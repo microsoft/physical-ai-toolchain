@@ -79,6 +79,9 @@ class DatasetInfo(BaseModel):
     fps: float = Field(gt=0, description="Frames per second")
     features: dict[str, FeatureSchema] = Field(default_factory=dict, description="Feature schemas by name")
     tasks: list[TaskInfo] = Field(default_factory=list, description="Available tasks")
+    is_read_only: bool = Field(default=False, description="Whether dataset mutations are prohibited")
+    source_dataset_id: str | None = Field(default=None, description="Source dataset for a published release")
+    release_id: str | None = Field(default=None, description="Published release identifier")
 
 
 # ============================================================================

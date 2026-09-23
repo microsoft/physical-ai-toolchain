@@ -1,4 +1,10 @@
-# Data Management
+---
+title: Data Management
+description: Curate, store, annotate, version, and inspect robotics datasets
+author: Microsoft
+ms.date: 2026-09-22
+ms.topic: overview
+---
 
 Dataset curation, storage, annotation, versioning, and the viewer application for the Physical AI Toolchain.
 
@@ -47,6 +53,7 @@ docker compose up
 | Guide                                                                       | Description                                           |
 |-----------------------------------------------------------------------------|-------------------------------------------------------|
 | [Viewer README](viewer/README.md)                                           | Architecture, API reference, auth configuration       |
+| [Dataset Release Workflow](../docs/data-pipeline/dataset-release-workflow.md) | Review-gated immutable packaging and publication      |
 | [Dataset Curation Spec](specifications/dataset-curation.specification.md)   | Filtering, splitting, merging, conversion, validation |
 | [Viewer Deployment Spec](specifications/viewer-deployment.specification.md) | Kubernetes deployment architecture                    |
 

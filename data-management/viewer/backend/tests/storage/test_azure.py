@@ -299,10 +299,11 @@ class TestAzureBlobStorageAdapter(TestCase):
             account_name="testaccount",
             container_name="testcontainer",
             sas_token="test-sas",
+            root_prefix="exports/mutable",
         )
 
         path = adapter._get_blob_path("my-dataset", 42)
-        assert path == "my-dataset/annotations/episodes/episode_000042.json"
+        assert path == "exports/mutable/my-dataset/annotations/episodes/episode_000042.json"
 
     @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
     def test_get_client_uses_sas_token_when_provided(self):

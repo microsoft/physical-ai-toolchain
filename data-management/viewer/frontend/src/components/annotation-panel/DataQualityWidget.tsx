@@ -17,6 +17,10 @@ import type { DataQualityIssue, DataQualityLevel } from '@/types'
 import { AddIssueDialog } from './AddIssueDialog'
 import { IssueList } from './IssueList'
 
+interface DataQualityWidgetProps {
+  embedded?: boolean
+}
+
 /**
  * Widget for annotating data quality with overall rating and issue list.
  *
@@ -25,7 +29,7 @@ import { IssueList } from './IssueList'
  * <DataQualityWidget />
  * ```
  */
-export function DataQualityWidget() {
+export function DataQualityWidget({ embedded = false }: DataQualityWidgetProps) {
   const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation)
   const updateDataQuality = useAnnotationStore((state) => state.updateDataQuality)
   const { currentFrame, setCurrentFrame } = usePlaybackControls()
@@ -56,6 +60,10 @@ export function DataQualityWidget() {
   }
 
   if (!currentAnnotation) {
+    if (embedded) {
+      return <p className="text-muted-foreground text-sm">No episode selected</p>
+    }
+
     return (
       <Card>
         <CardHeader>
@@ -70,31 +78,28 @@ export function DataQualityWidget() {
 
   const issueCount = dataQuality?.issues?.length ?? 0
 
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center justify-between text-sm">
-          Data Quality
-          {dataQuality?.overallQuality && (
-            <span
-              className={cn(
-                'rounded-sm px-2 py-0.5 text-xs font-medium',
-                ratingOptions.find((r) => r.value === dataQuality.overallQuality)?.color,
-              )}
-            >
-              {dataQuality.overallQuality}
-            </span>
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Overall quality rating */}
+  const content = (
+    <>
+      <div className="flex items-center justify-between pb-3 text-sm font-medium">
+        <span>Data Quality</span>
+        {dataQuality?.overallQuality && (
+          <span
+            className={cn(
+              'rounded-sm px-2 py-0.5 text-xs font-medium',
+              ratingOptions.find((r) => r.value === dataQuality.overallQuality)?.color,
+            )}
+          >
+            {dataQuality.overallQuality}
+          </span>
+        )}
+      </div>
+      <div className="space-y-4">
         <div className="space-y-2">
           <span id="quality-rating-label" className="text-sm font-medium">
             Overall Quality
           </span>
           <div
-            className="grid grid-cols-4 gap-2"
+            className="grid grid-cols-2 gap-2 xl:grid-cols-4"
             role="group"
             aria-labelledby="quality-rating-label"
           >
@@ -111,12 +116,11 @@ export function DataQualityWidget() {
           </div>
         </div>
 
-        {/* Issues section */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <label className="text-sm font-medium">
+            <span className="text-sm font-medium">
               Issues {issueCount > 0 && `(${issueCount})`}
-            </label>
+            </span>
             <Button
               variant="outline"
               size="sm"
@@ -134,7 +138,7 @@ export function DataQualityWidget() {
             onSeek={setCurrentFrame}
           />
         </div>
-      </CardContent>
+      </div>
 
       <AddIssueDialog
         open={dialogOpen}
@@ -142,6 +146,16 @@ export function DataQualityWidget() {
         onAdd={handleAddIssue}
         currentFrame={currentFrame}
       />
+    </>
+  )
+
+  if (embedded) {
+    return <div>{content}</div>
+  }
+
+  return (
+    <Card>
+      <CardContent className="pt-6">{content}</CardContent>
     </Card>
   )
 }

@@ -80,11 +80,12 @@ class TestCreateAnnotationStorageAzure:
         captured: dict = {}
 
         class _FakeAzureAdapter:
-            def __init__(self, *, account_name, container_name, sas_token, use_managed_identity):
+            def __init__(self, *, account_name, container_name, sas_token, use_managed_identity, root_prefix):
                 captured["account_name"] = account_name
                 captured["container_name"] = container_name
                 captured["sas_token"] = sas_token
                 captured["use_managed_identity"] = use_managed_identity
+                captured["root_prefix"] = root_prefix
 
         fake_module = types.ModuleType("src.api.storage.azure")
         fake_module.AzureBlobStorageAdapter = _FakeAzureAdapter  # type: ignore[attr-defined]
@@ -99,14 +100,16 @@ class TestCreateAnnotationStorageAzure:
         assert captured["account_name"] == "acct"
         assert captured["sas_token"] == "sas-value"
         assert captured["use_managed_identity"] is False
+        assert captured["root_prefix"] == "exports/mutable"
 
     def test_returns_azure_adapter_with_managed_identity(self, monkeypatch: pytest.MonkeyPatch) -> None:
         captured: dict = {}
 
         class _FakeAzureAdapter:
-            def __init__(self, *, account_name, container_name, sas_token, use_managed_identity):
+            def __init__(self, *, account_name, container_name, sas_token, use_managed_identity, root_prefix):
                 captured["use_managed_identity"] = use_managed_identity
                 captured["sas_token"] = sas_token
+                captured["root_prefix"] = root_prefix
 
         fake_module = types.ModuleType("src.api.storage.azure")
         fake_module.AzureBlobStorageAdapter = _FakeAzureAdapter  # type: ignore[attr-defined]
@@ -117,6 +120,7 @@ class TestCreateAnnotationStorageAzure:
 
         assert captured["sas_token"] is None
         assert captured["use_managed_identity"] is True
+        assert captured["root_prefix"] == "exports/mutable"
 
 
 class TestCreateBlobDatasetProvider:

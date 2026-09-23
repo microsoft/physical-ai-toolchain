@@ -112,6 +112,7 @@ vi.mock('@/components/annotation-panel', () => ({
       </button>
     </div>
   ),
+  DataQualityWidget: () => <div>Data Quality Widget</div>,
   LanguageInstructionWidget: () => <div>Language Instructions</div>,
   ObjectDetectionWidget: () => <div>Object Detection Widget</div>,
 }))
@@ -204,7 +205,15 @@ vi.mock('@/components/episode-viewer', () => ({
   },
 }))
 
-vi.mock('@/components/export', () => ({ ExportDialog: () => null }))
+vi.mock('@/components/export', () => ({
+  ExportDialog: ({ open }: { open: boolean }) =>
+    open ? <div role="dialog" aria-label="Legacy export dialog" /> : null,
+}))
+
+vi.mock('@/components/release', () => ({
+  ReleaseDialog: ({ open }: { open: boolean }) =>
+    open ? <div role="dialog" aria-label="Dataset release dialog" /> : null,
+}))
 
 vi.mock('@/components/frame-editor', () => ({
   ColorAdjustmentControls: () => <div>Color Adjustment Controls</div>,
@@ -256,6 +265,7 @@ vi.mock('@/lib/playback-diagnostics', () => ({
     'export',
     'navigation',
     'detection',
+    'release',
   ],
   DIAGNOSTICS_EVENT_NAME: 'dataviewer:diagnostics',
   clearDiagnosticEvents: hoisted.clearDiagnosticEvents,
@@ -296,8 +306,18 @@ vi.mock('@/hooks/use-labels', () => ({
   }),
 }))
 
+vi.mock('@/hooks/use-reviews', () => ({
+  useReviewDecision: () => ({ data: null }),
+  useReviewQuality: () => ({ data: null }),
+  useRunQualityReview: () => ({ isPending: false, mutate: vi.fn() }),
+  useCreateReviewDecision: () => ({ isPending: false, mutate: vi.fn() }),
+}))
+
 vi.mock('@/hooks/use-datasets', () => ({
   useCacheStats: () => ({ data: undefined }),
+  useCapabilities: () => ({
+    data: { isLerobotDataset: true, hasHdf5Files: false },
+  }),
 }))
 
 vi.mock('@/stores/label-store', () => ({

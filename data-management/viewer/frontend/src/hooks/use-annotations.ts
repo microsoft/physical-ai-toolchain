@@ -81,14 +81,15 @@ export function useEpisodeAnnotations() {
     )
 
     if (!userAnnotation) {
-      hydratedKeyRef.current = key
       initializeAnnotation(annotatorId)
-      return
+    } else {
+      loadAnnotation(userAnnotation)
     }
 
-    loadAnnotation(userAnnotation)
     hydratedKeyRef.current = key
     const hydrationEditGeneration = useAnnotationStore.getState().editGeneration
+    const baseline = userAnnotation ?? useAnnotationStore.getState().currentAnnotation
+    if (!baseline) return
     void loadPersistedAnnotationDraft(currentDataset.id, currentIndex, annotatorId).then(
       (draft) => {
         if (!active) return
@@ -100,7 +101,7 @@ export function useEpisodeAnnotations() {
         ) {
           return
         }
-        if (draft) restoreAnnotationDraft(draft.draft, userAnnotation)
+        if (draft) restoreAnnotationDraft(draft.draft, baseline)
       },
     )
 
@@ -230,12 +231,17 @@ export function useSaveAnnotation() {
  * ```
  */
 export function useSaveCurrentAnnotation() {
-  const currentDataset = useDatasetStore((state) => state.currentDataset)
-  const currentIndex = useEpisodeStore((state) => state.currentIndex)
-  const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation)
+  const selectedDataset = useDatasetStore((state) => state.currentDataset)
+  const selectedIndex = useEpisodeStore((state) => state.currentIndex)
+  const selectedAnnotation = useAnnotationStore((state) => state.currentAnnotation)
+  const selectedIsDirty = useAnnotationStore((state) => state.isDirty)
   const mutation = useSaveAnnotation()
 
   const save = (): Promise<VersionedResource<EpisodeAnnotationFile> | undefined> => {
+    const currentDataset = useDatasetStore.getState?.().currentDataset ?? selectedDataset
+    const currentIndex = useEpisodeStore.getState?.().currentIndex ?? selectedIndex
+    const currentAnnotation =
+      useAnnotationStore.getState?.().currentAnnotation ?? selectedAnnotation
     if (!currentDataset || currentIndex < 0 || !currentAnnotation) {
       return Promise.resolve(undefined)
     }
@@ -247,8 +253,18 @@ export function useSaveCurrentAnnotation() {
     })
   }
 
+  const saveIfDirty = (): Promise<VersionedResource<EpisodeAnnotationFile> | undefined> => {
+    const isDirty = useAnnotationStore.getState?.().isDirty ?? selectedIsDirty
+    if (!isDirty) {
+      return Promise.resolve(undefined)
+    }
+
+    return save()
+  }
+
   return {
     save,
+    saveIfDirty,
     isPending: mutation.isPending,
     isSuccess: mutation.isSuccess,
     isError: mutation.isError,

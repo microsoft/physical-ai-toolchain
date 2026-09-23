@@ -3,6 +3,7 @@
 import os
 import re
 from collections.abc import Callable
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,8 @@ def sanitize_user_string(value: str) -> str:
 
 
 def _sanitize_nested_value(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return value
     if isinstance(value, str):
         return sanitize_user_string(value)
     if isinstance(value, list):
@@ -39,11 +42,10 @@ def _sanitize_nested_value(value: Any) -> Any:
 class SanitizedModel(BaseModel):
     """Pydantic base model that strips CR/LF from nested string values."""
 
-    @model_validator(mode="after")
-    def sanitize_strings(self) -> "SanitizedModel":
-        for field_name in type(self).model_fields:
-            object.__setattr__(self, field_name, _sanitize_nested_value(getattr(self, field_name)))
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def sanitize_strings(cls, value: Any) -> Any:
+        return _sanitize_nested_value(value)
 
 
 def validate_safe_string(

@@ -79,7 +79,8 @@ export function ExportDialog({ open, onOpenChange, datasetId, episodeIndices }: 
         <DialogHeader>
           <DialogTitle>Export Episodes</DialogTitle>
           <DialogDescription>
-            Export {episodeIndices.length} episode(s) with applied edits.
+            Export {episodeIndices.length} episode(s) with applied edits. This creates a separate
+            mutable dataset copy; it does not approve the episode or create an immutable release.
           </DialogDescription>
         </DialogHeader>
 

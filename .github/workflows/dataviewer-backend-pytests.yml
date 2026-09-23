@@ -42,6 +42,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
 
+      - name: Install release worker dependencies
+        working-directory: data-management/viewer/release-worker
+        run: uv sync --frozen --extra dev
+
+      - name: Run release worker tests
+        working-directory: data-management/viewer/release-worker
+        run: uv run --frozen --extra dev pytest -v
+
       - name: Run pytest with coverage
         run: uv run --with-editable ../../../evaluation/vlm_judge pytest -v --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml --cov-report=term-missing --cov-fail-under=90
 

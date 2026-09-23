@@ -3,7 +3,6 @@
 import asyncio
 import hashlib
 import json
-import os
 import tempfile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -17,10 +16,11 @@ from src.api.main import app
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     """Create test client with isolated singletons and empty temp data path."""
     with tempfile.TemporaryDirectory() as tmp:
-        os.environ["DATA_DIR"] = tmp
+        monkeypatch.setenv("STORAGE_BACKEND", "local")
+        monkeypatch.setenv("DATA_DIR", tmp)
 
         import src.api.config as config_mod
         import src.api.services.annotation_service as ann_mod
@@ -499,6 +499,15 @@ def test_blob_label_storage_load_missing_returns_defaults():
     assert result.available_labels == ["SUCCESS", "FAILURE", "PARTIAL"]
 
 
+def test_blob_label_storage_uses_export_owned_mutable_prefix():
+    provider = MagicMock()
+    storage = labels_mod.BlobLabelStorage(provider, root_prefix="exports/mutable")
+
+    path = storage._blob_path("org--repo")
+
+    assert path == "exports/mutable/org/repo/meta/episode_labels.json"
+
+
 def test_blob_label_storage_load_uses_provider_etag():
     """BlobLabelStorage prefers the provider's native ETag when available."""
     blob_client = SimpleNamespace(get_blob_properties=AsyncMock(return_value=SimpleNamespace(etag='"azure-revision"')))
@@ -684,7 +693,7 @@ def test_create_label_storage_falls_back_when_azure_without_provider():
 def test_get_label_storage_singleton(monkeypatch):
     """_get_label_storage caches the storage instance and uses app config."""
     monkeypatch.setattr(labels_mod, "_label_storage", None)
-    fake_config = SimpleNamespace(storage_backend="local")
+    fake_config = SimpleNamespace(storage_backend="local", data_path="./data")
     monkeypatch.setattr(
         "src.api.config.get_app_config",
         lambda: fake_config,
@@ -701,11 +710,19 @@ def test_get_label_storage_singleton(monkeypatch):
 def test_get_label_storage_creates_azure_provider_once(monkeypatch):
     """Azure label storage creates one provider and caches the resulting adapter."""
     monkeypatch.setattr(labels_mod, "_label_storage", None)
-    fake_config = SimpleNamespace(storage_backend="azure")
+    fake_config = SimpleNamespace(
+        storage_backend="azure",
+        azure_account_name="account",
+        azure_annotation_container="annotations",
+        azure_dataset_container="datasets",
+        azure_sas_token=None,
+        azure_dataset_export_prefix="exports",
+        data_path="./data",
+    )
     provider = SimpleNamespace()
     create_provider = MagicMock(return_value=provider)
     monkeypatch.setattr("src.api.config.get_app_config", lambda: fake_config)
-    monkeypatch.setattr("src.api.config.create_blob_dataset_provider", create_provider)
+    monkeypatch.setattr("src.api.storage.blob_dataset.BlobDatasetProvider", create_provider)
 
     first = labels_mod._get_label_storage()
     second = labels_mod._get_label_storage()
@@ -713,6 +730,10 @@ def test_get_label_storage_creates_azure_provider_once(monkeypatch):
     assert first is second
     assert isinstance(first, labels_mod.BlobLabelStorage)
     assert first._provider is provider
-    create_provider.assert_called_once_with(fake_config)
+    create_provider.assert_called_once_with(
+        account_name="account",
+        container_name="annotations",
+        sas_token=None,
+    )
 
     monkeypatch.setattr(labels_mod, "_label_storage", None)

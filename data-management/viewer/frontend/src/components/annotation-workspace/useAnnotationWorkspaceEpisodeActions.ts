@@ -15,10 +15,13 @@ interface UseAnnotationWorkspaceEpisodeActionsOptions {
   savedLabelsForCurrentEpisode: string[]
   availableLabels: string[]
   labelDataLoaded: boolean
+  hasAnnotationChanges?: boolean
   hasEdits: boolean
+  onResetAnnotation?: () => void
   onResetEdits: () => void
   onSetEpisodeLabels: (episodeIndex: number, labels: string[]) => void
   onSaveEpisodeDraft: () => void
+  onSaveAnnotation?: () => Promise<unknown>
   onSaveEpisodeLabels: (input: SaveEpisodeLabelsInput) => SaveEpisodeLabelsResult
   onRecordEvent: (channel: string, type: string, data?: Record<string, unknown>) => void
   canGoNextEpisode: boolean
@@ -33,10 +36,13 @@ export function useAnnotationWorkspaceEpisodeActions({
   savedLabelsForCurrentEpisode,
   availableLabels,
   labelDataLoaded,
+  hasAnnotationChanges = false,
   hasEdits,
+  onResetAnnotation = () => {},
   onResetEdits,
   onSetEpisodeLabels,
   onSaveEpisodeDraft,
+  onSaveAnnotation = () => Promise.resolve(),
   onSaveEpisodeLabels,
   onRecordEvent,
   canGoNextEpisode,
@@ -67,7 +73,7 @@ export function useAnnotationWorkspaceEpisodeActions({
     return current.some((label, index) => label !== initial[index])
   }, [currentEpisodeIndex, currentEpisodeLabels, labelDataLoaded, savedLabelsForCurrentEpisode])
 
-  const hasPendingEpisodeChanges = hasLabelChanges || hasEdits
+  const hasPendingEpisodeChanges = hasAnnotationChanges || hasLabelChanges || hasEdits
   const saveStatusMessage = hasPendingEpisodeChanges
     ? 'Unsaved episode changes.'
     : showSavedStatus
@@ -154,6 +160,7 @@ export function useAnnotationWorkspaceEpisodeActions({
   }, [currentDatasetId, currentEpisodeIndex, diagnosticsEnabled, onRecordEvent])
 
   const handleResetAll = useCallback(async () => {
+    onResetAnnotation()
     onResetEdits()
 
     if (currentEpisodeIndex === null || !hasLabelChanges) {
@@ -169,6 +176,7 @@ export function useAnnotationWorkspaceEpisodeActions({
     availableLabels,
     currentEpisodeIndex,
     hasLabelChanges,
+    onResetAnnotation,
     onResetEdits,
     onSetEpisodeLabels,
     savedLabelsForCurrentEpisode,
@@ -177,6 +185,14 @@ export function useAnnotationWorkspaceEpisodeActions({
   const handleSaveAndNextEpisode = useCallback(async () => {
     if (!canGoNextEpisode || !onAdvanceToNextEpisode || currentEpisodeIndex === null) {
       return
+    }
+
+    const savedAnnotation = await onSaveAnnotation()
+    if (savedAnnotation !== undefined) {
+      onRecordEvent('annotations', 'saved', {
+        datasetId: currentDatasetId,
+        episodeIndex: currentEpisodeIndex,
+      })
     }
 
     if (currentDatasetId && hasLabelChanges) {
@@ -218,11 +234,13 @@ export function useAnnotationWorkspaceEpisodeActions({
     currentDatasetId,
     currentEpisodeIndex,
     currentEpisodeLabels,
+    hasAnnotationChanges,
     hasEdits,
     hasLabelChanges,
     hasPendingEpisodeChanges,
     onAdvanceToNextEpisode,
     onRecordEvent,
+    onSaveAnnotation,
     onSaveEpisodeDraft,
     onSaveEpisodeLabels,
   ])

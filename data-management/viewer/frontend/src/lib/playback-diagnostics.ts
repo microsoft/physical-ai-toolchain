@@ -11,6 +11,7 @@ export const DIAGNOSTIC_CHANNEL_OPTIONS = [
   'export',
   'navigation',
   'detection',
+  'release',
 ] as const
 
 const MAX_DIAGNOSTIC_EVENTS = 200

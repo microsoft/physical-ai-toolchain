@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -18,7 +18,18 @@ from .auth import PrincipalContext, require_auth, require_principal_context
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token
 from .middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddleware
 from .rate_limiter import limiter
-from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, vlm_judge
+from .routers import (
+    analysis,
+    annotations,
+    datasets,
+    detection,
+    export,
+    joint_config,
+    labels,
+    releases,
+    reviews,
+    vlm_judge,
+)
 from .routes import ai_analysis
 from .storage import RevisionConflictError
 from .swagger_ui import install_responsive_swagger_ui
@@ -49,8 +60,15 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """Clean up blob sync temp directories on shutdown."""
-    yield
+    """Run release recovery and clean up temporary dataset directories."""
+    from .release.processor import get_release_processor
+
+    processor = get_release_processor()
+    await processor.start()
+    try:
+        yield
+    finally:
+        await processor.stop()
     from .services.dataset_service import get_dataset_service
 
     try:
@@ -92,6 +110,16 @@ install_responsive_swagger_ui(app)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.middleware("http")
+async def enforce_read_only_releases(request: Request, call_next):
+    """Reject mutations against virtual published-release datasets."""
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        parts = request.url.path.split("/")
+        if len(parts) > 3 and parts[1:3] == ["api", "datasets"] and parts[3].startswith("release-job-"):
+            return JSONResponse(status_code=403, content={"detail": "Published releases are read-only"})
+    return await call_next(request)
 
 
 @app.exception_handler(RevisionConflictError)
@@ -149,6 +177,8 @@ app.include_router(ai_analysis.router, prefix="/api", tags=["ai"], dependencies=
 app.include_router(labels.router, prefix="/api/datasets", tags=["labels"], dependencies=api_auth)
 app.include_router(joint_config.router, prefix="/api/datasets", tags=["joint-config"], dependencies=api_auth)
 app.include_router(joint_config.defaults_router, prefix="/api", tags=["joint-config"], dependencies=api_auth)
+app.include_router(reviews.router, prefix="/api", tags=["reviews"], dependencies=api_auth)
+app.include_router(releases.router, prefix="/api/releases", tags=["releases"], dependencies=api_auth)
 if _config.vlm_judge_enabled:
     app.include_router(
         vlm_judge.router,
@@ -161,15 +191,18 @@ if _config.vlm_judge_enabled:
 @app.get("/health")
 async def health_check():
     """Health check verifying API and storage connectivity."""
+    from .config import get_app_config
+
     checks: dict[str, str] = {"api": "healthy"}
 
     try:
         from .services.dataset_service import get_dataset_service
 
+        config = get_app_config()
         service = get_dataset_service()
         # In Azure mode the local base_path is irrelevant; treat the blob
         # provider's presence as the storage health signal.
-        if _config.storage_backend == "azure":
+        if config.storage_backend == "azure":
             checks["storage"] = "healthy" if service._blob_provider is not None else "unhealthy"
         elif hasattr(service, "base_path"):
             from pathlib import Path as _Path

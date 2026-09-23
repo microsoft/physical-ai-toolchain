@@ -48,6 +48,12 @@ export interface DatasetInfo {
   tasks: TaskInfo[]
   /** Parent folder group for nested datasets */
   group?: string | null
+  /** Whether mutations are prohibited for this dataset */
+  isReadOnly?: boolean
+  /** Source dataset identifier for a published release */
+  sourceDatasetId?: string | null
+  /** Published release identifier */
+  releaseId?: string | null
 }
 
 /** Capabilities available for a dataset */

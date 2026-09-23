@@ -87,11 +87,21 @@ def accessibility_dataset_path(tmp_path_factory: pytest.TempPathFactory) -> Path
 
 
 @pytest.fixture(autouse=True, scope="session")
-def disable_auth_for_tests():
-    """Disable authentication and CSRF checks for all tests."""
-    os.environ["DATAVIEWER_AUTH_DISABLED"] = "true"
+def isolate_runtime_config_for_tests():
+    """Disable external authentication, storage, and model services for tests."""
+    overrides = {
+        "DATAVIEWER_AUTH_DISABLED": "true",
+        "STORAGE_BACKEND": "local",
+        "VLM_JUDGE_ENABLED": "false",
+    }
+    previous = {name: os.environ.get(name) for name in overrides}
+    os.environ.update(overrides)
     yield
-    os.environ.pop("DATAVIEWER_AUTH_DISABLED", None)
+    for name, value in previous.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
 
 
 @pytest.fixture(scope="session")

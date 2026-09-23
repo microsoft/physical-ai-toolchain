@@ -15,6 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 BACKEND_DIR="${SCRIPT_DIR}/backend"
 FRONTEND_DIR="${SCRIPT_DIR}/frontend"
+RELEASE_WORKER_DIR="${SCRIPT_DIR}/release-worker"
 
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
@@ -76,6 +77,7 @@ EOF
 }
 
 cleanup() {
+    local exit_code="${1:-0}"
     log_info "Shutting down services..."
 
     if [[ -n "${BACKEND_PID}" ]] && kill -0 "${BACKEND_PID}" 2>/dev/null; then
@@ -91,7 +93,7 @@ cleanup() {
     fi
 
     log_success "All services stopped"
-    exit 0
+    exit "${exit_code}"
 }
 
 trap cleanup SIGINT SIGTERM
@@ -139,6 +141,21 @@ wait_for_backend() {
     return 1
 }
 
+sync_release_worker() {
+    if ! command -v uv &>/dev/null; then
+        log_error "uv is required to restore the release worker"
+        exit 1
+    fi
+    if [[ ! -f "${RELEASE_WORKER_DIR}/pyproject.toml" || ! -f "${RELEASE_WORKER_DIR}/uv.lock" ]]; then
+        log_error "Release worker manifest or lock not found at ${RELEASE_WORKER_DIR}"
+        exit 1
+    fi
+
+    log_info "Syncing release worker from its frozen lock..."
+    uv sync --frozen --project "${RELEASE_WORKER_DIR}"
+    log_success "Release worker is ready"
+}
+
 start_backend() {
     log_info "Starting backend on port ${BACKEND_PORT}..."
     local backend_install_extras=".[dev,analysis,export]"
@@ -149,7 +166,7 @@ start_backend() {
     # so that setting it only in .env (the common local-dev pattern) still triggers install.
     if [[ -z "${VLM_JUDGE_ENABLED:-}" ]] && [[ -f "${BACKEND_DIR}/.env" ]]; then
         local env_vlm_enabled
-        env_vlm_enabled="$(grep -E '^VLM_JUDGE_ENABLED=' "${BACKEND_DIR}/.env" | tail -n 1 | cut -d '=' -f 2-)"
+        env_vlm_enabled="$(grep -E '^VLM_JUDGE_ENABLED=' "${BACKEND_DIR}/.env" | tail -n 1 | cut -d '=' -f 2- || true)"
         if [[ -n "${env_vlm_enabled}" ]]; then
             VLM_JUDGE_ENABLED="${env_vlm_enabled}"
         fi
@@ -157,7 +174,7 @@ start_backend() {
     # Similarly resolve VLM_JUDGE_BACKEND from .env when not already set.
     if [[ -z "${VLM_JUDGE_BACKEND:-}" ]] && [[ -f "${BACKEND_DIR}/.env" ]]; then
         local env_vlm_backend
-        env_vlm_backend="$(grep -E '^VLM_JUDGE_BACKEND=' "${BACKEND_DIR}/.env" | tail -n 1 | cut -d '=' -f 2-)"
+        env_vlm_backend="$(grep -E '^VLM_JUDGE_BACKEND=' "${BACKEND_DIR}/.env" | tail -n 1 | cut -d '=' -f 2- || true)"
         if [[ -n "${env_vlm_backend}" ]]; then
             VLM_JUDGE_BACKEND="${env_vlm_backend}"
         fi
@@ -183,7 +200,7 @@ start_backend() {
     if [[ -z "${DATA_DIR:-}" ]]; then
         if [[ -f "${BACKEND_DIR}/.env" ]]; then
             local env_data_dir
-            env_data_dir="$(grep -E '^DATA_DIR=' "${BACKEND_DIR}/.env" | tail -n 1 | cut -d '=' -f 2-)"
+            env_data_dir="$(grep -E '^DATA_DIR=' "${BACKEND_DIR}/.env" | tail -n 1 | cut -d '=' -f 2- || true)"
             if [[ -n "${env_data_dir}" ]]; then
                 DATA_DIR="${env_data_dir}"
                 log_info "Using DATA_DIR from backend/.env: ${DATA_DIR}"
@@ -199,6 +216,8 @@ start_backend() {
     fi
     export DATA_DIR
     log_info "Using DATA_DIR=${DATA_DIR}"
+
+    sync_release_worker
 
     if [[ ! -d "${BACKEND_DIR}/.venv" ]]; then
         log_warn "Virtual environment not found at ${BACKEND_DIR}/.venv"
@@ -328,8 +347,7 @@ main() {
             wait -n "${BACKEND_PID}" "${FRONTEND_PID}" 2>/dev/null || true
             cleanup
         else
-            cleanup
-            exit 1
+            cleanup 1
         fi
     fi
 }

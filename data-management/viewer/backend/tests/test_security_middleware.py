@@ -193,6 +193,7 @@ class TestEnhancedHealthCheck:
         import src.api.services.dataset_service as ds_mod
 
         nonexistent = str(tmp_path / "does_not_exist")
+        os.environ["STORAGE_BACKEND"] = "local"
         os.environ["DATA_DIR"] = nonexistent
         config_mod._app_config = None
         ds_mod._dataset_service = None
@@ -589,6 +590,7 @@ class TestHealthCheckBranches:
         import src.api.services.annotation_service as ann_mod
         import src.api.services.dataset_service as ds_mod
 
+        os.environ["STORAGE_BACKEND"] = "local"
         os.environ["DATA_DIR"] = str(tmp_path)
         config_mod._app_config = None
         ann_mod._annotation_service = None

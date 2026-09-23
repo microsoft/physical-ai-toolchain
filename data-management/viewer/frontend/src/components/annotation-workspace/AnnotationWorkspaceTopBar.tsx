@@ -1,7 +1,16 @@
-import { Activity, Download, Gauge, RotateCcw, SkipBack, SkipForward } from 'lucide-react'
+import {
+  Activity,
+  Download,
+  Gauge,
+  PackageCheck,
+  RotateCcw,
+  SkipBack,
+  SkipForward,
+} from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 interface AnnotationWorkspaceTopBarProps {
   episodeIndex: number
@@ -10,10 +19,12 @@ interface AnnotationWorkspaceTopBarProps {
   hasPendingEpisodeChanges: boolean
   onResetAllClick: () => void
   onOpenExportDialog: () => void
+  onOpenReleaseDialog: () => void
   canGoNextEpisode: boolean
   canSaveAndNextEpisode: boolean
   onSaveAndNextEpisode: () => void
   saveStatusMessage: string | null
+  isReadOnly?: boolean
 }
 
 export function AnnotationWorkspaceTopBar({
@@ -23,10 +34,12 @@ export function AnnotationWorkspaceTopBar({
   hasPendingEpisodeChanges,
   onResetAllClick,
   onOpenExportDialog,
+  onOpenReleaseDialog,
   canGoNextEpisode,
   canSaveAndNextEpisode,
   onSaveAndNextEpisode,
   saveStatusMessage,
+  isReadOnly = false,
 }: AnnotationWorkspaceTopBarProps) {
   return (
     <div
@@ -52,25 +65,59 @@ export function AnnotationWorkspaceTopBar({
             >
               <SkipBack className="h-4 w-4" />
             </Button>
-            <Button
-              variant="outline"
-              onClick={onResetAllClick}
-              disabled={!hasPendingEpisodeChanges}
-            >
-              <RotateCcw className="mr-2 h-4 w-4" />
-              Reset All
-            </Button>
-            <Button variant="outline" onClick={onOpenExportDialog}>
-              <Download className="mr-2 h-4 w-4" />
-              Export
-            </Button>
-            <Button
-              onClick={onSaveAndNextEpisode}
-              disabled={!canGoNextEpisode || !canSaveAndNextEpisode}
-            >
-              <SkipForward className="mr-2 h-4 w-4" />
-              Save & Next Episode
-            </Button>
+            {!isReadOnly && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={onResetAllClick}
+                  disabled={!hasPendingEpisodeChanges}
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Reset All
+                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="outline" onClick={onOpenExportDialog} aria-label="Export">
+                      <Download className="mr-2 h-4 w-4" />
+                      Export Copy
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-72">
+                    Create a separate mutable copy with selected edits. This does not approve or
+                    release the episode.
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="outline" onClick={onOpenReleaseDialog} aria-label="Release">
+                      <PackageCheck className="mr-2 h-4 w-4" />
+                      Create Release
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-72">
+                    Publish an accepted episode as an immutable, verified LeRobot package.
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Button
+                        onClick={onSaveAndNextEpisode}
+                        disabled={!canGoNextEpisode || !canSaveAndNextEpisode}
+                        aria-label="Save & Next Episode"
+                      >
+                        <SkipForward className="mr-2 h-4 w-4" />
+                        Save & Next
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-72">
+                    Save annotations, quality settings, labels, and edits, then open the next
+                    episode.
+                  </TooltipContent>
+                </Tooltip>
+              </>
+            )}
           </div>
           <div className="min-h-[1rem] xl:text-right" data-testid="workspace-save-status-slot">
             {saveStatusMessage && (

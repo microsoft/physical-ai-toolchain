@@ -13,7 +13,7 @@ import logging
 import os
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
 import aiofiles
@@ -274,11 +274,16 @@ class LocalLabelStorage:
 class BlobLabelStorage:
     """Azure Blob Storage-backed label storage. Stores in datasets container."""
 
-    def __init__(self, blob_provider: BlobDatasetProvider) -> None:
+    def __init__(self, blob_provider: BlobDatasetProvider, *, root_prefix: str = "") -> None:
         self._provider = blob_provider
+        prefix = PurePosixPath(root_prefix)
+        if prefix.is_absolute() or "\\" in root_prefix or ".." in prefix.parts:
+            raise ValueError("Invalid label root prefix")
+        self._root_prefix = prefix.as_posix().strip(".").strip("/")
 
     def _blob_path(self, dataset_id: str) -> str:
-        return f"{dataset_id_to_blob_prefix(dataset_id)}/meta/episode_labels.json"
+        path = f"{dataset_id_to_blob_prefix(dataset_id)}/meta/episode_labels.json"
+        return f"{self._root_prefix}/{path}" if self._root_prefix else path
 
     async def load(self, dataset_id: str) -> DatasetLabelsFile:
         return (await self.load_versioned(dataset_id)).value or DatasetLabelsFile(dataset_id=dataset_id)
@@ -378,10 +383,20 @@ def _get_label_storage() -> LabelStorage:
         config = get_app_config()
         blob_provider = None
         if config.storage_backend == "azure":
-            from ..config import create_blob_dataset_provider
+            from ..storage.blob_dataset import BlobDatasetProvider
 
-            blob_provider = create_blob_dataset_provider(config)
-        _label_storage = _create_label_storage(config.storage_backend, blob_provider)
+            annotation_container = config.azure_annotation_container or config.azure_dataset_container
+            if config.azure_account_name and annotation_container:
+                blob_provider = BlobDatasetProvider(
+                    account_name=config.azure_account_name,
+                    container_name=annotation_container,
+                    sas_token=config.azure_sas_token,
+                )
+        _label_storage = (
+            BlobLabelStorage(blob_provider, root_prefix=f"{config.azure_dataset_export_prefix}/mutable")
+            if config.storage_backend == "azure" and blob_provider is not None
+            else LocalLabelStorage(config.data_path)
+        )
     return _label_storage
 
 

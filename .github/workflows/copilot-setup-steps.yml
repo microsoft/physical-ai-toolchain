@@ -109,6 +109,10 @@ jobs:
         working-directory: data-management/viewer/backend
         run: uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
 
+      - name: Presync dataviewer release worker
+        working-directory: data-management/viewer/release-worker
+        run: uv sync --frozen --extra dev
+
       - name: Presync evaluation Python dev group
         working-directory: evaluation
         run: uv sync --only-group dev

@@ -13,7 +13,7 @@ const fallbackDraftStorage = new Map<string, unknown>()
 const resourceWriteQueues = new Map<string, Promise<void>>()
 let legacyDraftsPurged = false
 
-export type DraftResourceKind = 'annotation' | 'labels' | 'episode-edit'
+export type DraftResourceKind = 'annotation' | 'labels' | 'episode-edit' | 'review-decision'
 
 export interface DraftResource {
   kind: DraftResourceKind
@@ -48,6 +48,10 @@ export interface PersistedLabelDraft {
   episodeLabels: Record<number, string[]>
   savedEpisodeLabels: Record<number, string[]>
   baseEtag: string | null
+}
+
+export interface PersistedReviewDecisionDraft {
+  reasonCodes: string[]
 }
 
 export type ConflictResolution = 'local' | 'server'
@@ -284,6 +288,33 @@ export function persistAnnotationDraft(
     draft?.baseEtag ?? null,
     draft?.baseline ?? (null as never),
     draft?.draft ?? null,
+  )
+}
+
+export function loadPersistedReviewDecisionDraft(
+  datasetId: string,
+  episodeIndex: number,
+  principalScopeId: string,
+): Promise<DraftEnvelope<null, PersistedReviewDecisionDraft> | undefined> {
+  return loadPersistedDraftEnvelope(principalScopeId, {
+    kind: 'review-decision',
+    datasetId,
+    episodeIndex,
+  })
+}
+
+export function persistReviewDecisionDraft(
+  datasetId: string,
+  episodeIndex: number,
+  principalScopeId: string,
+  draft: PersistedReviewDecisionDraft | null,
+): Promise<void> {
+  return persistNextEnvelope(
+    principalScopeId,
+    { kind: 'review-decision', datasetId, episodeIndex },
+    null,
+    null,
+    draft,
   )
 }
 

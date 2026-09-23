@@ -102,9 +102,11 @@ function DatasetSelector({
               >
                 {groupedDatasets[groupKey].map((dataset) => {
                   const isSelected = dataset.id === datasetId
-                  const displayId = dataset.group
-                    ? dataset.id.slice(dataset.group.length + 2)
-                    : dataset.id
+                  const displayId = dataset.releaseId
+                    ? dataset.releaseId
+                    : dataset.group
+                      ? dataset.id.slice(dataset.group.length + 2)
+                      : dataset.id
 
                   return (
                     <CommandItem
@@ -122,6 +124,11 @@ function DatasetSelector({
                     >
                       <span className="min-w-0">
                         <span className="block truncate font-medium">{displayId}</span>
+                        {dataset.isReadOnly && (
+                          <span className="text-muted-foreground block text-xs">
+                            Read-only release
+                          </span>
+                        )}
                         {dataset.name !== dataset.id && (
                           <span className="text-muted-foreground block truncate text-xs">
                             {dataset.name}
@@ -169,6 +176,8 @@ export function DataviewerShellHeader({
   capabilities,
   isWarmingCache,
 }: DataviewerShellHeaderProps) {
+  const selectedDataset = datasets.find((dataset) => dataset.id === datasetId) ?? null
+
   return (
     <header className="bg-card border-b px-4 py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -204,6 +213,7 @@ export function DataviewerShellHeader({
             Diagnostics
           </Button>
           {capabilities?.isLerobotDataset && <Badge variant="secondary">LeRobot</Badge>}
+          {selectedDataset?.isReadOnly && <Badge variant="outline">Read-only release</Badge>}
           {capabilities?.hasHdf5Files && !capabilities?.isLerobotDataset && (
             <Badge variant="outline">HDF5</Badge>
           )}

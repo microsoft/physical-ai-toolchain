@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from pathlib import PurePosixPath
 
 from ..models.annotations import EpisodeAnnotationFile
 from .base import RevisionConflictError, StorageAdapter, StorageError, VersionedValue
@@ -57,6 +58,7 @@ class AzureBlobStorageAdapter(StorageAdapter):
         container_name: str,
         sas_token: str | None = None,
         use_managed_identity: bool = False,
+        root_prefix: str = "",
     ):
         """
         Initialize the Azure Blob Storage adapter.
@@ -66,6 +68,7 @@ class AzureBlobStorageAdapter(StorageAdapter):
             container_name: Blob container name.
             sas_token: SAS token for authentication (optional).
             use_managed_identity: Use managed identity for auth (optional).
+            root_prefix: Backend-owned prefix for mutable sidecars.
 
         Raises:
             ImportError: If azure-storage-blob is not installed.
@@ -84,6 +87,10 @@ class AzureBlobStorageAdapter(StorageAdapter):
         self.container_name = container_name
         self.sas_token = sas_token
         self.use_managed_identity = use_managed_identity
+        prefix = PurePosixPath(root_prefix)
+        if prefix.is_absolute() or "\\" in root_prefix or ".." in prefix.parts:
+            raise ValueError("Invalid annotation root prefix")
+        self.root_prefix = prefix.as_posix().strip(".").strip("/")
         self._client: BlobServiceClient | None = None
 
     async def _get_client(self) -> BlobServiceClient:
@@ -108,7 +115,8 @@ class AzureBlobStorageAdapter(StorageAdapter):
     def _get_blob_path(self, dataset_id: str, episode_index: int) -> str:
         """Get the blob path for an episode's annotations. Resolves -- to /."""
         blob_prefix = dataset_id_to_blob_prefix(dataset_id)
-        return f"{blob_prefix}/annotations/episodes/episode_{episode_index:06d}.json"
+        path = f"{blob_prefix}/annotations/episodes/episode_{episode_index:06d}.json"
+        return f"{self.root_prefix}/{path}" if self.root_prefix else path
 
     @staticmethod
     def _fallback_etag(content: bytes) -> str:

@@ -17,6 +17,8 @@ interface AnnotationWorkspaceTrajectoryTabProps {
   languageInstructionPanel: ReactNode
   objectDetectionPanel: ReactNode
   editToolsPanel: ReactNode
+  dataQualityPanel: ReactNode
+  reviewQualityPanel: ReactNode
   selectedRange: [number, number] | null
   selectedSubtaskId: string | null
   onClearPlaybackSelection: () => void
@@ -38,6 +40,8 @@ export function AnnotationWorkspaceTrajectoryTab({
   languageInstructionPanel,
   objectDetectionPanel,
   editToolsPanel,
+  dataQualityPanel,
+  reviewQualityPanel,
   selectedRange,
   selectedSubtaskId,
   onClearPlaybackSelection,
@@ -107,6 +111,12 @@ export function AnnotationWorkspaceTrajectoryTab({
           <CardContent className="h-full overflow-y-auto p-4">
             <div className="space-y-6">
               <CollapsibleSection title="Episode Labels">{labelPanel}</CollapsibleSection>
+              <CollapsibleSection title="Data Quality" className="border-t pt-6">
+                {dataQualityPanel}
+              </CollapsibleSection>
+              <CollapsibleSection title="Review" className="border-t pt-6">
+                {reviewQualityPanel}
+              </CollapsibleSection>
               <CollapsibleSection title="Episode Analysis" className="border-t pt-6">
                 {analysisCard}
               </CollapsibleSection>

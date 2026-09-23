@@ -1,7 +1,11 @@
+import { QueryClientProvider } from '@tanstack/react-query'
+
 import { AnnotationWorkspaceContent } from '@/components/annotation-workspace/AnnotationWorkspaceContent'
 import { AnnotationWorkspaceEmptyState } from '@/components/annotation-workspace/AnnotationWorkspaceEmptyState'
 import { DraftConflictDialog } from '@/components/annotation-workspace/DraftConflictDialog'
 import { useAnnotationWorkspaceShell } from '@/components/annotation-workspace/useAnnotationWorkspaceShell'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import { queryClient } from '@/lib/query-client'
 
 interface AnnotationWorkspaceProps {
   diagnosticsVisible?: boolean
@@ -18,7 +22,7 @@ interface AnnotationWorkspaceProps {
  * Uses native <video> for smooth playback and per-frame <img> for
  * frame-accurate scrubbing when paused.
  */
-export function AnnotationWorkspace({
+function AnnotationWorkspaceContentRoot({
   diagnosticsVisible,
   canGoPreviousEpisode = false,
   onPreviousEpisode,
@@ -49,5 +53,15 @@ export function AnnotationWorkspace({
       <AnnotationWorkspaceContent shell={shell} />
       <DraftConflictDialog />
     </>
+  )
+}
+
+export function AnnotationWorkspace(props: AnnotationWorkspaceProps) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <AnnotationWorkspaceContentRoot {...props} />
+      </TooltipProvider>
+    </QueryClientProvider>
   )
 }

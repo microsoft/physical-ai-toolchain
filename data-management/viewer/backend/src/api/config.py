@@ -16,9 +16,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .detection_constants import ALLOWED_DETECTION_MODELS
+
+if TYPE_CHECKING:
+    from .storage.review_base import ReviewRepository
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +57,12 @@ class AppConfig:
 
     backend_port: int
     """Bind port for uvicorn."""
+
+    dataviewer_release_root: str = "./data-exports"
+    """Backend-owned local root for review records, staging, and releases."""
+
+    azure_dataset_export_prefix: str = "exports"
+    """Backend-owned Blob prefix for review records, staging, and releases."""
 
     cors_origins: list[str] = field(default_factory=list)
     """Allowed CORS origins for the frontend."""
@@ -129,6 +138,8 @@ def load_config(env_path: Path | None = None) -> AppConfig:
     azure_dataset_container = os.environ.get("AZURE_STORAGE_DATASET_CONTAINER") or None
     azure_annotation_container = os.environ.get("AZURE_STORAGE_ANNOTATION_CONTAINER") or None
     azure_sas_token = os.environ.get("AZURE_STORAGE_SAS_TOKEN") or None
+    dataviewer_release_root = os.environ.get("DATAVIEWER_RELEASE_ROOT", "./data-exports")
+    azure_dataset_export_prefix = os.environ.get("AZURE_STORAGE_DATASET_EXPORT_PREFIX", "exports")
 
     backend_host = os.environ.get("BACKEND_HOST", "127.0.0.1")
     backend_port = int(os.environ.get("BACKEND_PORT", "8000"))
@@ -164,6 +175,8 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         azure_sas_token=azure_sas_token,
         backend_host=backend_host,
         backend_port=backend_port,
+        dataviewer_release_root=dataviewer_release_root,
+        azure_dataset_export_prefix=azure_dataset_export_prefix,
         cors_origins=cors_origins,
         episode_cache_capacity=episode_cache_capacity,
         episode_cache_max_mb=episode_cache_max_mb,
@@ -260,6 +273,7 @@ def create_annotation_storage(config: AppConfig):
             container_name=annotation_container,
             sas_token=config.azure_sas_token,
             use_managed_identity=config.azure_sas_token is None,
+            root_prefix=f"{config.azure_dataset_export_prefix}/mutable",
         )
 
     logger.info("Annotation storage: local filesystem — path=%s", config.data_path)
@@ -303,6 +317,43 @@ def create_blob_dataset_provider(config: AppConfig):
     except ImportError:
         logger.warning("BlobDatasetProvider unavailable: install azure-storage-blob and azure-identity")
         return None
+
+
+def create_source_workspace(config: AppConfig):
+    """Create the complete read-only source workspace for the configured backend."""
+    from .storage.source_workspace import AzureSourceWorkspace, LocalSourceWorkspace
+
+    if config.storage_backend == "azure":
+        provider = create_blob_dataset_provider(config)
+        if provider is None:
+            raise ValueError("Azure source workspace requires a configured dataset container")
+        return AzureSourceWorkspace(provider)
+    return LocalSourceWorkspace(Path(config.data_path))
+
+
+def create_review_repository(config: AppConfig) -> ReviewRepository:
+    """Create the immutable review repository for the configured storage mode."""
+    if config.storage_backend == "azure":
+        if not config.azure_account_name:
+            raise ValueError("AZURE_STORAGE_ACCOUNT_NAME is required when STORAGE_BACKEND=azure")
+        if not config.azure_dataset_container:
+            raise ValueError("AZURE_STORAGE_DATASET_CONTAINER is required when STORAGE_BACKEND=azure")
+
+        from .storage.review_azure import AzureReviewRepository
+
+        return AzureReviewRepository(
+            account_name=config.azure_account_name,
+            container_name=config.azure_dataset_container,
+            sas_token=config.azure_sas_token,
+            export_prefix=config.azure_dataset_export_prefix,
+        )
+
+    from .storage.review_local import LocalReviewRepository
+
+    return LocalReviewRepository(
+        config.dataviewer_release_root,
+        source_roots=(config.data_path,),
+    )
 
 
 # Global config instance (populated on first load_app_config() call)

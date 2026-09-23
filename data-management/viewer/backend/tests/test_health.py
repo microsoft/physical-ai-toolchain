@@ -27,7 +27,10 @@ class TestHealthCheckAzureBranch:
     async def test_azure_with_blob_provider_returns_healthy(self, monkeypatch):
         import src.api.main as main_mod
 
-        monkeypatch.setattr(main_mod, "_config", SimpleNamespace(storage_backend="azure"), raising=False)
+        monkeypatch.setattr(
+            "src.api.config.get_app_config",
+            lambda: SimpleNamespace(storage_backend="azure"),
+        )
         service = MagicMock()
         service._blob_provider = object()
         monkeypatch.setattr(
@@ -44,7 +47,10 @@ class TestHealthCheckAzureBranch:
     async def test_azure_without_blob_provider_returns_unhealthy(self, monkeypatch):
         import src.api.main as main_mod
 
-        monkeypatch.setattr(main_mod, "_config", SimpleNamespace(storage_backend="azure"), raising=False)
+        monkeypatch.setattr(
+            "src.api.config.get_app_config",
+            lambda: SimpleNamespace(storage_backend="azure"),
+        )
         service = MagicMock()
         service._blob_provider = None
         monkeypatch.setattr(

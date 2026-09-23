@@ -71,4 +71,17 @@ export {
   useSaveEpisodeLabels,
 } from './use-labels'
 export { usePrincipalContext } from './use-principal-context'
+export {
+  releaseKeys,
+  useCancelRelease,
+  useReleaseEligibility,
+  useReleaseJob,
+  useSubmitRelease,
+} from './use-releases'
+export {
+  reviewKeys,
+  useCreateReviewDecision,
+  useReviewQuality,
+  useRunQualityReview,
+} from './use-reviews'
 export { useRunVlmJudge, useVlmJudgeStatus, vlmJudgeKeys } from './use-vlm-judge'

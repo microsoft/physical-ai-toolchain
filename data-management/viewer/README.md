@@ -2,7 +2,7 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-08-27
+ms.date: 2026-09-22
 ms.topic: overview
 ---
 
@@ -87,6 +87,8 @@ Expected blob structure:
 | `AZURE_STORAGE_DATASET_CONTAINER`    | —               | Blob container for dataset files                               |
 | `AZURE_STORAGE_ANNOTATION_CONTAINER` | —               | Blob container for annotations (defaults to dataset container) |
 | `AZURE_STORAGE_SAS_TOKEN`            | —               | SAS token (omit to use DefaultAzureCredential / MSI)           |
+| `DATAVIEWER_RELEASE_ROOT`             | `./data-exports` | Backend-owned local review, staging, and release root           |
+| `AZURE_STORAGE_DATASET_EXPORT_PREFIX` | `exports`        | Backend-owned Azure review, staging, and release prefix         |
 | `BACKEND_HOST`                       | `127.0.0.1`     | Bind address (`0.0.0.0` for containers)                        |
 | `BACKEND_PORT`                       | `8000`          | API server port                                                |
 | `FRONTEND_PORT`                      | `5173`          | Dev server port                                                |
@@ -610,6 +612,12 @@ npm run format       # Prettier check
 npm run format:fix   # Prettier auto-fix
 npm run build        # Production build
 ```
+
+## 📦 Dataset Releases
+
+The release workflow gates episodes on immutable review decisions and versioned quality evidence, builds a LeRobot 3.0 package in an isolated worker, and publishes only after semantic read-back and SHA-256 verification. The existing HDF5 Export action remains a separate non-release operation.
+
+See [Dataset Release Workflow](../../docs/data-pipeline/dataset-release-workflow.md) for destination configuration, user steps, package artifacts, worker setup, cancellation, recovery, and troubleshooting.
 
 ## 📖 API Documentation
 

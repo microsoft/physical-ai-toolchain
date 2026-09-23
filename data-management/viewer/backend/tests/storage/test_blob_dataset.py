@@ -540,6 +540,36 @@ class TestUploadVideo(TestCase):
 
 class TestSyncDatasetToLocal(TestCase):
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
+    def test_materialize_dataset_downloads_all_source_files(self):
+        from tempfile import TemporaryDirectory
+
+        names = [
+            "org/repo/meta/info.json",
+            "org/repo/videos/cam0/chunk-000/file-000.mp4",
+            "org/repo/data/chunk-000/file-000.parquet",
+            "org/repo/extra/episode_0.hdf5",
+        ]
+        mock_container = MagicMock()
+        mock_container.list_blobs.return_value = _AsyncIter([_make_blob(name) for name in names])
+        mock_client = MagicMock()
+        mock_client.get_container_client.return_value = mock_container
+        provider = _build_provider(mock_client)
+
+        with (
+            TemporaryDirectory() as td,
+            patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=b"source")) as read_mock,
+        ):
+            local_dir = Path(td)
+            result = asyncio.run(provider.materialize_dataset_to_local("org--repo", local_dir))
+
+            assert result is True
+            assert (local_dir / "meta" / "info.json").is_file()
+            assert (local_dir / "videos" / "cam0" / "chunk-000" / "file-000.mp4").is_file()
+            assert (local_dir / "data" / "chunk-000" / "file-000.parquet").is_file()
+            assert (local_dir / "extra" / "episode_0.hdf5").is_file()
+            assert read_mock.await_count == 4
+
+    @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     def test_sync_dataset_skips_videos_and_hdf5(self):
         from tempfile import TemporaryDirectory
 

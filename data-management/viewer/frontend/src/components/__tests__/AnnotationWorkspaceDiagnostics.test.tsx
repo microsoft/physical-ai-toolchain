@@ -43,6 +43,17 @@ describe('AnnotationWorkspace diagnostics', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('keeps immutable release separate from legacy HDF5 export', () => {
+    render(<AnnotationWorkspace />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^release$/i }))
+    expect(screen.getByRole('dialog', { name: /dataset release dialog/i })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /legacy export dialog/i })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /^export$/i }))
+    expect(screen.getByRole('dialog', { name: /legacy export dialog/i })).toBeInTheDocument()
+  })
+
   it('renders diagnostics in a shared bottom panel outside the trajectory tab', () => {
     mockDiagnosticsState.enabled = true
     mockDiagnosticsState.channels = ['all', 'workspace', 'playback']

@@ -481,6 +481,8 @@ jobs:
             data-management/viewer/package.json
             data-management/viewer/backend/pyproject.toml
             data-management/viewer/backend/uv.lock
+            data-management/viewer/release-worker/pyproject.toml
+            data-management/viewer/release-worker/uv.lock
             data-management/viewer/frontend/package.json
             data-management/viewer/frontend/package-lock.json
             docs/docusaurus/package.json

@@ -23,6 +23,10 @@ mono_crash.*
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
+!data-management/viewer/backend/src/api/release/
+!data-management/viewer/backend/src/api/release/**
+!data-management/viewer/frontend/src/components/release/
+!data-management/viewer/frontend/src/components/release/**
 x64/
 x86/
 [Ww][Ii][Nn]32/
@@ -495,3 +499,6 @@ datasets/
 
 # Sources staged into the gpu-offload build context by examples/ur10e-single
 gpu-offload/examples/ur10e-single/.ur10e-src/
+
+# Data viewer developer export folder
+data-management/viewer/backend/data-exports/release-jobs/

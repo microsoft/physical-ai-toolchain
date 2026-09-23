@@ -9,10 +9,13 @@ from src.api.config import (
     AppConfig,
     create_annotation_storage,
     create_blob_dataset_provider,
+    create_review_repository,
     get_app_config,
     load_config,
 )
 from src.api.storage import LocalStorageAdapter
+from src.api.storage.review_azure import AzureReviewRepository
+from src.api.storage.review_local import LocalReviewRepository
 
 
 @pytest.fixture(autouse=True)
@@ -27,10 +30,13 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch):
     for var in (
         "STORAGE_BACKEND",
         "DATA_DIR",
+        "DATA_PATH",
         "AZURE_STORAGE_ACCOUNT_NAME",
         "AZURE_STORAGE_DATASET_CONTAINER",
         "AZURE_STORAGE_ANNOTATION_CONTAINER",
+        "AZURE_STORAGE_DATASET_EXPORT_PREFIX",
         "AZURE_STORAGE_SAS_TOKEN",
+        "DATAVIEWER_RELEASE_ROOT",
         "BACKEND_HOST",
         "BACKEND_PORT",
         "CORS_ORIGINS",
@@ -51,6 +57,8 @@ class TestLoadConfig:
         assert cfg.storage_backend == "local"
         assert cfg.data_path == "./data"
         assert cfg.azure_account_name is None
+        assert cfg.dataviewer_release_root == "./data-exports"
+        assert cfg.azure_dataset_export_prefix == "exports"
         assert cfg.backend_host == "127.0.0.1"
         assert cfg.backend_port == 8000
         assert cfg.episode_cache_capacity == 32
@@ -66,6 +74,13 @@ class TestLoadConfig:
         monkeypatch.setenv("STORAGE_BACKEND", "AZURE")
         cfg = load_config()
         assert cfg.storage_backend == "azure"
+
+    def test_data_path_does_not_configure_local_dataset_directory(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("DATA_PATH", "/srv/datasets")
+
+        cfg = load_config()
+
+        assert cfg.data_path == "./data"
 
     def test_cors_origins_split_and_trimmed(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("CORS_ORIGINS", "http://a.test , http://b.test ,, ")
@@ -123,12 +138,53 @@ class TestLoadConfig:
         monkeypatch.setenv("AZURE_STORAGE_ACCOUNT_NAME", "acct")
         monkeypatch.setenv("AZURE_STORAGE_DATASET_CONTAINER", "datasets")
         monkeypatch.setenv("AZURE_STORAGE_ANNOTATION_CONTAINER", "ann")
+        monkeypatch.setenv("AZURE_STORAGE_DATASET_EXPORT_PREFIX", "curated/releases")
         monkeypatch.setenv("AZURE_STORAGE_SAS_TOKEN", "sv=token")
+        monkeypatch.setenv("DATAVIEWER_RELEASE_ROOT", "/srv/dataviewer-exports")
         cfg = load_config()
         assert cfg.azure_account_name == "acct"
         assert cfg.azure_dataset_container == "datasets"
         assert cfg.azure_annotation_container == "ann"
+        assert cfg.azure_dataset_export_prefix == "curated/releases"
         assert cfg.azure_sas_token == "sv=token"
+        assert cfg.dataviewer_release_root == "/srv/dataviewer-exports"
+
+
+class TestCreateReviewRepository:
+    def test_local_uses_configured_release_root(self, tmp_path):
+        cfg = AppConfig(
+            storage_backend="local",
+            data_path=str(tmp_path / "datasets"),
+            azure_account_name=None,
+            azure_dataset_container=None,
+            azure_annotation_container=None,
+            azure_sas_token=None,
+            backend_host="127.0.0.1",
+            backend_port=8000,
+            dataviewer_release_root=str(tmp_path / "exports"),
+        )
+
+        repository = create_review_repository(cfg)
+
+        assert isinstance(repository, LocalReviewRepository)
+        assert repository.release_root == (tmp_path / "exports").resolve()
+
+    def test_azure_uses_dataset_container_and_export_prefix(self):
+        cfg = AppConfig(
+            storage_backend="azure",
+            data_path="./data",
+            azure_account_name="acct",
+            azure_dataset_container="datasets",
+            azure_annotation_container=None,
+            azure_sas_token="sv=token",
+            backend_host="127.0.0.1",
+            backend_port=8000,
+            azure_dataset_export_prefix="curated/releases",
+        )
+
+        repository = create_review_repository(cfg)
+
+        assert isinstance(repository, AzureReviewRepository)
 
 
 class TestGetAppConfigSingleton:

@@ -1,4 +1,7 @@
+import { PackageCheck } from 'lucide-react'
+
 import {
+  DataQualityWidget,
   LabelPanel,
   LanguageInstructionWidget,
   ObjectDetectionWidget,
@@ -10,11 +13,22 @@ import { AnnotationWorkspacePlaybackCard } from '@/components/annotation-workspa
 import { AnnotationWorkspaceSubtaskListCard } from '@/components/annotation-workspace/AnnotationWorkspaceSubtaskListCard'
 import { AnnotationWorkspaceTopBar } from '@/components/annotation-workspace/AnnotationWorkspaceTopBar'
 import { AnnotationWorkspaceTrajectoryTab } from '@/components/annotation-workspace/AnnotationWorkspaceTrajectoryTab'
+import { ReviewQualityPanel } from '@/components/annotation-workspace/ReviewQualityPanel'
 import { EpisodeAnalysisCard, MotionMetricsPanel } from '@/components/episode-analyzer'
 import { ExportDialog } from '@/components/export'
+import { ReleaseDialog } from '@/components/release'
+import { ReleaseStatusBanner } from '@/components/release/ReleaseStatusBanner'
 import { Tabs } from '@/components/ui/tabs'
 import { JudgePanel } from '@/components/vlm-judge'
-import { useAnnotationStore } from '@/stores'
+import { useCapabilities } from '@/hooks/use-datasets'
+import { useReviewReasonDraft } from '@/hooks/use-review-reason-draft'
+import {
+  useCreateReviewDecision,
+  useReviewDecision,
+  useReviewQuality,
+  useRunQualityReview,
+} from '@/hooks/use-reviews'
+import { useAnnotationStore, useEditStore } from '@/stores'
 
 import type { useAnnotationWorkspaceShell } from './useAnnotationWorkspaceShell'
 
@@ -30,6 +44,19 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
   // dataset metadata on the backend when empty.
   const currentInstruction = useAnnotationStore(
     (state) => state.currentAnnotation?.languageInstruction?.instruction,
+  )
+  const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation)
+  const getEditOperations = useEditStore((state) => state.getEditOperations)
+  const capabilities = useCapabilities(currentDataset?.id)
+  const quality = useReviewQuality(currentDataset?.id ?? '', currentEpisode?.meta.index ?? -1)
+  const decision = useReviewDecision(currentDataset?.id ?? '', currentEpisode?.meta.index ?? -1)
+  const runQuality = useRunQualityReview()
+  const createDecision = useCreateReviewDecision()
+  const isReadOnly = Boolean(currentDataset?.isReadOnly)
+  const reviewReasonDraft = useReviewReasonDraft(
+    currentDataset?.id ?? '',
+    currentEpisode?.meta.index ?? -1,
+    currentAnnotation?.annotatorId ?? '',
   )
 
   if (!currentDataset || !currentEpisode) {
@@ -72,7 +99,15 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
     />
   )
 
-  const trajectorySubtaskListCard = (
+  const readOnlyNotice = (
+    <p className="text-muted-foreground text-sm">
+      This verified release is read-only. Return to{' '}
+      {currentDataset.sourceDatasetId ?? 'the source dataset'} to annotate or edit.
+    </p>
+  )
+  const trajectorySubtaskListCard = isReadOnly ? (
+    readOnlyNotice
+  ) : (
     <AnnotationWorkspaceSubtaskListCard
       compact
       selectedSubtaskId={shell.playback.selectedSubtaskId}
@@ -84,8 +119,14 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
     />
   )
 
-  const trajectoryLabelPanel = <LabelPanel episodeIndex={currentEpisode.meta.index} />
-  const trajectoryJudgePanel = (
+  const trajectoryLabelPanel = isReadOnly ? (
+    readOnlyNotice
+  ) : (
+    <LabelPanel episodeIndex={currentEpisode.meta.index} />
+  )
+  const trajectoryJudgePanel = isReadOnly ? (
+    readOnlyNotice
+  ) : (
     <JudgePanel
       datasetId={currentDataset.id}
       episodeIndex={currentEpisode.meta.index}
@@ -93,12 +134,78 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
       totalEpisodes={currentDataset.totalEpisodes}
     />
   )
-  const trajectoryLanguageInstructionPanel = <LanguageInstructionWidget />
-  const trajectoryObjectDetectionPanel = <ObjectDetectionWidget />
-  const trajectoryEditToolsPanel = (
+  const trajectoryLanguageInstructionPanel = isReadOnly ? (
+    readOnlyNotice
+  ) : (
+    <LanguageInstructionWidget />
+  )
+  const trajectoryObjectDetectionPanel = isReadOnly ? readOnlyNotice : <ObjectDetectionWidget />
+  const trajectoryEditToolsPanel = isReadOnly ? (
+    readOnlyNotice
+  ) : (
     <AnnotationWorkspaceEditToolsPanel
       onClearTransforms={shell.clearTransforms}
       canResetTransforms={Boolean(shell.globalTransform)}
+    />
+  )
+  const trajectoryDataQualityPanel = isReadOnly ? readOnlyNotice : <DataQualityWidget embedded />
+  const sourceFormat = capabilities.data?.isLerobotDataset
+    ? 'lerobot'
+    : capabilities.data?.hasHdf5Files
+      ? 'hdf5'
+      : null
+  const trajectoryReviewQualityPanel = isReadOnly ? (
+    readOnlyNotice
+  ) : (
+    <ReviewQualityPanel
+      qualityReport={quality.data}
+      qualityError={runQuality.error?.message ?? null}
+      isRunningQuality={runQuality.isPending}
+      isSubmittingDecision={createDecision.isPending}
+      reasonCodes={reviewReasonDraft.reasonCodes}
+      onReasonCodesChange={reviewReasonDraft.setReasonCodes}
+      onRunQuality={() => {
+        if (!currentAnnotation || !sourceFormat) {
+          return
+        }
+        runQuality.mutate({
+          datasetId: currentDataset.id,
+          episodeIndex: currentEpisode.meta.index,
+          actorId: currentAnnotation.annotatorId,
+          sourceFormat,
+          profile: {
+            profileId: 'workspace-review',
+            version: '1.0.0',
+            fps: currentDataset.fps,
+            timestampToleranceSeconds: 1 / currentDataset.fps / 2,
+            requiredFeatures: Object.entries(currentDataset.features).map(([name, feature]) => ({
+              name,
+              dtype: feature.dtype,
+              shape: feature.shape,
+            })),
+            optionalFeatures: [],
+            requiredMetadataFiles: [],
+            calibration: null,
+            requireTaskLabel: true,
+          },
+        })
+      }}
+      onDecision={(decision, reasonCodes) => {
+        const edits = getEditOperations()
+        if (!currentAnnotation || !quality.data || !edits) {
+          return
+        }
+        createDecision.mutate({
+          datasetId: currentDataset.id,
+          episodeIndex: currentEpisode.meta.index,
+          actorId: currentAnnotation.annotatorId,
+          annotation: currentAnnotation,
+          edits,
+          qualityReport: quality.data,
+          decision,
+          reasonCodes,
+        })
+      }}
     />
   )
 
@@ -128,12 +235,29 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
           hasPendingEpisodeChanges={shell.hasPendingEpisodeChanges}
           onResetAllClick={shell.handleResetAllClick}
           onOpenExportDialog={shell.handleOpenExportDialog}
+          onOpenReleaseDialog={shell.handleOpenReleaseDialog}
           canGoNextEpisode={shell.canGoNextEpisode}
           canSaveAndNextEpisode={
-            Boolean(shell.onSaveAndNextEpisode) && !shell.saveEpisodeLabels.isPending
+            Boolean(shell.onSaveAndNextEpisode) &&
+            !shell.saveEpisodeLabels.isPending &&
+            !shell.saveCurrentAnnotation.isPending
           }
           onSaveAndNextEpisode={() => void shell.handleSaveAndNextEpisode()}
           saveStatusMessage={shell.saveStatusMessage}
+          isReadOnly={isReadOnly}
+        />
+
+        {isReadOnly && (
+          <div className="bg-muted/50 flex items-center gap-2 border px-3 py-2 text-sm">
+            <PackageCheck className="h-4 w-4" aria-hidden="true" />
+            <strong>Viewing release {currentDataset.releaseId}</strong>
+            <span className="text-muted-foreground">Verified and read-only</span>
+          </div>
+        )}
+
+        <ReleaseStatusBanner
+          datasetId={currentDataset.id}
+          onViewStatus={shell.handleOpenReleaseDialog}
         />
 
         <AnnotationWorkspaceTrajectoryTab
@@ -145,6 +269,8 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
           languageInstructionPanel={trajectoryLanguageInstructionPanel}
           objectDetectionPanel={trajectoryObjectDetectionPanel}
           editToolsPanel={trajectoryEditToolsPanel}
+          dataQualityPanel={trajectoryDataQualityPanel}
+          reviewQualityPanel={trajectoryReviewQualityPanel}
           selectedRange={shell.playback.selectedRange}
           selectedSubtaskId={shell.playback.selectedSubtaskId}
           onClearPlaybackSelection={shell.playback.clearPlaybackSelection}
@@ -183,12 +309,24 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
         />
       )}
 
-      <ExportDialog
-        open={shell.exportDialogOpen}
-        onOpenChange={shell.setExportDialogOpen}
-        datasetId={currentDataset.id}
-        episodeIndices={[currentEpisode.meta.index]}
-      />
+      {!isReadOnly && (
+        <ExportDialog
+          open={shell.exportDialogOpen}
+          onOpenChange={shell.setExportDialogOpen}
+          datasetId={currentDataset.id}
+          episodeIndices={[currentEpisode.meta.index]}
+        />
+      )}
+      {!isReadOnly && (
+        <ReleaseDialog
+          open={shell.releaseDialogOpen}
+          onOpenChange={shell.setReleaseDialogOpen}
+          datasetId={currentDataset.id}
+          episodeIndex={currentEpisode.meta.index}
+          actorId={decision.data?.actorId ?? currentAnnotation?.annotatorId ?? ''}
+          decision={decision.data}
+        />
+      )}
     </div>
   )
 }

@@ -6,6 +6,7 @@ implementations (LeRobot, HDF5) and manages blob storage integration.
 """
 
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -62,6 +63,7 @@ class DatasetService:
         base_path: str | None = None,
         storage_adapter: StorageAdapter | None = None,
         blob_provider: "BlobDatasetProvider | None" = None,
+        release_root: str | None = None,
         episode_cache_capacity: int = 32,
         episode_cache_max_mb: int = 100,
     ):
@@ -76,6 +78,8 @@ class DatasetService:
         self._local_dataset_ids: set[str] = set()
         self._blob_dataset_ids: set[str] = set()
         self._blob_provider: BlobDatasetProvider | None = blob_provider
+        self._release_root = Path(release_root).resolve() if release_root else None
+        self._release_dataset_paths: dict[str, Path] = {}
         self._blob_synced: dict[str, Path] = {}
         self._blob_hdf5_synced: dict[str, Path] = {}
         self._blob_meta_synced: dict[str, Path] = {}
@@ -383,6 +387,40 @@ class DatasetService:
             self._local_dataset_ids.add(dataset_id)
         return dataset_info
 
+    def _discover_local_releases(self) -> None:
+        if self._release_root is None or not self._release_root.is_dir():
+            return
+        discovered_ids: set[str] = set()
+        for marker in sorted(self._release_root.glob("*/*/.published.json")):
+            try:
+                payload = json.loads(marker.read_bytes())
+                source_dataset_id = str(payload["dataset_id"])
+                release_id = str(payload["release_id"])
+                owner = str(payload["owner"])
+                dataset_id = f"release-{owner}"
+                dataset_path = marker.parent.resolve()
+                if not dataset_path.is_relative_to(self._release_root):
+                    continue
+                handler = self._detect_handler(dataset_path)
+                if handler is None:
+                    continue
+                dataset_info = handler.discover(dataset_id, dataset_path)
+                if dataset_info is None:
+                    continue
+                dataset_info.name = release_id
+                dataset_info.group = f"Releases / {source_dataset_id}"
+                dataset_info.is_read_only = True
+                dataset_info.source_dataset_id = source_dataset_id
+                dataset_info.release_id = release_id
+                self._datasets[dataset_id] = dataset_info
+                self._release_dataset_paths[dataset_id] = dataset_path
+                discovered_ids.add(dataset_id)
+            except (KeyError, OSError, TypeError, ValueError):
+                continue
+        for dataset_id in set(self._release_dataset_paths) - discovered_ids:
+            self._evict_dataset(dataset_id)
+            self._release_dataset_paths.pop(dataset_id, None)
+
     def _evict_dataset(self, dataset_id: str) -> None:
         """Remove cached dataset metadata, handler state, and temp dirs for a dataset."""
         self._datasets.pop(dataset_id, None)
@@ -456,6 +494,7 @@ class DatasetService:
                 except Exception as e:
                     logger.warning("Failed to discover blob HDF5 dataset %s: %s", dataset_id, e)
 
+        self._discover_local_releases()
         base = Path(self.base_path)
         if not base.exists():
             return list(self._datasets.values())
@@ -773,6 +812,10 @@ class DatasetService:
             ValueError: If any component contains path traversal or
                         the directory does not exist.
         """
+        release_path = self._release_dataset_paths.get(dataset_id)
+        if release_path is not None and release_path.is_dir():
+            return release_path
+
         parts = dataset_id.split("--") if "--" in dataset_id else [dataset_id]
         if len(parts) > 5:
             raise ValueError(f"Dataset nesting too deep (max 5 levels): {dataset_id}")
@@ -918,6 +961,7 @@ def get_dataset_service() -> DatasetService:
             base_path=config.data_path,
             storage_adapter=storage,
             blob_provider=blob_provider,
+            release_root=str(Path(getattr(config, "dataviewer_release_root", "./data-exports")) / "releases"),
             episode_cache_capacity=config.episode_cache_capacity,
             episode_cache_max_mb=config.episode_cache_max_mb,
         )

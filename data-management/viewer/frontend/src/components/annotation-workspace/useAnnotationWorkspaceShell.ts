@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { useSaveCurrentAnnotation } from '@/hooks/use-annotations'
 import { useSaveEpisodeLabels } from '@/hooks/use-labels'
 import { usePrincipalContext } from '@/hooks/use-principal-context'
 import { isDiagnosticsEnabled, recordDiagnosticEvent } from '@/lib/playback-diagnostics'
 import {
+  useAnnotationStore,
   useDatasetStore,
   useEditDirtyState,
   useEditStore,
@@ -42,6 +44,7 @@ export function useAnnotationWorkspaceShell({
   onSaveAndNextEpisode,
 }: UseAnnotationWorkspaceShellOptions) {
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
+  const [releaseDialogOpen, setReleaseDialogOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('trajectory')
   const seekVideoFrameRef = useRef(
     (frame: number, _range: [number, number] | null, _constrainToRange = true) => frame,
@@ -49,6 +52,8 @@ export function useAnnotationWorkspaceShell({
   const resumePlaybackRef = useRef((_: number) => {})
 
   const currentDataset = useDatasetStore((state) => state.currentDataset)
+  const hasAnnotationChanges = useAnnotationStore((state) => state.isDirty)
+  const resetAnnotation = useAnnotationStore((state) => state.resetAnnotation)
   const principalQuery = usePrincipalContext()
   const currentEpisode = useEpisodeStore((state) => state.currentEpisode)
   const labelDataLoaded = useLabelStore((state) => state.isLoaded)
@@ -79,6 +84,7 @@ export function useAnnotationWorkspaceShell({
   const { displayAdjustment, isActive: displayActive } = useViewerDisplay()
   const { autoPlay, autoLoop, setAutoPlay, setAutoLoop } = usePlaybackSettings()
   const saveEpisodeLabels = useSaveEpisodeLabels()
+  const saveCurrentAnnotation = useSaveCurrentAnnotation()
 
   const currentEpisodeLabels = useMemo(() => {
     if (!currentEpisode) {
@@ -107,10 +113,13 @@ export function useAnnotationWorkspaceShell({
       savedLabelsForCurrentEpisode,
       availableLabels,
       labelDataLoaded,
+      hasAnnotationChanges,
       hasEdits,
+      onResetAnnotation: resetAnnotation,
       onResetEdits: resetEdits,
       onSetEpisodeLabels: setEpisodeLabelsInStore,
       onSaveEpisodeDraft: saveEpisodeDraft,
+      onSaveAnnotation: saveCurrentAnnotation.saveIfDirty,
       onSaveEpisodeLabels: saveEpisodeLabels.mutateAsync,
       onRecordEvent: recordDiagnosticEvent,
       canGoNextEpisode,
@@ -265,6 +274,14 @@ export function useAnnotationWorkspaceShell({
     })
   }, [activeTab, currentEpisode?.meta.index])
 
+  const handleOpenReleaseDialog = useCallback(() => {
+    setReleaseDialogOpen(true)
+    recordDiagnosticEvent('release', 'dialog-open', {
+      activeTab,
+      episodeIndex: currentEpisode?.meta.index ?? null,
+    })
+  }, [activeTab, currentEpisode?.meta.index])
+
   const handleResetAllClick = useCallback(() => {
     recordDiagnosticEvent('workspace', 'reset-all', {
       activeTab,
@@ -293,6 +310,7 @@ export function useAnnotationWorkspaceShell({
     handleCreateSubtaskFromSelection,
     handleLoadedMetadata: media.handleLoadedMetadata,
     handleOpenExportDialog,
+    handleOpenReleaseDialog,
     handleResetAllClick,
     handleSaveAndNextEpisode,
     handleTabChange,
@@ -306,12 +324,15 @@ export function useAnnotationWorkspaceShell({
     onSaveAndNextEpisode,
     playback,
     playbackSpeed,
+    releaseDialogOpen,
     saveEpisodeLabels,
+    saveCurrentAnnotation,
     saveStatusMessage,
     setActiveTab,
     setAutoLoop,
     setAutoPlay,
     setExportDialogOpen,
+    setReleaseDialogOpen,
     setPlaybackSpeed,
     togglePlayback,
     totalFrames,

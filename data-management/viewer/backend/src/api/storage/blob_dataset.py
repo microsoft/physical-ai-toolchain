@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncIterator
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -644,6 +644,37 @@ class BlobDatasetProvider:
                 "Failed to sync dataset '%s' to local: %s",
                 dataset_id.replace("\r", "").replace("\n", ""),
                 e,
+            )
+            return False
+
+    async def materialize_dataset_to_local(self, dataset_id: str, local_dir: Path) -> bool:
+        """Download every source blob required for quality and release work."""
+        local_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            client = await self._get_client()
+            container = client.get_container_client(self.container_name)
+            prefix = f"{self.get_blob_prefix(dataset_id)}/"
+            async for blob in container.list_blobs(name_starts_with=prefix, include=["metadata"]):
+                if self._is_directory_blob(blob):
+                    continue
+                relative = blob.name[len(prefix) :]
+                path = PurePosixPath(relative)
+                if not relative or path.is_absolute() or "\\" in relative or ".." in path.parts:
+                    raise ValueError("Invalid source blob path")
+                if path.parts[0] == ".cache":
+                    continue
+                payload = await self._read_blob_bytes(blob.name)
+                if payload is None:
+                    return False
+                local_path = local_dir.joinpath(*path.parts)
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                local_path.write_bytes(payload)
+            return True
+        except Exception as exc:
+            logger.warning(
+                "Failed to materialize dataset '%s': %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                exc,
             )
             return False
 
