@@ -87,21 +87,21 @@ def test_proxy_output_urls_require_trusted_boundaries(
     monkeypatch.delenv("OSMO_OUTPUT_CONTAINER", raising=False)
 
     with pytest.raises(ValueError, match="boundaries are required"):
-        _validate_output_urls(repo_root, ["azure://trustedaccount/osmo/path/"])
+        _validate_output_urls(repo_root, ["azure://trusted/osmo/path/"])
 
 
 def test_proxy_output_urls_reject_boundary_mismatch(
     monkeypatch: pytest.MonkeyPatch,
     repo_root: Path,
 ) -> None:
-    monkeypatch.setenv("OSMO_OUTPUT_STORAGE_ACCOUNT", "trustedaccount")
+    monkeypatch.setenv("OSMO_OUTPUT_STORAGE_ACCOUNT", "trusted")
     monkeypatch.setenv("OSMO_OUTPUT_CONTAINER", _CONTAINER)
 
     with pytest.raises(ValueError, match="outside the expected storage account or container"):
-        _validate_output_urls(repo_root, ["azure://attackeraccount/osmo/path/"])
+        _validate_output_urls(repo_root, ["azure://attacker/osmo/path/"])
 
     with pytest.raises(ValueError, match="outside the expected storage account or container"):
-        _validate_output_urls(repo_root, ["azure://trustedaccount/other/path/"])
+        _validate_output_urls(repo_root, ["azure://trusted/other/path/"])
 
 
 def _submit_proxy(
