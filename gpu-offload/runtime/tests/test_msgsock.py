@@ -7,10 +7,20 @@ import threading
 import pytest
 
 from remoter import autoremote, msgsock
-from remoter.msgsock import decryptMessage, encryptMessage, noncelen
+from remoter.msgsock import ENCRYPTED_MESSAGE_OVERHEAD, decryptMessage, encryptMessage, noncelen
 from remoter.msgtcp import MessengerTCP
 
-_AES_GCM_TAG_BYTES = 16
+
+@pytest.fixture(autouse=True)
+def reset_replay_window(monkeypatch) -> None:
+    monkeypatch.setattr(
+        msgsock,
+        "_replay_window",
+        msgsock._ReplayWindow(
+            max_age_seconds=msgsock._MAX_MESSAGE_AGE_SECONDS,
+            max_entries=msgsock._MAX_REPLAY_NONCES,
+        ),
+    )
 
 
 def test_aes_gcm_round_trip() -> None:
@@ -20,7 +30,7 @@ def test_aes_gcm_round_trip() -> None:
     encrypted = encryptMessage(payload, key)
 
     assert decryptMessage(encrypted, key) == payload
-    assert len(encrypted) == len(payload) + noncelen + _AES_GCM_TAG_BYTES
+    assert len(encrypted) == len(payload) + ENCRYPTED_MESSAGE_OVERHEAD
 
 
 def test_aes_gcm_rejects_wrong_key() -> None:
@@ -44,10 +54,53 @@ def test_aes_gcm_uses_unique_nonces() -> None:
     first = encryptMessage(payload, key)
     second = encryptMessage(payload, key)
 
-    assert first[:noncelen] != second[:noncelen]
+    nonce_start = 1 + msgsock._TIMESTAMP_BYTES
+    assert first[nonce_start : nonce_start + noncelen] != second[nonce_start : nonce_start + noncelen]
     assert first != second
     assert decryptMessage(first, key) == payload
     assert decryptMessage(second, key) == payload
+
+
+def test_aes_gcm_rejects_replayed_frame() -> None:
+    key = secrets.token_bytes(32)
+    encrypted = encryptMessage(b"payload", key)
+
+    assert decryptMessage(encrypted, key) == b"payload"
+    assert decryptMessage(encrypted, key) is None
+
+
+def test_aes_gcm_rejects_stale_frame(monkeypatch) -> None:
+    key = secrets.token_bytes(32)
+    monkeypatch.setattr(msgsock.time, "time", lambda: 1_000.0)
+    encrypted = encryptMessage(b"payload", key)
+    monkeypatch.setattr(
+        msgsock.time,
+        "time",
+        lambda: 1_000.0 + msgsock._MAX_MESSAGE_AGE_SECONDS + 0.001,
+    )
+
+    assert decryptMessage(encrypted, key) is None
+
+
+def test_aes_gcm_rejects_frame_too_far_in_the_future(monkeypatch) -> None:
+    key = secrets.token_bytes(32)
+    monkeypatch.setattr(
+        msgsock.time,
+        "time",
+        lambda: 1_000.0 + msgsock._MAX_FUTURE_SKEW_SECONDS + 0.001,
+    )
+    encrypted = encryptMessage(b"payload", key)
+    monkeypatch.setattr(msgsock.time, "time", lambda: 1_000.0)
+
+    assert decryptMessage(encrypted, key) is None
+
+
+def test_aes_gcm_authenticates_frame_timestamp() -> None:
+    key = secrets.token_bytes(32)
+    encrypted = bytearray(encryptMessage(b"payload", key))
+    encrypted[1] ^= 1
+
+    assert decryptMessage(bytes(encrypted), key) is None
 
 
 def test_configure_message_encryption_defaults_to_enabled(tmp_path, monkeypatch) -> None:
@@ -110,5 +163,32 @@ def test_forged_peer_message_is_rejected_before_handler(monkeypatch) -> None:
     assert closed.wait(timeout=2)
     thread.join(timeout=2)
     assert handled == []
+    assert messenger.closecalled is True
+    client_sock.close()
+
+
+def test_replayed_authenticated_message_is_rejected_before_handler(monkeypatch) -> None:
+    key = secrets.token_bytes(32)
+    client_sock, server_sock = socket.socketpair()
+    handled = []
+    closed = threading.Event()
+    monkeypatch.setattr(msgsock, "msgkey", key)
+    messenger = MessengerTCP(
+        server_sock,
+        "tcp://authenticated-peer:1",
+        handlefn=lambda data, _messenger, _endpoint: handled.append(data),
+        closefn=lambda _messenger, _endpoint: closed.set(),
+    )
+    thread = threading.Thread(target=messenger.recvthread)
+    thread.start()
+
+    payload = encryptMessage(b"authenticated RPC payload", key)
+    frame = messenger.data + payload
+    wire_frame = len(frame).to_bytes(4, "big") + frame
+    client_sock.sendall(wire_frame + wire_frame)
+
+    assert closed.wait(timeout=2)
+    thread.join(timeout=2)
+    assert handled == [b"authenticated RPC payload"]
     assert messenger.closecalled is True
     client_sock.close()

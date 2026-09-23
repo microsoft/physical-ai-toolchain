@@ -71,6 +71,11 @@ messages. The controller generates one random 32-byte key per opted-in workload,
 stores it in a controller-managed Kubernetes Secret, and mounts the same key
 read-only into the client containers and every generated server stage.
 
+Encrypted frames authenticate their protocol version and issuance time. The
+runtime rejects stale or future-dated frames and tracks recently accepted
+nonces in a bounded process-wide replay window, so a captured frame cannot be
+dispatched more than once while the receiving process is running.
+
 ```yaml
 encryption: true
 serverstages:
