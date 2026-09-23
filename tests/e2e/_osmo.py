@@ -557,8 +557,7 @@ def cancel_osmo_workflows_by_identifier(identifier: str, repo_root: Path) -> Non
         cancel_result = run_command(["osmo", "workflow", "cancel", workflow_id], cwd=repo_root)
         if cancel_result.returncode != 0:
             raise AssertionError(
-                f"Failed to recovery cancel OSMO workflow {workflow_id!r}\n\n"
-                f"{format_command_failure(cancel_result)}"
+                f"Failed to recovery cancel OSMO workflow {workflow_id!r}\n\n{format_command_failure(cancel_result)}"
             )
 
 

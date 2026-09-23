@@ -63,12 +63,8 @@ def assert_e2e_handle_complete(
     missing_attempts = [name for name in required_executions if not handle.attempts.get(name)]
     assert not missing_attempts, f"Missing attempt evidence: {missing_attempts}"
 
-    missing_retry_classifications = [
-        name for name in required_executions if not handle.retry_classifications.get(name)
-    ]
-    assert not missing_retry_classifications, (
-        f"Missing retry classification evidence: {missing_retry_classifications}"
-    )
+    missing_retry_classifications = [name for name in required_executions if not handle.retry_classifications.get(name)]
+    assert not missing_retry_classifications, f"Missing retry classification evidence: {missing_retry_classifications}"
 
     missing_terminal_states = [name for name in required_executions if not handle.terminal_states.get(name)]
     assert not missing_terminal_states, f"Missing terminal state evidence: {missing_terminal_states}"
