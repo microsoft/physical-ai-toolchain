@@ -8,6 +8,8 @@ import json
 import os
 import threading
 import types
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 from kubernetes import client
@@ -463,9 +465,12 @@ def test_controller_readiness_fails_closed_when_check_raises():
     assert controller.readiness_status() == (False, "readiness check failed")
 
 
-def _reconcile_controller(list_pods):
-    def empty_list():
+def _reconcile_controller(list_pods: Callable[[], Any]) -> types.SimpleNamespace:
+    def empty_list() -> types.SimpleNamespace:
         return types.SimpleNamespace(items=[])
+
+    def reconcile_object(_obj: dict[str, Any]) -> None:
+        return None
 
     return types.SimpleNamespace(
         core_api=types.SimpleNamespace(list_pod_for_all_namespaces=list_pods),
@@ -474,7 +479,7 @@ def _reconcile_controller(list_pods):
             list_stateful_set_for_all_namespaces=empty_list,
         ),
         batch_api=types.SimpleNamespace(list_job_for_all_namespaces=empty_list),
-        reconcile_object=lambda _obj: None,
+        reconcile_object=reconcile_object,
     )
 
 
