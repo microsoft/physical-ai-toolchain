@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from remoter import class2dict, remoter, rmtclass
+from remoter import autoremote, class2dict, remoter, rmtclass
 from remoter.safe_codec import (
     AdapterContext,
     AdapterRegistry,
@@ -57,6 +57,29 @@ class _FakeTorch:
         assert dtype is cls.float32
         cls.allocation_count += 1
         return _FakeTensor().reshape(shape)
+
+
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        ({"allowedmodules": ["valid.module", 7]}, r"allowedmodules\[1\]"),
+        ({"remotefuncs": [{7: {}}]}, r"remotefuncs\[0\] target"),
+        ({"remoteclasses": "not-a-list"}, "remoteclasses must be a list"),
+        ({"stubs": {"stub.module/Target": 7}}, "stub target"),
+    ],
+)
+def test_configured_modules_reject_non_string_targets_before_installing_permissions(
+    monkeypatch: pytest.MonkeyPatch,
+    config: dict[str, object],
+    message: str,
+) -> None:
+    allowed_modules = {"remoter.remoter", "remoter.rmtclass"}
+    monkeypatch.setattr(remoter, "allowed_modules", allowed_modules)
+
+    with pytest.raises(ValueError, match=message):
+        autoremote.allow_configured_modules(config)
+
+    assert remoter.allowed_modules == allowed_modules
 
 
 def _tensor_wire_payload(*, data: bytes, shape: list[int]) -> dict[str, object]:

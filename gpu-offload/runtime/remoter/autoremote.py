@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import sys
+from typing import Any
 
 # use by sitecustomize.py
 import yaml
@@ -82,34 +83,51 @@ def importmodule(mod):
             raise e
 
 
-def allow_configured_modules(cfg: dict) -> None:
-    module_names = cfg.get("allowedmodules", [])
-    if not isinstance(module_names, list):
+def allow_configured_modules(cfg: dict[str, Any]) -> None:
+    raw_module_names = cfg.get("allowedmodules", [])
+    if not isinstance(raw_module_names, list):
         raise ValueError("allowedmodules must be a list of module names")
-    for module_name in module_names:
-        remoter.allow_module(module_name)
+    module_names: list[str] = []
+    for index, module_name in enumerate(raw_module_names):
+        if not isinstance(module_name, str) or not module_name:
+            raise ValueError(f"allowedmodules[{index}] must be a non-empty string")
+        module_names.append(module_name)
 
-    target_paths = []
+    target_paths: list[str] = []
     for config_key in ("remotefuncs", "remoteclasses"):
-        for item in cfg.get(config_key, []):
+        entries = cfg.get(config_key, [])
+        if not isinstance(entries, list):
+            raise ValueError(f"{config_key} must be a list")
+        for index, item in enumerate(entries):
             if not isinstance(item, dict):
-                raise ValueError(f"{config_key} entries must be mappings")
-            target_paths.extend(item.keys())
+                raise ValueError(f"{config_key}[{index}] must be a mapping")
+            for target_path in item:
+                if not isinstance(target_path, str) or not target_path:
+                    raise ValueError(f"{config_key}[{index}] target must be a non-empty string")
+                target_paths.append(target_path)
 
     stubs = cfg.get("stubs", {})
     if not isinstance(stubs, dict):
         raise ValueError("stubs must be a mapping")
-    target_paths.extend(stubs.keys())
-    target_paths.extend(stubs.values())
+    for stub_path, target_path in stubs.items():
+        if not isinstance(stub_path, str) or not stub_path:
+            raise ValueError("stub source targets must be non-empty strings")
+        if not isinstance(target_path, str) or not target_path:
+            raise ValueError(f"stub target for {stub_path!r} must be a non-empty string")
+        target_paths.extend((stub_path, target_path))
 
+    modules_to_allow = set(module_names)
     for target_path in target_paths:
         module_name, separator, _ = target_path.partition("/")
         if not separator or not module_name:
             raise ValueError(f"Remote target must include a module path: {target_path!r}")
+        modules_to_allow.add(module_name)
+
+    for module_name in modules_to_allow:
         remoter.allow_module(module_name)
 
 
-def configure_message_encryption(cfg: dict) -> None:
+def configure_message_encryption(cfg: dict[str, Any]) -> None:
     encryption_enabled = cfg.get("encryption", True)
     if not isinstance(encryption_enabled, bool):
         raise ValueError("encryption must be a boolean")
