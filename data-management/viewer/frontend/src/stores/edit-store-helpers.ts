@@ -19,6 +19,7 @@ export interface EditOriginalStateSnapshot {
 export interface EditStateSnapshot {
   datasetId: string | null
   episodeIndex: number | null
+  principalScopeId?: string
   globalTransform: ImageTransform | null
   cameraTransforms: Record<string, ImageTransform>
   removedFrames: Set<number>
@@ -186,5 +187,5 @@ export async function persistEditStateDraft(state: EditStateSnapshot) {
     return
   }
 
-  await persistEditDraft(datasetId, episodeIndex, persistedDraft)
+  await persistEditDraft(datasetId, episodeIndex, state.principalScopeId ?? 'local', persistedDraft)
 }

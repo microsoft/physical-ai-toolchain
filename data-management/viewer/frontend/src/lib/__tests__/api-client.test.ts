@@ -277,10 +277,10 @@ describe('fetchEpisode', () => {
 describe('fetchAnnotations', () => {
   it('calls GET annotations endpoint', async () => {
     const data = { schemaVersion: '1.0', annotations: [] }
-    mockFetch.mockResolvedValueOnce(jsonResponse(data))
+    mockFetch.mockResolvedValueOnce(jsonResponse(data, { headers: { ETag: '"revision-one"' } }))
 
     const result = await fetchAnnotations('ds-1', 0)
-    expect(result).toEqual(data)
+    expect(result).toEqual({ data, etag: '"revision-one"' })
     expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/0/annotations', {
       headers: {},
     })
@@ -288,17 +288,50 @@ describe('fetchAnnotations', () => {
 })
 
 describe('saveAnnotation', () => {
-  it('calls PUT with annotation body', async () => {
+  it('calls PUT with a create-only precondition', async () => {
     const annotation = { annotatorId: 'u1' }
-    mockMutationFetch(jsonResponse({ success: true }))
+    mockMutationFetch(jsonResponse({ success: true }, { headers: { ETag: '"created"' } }))
 
-    await saveAnnotation('ds-1', 0, annotation as never)
+    const result = await saveAnnotation('ds-1', 0, annotation as never, { createOnly: true })
 
     const apiCall = mockFetch.mock.calls[1]
     expect(apiCall[0]).toBe('/api/datasets/ds-1/episodes/0/annotations')
     expect(apiCall[1]).toMatchObject({
       method: 'PUT',
       body: JSON.stringify(annotation),
+    })
+    expect(apiCall[1].headers).toHaveProperty('If-None-Match', '*')
+    expect(result.etag).toBe('"created"')
+  })
+
+  it('sends If-Match for an existing annotation resource', async () => {
+    const annotation = { annotatorId: 'u1' }
+    mockMutationFetch(jsonResponse({ success: true }, { headers: { ETag: '"updated"' } }))
+
+    await saveAnnotation('ds-1', 0, annotation as never, { etag: '"revision-one"' })
+
+    expect(mockFetch.mock.calls[1][1].headers).toHaveProperty('If-Match', '"revision-one"')
+  })
+
+  it('preserves the current ETag from a 412 conflict', async () => {
+    const annotation = { annotatorId: 'u1' }
+    mockMutationFetch(
+      jsonResponse(
+        {
+          code: 'PRECONDITION_FAILED',
+          message: 'Resource revision precondition failed',
+          details: { currentEtag: '"revision-two"' },
+        },
+        { status: 412, headers: { ETag: '"revision-two"' } },
+      ),
+    )
+
+    await expect(
+      saveAnnotation('ds-1', 0, annotation as never, { etag: '"revision-one"' }),
+    ).rejects.toMatchObject({
+      name: 'ApiClientError',
+      status: 412,
+      details: { currentEtag: '"revision-two"' },
     })
   })
 })
@@ -307,18 +340,20 @@ describe('deleteAnnotations', () => {
   it('calls DELETE without annotatorId', async () => {
     mockMutationFetch(jsonResponse({ deleted: true, episodeIndex: 0 }))
 
-    await deleteAnnotations('ds-1', 0)
+    await deleteAnnotations('ds-1', 0, '"revision-one"')
     const apiCall = mockFetch.mock.calls[1]
     expect(apiCall[0]).toBe('/api/datasets/ds-1/episodes/0/annotations')
     expect(apiCall[1]).toMatchObject({ method: 'DELETE' })
+    expect(apiCall[1].headers).toHaveProperty('If-Match', '"revision-one"')
   })
 
-  it('includes annotator_id query param when provided', async () => {
+  it('does not expose an annotator owner selector', async () => {
     mockMutationFetch(jsonResponse({ deleted: true, episodeIndex: 0 }))
 
-    await deleteAnnotations('ds-1', 0, 'u1')
+    await deleteAnnotations('ds-1', 0, '"revision-one"')
+
     const url = mockFetch.mock.calls[1][0] as string
-    expect(url).toContain('annotator_id=u1')
+    expect(url).not.toContain('annotator_id')
   })
 })
 

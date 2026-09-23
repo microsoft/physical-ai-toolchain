@@ -76,6 +76,32 @@ class TestCsrfTokenEndpoint:
         assert t1 != t2
 
 
+class TestPrincipalContextEndpoint:
+    def test_auth_disabled_returns_stable_non_personal_scope(self, client_auth_disabled):
+        first = client_auth_disabled.get("/api/auth/context")
+        second = client_auth_disabled.get("/api/auth/context")
+
+        assert first.status_code == 200
+        assert first.json() == second.json()
+        assert first.json()["auth_mode"] == "local"
+        assert first.json()["scope_id"].startswith("principal-")
+
+    def test_api_key_returns_opaque_service_scope(self, client_with_auth):
+        response = client_with_auth.get(
+            "/api/auth/context",
+            headers={"X-API-Key": "test-secret-key"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["auth_mode"] == "apikey"
+        assert "test-secret-key" not in response.json()["scope_id"]
+
+    def test_missing_api_key_is_rejected(self, client_with_auth):
+        response = client_with_auth.get("/api/auth/context")
+
+        assert response.status_code == 401
+
+
 # ============================================================================
 # Auth dependency - auth disabled
 # ============================================================================

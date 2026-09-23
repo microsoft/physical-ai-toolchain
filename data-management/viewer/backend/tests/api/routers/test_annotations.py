@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
+from src.api.auth import PrincipalContext, require_principal_context
 from src.api.models.annotations import (
     AnnotationSummary,
     AnomalyAnnotation,
@@ -28,6 +29,7 @@ from src.api.models.annotations import (
     TrajectoryQualityMetrics,
 )
 from src.api.models.datasources import DatasetInfo, EpisodeData, EpisodeMeta
+from src.api.storage import RevisionConflictError, VersionedValue
 
 
 def _make_dataset(dataset_id: str = "ds-1", total_episodes: int = 10) -> DatasetInfo:
@@ -85,6 +87,7 @@ def override_services():
 
     annotation_service = MagicMock()
     annotation_service.get_annotation = AsyncMock(return_value=None)
+    annotation_service.get_annotation_versioned = AsyncMock(return_value=VersionedValue(value=None, etag=None))
     annotation_service.save_annotation = AsyncMock()
     annotation_service.delete_annotation = AsyncMock(return_value=True)
     annotation_service.run_auto_analysis = AsyncMock()
@@ -92,11 +95,16 @@ def override_services():
 
     app.dependency_overrides[get_dataset_service] = lambda: dataset_service
     app.dependency_overrides[get_annotation_service] = lambda: annotation_service
+    app.dependency_overrides[require_principal_context] = lambda: PrincipalContext(
+        scope_id="principal-scope",
+        auth_mode="azure_ad",
+    )
     try:
         yield dataset_service, annotation_service
     finally:
         app.dependency_overrides.pop(get_dataset_service, None)
         app.dependency_overrides.pop(get_annotation_service, None)
+        app.dependency_overrides.pop(require_principal_context, None)
 
 
 # ----------------------------------------------------------------------------
@@ -131,15 +139,20 @@ def test_get_annotations_returns_empty_when_none_exist(client: TestClient, overr
 def test_get_annotations_returns_existing_file(client: TestClient, override_services) -> None:
     dataset_service, annotation_service = override_services
     dataset_service.get_dataset.return_value = _make_dataset()
-    annotation_service.get_annotation.return_value = EpisodeAnnotationFile(
+    annotation_file = EpisodeAnnotationFile(
         episode_index=2,
         dataset_id="ds-1",
         annotations=[_make_annotation()],
+    )
+    annotation_service.get_annotation_versioned.return_value = VersionedValue(
+        value=annotation_file,
+        etag='"revision-one"',
     )
 
     response = client.get("/api/datasets/ds-1/episodes/2/annotations")
 
     assert response.status_code == 200
+    assert response.headers["etag"] == '"revision-one"'
     body = response.json()
     assert body["episode_index"] == 2
     assert len(body["annotations"]) == 1
@@ -171,7 +184,10 @@ def test_save_annotations_episode_out_of_range_returns_404(client: TestClient, o
     assert "Episode 99" in response.json()["detail"]
 
 
-def test_save_annotations_success_invalidates_cache(client: TestClient, override_services) -> None:
+def test_save_annotations_uses_authenticated_owner_and_invalidates_cache(
+    client: TestClient,
+    override_services,
+) -> None:
     dataset_service, annotation_service = override_services
     dataset_service.get_dataset.return_value = _make_dataset(total_episodes=10)
     saved = EpisodeAnnotationFile(
@@ -179,15 +195,87 @@ def test_save_annotations_success_invalidates_cache(client: TestClient, override
         dataset_id="ds-1",
         annotations=[_make_annotation()],
     )
-    annotation_service.save_annotation.return_value = saved
+    annotation_service.save_annotation.return_value = VersionedValue(value=saved, etag='"saved-revision"')
     payload = _make_annotation().model_dump(mode="json")
 
-    response = client.put("/api/datasets/ds-1/episodes/4/annotations", json=payload)
+    response = client.put(
+        "/api/datasets/ds-1/episodes/4/annotations",
+        json=payload,
+        headers={"If-None-Match": "*"},
+    )
 
     assert response.status_code == 200
     assert response.json()["episode_index"] == 4
-    annotation_service.save_annotation.assert_awaited_once()
+    saved_annotation = annotation_service.save_annotation.await_args.args[2]
+    assert saved_annotation.annotator_id == "principal-scope"
     dataset_service.invalidate_episode_cache.assert_called_once_with("ds-1", 4)
+
+
+def test_save_annotations_requires_revision_precondition(client: TestClient, override_services) -> None:
+    dataset_service, _ = override_services
+    dataset_service.get_dataset.return_value = _make_dataset()
+
+    response = client.put(
+        "/api/datasets/ds-1/episodes/4/annotations",
+        json=_make_annotation().model_dump(mode="json"),
+    )
+
+    assert response.status_code == 428
+
+
+def test_save_annotations_rejects_multiple_revision_preconditions(client: TestClient, override_services) -> None:
+    dataset_service, _ = override_services
+    dataset_service.get_dataset.return_value = _make_dataset()
+
+    response = client.put(
+        "/api/datasets/ds-1/episodes/4/annotations",
+        json=_make_annotation().model_dump(mode="json"),
+        headers={"If-Match": '"revision"', "If-None-Match": "*"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_save_annotations_rejects_non_wildcard_create_precondition(client: TestClient, override_services) -> None:
+    dataset_service, _ = override_services
+    dataset_service.get_dataset.return_value = _make_dataset()
+
+    response = client.put(
+        "/api/datasets/ds-1/episodes/4/annotations",
+        json=_make_annotation().model_dump(mode="json"),
+        headers={"If-None-Match": '"revision"'},
+    )
+
+    assert response.status_code == 400
+
+
+def test_save_annotations_rejects_missing_saved_value(client: TestClient, override_services) -> None:
+    dataset_service, annotation_service = override_services
+    dataset_service.get_dataset.return_value = _make_dataset()
+    annotation_service.save_annotation.return_value = VersionedValue(value=None, etag='"revision"')
+
+    response = client.put(
+        "/api/datasets/ds-1/episodes/4/annotations",
+        json=_make_annotation().model_dump(mode="json"),
+        headers={"If-None-Match": "*"},
+    )
+
+    assert response.status_code == 500
+
+
+def test_save_annotations_returns_412_with_current_revision(client: TestClient, override_services) -> None:
+    dataset_service, annotation_service = override_services
+    dataset_service.get_dataset.return_value = _make_dataset()
+    annotation_service.save_annotation.side_effect = RevisionConflictError('"current-revision"')
+
+    response = client.put(
+        "/api/datasets/ds-1/episodes/4/annotations",
+        json=_make_annotation().model_dump(mode="json"),
+        headers={"If-Match": '"stale-revision"'},
+    )
+
+    assert response.status_code == 412
+    assert response.json()["details"]["currentEtag"] == '"current-revision"'
 
 
 # ----------------------------------------------------------------------------
@@ -204,19 +292,37 @@ def test_delete_annotations_dataset_not_found_returns_404(client: TestClient, ov
     assert response.status_code == 404
 
 
-def test_delete_annotations_with_annotator_id(client: TestClient, override_services) -> None:
+def test_delete_annotations_requires_current_revision(client: TestClient, override_services) -> None:
+    dataset_service, _ = override_services
+    dataset_service.get_dataset.return_value = _make_dataset()
+
+    response = client.delete("/api/datasets/ds-1/episodes/0/annotations")
+
+    assert response.status_code == 428
+
+
+def test_delete_annotations_ignores_client_owner_and_uses_authenticated_owner(
+    client: TestClient,
+    override_services,
+) -> None:
     dataset_service, annotation_service = override_services
     dataset_service.get_dataset.return_value = _make_dataset()
     annotation_service.delete_annotation.return_value = True
 
     response = client.delete(
         "/api/datasets/ds-1/episodes/2/annotations",
-        params={"annotator_id": "user-1"},
+        params={"annotator_id": "other-user"},
+        headers={"If-Match": '"revision-one"'},
     )
 
     assert response.status_code == 200
     assert response.json() == {"deleted": True, "episode_index": 2}
-    annotation_service.delete_annotation.assert_awaited_once_with("ds-1", 2, "user-1")
+    annotation_service.delete_annotation.assert_awaited_once_with(
+        "ds-1",
+        2,
+        "principal-scope",
+        if_match='"revision-one"',
+    )
     dataset_service.invalidate_episode_cache.assert_called_once_with("ds-1", 2)
 
 

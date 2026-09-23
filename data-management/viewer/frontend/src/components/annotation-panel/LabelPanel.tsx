@@ -144,10 +144,10 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
           prefix: importPrefix.trim() || undefined,
           overwrite: shouldOverwrite,
         })
-        const added = result.labelsAdded.length
+        const added = result.data.labelsAdded.length
         setImportMessage(
           `Imported ${added} ${ANALYSIS_FIELD_LABELS[field]} label${added === 1 ? '' : 's'} ` +
-            `across ${result.episodesUpdated} episode${result.episodesUpdated === 1 ? '' : 's'}.`,
+            `across ${result.data.episodesUpdated} episode${result.data.episodesUpdated === 1 ? '' : 's'}.`,
         )
         setErrorMessage(null)
       } catch (error) {
