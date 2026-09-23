@@ -116,6 +116,17 @@ vi.mock('@/components/annotation-panel', () => ({
   ObjectDetectionWidget: () => <div>Object Detection Widget</div>,
 }))
 
+vi.mock('@/components/annotation-workspace/DraftConflictDialog', () => ({
+  DraftConflictDialog: () => null,
+}))
+
+vi.mock('@/hooks/use-principal-context', () => ({
+  usePrincipalContext: () => ({
+    data: { scopeId: 'principal-test', authMode: 'local' },
+    isSuccess: true,
+  }),
+}))
+
 vi.mock('@/components/vlm-judge', () => ({
   JudgePanel: () => <div>VLM Judge</div>,
 }))
@@ -153,6 +164,7 @@ vi.mock('@/components/episode-viewer', () => ({
       onCreateSubtaskFromRange?: (range: [number, number]) => void
       onSelectionStart?: () => void
       onSelectionComplete?: (range: [number, number]) => void
+      onSelectionCancel?: () => void
     }
 
     return (
@@ -171,6 +183,9 @@ vi.mock('@/components/episode-viewer', () => ({
         </button>
         <button type="button" onClick={() => plotProps.onSelectionComplete?.([2, 6])}>
           Finish Range Drag
+        </button>
+        <button type="button" onClick={() => plotProps.onSelectionCancel?.()}>
+          Cancel Range Drag
         </button>
         <button
           type="button"
