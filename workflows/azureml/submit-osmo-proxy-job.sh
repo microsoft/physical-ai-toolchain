@@ -81,7 +81,7 @@ require_tools az
 subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
 resource_group="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
 workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
-storage_account="$(get_storage_account)"
+storage_account="${AZURE_STORAGE_ACCOUNT_NAME:-$(get_storage_account)}"
 output_container="${OSMO_WORKFLOW_BUCKET:-osmo}"
 compute_name="${AZUREML_COMPUTE_NAME:-}"
 if [[ -z "$compute_name" && -n "${AKS_CLUSTER_NAME:-}" ]]; then

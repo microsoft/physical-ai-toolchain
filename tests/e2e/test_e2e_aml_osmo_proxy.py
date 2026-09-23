@@ -9,10 +9,12 @@ uv run pytest -vv -s -m e2e tests/e2e/test_e2e_aml_osmo_proxy.py
 from __future__ import annotations
 
 import runpy
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from tests.e2e import _aml
 from tests.e2e._aml import (
     AzureMLJob,
     AzureMLWorkspace,
@@ -44,6 +46,30 @@ from tests.e2e._osmo import OSMOWorkflow, assert_workflow_task_succeeded, cancel
 
 _TASK_NAME = "write-output"
 _CONTAINER = "osmo"
+
+
+def test_archive_missing_data_asset_is_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+    repo_root: Path,
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run_command(
+        args: list[str], *, cwd: Path, input_text: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=3,
+            stdout="",
+            stderr="ERROR: (UserError) missing container was not found.",
+        )
+
+    monkeypatch.setattr(_aml, "run_command", fake_run_command)
+
+    archive_aml_data_asset(repo_root, AzureMLWorkspace("subscription", "resource-group", "workspace"), "missing")
+
+    assert len(commands) == 1
 
 
 def _validate_output_urls(repo_root: Path, output_urls: list[str]) -> list[str]:

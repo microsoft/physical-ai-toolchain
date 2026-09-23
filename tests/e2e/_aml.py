@@ -198,6 +198,8 @@ def archive_aml_data_asset(repo_root: Path, aml_workspace: AzureMLWorkspace, ass
         cwd=repo_root,
     )
     if result.returncode != 0:
+        if "container was not found" in result.stderr:
+            return
         raise AssertionError(
             f"Failed to list AzureML data asset versions for {asset_name!r}\n\n{format_command_failure(result)}"
         )
