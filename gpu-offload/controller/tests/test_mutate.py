@@ -1160,7 +1160,7 @@ def test_reconcile_object_does_not_delete_managed_encryption_secret_owned_by_ano
     assert core_api.actions == []
 
 
-def test_reconcile_object_rejects_precreated_unmanaged_encryption_secret():
+def test_reconcile_object_rejects_pre_created_unmanaged_encryption_secret():
     mod = _load_mutate_module()
     deploy = _base_workload()
     deploy["metadata"]["labels"] = {"xavier": "true"}
