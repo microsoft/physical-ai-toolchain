@@ -13,6 +13,9 @@ jobs:
   scan:
     name: ZAP Baseline Scan
     runs-on: ubuntu-latest
+    env:
+      # DAST does not provision detection weights; model loading remains fail-closed.
+      DETECTION_MODEL_DIGESTS: "{}"
     permissions:
       contents: read
       security-events: write
