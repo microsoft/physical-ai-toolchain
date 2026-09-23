@@ -1150,14 +1150,48 @@ def _create_encryption_secret_spec(secret_name: str, namespace: str, owner_obj: 
     return secret
 
 
-def _validate_managed_encryption_secret(secret_obj: Any, secret_name: str) -> None:
-    secret = kubernetes_object_to_dict(secret_obj)
+def _expected_owner_reference(owner_obj: dict[str, Any]) -> dict[str, str]:
+    metadata = owner_obj.get("metadata", {}) or {}
+    owner_reference = {
+        "apiVersion": _api_version_for_owner(owner_obj),
+        "kind": owner_obj.get("kind"),
+        "name": metadata.get("name"),
+        "uid": metadata.get("uid"),
+    }
+    if not all(isinstance(value, str) and value for value in owner_reference.values()):
+        raise XavierConfigError("Encryption Secret owner must have apiVersion, kind, name, and uid")
+    return owner_reference
+
+
+def _validate_managed_encryption_secret_owner(
+    secret: dict[str, Any],
+    secret_name: str,
+    owner_obj: dict[str, Any],
+) -> None:
     metadata = secret.get("metadata", {}) or {}
     labels = metadata.get("labels", {}) or {}
     if labels.get(XAVIER_ENCRYPTION_SECRET_LABEL) != "true":
         raise XavierConfigError(
             f"Secret {secret_name!r} already exists and is not managed by the GPU offload controller"
         )
+    expected_owner = _expected_owner_reference(owner_obj)
+    owner_references = metadata.get("ownerReferences") or []
+    if len(owner_references) != 1 or any(
+        owner_references[0].get(field) != expected_value for field, expected_value in expected_owner.items()
+    ):
+        raise XavierConfigError(
+            f"Managed Secret {secret_name!r} is not owned by "
+            f"{expected_owner['kind']} {expected_owner['name']!r} with uid {expected_owner['uid']!r}"
+        )
+
+
+def _validate_managed_encryption_secret(
+    secret_obj: Any,
+    secret_name: str,
+    owner_obj: dict[str, Any],
+) -> None:
+    secret = kubernetes_object_to_dict(secret_obj)
+    _validate_managed_encryption_secret_owner(secret, secret_name, owner_obj)
     encoded_key = (secret.get("data") or {}).get(REMOTER_KEY_DATA_NAME)
     if not isinstance(encoded_key, str):
         raise XavierConfigError(f"Managed Secret {secret_name!r} does not contain key data")
@@ -1191,12 +1225,13 @@ def reconcile_encryption_secret(
         return "created"
 
     if enabled:
-        _validate_managed_encryption_secret(existing, secret_name)
+        _validate_managed_encryption_secret(existing, secret_name, owner_obj)
         return "unchanged"
     secret = kubernetes_object_to_dict(existing)
     labels = (secret.get("metadata", {}) or {}).get("labels", {}) or {}
     if labels.get(XAVIER_ENCRYPTION_SECRET_LABEL) != "true":
         return "absent"
+    _validate_managed_encryption_secret_owner(secret, secret_name, owner_obj)
     core_api.delete_namespaced_secret(name=secret_name, namespace=namespace)
     return "deleted"
 

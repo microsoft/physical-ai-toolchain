@@ -1000,6 +1000,15 @@ def test_reconcile_object_creates_stable_encryption_secret_and_mounts_it():
 
     assert first["client-deployment-remoter-key"] == "created"
     assert len(first_key) == 32
+    assert secret["metadata"]["ownerReferences"] == [
+        {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "name": "client",
+            "uid": "workload-uid",
+            "blockOwnerDeletion": True,
+        }
+    ]
     assert server_spec["volumes"][-1]["secret"]["secretName"] == "client-deployment-remoter-key"
     assert server_container["volumeMounts"][-1]["mountPath"] == mod.REMOTER_KEY_MOUNT_PATH
     assert mod.get_env_var(server_container, "REMOTER_KEY_FILE") == mod.REMOTER_KEY_PATH
@@ -1033,6 +1042,89 @@ def test_reconcile_object_deletes_managed_secret_when_encryption_is_disabled():
 
     assert outcomes["client-deployment-remoter-key"] == "deleted"
     assert ("default", "client-deployment-remoter-key") not in core_api.secrets
+
+
+def test_reconcile_object_rejects_managed_encryption_secret_owned_by_another_workload():
+    mod = _load_mutate_module()
+    deploy = _base_workload()
+    deploy["metadata"]["labels"] = {"xavier": "true"}
+    mod.DoMutate(
+        deploy,
+        strict=True,
+        resolved_config={"remoteablecm": "client-cm"},
+    )
+    deploy["spec"]["template"]["spec"]["containers"][0]["env"].append({"name": "REMOTERPORT", "value": "30001"})
+    secret = mod._create_encryption_secret_spec("client-deployment-remoter-key", "default", deploy)
+    secret["metadata"]["ownerReferences"][0]["uid"] = "stale-workload-uid"
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}},
+        {("default", "client-deployment-remoter-key"): secret},
+    )
+
+    with pytest.raises(mod.XavierConfigError, match="is not owned by Deployment 'client'"):
+        mod.reconcile_object(
+            deploy,
+            core_api=core_api,
+            apps_api=_FakeAppsApi(),
+            batch_api=_FakeBatchApi(),
+        )
+
+    assert core_api.actions == []
+
+
+def test_reconcile_object_does_not_delete_managed_encryption_secret_owned_by_another_workload():
+    mod = _load_mutate_module()
+    deploy = _base_workload()
+    deploy["metadata"]["labels"] = {"xavier": "true"}
+    deploy["spec"]["template"]["spec"]["containers"][0]["env"] = [
+        {"name": "XAVIER_CONTAINER", "value": "true"},
+        {"name": "REMOTERPORT", "value": "30001"},
+    ]
+    secret = mod._create_encryption_secret_spec("client-deployment-remoter-key", "default", deploy)
+    secret["metadata"]["ownerReferences"][0]["name"] = "other-client"
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": 'encryption: false\nserverstages:\n  - name: ""\n'}},
+        {("default", "client-deployment-remoter-key"): secret},
+    )
+
+    with pytest.raises(mod.XavierConfigError, match="is not owned by Deployment 'client'"):
+        mod.reconcile_object(
+            deploy,
+            core_api=core_api,
+            apps_api=_FakeAppsApi(),
+            batch_api=_FakeBatchApi(),
+        )
+
+    assert ("default", "client-deployment-remoter-key") in core_api.secrets
+    assert core_api.actions == []
+
+
+def test_reconcile_object_rejects_precreated_unmanaged_encryption_secret():
+    mod = _load_mutate_module()
+    deploy = _base_workload()
+    deploy["metadata"]["labels"] = {"xavier": "true"}
+    mod.DoMutate(
+        deploy,
+        strict=True,
+        resolved_config={"remoteablecm": "client-cm"},
+    )
+    deploy["spec"]["template"]["spec"]["containers"][0]["env"].append({"name": "REMOTERPORT", "value": "30001"})
+    secret = mod._create_encryption_secret_spec("client-deployment-remoter-key", "default", deploy)
+    secret["metadata"]["labels"] = {}
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}},
+        {("default", "client-deployment-remoter-key"): secret},
+    )
+
+    with pytest.raises(mod.XavierConfigError, match="is not managed by the GPU offload controller"):
+        mod.reconcile_object(
+            deploy,
+            core_api=core_api,
+            apps_api=_FakeAppsApi(),
+            batch_api=_FakeBatchApi(),
+        )
+
+    assert core_api.actions == []
 
 
 def test_reconcile_object_deletes_server_deployment_for_removed_stage():
