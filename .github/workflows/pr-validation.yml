@@ -38,54 +38,26 @@ jobs:
       docusaurus: ${{ steps.filter.outputs.docusaurus }}
       pester: ${{ steps.filter.outputs.pester }}
       containers: ${{ steps.filter.outputs.containers }}
+      selection_status: ${{ steps.filter.outputs.selection_status }}
+      base_sha: ${{ steps.filter.outputs.base_sha }}
+      head_sha: ${{ steps.filter.outputs.head_sha }}
+      file_count: ${{ steps.filter.outputs.file_count }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.14.1'
       - name: Compute path filters
         id: filter
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
-          echo "Changed files:"
-          echo "$FILES"
-          # match() returns false (not an error) on an empty/non-matching diff.
-          # That is safe: the unconditional CPU import baseline in smoke-cpu.yml
-          # runs regardless of these outputs, so a false here can only narrow the
-          # path-gated runtime-image depth, never silently skip the gate.
-          match() { echo "$FILES" | grep -qE "$1" && echo true || echo false; }
-          pester_match=$(match '\.(ps1|psm1|psd1)$')
-          echo "Computed pester=$pester_match"
-          {
-            echo "training=$(match '^training/')"
-            echo "rl=$(match '^(training/rl/|shared/ci/|scripts/lib/common\.sh|\.github/workflows/smoke-cpu\.yml)')"
-            echo "il=$(match '^(training/il/|shared/ci/|scripts/lib/common\.sh|\.github/workflows/smoke-cpu\.yml)')"
-            echo "vla=$(match '^(training/vla/|shared/ci/|scripts/lib/common\.sh|\.github/workflows/smoke-cpu\.yml)')"
-            echo "evaluation=$(match '^(evaluation/|training/il/lerobot/|shared/ci/|scripts/lib/common\.sh|\.github/workflows/smoke-cpu\.yml)')"
-            echo "osmo_replay=$(match '^(workflows/osmo/|training/utils/aml_mirror\.py|training/utils/replay-azureml\.sh|shared/ci/|scripts/lib/common\.sh|\.github/workflows/smoke-cpu\.yml)')"
-            echo "dm_tools=$(match '^data-management/tools/')"
-            echo "data_pipeline=$(match '^data-pipeline/capture/')"
-            echo "inference=$(match '^fleet-deployment/inference/')"
-            echo "gpu_offload=$(match '^gpu-offload/(controller|runtime)/')"
-            # Broader than gpu_offload (which only gates the controller/runtime
-            # unit tests): also covers the Helm chart, host scripts, local
-            # registry, and examples (including committed remote.yaml
-            # manifests and Containerfiles), since a change confined to any of
-            # those previously merged with zero GPU-offload validation.
-            echo "gpu_offload_e2e=$(match '^gpu-offload/(controller|runtime|helm|scripts|registry|examples)/|^gpu-offload/mise\.toml$|^gpu-offload/\.env\.example$|^\.github/workflows/gpu-offload-kind-smoke\.yml$')"
-            echo "shared_ci=$(match '^shared/ci/')"
-            echo "dv_backend=$(match '^(data-management/viewer/backend/|data-management/viewer/specifications/language-tag-corpus\.json$|data-management/viewer/docker-compose\.yml|shared/ci/smoke-docker\.sh|\.github/workflows/smoke-cpu\.yml)')"
-            echo "dv_frontend=$(match '^(data-management/viewer/frontend/|data-management/viewer/specifications/language-tag-corpus\.json$|package(-lock)?\.json$)')"
-            echo "fuzz=$(match '^(tests/fuzz|tests/fuzz_harness\.py|tests/generate_fuzz_corpus\.py|data-management/viewer/backend/src/|training/)')"
-            echo "docusaurus=$(match '^docs/docusaurus/')"
-            echo "pester=$pester_match"
-            echo "containers=$(match '(Dockerfile|^\.github/workflows/container-scan\.yml$|^scripts/security/(discover-base-images|image-slug)\.sh$)')"
-          } >> "$GITHUB_OUTPUT"
+          HEAD_SHA: ${{ github.sha }}
+        run: node scripts/ci/select-checks.mjs
 
   # GPU-free import smoke gate. CPU import smoke runs for every domain on every
   # PR (unconditional baseline); the runtime-image smoke is path-gated to the
@@ -104,7 +76,7 @@ jobs:
     permissions:
       contents: read
 
-  # Validate that all `uses: ./.github/workflows/*.yml` references resolve
+  # Validate workflow references, dependency selection, and CI contracts
   workflow-refs-check:
     name: Workflow Refs Check
     uses: ./.github/workflows/workflow-refs-check.yml
@@ -144,7 +116,7 @@ jobs:
     name: Frontmatter Validation
     uses: ./.github/workflows/frontmatter-validation.yml
     with:
-      changed-files-only: true
+      changed-files-only: false
     permissions:
       contents: read
 
@@ -154,7 +126,7 @@ jobs:
     uses: ./.github/workflows/msdate-freshness-check.yml
     with:
       staleness-threshold-days: 90
-      changed-files-only: true
+      changed-files-only: false
       soft-fail: false
     permissions:
       contents: read
@@ -164,7 +136,7 @@ jobs:
     name: PSScriptAnalyzer
     uses: ./.github/workflows/ps-script-analyzer.yml
     with:
-      changed-files-only: true
+      changed-files-only: false
     permissions:
       contents: read
 
@@ -173,7 +145,7 @@ jobs:
     name: YAML Lint
     uses: ./.github/workflows/yaml-lint.yml
     with:
-      changed-files-only: true
+      changed-files-only: false
     permissions:
       contents: read
 
@@ -419,7 +391,7 @@ jobs:
     name: uv Lock Consistency
     uses: ./.github/workflows/uv-lock-consistency.yml
     with:
-      changed-files-only: true
+      changed-files-only: false
       soft-fail: false
     permissions:
       contents: read
@@ -439,7 +411,7 @@ jobs:
     uses: ./.github/workflows/terraform-validation.yml
     with:
       soft-fail: false
-      changed-files-only: true
+      changed-files-only: false
     permissions:
       contents: read
 
@@ -460,7 +432,7 @@ jobs:
     uses: ./.github/workflows/terraform-tests.yml
     with:
       soft-fail: true
-      changed-files-only: true
+      changed-files-only: false
       code-coverage: true
     permissions:
       contents: read
@@ -472,7 +444,7 @@ jobs:
     uses: ./.github/workflows/go-lint.yml
     with:
       soft-fail: false
-      changed-files-only: true
+      changed-files-only: false
     permissions:
       contents: read
 
@@ -482,7 +454,7 @@ jobs:
     uses: ./.github/workflows/terraform-docs-check.yml
     with:
       soft-fail: true
-      changed-files-only: true
+      changed-files-only: false
     permissions:
       contents: read
 
@@ -503,7 +475,7 @@ jobs:
     uses: ./.github/workflows/shellcheck.yml
     with:
       soft-fail: false
-      changed-files-only: true
+      changed-files-only: false
     permissions:
       contents: read
 
@@ -516,9 +488,8 @@ jobs:
       security-events: write
       actions: read
 
-  # Single required-status-check aggregator. Set this as the sole required
-  # check in branch protection. Skipped jobs (gated out by changes) pass;
-  # any failure or cancellation in a needed job fails the summary.
+  # Single required-status-check aggregator. Selected mandatory jobs must
+  # succeed; only jobs deselected by verified dependency selection may skip.
   pr-validation-summary:
     if: always()
     runs-on: ubuntu-latest
@@ -565,19 +536,15 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.14.1'
       - name: Evaluate needed job results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-        run: |
-          set -euo pipefail
-          echo "$NEEDS_JSON"
-          failed=$(echo "$NEEDS_JSON" | jq -r '
-            to_entries
-            | map(select(.value.result == "failure" or .value.result == "cancelled"))
-            | map(.key)
-            | join(",")')
-          if [ -n "$failed" ]; then
-            echo "::error::Required jobs failed or were cancelled: $failed"
-            exit 1
-          fi
-          echo "All required jobs succeeded or were skipped via path filtering."
+        run: node scripts/ci/evaluate-checks.mjs
