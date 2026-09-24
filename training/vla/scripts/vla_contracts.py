@@ -183,6 +183,36 @@ def load_record(path: Path, expected_kind: RecordKind | None = None) -> dict[str
     return record
 
 
+def load_calibration_workload(path: Path) -> dict[str, Any]:
+    """Load and validate a calibration workload from a JSON file."""
+    try:
+        workload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ContractError(f"Unable to load calibration workload {path}: {exc}") from exc
+    if not isinstance(workload, dict):
+        raise ContractError(f"Calibration workload {path} must be a JSON object")
+    validate_calibration_workload(workload)
+    return workload
+
+
+def resolve_recommended_batch_size(calibration_report: Path, workload_config: Path) -> int:
+    """Return the recommended batch size after verifying exact workload lineage."""
+    report = load_record(calibration_report, RecordKind.CALIBRATION)
+    workload = load_calibration_workload(workload_config)
+    expected_fingerprint = calibration_workload_fingerprint(workload)
+    if report["workload_fingerprint"] != expected_fingerprint:
+        raise ContractError("Calibration report workload fingerprint does not match the workload config")
+    if report.get("workload") != workload:
+        raise ContractError("Calibration report workload does not match the workload config")
+    recommendation = _require_mapping(report, "recommendation")
+    if recommendation.get("status") != "recommended":
+        raise ContractError("Calibration report does not contain a feasible recommendation")
+    batch_size = recommendation.get("micro_batch_size")
+    if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size < 1:
+        raise ContractError("Calibration recommendation micro_batch_size must be a positive integer")
+    return batch_size
+
+
 def write_record(path: Path, record: Mapping[str, Any]) -> str:
     """Validate and write a lifecycle record, returning its file digest."""
     validate_record(record)
@@ -564,7 +594,11 @@ def _run_self_check() -> None:
     calibration = records[6]
     with tempfile.TemporaryDirectory() as temporary_directory:
         report_path = Path(temporary_directory) / "calibration.json"
+        workload_path = Path(temporary_directory) / "workload.json"
+        workload_path.write_text(json.dumps(workload), encoding="utf-8")
         report_digest = write_record(report_path, calibration)
+        if resolve_recommended_batch_size(report_path, workload_path) != 1:
+            raise ContractError("Calibration recommendation did not resolve to the expected batch size")
         approval = dict(records[7], calibration_report_sha256=report_digest)
         verify_approval(report_path, approval)
         report_path.write_text(report_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
@@ -588,6 +622,12 @@ def create_parser() -> argparse.ArgumentParser:
         help="Calibration report to verify against an approval record",
     )
     parser.add_argument("--approval", type=Path, help="Approval record bound to --calibration-report")
+    parser.add_argument(
+        "--recommended-batch-size",
+        type=Path,
+        help="Calibration report from which to resolve a workload-bound recommendation",
+    )
+    parser.add_argument("--workload-config", type=Path, help="Workload config bound to the calibration report")
     return parser
 
 
@@ -596,6 +636,11 @@ def run(args: argparse.Namespace) -> int:
     if args.self_check:
         _run_self_check()
         print("VLA lifecycle contract self-check passed")
+        return EXIT_SUCCESS
+    if args.recommended_batch_size or args.workload_config:
+        if not args.recommended_batch_size or not args.workload_config:
+            raise ContractError("--recommended-batch-size and --workload-config must be provided together")
+        print(resolve_recommended_batch_size(args.recommended_batch_size, args.workload_config))
         return EXIT_SUCCESS
     if args.calibration_report or args.approval:
         if not args.calibration_report or not args.approval:

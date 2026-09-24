@@ -1,0 +1,128 @@
+$schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
+type: pipeline
+display_name: VLA Calibrate and Train
+experiment_name: vla-calibrate-train
+description: Calibrate VLA micro-batch capacity and train from the validated recommendation.
+
+settings:
+  default_datastore: azureml:workspaceblobstore
+  continue_on_step_failure: false
+
+inputs:
+  workload_config:
+    type: uri_file
+  dataset_repo_id: placeholder/dataset
+  dataset_revision: 0000000000000000000000000000000000000000
+  policy_type: placeholder
+  init_from_policy_hf_repo_id: placeholder/model
+  init_from_policy_hf_revision: 0000000000000000000000000000000000000000
+  adapter_name: placeholder
+  adapter_version: "1"
+  adapter_config_sha256: 0000000000000000000000000000000000000000000000000000000000000000
+  dependency_extra: placeholder
+  train_expert_only: "false"
+  gradient_checkpointing: "false"
+  use_imagenet_stats: "false"
+  rename_map_b64: none
+  candidate_batch_sizes: "1"
+  headroom_fraction: 0.1
+  probe_timeout_seconds: 3600
+  training_steps: 2
+  save_freq: 1
+  log_freq: 1
+  job_name: vla-calibrated-training
+  output_dir: /workspace/outputs/train
+  mixed_precision: bf16
+  policy_dtype: none
+  subscription_id: 00000000-0000-0000-0000-000000000000
+  resource_group: placeholder
+  workspace_name: placeholder
+  mlflow_token_refresh_retries: 3
+  mlflow_http_request_timeout: 60
+  azure_client_id: none
+  hf_key_vault_url: none
+  hf_token_secret_name: none
+  register_checkpoint: none
+  compute_calibrate: azureml:placeholder
+  compute_train: azureml:placeholder
+
+outputs:
+  calibration_report:
+    type: uri_folder
+    mode: upload
+  checkpoints:
+    type: uri_folder
+    mode: upload
+
+jobs:
+  calibration_step:
+    type: command
+    component: ./components/calibrate.yaml
+    compute: ${{parent.inputs.compute_calibrate}}
+    resources:
+      instance_type: gpu
+    inputs:
+      workload_config: ${{parent.inputs.workload_config}}
+      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
+      dataset_revision: ${{parent.inputs.dataset_revision}}
+      policy_type: ${{parent.inputs.policy_type}}
+      init_from_policy_hf_repo_id: ${{parent.inputs.init_from_policy_hf_repo_id}}
+      init_from_policy_hf_revision: ${{parent.inputs.init_from_policy_hf_revision}}
+      train_expert_only: ${{parent.inputs.train_expert_only}}
+      gradient_checkpointing: ${{parent.inputs.gradient_checkpointing}}
+      use_imagenet_stats: ${{parent.inputs.use_imagenet_stats}}
+      rename_map_b64: ${{parent.inputs.rename_map_b64}}
+      candidate_batch_sizes: ${{parent.inputs.candidate_batch_sizes}}
+      headroom_fraction: ${{parent.inputs.headroom_fraction}}
+      probe_timeout_seconds: ${{parent.inputs.probe_timeout_seconds}}
+    outputs:
+      calibration_report: ${{parent.outputs.calibration_report}}
+    identity:
+      type: managed_identity
+
+  training_step:
+    type: command
+    component: ./components/train.yaml
+    compute: ${{parent.inputs.compute_train}}
+    resources:
+      instance_type: gpu
+    inputs:
+      calibration_report: ${{parent.jobs.calibration_step.outputs.calibration_report}}
+      workload_config: ${{parent.inputs.workload_config}}
+      adapter_name: ${{parent.inputs.adapter_name}}
+      adapter_version: ${{parent.inputs.adapter_version}}
+      adapter_config_sha256: ${{parent.inputs.adapter_config_sha256}}
+      dependency_extra: ${{parent.inputs.dependency_extra}}
+      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
+      dataset_revision: ${{parent.inputs.dataset_revision}}
+      policy_type: ${{parent.inputs.policy_type}}
+      init_from_policy_hf_repo_id: ${{parent.inputs.init_from_policy_hf_repo_id}}
+      init_from_policy_hf_revision: ${{parent.inputs.init_from_policy_hf_revision}}
+      train_expert_only: ${{parent.inputs.train_expert_only}}
+      gradient_checkpointing: ${{parent.inputs.gradient_checkpointing}}
+      use_imagenet_stats: ${{parent.inputs.use_imagenet_stats}}
+      rename_map_b64: ${{parent.inputs.rename_map_b64}}
+      training_steps: ${{parent.inputs.training_steps}}
+      save_freq: ${{parent.inputs.save_freq}}
+      log_freq: ${{parent.inputs.log_freq}}
+      job_name: ${{parent.inputs.job_name}}
+      output_dir: ${{parent.inputs.output_dir}}
+      mixed_precision: ${{parent.inputs.mixed_precision}}
+      policy_dtype: ${{parent.inputs.policy_dtype}}
+      subscription_id: ${{parent.inputs.subscription_id}}
+      resource_group: ${{parent.inputs.resource_group}}
+      workspace_name: ${{parent.inputs.workspace_name}}
+      mlflow_token_refresh_retries: ${{parent.inputs.mlflow_token_refresh_retries}}
+      mlflow_http_request_timeout: ${{parent.inputs.mlflow_http_request_timeout}}
+      azure_client_id: ${{parent.inputs.azure_client_id}}
+      hf_key_vault_url: ${{parent.inputs.hf_key_vault_url}}
+      hf_token_secret_name: ${{parent.inputs.hf_token_secret_name}}
+      register_checkpoint: ${{parent.inputs.register_checkpoint}}
+    outputs:
+      checkpoints: ${{parent.outputs.checkpoints}}
+    identity:
+      type: managed_identity
+
+tags:
+  framework: lerobot
+  lifecycle_stage: calibrate-train
