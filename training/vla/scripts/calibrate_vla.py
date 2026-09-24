@@ -84,6 +84,13 @@ def _has_argument(arguments: Sequence[str], name: str) -> bool:
     return any(argument == name or argument.startswith(f"{name}=") for argument in arguments)
 
 
+def _training_arguments(arguments: Sequence[str]) -> list[str]:
+    normalized = list(arguments)
+    if normalized and normalized[0] == "--":
+        normalized.pop(0)
+    return normalized
+
+
 def _build_probe_arguments(training_arguments: Sequence[str], batch_size: int, output_dir: Path) -> list[str]:
     for argument in training_arguments:
         if any(argument == owned or argument.startswith(f"{owned}=") for owned in _OWNED_TRAINING_ARGUMENTS):
@@ -191,7 +198,7 @@ def _run_probe(args: argparse.Namespace) -> int:
         return result
 
     lerobot_train.update_policy = measured_update_policy
-    sys.argv = ["lerobot-train", *args.training_arguments]
+    sys.argv = ["lerobot-train", *_training_arguments(args.training_arguments)]
     try:
         lerobot_train.main()
     except Exception as exc:
@@ -318,9 +325,7 @@ def _run_calibration(args: argparse.Namespace) -> int:
     if workload["world_size"] != 1:
         raise CalibrationError("Calibration currently supports workloads with world_size equal to 1")
     candidates = _parse_candidate_batch_sizes(args.candidate_batch_sizes)
-    training_arguments = list(args.training_arguments)
-    if training_arguments and training_arguments[0] == "--":
-        training_arguments.pop(0)
+    training_arguments = _training_arguments(args.training_arguments)
 
     with tempfile.TemporaryDirectory(prefix="vla-calibration-") as temporary_directory:
         probe_dir = Path(temporary_directory)
@@ -366,6 +371,8 @@ def _run_self_check() -> None:
     validate_calibration_workload(workload)
     if _parse_candidate_batch_sizes("1,2,4") != [1, 2, 4]:
         raise CalibrationError("Candidate batch-size parsing changed")
+    if _training_arguments(("--", "--wandb.enable=false")) != ["--wandb.enable=false"]:
+        raise CalibrationError("Training argument separator normalization changed")
     previous_dataset_revision = os.environ.get("DATASET_REVISION")
     os.environ["DATASET_REVISION"] = "b" * 40
     try:
