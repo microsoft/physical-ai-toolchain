@@ -32,7 +32,7 @@
   "dependencyGroups": {
     "python": ["^(pyproject\\.toml|uv\\.lock)$", "^tests/(conftest\\.py|__init__\\.py|fixtures/)"],
     "images": ["^shared/ci/", "^scripts/lib/common\\.sh$", "(^|/)defaults\\.conf$"],
-    "container-scan": ["(^|/)(Dockerfile|Containerfile)[^/]*$", "^scripts/security/(discover-base-images|image-slug)\\.sh$", "^scripts/security/container-scan-lanes\\.json$"],
+    "container-scan": ["Dockerfile|Containerfile", "^scripts/security/(discover-base-images|image-slug)\\.sh$", "^scripts/security/container-scan-lanes\\.json$"],
     "viewer": ["^data-management/viewer/(pyproject\\.toml|uv\\.lock|package(-lock)?\\.json|docker-compose[^/]*|Dockerfile[^/]*)$"],
     "gpu": ["^gpu-offload/(pyproject\\.toml|uv\\.lock|mise\\.toml|\\.env\\.example)$"]
   },

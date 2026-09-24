@@ -387,6 +387,9 @@ console.log(`${selected.containers},${selected.pester}`);
             foreach ($path in @(
                 'gpu-offload/controller/Containerfile',
                 '.devcontainer/Dockerfile',
+                'images/service.Dockerfile',
+                'images/service.Containerfile',
+                'images/Dockerfile.runtime',
                 'scripts/security/container-scan-lanes.json',
                 'scripts/security/discover-base-images.sh',
                 'scripts/security/image-slug.sh',
