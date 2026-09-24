@@ -19,6 +19,7 @@
 		"chatcmpl",
 		"configfromkube",
 		"containerfile",
+		"ddpm",
 		"dedented",
 		"directqueue",
 		"dockerbuild",
