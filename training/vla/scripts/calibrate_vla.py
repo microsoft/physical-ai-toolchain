@@ -96,6 +96,10 @@ def _build_probe_arguments(training_arguments: Sequence[str], batch_size: int, o
             raise CalibrationError("DATASET_REPO_ID is required when --dataset.repo_id is not provided")
         arguments.append(f"--dataset.repo_id={dataset_repo_id}")
 
+    dataset_revision = os.environ.get("DATASET_REVISION", "")
+    if dataset_revision and not _has_argument(arguments, "--dataset.revision"):
+        arguments.append(f"--dataset.revision={dataset_revision}")
+
     if not _has_argument(arguments, "--policy.path") and not _has_argument(arguments, "--policy.type"):
         policy_type = os.environ.get("POLICY_TYPE", "")
         if not policy_type:
@@ -362,12 +366,25 @@ def _run_self_check() -> None:
     validate_calibration_workload(workload)
     if _parse_candidate_batch_sizes("1,2,4") != [1, 2, 4]:
         raise CalibrationError("Candidate batch-size parsing changed")
-    arguments = _build_probe_arguments(
-        ("--dataset.repo_id=org/dataset", "--dataset.root=/tmp/data", "--policy.type=pi0"),
-        2,
-        Path("/tmp/probe"),
-    )
-    required_arguments = {"--batch_size=2", "--steps=1", "--save_checkpoint=false"}
+    previous_dataset_revision = os.environ.get("DATASET_REVISION")
+    os.environ["DATASET_REVISION"] = "b" * 40
+    try:
+        arguments = _build_probe_arguments(
+            ("--dataset.repo_id=org/dataset", "--dataset.root=/tmp/data", "--policy.type=pi0"),
+            2,
+            Path("/tmp/probe"),
+        )
+    finally:
+        if previous_dataset_revision is None:
+            os.environ.pop("DATASET_REVISION", None)
+        else:
+            os.environ["DATASET_REVISION"] = previous_dataset_revision
+    required_arguments = {
+        "--batch_size=2",
+        f"--dataset.revision={'b' * 40}",
+        "--steps=1",
+        "--save_checkpoint=false",
+    }
     if not required_arguments.issubset(arguments):
         raise CalibrationError("Probe arguments do not enforce a bounded optimizer step")
 
