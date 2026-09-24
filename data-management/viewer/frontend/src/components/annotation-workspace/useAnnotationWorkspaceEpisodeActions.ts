@@ -24,8 +24,6 @@ interface UseAnnotationWorkspaceEpisodeActionsOptions {
   onSaveAnnotation?: () => Promise<unknown>
   onSaveEpisodeLabels: (input: SaveEpisodeLabelsInput) => SaveEpisodeLabelsResult
   onRecordEvent: (channel: string, type: string, data?: Record<string, unknown>) => void
-  canGoNextEpisode: boolean
-  onAdvanceToNextEpisode?: () => void
 }
 
 export function useAnnotationWorkspaceEpisodeActions({
@@ -45,8 +43,6 @@ export function useAnnotationWorkspaceEpisodeActions({
   onSaveAnnotation = () => Promise.resolve(),
   onSaveEpisodeLabels,
   onRecordEvent,
-  canGoNextEpisode,
-  onAdvanceToNextEpisode,
 }: UseAnnotationWorkspaceEpisodeActionsOptions) {
   const [showSavedStatus, setShowSavedStatus] = useState(false)
   const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -182,8 +178,8 @@ export function useAnnotationWorkspaceEpisodeActions({
     savedLabelsForCurrentEpisode,
   ])
 
-  const handleSaveAndNextEpisode = useCallback(async () => {
-    if (!canGoNextEpisode || !onAdvanceToNextEpisode || currentEpisodeIndex === null) {
+  const handleSaveEpisode = useCallback(async () => {
+    if (currentEpisodeIndex === null) {
       return
     }
 
@@ -220,17 +216,14 @@ export function useAnnotationWorkspaceEpisodeActions({
       announceSave()
     }
 
-    onRecordEvent('workspace', 'save-next-episode', {
+    onRecordEvent('workspace', 'save-episode', {
       episodeIndex: currentEpisodeIndex,
       hasPendingEpisodeChanges,
       hasEdits,
       hasLabelChanges,
     })
-
-    onAdvanceToNextEpisode()
   }, [
     announceSave,
-    canGoNextEpisode,
     currentDatasetId,
     currentEpisodeIndex,
     currentEpisodeLabels,
@@ -238,7 +231,6 @@ export function useAnnotationWorkspaceEpisodeActions({
     hasEdits,
     hasLabelChanges,
     hasPendingEpisodeChanges,
-    onAdvanceToNextEpisode,
     onRecordEvent,
     onSaveAnnotation,
     onSaveEpisodeDraft,
@@ -250,6 +242,6 @@ export function useAnnotationWorkspaceEpisodeActions({
     hasPendingEpisodeChanges,
     saveStatusMessage,
     handleResetAll,
-    handleSaveAndNextEpisode,
+    handleSaveEpisode,
   }
 }

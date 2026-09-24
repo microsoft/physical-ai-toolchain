@@ -106,6 +106,9 @@ class AppConfig:
     vlm_judge_api_key: str | None = None
     """API key for the OpenAI-compatible backend."""
 
+    vlm_judge_timeout_s: float = 120.0
+    """Timeout in seconds for each OpenAI-compatible model request."""
+
     vlm_judge_n_frames: int = 12
     """Number of frames sampled per episode."""
 
@@ -173,6 +176,7 @@ def load_config(env_path: Path | None = None) -> AppConfig:
     vlm_judge_model_revision = os.environ.get("VLM_JUDGE_MODEL_REVISION") or None
     vlm_judge_base_url = os.environ.get("VLM_JUDGE_BASE_URL") or None
     vlm_judge_api_key = os.environ.get("VLM_JUDGE_API_KEY") or None
+    vlm_judge_timeout_s = _positive_float_env("VLM_JUDGE_TIMEOUT_S", 120.0)
     vlm_judge_n_frames = int(os.environ.get("VLM_JUDGE_N_FRAMES", "12"))
     vlm_judge_process_method = os.environ.get("VLM_JUDGE_PROCESS_METHOD", "gvl").lower()
     vlm_judge_cache_dir = os.environ.get("VLM_JUDGE_CACHE_DIR") or None
@@ -226,6 +230,7 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         vlm_judge_model_revision=vlm_judge_model_revision,
         vlm_judge_base_url=vlm_judge_base_url,
         vlm_judge_api_key=vlm_judge_api_key,
+        vlm_judge_timeout_s=vlm_judge_timeout_s,
         vlm_judge_n_frames=vlm_judge_n_frames,
         vlm_judge_process_method=vlm_judge_process_method,
         vlm_judge_cache_dir=vlm_judge_cache_dir,

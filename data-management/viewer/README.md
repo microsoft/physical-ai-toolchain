@@ -223,6 +223,7 @@ in-process `qwen3-vl` backend without `start.sh`.
 | `VLM_JUDGE_MODEL_ID`       | `Qwen/Qwen3-VL-4B-Instruct` | HF model id or remote model name                                                      |
 | `VLM_JUDGE_BASE_URL`       | —                           | OpenAI-compatible server URL (`openai-compat` only)                                   |
 | `VLM_JUDGE_API_KEY`        | —                           | Bearer token for the remote backend                                                   |
+| `VLM_JUDGE_TIMEOUT_S`      | `120`                       | Per-call timeout in seconds for OpenAI-compatible model requests                      |
 | `VLM_JUDGE_N_FRAMES`       | `12`                        | Frames sampled per episode                                                            |
 | `VLM_JUDGE_PROCESS_METHOD` | `gvl`                       | Process-reward method: `gvl` (shuffle-and-rank) or `chronological`                    |
 | `VLM_JUDGE_CACHE_DIR`      | —                           | Fallback judgment cache; the viewer caches per dataset under `annotations/vlm_judge/` |
@@ -248,9 +249,10 @@ in-process `qwen3-vl` backend without `start.sh`.
 
 The `/judge` request stays open until model loading and inference finish. Local
 `qwen3-vl` runs can take minutes on the first request because the backend loads
-the model in-process. Configure any reverse proxy, ingress, or browser-facing
-gateway timeout above the expected first-run latency, or run the model through the
-`openai-compat` shim so the dataviewer backend remains lightweight.
+the model in-process. Local or slow hosted `openai-compat` runs can require a
+`VLM_JUDGE_TIMEOUT_S` value above the 120-second default. Configure any reverse
+proxy, ingress, or browser-facing gateway timeout above the backend request
+duration.
 
 #### Local model via the openai-compat shim
 
@@ -618,6 +620,18 @@ npm run build        # Production build
 ## 📦 Dataset Releases
 
 The release workflow gates episodes on immutable review decisions and versioned quality evidence, builds a LeRobot 3.0 package in an isolated worker, and publishes only after semantic read-back and SHA-256 verification. The existing HDF5 Export action remains a separate non-release operation.
+
+Use the workspace actions independently:
+
+| Action             | Behavior                                                                                                         |
+|--------------------|------------------------------------------------------------------------------------------------------------------|
+| **Save**           | Persists current annotations, labels, and edits without navigating                                                |
+| **Run quality**    | Captures current source identity and checks timestamps, streams, frames, features, metadata, labels, and calibration |
+| **Accept episode** | Binds a review decision to the saved source bytes and quality evidence                                           |
+| **Create Release** | Publishes the accepted episode as an immutable, verified LeRobot package                                         |
+| **Next**           | Navigates independently and confirms before discarding unsaved changes                                           |
+
+Run quality is disabled while the episode has unsaved changes. Saving after acceptance changes the reviewed source identity; rerun quality and accept the current saved version before creating a release.
 
 See [Dataset Release Workflow](../../docs/data-pipeline/dataset-release-workflow.md) for destination configuration, user steps, package artifacts, worker setup, cancellation, recovery, and troubleshooting.
 

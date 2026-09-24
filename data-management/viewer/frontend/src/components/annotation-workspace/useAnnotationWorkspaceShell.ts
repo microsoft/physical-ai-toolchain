@@ -32,7 +32,6 @@ interface UseAnnotationWorkspaceShellOptions {
   onPreviousEpisode?: () => void
   canGoNextEpisode?: boolean
   onNextEpisode?: () => void
-  onSaveAndNextEpisode?: () => void
 }
 
 export function useAnnotationWorkspaceShell({
@@ -41,7 +40,6 @@ export function useAnnotationWorkspaceShell({
   onPreviousEpisode,
   canGoNextEpisode = false,
   onNextEpisode,
-  onSaveAndNextEpisode,
 }: UseAnnotationWorkspaceShellOptions) {
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [releaseDialogOpen, setReleaseDialogOpen] = useState(false)
@@ -104,7 +102,7 @@ export function useAnnotationWorkspaceShell({
 
   const diagnosticsEnabled = diagnosticsVisible && isDiagnosticsEnabled()
 
-  const { hasPendingEpisodeChanges, saveStatusMessage, handleResetAll, handleSaveAndNextEpisode } =
+  const { hasPendingEpisodeChanges, saveStatusMessage, handleResetAll, handleSaveEpisode } =
     useAnnotationWorkspaceEpisodeActions({
       diagnosticsEnabled,
       currentDatasetId: currentDataset?.id ?? null,
@@ -122,9 +120,24 @@ export function useAnnotationWorkspaceShell({
       onSaveAnnotation: saveCurrentAnnotation.saveIfDirty,
       onSaveEpisodeLabels: saveEpisodeLabels.mutateAsync,
       onRecordEvent: recordDiagnosticEvent,
-      canGoNextEpisode,
-      onAdvanceToNextEpisode: onSaveAndNextEpisode ?? onNextEpisode,
     })
+
+  const handleNextEpisode = useCallback(() => {
+    if (!onNextEpisode) {
+      return
+    }
+    if (
+      hasPendingEpisodeChanges &&
+      !window.confirm('Discard unsaved episode changes and open the next episode?')
+    ) {
+      return
+    }
+    recordDiagnosticEvent('navigation', 'next-episode', {
+      episodeIndex: currentEpisode?.meta.index ?? null,
+      discardedPendingChanges: hasPendingEpisodeChanges,
+    })
+    onNextEpisode()
+  }, [currentEpisode?.meta.index, hasPendingEpisodeChanges, onNextEpisode])
 
   useEffect(() => {
     if (currentDataset && currentEpisode && principalQuery.data) {
@@ -312,16 +325,15 @@ export function useAnnotationWorkspaceShell({
     handleOpenExportDialog,
     handleOpenReleaseDialog,
     handleResetAllClick,
-    handleSaveAndNextEpisode,
+    handleNextEpisode,
+    handleSaveEpisode,
     handleTabChange,
     handleVideoEnded: media.handleVideoEnded,
     hasPendingEpisodeChanges,
     interpolatedImageUrl: media.interpolatedImageUrl,
     isInsertedFrame: media.isInsertedFrame,
     isPlaying,
-    onNextEpisode,
     onPreviousEpisode,
-    onSaveAndNextEpisode,
     playback,
     playbackSpeed,
     releaseDialogOpen,

@@ -173,10 +173,11 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
       qualityError={runQuality.error?.message ?? null}
       isRunningQuality={runQuality.isPending}
       isSubmittingDecision={createDecision.isPending}
+      hasPendingChanges={shell.hasPendingEpisodeChanges}
       reasonCodes={reviewReasonDraft.reasonCodes}
       onReasonCodesChange={reviewReasonDraft.setReasonCodes}
       onRunQuality={() => {
-        if (!currentAnnotation || !sourceFormat) {
+        if (shell.hasPendingEpisodeChanges || !currentAnnotation || !sourceFormat) {
           return
         }
         runQuality.mutate({
@@ -248,12 +249,11 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
           onOpenExportDialog={shell.handleOpenExportDialog}
           onOpenReleaseDialog={shell.handleOpenReleaseDialog}
           canGoNextEpisode={shell.canGoNextEpisode}
-          canSaveAndNextEpisode={
-            Boolean(shell.onSaveAndNextEpisode) &&
-            !shell.saveEpisodeLabels.isPending &&
-            !shell.saveCurrentAnnotation.isPending
+          canSaveEpisode={
+            !shell.saveEpisodeLabels.isPending && !shell.saveCurrentAnnotation.isPending
           }
-          onSaveAndNextEpisode={() => void shell.handleSaveAndNextEpisode()}
+          onNextEpisode={shell.handleNextEpisode}
+          onSaveEpisode={() => void shell.handleSaveEpisode()}
           saveStatusMessage={shell.saveStatusMessage}
           isReadOnly={isReadOnly}
         />

@@ -13,7 +13,6 @@ interface AnnotationWorkspaceProps {
   onPreviousEpisode?: () => void
   canGoNextEpisode?: boolean
   onNextEpisode?: () => void
-  onSaveAndNextEpisode?: () => void
 }
 
 /**
@@ -28,7 +27,6 @@ function AnnotationWorkspaceContentRoot({
   onPreviousEpisode,
   canGoNextEpisode = false,
   onNextEpisode,
-  onSaveAndNextEpisode,
 }: AnnotationWorkspaceProps) {
   const shell = useAnnotationWorkspaceShell({
     diagnosticsVisible,
@@ -36,7 +34,6 @@ function AnnotationWorkspaceContentRoot({
     onPreviousEpisode,
     canGoNextEpisode,
     onNextEpisode,
-    onSaveAndNextEpisode,
   })
 
   if (!shell.currentDataset || !shell.currentEpisode) {

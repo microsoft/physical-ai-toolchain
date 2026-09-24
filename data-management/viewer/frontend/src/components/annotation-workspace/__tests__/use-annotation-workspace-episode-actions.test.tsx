@@ -23,7 +23,6 @@ describe('useAnnotationWorkspaceEpisodeActions', () => {
         onSaveEpisodeDraft: vi.fn(),
         onSaveEpisodeLabels: vi.fn(),
         onRecordEvent: vi.fn(),
-        canGoNextEpisode: false,
       }),
     )
 
@@ -38,10 +37,9 @@ describe('useAnnotationWorkspaceEpisodeActions', () => {
     expect(handleSetEpisodeLabels).toHaveBeenCalledWith(2, ['keep'])
   })
 
-  it('saves labels and draft edits before advancing to the next episode', async () => {
+  it('saves labels and draft edits without advancing to another episode', async () => {
     const handleSaveEpisodeLabels = vi.fn().mockResolvedValue(undefined)
     const handleSaveEpisodeDraft = vi.fn()
-    const handleAdvance = vi.fn()
     const handleRecordEvent = vi.fn()
 
     const { result } = renderHook(() =>
@@ -59,21 +57,18 @@ describe('useAnnotationWorkspaceEpisodeActions', () => {
         onSaveEpisodeDraft: handleSaveEpisodeDraft,
         onSaveEpisodeLabels: handleSaveEpisodeLabels,
         onRecordEvent: handleRecordEvent,
-        canGoNextEpisode: true,
-        onAdvanceToNextEpisode: handleAdvance,
       }),
     )
 
     await act(async () => {
-      await result.current.handleSaveAndNextEpisode()
+      await result.current.handleSaveEpisode()
     })
 
     expect(handleSaveEpisodeLabels).toHaveBeenCalledWith({ episodeIdx: 4, labels: ['success'] })
     expect(handleSaveEpisodeDraft).toHaveBeenCalledOnce()
-    expect(handleAdvance).toHaveBeenCalledOnce()
     expect(handleRecordEvent).toHaveBeenCalledWith(
       'workspace',
-      'save-next-episode',
+      'save-episode',
       expect.objectContaining({
         episodeIndex: 4,
         hasEdits: true,

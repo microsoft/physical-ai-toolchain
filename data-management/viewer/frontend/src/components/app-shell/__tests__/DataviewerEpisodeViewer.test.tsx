@@ -31,7 +31,6 @@ const baseProps = {
   onPreviousEpisode: vi.fn(),
   canGoNextEpisode: true,
   onNextEpisode: vi.fn(),
-  onSaveAndNextEpisode: vi.fn(),
 }
 
 describe('DataviewerEpisodeViewer', () => {

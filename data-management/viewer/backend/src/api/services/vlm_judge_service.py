@@ -59,6 +59,7 @@ def get_vlm_judge_service(config: AppConfig):
             revision=config.vlm_judge_model_revision,
             base_url=config.vlm_judge_base_url,
             api_key=config.vlm_judge_api_key,
+            timeout_s=config.vlm_judge_timeout_s,
         )
         frames = FrameConfig(n_frames=config.vlm_judge_n_frames)
         method = config.vlm_judge_process_method

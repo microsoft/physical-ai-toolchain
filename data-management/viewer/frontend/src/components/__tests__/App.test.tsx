@@ -103,13 +103,11 @@ vi.mock('@/components/annotation-workspace/AnnotationWorkspace', () => ({
     onPreviousEpisode,
     canGoNextEpisode,
     onNextEpisode,
-    onSaveAndNextEpisode,
   }: {
     canGoPreviousEpisode?: boolean
     onPreviousEpisode?: () => void
     canGoNextEpisode?: boolean
     onNextEpisode?: () => void
-    onSaveAndNextEpisode?: () => void
   }) => (
     <div>
       <div>Annotation Workspace</div>
@@ -118,9 +116,6 @@ vi.mock('@/components/annotation-workspace/AnnotationWorkspace', () => ({
       </button>
       <button type="button" disabled={!canGoNextEpisode} onClick={onNextEpisode}>
         Next Episode
-      </button>
-      <button type="button" disabled={!canGoNextEpisode} onClick={onSaveAndNextEpisode}>
-        Save and Next Episode
       </button>
     </div>
   ),
@@ -292,20 +287,6 @@ describe('AppContent', () => {
 
     await waitFor(() => {
       expect(useEpisodeStore.getState().currentEpisode?.meta.index).toBe(0)
-    })
-  })
-
-  it('advances from the workspace save-and-next action', async () => {
-    const user = userEvent.setup()
-
-    renderAppContent()
-
-    await screen.findByText('Annotation Workspace')
-
-    await user.click(screen.getByRole('button', { name: /save and next episode/i }))
-
-    await waitFor(() => {
-      expect(useEpisodeStore.getState().currentEpisode?.meta.index).toBe(1)
     })
   })
 

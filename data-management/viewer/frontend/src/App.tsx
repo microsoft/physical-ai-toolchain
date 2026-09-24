@@ -120,7 +120,6 @@ export function AppContent() {
                 onPreviousEpisode={handlePreviousEpisode}
                 canGoNextEpisode={canGoNextEpisode}
                 onNextEpisode={handleNextEpisode}
-                onSaveAndNextEpisode={handleNextEpisode}
               />
             </main>
           </div>

@@ -130,6 +130,34 @@ describe('ReleaseDialog', () => {
     expect(screen.getByRole('button', { name: /create release/i })).toBeDisabled()
   })
 
+  it('explains how to recover when saved source bytes changed after acceptance', () => {
+    vi.mocked(useReleaseEligibility).mockReturnValue({
+      data: {
+        eligibleEpisodes: [],
+        excludedEpisodes: [{ episodeIndex: 2, reasonCodes: ['source-identity-changed'] }],
+      },
+      isPending: false,
+      error: null,
+    } as unknown as ReturnType<typeof useReleaseEligibility>)
+
+    renderWithQuery(
+      <ReleaseDialog
+        open
+        onOpenChange={vi.fn()}
+        datasetId="dataset-1"
+        episodeIndex={2}
+        actorId="reviewer"
+        decision={decision}
+      />,
+    )
+
+    expect(
+      screen.getByText(
+        /saved episode data changed after acceptance\. run quality and accept the current saved version before release\./i,
+      ),
+    ).toBeVisible()
+  })
+
   it('shows durable progress, cancellation, verification, and conflicts', async () => {
     const user = userEvent.setup()
     const cancel = vi.fn()

@@ -4,6 +4,7 @@ import {
   Gauge,
   PackageCheck,
   RotateCcw,
+  Save,
   SkipBack,
   SkipForward,
 } from 'lucide-react'
@@ -21,8 +22,9 @@ interface AnnotationWorkspaceTopBarProps {
   onOpenExportDialog: () => void
   onOpenReleaseDialog: () => void
   canGoNextEpisode: boolean
-  canSaveAndNextEpisode: boolean
-  onSaveAndNextEpisode: () => void
+  canSaveEpisode: boolean
+  onNextEpisode?: () => void
+  onSaveEpisode: () => void
   saveStatusMessage: string | null
   isReadOnly?: boolean
 }
@@ -36,8 +38,9 @@ export function AnnotationWorkspaceTopBar({
   onOpenExportDialog,
   onOpenReleaseDialog,
   canGoNextEpisode,
-  canSaveAndNextEpisode,
-  onSaveAndNextEpisode,
+  canSaveEpisode,
+  onNextEpisode,
+  onSaveEpisode,
   saveStatusMessage,
   isReadOnly = false,
 }: AnnotationWorkspaceTopBarProps) {
@@ -89,31 +92,55 @@ export function AnnotationWorkspaceTopBar({
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant="outline" onClick={onOpenReleaseDialog} aria-label="Release">
-                      <PackageCheck className="mr-2 h-4 w-4" />
-                      Create Release
+                    <span>
+                      <Button
+                        variant="outline"
+                        onClick={onOpenReleaseDialog}
+                        disabled={hasPendingEpisodeChanges}
+                        aria-label="Release"
+                      >
+                        <PackageCheck className="mr-2 h-4 w-4" />
+                        Create Release
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-72">
+                    {hasPendingEpisodeChanges
+                      ? 'Save changes, run quality, and accept the current saved version before release.'
+                      : 'Publish an accepted episode as an immutable, verified LeRobot package.'}
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      onClick={onSaveEpisode}
+                      disabled={!canSaveEpisode}
+                      aria-label="Save Episode"
+                    >
+                      <Save className="mr-2 h-4 w-4" />
+                      Save
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent className="max-w-72">
-                    Publish an accepted episode as an immutable, verified LeRobot package.
+                    Save annotations, labels, and edits for the current episode.
                   </TooltipContent>
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span>
                       <Button
-                        onClick={onSaveAndNextEpisode}
-                        disabled={!canGoNextEpisode || !canSaveAndNextEpisode}
-                        aria-label="Save & Next Episode"
+                        onClick={onNextEpisode}
+                        disabled={!canGoNextEpisode || !onNextEpisode}
+                        aria-label="Next Episode"
                       >
                         <SkipForward className="mr-2 h-4 w-4" />
-                        Save & Next
+                        Next
                       </Button>
                     </span>
                   </TooltipTrigger>
                   <TooltipContent className="max-w-72">
-                    Save annotations, quality settings, labels, and edits, then open the next
-                    episode.
+                    Move to the next episode. Unsaved changes require confirmation.
                   </TooltipContent>
                 </Tooltip>
               </>

@@ -47,6 +47,13 @@ function humanize(value: string): string {
   return value.replaceAll('-', ' ')
 }
 
+function exclusionMessage(reasonCodes: string[]): string {
+  if (reasonCodes.includes('source-identity-changed')) {
+    return 'Saved episode data changed after acceptance. Run quality and accept the current saved version before release.'
+  }
+  return reasonCodes.map(humanize).join(', ')
+}
+
 function errorMessage(error: Error | null): string | null {
   if (!error) {
     return null
@@ -289,7 +296,7 @@ export function ReleaseDialog({
               <div key={episode.episodeIndex} className="flex items-start gap-2">
                 <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                 <span>
-                  Episode {episode.episodeIndex}: {episode.reasonCodes.map(humanize).join(', ')}
+                  Episode {episode.episodeIndex}: {exclusionMessage(episode.reasonCodes)}
                 </span>
               </div>
             ))}

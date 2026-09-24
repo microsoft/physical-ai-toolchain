@@ -113,6 +113,7 @@ def build_app():
     - ``VLM_JUDGE_MODEL_REVISION`` (immutable HF commit SHA to pin the qwen3-vl download)
     - ``VLM_JUDGE_BASE_URL`` (required for ``openai-compat``)
     - ``VLM_JUDGE_API_KEY``  (optional API key for ``openai-compat``)
+    - ``VLM_JUDGE_TIMEOUT_S`` (per-request timeout, default ``120``)
     - ``VLM_JUDGE_N_FRAMES`` (default ``12``)
     - ``VLM_JUDGE_CACHE_DIR`` (default ``outputs/vlm-judge/cache``)
     """
@@ -124,6 +125,7 @@ def build_app():
         revision=os.environ.get("VLM_JUDGE_MODEL_REVISION") or None,
         base_url=os.environ.get("VLM_JUDGE_BASE_URL") or None,
         api_key=os.environ.get("VLM_JUDGE_API_KEY") or None,
+        timeout_s=_positive_float_env("VLM_JUDGE_TIMEOUT_S", 120.0),
     )
     frames = FrameConfig(
         n_frames=int(os.environ.get("VLM_JUDGE_N_FRAMES", "12")),
@@ -136,6 +138,13 @@ def build_app():
     app.include_router(build_router(service))
     _LOGGER.info("VLM judge API ready (backend=%s, model=%s)", backend.kind, backend.model_id)
     return app
+
+
+def _positive_float_env(name: str, default: float) -> float:
+    value = float(os.environ.get(name, str(default)))
+    if value <= 0.0:
+        raise ValueError(f"{name} must be greater than zero")
+    return value
 
 
 app = build_app()

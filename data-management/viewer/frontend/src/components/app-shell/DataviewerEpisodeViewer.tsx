@@ -12,7 +12,6 @@ interface DataviewerEpisodeViewerProps {
   onPreviousEpisode: () => void
   canGoNextEpisode: boolean
   onNextEpisode: () => void
-  onSaveAndNextEpisode: () => void
 }
 
 export function DataviewerEpisodeViewer({
@@ -23,7 +22,6 @@ export function DataviewerEpisodeViewer({
   onPreviousEpisode,
   canGoNextEpisode,
   onNextEpisode,
-  onSaveAndNextEpisode,
 }: DataviewerEpisodeViewerProps) {
   const { data: episode, isLoading, error } = useEpisode(datasetId, episodeIndex)
   const setCurrentEpisode = useEpisodeStore((state) => state.setCurrentEpisode)
@@ -65,7 +63,6 @@ export function DataviewerEpisodeViewer({
       onPreviousEpisode={onPreviousEpisode}
       canGoNextEpisode={canGoNextEpisode}
       onNextEpisode={onNextEpisode}
-      onSaveAndNextEpisode={onSaveAndNextEpisode}
     />
   )
 }

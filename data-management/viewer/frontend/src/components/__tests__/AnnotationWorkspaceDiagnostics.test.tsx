@@ -161,14 +161,11 @@ describe('AnnotationWorkspace diagnostics', () => {
   })
 
   it('records expanded diagnostics channels for labels, subtasks, export, and persistence actions', async () => {
-    const handleSaveAndNextEpisode = vi.fn()
     mockDiagnosticsState.enabled = true
     mockDiagnosticsState.channels = ['all']
     testState.hasEdits = true
 
-    const { rerender } = render(
-      <AnnotationWorkspace canGoNextEpisode onSaveAndNextEpisode={handleSaveAndNextEpisode} />,
-    )
+    const { rerender } = render(<AnnotationWorkspace />)
 
     mockRecordDiagnosticEvent.mockClear()
 
@@ -178,13 +175,11 @@ describe('AnnotationWorkspace diagnostics', () => {
       ctrlKey: false,
     })
     fireEvent.click(screen.getByRole('button', { name: /toggle label draft/i }))
-    rerender(
-      <AnnotationWorkspace canGoNextEpisode onSaveAndNextEpisode={handleSaveAndNextEpisode} />,
-    )
+    rerender(<AnnotationWorkspace />)
     fireEvent.click(screen.getByRole('button', { name: /create subtask/i }))
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save\s*&\s*next episode/i }))
+      fireEvent.click(screen.getByRole('button', { name: /^save episode$/i }))
       await Promise.resolve()
     })
 
@@ -194,6 +189,7 @@ describe('AnnotationWorkspace diagnostics', () => {
         ['export', 'dialog-open', expect.objectContaining({ activeTab: 'trajectory' })],
         ['subtasks', 'create', expect.objectContaining({ rangeStart: 2, rangeEnd: 6 })],
         ['persistence', 'draft-saved', expect.objectContaining({ episodeIndex: 0 })],
+        ['workspace', 'save-episode', expect.objectContaining({ episodeIndex: 0 })],
       ]),
     )
   })

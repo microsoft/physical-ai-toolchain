@@ -52,6 +52,18 @@ def test_builds_and_memoizes_singleton(monkeypatch: pytest.MonkeyPatch) -> None:
     assert vjs.get_vlm_judge_service(config) is service
 
 
+def test_configures_openai_compatible_request_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VLM_JUDGE_ENABLED", "true")
+    monkeypatch.setenv("VLM_JUDGE_BACKEND", "openai-compat")
+    monkeypatch.setenv("VLM_JUDGE_BASE_URL", "http://localhost:8001/v1")
+    monkeypatch.setenv("VLM_JUDGE_TIMEOUT_S", "600")
+
+    service = vjs.get_vlm_judge_service(load_config())
+
+    assert service is not None
+    assert service.config.backend.timeout_s == 600.0
+
+
 def test_reset_drops_the_singleton(monkeypatch: pytest.MonkeyPatch) -> None:
     config = _config(monkeypatch, enabled=True)
     first = vjs.get_vlm_judge_service(config)

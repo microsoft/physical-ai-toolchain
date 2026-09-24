@@ -93,6 +93,38 @@ describe('ReviewQualityPanel', () => {
     expect(onDecision).toHaveBeenCalledWith('reject', ['needs-recapture'])
   })
 
+  it('requires saved changes before running quality or submitting a decision', async () => {
+    const user = userEvent.setup()
+    const onRunQuality = vi.fn()
+    const onDecision = vi.fn()
+
+    render(
+      <ReviewQualityPanel
+        qualityReport={report}
+        qualityError={null}
+        isRunningQuality={false}
+        isSubmittingDecision={false}
+        hasPendingChanges
+        onRunQuality={onRunQuality}
+        onDecision={onDecision}
+        reasonCodes={['evidence-reviewed']}
+      />,
+    )
+
+    const runButton = screen.getByRole('button', { name: 'Run quality' })
+    const acceptButton = screen.getByRole('button', { name: 'Accept episode' })
+
+    expect(runButton).toBeDisabled()
+    expect(acceptButton).toBeDisabled()
+    expect(screen.getByText('Save changes before running quality.')).toBeVisible()
+
+    await user.click(runButton)
+    await user.click(acceptButton)
+
+    expect(onRunQuality).not.toHaveBeenCalled()
+    expect(onDecision).not.toHaveBeenCalled()
+  })
+
   it('explains locked decision controls and exposes quality-run failures', () => {
     render(
       <ReviewQualityPanel

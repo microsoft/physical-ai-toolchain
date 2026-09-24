@@ -16,6 +16,7 @@ interface ReviewQualityPanelProps {
   qualityError: string | null
   isRunningQuality: boolean
   isSubmittingDecision: boolean
+  hasPendingChanges?: boolean
   onRunQuality: () => void
   onDecision: (decision: ReviewDecisionValue, reasonCodes: string[]) => void
   reasonCodes?: string[]
@@ -27,6 +28,7 @@ export function ReviewQualityPanel({
   qualityError,
   isRunningQuality,
   isSubmittingDecision,
+  hasPendingChanges = false,
   onRunQuality,
   onDecision,
   reasonCodes: controlledReasonCodes,
@@ -58,11 +60,20 @@ export function ReviewQualityPanel({
             </p>
           )}
         </div>
-        <Button size="sm" variant="outline" onClick={onRunQuality} disabled={isRunningQuality}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onRunQuality}
+          disabled={isRunningQuality || hasPendingChanges}
+        >
           <Play className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
           {isRunningQuality ? 'Running...' : 'Run quality'}
         </Button>
       </div>
+
+      {hasPendingChanges && (
+        <p className="text-muted-foreground text-xs">Save changes before running quality.</p>
+      )}
 
       {qualityError && (
         <p role="alert" className="text-destructive text-xs">
@@ -104,7 +115,10 @@ export function ReviewQualityPanel({
         </div>
       )}
 
-      <fieldset className="space-y-1.5" disabled={!qualityReport || isSubmittingDecision}>
+      <fieldset
+        className="space-y-1.5"
+        disabled={!qualityReport || isSubmittingDecision || hasPendingChanges}
+      >
         <legend className="text-xs font-medium">Reason codes</legend>
         {!qualityReport && (
           <p className="text-muted-foreground text-xs">
@@ -128,7 +142,9 @@ export function ReviewQualityPanel({
       <div className="grid grid-cols-2 gap-2">
         <Button
           size="sm"
-          disabled={!qualityReport || reasonCodes.length === 0 || isSubmittingDecision}
+          disabled={
+            !qualityReport || reasonCodes.length === 0 || isSubmittingDecision || hasPendingChanges
+          }
           onClick={() => onDecision('accept', reasonCodes)}
         >
           <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
@@ -137,7 +153,9 @@ export function ReviewQualityPanel({
         <Button
           size="sm"
           variant="destructive"
-          disabled={!qualityReport || reasonCodes.length === 0 || isSubmittingDecision}
+          disabled={
+            !qualityReport || reasonCodes.length === 0 || isSubmittingDecision || hasPendingChanges
+          }
           onClick={() => onDecision('reject', reasonCodes)}
         >
           <X className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />

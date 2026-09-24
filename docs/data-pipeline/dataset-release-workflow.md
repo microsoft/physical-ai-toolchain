@@ -2,7 +2,7 @@
 title: Dataset Release Workflow
 description: Review, package, publish, and verify immutable dataset releases from the Dataset Analysis Tool
 author: Microsoft
-ms.date: 2026-09-23
+ms.date: 2026-09-24
 ms.topic: how-to
 ---
 
@@ -75,14 +75,19 @@ Azure browsing uses an optimized media cache, but quality and release operations
 ## Create a Release
 
 1. Open a dataset and episode in the annotation workspace.
-1. Run the versioned quality review. Resolve every failed required check.
+1. Select **Save** to persist annotations, labels, language instructions, and edits. **Save** does not navigate.
+1. Select **Run quality**. This captures the current saved source identity and checks timestamps, stream completeness, frame continuity, feature shapes and dtypes, metadata, labels, and calibration structure. Resolve every failed required check.
 1. Record an explicit **Accept episode** decision with reason codes. The decision references the immutable annotation revision, edit revision, quality run, and source identity shown in the workspace.
-1. Select **Release**. Do not select **Export**; Export creates the existing HDF5 artifact and is not an immutable release package.
+1. Select **Create Release**. Do not select **Export Copy**; Export Copy creates a mutable artifact and is not an immutable release package.
 1. Enter a release ID and reason, select the configured destination kind, and confirm the fixed LeRobot 3.0 target.
 1. Review the eligibility result. Excluded episodes remain visible with machine-readable reasons, such as a failed required quality check or changed source identity.
 1. Select **Create Release**. Reusing the same idempotency key and inputs returns the existing job. Reusing a release ID or idempotency key with different inputs returns HTTP `409`.
 1. Monitor the durable job through `queued`, `running`, `verifying`, and `publishing`. Use **Cancel Release** before publication when cancellation is required.
 1. Confirm the terminal `succeeded` state and inspect the manifest and checksum references.
+
+**Run quality**, **Accept episode**, and **Create Release** are disabled when the current episode has unsaved changes. **Next** remains independent and asks for confirmation before discarding unsaved changes.
+
+An accepted decision applies to exact source bytes. Saving any reviewed source file after acceptance invalidates release eligibility. When the UI reports that saved episode data changed after acceptance, run quality again and accept the current saved version before release.
 
 The UI uses the actor from the accepted decision. Before a decision is cached, it falls back to the current annotation actor for display, but submission remains disabled until an accepted decision exists.
 

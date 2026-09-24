@@ -43,6 +43,7 @@ class BackendConfig:
     """Immutable HF commit SHA pinning the qwen3-vl download; None uses the default branch."""
     base_url: str | None = None
     api_key: str | None = None
+    timeout_s: float = 120.0
     device_map: str = "auto"
     dtype: str = "bfloat16"
 
@@ -201,6 +202,7 @@ class JudgeService:
                 model=cfg.model_id,
                 base_url=cfg.base_url,
                 api_key=cfg.api_key,
+                timeout_s=cfg.timeout_s,
             )
         if cfg.kind == "echo":
             return EchoBackend()
