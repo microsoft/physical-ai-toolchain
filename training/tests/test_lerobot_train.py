@@ -402,9 +402,62 @@ class TestMain:
         monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
         monkeypatch.setenv("SYSTEM_METRICS", "false")
         monkeypatch.delenv("REGISTER_CHECKPOINT", raising=False)
+        monkeypatch.delenv("DATASET_TRUST", raising=False)
+        monkeypatch.delenv("VERIFIED_RELEASE_PATH", raising=False)
         _FakePopen.lines = []
         monkeypatch.setattr(_MOD.subprocess, "Popen", _FakePopen)
         monkeypatch.setattr(_MOD.signal, "signal", lambda *a, **k: None)
+
+    def test_verified_release_is_checked_before_training(
+        self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap
+    ):
+        self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
+        monkeypatch.setattr(_MOD.sys, "argv", ["train.py"])
+        monkeypatch.setenv("DATASET_TRUST", "verified")
+        monkeypatch.setenv("VERIFIED_RELEASE_PATH", str(tmp_path / "release"))
+        summary = SimpleNamespace(
+            release_id="release-1",
+            manifest_evidence_digest="abc123",
+            target_format_name="lerobot",
+            target_format_version="3.0",
+        )
+        verify = MagicMock(return_value=summary)
+        monkeypatch.setattr(_MOD, "verify_release", verify)
+        captured = {}
+
+        def fake_run(cmd, source="x", num_gpus=1, verified_release=None):
+            captured["cmd"] = cmd
+            captured["summary"] = verified_release
+            return 0
+
+        monkeypatch.setattr(_MOD, "run_training", fake_run)
+
+        assert _MOD.main() == 0
+        verify.assert_called_once_with((tmp_path / "release").resolve(), expected_target_format=("lerobot", "3.0"))
+        assert f"--dataset.root={(tmp_path / 'release').resolve()}" in captured["cmd"]
+        assert captured["summary"] is summary
+
+    def test_verified_release_failure_prevents_bootstrap(
+        self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap
+    ):
+        self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
+        monkeypatch.setenv("DATASET_TRUST", "verified")
+        monkeypatch.setenv("VERIFIED_RELEASE_PATH", str(tmp_path / "release"))
+        monkeypatch.setattr(_MOD, "verify_release", MagicMock(side_effect=ValueError("tampered")))
+
+        with pytest.raises(ValueError, match="tampered"):
+            _MOD.main()
+
+        fake_bootstrap.authenticate_huggingface.assert_not_called()
+
+    def test_verified_release_path_requires_verified_mode(
+        self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap
+    ):
+        self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
+        monkeypatch.setenv("VERIFIED_RELEASE_PATH", str(tmp_path / "release"))
+
+        with pytest.raises(RuntimeError, match="requires DATASET_TRUST=verified"):
+            _MOD.main()
 
     def test_basic_invocation(self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap):
         self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)

@@ -36,13 +36,24 @@ class WorkerEpisodeReference:
 
 
 @dataclass(frozen=True)
+class WorkerVisualSample:
+    """One visual sample decoded during package read-back."""
+
+    release_episode_index: int
+    feature_name: str
+    frame_index: int
+
+
+@dataclass(frozen=True)
 class WorkerReadback:
     """Semantic evidence obtained by reopening a written package."""
 
     episode_count: int
     frame_count: int
+    episode_frame_counts: dict[int, int]
     features: tuple[str, ...]
     sampled_visual_frames: int
+    visual_samples: tuple[WorkerVisualSample, ...]
 
 
 @dataclass(frozen=True)
@@ -194,6 +205,8 @@ class LeRobotReleaseWorker:
         }
         nonvisual_features = set(feature_names).difference(visual_features)
         sampled_visual_frames = 0
+        visual_samples: list[WorkerVisualSample] = []
+        episode_frame_counts: dict[int, int] = {}
         total_frames = 0
         for episode_index in range(episode_count):
             episode = LeRobotDataset(
@@ -206,26 +219,36 @@ class LeRobotReleaseWorker:
             frame_count = len(episode)
             if frame_count == 0:
                 raise ValueError(f"Written episode {episode_index} is empty")
+            episode_frame_counts[episode_index] = frame_count
             total_frames += frame_count
             for frame_index in range(frame_count):
                 missing = nonvisual_features.difference(episode.hf_dataset[frame_index])
                 if missing:
                     raise ValueError(f"Written episode {episode_index} is missing features: {sorted(missing)}")
-            sample_indices = {0, frame_count // 2, frame_count - 1}
+            sample_indices = sorted({0, frame_count // 2, frame_count - 1})
             for frame_index in sample_indices:
                 frame = episode[frame_index]
                 missing = set(feature_names).difference(frame)
                 if missing:
                     raise ValueError(f"Written episode {episode_index} is missing features: {sorted(missing)}")
-                for feature_name in visual_features:
+                for feature_name in sorted(visual_features):
                     if frame[feature_name] is None:
                         raise ValueError(f"Visual feature {feature_name} could not be decoded")
                     sampled_visual_frames += 1
+                    visual_samples.append(
+                        WorkerVisualSample(
+                            release_episode_index=episode_index,
+                            feature_name=feature_name,
+                            frame_index=frame_index,
+                        )
+                    )
         return WorkerReadback(
             episode_count=episode_count,
             frame_count=total_frames,
+            episode_frame_counts=episode_frame_counts,
             features=feature_names,
             sampled_visual_frames=sampled_visual_frames,
+            visual_samples=tuple(visual_samples),
         )
 
     def convert_v21(self, *, source_root: Path, workspace_root: Path, repo_id: str) -> Path:

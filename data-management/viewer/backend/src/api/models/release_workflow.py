@@ -10,7 +10,7 @@ from pydantic import ConfigDict, Field, model_validator
 from ..release.jobs import JobState
 from ..validation import SanitizedModel
 from .releases import ReleaseFormat
-from .reviews import ContractId
+from .reviews import ContractId, Sha256Digest, SourceIdentity
 
 
 def _to_camel(value: str) -> str:
@@ -45,7 +45,7 @@ class ReleaseSubmitRequest(ReleaseApiModel):
     destination_kind: Literal["local", "azure"]
     idempotency_key: ContractId
     target_format: ReleaseFormat
-    episodes: tuple[ReleaseEpisodeSelection, ...] = Field(min_length=1)
+    episodes: tuple[ReleaseEpisodeSelection, ...] = ()
 
     @model_validator(mode="after")
     def validate_unique_selections(self) -> ReleaseSubmitRequest:
@@ -68,6 +68,37 @@ class ExcludedEpisode(ReleaseApiModel):
 
     episode_index: int = Field(ge=0)
     reason_codes: tuple[ContractId, ...] = Field(min_length=1)
+    decision_id: ContractId | None = None
+    quality_run_id: ContractId | None = None
+    failed_check_ids: tuple[ContractId, ...] = ()
+
+
+class EligibilityCandidate(ReleaseApiModel):
+    """Immutable release disposition for one authoritative dataset candidate."""
+
+    episode_index: int = Field(ge=0)
+    disposition: Literal["accepted", "rejected", "excluded"]
+    reason_codes: tuple[ContractId, ...]
+    review_reason_codes: tuple[ContractId, ...] = ()
+    decision_id: ContractId | None = None
+    quality_run_id: ContractId | None = None
+    failed_check_ids: tuple[ContractId, ...] = ()
+    source: SourceIdentity | None = None
+
+
+class EligibilitySnapshot(ReleaseApiModel):
+    """Normalized dataset candidate assessment persisted with a release job."""
+
+    schema_version: str = Field(default="1.0.0", pattern=r"^\d+\.\d+\.\d+$")
+    dataset_id: ContractId
+    candidates: tuple[EligibilityCandidate, ...] = Field(min_length=1)
+    eligibility_fingerprint: Sha256Digest
+
+
+class ReleaseJobRequest(ReleaseSubmitRequest):
+    """Backend-normalized release input persisted for deterministic processing."""
+
+    eligibility_snapshot: EligibilitySnapshot
 
 
 class ReleaseVerification(ReleaseApiModel):
@@ -94,6 +125,8 @@ class ReleaseWorkflowResponse(ReleaseApiModel):
     state: JobState
     eligible_episodes: tuple[EligibleEpisode, ...]
     excluded_episodes: tuple[ExcludedEpisode, ...]
+    rejected_episodes: tuple[ExcludedEpisode, ...] = ()
+    eligibility_fingerprint: Sha256Digest
     conflict: str | None = None
     verification: ReleaseVerification = Field(default_factory=ReleaseVerification)
     progress: ReleaseProgress | None = Field(default=None, exclude_if=lambda value: value is None)
@@ -104,3 +137,5 @@ class ReleaseEligibility(ReleaseApiModel):
 
     eligible_episodes: tuple[EligibleEpisode, ...]
     excluded_episodes: tuple[ExcludedEpisode, ...]
+    rejected_episodes: tuple[ExcludedEpisode, ...] = ()
+    eligibility_fingerprint: Sha256Digest

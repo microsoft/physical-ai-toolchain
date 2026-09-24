@@ -32,6 +32,18 @@ class FeatureObservation:
 
 
 @dataclass(frozen=True)
+class VideoObservation:
+    """Episode-specific read-back evidence for one declared video feature."""
+
+    feature_name: str
+    relative_path: str
+    frame_count: int
+    duration_seconds: float
+    window_start_seconds: float | None
+    window_end_seconds: float | None
+
+
+@dataclass(frozen=True)
 class SourceSnapshot:
     """Format-neutral strict source inspection result."""
 
@@ -44,6 +56,8 @@ class SourceSnapshot:
     metadata: dict[str, Any]
     task_labels: tuple[str, ...]
     calibration: dict[str, Any] | None
+    calibration_file: SourceFileIdentity | None
+    video_observations: tuple[VideoObservation, ...]
     readback_errors: tuple[str, ...]
 
 
@@ -94,12 +108,26 @@ class LeRobotSourceAdapter:
         frame_indices = self._numeric_column(table, "frame_index", np.int64)
         task_labels = self._read_task_labels(dataset_root / "meta" / "tasks.parquet")
         calibration = self._read_json(dataset_root / profile.calibration.relative_path) if profile.calibration else None
-        readback_errors.extend(self._readback_videos(dataset_root, info))
         files = _source_files(dataset_root)
+        calibration_file = (
+            next((file for file in files if file.relative_path == profile.calibration.relative_path), None)
+            if profile.calibration
+            else None
+        )
+        episode_metadata = self._read_episode_metadata(dataset_root, episode_index)
+        video_observations, video_errors = self._readback_videos(
+            dataset_root,
+            info,
+            episode_index,
+            episode_metadata,
+        )
+        readback_errors.extend(video_errors)
         metadata = dict(info)
-        episode_frame_count = self._read_episode_frame_count(dataset_root, episode_index)
-        if episode_frame_count is not None:
-            metadata["episode_frame_count"] = episode_frame_count
+        metadata["episode"] = episode_metadata
+        if "length" in episode_metadata:
+            metadata["episode_frame_count"] = int(episode_metadata["length"])
+        elif int(info.get("total_episodes", 0)) == 1 and "total_frames" in info:
+            metadata["episode_frame_count"] = int(info["total_frames"])
         return SourceSnapshot(
             source=_source_identity(
                 dataset_id,
@@ -116,6 +144,8 @@ class LeRobotSourceAdapter:
             metadata=metadata,
             task_labels=task_labels,
             calibration=calibration,
+            calibration_file=calibration_file,
+            video_observations=video_observations,
             readback_errors=tuple(readback_errors),
         )
 
@@ -164,41 +194,122 @@ class LeRobotSourceAdapter:
             return None
 
     @staticmethod
-    def _read_episode_frame_count(dataset_root: Path, episode_index: int) -> int | None:
+    def _read_episode_metadata(dataset_root: Path, episode_index: int) -> dict[str, Any]:
         for path in sorted((dataset_root / "meta" / "episodes").rglob("*.parquet")):
-            table = pq.read_table(path, columns=["episode_index", "length"])
+            table = pq.read_table(path)
+            if "episode_index" not in table.column_names:
+                continue
             matches = table.filter(pa.compute.equal(table["episode_index"], episode_index))
             if matches.num_rows:
-                return int(matches["length"][0].as_py())
+                return {name: _json_value(matches[name][0].as_py()) for name in matches.column_names}
         legacy_path = dataset_root / "meta" / "episodes.jsonl"
         if legacy_path.is_file():
             with legacy_path.open(encoding="utf-8") as stream:
                 for line in stream:
                     episode = json.loads(line)
                     if int(episode.get("episode_index", -1)) == episode_index:
-                        return int(episode["length"])
-        return None
+                        return episode
+        return {}
 
     @staticmethod
-    def _readback_videos(dataset_root: Path, info: dict[str, Any]) -> list[str]:
+    def _readback_videos(
+        dataset_root: Path,
+        info: dict[str, Any],
+        episode_index: int,
+        episode_metadata: dict[str, Any],
+    ) -> tuple[tuple[VideoObservation, ...], list[str]]:
+        observations: list[VideoObservation] = []
         errors: list[str] = []
         for feature_name, declaration in info.get("features", {}).items():
             if declaration.get("dtype") != "video":
                 continue
-            paths = sorted((dataset_root / "videos" / feature_name).rglob("*.mp4"))
-            if not paths:
+            path = LeRobotSourceAdapter._video_path(
+                dataset_root,
+                info,
+                declaration,
+                feature_name,
+                episode_index,
+                episode_metadata,
+            )
+            if path is None or not path.is_file():
                 errors.append(f"video:{feature_name}:missing")
                 continue
+            start = _optional_float(episode_metadata.get(f"videos/{feature_name}/from_timestamp"))
+            end = _optional_float(episode_metadata.get(f"videos/{feature_name}/to_timestamp"))
             try:
                 import av
 
-                with av.open(str(paths[0])) as container:
-                    has_frames = any(True for _frame in container.decode(video=0))
-                if not has_frames:
+                with av.open(str(path)) as container:
+                    stream = container.streams.video[0]
+                    if start is not None:
+                        if stream.time_base is None:
+                            raise ValueError("video stream has no time base")
+                        container.seek(int(start / float(stream.time_base)), stream=stream, backward=True)
+                    timestamps = []
+                    for frame in container.decode(stream):
+                        timestamp = _frame_timestamp(frame)
+                        if start is not None and timestamp is not None and timestamp + 1e-6 < start:
+                            continue
+                        if end is not None and timestamp is not None and timestamp >= end - 1e-6:
+                            break
+                        timestamps.append(timestamp)
+                if not timestamps:
                     errors.append(f"video:{feature_name}:empty")
+                    continue
+                duration = (
+                    end - start
+                    if start is not None and end is not None
+                    else _timestamp_duration(timestamps, float(info.get("fps", 0)))
+                )
+                observations.append(
+                    VideoObservation(
+                        feature_name=feature_name,
+                        relative_path=path.relative_to(dataset_root).as_posix(),
+                        frame_count=len(timestamps),
+                        duration_seconds=duration,
+                        window_start_seconds=start,
+                        window_end_seconds=end,
+                    )
+                )
             except Exception as exc:
                 errors.append(f"video:{feature_name}:{type(exc).__name__}")
-        return errors
+        return tuple(observations), errors
+
+    @staticmethod
+    def _video_path(
+        dataset_root: Path,
+        info: dict[str, Any],
+        declaration: dict[str, Any],
+        feature_name: str,
+        episode_index: int,
+        episode_metadata: dict[str, Any],
+    ) -> Path | None:
+        chunk_value = episode_metadata.get(f"videos/{feature_name}/chunk_index")
+        file_value = episode_metadata.get(f"videos/{feature_name}/file_index")
+        template = str(
+            declaration.get("videos_path")
+            or declaration.get("video_path")
+            or info.get("video_path", "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4")
+        )
+        if chunk_value is not None and file_value is not None:
+            relative_path = template.format(
+                chunk_index=int(chunk_value),
+                file_index=int(file_value),
+                video_key=feature_name,
+                episode_chunk=episode_index // max(int(info.get("chunks_size", 1000)), 1),
+                episode_index=episode_index,
+            )
+            return dataset_root / relative_path
+        if "{episode_index" in template:
+            relative_path = template.format(
+                chunk_index=episode_index,
+                file_index=0,
+                video_key=feature_name,
+                episode_chunk=episode_index // max(int(info.get("chunks_size", 1000)), 1),
+                episode_index=episode_index,
+            )
+            return dataset_root / relative_path
+        return None
 
 
 class HDF5SourceAdapter:
@@ -268,6 +379,12 @@ class HDF5SourceAdapter:
             metadata=metadata,
             task_labels=(task,) if task else (),
             calibration=calibration,
+            calibration_file=(
+                next((file for file in files if file.relative_path == profile.calibration.relative_path), None)
+                if profile.calibration
+                else None
+            ),
+            video_observations=(),
             readback_errors=tuple(readback_errors),
         )
 
@@ -349,3 +466,20 @@ def _json_value(value: Any) -> Any:
     if isinstance(value, np.generic):
         return value.item()
     return value
+
+
+def _optional_float(value: Any) -> float | None:
+    return float(value) if value is not None else None
+
+
+def _frame_timestamp(frame: Any) -> float | None:
+    if frame.pts is None:
+        return None
+    return float(frame.pts * frame.time_base)
+
+
+def _timestamp_duration(timestamps: list[float | None], fps: float) -> float:
+    finite_timestamps = [timestamp for timestamp in timestamps if timestamp is not None]
+    if len(finite_timestamps) > 1:
+        return finite_timestamps[-1] - finite_timestamps[0]
+    return 1.0 / fps if fps > 0 and finite_timestamps else 0.0

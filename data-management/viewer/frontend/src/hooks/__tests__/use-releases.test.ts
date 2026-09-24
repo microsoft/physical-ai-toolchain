@@ -37,6 +37,8 @@ const workflow: ReleaseWorkflowResponse = {
   state: 'queued',
   eligibleEpisodes: [{ episodeIndex: 2, decisionId: 'decision-1', qualityRunId: 'quality-1' }],
   excludedEpisodes: [],
+  rejectedEpisodes: [],
+  eligibilityFingerprint: 'f'.repeat(64),
   conflict: null,
   verification: { manifestPath: null, checksumsPath: null, verified: false },
 }

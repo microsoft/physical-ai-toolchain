@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from src.api.models.releases import (
     OperationalEvent,
+    QualityEvidenceReference,
     ReleaseFile,
     ReleaseFormat,
     ReleaseManifest,
@@ -177,11 +178,29 @@ def test_given_equivalent_manifests_when_serialized_then_canonical_bytes_match(
         "actor_id": "localuser",
         "source_provenance": (source_identity,),
         "accepted_decision_ids": ("decision-01",),
+        "rejected_decision_ids": (),
+        "excluded_episode_indices": (),
         "episode_index_mapping": {7: 0},
         "source_formats": (ReleaseFormat(name="lerobot", version="3.0"),),
         "target_format": ReleaseFormat(name="lerobot", version="3.0"),
+        "candidate_count": 1,
+        "accepted_count": 1,
+        "rejected_count": 0,
+        "excluded_count": 0,
+        "nonincluded_count": 0,
         "episode_count": 1,
         "frame_count": 42,
+        "quality_evidence": (
+            QualityEvidenceReference(
+                source_episode_index=7,
+                release_episode_index=0,
+                decision_id="decision-01",
+                quality_run_id="quality-01",
+                quality_report_path="metadata/quality/quality-01.json",
+                check_set_version="1.0.0",
+                required_outcome=QualityOutcome.PASS,
+            ),
+        ),
         "files": (ReleaseFile(path="data/file.parquet", size_bytes=42, sha256="c" * 64),),
     }
     first = ReleaseManifest(

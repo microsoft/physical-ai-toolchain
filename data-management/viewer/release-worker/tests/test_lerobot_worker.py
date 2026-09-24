@@ -47,8 +47,10 @@ def test_write_v3_uses_native_lifecycle_and_reads_back_all_episodes(tmp_path: Pa
     assert result.accepted_decision_ids == ("decision-5", "decision-9")
     assert result.readback.episode_count == 2
     assert result.readback.frame_count == 6
+    assert result.readback.episode_frame_counts == {0: 3, 1: 3}
     assert set(result.readback.features) >= {"observation.state", "action"}
     assert result.readback.sampled_visual_frames == 0
+    assert result.readback.visual_samples == ()
 
 
 def test_copy_v3_streams_source_video_without_random_access(tmp_path: Path, monkeypatch) -> None:
@@ -113,7 +115,10 @@ def test_copy_v3_streams_source_video_without_random_access(tmp_path: Path, monk
     # Assert
     assert result.episode_index_mapping == {0: 0}
     assert result.readback.frame_count == 10
+    assert result.readback.episode_frame_counts == {0: 10}
     assert result.readback.sampled_visual_frames == 3
+    assert tuple(sample.frame_index for sample in result.readback.visual_samples) == (0, 5, 9)
+    assert {sample.feature_name for sample in result.readback.visual_samples} == {"observation.images.camera"}
     assert target_video_reads == 3
     released = LeRobotDataset(repo_id="local/release", root=tmp_path / "release", download_videos=False)
     assert released.features["observation.images.camera"]["info"]["video.codec"] == "h264"

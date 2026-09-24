@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from training.il.scripts.lerobot._env import has_blob_urls
+from training.il.scripts.lerobot.release_verifier import VerifiedReleaseSummary, verify_release
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
@@ -72,6 +73,23 @@ SYSTEM_METRICS_INTERVAL = 30
 _PROCESS_GROUP_KILL_GRACE_S = 15
 
 _VALID_MIXED_PRECISION = {"no", "fp16", "bf16"}
+_VALID_DATASET_TRUST = {"unverified", "verified"}
+
+
+def _verify_dataset_release() -> tuple[Path | None, VerifiedReleaseSummary | None]:
+    """Resolve dataset trust mode and verify an immutable release before use."""
+    trust = os.environ.get("DATASET_TRUST", "unverified").strip().lower()
+    if trust not in _VALID_DATASET_TRUST:
+        raise RuntimeError(f"DATASET_TRUST must be one of {sorted(_VALID_DATASET_TRUST)} (got {trust!r})")
+    raw_path = os.environ.get("VERIFIED_RELEASE_PATH", "").strip()
+    if trust == "unverified":
+        if raw_path:
+            raise RuntimeError("VERIFIED_RELEASE_PATH requires DATASET_TRUST=verified")
+        return None, None
+    if not raw_path:
+        raise RuntimeError("DATASET_TRUST=verified requires VERIFIED_RELEASE_PATH")
+    release_path = Path(raw_path).resolve()
+    return release_path, verify_release(release_path, expected_target_format=("lerobot", "3.0"))
 
 
 def _sync_checkpoint_output(output_dir: Path) -> None:
@@ -116,8 +134,8 @@ def _detect_num_gpus() -> int:
     """
     try:
         import torch
-    except ImportError:
-        print("[GPU-DETECT] torch not importable; assuming 1 GPU (single-process launch)")
+    except Exception as exc:
+        print(f"[GPU-DETECT] torch unavailable ({exc}); assuming 1 GPU (single-process launch)")
         return 1
 
     count = torch.cuda.device_count()
@@ -315,7 +333,12 @@ def _build_train_params(num_gpus: int) -> dict[str, str]:
     return params
 
 
-def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus: int = 1) -> int:
+def run_training(
+    cmd: list[str],
+    source: str = "osmo-lerobot-training",
+    num_gpus: int = 1,
+    verified_release: VerifiedReleaseSummary | None = None,
+) -> int:
     """Execute lerobot-train and log metrics to MLflow.
 
     Args:
@@ -365,6 +388,20 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
             lineage_tags["dataset.source"] = "azure-blob"
         elif os.environ.get("DATASET_REPO_ID"):
             lineage_tags["dataset.source"] = "huggingface"
+        if verified_release is not None:
+            lineage_tags.update(
+                {
+                    "dataset.source": "viewer-release",
+                    "dataset.trust": "verified",
+                    "dataset.release_id": verified_release.release_id,
+                    "dataset.manifest_digest": verified_release.manifest_evidence_digest,
+                    "dataset.target_format": (
+                        f"{verified_release.target_format_name}/{verified_release.target_format_version}"
+                    ),
+                }
+            )
+        else:
+            lineage_tags["dataset.trust"] = "unverified"
         if os.environ.get("REGISTER_CHECKPOINT"):
             lineage_tags["model.register_name"] = os.environ["REGISTER_CHECKPOINT"]
         warm_start_source = os.environ.get("INIT_FROM_POLICY_MODEL_SOURCE", "")
@@ -482,6 +519,8 @@ def main() -> int:
     from training.il.scripts.lerobot.bootstrap import authenticate_huggingface, bootstrap_mlflow
     from training.il.scripts.lerobot.checkpoints import register_final_checkpoint
 
+    release_path, verified_release = _verify_dataset_release()
+
     # Bootstrap
     hf_user = authenticate_huggingface()
 
@@ -515,6 +554,8 @@ def main() -> int:
         dataset_repo_id = os.environ.get("DATASET_REPO_ID", "")
         if dataset_repo_id:
             cmd.append(f"--dataset.repo_id={dataset_repo_id}")
+    if release_path is not None and "--dataset.root" not in cli_text:
+        cmd.append(f"--dataset.root={release_path}")
 
     # lerobot rejects --policy.path together with --policy.type; when warm-starting
     # (--policy.path is present) the policy type is read from the loaded config.json.
@@ -586,7 +627,10 @@ def main() -> int:
         print("[ACCELERATE] Single-GPU run: launching lerobot-train directly")
 
     # Run training
-    exit_code = run_training(cmd, source=source, num_gpus=num_gpus)
+    if verified_release is None:
+        exit_code = run_training(cmd, source=source, num_gpus=num_gpus)
+    else:
+        exit_code = run_training(cmd, source=source, num_gpus=num_gpus, verified_release=verified_release)
 
     # Post-training checkpoint registration
     if exit_code == EXIT_SUCCESS and os.environ.get("REGISTER_CHECKPOINT"):

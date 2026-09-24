@@ -1,6 +1,8 @@
+import { RefreshCw } from 'lucide-react'
 import { useEffect } from 'react'
 
 import { AnnotationWorkspace } from '@/components/annotation-workspace/AnnotationWorkspace'
+import { Button } from '@/components/ui/button'
 import { useEpisode } from '@/hooks/use-datasets'
 import { useEpisodeStore } from '@/stores'
 
@@ -23,7 +25,13 @@ export function DataviewerEpisodeViewer({
   canGoNextEpisode,
   onNextEpisode,
 }: DataviewerEpisodeViewerProps) {
-  const { data: episode, isLoading, error } = useEpisode(datasetId, episodeIndex)
+  const {
+    data: episode,
+    isLoading,
+    isFetching,
+    error,
+    refetch,
+  } = useEpisode(datasetId, episodeIndex)
   const setCurrentEpisode = useEpisodeStore((state) => state.setCurrentEpisode)
 
   useEffect(() => {
@@ -42,8 +50,12 @@ export function DataviewerEpisodeViewer({
 
   if (error) {
     return (
-      <div className="flex h-full items-center justify-center">
+      <div className="flex h-full flex-col items-center justify-center gap-3">
         <div className="text-red-500">Error loading episode: {error.message}</div>
+        <Button variant="outline" disabled={isFetching} onClick={() => void refetch()}>
+          <RefreshCw className={isFetching ? 'animate-spin' : undefined} />
+          Retry
+        </Button>
       </div>
     )
   }

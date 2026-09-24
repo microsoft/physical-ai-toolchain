@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DataviewerEpisodeViewer } from '../DataviewerEpisodeViewer'
@@ -64,17 +65,22 @@ describe('DataviewerEpisodeViewer', () => {
     expect(screen.queryByTestId('annotation-workspace')).not.toBeInTheDocument()
   })
 
-  it('surfaces the error message when the fetch fails', () => {
+  it('surfaces the error message and retries when the fetch fails', async () => {
+    const user = userEvent.setup()
+    const refetch = vi.fn()
     vi.mocked(useEpisode).mockReturnValue({
       data: undefined,
       isLoading: false,
       error: new Error('boom'),
+      refetch,
     } as unknown as ReturnType<typeof useEpisode>)
 
     render(<DataviewerEpisodeViewer {...baseProps} />)
 
     expect(screen.getByText('Error loading episode: boom')).toBeInTheDocument()
     expect(screen.queryByTestId('annotation-workspace')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(refetch).toHaveBeenCalledOnce()
   })
 
   it('renders the no-data placeholder when the episode is missing', () => {

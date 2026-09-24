@@ -11,8 +11,14 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from src.api.models.release_workflow import ReleaseEpisodeSelection, ReleaseSubmitRequest
-from src.api.models.releases import ReleaseFormat, ReleaseManifest
+from src.api.models.release_workflow import (
+    EligibilityCandidate,
+    EligibilitySnapshot,
+    ReleaseEpisodeSelection,
+    ReleaseJobRequest,
+    ReleaseSubmitRequest,
+)
+from src.api.models.releases import PackageQualityReport, QualityEvidenceReference, ReleaseFormat, ReleaseManifest
 from src.api.models.reviews import (
     AnnotationRevision,
     EditRevision,
@@ -28,7 +34,7 @@ from src.api.release.jobs import JobConflictError, JobState, ReleaseJobStore
 from src.api.release.lerobot import ReleaseReadback, ReleaseWriteResult
 from src.api.release.local_publisher import LocalReleasePublisher
 from src.api.release.processor import ReleaseAssembly, ReleasePackageAssembler, ReleaseProcessor
-from src.api.services.release_workflow_service import ReleaseWorkflowService
+from src.api.services.release_workflow_service import NoEligibleEpisodesError, ReleaseWorkflowService
 from src.api.services.review_service import ReviewService
 from src.api.storage.review_local import LocalReviewRepository
 from src.api.storage.source_workspace import LocalSourceWorkspace
@@ -51,6 +57,37 @@ def _source_identity(
     )
 
 
+def _quality_reference(decision: ReviewDecision, release_episode_index: int = 0) -> QualityEvidenceReference:
+    return QualityEvidenceReference(
+        source_episode_index=decision.source.episode_index,
+        release_episode_index=release_episode_index,
+        decision_id=decision.decision_id,
+        quality_run_id=decision.quality_run_id,
+        quality_report_path=f"metadata/quality/{decision.quality_run_id}.json",
+        check_set_version="1.0.0",
+        required_outcome=QualityOutcome.PASS,
+    )
+
+
+def _package_quality(
+    target_format: ReleaseFormat,
+    *,
+    frame_count: int,
+    features: tuple[str, ...],
+) -> PackageQualityReport:
+    return PackageQualityReport(
+        target_format=target_format,
+        episode_count=1,
+        frame_count=frame_count,
+        episode_frame_counts={0: frame_count},
+        features=features,
+        nonvisual_rows_read_back=frame_count,
+        visual_samples=(),
+        inventory_verified=True,
+        checksums_verified=True,
+    )
+
+
 async def _persist_evidence(
     repository: LocalReviewRepository,
     *,
@@ -59,6 +96,7 @@ async def _persist_evidence(
     suffix: str = "1",
     source_format: str = "lerobot",
     format_version: str = "3.0",
+    decision_value: ReviewDecisionValue = ReviewDecisionValue.ACCEPT,
 ) -> ReviewDecision:
     source = _source_identity(
         episode_index,
@@ -99,7 +137,7 @@ async def _persist_evidence(
     )
     decision = ReviewDecision(
         decision_id=f"decision-{suffix}",
-        decision=ReviewDecisionValue.ACCEPT,
+        decision=decision_value,
         reason_codes=("reviewed",),
         actor_id="reviewer",
         created_at=created_at,
@@ -115,11 +153,63 @@ async def _persist_evidence(
     return decision
 
 
+async def test_given_mixed_dataset_candidates_when_submitted_then_job_persists_accepted_snapshot_only(
+    tmp_path: Path,
+) -> None:
+    # Arrange
+    repository = LocalReviewRepository(tmp_path / "release", source_roots=(tmp_path / "source",))
+    accepted = await _persist_evidence(repository, episode_index=0, suffix="accepted")
+    rejected = await _persist_evidence(
+        repository,
+        episode_index=1,
+        suffix="rejected",
+        decision_value=ReviewDecisionValue.REJECT,
+    )
+
+    async def resolve_current(source: SourceIdentity) -> SourceIdentity:
+        return source
+
+    async def resolve_candidates(_dataset_id: str) -> tuple[int, ...]:
+        return (0, 1, 2)
+
+    jobs = ReleaseJobStore(tmp_path / "jobs")
+    service = ReleaseWorkflowService(repository, jobs, resolve_current, resolve_candidates)
+    request = ReleaseSubmitRequest(
+        release_id="release-1",
+        dataset_id="dataset-1",
+        actor_id="publisher",
+        reason="approved training set",
+        destination_kind="local",
+        idempotency_key="request-1",
+        target_format=ReleaseFormat(name="lerobot", version="3.0"),
+        episodes=(),
+    )
+
+    # Act
+    response = await service.submit(request)
+    persisted = ReleaseJobRequest.model_validate(jobs.get(response.job_id).request)
+
+    # Assert
+    assert persisted.episodes == (ReleaseEpisodeSelection(episode_index=0, decision_id=accepted.decision_id),)
+    assert persisted.eligibility_snapshot.eligibility_fingerprint == response.eligibility_fingerprint
+    assert [candidate.disposition for candidate in persisted.eligibility_snapshot.candidates] == [
+        "accepted",
+        "rejected",
+        "excluded",
+    ]
+    assert persisted.eligibility_snapshot.candidates[1].decision_id == rejected.decision_id
+    assert persisted.eligibility_snapshot.candidates[2].reason_codes == ("unreviewed",)
+
+    await _persist_evidence(repository, episode_index=2, suffix="new-review")
+    with pytest.raises(JobConflictError):
+        await service.submit(request)
+
+
 @pytest.mark.parametrize(
     ("passing", "current_digest", "expected_reason"),
     [
-        (False, "a" * 64, "quality-required-check-failed"),
-        (True, "c" * 64, "source-identity-changed"),
+        (False, "a" * 64, "failed-quality"),
+        (True, "c" * 64, "stale-source"),
     ],
 )
 async def test_given_ineligible_evidence_when_evaluated_then_episode_is_excluded(
@@ -152,6 +242,40 @@ async def test_given_ineligible_evidence_when_evaluated_then_episode_is_excluded
 
     # Assert
     assert result.excluded_episodes[0].reason_codes == (expected_reason,)
+    with pytest.raises(NoEligibleEpisodesError):
+        await service.submit(request)
+
+
+async def test_given_duplicate_dataset_candidates_when_evaluated_then_inventory_is_rejected(tmp_path: Path) -> None:
+    # Arrange
+    repository = LocalReviewRepository(tmp_path / "release", source_roots=(tmp_path / "source",))
+
+    async def resolve_current(source: SourceIdentity) -> SourceIdentity:
+        return source
+
+    async def resolve_candidates(_dataset_id: str) -> tuple[int, ...]:
+        return (0, 0)
+
+    service = ReleaseWorkflowService(
+        repository,
+        ReleaseJobStore(tmp_path / "jobs"),
+        resolve_current,
+        resolve_candidates,
+    )
+    request = ReleaseSubmitRequest(
+        release_id="release-1",
+        dataset_id="dataset-1",
+        actor_id="publisher",
+        reason="approved training set",
+        destination_kind="local",
+        idempotency_key="request-1",
+        target_format=ReleaseFormat(name="lerobot", version="3.0"),
+        episodes=(ReleaseEpisodeSelection(episode_index=0, decision_id="decision-1"),),
+    )
+
+    # Act and assert
+    with pytest.raises(ValueError, match="duplicate episodes"):
+        await service.evaluate(request)
 
 
 async def test_given_eligible_request_when_submitted_reordered_and_cancelled_then_job_is_durable_and_idempotent(
@@ -214,23 +338,39 @@ async def test_given_queued_release_when_processor_starts_then_verified_package_
     ) -> ReleaseAssembly:
         staging_root.mkdir(parents=True)
         (staging_root / "data.bin").write_bytes(b"release-data")
+        quality_report = await repository.get_quality_report(decision.quality_run_id)
+        assert quality_report is not None
         manifest = ReleaseManifest(
             release_id=request.release_id,
             created_at=datetime(2026, 9, 23, tzinfo=UTC),
             actor_id=request.actor_id,
             source_provenance=(decision.source,),
             accepted_decision_ids=(decision.decision_id,),
+            rejected_decision_ids=(),
+            excluded_episode_indices=(),
             episode_index_mapping={0: 0},
             source_formats=(ReleaseFormat(name="lerobot", version="3.0"),),
             target_format=request.target_format,
             adapter_versions={"lerobot": "0.6.1"},
             tool_versions={"dataviewer": "0.1.0"},
             feature_schema={},
+            candidate_count=1,
+            accepted_count=1,
+            rejected_count=0,
+            excluded_count=0,
+            nonincluded_count=0,
             episode_count=1,
             frame_count=1,
+            quality_evidence=(_quality_reference(decision),),
             files=(),
         )
-        return ReleaseAssembly(manifest=manifest, accepted=(decision,), rejected=())
+        return ReleaseAssembly(
+            manifest=manifest,
+            accepted=(decision,),
+            rejected=(),
+            quality_reports=(quality_report,),
+            package_quality=_package_quality(request.target_format, frame_count=1, features=()),
+        )
 
     jobs = ReleaseJobStore(tmp_path / "jobs")
     service = ReleaseWorkflowService(repository, jobs, resolve_current)
@@ -304,6 +444,12 @@ async def test_given_lerobot_source_when_assembled_then_worker_receives_complete
     )
     repository = LocalReviewRepository(tmp_path / "review", source_roots=(tmp_path / "source",))
     decision = await _persist_evidence(repository)
+    rejected = await _persist_evidence(
+        repository,
+        episode_index=1,
+        suffix="rejected",
+        decision_value=ReviewDecisionValue.REJECT,
+    )
     worker = MagicMock()
 
     def write_v3(**kwargs):
@@ -316,6 +462,7 @@ async def test_given_lerobot_source_when_assembled_then_worker_receives_complete
             readback=ReleaseReadback(
                 episode_count=1,
                 frame_count=2,
+                episode_frame_counts={0: 2},
                 features=("action", "observation.state"),
                 sampled_visual_frames=0,
             ),
@@ -327,7 +474,7 @@ async def test_given_lerobot_source_when_assembled_then_worker_receives_complete
         LocalSourceWorkspace(tmp_path / "source"),
         worker=worker,
     )
-    request = ReleaseSubmitRequest(
+    request = ReleaseJobRequest(
         release_id="release-1",
         dataset_id="dataset-1",
         actor_id="publisher",
@@ -336,6 +483,34 @@ async def test_given_lerobot_source_when_assembled_then_worker_receives_complete
         idempotency_key="request-1",
         target_format=ReleaseFormat(name="lerobot", version="3.0"),
         episodes=(ReleaseEpisodeSelection(episode_index=0, decision_id=decision.decision_id),),
+        eligibility_snapshot=EligibilitySnapshot(
+            dataset_id="dataset-1",
+            candidates=(
+                EligibilityCandidate(
+                    episode_index=0,
+                    disposition="accepted",
+                    reason_codes=(),
+                    decision_id=decision.decision_id,
+                    quality_run_id=decision.quality_run_id,
+                    source=decision.source,
+                ),
+                EligibilityCandidate(
+                    episode_index=1,
+                    disposition="rejected",
+                    reason_codes=("rejected",),
+                    review_reason_codes=rejected.reason_codes,
+                    decision_id=rejected.decision_id,
+                    quality_run_id=rejected.quality_run_id,
+                    source=rejected.source,
+                ),
+                EligibilityCandidate(
+                    episode_index=2,
+                    disposition="excluded",
+                    reason_codes=("unreviewed",),
+                ),
+            ),
+            eligibility_fingerprint="f" * 64,
+        ),
     )
 
     # Act
@@ -347,6 +522,13 @@ async def test_given_lerobot_source_when_assembled_then_worker_receives_complete
     assert episode.frames[1]["observation.state"].tolist() == [3.0, 4.0]
     assert assembly.manifest.frame_count == 2
     assert assembly.accepted == (decision,)
+    assert assembly.rejected == (rejected,)
+    assert tuple(candidate.episode_index for candidate in assembly.excluded) == (2,)
+    assert assembly.manifest.candidate_count == 3
+    assert assembly.manifest.nonincluded_count == 2
+    assert tuple(report.run_id for report in assembly.quality_reports) == (decision.quality_run_id,)
+    assert assembly.manifest.quality_evidence == (_quality_reference(decision),)
+    assert assembly.package_quality.nonvisual_rows_read_back == 2
 
 
 async def test_given_hdf5_source_when_assembled_then_worker_receives_visual_frames(tmp_path: Path) -> None:
@@ -377,6 +559,7 @@ async def test_given_hdf5_source_when_assembled_then_worker_receives_visual_fram
             readback=ReleaseReadback(
                 episode_count=1,
                 frame_count=2,
+                episode_frame_counts={0: 2},
                 features=("action", "observation.images.cam0", "observation.state"),
                 sampled_visual_frames=2,
             ),
@@ -388,7 +571,7 @@ async def test_given_hdf5_source_when_assembled_then_worker_receives_visual_fram
         LocalSourceWorkspace(tmp_path / "source"),
         worker=worker,
     )
-    request = ReleaseSubmitRequest(
+    request = ReleaseJobRequest(
         release_id="release-1",
         dataset_id="dataset-1",
         actor_id="publisher",
@@ -397,6 +580,20 @@ async def test_given_hdf5_source_when_assembled_then_worker_receives_visual_fram
         idempotency_key="request-1",
         target_format=ReleaseFormat(name="lerobot", version="3.0"),
         episodes=(ReleaseEpisodeSelection(episode_index=0, decision_id=decision.decision_id),),
+        eligibility_snapshot=EligibilitySnapshot(
+            dataset_id="dataset-1",
+            candidates=(
+                EligibilityCandidate(
+                    episode_index=0,
+                    disposition="accepted",
+                    reason_codes=(),
+                    decision_id=decision.decision_id,
+                    quality_run_id=decision.quality_run_id,
+                    source=decision.source,
+                ),
+            ),
+            eligibility_fingerprint="f" * 64,
+        ),
     )
 
     # Act
@@ -407,3 +604,4 @@ async def test_given_hdf5_source_when_assembled_then_worker_receives_visual_fram
     assert episode.frames[1]["observation.images.cam0"].shape == (2, 2, 3)
     assert worker.write_v3.call_args.kwargs["features"]["observation.images.cam0"]["dtype"] == "video"
     assert assembly.manifest.source_formats == (ReleaseFormat(name="hdf5", version="1.0"),)
+    assert tuple(report.run_id for report in assembly.quality_reports) == (decision.quality_run_id,)

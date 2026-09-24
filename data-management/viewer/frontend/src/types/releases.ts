@@ -38,11 +38,16 @@ export interface EligibleReleaseEpisode {
 export interface ExcludedReleaseEpisode {
   episodeIndex: number
   reasonCodes: string[]
+  decisionId?: string | null
+  qualityRunId?: string | null
+  failedCheckIds?: string[]
 }
 
 export interface ReleaseEligibility {
   eligibleEpisodes: EligibleReleaseEpisode[]
   excludedEpisodes: ExcludedReleaseEpisode[]
+  rejectedEpisodes: ExcludedReleaseEpisode[]
+  eligibilityFingerprint: string
 }
 
 export interface ReleaseVerification {

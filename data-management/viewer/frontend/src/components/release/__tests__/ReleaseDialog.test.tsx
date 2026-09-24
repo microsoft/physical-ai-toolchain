@@ -39,6 +39,8 @@ const workflow: ReleaseWorkflowResponse = {
   state: 'running',
   eligibleEpisodes: [{ episodeIndex: 2, decisionId: 'decision-1', qualityRunId: 'quality-1' }],
   excludedEpisodes: [],
+  rejectedEpisodes: [],
+  eligibilityFingerprint: 'f'.repeat(64),
   conflict: null,
   verification: { manifestPath: null, checksumsPath: null, verified: false },
 }
@@ -51,8 +53,22 @@ beforeEach(() => {
   vi.clearAllMocks()
   window.localStorage.clear()
   vi.mocked(useReleaseEligibility).mockReturnValue({
-    data: { eligibleEpisodes: workflow.eligibleEpisodes, excludedEpisodes: [] },
+    data: {
+      eligibleEpisodes: workflow.eligibleEpisodes,
+      excludedEpisodes: [],
+      rejectedEpisodes: [],
+      eligibilityFingerprint: workflow.eligibilityFingerprint,
+    },
     isPending: false,
+    isFetching: false,
+    refetch: vi.fn().mockResolvedValue({
+      data: {
+        eligibleEpisodes: workflow.eligibleEpisodes,
+        excludedEpisodes: [],
+        rejectedEpisodes: [],
+        eligibilityFingerprint: workflow.eligibilityFingerprint,
+      },
+    }),
     error: null,
   } as unknown as ReturnType<typeof useReleaseEligibility>)
   vi.mocked(useSubmitRelease).mockReturnValue(
@@ -88,7 +104,7 @@ describe('ReleaseDialog', () => {
       />,
     )
 
-    expect(screen.getByText(/episode 2 is eligible/i)).toBeInTheDocument()
+    expect(screen.getByText(/1 included/i)).toBeInTheDocument()
     await user.type(screen.getByLabelText(/release id/i), 'release-1')
     await user.type(screen.getByLabelText(/reason/i), 'Approved training set')
     await user.click(screen.getByRole('button', { name: /create release/i }))
@@ -99,7 +115,7 @@ describe('ReleaseDialog', () => {
         actorId: 'reviewer',
         destinationKind: 'local',
         targetFormat: { name: 'lerobot', version: '3.0' },
-        episodes: [{ episodeIndex: 2, decisionId: 'decision-1' }],
+        episodes: [],
       }),
     )
     expect(screen.queryByLabelText(/path|prefix/i)).not.toBeInTheDocument()
@@ -110,8 +126,12 @@ describe('ReleaseDialog', () => {
       data: {
         eligibleEpisodes: [],
         excludedEpisodes: [{ episodeIndex: 2, reasonCodes: ['quality-required-check-failed'] }],
+        rejectedEpisodes: [],
+        eligibilityFingerprint: 'e'.repeat(64),
       },
       isPending: false,
+      isFetching: false,
+      refetch: vi.fn(),
       error: null,
     } as unknown as ReturnType<typeof useReleaseEligibility>)
 
@@ -135,8 +155,12 @@ describe('ReleaseDialog', () => {
       data: {
         eligibleEpisodes: [],
         excludedEpisodes: [{ episodeIndex: 2, reasonCodes: ['source-identity-changed'] }],
+        rejectedEpisodes: [],
+        eligibilityFingerprint: 'e'.repeat(64),
       },
       isPending: false,
+      isFetching: false,
+      refetch: vi.fn(),
       error: null,
     } as unknown as ReturnType<typeof useReleaseEligibility>)
 
@@ -246,6 +270,40 @@ describe('ReleaseDialog', () => {
     await user.type(screen.getByLabelText(/reason/i), 'Approved training set')
 
     expect(vi.mocked(useReleaseEligibility).mock.calls.at(-1)?.[0]).toBe(initialRequest)
+    expect(initialRequest?.episodes).toEqual([])
+  })
+
+  it('keeps mixed accepted and rejected datasets releasable', () => {
+    vi.mocked(useReleaseEligibility).mockReturnValue({
+      data: {
+        eligibleEpisodes: workflow.eligibleEpisodes,
+        excludedEpisodes: [{ episodeIndex: 4, reasonCodes: ['unreviewed'] }],
+        rejectedEpisodes: [
+          { episodeIndex: 3, reasonCodes: ['rejected'], decisionId: 'decision-3' },
+        ],
+        eligibilityFingerprint: 'a'.repeat(64),
+      },
+      isPending: false,
+      isFetching: false,
+      refetch: vi.fn(),
+      error: null,
+    } as unknown as ReturnType<typeof useReleaseEligibility>)
+
+    renderWithQuery(
+      <ReleaseDialog
+        open
+        onOpenChange={vi.fn()}
+        datasetId="dataset-1"
+        episodeIndex={2}
+        actorId="reviewer"
+        decision={decision}
+      />,
+    )
+
+    expect(screen.getByText(/1 included/i)).toBeVisible()
+    expect(screen.getByText(/2 excluded/i)).toBeVisible()
+    expect(screen.getByText(/episode 3.*rejected/i)).toBeVisible()
+    expect(screen.getByText(/episode 4.*unreviewed/i)).toBeVisible()
   })
 
   it('clears terminal job persistence and can start another release', async () => {

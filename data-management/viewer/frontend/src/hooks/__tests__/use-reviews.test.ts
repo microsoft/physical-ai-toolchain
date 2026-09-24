@@ -9,7 +9,12 @@ import {
   useRunQualityReview,
 } from '@/hooks/use-reviews'
 import { renderHookWithProviders } from '@/test-utils/render'
-import type { EpisodeAnnotation, EpisodeEditOperations, QualityReport } from '@/types'
+import type {
+  EpisodeAnnotation,
+  EpisodeEditOperations,
+  QualityReport,
+  ReviewDecision,
+} from '@/types'
 
 const api = vi.hoisted(() => ({
   createAnnotationRevision: vi.fn(),
@@ -149,6 +154,44 @@ describe('review hooks', () => {
         editRevisionId: expect.stringMatching(/^edit-/),
         qualityRunId: 'quality-1',
       }),
+    )
+  })
+
+  it('links new evidence to the latest review decision revisions', async () => {
+    const annotation = { annotatorId: 'reviewer' } as EpisodeAnnotation
+    const edits: EpisodeEditOperations = { datasetId: 'dataset-1', episodeIndex: 2 }
+    const latestDecision = {
+      decisionId: 'decision-previous',
+      source,
+      annotationRevisionId: 'annotation-previous',
+      editRevisionId: 'edit-previous',
+    } as ReviewDecision
+    const { result, queryClient } = renderHookWithProviders(() => useCreateReviewDecision())
+    queryClient.setQueryData(reviewKeys.decision('dataset-1', 2), latestDecision)
+
+    act(() => {
+      result.current.mutate({
+        datasetId: 'dataset-1',
+        episodeIndex: 2,
+        actorId: 'reviewer',
+        annotation,
+        edits,
+        qualityReport,
+        decision: 'accept',
+        reasonCodes: ['evidence-reviewed'],
+      })
+    })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(api.createAnnotationRevision).toHaveBeenCalledWith(
+      'dataset-1',
+      2,
+      expect.objectContaining({ predecessorRevisionId: 'annotation-previous' }),
+    )
+    expect(api.createEditRevision).toHaveBeenCalledWith(
+      'dataset-1',
+      2,
+      expect.objectContaining({ predecessorRevisionId: 'edit-previous' }),
     )
   })
 })

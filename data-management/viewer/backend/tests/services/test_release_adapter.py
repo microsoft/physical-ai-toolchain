@@ -60,8 +60,10 @@ def test_write_v3_serializes_safe_worker_request_and_returns_readback(tmp_path: 
             "readback": {
                 "episode_count": 2,
                 "frame_count": 6,
+                "episode_frame_counts": {"0": 3, "1": 3},
                 "features": ["action", "observation.state"],
                 "sampled_visual_frames": 0,
+                "visual_samples": [],
             },
         }
 
@@ -81,6 +83,7 @@ def test_write_v3_serializes_safe_worker_request_and_returns_readback(tmp_path: 
     assert result.accepted_decision_ids == ("decision-5", "decision-9")
     assert result.readback.episode_count == 2
     assert result.readback.frame_count == 6
+    assert result.readback.episode_frame_counts == {0: 3, 1: 3}
     assert set(result.readback.features) >= {"observation.state", "action"}
     assert result.readback.sampled_visual_frames == 0
     assert requests[0]["operation"] == "write-v3"

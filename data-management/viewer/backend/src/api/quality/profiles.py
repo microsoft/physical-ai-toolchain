@@ -30,6 +30,7 @@ class QualityProfile(ImmutableContract):
     version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
     fps: float = Field(gt=0)
     timestamp_tolerance_seconds: float = Field(ge=0)
+    video_frame_count_tolerance: int = Field(default=1, ge=0)
     required_features: tuple[FeatureRequirement, ...]
     optional_features: tuple[FeatureRequirement, ...] = ()
     required_metadata_files: tuple[str, ...] = ()

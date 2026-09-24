@@ -19,6 +19,11 @@ export default defineConfig({
         // Leave unset for local dev (defaults to same-host backend on port 8000).
         target: process.env.VITE_API_BASE_URL || 'http://localhost:8000',
         changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('proxyRes', (response) => {
+            delete response.headers.connection
+          })
+        },
       },
     },
   },

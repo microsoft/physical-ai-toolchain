@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import uuid
 from collections.abc import Awaitable, Callable
@@ -9,16 +11,19 @@ from pathlib import Path
 
 from ..config import create_source_workspace, get_app_config
 from ..models.release_workflow import (
+    EligibilityCandidate,
+    EligibilitySnapshot,
     EligibleEpisode,
     ExcludedEpisode,
     ReleaseEligibility,
+    ReleaseJobRequest,
     ReleaseProgress,
     ReleaseSubmitRequest,
     ReleaseVerification,
     ReleaseWorkflowResponse,
 )
 from ..models.releases import canonical_json_bytes
-from ..models.reviews import ReviewDecisionValue, SourceIdentity
+from ..models.reviews import ReviewDecision, ReviewDecisionValue, SourceIdentity
 from ..quality.service import required_checks_pass
 from ..release.jobs import JobState, ReleaseJobStore
 from ..storage.review_base import ReviewRepository
@@ -26,6 +31,7 @@ from ..storage.source_workspace import resolve_source_identity
 from .review_workflow_service import get_review_repository
 
 CurrentSourceResolver = Callable[[SourceIdentity], Awaitable[SourceIdentity]]
+CandidateResolver = Callable[[str], Awaitable[tuple[int, ...]]]
 JobNotifier = Callable[[str], None]
 
 
@@ -41,11 +47,13 @@ class ReleaseWorkflowService:
         repository: ReviewRepository,
         job_store: ReleaseJobStore,
         current_source_resolver: CurrentSourceResolver,
+        candidate_resolver: CandidateResolver | None = None,
         job_notifier: JobNotifier | None = None,
     ) -> None:
         self._repository = repository
         self._jobs = job_store
         self._resolve_current_source = current_source_resolver
+        self._resolve_candidates = candidate_resolver
         self._job_notifier = job_notifier
 
     @property
@@ -63,66 +71,162 @@ class ReleaseWorkflowService:
         self._job_notifier = notifier
 
     async def evaluate(self, request: ReleaseSubmitRequest) -> ReleaseEligibility:
-        eligible: list[EligibleEpisode] = []
-        excluded: list[ExcludedEpisode] = []
-        for selection in sorted(request.episodes, key=lambda item: (item.episode_index, item.decision_id)):
+        snapshot = await self._create_snapshot(request)
+        return self._eligibility_from_snapshot(snapshot)
+
+    async def _create_snapshot(self, request: ReleaseSubmitRequest) -> EligibilitySnapshot:
+        selections = {selection.episode_index: selection for selection in request.episodes}
+        candidate_indices = (
+            await self._resolve_candidates(request.dataset_id)
+            if self._resolve_candidates is not None
+            else tuple(selections)
+        )
+        if len(candidate_indices) != len(set(candidate_indices)):
+            raise ValueError("dataset candidate inventory contains duplicate episodes")
+        unknown_selections = set(selections).difference(candidate_indices)
+        if unknown_selections:
+            raise ValueError("release selection is outside the dataset candidate scope")
+        candidates = []
+        for episode_index in sorted(candidate_indices):
+            selection = selections.get(episode_index)
             reasons: list[str] = []
-            decision = await self._repository.get_decision(selection.decision_id)
+            failed_check_ids: tuple[str, ...] = ()
+            decision = (
+                await self._repository.get_decision(selection.decision_id)
+                if selection is not None
+                else await self._latest_decision(request.dataset_id, episode_index)
+            )
             if decision is None:
-                reasons.append("decision-not-found")
-            elif (
-                decision.source.dataset_id != request.dataset_id
-                or decision.source.episode_index != selection.episode_index
-            ):
-                reasons.append("decision-source-mismatch")
-            elif decision.decision is not ReviewDecisionValue.ACCEPT:
-                reasons.append("decision-not-accepted")
+                reasons.append("unreviewed")
+            elif decision.source.dataset_id != request.dataset_id or decision.source.episode_index != episode_index:
+                reasons.append("source-mismatch")
+            elif decision.decision is ReviewDecisionValue.REJECT:
+                candidates.append(
+                    EligibilityCandidate(
+                        episode_index=episode_index,
+                        disposition="rejected",
+                        reason_codes=("rejected",),
+                        review_reason_codes=decision.reason_codes,
+                        decision_id=decision.decision_id,
+                        quality_run_id=decision.quality_run_id,
+                        source=decision.source,
+                    )
+                )
+                continue
             else:
                 annotation = await self._repository.get_annotation_revision(decision.annotation_revision_id)
                 edit = await self._repository.get_edit_revision(decision.edit_revision_id)
                 quality = await self._repository.get_quality_report(decision.quality_run_id)
                 if annotation is None or edit is None:
-                    reasons.append("review-revision-missing")
+                    reasons.append("missing-revision")
                 if quality is None:
-                    reasons.append("quality-report-missing")
+                    reasons.append("missing-quality")
                 elif quality.source != decision.source:
-                    reasons.append("quality-source-mismatch")
+                    reasons.append("source-mismatch")
                 elif not required_checks_pass(quality):
-                    reasons.append("quality-required-check-failed")
+                    reasons.append("failed-quality")
+                    failed_check_ids = tuple(
+                        check.check_id
+                        for check in quality.episode_checks
+                        if check.required and check.outcome.value != "pass"
+                    )
                 current_source = await self._resolve_current_source(decision.source)
                 if current_source != decision.source:
-                    reasons.append("source-identity-changed")
-                if not reasons:
-                    eligible.append(
-                        EligibleEpisode(
-                            episode_index=selection.episode_index,
-                            decision_id=decision.decision_id,
-                            quality_run_id=decision.quality_run_id,
-                        )
-                    )
-            if reasons:
-                excluded.append(
-                    ExcludedEpisode(
-                        episode_index=selection.episode_index,
-                        reason_codes=tuple(dict.fromkeys(reasons)),
-                    )
+                    reasons.append("stale-source")
+            candidates.append(
+                EligibilityCandidate(
+                    episode_index=episode_index,
+                    disposition="excluded" if reasons else "accepted",
+                    reason_codes=tuple(dict.fromkeys(reasons)),
+                    decision_id=decision.decision_id if decision else None,
+                    quality_run_id=decision.quality_run_id if decision else None,
+                    failed_check_ids=failed_check_ids,
+                    source=decision.source if decision else None,
                 )
-        return ReleaseEligibility(eligible_episodes=tuple(eligible), excluded_episodes=tuple(excluded))
+            )
+        payload = {
+            "schema_version": "1.0.0",
+            "dataset_id": request.dataset_id,
+            "candidates": [candidate.model_dump(mode="json", by_alias=False) for candidate in candidates],
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest()
+        return EligibilitySnapshot(
+            dataset_id=request.dataset_id,
+            candidates=tuple(candidates),
+            eligibility_fingerprint=fingerprint,
+        )
+
+    async def _latest_decision(self, dataset_id: str, episode_index: int) -> ReviewDecision | None:
+        decisions = await self._repository.list_decisions(dataset_id, episode_index)
+        return max(decisions, key=lambda value: (value.created_at, value.decision_id)) if decisions else None
+
+    @staticmethod
+    def _eligibility_from_snapshot(snapshot: EligibilitySnapshot) -> ReleaseEligibility:
+        eligible = tuple(
+            EligibleEpisode(
+                episode_index=candidate.episode_index,
+                decision_id=candidate.decision_id,
+                quality_run_id=candidate.quality_run_id,
+            )
+            for candidate in snapshot.candidates
+            if candidate.disposition == "accepted"
+            and candidate.decision_id is not None
+            and candidate.quality_run_id is not None
+            and candidate.source is not None
+        )
+        rejected = tuple(
+            ExcludedEpisode(
+                episode_index=candidate.episode_index,
+                reason_codes=candidate.reason_codes,
+                decision_id=candidate.decision_id,
+                quality_run_id=candidate.quality_run_id,
+                failed_check_ids=candidate.failed_check_ids,
+            )
+            for candidate in snapshot.candidates
+            if candidate.disposition == "rejected"
+        )
+        excluded = tuple(
+            ExcludedEpisode(
+                episode_index=candidate.episode_index,
+                reason_codes=candidate.reason_codes,
+                decision_id=candidate.decision_id,
+                quality_run_id=candidate.quality_run_id,
+                failed_check_ids=candidate.failed_check_ids,
+            )
+            for candidate in snapshot.candidates
+            if candidate.disposition == "excluded"
+        )
+        return ReleaseEligibility(
+            eligible_episodes=eligible,
+            rejected_episodes=rejected,
+            excluded_episodes=excluded,
+            eligibility_fingerprint=snapshot.eligibility_fingerprint,
+        )
 
     async def submit(self, request: ReleaseSubmitRequest) -> ReleaseWorkflowResponse:
-        eligibility = await self.evaluate(request)
+        snapshot = await self._create_snapshot(request)
+        eligibility = self._eligibility_from_snapshot(snapshot)
         if not eligibility.eligible_episodes:
             raise NoEligibleEpisodesError("Release request has no eligible episodes")
-        normalized_request = request.model_dump(mode="json", by_alias=False)
-        normalized_request["episodes"] = sorted(
-            normalized_request["episodes"],
-            key=lambda item: (item["episode_index"], item["decision_id"]),
+        request_values = request.model_dump(mode="python", by_alias=False)
+        request_values["episodes"] = tuple(
+            {
+                "episode_index": episode.episode_index,
+                "decision_id": episode.decision_id,
+            }
+            for episode in eligibility.eligible_episodes
+        )
+        normalized_request = ReleaseJobRequest(
+            **request_values,
+            eligibility_snapshot=snapshot,
         )
         job = self._jobs.submit(
             idempotency_key=request.idempotency_key,
             release_id=request.release_id,
             actor_id=request.actor_id,
-            request=normalized_request,
+            request=normalized_request.model_dump(mode="json", by_alias=False),
         )
         existing = self._read_record(job.job_id)
         if existing is not None:
@@ -133,6 +237,8 @@ class ReleaseWorkflowService:
             state=job.state,
             eligible_episodes=eligibility.eligible_episodes,
             excluded_episodes=eligibility.excluded_episodes,
+            rejected_episodes=eligibility.rejected_episodes,
+            eligibility_fingerprint=eligibility.eligibility_fingerprint,
         )
         self._write_record(response, exclusive=True)
         if self._job_notifier is not None:
@@ -266,9 +372,24 @@ def get_release_workflow_service() -> ReleaseWorkflowService:
         config = get_app_config()
         root = Path(config.dataviewer_release_root)
         source_workspace = create_source_workspace(config)
+        from .dataset_service import get_dataset_service
+
+        dataset_service = get_dataset_service()
+
+        async def resolve_candidates(dataset_id: str) -> tuple[int, ...]:
+            candidates = []
+            offset = 0
+            while True:
+                page = await dataset_service.list_episodes(dataset_id, offset=offset, limit=1000)
+                candidates.extend(episode.index for episode in page)
+                if len(page) < 1000:
+                    return tuple(candidates)
+                offset += len(page)
+
         _release_workflow_service = ReleaseWorkflowService(
             get_review_repository(),
             ReleaseJobStore(root / "release-jobs"),
             lambda source: resolve_source_identity(source_workspace, source),
+            resolve_candidates,
         )
     return _release_workflow_service

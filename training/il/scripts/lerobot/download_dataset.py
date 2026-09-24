@@ -15,6 +15,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from training.il.scripts.lerobot.release_verifier import verify_release
+
 _DOWNLOAD_MAX_CONCURRENCY = 4
 
 EXIT_SUCCESS = 0
@@ -811,6 +813,9 @@ def prepare_dataset() -> Path:
     """
     try:
         dataset_root, repo_id, urls = _parse_env_config()
+        verified_release = os.environ.get("DATASET_TRUST", "unverified").strip().lower() == "verified"
+        if verified_release and len(urls) != 1:
+            raise ValueError("Verified release mode requires exactly one Blob source")
         final = dataset_root / repo_id
         if final.exists():
             raise FileExistsError(
@@ -828,7 +833,10 @@ def prepare_dataset() -> Path:
             sources.append(download_dataset_from_url(url, str(dataset_root), idx))
 
         _populate_staged(sources, staged)
-        _postprocess_dataset(staged)
+        if verified_release:
+            verify_release(staged, expected_target_format=("lerobot", "3.0"))
+        else:
+            _postprocess_dataset(staged)
         staged.rename(final)
 
         print("\n--- Cleaning up staging directories ---")

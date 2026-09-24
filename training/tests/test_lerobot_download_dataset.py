@@ -863,6 +863,46 @@ class TestMultiBlobFlow:
         assert (tmp_path / "user" / "dataset" / "data.txt").read_text() == "x"
 
 
+class TestVerifiedReleasePreparation:
+    def test_single_release_is_verified_without_postprocessing(self, monkeypatch, tmp_path):
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "payload.bin").write_bytes(b"immutable")
+        monkeypatch.setenv("DATASET_ROOT", str(tmp_path / "datasets"))
+        monkeypatch.setenv("DATASET_REPO_ID", "release-1")
+        monkeypatch.setenv("BLOB_URLS", '["https://account.blob.core.windows.net/releases/release-1"]')
+        monkeypatch.setenv("DATASET_TRUST", "verified")
+        monkeypatch.setattr(_MOD, "download_dataset_from_url", MagicMock(return_value=source))
+        verify = MagicMock()
+        postprocess = MagicMock()
+        monkeypatch.setattr(_MOD, "verify_release", verify)
+        monkeypatch.setattr(_MOD, "_postprocess_dataset", postprocess)
+
+        result = _MOD.prepare_dataset()
+
+        assert (result / "payload.bin").read_bytes() == b"immutable"
+        verify.assert_called_once_with(
+            result.with_name(f".{result.name}.new"),
+            expected_target_format=("lerobot", "3.0"),
+        )
+        postprocess.assert_not_called()
+
+    def test_multiple_verified_release_sources_are_rejected(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DATASET_ROOT", str(tmp_path))
+        monkeypatch.setenv("DATASET_REPO_ID", "release")
+        monkeypatch.setenv(
+            "BLOB_URLS",
+            '["https://account.blob.core.windows.net/releases/one", '
+            '"https://account.blob.core.windows.net/releases/two"]',
+        )
+        monkeypatch.setenv("DATASET_TRUST", "verified")
+
+        with pytest.raises(SystemExit) as exc_info:
+            _MOD.prepare_dataset()
+
+        assert exc_info.value.code == _MOD.EXIT_FAILURE
+
+
 class TestParseEnvConfig:
     """Direct tests for `_parse_env_config` covering the tightened payload validation.
 

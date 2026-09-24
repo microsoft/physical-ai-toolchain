@@ -99,13 +99,22 @@ export function useCreateReviewDecision() {
       notes = null,
     }: CreateReviewDecisionInput) => {
       const createdAt = new Date().toISOString()
+      const latestDecision = queryClient.getQueryData<ReviewDecision>(
+        reviewKeys.decision(datasetId, episodeIndex),
+      )
+      const hasSameSource =
+        latestDecision?.source.datasetId === qualityReport.source.datasetId &&
+        latestDecision.source.episodeIndex === qualityReport.source.episodeIndex &&
+        latestDecision.source.sourceFormat === qualityReport.source.sourceFormat &&
+        latestDecision.source.formatVersion === qualityReport.source.formatVersion &&
+        latestDecision.source.sourceDigest === qualityReport.source.sourceDigest
       const annotationRevision = await createAnnotationRevision(datasetId, episodeIndex, {
         revisionId: contractId('annotation'),
         source: qualityReport.source,
         actorId,
         createdAt,
         annotation: annotation as unknown as Record<string, JsonValue>,
-        predecessorRevisionId: null,
+        predecessorRevisionId: hasSameSource ? latestDecision.annotationRevisionId : null,
       })
       const editRevision = await createEditRevision(datasetId, episodeIndex, {
         revisionId: contractId('edit'),
@@ -113,7 +122,7 @@ export function useCreateReviewDecision() {
         actorId,
         createdAt,
         operations: editOperations(edits),
-        predecessorRevisionId: null,
+        predecessorRevisionId: hasSameSource ? latestDecision.editRevisionId : null,
       })
 
       return createReviewDecision(datasetId, episodeIndex, {

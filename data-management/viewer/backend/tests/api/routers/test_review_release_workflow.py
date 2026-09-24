@@ -9,8 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.models.release_workflow import ReleaseSubmitRequest
-from src.api.models.releases import ReleaseFormat, ReleaseManifest
-from src.api.models.reviews import SourceFileIdentity, SourceIdentity
+from src.api.models.releases import PackageQualityReport, QualityEvidenceReference, ReleaseFormat, ReleaseManifest
+from src.api.models.reviews import QualityOutcome, SourceFileIdentity, SourceIdentity
 from src.api.release.jobs import ReleaseJobStore
 from src.api.release.local_publisher import LocalReleasePublisher
 from src.api.release.processor import ReleaseAssembly, ReleaseProcessor
@@ -60,6 +60,8 @@ def workflow_client(
     ) -> ReleaseAssembly:
         persisted_decision = await repository.get_decision("decision-1")
         assert persisted_decision is not None
+        quality_report = await repository.get_quality_report(persisted_decision.quality_run_id)
+        assert quality_report is not None
         staging_root.mkdir(parents=True)
         (staging_root / "dataset.bin").write_bytes(b"release-data")
         return ReleaseAssembly(
@@ -69,18 +71,48 @@ def workflow_client(
                 actor_id=request.actor_id,
                 source_provenance=(source,),
                 accepted_decision_ids=(persisted_decision.decision_id,),
+                rejected_decision_ids=(),
+                excluded_episode_indices=(),
                 episode_index_mapping={0: 0},
                 source_formats=(ReleaseFormat(name="lerobot", version="3.0"),),
                 target_format=request.target_format,
                 adapter_versions={"lerobot": "0.6.1"},
                 tool_versions={"dataviewer": "0.1.0"},
                 feature_schema={},
+                candidate_count=1,
+                accepted_count=1,
+                rejected_count=0,
+                excluded_count=0,
+                nonincluded_count=0,
                 episode_count=1,
                 frame_count=1,
+                quality_evidence=(
+                    QualityEvidenceReference(
+                        source_episode_index=0,
+                        release_episode_index=0,
+                        decision_id=persisted_decision.decision_id,
+                        quality_run_id=persisted_decision.quality_run_id,
+                        quality_report_path=f"metadata/quality/{persisted_decision.quality_run_id}.json",
+                        check_set_version=quality_report.check_set_version,
+                        required_outcome=QualityOutcome.PASS,
+                    ),
+                ),
                 files=(),
             ),
             accepted=(persisted_decision,),
             rejected=(),
+            quality_reports=(quality_report,),
+            package_quality=PackageQualityReport(
+                target_format=request.target_format,
+                episode_count=1,
+                frame_count=1,
+                episode_frame_counts={0: 1},
+                features=(),
+                nonvisual_rows_read_back=1,
+                visual_samples=(),
+                inventory_verified=True,
+                checksums_verified=True,
+            ),
         )
 
     processor = ReleaseProcessor(
@@ -198,10 +230,13 @@ def test_given_review_evidence_when_release_lifecycle_runs_then_api_contract_is_
     assert latest_quality_get.json()["run_id"] == "quality-1"
     assert latest_decision_get.json()["decision_id"] == "decision-1"
     assert eligibility.status_code == 200
-    assert eligibility.json() == {
-        "eligibleEpisodes": [{"episodeIndex": 0, "decisionId": "decision-1", "qualityRunId": "quality-1"}],
-        "excludedEpisodes": [],
-    }
+    eligibility_payload = eligibility.json()
+    assert eligibility_payload["eligibleEpisodes"] == [
+        {"episodeIndex": 0, "decisionId": "decision-1", "qualityRunId": "quality-1"}
+    ]
+    assert eligibility_payload["excludedEpisodes"] == []
+    assert eligibility_payload["rejectedEpisodes"] == []
+    assert len(eligibility_payload["eligibilityFingerprint"]) == 64
     assert submitted.status_code == 202
     assert submitted.json() == {
         "releaseId": "release-1",
@@ -209,6 +244,8 @@ def test_given_review_evidence_when_release_lifecycle_runs_then_api_contract_is_
         "state": "queued",
         "eligibleEpisodes": [{"episodeIndex": 0, "decisionId": "decision-1", "qualityRunId": "quality-1"}],
         "excludedEpisodes": [],
+        "rejectedEpisodes": [],
+        "eligibilityFingerprint": eligibility_payload["eligibilityFingerprint"],
         "conflict": None,
         "verification": {"manifestPath": None, "checksumsPath": None, "verified": False},
     }

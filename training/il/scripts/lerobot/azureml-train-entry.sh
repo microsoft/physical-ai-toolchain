@@ -149,6 +149,9 @@ if python3 -c 'from training.il.scripts.lerobot._env import has_blob_urls; raise
   python3 -m training.il.scripts.lerobot.download_dataset
   FULL_DATASET_PATH="${DATASET_ROOT:-/workspace/data}/${DATASET_REPO_ID}"
   echo "Dataset materialized at: ${FULL_DATASET_PATH}"
+  if [[ "${DATASET_TRUST:-unverified}" == "verified" ]]; then
+    export VERIFIED_RELEASE_PATH="${FULL_DATASET_PATH}"
+  fi
   blob_paths+=("${FULL_DATASET_PATH}")
 fi
 

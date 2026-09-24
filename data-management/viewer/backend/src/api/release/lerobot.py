@@ -12,7 +12,8 @@ from typing import Any
 
 import numpy as np
 
-from ..models.reviews import SourceIdentity
+from ..models.releases import VisualReadbackSample
+from ..models.reviews import QualityOutcome, SourceIdentity
 
 WorkerRunner = Callable[[Path], dict[str, Any]]
 
@@ -42,8 +43,10 @@ class ReleaseReadback:
 
     episode_count: int
     frame_count: int
+    episode_frame_counts: dict[int, int]
     features: tuple[str, ...]
     sampled_visual_frames: int
+    visual_samples: tuple[VisualReadbackSample, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -177,8 +180,21 @@ def _write_result(response: dict[str, Any]) -> ReleaseWriteResult:
         readback=ReleaseReadback(
             episode_count=int(readback["episode_count"]),
             frame_count=int(readback["frame_count"]),
+            episode_frame_counts={
+                int(episode_index): int(frame_count)
+                for episode_index, frame_count in readback["episode_frame_counts"].items()
+            },
             features=tuple(readback["features"]),
             sampled_visual_frames=int(readback["sampled_visual_frames"]),
+            visual_samples=tuple(
+                VisualReadbackSample(
+                    release_episode_index=int(sample["release_episode_index"]),
+                    feature_name=str(sample["feature_name"]),
+                    frame_index=int(sample["frame_index"]),
+                    outcome=QualityOutcome.PASS,
+                )
+                for sample in readback.get("visual_samples", ())
+            ),
         ),
     )
 

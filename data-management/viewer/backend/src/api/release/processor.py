@@ -13,9 +13,9 @@ from typing import Any
 import numpy as np
 import pyarrow.parquet as pq
 
-from ..models.release_workflow import ReleaseEpisodeSelection, ReleaseSubmitRequest
-from ..models.releases import ReleaseFormat, ReleaseManifest
-from ..models.reviews import ReviewDecision
+from ..models.release_workflow import EligibilityCandidate, ReleaseEpisodeSelection, ReleaseJobRequest
+from ..models.releases import PackageQualityReport, QualityEvidenceReference, ReleaseFormat, ReleaseManifest
+from ..models.reviews import QualityOutcome, QualityReport, ReviewDecision
 from ..services.hdf5_loader import HDF5Loader
 from ..services.lerobot_loader import LeRobotLoader
 from ..services.release_workflow_service import ReleaseWorkflowService
@@ -35,10 +35,13 @@ class ReleaseAssembly:
     manifest: ReleaseManifest
     accepted: tuple[ReviewDecision, ...]
     rejected: tuple[ReviewDecision, ...]
+    quality_reports: tuple[QualityReport, ...]
+    package_quality: PackageQualityReport
+    excluded: tuple[EligibilityCandidate, ...] = ()
 
 
 ReleaseAssembler = Callable[
-    [ReleaseSubmitRequest, tuple[ReleaseEpisodeSelection, ...], Path],
+    [ReleaseJobRequest, tuple[ReleaseEpisodeSelection, ...], Path],
     Awaitable[ReleaseAssembly],
 ]
 AzurePublisherFactory = Callable[[], Awaitable[BlobReleasePublisher]]
@@ -60,7 +63,7 @@ class ReleasePackageAssembler:
 
     async def __call__(
         self,
-        request: ReleaseSubmitRequest,
+        request: ReleaseJobRequest,
         selections: tuple[ReleaseEpisodeSelection, ...],
         staging_root: Path,
     ) -> ReleaseAssembly:
@@ -70,19 +73,56 @@ class ReleasePackageAssembler:
             if decision is None:
                 raise ValueError(f"Release decision not found: {selection.decision_id}")
             decisions.append(decision)
+        snapshot_by_index = {
+            candidate.episode_index: candidate for candidate in request.eligibility_snapshot.candidates
+        }
+        for decision in decisions:
+            candidate = snapshot_by_index.get(decision.source.episode_index)
+            if (
+                candidate is None
+                or candidate.disposition != "accepted"
+                or candidate.decision_id != decision.decision_id
+                or candidate.source != decision.source
+            ):
+                raise ValueError("Accepted decision does not match the persisted eligibility snapshot")
+        rejected = []
+        for candidate in request.eligibility_snapshot.candidates:
+            if candidate.disposition != "rejected":
+                continue
+            if candidate.decision_id is None:
+                raise ValueError("Rejected candidate is missing its decision ID")
+            decision = await self._repository.get_decision(candidate.decision_id)
+            if decision is None or decision.source != candidate.source:
+                raise ValueError("Rejected decision does not match the persisted eligibility snapshot")
+            rejected.append(decision)
+        excluded = tuple(
+            candidate for candidate in request.eligibility_snapshot.candidates if candidate.disposition == "excluded"
+        )
+        quality_reports = []
+        for decision in decisions:
+            quality_report = await self._repository.get_quality_report(decision.quality_run_id)
+            if quality_report is None:
+                raise ValueError(f"Release quality report not found: {decision.quality_run_id}")
+            quality_reports.append(quality_report)
         async with self._source_workspace.open(request.dataset_id) as source_root:
             return await asyncio.to_thread(
                 self._assemble,
                 request,
                 tuple(decisions),
+                tuple(quality_reports),
+                tuple(rejected),
+                excluded,
                 source_root,
                 staging_root,
             )
 
     def _assemble(
         self,
-        request: ReleaseSubmitRequest,
+        request: ReleaseJobRequest,
         decisions: tuple[ReviewDecision, ...],
+        quality_reports: tuple[QualityReport, ...],
+        rejected: tuple[ReviewDecision, ...],
+        excluded: tuple[EligibilityCandidate, ...],
         source_root: Path,
         staging_root: Path,
     ) -> ReleaseAssembly:
@@ -161,17 +201,58 @@ class ReleasePackageAssembler:
             actor_id=request.actor_id,
             source_provenance=tuple(decision.source for decision in decisions),
             accepted_decision_ids=result.accepted_decision_ids,
+            rejected_decision_ids=tuple(sorted(decision.decision_id for decision in rejected)),
+            excluded_episode_indices=tuple(candidate.episode_index for candidate in excluded),
             episode_index_mapping=result.episode_index_mapping,
             source_formats=source_formats,
             target_format=request.target_format,
             adapter_versions={"lerobot": "0.6.1"},
             tool_versions={"dataviewer": "0.1.0"},
             feature_schema=features,
+            candidate_count=len(request.eligibility_snapshot.candidates),
+            accepted_count=len(decisions),
+            rejected_count=len(rejected),
+            excluded_count=len(excluded),
+            nonincluded_count=len(rejected) + len(excluded),
             episode_count=result.readback.episode_count,
             frame_count=result.readback.frame_count,
+            quality_evidence=tuple(
+                QualityEvidenceReference(
+                    source_episode_index=decision.source.episode_index,
+                    release_episode_index=result.episode_index_mapping[decision.source.episode_index],
+                    decision_id=decision.decision_id,
+                    quality_run_id=decision.quality_run_id,
+                    quality_report_path=f"metadata/quality/{decision.quality_run_id}.json",
+                    check_set_version=next(
+                        report.check_set_version
+                        for report in quality_reports
+                        if report.run_id == decision.quality_run_id
+                    ),
+                    required_outcome=QualityOutcome.PASS,
+                )
+                for decision in sorted(decisions, key=lambda value: value.source.episode_index)
+            ),
             files=(),
         )
-        return ReleaseAssembly(manifest=manifest, accepted=decisions, rejected=())
+        package_quality = PackageQualityReport(
+            target_format=request.target_format,
+            episode_count=result.readback.episode_count,
+            frame_count=result.readback.frame_count,
+            episode_frame_counts=result.readback.episode_frame_counts,
+            features=tuple(sorted(features)),
+            nonvisual_rows_read_back=result.readback.frame_count,
+            visual_samples=result.readback.visual_samples,
+            inventory_verified=True,
+            checksums_verified=True,
+        )
+        return ReleaseAssembly(
+            manifest=manifest,
+            accepted=decisions,
+            rejected=rejected,
+            quality_reports=quality_reports,
+            package_quality=package_quality,
+            excluded=excluded,
+        )
 
     @staticmethod
     def _load_lerobot_episode(
@@ -351,7 +432,7 @@ class ReleaseProcessor:
         job = self._jobs.get(job_id)
         if job.state is not JobState.QUEUED:
             return
-        request = ReleaseSubmitRequest.model_validate(job.request)
+        request = ReleaseJobRequest.model_validate(job.request)
         staging_root = self._staging_root / request.dataset_id / job.job_id
         try:
             self._staging_root.mkdir(parents=True, exist_ok=True)
@@ -365,6 +446,9 @@ class ReleaseProcessor:
                 assembly.manifest,
                 assembly.accepted,
                 assembly.rejected,
+                assembly.quality_reports,
+                assembly.package_quality,
+                assembly.excluded,
             )
             self._workflow.transition(job_id, JobState.VERIFYING)
             await asyncio.to_thread(verify_release, staging_root)

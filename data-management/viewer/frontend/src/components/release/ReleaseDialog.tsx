@@ -116,14 +116,7 @@ function ReleaseResult({ workflow }: { workflow: ReleaseWorkflowResponse }) {
   )
 }
 
-export function ReleaseDialog({
-  open,
-  onOpenChange,
-  datasetId,
-  episodeIndex,
-  actorId,
-  decision,
-}: ReleaseDialogProps) {
+export function ReleaseDialog({ open, onOpenChange, datasetId, actorId }: ReleaseDialogProps) {
   const [releaseId, setReleaseId] = useState('')
   const [reason, setReason] = useState('')
   const [destinationKind, setDestinationKind] = useState<'local' | 'azure'>('local')
@@ -131,9 +124,8 @@ export function ReleaseDialog({
     typeof window === 'undefined' ? null : window.localStorage.getItem(persistedJobKey(datasetId)),
   )
   const lastRecordedJobStateRef = useRef<string | null>(null)
-  const acceptedDecision = decision?.decision === 'accept' ? decision : null
   const previewRequest = useMemo<ReleaseSubmitRequest | null>(() => {
-    if (!open || !acceptedDecision) {
+    if (!open) {
       return null
     }
     return {
@@ -142,11 +134,11 @@ export function ReleaseDialog({
       actorId,
       reason: 'Eligibility preflight',
       destinationKind,
-      idempotencyKey: `preview-${acceptedDecision.decisionId}`,
+      idempotencyKey: `preview-${datasetId}`,
       targetFormat: { name: 'lerobot', version: '3.0' },
-      episodes: [{ episodeIndex, decisionId: acceptedDecision.decisionId }],
+      episodes: [],
     }
-  }, [acceptedDecision, actorId, datasetId, destinationKind, episodeIndex, open])
+  }, [actorId, datasetId, destinationKind, open])
   const eligibility = useReleaseEligibility(previewRequest)
   const submit = useSubmitRelease()
   const selectedJobId = submit.data?.jobId ?? trackedJobId
@@ -154,6 +146,15 @@ export function ReleaseDialog({
   const cancel = useCancelRelease()
   const workflow = job.data ?? submit.data
   const excluded = eligibility.data?.excludedEpisodes ?? []
+  const rejected = eligibility.data?.rejectedEpisodes ?? []
+  const nonincluded = [...rejected, ...excluded]
+  const groupedExclusions = Array.from(
+    nonincluded.reduce((groups, episode) => {
+      const reason = episode.reasonCodes[0] ?? 'not-eligible'
+      groups.set(reason, [...(groups.get(reason) ?? []), episode.episodeIndex])
+      return groups
+    }, new Map<string, number[]>()),
+  )
   const isEligible = Boolean(eligibility.data?.eligibleEpisodes.length)
   const visibleError = errorMessage(job.error ?? submit.error ?? eligibility.error ?? cancel.error)
 
@@ -201,8 +202,12 @@ export function ReleaseDialog({
     setDestinationKind('local')
   }
 
-  const handleSubmit = () => {
-    if (!acceptedDecision || !releaseId.trim() || !reason.trim() || !isEligible) {
+  const handleSubmit = async () => {
+    if (!releaseId.trim() || !reason.trim() || !isEligible) {
+      return
+    }
+    const refreshed = await eligibility.refetch()
+    if (!refreshed.data?.eligibleEpisodes.length) {
       return
     }
     submit.mutate({
@@ -211,9 +216,9 @@ export function ReleaseDialog({
       actorId,
       reason: reason.trim(),
       destinationKind,
-      idempotencyKey: `${releaseId.trim()}-${acceptedDecision.decisionId}`,
+      idempotencyKey: `${releaseId.trim()}-${datasetId}`,
       targetFormat: { name: 'lerobot', version: '3.0' },
-      episodes: [{ episodeIndex, decisionId: acceptedDecision.decisionId }],
+      episodes: [],
     })
   }
 
@@ -276,27 +281,34 @@ export function ReleaseDialog({
 
           <div className="grid gap-1 text-sm" aria-live="polite">
             <span className="text-muted-foreground text-xs font-medium uppercase">Readiness</span>
-            {!acceptedDecision ? (
-              <div className="flex items-center gap-2">
-                <CircleAlert className="h-4 w-4 text-amber-600" />
-                Episode {episodeIndex} requires an explicit accepted review decision.
-              </div>
-            ) : eligibility.isPending ? (
+            {eligibility.isPending ? (
               <div className="flex items-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Checking release eligibility
               </div>
             ) : isEligible ? (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                 <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                Episode {episodeIndex} is eligible for LeRobot 3.0.
+                <span>{eligibility.data?.eligibleEpisodes.length ?? 0} included</span>
+                <span>{nonincluded.length} excluded</span>
+              </div>
+            ) : eligibility.data ? (
+              <div className="flex items-start gap-2">
+                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                No episodes are currently eligible. Resolve the exclusions below before creating a
+                release.
               </div>
             ) : null}
-            {excluded.map((episode) => (
-              <div key={episode.episodeIndex} className="flex items-start gap-2">
-                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            {groupedExclusions.map(([reason, episodeIndices]) => (
+              <div key={reason} className="flex items-start gap-2">
+                {reason === 'rejected' ? (
+                  <Ban className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+                ) : (
+                  <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                )}
                 <span>
-                  Episode {episode.episodeIndex}: {exclusionMessage(episode.reasonCodes)}
+                  {episodeIndices.length === 1 ? 'Episode' : 'Episodes'} {episodeIndices.join(', ')}
+                  : {exclusionMessage([reason])}
                 </span>
               </div>
             ))}
@@ -325,7 +337,13 @@ export function ReleaseDialog({
               ) : (
                 <Button
                   onClick={handleSubmit}
-                  disabled={!isEligible || !releaseId.trim() || !reason.trim() || submit.isPending}
+                  disabled={
+                    !isEligible ||
+                    eligibility.isFetching ||
+                    !releaseId.trim() ||
+                    !reason.trim() ||
+                    submit.isPending
+                  }
                 >
                   Create Release
                 </Button>
