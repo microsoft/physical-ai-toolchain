@@ -90,10 +90,7 @@ def test_resolve_frame_task_tracks_transition_within_episode() -> None:
     data = {"task_index": [2, 2, 3, 3]}
     task_descriptions = {2: "pick up the block", 3: "place the block"}
 
-    tasks = [
-        _MOD._resolve_frame_task(step, 1, data, task_descriptions, {})
-        for step in range(len(data["task_index"]))
-    ]
+    tasks = [_MOD._resolve_frame_task(step, 1, data, task_descriptions, {}) for step in range(len(data["task_index"]))]
 
     assert tasks == [
         "pick up the block",

@@ -402,11 +402,7 @@ def _task_from_episode_record(record: dict, task_descriptions: dict[int, str]) -
         return tasks
     if isinstance(tasks, list) and tasks:
         resolved_tasks = {
-            task.strip()
-            if isinstance(task, str)
-            else task_descriptions.get(task, "")
-            if isinstance(task, int)
-            else ""
+            task.strip() if isinstance(task, str) else task_descriptions.get(task, "") if isinstance(task, int) else ""
             for task in tasks
         }
         resolved_tasks.discard("")
@@ -626,9 +622,7 @@ def main() -> int:
             if bundle.policy_type in VLA_POLICY_TYPES:
                 task = _resolve_frame_task(step, ep, data, task_descriptions, episode_tasks)
                 if not task:
-                    print(
-                        f"[ERROR] Episode {ep} frame {step} has no task description required by {bundle.policy_type}"
-                    )
+                    print(f"[ERROR] Episode {ep} frame {step} has no task description required by {bundle.policy_type}")
                     return 1
                 obs["task"] = task
             processed_obs = bundle.preprocessor(obs)
