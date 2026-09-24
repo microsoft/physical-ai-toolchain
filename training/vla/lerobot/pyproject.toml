@@ -1,7 +1,7 @@
 [project]
 name = "robotics-training-vla"
 version = "0.1.0"
-description = "LeRobot vision-language-action (pi0 / pi0_fast / pi05) workflow runtime dependencies"
+description = "LeRobot vision-language-action (PI and SmolVLA) workflow runtime dependencies"
 requires-python = ">=3.12"
 # Direct dependencies for the AzureML VLA pi0 training entrypoint. All versions
 # are pinned exactly because runtime consumers install with `uv pip install
@@ -12,8 +12,8 @@ requires-python = ">=3.12"
 #
 # This file is a fork of training/il/lerobot/pyproject.toml. The VLA fork
 # differs in three ways:
-#   1. lerobot is installed with the `[dataset,pi]` extras, which provide the
-#      dataset/video runtime plus pi0 / pi0_fast / pi05 dependencies.
+#   1. lerobot is installed with the `[dataset,pi,smolvla]` extras, which provide
+#      the dataset/video runtime plus PI-family and SmolVLA dependencies.
 #   2. transformers and scipy are pinned as direct dependencies so they
 #      appear in the compiled lockfile (the IL lockfile excludes them).
 #   3. matplotlib is included for offline replay evaluation plots.
@@ -25,6 +25,7 @@ dependencies = [
     "azure-core==1.41.0",
     "azure-storage-blob==12.30.1",
     "azure-identity==1.25.3",
+    "azure-keyvault-secrets==4.10.0",
     "azure-ai-ml==1.35.0",
     "azureml-mlflow==1.62.0.post6",
     # azure-ai-ml allows newer prerelease storage clients when prerelease
@@ -50,9 +51,8 @@ dependencies = [
     "datasets==5.0.1",
     "pyarrow==25.0.1",
     "huggingface-hub==1.31.0",
-    # lerobot[dataset,pi] supplies the dataset/video runtime plus dependencies
-    # required by the pi0 / pi0_fast / pi05 policy implementations.
-    "lerobot[dataset,pi]==0.6.1",
+    # LeRobot policy extras keep PI and SmolVLA behind the same pinned runtime.
+    "lerobot[dataset,pi,smolvla]==0.6.1",
     "torch==2.14.0",
     "torchvision==0.29.0",
     # Keep aligned with the root constraint used by CPU smoke resolution.

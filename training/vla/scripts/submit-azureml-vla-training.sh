@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
-# Submit LeRobot VLA pi0 training to Azure ML
-# Installs LeRobot[dataset,pi] dynamically and trains pi0/pi0_fast/pi05 vision-language-action
-# policies from datasets in Azure Blob Storage (canonical) or HuggingFace (legacy
-# fallback via --hf-dataset). Reuses the policy-agnostic IL training entry script
-# (training/il/scripts/lerobot/azureml-train-entry.sh) with a VLA-specific
-# dependency project injected via LEROBOT_PROJECT.
+# Submit adapter-resolved LeRobot VLA training to Azure ML
+# Uses the shared VLA dependency lock and policy-agnostic LeRobot entrypoint.
 # cspell:ignore alreadyexists
 set -o errexit -o nounset
 
@@ -17,27 +13,19 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 source "$REPO_ROOT/scripts/lib/terraform-outputs.sh"
 read_terraform_outputs "$REPO_ROOT/infrastructure/terraform" 2>/dev/null || true
 
-# Source .env file if present (for credentials and Azure context)
-ENV_FILE="${SCRIPT_DIR}/.env"
-if [[ -f "${ENV_FILE}" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "${ENV_FILE}"
-  set +a
-fi
-
 #------------------------------------------------------------------------------
 # Help
 #------------------------------------------------------------------------------
 
 show_help() {
   cat << 'EOF'
-Usage: submit-azureml-vla-pi0-training.sh [OPTIONS] [-- az-ml-job-flags]
+Usage: submit-azureml-vla-training.sh [OPTIONS] [-- az-ml-job-flags]
 
-Submit LeRobot VLA pi0 training to Azure ML.
+Submit adapter-resolved LeRobot VLA training to Azure ML.
 
 OPTIONS:
     -d, --dataset-repo-id ID     Dataset logical name for folder naming (default: dataset)
+      --dataset-revision SHA   Full 40-character dataset commit for Hugging Face sources
 
 DATA SOURCE (combinable):
         --dataset-asset URI           AzureML data asset to mount (ro_mount, repeatable, max 64).
@@ -52,15 +40,17 @@ DATA SOURCE (combinable):
                                       (default: /workspace/data)
 
 AZUREML ASSET OPTIONS:
-    --environment-name NAME       AzureML environment name (default: vla-pi0-training-env)
+    --environment-name NAME       AzureML environment name (default: vla-training-env)
     --environment-version VER     Environment version (default: derived from --image)
     --image IMAGE                 Container image (default: $DEFAULT_LEROBOT_TRAIN_IMAGE, digest-pinned in scripts/lib/common.sh)
     --assets-only                 Register environment without submitting job
+    --validate-only               Validate the composed job without registering assets or submitting
 
 TRAINING OPTIONS:
-    -w, --job-file PATH           Job YAML template (default: training/vla/workflows/azureml/vla-pi0-train.yaml)
-    -p, --policy-type TYPE        Policy architecture: pi0, pi0_fast, pi05 (default: pi0)
-    -j, --job-name NAME           Job identifier (default: vla-pi0-training)
+    -w, --job-file PATH           Job YAML template (default: training/vla/workflows/azureml/vla-train.yaml)
+      --adapter NAME            Required model adapter: lerobot-pi or lerobot-smolvla
+    -p, --policy-type TYPE        Optional adapter policy alias
+    -j, --job-name NAME           Job identifier (default: vla-training)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/train)
         --policy-repo-id ID       HuggingFace Hub repo_id forwarded to lerobot as
                                   policy.repo_id. lerobot uses this for hub-push
@@ -111,24 +101,17 @@ AZURE CONTEXT:
         --resource-group NAME     Azure resource group
         --workspace-name NAME     Azure ML workspace
         --compute TARGET          Compute target override
-        --hf-token TOKEN          HuggingFace access token forwarded to the
-                                  container as HF_TOKEN (default: $HF_TOKEN if
-                                  set). Required for pi0 training when the
-                                  policy initializes from the gated
-                                  google/paligemma-3b-pt-224 backbone (i.e.
-                                  unless --init-from-policy-model points at an
-                                  already-materialized checkpoint). Direct
-                                  Hugging Face policy initialization still
-                                  requires the gated PaliGemma tokenizer.
-                                  Also used on the HuggingFace Hub dataset path.
+        --hf-key-vault-url URL    Azure Key Vault URL containing the Hugging Face
+                access token (default: $HF_KEY_VAULT_URL).
+        --hf-token-secret-name NAME
+                Key Vault secret name for the Hugging Face access
+                token (default: $HF_TOKEN_SECRET_NAME). The job
+                retrieves the value with its managed identity;
+                the token is never included in the job spec.
         --instance-type NAME      Instance type for AzureML-on-Kubernetes compute
-                                  (default: gpu). pi0 full fine-tuning (~3B
-                                  params + paligemma backbone) needs a high-
-                                  memory GPU; 40 GB+ HBM (A100/H100-class) is
-                                  recommended. On smaller GPUs, use
-                                  --train-expert-only to freeze the VLM backbone
-                                  and train only the action expert, which fits
-                                  in less memory. The instance type value is
+                                  (default: gpu). The selected adapter validates
+                                  model-family precision and trainable-scope
+                                  options. The instance type value is
                                   forwarded to the job as resources.instance_type
                                   whenever non-empty. On AzureML managed
                                   AmlCompute the cluster's VM SKU determines GPU
@@ -140,18 +123,14 @@ AZURE CONTEXT:
                                   Shipped multi-GPU Kubernetes types:
                                   gpu2/gpuspot2, gpu4/gpuspot4 (see
                                   infrastructure/setup/manifests/azureml-instance-types.yaml).
-        --train-expert-only       Freeze the VLM backbone and train only the
-                                  action expert and projections
+        --train-expert-only       Train only the model-family expert scope
+        --no-train-expert-only    Disable expert-only training when supported
         --mixed-precision MODE    Accelerate mixed-precision mode (no|fp16|bf16);
-                                  default: bf16. pi0 was trained in bf16 upstream;
-                                  bf16 is the recommended default for memory and
-                                  numerical-stability reasons. Explicit mixed
+                default: bf16. Explicit mixed
                                   precision uses Accelerate on single- and
                                   multi-GPU jobs.
-        --policy-dtype DTYPE      PI policy storage dtype: float32 or bfloat16
-                                  (default: checkpoint configuration).
-        --gradient-checkpointing  Recompute PI policy activations during backward
-                                  to reduce GPU memory usage.
+        --policy-dtype DTYPE      Adapter-specific policy storage dtype
+        --gradient-checkpointing  Adapter-specific activation recomputation
         --experiment-name NAME    Experiment name override
         --display-name NAME       Display name override
         --stream                  Stream logs after submission
@@ -169,47 +148,57 @@ Values resolved: CLI > Environment variables > Terraform outputs
 Additional arguments after -- are forwarded to az ml job create.
 
 EXAMPLES:
-    # pi0 training with HuggingFace dataset
-    submit-azureml-vla-pi0-training.sh -d lerobot/aloha_sim_insertion_human
+    # PI training with a Hugging Face dataset
+    submit-azureml-vla-training.sh --adapter lerobot-pi -p pi0 \
+      -d lerobot/aloha_sim_insertion_human
+
+    # SmolVLA bounded optimizer-step smoke
+    submit-azureml-vla-training.sh \
+      --adapter lerobot-smolvla \
+      -d lerobot/svla_so100_pickplace \
+      --dataset-revision 728583b5eaf9e739a7f119e2def466fa1d552402 \
+      --training-steps 2 \
+      --batch-size 1
 
     # pi0_fast with custom hyperparameters
-    submit-azureml-vla-pi0-training.sh \
+    submit-azureml-vla-training.sh \
+      --adapter lerobot-pi \
       -d user/custom-dataset \
       -p pi0_fast \
       --training-steps 50000 \
       --batch-size 8
 
     # Warm-start a new pi0 run from a previously registered checkpoint
-    submit-azureml-vla-pi0-training.sh \
+    submit-azureml-vla-training.sh --adapter lerobot-pi \
       -d user/dataset \
       --init-from-policy-model azureml:vla-pi0:7
 
     # Register trained pi0 model and stream logs
-    submit-azureml-vla-pi0-training.sh \
+    submit-azureml-vla-training.sh --adapter lerobot-pi \
       -d user/dataset \
       -r my-pi0-model \
       --stream
 
     # Fine-tune from pre-trained pi0 policy
-    submit-azureml-vla-pi0-training.sh \
+    submit-azureml-vla-training.sh --adapter lerobot-pi \
       -d user/dataset \
       --policy-repo-id user/pretrained-pi0 \
       --training-steps 10000
 
     # AzureML data asset (native mount, no download)
-    submit-azureml-vla-pi0-training.sh \
+    submit-azureml-vla-training.sh --adapter lerobot-pi \
       --dataset-asset azureml:pusht-episodes:3 \
       -r pusht-pi0-model
 
     # Single-node multi-GPU training (4 GPUs on a gpu4 InstanceType, bf16)
-    submit-azureml-vla-pi0-training.sh \
+    submit-azureml-vla-training.sh --adapter lerobot-pi \
       -d user/dataset \
       --instance-type gpu4 \
       --mixed-precision bf16 \
       --batch-size 4
 
     # Register environment only (no job submission)
-    submit-azureml-vla-pi0-training.sh -d placeholder --assets-only
+    submit-azureml-vla-training.sh --adapter lerobot-pi -d placeholder --assets-only
 EOF
 }
 
@@ -265,17 +254,20 @@ PY
 # Defaults
 #------------------------------------------------------------------------------
 
-environment_name="vla-pi0-training-env"
+environment_name="vla-training-env"
 environment_version="${ENVIRONMENT_VERSION:-}"
 environment_version_explicit=false
 [[ -n "${ENVIRONMENT_VERSION:-}" ]] && environment_version_explicit=true
 image="${IMAGE:-$DEFAULT_LEROBOT_TRAIN_IMAGE}"
 assets_only=false
+validate_only=false
 
-job_file="$REPO_ROOT/training/vla/workflows/azureml/vla-pi0-train.yaml"
+job_file="$REPO_ROOT/training/vla/workflows/azureml/vla-train.yaml"
 dataset_repo_id="${DATASET_REPO_ID:-}"
-policy_type="${POLICY_TYPE:-pi0}"
-job_name="${JOB_NAME:-vla-pi0-training}"
+dataset_revision="${DATASET_REVISION:-}"
+adapter_name="${VLA_MODEL_ADAPTER:-}"
+policy_type="${POLICY_TYPE:-}"
+job_name="${JOB_NAME:-vla-training}"
 output_dir="${OUTPUT_DIR:-/workspace/outputs/train}"
 policy_repo_id="${POLICY_REPO_ID:-}"
 init_from_policy_model="${INIT_FROM_POLICY_MODEL:-}"
@@ -306,11 +298,12 @@ mlflow_timeout="${MLFLOW_HTTP_REQUEST_TIMEOUT:-60}"
 
 compute="${AZUREML_COMPUTE:-$(get_compute_target)}"
 instance_type="gpu"
-train_expert_only=false
+train_expert_only=""
 mixed_precision="${MIXED_PRECISION:-bf16}"
 policy_dtype="${POLICY_DTYPE:-}"
 gradient_checkpointing=false
-hf_token="${HF_TOKEN:-}"
+hf_key_vault_url="${HF_KEY_VAULT_URL:-}"
+hf_token_secret_name="${HF_TOKEN_SECRET_NAME:-}"
 experiment_name=""
 display_name=""
 stream_logs=false
@@ -329,8 +322,11 @@ while [[ $# -gt 0 ]]; do
     --environment-version)        environment_version="$2"; environment_version_explicit=true; shift 2 ;;
     --image|-i)                   image="$2"; shift 2 ;;
     --assets-only)                assets_only=true; shift ;;
+    --validate-only)              validate_only=true; shift ;;
     -w|--job-file)                job_file="$2"; shift 2 ;;
+    --adapter)                    adapter_name="$2"; shift 2 ;;
     -d|--dataset-repo-id)         dataset_repo_id="$2"; shift 2 ;;
+    --dataset-revision)           dataset_revision="$2"; shift 2 ;;
     -p|--policy-type)             policy_type="$2"; shift 2 ;;
     -j|--job-name)                job_name="$2"; shift 2 ;;
     -o|--output-dir)              output_dir="$2"; shift 2 ;;
@@ -358,10 +354,12 @@ while [[ $# -gt 0 ]]; do
     --compute)                    compute="$2"; shift 2 ;;
     --instance-type)              instance_type="$2"; shift 2 ;;
     --train-expert-only)          train_expert_only=true; shift ;;
+    --no-train-expert-only)       train_expert_only=false; shift ;;
     --mixed-precision)            mixed_precision="$2"; shift 2 ;;
     --policy-dtype)               policy_dtype="$2"; shift 2 ;;
     --gradient-checkpointing)     gradient_checkpointing=true; shift ;;
-    --hf-token)                   hf_token="$2"; shift 2 ;;
+    --hf-key-vault-url)           hf_key_vault_url="$2"; shift 2 ;;
+    --hf-token-secret-name)       hf_token_secret_name="$2"; shift 2 ;;
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     --display-name)               display_name="$2"; shift 2 ;;
     --stream)                     stream_logs=true; shift ;;
@@ -393,13 +391,88 @@ elif [[ -z "$dataset_repo_id" ]]; then
   fatal "No dataset source specified. Use --dataset-repo-id for HuggingFace Hub, or provide one or more --blob-url / --dataset-asset sources."
 fi
 
-case "$policy_type" in
-  pi0|pi0_fast|pi05) ;;
-  *) fatal "Unsupported policy type: $policy_type (use: pi0, pi0_fast, pi05)" ;;
-esac
+if [[ ${#dataset_assets[@]} -eq 0 && ${#blob_urls[@]} -eq 0 ]]; then
+  [[ "$dataset_revision" =~ ^[0-9a-f]{40}$ ]] || fatal \
+    "--dataset-revision must be a full 40-character lowercase Git commit for Hugging Face datasets"
+elif [[ -n "$dataset_revision" ]]; then
+  fatal "--dataset-revision applies only to Hugging Face dataset sources"
+fi
+
+[[ -n "$adapter_name" ]] || fatal "--adapter is required (use: lerobot-pi or lerobot-smolvla)"
+
+adapter_rename_map="$rename_map"
+[[ -n "$adapter_rename_map" ]] || adapter_rename_map="{}"
+adapter_args=(
+  "$SCRIPT_DIR/model_adapters.py"
+  --adapter "$adapter_name"
+  --mixed-precision "$mixed_precision"
+  --rename-map "$adapter_rename_map"
+)
+[[ -n "$policy_type" ]] && adapter_args+=(--policy-type "$policy_type")
+[[ -n "$policy_dtype" ]] && adapter_args+=(--policy-dtype "$policy_dtype")
+[[ "$gradient_checkpointing" == "true" ]] && adapter_args+=(--gradient-checkpointing)
+if [[ "$train_expert_only" == "true" ]]; then
+  adapter_args+=(--train-expert-only)
+elif [[ "$train_expert_only" == "false" ]]; then
+  adapter_args+=(--no-train-expert-only)
+fi
+
+adapter_resolution=$(python3 "${adapter_args[@]}") || fatal "Model adapter validation failed: $adapter_name"
+adapter_values=$(python3 -c '
+import json
+import sys
+
+resolution = json.loads(sys.argv[1])
+environment = resolution["environment"]
+values = (
+    resolution["adapter_name"],
+    resolution["adapter_version"],
+    resolution["policy_type"],
+    resolution["dependency_extra"],
+    resolution["default_source_model"] or "",
+    resolution["default_source_revision"] or "",
+    str(resolution["requires_hf_token"]).lower(),
+    environment["TRAIN_EXPERT_ONLY"],
+    environment.get("GRADIENT_CHECKPOINTING", "false"),
+    environment["USE_IMAGENET_STATS"],
+    resolution["config_sha256"],
+)
+print("\n".join(values))
+' "$adapter_resolution") || fatal "Unable to read model adapter resolution: $adapter_name"
+mapfile -t resolved_adapter_values <<< "$adapter_values"
+
+adapter_name="${resolved_adapter_values[0]}"
+adapter_version="${resolved_adapter_values[1]}"
+policy_type="${resolved_adapter_values[2]}"
+dependency_extra="${resolved_adapter_values[3]}"
+default_source_model="${resolved_adapter_values[4]}"
+default_source_revision="${resolved_adapter_values[5]}"
+adapter_requires_hf_token="${resolved_adapter_values[6]}"
+train_expert_only="${resolved_adapter_values[7]}"
+gradient_checkpointing="${resolved_adapter_values[8]}"
+use_imagenet_stats="${resolved_adapter_values[9]}"
+adapter_config_sha256="${resolved_adapter_values[10]}"
+
+if [[ -z "$init_from_policy_model" && -z "$init_from_policy_hf_repo_id" && -z "$policy_repo_id" && -n "$default_source_model" ]]; then
+  init_from_policy_hf_repo_id="$default_source_model"
+  init_from_policy_hf_revision="$default_source_revision"
+fi
 
 if [[ -n "$init_from_policy_model" && -n "$policy_repo_id" ]]; then
   fatal "--init-from-policy-model and --policy-repo-id are mutually exclusive"
+fi
+
+if [[ -n "${HF_TOKEN:-}" ]]; then
+  fatal "HF_TOKEN plaintext input is not supported. Store the token in Azure Key Vault and use --hf-key-vault-url with --hf-token-secret-name."
+fi
+
+if [[ -n "$hf_key_vault_url" || -n "$hf_token_secret_name" ]]; then
+  [[ -n "$hf_key_vault_url" && -n "$hf_token_secret_name" ]] || fatal \
+    "--hf-key-vault-url and --hf-token-secret-name must be provided together"
+  [[ "$hf_key_vault_url" =~ ^https://[A-Za-z0-9-]+\.vault\.azure\.net/?$ ]] || fatal \
+    "--hf-key-vault-url must use https://VAULT.vault.azure.net/"
+  [[ "$hf_token_secret_name" =~ ^[A-Za-z0-9-]{1,127}$ ]] || fatal \
+    "--hf-token-secret-name must contain 1-127 alphanumeric or hyphen characters"
 fi
 
 if [[ -n "$init_from_policy_hf_repo_id" || -n "$init_from_policy_hf_revision" ]]; then
@@ -409,8 +482,10 @@ if [[ -n "$init_from_policy_hf_repo_id" || -n "$init_from_policy_hf_revision" ]]
     "--init-from-policy-hf-repo must be a Hugging Face repository ID in OWNER/NAME form"
   [[ "$init_from_policy_hf_revision" =~ ^[0-9a-f]{40}$ ]] || fatal \
     "--init-from-policy-hf-revision must be a full 40-character lowercase Git commit"
-  [[ -n "$hf_token" ]] || fatal \
-    "--hf-token or HF_TOKEN is required because PI policies use the gated PaliGemma tokenizer"
+  if [[ "$adapter_requires_hf_token" == "true" ]]; then
+    [[ -n "$hf_token_secret_name" ]] || fatal \
+      "--hf-key-vault-url and --hf-token-secret-name are required by adapter $adapter_name"
+  fi
 fi
 
 if [[ -n "$init_from_policy_hf_repo_id" && ( -n "$init_from_policy_model" || -n "$policy_repo_id" ) ]]; then
@@ -427,12 +502,6 @@ case "$policy_dtype" in
   *) fatal "--policy-dtype must be one of: float32, bfloat16 (got '$policy_dtype')" ;;
 esac
 
-if [[ -n "$rename_map" ]]; then
-  python3 -c \
-    'import json, sys; value = json.loads(sys.argv[1]); assert isinstance(value, dict) and all(isinstance(key, str) and isinstance(item, str) for key, item in value.items())' \
-    "$rename_map" || fatal "--rename-map must be a JSON object containing string-to-string mappings"
-fi
-
 # AzureML model names: alphanumeric, dash, dot, underscore; must start with an
 # alphanumeric or underscore; max 255 chars. Reject upfront so az ml model
 # create at the end of training does not fail with a cryptic 400.
@@ -445,6 +514,10 @@ fi
 # compute (azureml:cpu-cluster) is not a real target in user workspaces.
 # Fail fast instead of letting az ml job create return a late, cryptic error.
 [[ -n "$compute" ]] || fatal "--compute is required (or set AZUREML_COMPUTE env var, or expose 'compute_target' via Terraform outputs)."
+[[ "$assets_only" != "true" || "$validate_only" != "true" ]] || fatal \
+  "--assets-only and --validate-only are mutually exclusive"
+[[ "$validate_only" != "true" || -z "$save_as" ]] || fatal \
+  "--save-as is not supported with --validate-only"
 
 [[ ${#dataset_assets[@]} -le $dataset_asset_count_max ]] || fatal \
   "--dataset-asset: too many data assets (${#dataset_assets[@]}); maximum is ${dataset_asset_count_max}."
@@ -511,7 +584,11 @@ _project_local="$REPO_ROOT/$lerobot_project"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
+  print_kv "Adapter" "${adapter_name}:${adapter_version}"
+  print_kv "Adapter Config" "$adapter_config_sha256"
+  print_kv "Dependency Extra" "$dependency_extra"
   print_kv "Dataset" "$dataset_repo_id"
+  print_kv "Dataset Revision" "${dataset_revision:-<not applicable>}"
   print_kv "Policy Type" "$policy_type"
   print_kv "Job Name" "$job_name"
   print_kv "Image" "$image"
@@ -543,8 +620,10 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Mixed Precision" "$mixed_precision"
   print_kv "Policy Dtype" "${policy_dtype:-<checkpoint default>}"
   print_kv "Gradient Checkpointing" "$gradient_checkpointing"
+  print_kv "Use ImageNet Stats" "$use_imagenet_stats"
   print_kv "Rename Map" "${rename_map:-<none>}"
-  print_kv "HF Token" "$([[ -n "$hf_token" ]] && echo '<set>' || echo '<none>')"
+  print_kv "HF Key Vault" "${hf_key_vault_url:-<none>}"
+  print_kv "HF Token Secret" "${hf_token_secret_name:-<none>}"
   print_kv "Environment" "${environment_name}:${environment_version}"
   print_kv "LeRobot Project" "$lerobot_project"
   exit 0
@@ -554,8 +633,10 @@ fi
 # Register Environment
 #------------------------------------------------------------------------------
 
-register_azureml_environment "$environment_name" "$environment_version" "$image" \
-  "$resource_group" "$workspace_name" "$subscription_id"
+if [[ "$validate_only" != "true" ]]; then
+  register_azureml_environment "$environment_name" "$environment_version" "$image" \
+    "$resource_group" "$workspace_name" "$subscription_id"
+fi
 
 info "Environment: ${environment_name}:${environment_version}"
 
@@ -576,7 +657,7 @@ rendered_job_file=""
 resolved_job_file="$job_file"
 trap '[[ -n "${rendered_job_file:-}" ]] && rm -f "$rendered_job_file"' EXIT
 if [[ -n "$init_from_policy_model" || ${#dataset_assets[@]} -gt 0 ]]; then
-  rendered_job_file=$(mktemp "${TMPDIR:-/tmp}/vla-pi0-job.XXXXXX")
+  rendered_job_file=$(mktemp "${TMPDIR:-/tmp}/vla-job.XXXXXX")
   mv "$rendered_job_file" "${rendered_job_file}.yml"
   rendered_job_file="${rendered_job_file}.yml"
   if [[ ${#dataset_assets[@]} -gt 0 ]]; then
@@ -592,8 +673,8 @@ fi
 #
 # The AzureML job runs training/il/scripts/lerobot/azureml-train-entry.sh, which
 # is uploaded as part of the code asset. The entry script is policy-agnostic;
-# VLA selects pi0/pi0_fast/pi05 via POLICY_TYPE and points the dependency
-# install from the VLA-specific lock via LEROBOT_PROJECT below.
+# The selected adapter resolves policy behavior before this generic lifecycle
+# owner points the dependency install at the shared VLA lock.
 # Keeping the inline command short avoids multi-line YAML escaping issues with
 # the Azure ML K8s extension.
 #------------------------------------------------------------------------------
@@ -604,8 +685,12 @@ train_cmd="bash il/scripts/lerobot/azureml-train-entry.sh"
 # Build Submission Command
 #------------------------------------------------------------------------------
 
-az_args=(
-  az ml job create
+if [[ "$validate_only" == "true" ]]; then
+  az_args=(az ml job validate)
+else
+  az_args=(az ml job create)
+fi
+az_args+=(
   --resource-group "$resource_group"
   --workspace-name "$workspace_name"
   --file "$resolved_job_file"
@@ -623,6 +708,7 @@ az_args+=(--set "command=$train_cmd")
 
 # Input values
 az_args+=(
+  --set "inputs.adapter_name=$adapter_name"
   --set "inputs.dataset_repo_id=$dataset_repo_id"
   --set "inputs.policy_type=$policy_type"
   --set "inputs.job_name=$job_name"
@@ -637,6 +723,7 @@ az_args+=(
 )
 
 [[ -n "$policy_repo_id" ]]      && az_args+=(--set "inputs.policy_repo_id=$policy_repo_id")
+[[ -n "$dataset_revision" ]]    && az_args+=(--set "inputs.dataset_revision=$dataset_revision")
 [[ -n "$lerobot_version" ]]     && az_args+=(--set "inputs.lerobot_version=$lerobot_version")
 [[ -n "$training_steps" ]]      && az_args+=(--set "inputs.training_steps=$training_steps")
 [[ -n "$batch_size" ]]          && az_args+=(--set "inputs.batch_size=$batch_size")
@@ -657,8 +744,7 @@ fi
 # `--set environment_variables.X=Y` so the values are baked into the job spec.
 #
 # LEROBOT_PROJECT is the VLA-specific opt-in: the entry script defaults to the
-# IL project (training/il/lerobot); the VLA submit script overrides it to export
-# and install the VLA lock containing lerobot[dataset,pi], transformers, and scipy.
+# IL project while this submitter selects the shared PI and SmolVLA lock.
 az_args+=(
   --set "environment_variables.AZURE_SUBSCRIPTION_ID=$subscription_id"
   --set "environment_variables.AZURE_RESOURCE_GROUP=$resource_group"
@@ -666,15 +752,22 @@ az_args+=(
   --set "environment_variables.MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES=$mlflow_retries"
   --set "environment_variables.MLFLOW_HTTP_REQUEST_TIMEOUT=$mlflow_timeout"
   --set "environment_variables.DATASET_REPO_ID=$dataset_repo_id"
+  --set "environment_variables.VLA_MODEL_ADAPTER=$adapter_name"
+  --set "environment_variables.VLA_ADAPTER_VERSION=$adapter_version"
+  --set "environment_variables.VLA_ADAPTER_CONFIG_SHA256=$adapter_config_sha256"
+  --set "environment_variables.LEROBOT_POLICY_EXTRA=$dependency_extra"
   --set "environment_variables.POLICY_TYPE=$policy_type"
   --set "environment_variables.JOB_NAME=$job_name"
   --set "environment_variables.OUTPUT_DIR=$output_dir"
   --set "environment_variables.SAVE_FREQ=$save_freq"
   --set "environment_variables.MIXED_PRECISION=$mixed_precision"
+  --set "environment_variables.TRAIN_EXPERT_ONLY=$train_expert_only"
   --set "environment_variables.GRADIENT_CHECKPOINTING=$gradient_checkpointing"
+  --set "environment_variables.USE_IMAGENET_STATS=$use_imagenet_stats"
   --set "environment_variables.LEROBOT_PROJECT=$lerobot_project"
 )
 
+[[ -n "$dataset_revision" ]]    && az_args+=(--set "environment_variables.DATASET_REVISION=$dataset_revision")
 [[ -n "$policy_repo_id" ]]      && az_args+=(--set "environment_variables.POLICY_REPO_ID=$policy_repo_id")
 [[ -n "$init_from_policy_model" ]] && az_args+=(--set "environment_variables.INIT_FROM_POLICY_MODEL_SOURCE=$init_from_policy_model")
 [[ -n "$init_from_policy_hf_repo_id" ]] && az_args+=(--set "environment_variables.INIT_FROM_POLICY_HF_REPO_ID=$init_from_policy_hf_repo_id")
@@ -690,8 +783,8 @@ if [[ -n "$rename_map" ]]; then
   az_args+=(--set "environment_variables.RENAME_MAP_B64=$rename_map_b64")
 fi
 [[ -n "$register_checkpoint" ]] && az_args+=(--set "environment_variables.REGISTER_CHECKPOINT=$register_checkpoint")
-[[ "$train_expert_only" == "true" ]] && az_args+=(--set "environment_variables.TRAIN_EXPERT_ONLY=true")
-[[ -n "$hf_token" ]] && az_args+=(--set "environment_variables.HF_TOKEN=$hf_token")
+[[ -n "$hf_key_vault_url" ]] && az_args+=(--set "environment_variables.HF_KEY_VAULT_URL=$hf_key_vault_url")
+[[ -n "$hf_token_secret_name" ]] && az_args+=(--set "environment_variables.HF_TOKEN_SECRET_NAME=$hf_token_secret_name")
 
 if [[ ${#dataset_assets[@]} -gt 0 ]]; then
   dataset_assets_json=$(python3 -c "import json; import sys; print(json.dumps(sys.argv[1:]))" "${dataset_assets[@]}")
@@ -707,13 +800,25 @@ fi
 
 [[ ${#forward_args[@]} -gt 0 ]] && az_args+=("${forward_args[@]}")
 [[ -n "$save_as" ]] && az_args+=(--save-as "$save_as")
-az_args+=(--query "name" -o "tsv")
+[[ "$validate_only" != "true" ]] && az_args+=(--query "name" -o "tsv")
+
+if [[ "$validate_only" == "true" ]]; then
+  info "Validating AzureML LeRobot VLA job for adapter ${adapter_name}:${adapter_version}..."
+  "${az_args[@]}"
+  section "Validation Summary"
+  print_kv "Adapter" "${adapter_name}:${adapter_version}"
+  print_kv "Policy Type" "$policy_type"
+  print_kv "Job Template" "$resolved_job_file"
+  print_kv "Status" "Succeeded"
+  exit 0
+fi
 
 #------------------------------------------------------------------------------
 # Submit Job
 #------------------------------------------------------------------------------
 
-info "Submitting AzureML LeRobot VLA pi0 training job..."
+info "Submitting AzureML LeRobot VLA training job..."
+info "  Adapter: ${adapter_name}:${adapter_version}"
 info "  Dataset: $dataset_repo_id"
 info "  Policy: $policy_type"
 info "  Job Name: $job_name"
@@ -752,6 +857,8 @@ fi
 #------------------------------------------------------------------------------
 section "Deployment Summary"
 print_kv "Job Name" "$job_result"
+print_kv "Adapter" "${adapter_name}:${adapter_version}"
+print_kv "Adapter Config" "$adapter_config_sha256"
 print_kv "Dataset" "$dataset_repo_id"
 print_kv "Policy Type" "$policy_type"
 print_kv "Image" "$image"

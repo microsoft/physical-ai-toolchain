@@ -37,16 +37,45 @@ uv venv --python 3.12 "${LEROBOT_VENV}"
 source "${LEROBOT_VENV}/bin/activate"
 uv sync --active --frozen --no-config --no-install-project --project "${LEROBOT_PROJECT}"
 
-# HuggingFace login: must run before any code path that pulls gated models or
-# datasets from the Hub. pi0 reaches the Hub during policy init to download the
-# google/paligemma-3b-pt-224 backbone, which is gated, so logging in only on
-# the "no mounted assets" branch (the original placement) breaks the
-# blob-storage and data-asset paths where datasets are local but the backbone
-# is still pulled. Lift the login here so it runs once per container whenever
-# the caller forwards HF_TOKEN, before train.py is invoked. No-op for callers
-# that don't set HF_TOKEN.
+# Authenticate before any gated model or dataset access. Only non-secret Key
+# Vault coordinates enter the job spec; the compute identity retrieves the
+# token at runtime and the value is never passed on a command line.
 if [[ -n "${HF_TOKEN:-}" ]]; then
-  python3 -c "import os; from huggingface_hub import login; login(token=os.environ['HF_TOKEN'], add_to_git_credential=False)"
+  echo "ERROR: HF_TOKEN plaintext injection is not supported" >&2
+  exit 1
+fi
+if [[ -n "${HF_KEY_VAULT_URL:-}" || -n "${HF_TOKEN_SECRET_NAME:-}" ]]; then
+  if [[ -z "${HF_KEY_VAULT_URL:-}" || -z "${HF_TOKEN_SECRET_NAME:-}" ]]; then
+    echo "ERROR: HF_KEY_VAULT_URL and HF_TOKEN_SECRET_NAME must be set together" >&2
+    exit 1
+  fi
+  hf_token=$(python3 <<'PY'
+import os
+import sys
+
+from azure.identity import ManagedIdentityCredential
+from azure.keyvault.secrets import SecretClient
+
+credential = ManagedIdentityCredential(client_id=os.environ.get("AZURE_CLIENT_ID") or None)
+client = SecretClient(vault_url=os.environ["HF_KEY_VAULT_URL"], credential=credential)
+secret = client.get_secret(os.environ["HF_TOKEN_SECRET_NAME"])
+if not secret.value:
+    raise RuntimeError("Hugging Face token secret is empty")
+sys.stdout.write(secret.value)
+PY
+  )
+  printf '%s' "$hf_token" | python3 -c \
+    'import sys; from huggingface_hub import login; login(token=sys.stdin.read(), add_to_git_credential=False)'
+  unset hf_token
+  echo "[HUGGINGFACE] Authenticated with Azure Key Vault secret"
+fi
+if [[ "${HF_AUTH_PROBE_ONLY:-false}" == "true" ]]; then
+  if [[ -z "${HF_KEY_VAULT_URL:-}" ]]; then
+    echo "ERROR: HF_AUTH_PROBE_ONLY requires Key Vault authentication" >&2
+    exit 1
+  fi
+  echo "[HUGGINGFACE] Authentication probe completed"
+  exit 0
 fi
 
 # Build args forwarded to the MLflow training wrapper. Only flags whose values
@@ -65,12 +94,14 @@ train_args=(
   --wandb.enable=false
 )
 
-# PI policies normalize images in their policy processor and use VISUAL=IDENTITY.
-# Enabling LeRobot's ImageNet override also requires every camera key to exist
-# in meta/stats.json, which is not guaranteed for valid LeRobot v3 datasets.
-use_imagenet_stats=true
-case "${POLICY_TYPE:-act}" in
-  pi0|pi0_fast|pi05) use_imagenet_stats=false ;;
+# VLA adapters resolve image normalization from the policy configuration.
+use_imagenet_stats="${USE_IMAGENET_STATS:-true}"
+case "$use_imagenet_stats" in
+  true|false) ;;
+  *)
+    echo "ERROR: USE_IMAGENET_STATS must be true or false, got '$use_imagenet_stats'" >&2
+    exit 1
+    ;;
 esac
 
 # Warm-start from a previously registered policy model: load weights only;
@@ -139,53 +170,6 @@ if [[ -n "${init_from_policy_model_path}" ]]; then
   echo "[INIT-FROM-POLICY-MODEL] Source URI: ${INIT_FROM_POLICY_MODEL_SOURCE:-<unset>}"
   echo "[INIT-FROM-POLICY-MODEL] Mount path: ${init_from_policy_model_path}"
   ls -la "${init_from_policy_model_path}" || echo "[INIT-FROM-POLICY-MODEL] WARNING: mount path not listable"
-
-  transport_parts_dir="${init_from_policy_model_path}/model.safetensors.parts"
-  if [[ -d "${transport_parts_dir}" ]]; then
-    checksum_file="${init_from_policy_model_path}/model.safetensors.sha256"
-    part_count_file="${init_from_policy_model_path}/model.safetensors.part-count"
-    [[ -s "${checksum_file}" ]] || {
-      echo "ERROR: Chunked policy model is missing model.safetensors.sha256" >&2
-      exit 1
-    }
-    [[ -s "${part_count_file}" ]] || {
-      echo "ERROR: Chunked policy model is missing model.safetensors.part-count" >&2
-      exit 1
-    }
-
-    mapfile -d '' transport_parts < <(
-      find "${transport_parts_dir}" -maxdepth 1 -type f -name "part-*.part" -print0 | sort -z
-    )
-    expected_part_count=$(<"${part_count_file}")
-    if [[ ! "${expected_part_count}" =~ ^[1-9][0-9]*$ ]]; then
-      echo "ERROR: Invalid policy model transport part count: ${expected_part_count}" >&2
-      exit 1
-    fi
-    if [[ ${#transport_parts[@]} -ne ${expected_part_count} ]]; then
-      echo "ERROR: Expected ${expected_part_count} policy model parts, found ${#transport_parts[@]}" >&2
-      exit 1
-    fi
-
-    reconstructed_policy_path="/tmp/lerobot-reconstructed-policy"
-    rm -rf "${reconstructed_policy_path}"
-    mkdir -p "${reconstructed_policy_path}"
-    find "${init_from_policy_model_path}" -mindepth 1 -maxdepth 1 \
-      ! -name "model.safetensors.parts" \
-      ! -name "model.safetensors.sha256" \
-      ! -name "model.safetensors.part-count" \
-      -exec cp -a {} "${reconstructed_policy_path}/" \;
-    cat "${transport_parts[@]}" > "${reconstructed_policy_path}/model.safetensors"
-
-    expected_checksum=$(<"${checksum_file}")
-    actual_checksum=$(sha256sum "${reconstructed_policy_path}/model.safetensors" | cut -d " " -f 1)
-    if [[ "${actual_checksum}" != "${expected_checksum}" ]]; then
-      echo "ERROR: Reconstructed policy model checksum does not match the imported model" >&2
-      exit 1
-    fi
-    echo "[INIT-FROM-POLICY-MODEL] Reconstructed and verified ${#transport_parts[@]} transport parts"
-    init_from_policy_model_path="${reconstructed_policy_path}"
-  fi
-
   train_args+=(--policy.path="${init_from_policy_model_path}")
 else
   echo "[INIT-FROM-POLICY-MODEL] Not set; training from random initialization."
@@ -365,6 +349,34 @@ EOF
     --dataset.video_backend=pyav
     --tolerance_s=0.04
   )
+fi
+
+if [[ "${CALIBRATION_MODE:-false}" == "true" ]]; then
+  calibration_workload_config="${CALIBRATION_WORKLOAD_CONFIG:-}"
+  calibration_output_dir="${CALIBRATION_OUTPUT_DIR:-${AZURE_ML_OUTPUT_calibration_report:-}}"
+  [[ -f "${calibration_workload_config}" ]] || {
+    echo "ERROR: CALIBRATION_WORKLOAD_CONFIG must identify a readable JSON file" >&2
+    exit 1
+  }
+  [[ -n "${calibration_output_dir}" ]] || {
+    echo "ERROR: CALIBRATION_OUTPUT_DIR or AZURE_ML_OUTPUT_calibration_report is required" >&2
+    exit 1
+  }
+
+  calibration_args=(
+    python3 training/vla/scripts/calibrate_vla.py
+    --workload-config "${calibration_workload_config}"
+    --output-dir "${calibration_output_dir}"
+    --candidate-batch-sizes "${CALIBRATION_BATCH_SIZES:-1}"
+    --headroom-fraction "${CALIBRATION_HEADROOM_FRACTION:-0.1}"
+    --probe-timeout-seconds "${CALIBRATION_PROBE_TIMEOUT_SECONDS:-3600}"
+    --
+    "${train_args[@]}"
+  )
+  printf '  %s\n' "${calibration_args[@]}"
+  "${calibration_args[@]}"
+  echo "=== Calibration Complete ==="
+  exit 0
 fi
 
 echo "Running: python -m training.il.scripts.lerobot.train ${train_args[*]}"

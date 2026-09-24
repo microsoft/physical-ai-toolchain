@@ -1,0 +1,64 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+name: vla_calibrate
+display_name: VLA Calibration
+version: "1"
+description: Measure VLA CUDA memory through isolated one-step optimizer probes.
+
+code: ../../../../..
+
+inputs:
+  prepared_dataset:
+    type: uri_folder
+    description: Prepared LeRobot dataset mounted read-only.
+  workload_config:
+    type: uri_file
+    description: Immutable calibration workload JSON.
+  dataset_repo_id:
+    type: string
+  policy_type:
+    type: string
+  init_from_policy_hf_repo_id:
+    type: string
+  init_from_policy_hf_revision:
+    type: string
+  candidate_batch_sizes:
+    type: string
+    default: "1"
+  headroom_fraction:
+    type: number
+    default: 0.1
+  probe_timeout_seconds:
+    type: integer
+    default: 3600
+
+outputs:
+  calibration_report:
+    type: uri_folder
+    mode: upload
+    description: Schema-versioned calibration report and workload fingerprint.
+
+environment:
+  image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
+
+command: >-
+  bash -c '
+  set -euo pipefail;
+  export AZURE_ML_INPUT_dataset_asset_0="$AZURE_ML_INPUT_prepared_dataset";
+  export DATASET_ASSET_COUNT=1;
+  export DATASET_REPO_ID="${{inputs.dataset_repo_id}}";
+  export POLICY_TYPE="${{inputs.policy_type}}";
+  export INIT_FROM_POLICY_HF_REPO_ID="${{inputs.init_from_policy_hf_repo_id}}";
+  export INIT_FROM_POLICY_HF_REVISION="${{inputs.init_from_policy_hf_revision}}";
+  export CALIBRATION_MODE=true;
+  export CALIBRATION_WORKLOAD_CONFIG="$AZURE_ML_INPUT_workload_config";
+  export CALIBRATION_OUTPUT_DIR="$AZURE_ML_OUTPUT_calibration_report";
+  export CALIBRATION_BATCH_SIZES="${{inputs.candidate_batch_sizes}}";
+  export CALIBRATION_HEADROOM_FRACTION="${{inputs.headroom_fraction}}";
+  export CALIBRATION_PROBE_TIMEOUT_SECONDS="${{inputs.probe_timeout_seconds}}";
+  export LEROBOT_PROJECT=training/vla/lerobot;
+  export MIXED_PRECISION=bf16;
+  export POLICY_DTYPE=bfloat16;
+  export TRAIN_EXPERT_ONLY=true;
+  export GRADIENT_CHECKPOINTING=true;
+  bash training/il/scripts/lerobot/azureml-train-entry.sh'

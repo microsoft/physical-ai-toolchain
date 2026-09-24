@@ -1,0 +1,59 @@
+$schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
+type: pipeline
+display_name: VLA PI 0 Calibration
+experiment_name: vla-pi0-calibration
+description: Calibrate PI 0 micro-batch capacity through measured optimizer steps.
+
+settings:
+  default_datastore: azureml:workspaceblobstore
+  continue_on_step_failure: false
+
+inputs:
+  prepared_dataset:
+    type: uri_folder
+  workload_config:
+    type: uri_file
+  dataset_repo_id: placeholder/dataset
+  policy_type: pi0
+  init_from_policy_hf_repo_id: placeholder/model
+  init_from_policy_hf_revision: 0000000000000000000000000000000000000000
+  candidate_batch_sizes: "1"
+  headroom_fraction: 0.1
+  probe_timeout_seconds: 3600
+  compute_calibrate: azureml:placeholder
+
+outputs:
+  calibration_report:
+    type: uri_folder
+    mode: upload
+
+jobs:
+  calibration_step:
+    type: command
+    component: ./components/calibrate.yaml
+    compute: ${{parent.inputs.compute_calibrate}}
+    resources:
+      instance_type: gpu
+    inputs:
+      prepared_dataset: ${{parent.inputs.prepared_dataset}}
+      workload_config: ${{parent.inputs.workload_config}}
+      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
+      policy_type: ${{parent.inputs.policy_type}}
+      init_from_policy_hf_repo_id: ${{parent.inputs.init_from_policy_hf_repo_id}}
+      init_from_policy_hf_revision: ${{parent.inputs.init_from_policy_hf_revision}}
+      candidate_batch_sizes: ${{parent.inputs.candidate_batch_sizes}}
+      headroom_fraction: ${{parent.inputs.headroom_fraction}}
+      probe_timeout_seconds: ${{parent.inputs.probe_timeout_seconds}}
+    outputs:
+      calibration_report: ${{parent.outputs.calibration_report}}
+    identity:
+      type: managed_identity
+    environment_variables:
+      AZURE_AUTHORITY_HOST: https://login.microsoftonline.com
+      HF_KEY_VAULT_URL: placeholder
+      HF_TOKEN_SECRET_NAME: placeholder
+
+tags:
+  framework: lerobot
+  lifecycle_stage: calibration
+  model_family: pi
