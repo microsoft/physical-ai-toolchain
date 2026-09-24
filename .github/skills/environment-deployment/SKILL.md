@@ -104,6 +104,8 @@ Read these values when present:
 | `storage_account`    | Storage account name                            |
 | `azureml_workspace`  | Azure ML workspace name                         |
 | `osmo_workload_identity` | OSMO workload identity ID and Entra metadata |
+| `dns_server_ip`      | VPN route-only DNS server                       |
+| `private_dns_zones`  | Private zones used to derive VPN query suffixes |
 
 Fail when the resource group, Key Vault, or requested AKS/ACR values are missing. Do not infer names from naming conventions when Terraform exposes them.
 
@@ -332,6 +334,10 @@ The environment owner runs `infrastructure/setup/04-prepare-osmo-hil-node.sh` af
 Key Vault is the only scripted protected-artifact transfer. Before publication, the environment owner manually creates the exact secret resources and grants the Ubuntu identity data-plane access to each named inbound secret only. Use `Key Vault Secrets User` for inbound secrets and `Key Vault Secrets Officer` only for the host-specific CSR secret. Verify that the Ubuntu identity has no direct or inherited vault-wide data-plane role.
 
 Key Vault networking and RBAC are manual environment-owner actions. The publisher does not assign roles, modify Key Vault networking, or make a private vault reachable. Complete any bounded network-access window and restore private-only access before the consumer continues.
+
+When VPN is required, generate `vpn.json` from the selected environment's Terraform outputs and Azure VPN artifacts. Set `private_dns.server` to `dns_server_ip`. Derive each route-only query suffix from `private_dns_zones` by removing the leading `privatelink.` label; map the Key Vault zone `privatelink.vaultcore.azure.net` to `vault.azure.net`.
+
+Include every derived suffix in `private_dns.zones`, and add a Key Vault probe for `<key-vault-name>.vault.azure.net` with the private-endpoint subnet CIDR. Do not publish a partial or manually inferred DNS list.
 
 The publisher reuses the exact catalog-pinned OSMO token and token-metadata secret versions when they are valid and unexpired. `--renew-token` forces a new issuance. An absent catalog or valid expired token metadata issues a new token. Stop on a malformed or inaccessible catalog, or a token-metadata binding or digest mismatch. The publisher does not delete token versions.
 

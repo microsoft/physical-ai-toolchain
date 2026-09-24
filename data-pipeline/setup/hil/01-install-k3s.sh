@@ -167,12 +167,13 @@ fi
 printf '%s\n' "physical-ai-toolchain:$version" > "$tmp_dir/managed"
 sudo install -m 0600 "$tmp_dir/managed" "$managed_marker"
 
-# Install the local kubectl wrapper when needed, then start K3s and wait for its API to become ready.
-if [[ ! -e /usr/local/bin/kubectl ]]; then
-  cat > "$tmp_dir/kubectl" <<'EOF'
+# Install or update the local kubectl wrapper, then start K3s and wait for its API to become ready.
+cat > "$tmp_dir/kubectl" <<'EOF'
 #!/usr/bin/env bash
+export K3S_CONFIG_FILE=/dev/null
 exec /usr/local/bin/k3s kubectl "$@"
 EOF
+if ! sudo cmp --silent "$tmp_dir/kubectl" /usr/local/bin/kubectl 2>/dev/null; then
   sudo install -m 0755 "$tmp_dir/kubectl" /usr/local/bin/kubectl
 fi
 
@@ -182,10 +183,34 @@ if [[ "$binary_changed" == "true" || "$config_changed" == "true" ]]; then
   sudo systemctl restart k3s
 fi
 
-# Wait until the kubeconfig source is available.
+# Wait for consecutive successful checks so a transient API start cannot report success.
+stable_ready_checks=0
 for ((attempt = 1; attempt <= 60; attempt++)); do
   if sudo /usr/local/bin/k3s kubectl get --raw=/readyz >/dev/null 2>&1; then
-    break
+    node_json=$(sudo /usr/local/bin/k3s kubectl get node "$node_name" -o json 2>/dev/null || true)
+    configured_node_ip=$(jq -r '.metadata.annotations["k3s.io/internal-ip"] // empty' \
+      <<< "$node_json")
+    current_node_ip=$(jq -r \
+      '[.status.addresses[]? | select(.type == "InternalIP") | .address][0] // empty' \
+      <<< "$node_json")
+    if [[ -n "$configured_node_ip" && -n "$current_node_ip" && \
+        "$configured_node_ip" != "$current_node_ip" ]]; then
+      warn "Reconciling stale node status IP $current_node_ip to $configured_node_ip"
+      status_patch=$(jq -c --arg ip "$configured_node_ip" '
+        {status: {addresses: [.status.addresses[]
+          | if .type == "InternalIP" then .address = $ip else . end]}}
+      ' <<< "$node_json")
+      sudo /usr/local/bin/k3s kubectl patch node "$node_name" \
+        --subresource=status --type=merge --patch "$status_patch" >/dev/null 2>&1 || true
+      stable_ready_checks=0
+    elif [[ -n "$current_node_ip" ]]; then
+      ((stable_ready_checks += 1))
+    fi
+    if (( stable_ready_checks >= 3 )); then
+      break
+    fi
+  else
+    stable_ready_checks=0
   fi
   (( attempt < 60 )) || fatal "K3s API did not become ready"
   sleep 2
@@ -200,9 +225,10 @@ fi
 # Replace the local identity receipt after each successful run.
 identity_file=/var/lib/physical-ai-toolchain/k3s-identity.json
 identity_tmp="$tmp_dir/k3s-identity.json"
+api_server=$(kube_api_server "$kubeconfig_out" "$context")
+namespace_uid=$(kube_system_namespace_uid "$kubeconfig_out" "$context")
 jq -n --arg kubeconfig "$kubeconfig_out" --arg context "$context" \
-  --arg server "$(kube_api_server "$kubeconfig_out" "$context")" \
-  --arg namespace_uid "$(kube_system_namespace_uid "$kubeconfig_out" "$context")" \
+  --arg server "$api_server" --arg namespace_uid "$namespace_uid" \
   --arg node "$node_name" --arg version "$version" '
   {schema_version: 1, kind: "physical-ai-local-k3s", kubeconfig: $kubeconfig,
    context: $context, api_server: $server, kube_system_namespace_uid: $namespace_uid,

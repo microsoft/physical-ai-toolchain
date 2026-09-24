@@ -130,6 +130,11 @@ output "dns_server_ip" {
   value       = module.platform.dns_server_ip
 }
 
+output "private_dns_zones" {
+  description = "Private DNS zones for private endpoints."
+  value       = module.platform.private_dns_zones
+}
+
 // ============================================================
 // Compute Resources Outputs
 // ============================================================

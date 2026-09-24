@@ -1,0 +1,31 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+display_name: VLA GPU Readiness Canary
+description: Validate one GPU allocation and emit bounded CUDA memory evidence.
+experiment_name: vla-gpu-readiness
+
+code: .
+environment: azureml:vla-pi0-training-env:2.13.0-cuda13.0-cudnn9-runtime-sha256-db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
+compute: azureml:placeholder
+resources:
+  instance_type: gpu
+
+environment_variables:
+  ACCEPT_EULA: "Y"
+  NVIDIA_DRIVER_CAPABILITIES: all
+  PRIVACY_CONSENT: "Y"
+
+command: >-
+  python -c "import json, subprocess, time, torch;
+  assert torch.cuda.is_available(), 'CUDA is unavailable';
+  device = torch.cuda.current_device();
+  uuid = subprocess.check_output(['nvidia-smi', '--query-gpu=uuid', '--format=csv,noheader'], text=True).strip();
+  allocation = torch.empty(128 * 1024 * 1024, dtype=torch.float32, device=device);
+  torch.cuda.synchronize();
+  free_bytes, total_bytes = torch.cuda.mem_get_info(device);
+  print(json.dumps({'device_name': torch.cuda.get_device_name(device), 'gpu_uuid': uuid,
+  'allocated_bytes': torch.cuda.memory_allocated(device), 'reserved_bytes': torch.cuda.memory_reserved(device),
+  'free_bytes': free_bytes, 'total_bytes': total_bytes}), flush=True);
+  time.sleep(120);
+  del allocation;
+  torch.cuda.empty_cache()"

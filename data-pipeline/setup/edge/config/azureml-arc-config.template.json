@@ -1,0 +1,8 @@
+{
+    "enableTraining": "${ENABLE_TRAINING}",
+    "enableInference": "${ENABLE_INFERENCE}",
+    "clusterPurpose": "${CLUSTER_PURPOSE}",
+    "installNvidiaDevicePlugin": "${INSTALL_NVIDIA_DEVICE_PLUGIN}",
+    "installDcgmExporter": "${INSTALL_DCGM_EXPORTER}",
+    "relayserver.enabled": "${RELAY_SERVER_ENABLED}"
+}
