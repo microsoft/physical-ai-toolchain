@@ -166,6 +166,44 @@ describe('useEpisodeAnnotations', () => {
 
     expect(useAnnotationStore.getState().currentAnnotation?.notes).toBe('newer edit')
   })
+
+  it('does not persist a dirty annotation under the next episode key during hydration', async () => {
+    const episodeZero = makeAnnotation('me')
+    const episodeOne = { ...makeAnnotation('me'), notes: 'episode one' }
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ annotations: [episodeZero] }))
+      .mockResolvedValueOnce(jsonResponse({ annotations: [episodeOne] }))
+    selectDataset()
+    renderHookWithProviders(() => useEpisodeAnnotations())
+    await waitFor(() => expect(useAnnotationStore.getState().currentAnnotation).not.toBeNull())
+
+    act(() => useAnnotationStore.getState().updateNotes('dirty episode zero'))
+    await waitFor(() =>
+      expect(draftMocks.persist).toHaveBeenCalledWith(
+        'ds-1',
+        0,
+        'me',
+        expect.objectContaining({
+          draft: expect.objectContaining({ notes: 'dirty episode zero' }),
+        }),
+      ),
+    )
+
+    act(() => useEpisodeStore.setState({ currentIndex: 1 }))
+    await waitFor(() =>
+      expect(useAnnotationStore.getState().currentAnnotation?.notes).toBe('episode one'),
+    )
+
+    expect(draftMocks.persist).not.toHaveBeenCalledWith(
+      'ds-1',
+      1,
+      'me',
+      expect.objectContaining({
+        draft: expect.objectContaining({ notes: 'dirty episode zero' }),
+      }),
+    )
+  })
+
   it('does not fetch when no dataset is selected', async () => {
     renderHookWithProviders(() => useEpisodeAnnotations())
 

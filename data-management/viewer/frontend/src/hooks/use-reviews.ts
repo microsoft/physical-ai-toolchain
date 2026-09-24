@@ -4,6 +4,8 @@ import {
   createAnnotationRevision,
   createEditRevision,
   createReviewDecision,
+  fetchLatestReviewDecision,
+  fetchLatestReviewQuality,
   runQualityReview,
 } from '@/api/reviews'
 import { persistReviewDecisionDraft } from '@/lib/edit-draft-storage'
@@ -12,7 +14,6 @@ import type {
   EpisodeEditOperations,
   JsonValue,
   QualityProfile,
-  QualityReport,
   ReviewDecision,
 } from '@/types'
 
@@ -48,20 +49,18 @@ function editOperations(edits: EpisodeEditOperations) {
 export function useReviewQuality(datasetId: string, episodeIndex: number) {
   return useQuery({
     queryKey: reviewKeys.quality(datasetId, episodeIndex),
-    queryFn: async () => null as QualityReport | null,
-    initialData: null,
+    queryFn: () => fetchLatestReviewQuality(datasetId, episodeIndex),
     staleTime: Infinity,
-    enabled: false,
+    enabled: Boolean(datasetId) && episodeIndex >= 0,
   })
 }
 
 export function useReviewDecision(datasetId: string, episodeIndex: number) {
   return useQuery({
     queryKey: reviewKeys.decision(datasetId, episodeIndex),
-    queryFn: async () => null as ReviewDecision | null,
-    initialData: null,
+    queryFn: () => fetchLatestReviewDecision(datasetId, episodeIndex),
     staleTime: Infinity,
-    enabled: false,
+    enabled: Boolean(datasetId) && episodeIndex >= 0,
   })
 }
 

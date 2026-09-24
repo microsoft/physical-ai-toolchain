@@ -29,7 +29,7 @@ const EpisodeListItem = memo(function EpisodeListItem({
         <div className="font-medium">Episode {episode.index}</div>
         <div className="text-muted-foreground text-sm">
           {episode.length} frames • Task {episode.taskIndex}
-          {episode.hasAnnotations && <span className="ml-2 text-green-600">✓ Annotated</span>}
+          {episode.hasAnnotations && <span className="ml-2 text-green-600">✓ Saved</span>}
         </div>
         {labels.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">

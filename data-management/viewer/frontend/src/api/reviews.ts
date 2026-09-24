@@ -46,6 +46,22 @@ export function runQualityReview(
   return postReview(reviewPath(datasetId, episodeIndex, 'quality-runs'), request)
 }
 
+export function fetchLatestReviewQuality(
+  datasetId: string,
+  episodeIndex: number,
+): Promise<QualityReport | null> {
+  return apiRequest<QualityReport | null>(
+    reviewPath(datasetId, episodeIndex, 'quality-reports/latest'),
+  )
+}
+
+export function fetchLatestReviewDecision(
+  datasetId: string,
+  episodeIndex: number,
+): Promise<ReviewDecision | null> {
+  return apiRequest<ReviewDecision | null>(reviewPath(datasetId, episodeIndex, 'decisions/latest'))
+}
+
 export function createAnnotationRevision(
   datasetId: string,
   episodeIndex: number,

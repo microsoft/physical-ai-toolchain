@@ -123,6 +123,15 @@ export function useEpisodeAnnotations() {
     const key = `${currentDataset.id}:${currentIndex}:${annotatorId}`
     if (hydratedKeyRef.current !== key) return
 
+    const state = useAnnotationStore.getState()
+    if (
+      state.currentAnnotation !== currentAnnotation ||
+      state.originalAnnotation !== originalAnnotation ||
+      state.isDirty !== isDirty
+    ) {
+      return
+    }
+
     void persistAnnotationDraft(
       currentDataset.id,
       currentIndex,

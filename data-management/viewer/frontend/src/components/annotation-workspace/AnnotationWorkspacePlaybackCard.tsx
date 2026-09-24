@@ -24,8 +24,8 @@ interface AnnotationWorkspacePlaybackCardProps {
   videoSrc: string | null
   /**
    * Map of camera name -> video URL for every camera in the current episode.
-   * Used to pre-mount a `<video>` element per camera so switching is instant
-   * (parallel preload + persistent decoder pipelines).
+   * Used to keep a `<video>` element mounted per camera while limiting full
+   * media preloading to the selected camera.
    */
   videoUrls?: Record<string, string>
   onVideoEnded: () => void
@@ -141,12 +141,8 @@ export function AnnotationWorkspacePlaybackCard({
     }
   }, [episodeBase, videoSrc])
 
-  // Build the list of videos to mount. Pre-mounting every camera's <video>
-  // (with preload="auto") keeps each camera's decode pipeline warm so
-  // switching cameras is effectively instant — no fresh HTTP fetch, no
-  // decoder cold start. Inactive videos are kept mounted but hidden and
-  // never receive play() calls, so they sit on their first frame at zero
-  // CPU cost.
+  // Keep inactive cameras mounted with metadata only. Fully preloading every
+  // camera creates overlapping range streams that can overwhelm dev proxies.
   const videoEntries = useMemo<Array<{ camera: string; url: string }>>(() => {
     if (!videoUrls) {
       return videoSrc && selectedCamera ? [{ camera: selectedCamera, url: videoSrc }] : []
@@ -208,7 +204,7 @@ export function AnnotationWorkspacePlaybackCard({
                   onLoadedMetadata={isActive ? handleVideoLoadedMetadata : undefined}
                   muted
                   playsInline
-                  preload="auto"
+                  preload={isActive ? 'auto' : 'metadata'}
                   className={cn(
                     'absolute inset-0 m-auto max-h-full max-w-full object-contain',
                     isActive ? 'z-10 opacity-100' : 'pointer-events-none z-0 opacity-0',

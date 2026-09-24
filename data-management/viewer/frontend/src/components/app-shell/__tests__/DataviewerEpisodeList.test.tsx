@@ -74,6 +74,17 @@ describe('DataviewerEpisodeList', () => {
     expect(screen.getByText('Episode 2')).toBeInTheDocument()
   })
 
+  it('labels an existing annotation record as saved rather than reviewed', () => {
+    mockEpisodesResult = { data: sampleEpisodes, isLoading: false, error: null }
+
+    render(
+      <DataviewerEpisodeList datasetId="ds-1" onSelectEpisode={noopSelect} selectedIndex={1} />,
+    )
+
+    expect(screen.getByText('✓ Saved')).toBeInTheDocument()
+    expect(screen.queryByText(/annotated/i)).not.toBeInTheDocument()
+  })
+
   it('narrows visible episodes and shows fraction count when filter labels are active', () => {
     mockEpisodesResult = { data: sampleEpisodes, isLoading: false, error: null }
     useLabelStore.getState().setAllEpisodeLabels({ 0: ['SUCCESS'], 1: ['FAILURE'] })

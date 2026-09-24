@@ -80,11 +80,37 @@ class AzureReviewRepository:
     async def get_quality_report(self, run_id: str) -> QualityReport | None:
         return await self._get_record("quality", run_id, QualityReport)
 
+    async def list_quality_reports(self, dataset_id: str, episode_index: int) -> list[QualityReport]:
+        validated_dataset_id = validate_review_identifier(dataset_id)
+        prefix = f"{self._prefix}/reviews/{validated_dataset_id}/episodes/episode-{episode_index:06d}/quality/"
+        records: list[QualityReport] = []
+        try:
+            container = await self._get_container()
+            async for item in container.list_blobs(name_starts_with=prefix):
+                download = await container.get_blob_client(item.name).download_blob()
+                records.append(QualityReport.model_validate_json(await download.readall()))
+            return records
+        except Exception as exc:
+            raise ReviewStorageError(f"Failed to list quality review records: {exc}") from exc
+
     async def create_decision(self, decision: ReviewDecision) -> None:
         await self._create_record("decisions", decision.decision_id, decision)
 
     async def get_decision(self, decision_id: str) -> ReviewDecision | None:
         return await self._get_record("decisions", decision_id, ReviewDecision)
+
+    async def list_decisions(self, dataset_id: str, episode_index: int) -> list[ReviewDecision]:
+        validated_dataset_id = validate_review_identifier(dataset_id)
+        prefix = f"{self._prefix}/reviews/{validated_dataset_id}/episodes/episode-{episode_index:06d}/decisions/"
+        records: list[ReviewDecision] = []
+        try:
+            container = await self._get_container()
+            async for item in container.list_blobs(name_starts_with=prefix):
+                download = await container.get_blob_client(item.name).download_blob()
+                records.append(ReviewDecision.model_validate_json(await download.readall()))
+            return records
+        except Exception as exc:
+            raise ReviewStorageError(f"Failed to list review decision records: {exc}") from exc
 
     async def append_event(self, event: OperationalEvent) -> None:
         operation_id = validate_review_identifier(event.operation_id)

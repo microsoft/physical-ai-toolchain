@@ -158,7 +158,7 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
     readOnlyNotice
   ) : (
     <ReviewQualityPanel
-      qualityReport={quality.data}
+      qualityReport={quality.data ?? null}
       qualityError={runQuality.error?.message ?? null}
       isRunningQuality={runQuality.isPending}
       isSubmittingDecision={createDecision.isPending}
@@ -324,7 +324,7 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
           datasetId={currentDataset.id}
           episodeIndex={currentEpisode.meta.index}
           actorId={decision.data?.actorId ?? currentAnnotation?.annotatorId ?? ''}
-          decision={decision.data}
+          decision={decision.data ?? null}
         />
       )}
     </div>

@@ -148,6 +148,55 @@ class TestLocalReviewRepository:
             "review.completed",
         ]
 
+    async def test_given_quality_reports_when_listed_then_only_episode_records_are_returned(
+        self,
+        tmp_path: Path,
+        source_identity: SourceIdentity,
+    ) -> None:
+        # Arrange
+        repository = LocalReviewRepository(tmp_path / "release-root", source_roots=(tmp_path / "datasets",))
+        report = _quality(source_identity)
+        await repository.create_quality_report(report)
+
+        # Act
+        records = await repository.list_quality_reports("sample-dataset", 7)
+
+        # Assert
+        assert records == [report]
+
+    async def test_given_decisions_when_listed_then_only_episode_records_are_returned(
+        self,
+        tmp_path: Path,
+        source_identity: SourceIdentity,
+    ) -> None:
+        # Arrange
+        repository = LocalReviewRepository(tmp_path / "release-root", source_roots=(tmp_path / "datasets",))
+        service = ReviewService(repository)
+        annotation = _annotation(source_identity, "annotation-01")
+        edit = _edit(source_identity)
+        quality = _quality(source_identity)
+        decision = ReviewDecision(
+            decision_id="decision-01",
+            decision=ReviewDecisionValue.ACCEPT,
+            reason_codes=("quality-approved",),
+            actor_id="localuser",
+            created_at=datetime(2025, 1, 1, tzinfo=UTC),
+            source=source_identity,
+            annotation_revision_id=annotation.revision_id,
+            edit_revision_id=edit.revision_id,
+            quality_run_id=quality.run_id,
+        )
+        await service.create_annotation_revision(annotation)
+        await service.create_edit_revision(edit)
+        await service.create_quality_report(quality)
+        await service.create_decision(decision)
+
+        # Act
+        records = await repository.list_decisions("sample-dataset", 7)
+
+        # Assert
+        assert records == [decision]
+
 
 class TestReviewService:
     async def test_given_missing_predecessor_when_revision_created_then_rejected(

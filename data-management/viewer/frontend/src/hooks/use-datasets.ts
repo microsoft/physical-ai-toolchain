@@ -144,6 +144,8 @@ export function useEpisode(datasetId: string | undefined, episodeIndex: number |
     enabled: !!datasetId && episodeIndex !== undefined && episodeIndex >= 0,
     staleTime: 30 * 1000, // 30 seconds
     gcTime: 30 * 60 * 1000, // 30 minutes
+    retry: (failureCount, error) => error instanceof TypeError && failureCount < 3,
+    retryDelay: (attemptIndex) => Math.min(250 * 2 ** attemptIndex, 1_000),
   })
 }
 

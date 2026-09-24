@@ -1,7 +1,13 @@
 import { act, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { reviewKeys, useCreateReviewDecision, useRunQualityReview } from '@/hooks/use-reviews'
+import {
+  reviewKeys,
+  useCreateReviewDecision,
+  useReviewDecision,
+  useReviewQuality,
+  useRunQualityReview,
+} from '@/hooks/use-reviews'
 import { renderHookWithProviders } from '@/test-utils/render'
 import type { EpisodeAnnotation, EpisodeEditOperations, QualityReport } from '@/types'
 
@@ -9,6 +15,8 @@ const api = vi.hoisted(() => ({
   createAnnotationRevision: vi.fn(),
   createEditRevision: vi.fn(),
   createReviewDecision: vi.fn(),
+  fetchLatestReviewDecision: vi.fn(),
+  fetchLatestReviewQuality: vi.fn(),
   runQualityReview: vi.fn(),
 }))
 
@@ -37,6 +45,11 @@ const qualityReport: QualityReport = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  api.fetchLatestReviewDecision.mockResolvedValue({
+    decisionId: 'decision-latest',
+    decision: 'accept',
+  })
+  api.fetchLatestReviewQuality.mockResolvedValue(qualityReport)
   api.runQualityReview.mockResolvedValue(qualityReport)
   api.createAnnotationRevision.mockImplementation(async (_datasetId, _episodeIndex, revision) =>
     Promise.resolve(revision),
@@ -50,6 +63,24 @@ beforeEach(() => {
 })
 
 describe('review hooks', () => {
+  it('restores the latest persisted decision for the selected episode', async () => {
+    const { result } = renderHookWithProviders(() => useReviewDecision('dataset-1', 2))
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(api.fetchLatestReviewDecision).toHaveBeenCalledWith('dataset-1', 2)
+    expect(result.current.data).toMatchObject({ decisionId: 'decision-latest' })
+  })
+
+  it('restores the latest persisted quality report for the selected episode', async () => {
+    const { result } = renderHookWithProviders(() => useReviewQuality('dataset-1', 2))
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(api.fetchLatestReviewQuality).toHaveBeenCalledWith('dataset-1', 2)
+    expect(result.current.data).toEqual(qualityReport)
+  })
+
   it('stores quality reports in TanStack Query state', async () => {
     const { result, queryClient } = renderHookWithProviders(() => useRunQualityReview())
 

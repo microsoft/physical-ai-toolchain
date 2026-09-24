@@ -4,6 +4,8 @@ import {
   createAnnotationRevision,
   createEditRevision,
   createReviewDecision,
+  fetchLatestReviewDecision,
+  fetchLatestReviewQuality,
   runQualityReview,
 } from '@/api/reviews'
 import { _resetCsrfToken } from '@/lib/api-client'
@@ -25,6 +27,47 @@ beforeEach(() => {
 })
 
 describe('review API', () => {
+  it('fetches the latest persisted review decision for an episode', async () => {
+    installFetchMock({ csrf: false })
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        decision_id: 'decision-latest',
+        decision: 'accept',
+        reason_codes: ['evidence-reviewed'],
+        quality_run_id: 'quality-latest',
+      }),
+    )
+
+    const decision = await fetchLatestReviewDecision('dataset-1', 2)
+
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      '/api/datasets/dataset-1/episodes/2/review/decisions/latest',
+    )
+    expect(decision?.decisionId).toBe('decision-latest')
+  })
+
+  it('fetches the latest persisted quality report for an episode', async () => {
+    installFetchMock({ csrf: false })
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        run_id: 'quality-latest',
+        check_set_version: '1.0.0',
+        source,
+        actor_id: 'reviewer',
+        created_at: '2026-09-24T08:00:00Z',
+        episode_checks: [],
+        package_checks: [],
+      }),
+    )
+
+    const report = await fetchLatestReviewQuality('dataset-1', 2)
+
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      '/api/datasets/dataset-1/episodes/2/review/quality-reports/latest',
+    )
+    expect(report?.runId).toBe('quality-latest')
+  })
+
   it('uses the P06 review routes and transforms immutable contracts', async () => {
     mockFetch
       .mockResolvedValueOnce(

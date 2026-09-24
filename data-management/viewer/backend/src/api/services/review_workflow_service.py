@@ -69,6 +69,12 @@ class ReviewWorkflowService:
         self._validate_route(dataset_id, episode_index, report.source.dataset_id, report.source.episode_index)
         return report
 
+    async def get_latest_quality_report(self, dataset_id: str, episode_index: int) -> QualityReport | None:
+        reports = await self.repository.list_quality_reports(dataset_id, episode_index)
+        if not reports:
+            return None
+        return max(reports, key=lambda report: (report.created_at, report.run_id))
+
     async def run_quality(
         self,
         dataset_id: str,
@@ -101,6 +107,12 @@ class ReviewWorkflowService:
         self._validate_route(dataset_id, episode_index, decision.source.dataset_id, decision.source.episode_index)
         await self._review.create_decision(decision)
         return decision
+
+    async def get_latest_decision(self, dataset_id: str, episode_index: int) -> ReviewDecision | None:
+        decisions = await self.repository.list_decisions(dataset_id, episode_index)
+        if not decisions:
+            return None
+        return max(decisions, key=lambda decision: (decision.created_at, decision.decision_id))
 
     @staticmethod
     def _validate_route(

@@ -91,6 +91,21 @@ async def run_quality(
 
 
 @router.get(
+    "/datasets/{dataset_id}/episodes/{episode_idx}/review/quality-reports/latest",
+    response_model=QualityReport | None,
+)
+async def get_latest_quality_report(
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0)),
+    service: ReviewWorkflowService = Depends(get_review_workflow_service),
+) -> QualityReport | None:
+    try:
+        return await service.get_latest_quality_report(dataset_id, episode_idx)
+    except ReviewStorageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
     "/datasets/{dataset_id}/episodes/{episode_idx}/review/quality-reports/{run_id}",
     response_model=QualityReport,
 )
@@ -129,6 +144,21 @@ async def create_decision(
         }
     )
     return await _create(service.create_decision(dataset_id, episode_idx, decision))
+
+
+@router.get(
+    "/datasets/{dataset_id}/episodes/{episode_idx}/review/decisions/latest",
+    response_model=ReviewDecision | None,
+)
+async def get_latest_decision(
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0)),
+    service: ReviewWorkflowService = Depends(get_review_workflow_service),
+) -> ReviewDecision | None:
+    try:
+        return await service.get_latest_decision(dataset_id, episode_idx)
+    except ReviewStorageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 async def _create(operation):

@@ -145,6 +145,25 @@ describe('useEpisode', () => {
     })
     expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/0', expect.any(Object))
   })
+
+  it('retries transient transport failures while loading a large episode payload', async () => {
+    mockFetch
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          meta: { index: 0, length: 100, task_index: 0, has_annotations: false },
+          video_urls: {},
+          cameras: [],
+          trajectory_data: [],
+        }),
+      )
+
+    const { result } = renderHookWithProviders(() => useEpisode('ds-1', 0))
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true), { timeout: 5_000 })
+    expect(mockFetch).toHaveBeenCalledTimes(3)
+  })
 })
 
 describe('useCapabilities', () => {

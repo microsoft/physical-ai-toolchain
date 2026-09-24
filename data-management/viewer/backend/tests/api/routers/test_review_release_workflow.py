@@ -157,7 +157,9 @@ def test_given_review_evidence_when_release_lifecycle_runs_then_api_contract_is_
     edit_response = client.post(f"{base_path}/edit-revisions", json=edit)
     quality_response = client.post(f"{base_path}/quality-reports", json=quality)
     quality_get = client.get(f"{base_path}/quality-reports/quality-1")
+    latest_quality_get = client.get(f"{base_path}/quality-reports/latest")
     decision_response = client.post(f"{base_path}/decisions", json=decision)
+    latest_decision_get = client.get(f"{base_path}/decisions/latest")
     request = {
         "releaseId": "release-1",
         "datasetId": "dataset-1",
@@ -187,10 +189,14 @@ def test_given_review_evidence_when_release_lifecycle_runs_then_api_contract_is_
         edit_response.status_code,
         quality_response.status_code,
         quality_get.status_code,
+        latest_quality_get.status_code,
         decision_response.status_code,
-    ] == [201, 201, 201, 200, 201]
+        latest_decision_get.status_code,
+    ] == [201, 201, 201, 200, 200, 201, 200]
     assert annotation_response.json()["actor_id"] == "reviewer"
     assert quality_get.json()["run_id"] == "quality-1"
+    assert latest_quality_get.json()["run_id"] == "quality-1"
+    assert latest_decision_get.json()["decision_id"] == "decision-1"
     assert eligibility.status_code == 200
     assert eligibility.json() == {
         "eligibleEpisodes": [{"episodeIndex": 0, "decisionId": "decision-1", "qualityRunId": "quality-1"}],

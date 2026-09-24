@@ -288,8 +288,11 @@ describe('fetchAnnotations', () => {
 })
 
 describe('saveAnnotation', () => {
-  it('calls PUT with a create-only precondition', async () => {
-    const annotation = { annotatorId: 'u1' }
+  it('calls PUT with snake-case fields and a create-only precondition', async () => {
+    const annotation = {
+      annotatorId: 'u1',
+      taskCompleteness: { completionPercentage: 100 },
+    }
     mockMutationFetch(jsonResponse({ success: true }, { headers: { ETag: '"created"' } }))
 
     const result = await saveAnnotation('ds-1', 0, annotation as never, { createOnly: true })
@@ -298,7 +301,10 @@ describe('saveAnnotation', () => {
     expect(apiCall[0]).toBe('/api/datasets/ds-1/episodes/0/annotations')
     expect(apiCall[1]).toMatchObject({
       method: 'PUT',
-      body: JSON.stringify(annotation),
+      body: JSON.stringify({
+        annotator_id: 'u1',
+        task_completeness: { completion_percentage: 100 },
+      }),
     })
     expect(apiCall[1].headers).toHaveProperty('If-None-Match', '*')
     expect(result.etag).toBe('"created"')

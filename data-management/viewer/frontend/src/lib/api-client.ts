@@ -110,6 +110,21 @@ export function transformKeys<T>(obj: unknown): T {
   return obj as T
 }
 
+function transformRequestKeys(obj: unknown): unknown {
+  if (Array.isArray(obj)) {
+    return obj.map(transformRequestKeys)
+  }
+  if (obj !== null && typeof obj === 'object') {
+    return Object.fromEntries(
+      Object.entries(obj).map(([key, value]) => [
+        key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+        transformRequestKeys(value),
+      ]),
+    )
+  }
+  return obj
+}
+
 /**
  * Apply transformKeys to a dataset payload while preserving the original
  * `features` map keys (camera/feature names like ``observation.images.front``
@@ -384,7 +399,7 @@ export async function saveAnnotation(
         'Content-Type': 'application/json',
         ...mutationPreconditionHeaders(precondition),
       },
-      body: JSON.stringify(annotation),
+      body: JSON.stringify(transformRequestKeys(annotation)),
     },
   )
 }
