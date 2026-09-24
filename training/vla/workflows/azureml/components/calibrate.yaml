@@ -10,11 +10,14 @@ code: ../../../../..
 inputs:
   prepared_dataset:
     type: uri_folder
+    optional: true
     description: Prepared LeRobot dataset mounted read-only.
   workload_config:
     type: uri_file
     description: Immutable calibration workload JSON.
   dataset_repo_id:
+    type: string
+  dataset_revision:
     type: string
   policy_type:
     type: string
@@ -22,6 +25,15 @@ inputs:
     type: string
   init_from_policy_hf_revision:
     type: string
+  train_expert_only:
+    type: string
+  gradient_checkpointing:
+    type: string
+  use_imagenet_stats:
+    type: string
+  rename_map_b64:
+    type: string
+    default: none
   candidate_batch_sizes:
     type: string
     default: "1"
@@ -44,12 +56,21 @@ environment:
 command: >-
   bash -c '
   set -euo pipefail;
-  export AZURE_ML_INPUT_dataset_asset_0="$AZURE_ML_INPUT_prepared_dataset";
-  export DATASET_ASSET_COUNT=1;
+  if [[ -n "${AZURE_ML_INPUT_prepared_dataset:-}" ]]; then
+    export AZURE_ML_INPUT_dataset_asset_0="$AZURE_ML_INPUT_prepared_dataset";
+    export DATASET_ASSET_COUNT=1;
+  fi;
   export DATASET_REPO_ID="${{inputs.dataset_repo_id}}";
+  export DATASET_REVISION="${{inputs.dataset_revision}}";
   export POLICY_TYPE="${{inputs.policy_type}}";
   export INIT_FROM_POLICY_HF_REPO_ID="${{inputs.init_from_policy_hf_repo_id}}";
   export INIT_FROM_POLICY_HF_REVISION="${{inputs.init_from_policy_hf_revision}}";
+  export TRAIN_EXPERT_ONLY="${{inputs.train_expert_only}}";
+  export GRADIENT_CHECKPOINTING="${{inputs.gradient_checkpointing}}";
+  export USE_IMAGENET_STATS="${{inputs.use_imagenet_stats}}";
+  if [[ "${{inputs.rename_map_b64}}" != "none" ]]; then
+    export RENAME_MAP_B64="${{inputs.rename_map_b64}}";
+  fi;
   export CALIBRATION_MODE=true;
   export CALIBRATION_WORKLOAD_CONFIG="$AZURE_ML_INPUT_workload_config";
   export CALIBRATION_OUTPUT_DIR="$AZURE_ML_OUTPUT_calibration_report";
@@ -58,7 +79,4 @@ command: >-
   export CALIBRATION_PROBE_TIMEOUT_SECONDS="${{inputs.probe_timeout_seconds}}";
   export LEROBOT_PROJECT=training/vla/lerobot;
   export MIXED_PRECISION=bf16;
-  export POLICY_DTYPE=bfloat16;
-  export TRAIN_EXPERT_ONLY=true;
-  export GRADIENT_CHECKPOINTING=true;
   bash training/il/scripts/lerobot/azureml-train-entry.sh'
