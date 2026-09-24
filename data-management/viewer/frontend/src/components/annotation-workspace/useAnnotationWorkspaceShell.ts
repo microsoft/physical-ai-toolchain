@@ -342,6 +342,9 @@ export function useAnnotationWorkspaceShell({
     canvasRef: media.canvasRef,
     cameras: media.cameras,
     cameraName: media.cameraName,
+    cameraNames: media.cameraNames,
     setCameraName: media.setCameraName,
+    setCameraNames: media.setCameraNames,
+    videoWindows: media.videoWindows,
   }
 }

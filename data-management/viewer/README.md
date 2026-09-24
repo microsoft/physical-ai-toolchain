@@ -2,7 +2,7 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-09-22
+ms.date: 2026-09-24
 ms.topic: overview
 ---
 
@@ -44,6 +44,8 @@ npm install
 ## ⚙️ Configuration
 
 Copy `backend/.env.example` to `backend/.env` and set values for your environment.
+
+Use the [operator workspace guide](docs/operator-workspace.md) to configure simulation or explicit physical SO-101 access, preflight, recording handoff, and cleanup recovery.
 
 ### Local File Storage (default)
 

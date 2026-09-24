@@ -73,4 +73,45 @@ describe('CameraSelector', () => {
     fireEvent.mouseDown(document.body)
     expect(screen.queryByText('Wrist')).not.toBeInTheDocument()
   })
+
+  it('exposes checked state and updates a multi-camera selection', async () => {
+    const user = userEvent.setup()
+    const onSelectionChange = vi.fn()
+    renderWithQuery(
+      <CameraSelector
+        cameras={['observation.images.front', 'observation.images.wrist']}
+        selectedCameras={['observation.images.front', 'observation.images.wrist']}
+        onSelectionChange={onSelectionChange}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /2 cameras/i }))
+    const options = screen.getAllByRole('menuitemcheckbox')
+
+    expect(options).toHaveLength(2)
+    expect(options[0]).toHaveAttribute('aria-checked', 'true')
+    await user.click(options[1])
+    expect(onSelectionChange).toHaveBeenCalledWith(['observation.images.front'])
+  })
+
+  it('toggles end-effector analysis independently from cameras', async () => {
+    const user = userEvent.setup()
+    const onSelectionChange = vi.fn()
+    const onEndEffectorViewSelectionChange = vi.fn()
+    renderWithQuery(
+      <CameraSelector
+        cameras={['observation.images.front']}
+        selectedCameras={['observation.images.front']}
+        onSelectionChange={onSelectionChange}
+        endEffectorViewSelected={false}
+        onEndEffectorViewSelectionChange={onEndEffectorViewSelectionChange}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /1 camera/i }))
+    await user.click(screen.getByRole('menuitemcheckbox', { name: /end effector 3d/i }))
+
+    expect(onEndEffectorViewSelectionChange).toHaveBeenCalledWith(true)
+    expect(onSelectionChange).not.toHaveBeenCalled()
+  })
 })

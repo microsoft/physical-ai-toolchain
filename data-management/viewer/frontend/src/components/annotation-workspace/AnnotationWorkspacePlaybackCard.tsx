@@ -1,15 +1,28 @@
-import { Loader2, Pause, Play, Repeat, RotateCcw, SkipBack, SkipForward } from 'lucide-react'
+import {
+  Loader2,
+  Maximize2,
+  Minimize2,
+  Pause,
+  Play,
+  Repeat,
+  RotateCcw,
+  SkipBack,
+  SkipForward,
+} from 'lucide-react'
 import {
   type RefObject,
   type SyntheticEvent,
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react'
 
-import { CameraSelector } from '@/components/episode-viewer'
+import {
+  CameraSelector,
+  type EndEffectorTrajectory,
+  EndEffectorTrajectoryPlot,
+} from '@/components/episode-viewer'
 import { PlaybackControlStrip } from '@/components/playback/PlaybackControlStrip'
 import { SpeedControl } from '@/components/playback/SpeedControl'
 import { Button } from '@/components/ui/button'
@@ -40,6 +53,11 @@ interface AnnotationWorkspacePlaybackCardProps {
   cameras: string[]
   selectedCamera: string | null
   onSelectCamera: (camera: string) => void
+  selectedCameras?: string[]
+  onSelectionChange?: (cameras: string[]) => void
+  endEffectorTrajectories?: readonly EndEffectorTrajectory[]
+  videoWindows?: Record<string, [number, number]>
+  datasetFps?: number
   isPlaying: boolean
   onTogglePlayback: () => void
   onStepFrame: (delta: number) => void
@@ -74,6 +92,11 @@ export function AnnotationWorkspacePlaybackCard({
   cameras,
   selectedCamera,
   onSelectCamera,
+  selectedCameras,
+  onSelectionChange,
+  endEffectorTrajectories = [],
+  videoWindows = {},
+  datasetFps = 30,
   isPlaying,
   onTogglePlayback,
   onStepFrame,
@@ -99,6 +122,8 @@ export function AnnotationWorkspacePlaybackCard({
   const [imageLoaded, setImageLoaded] = useState(false)
   const [videoLoaded, setVideoLoaded] = useState(false)
   const [showVideoLoading, setShowVideoLoading] = useState(false)
+  const [showEndEffectorView, setShowEndEffectorView] = useState(false)
+  const [isMediaExpanded, setIsMediaExpanded] = useState(false)
 
   useEffect(() => {
     if (!videoSrc) {
@@ -107,9 +132,7 @@ export function AnnotationWorkspacePlaybackCard({
       return
     }
 
-    // With every camera's <video> pre-mounted, the new active video is
-    // typically already loaded (readyState >= HAVE_METADATA) when the user
-    // switches cameras. In that case, skip the loading flicker entirely.
+    // Skip the loading indicator when the selected video already has metadata.
     const activeVideo = videoRef.current
     if (activeVideo && activeVideo.readyState >= 1) {
       setVideoLoaded(true)
@@ -141,8 +164,6 @@ export function AnnotationWorkspacePlaybackCard({
     }
   }, [episodeBase, videoSrc])
 
-  // Keep inactive cameras mounted with metadata only. Fully preloading every
-  // camera creates overlapping range streams that can overwhelm dev proxies.
   const videoEntries = useMemo<Array<{ camera: string; url: string }>>(() => {
     if (!videoUrls) {
       return videoSrc && selectedCamera ? [{ camera: selectedCamera, url: videoSrc }] : []
@@ -151,67 +172,138 @@ export function AnnotationWorkspacePlaybackCard({
       .filter(([, url]) => Boolean(url))
       .map(([camera, url]) => ({ camera, url }))
   }, [selectedCamera, videoSrc, videoUrls])
+  const displayedCameras = useMemo(
+    () => (selectedCameras?.length ? selectedCameras : selectedCamera ? [selectedCamera] : []),
+    [selectedCamera, selectedCameras],
+  )
+  const displayedEntries = videoEntries.filter(({ camera }) => displayedCameras.includes(camera))
 
-  // Pause inactive videos when the user switches cameras. We don't restore
-  // playback on the previous camera; the active video resumes from the
-  // current frame via useAnnotationWorkspaceVideoSync.
-  const previousActiveCameraRef = useRef<string | null>(null)
-  useEffect(() => {
-    const previous = previousActiveCameraRef.current
-    if (previous && previous !== selectedCamera) {
-      const inactive = document.querySelector<HTMLVideoElement>(
-        `video[data-camera="${CSS.escape(previous)}"]`,
+  const syncSelectedVideos = useCallback(() => {
+    if (!selectedCamera) return
+
+    const primary = videoRef.current
+    const primaryStart = videoWindows[selectedCamera]?.[0] ?? 0
+    const episodeTime = primary
+      ? Math.max(0, primary.currentTime - primaryStart)
+      : currentFrame / datasetFps
+
+    for (const camera of displayedCameras) {
+      if (camera === selectedCamera) continue
+
+      const video = document.querySelector<HTMLVideoElement>(
+        `video[data-camera="${CSS.escape(camera)}"]`,
       )
-      if (inactive && !inactive.paused) {
-        inactive.pause()
+      if (!video) continue
+
+      const start = videoWindows[camera]?.[0] ?? 0
+      const end = videoWindows[camera]?.[1]
+      const target = end === undefined ? start + episodeTime : Math.min(start + episodeTime, end)
+      if (Math.abs(video.currentTime - target) > 0.5 / datasetFps) {
+        video.currentTime = target
+      }
+      video.playbackRate = playbackSpeed
+      if (isPlaying && !video.ended) {
+        void video.play().catch(() => {})
+      } else {
+        video.pause()
       }
     }
-    previousActiveCameraRef.current = selectedCamera ?? null
-  }, [selectedCamera])
+  }, [
+    currentFrame,
+    datasetFps,
+    displayedCameras,
+    isPlaying,
+    playbackSpeed,
+    selectedCamera,
+    videoRef,
+    videoWindows,
+  ])
 
-  const hasAnyVideo = videoEntries.length > 0
+  useEffect(() => {
+    syncSelectedVideos()
+  }, [syncSelectedVideos])
+
+  const hasAnyVideo = displayedEntries.length > 0
+  const mediaViewCount = hasAnyVideo ? displayedEntries.length : 1
+  const visibleViewCount = mediaViewCount + (showEndEffectorView ? 1 : 0)
   return (
-    <Card className={compact ? 'mx-auto h-full min-h-0 w-full max-w-[44rem]' : 'shrink-0'}>
+    <Card
+      data-testid="trajectory-playback-card"
+      className={cn(
+        compact ? 'mx-auto h-full min-h-0 w-full' : 'shrink-0',
+        compact && !isMediaExpanded && 'max-w-[44rem]',
+      )}
+    >
       <CardContent className={compact ? 'flex h-full min-h-0 flex-col p-3' : 'p-4'}>
         <div className="flex items-center justify-between gap-2">
           <CameraSelector
             cameras={cameras}
             selectedCamera={selectedCamera ?? ''}
             onSelectCamera={onSelectCamera}
+            selectedCameras={displayedCameras}
+            onSelectionChange={onSelectionChange}
+            endEffectorViewSelected={showEndEffectorView}
+            onEndEffectorViewSelectionChange={setShowEndEffectorView}
           />
-          <ViewerDisplayControls />
+          <div className="flex items-center gap-1.5">
+            {compact && (
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                onClick={() => setIsMediaExpanded((expanded) => !expanded)}
+                aria-label={isMediaExpanded ? 'Compact media' : 'Expand media'}
+                title={isMediaExpanded ? 'Compact media' : 'Expand media'}
+                className="h-8 w-8"
+              >
+                {isMediaExpanded ? (
+                  <Minimize2 className="h-4 w-4" />
+                ) : (
+                  <Maximize2 className="h-4 w-4" />
+                )}
+              </Button>
+            )}
+            <ViewerDisplayControls />
+          </div>
         </div>
         <div
-          data-testid={compact ? 'trajectory-compact-media-frame' : undefined}
-          className={
-            compact
-              ? 'relative mx-auto mt-2 flex aspect-video max-h-[18rem] min-h-0 w-full max-w-[40rem] items-center justify-center overflow-hidden rounded-lg bg-black'
-              : 'relative mt-2 flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-black'
-          }
+          data-testid={compact ? 'trajectory-compact-media-frame' : 'trajectory-camera-grid'}
+          data-camera-count={displayedEntries.length}
+          data-view-count={visibleViewCount}
+          className={cn(
+            'relative mt-2 grid min-h-0 w-full grid-cols-1 gap-1 overflow-hidden rounded-lg bg-black',
+            visibleViewCount === 2 && 'sm:grid-cols-2',
+            visibleViewCount >= 3 && 'sm:grid-cols-2 xl:grid-cols-3',
+            compact && 'mx-auto',
+            compact && isMediaExpanded && 'max-h-[34rem]',
+            compact && !isMediaExpanded && 'max-h-[18rem] max-w-[40rem]',
+            showEndEffectorView && 'bg-muted/20',
+          )}
         >
           <canvas ref={canvasRef} className="hidden" />
 
           {hasAnyVideo ? (
-            videoEntries.map(({ camera, url }) => {
+            displayedEntries.map(({ camera, url }) => {
               const isActive = camera === selectedCamera
               return (
-                <video
-                  key={camera}
-                  ref={isActive ? videoRef : null}
-                  data-camera={camera}
-                  src={url}
-                  onEnded={isActive ? onVideoEnded : undefined}
-                  onLoadedMetadata={isActive ? handleVideoLoadedMetadata : undefined}
-                  muted
-                  playsInline
-                  preload={isActive ? 'auto' : 'metadata'}
-                  className={cn(
-                    'absolute inset-0 m-auto max-h-full max-w-full object-contain',
-                    isActive ? 'z-10 opacity-100' : 'pointer-events-none z-0 opacity-0',
-                  )}
-                  style={isActive && displayFilter ? { filter: displayFilter } : undefined}
-                  aria-hidden={!isActive}
-                />
+                <div key={camera} className="relative aspect-video min-w-0 bg-black">
+                  <video
+                    ref={isActive ? videoRef : null}
+                    data-camera={camera}
+                    src={url}
+                    onEnded={isActive ? onVideoEnded : undefined}
+                    onLoadedMetadata={isActive ? handleVideoLoadedMetadata : undefined}
+                    muted
+                    playsInline
+                    preload="auto"
+                    className="h-full w-full object-contain"
+                    style={displayFilter ? { filter: displayFilter } : undefined}
+                    aria-label={`${formatCameraLabel(camera)} camera view`}
+                  />
+                  <span className="absolute bottom-1 left-1 rounded-sm bg-black/65 px-1.5 py-0.5 text-xs text-white">
+                    {formatCameraLabel(camera)}
+                  </span>
+                </div>
               )
             })
           ) : isInsertedFrame && interpolatedImageUrl ? (
@@ -233,6 +325,15 @@ export function AnnotationWorkspacePlaybackCard({
             <span className="text-white">
               Frame {currentFrame + 1} of {totalFrames}
             </span>
+          )}
+
+          {showEndEffectorView && (
+            <EndEffectorTrajectoryPlot
+              trajectories={endEffectorTrajectories}
+              currentSampleIndex={currentFrame}
+              className="h-full w-full"
+              frameClassName="h-full border-0"
+            />
           )}
 
           {isInsertedFrame && (
@@ -330,6 +431,13 @@ export function AnnotationWorkspacePlaybackCard({
       </CardContent>
     </Card>
   )
+}
+
+function formatCameraLabel(camera: string): string {
+  return camera
+    .replace(/^observation\.images\./, '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase())
 }
 
 interface PlaybackControlsProps {

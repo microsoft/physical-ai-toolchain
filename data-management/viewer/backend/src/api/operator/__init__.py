@@ -1,0 +1,1 @@
+"""Operator contracts and orchestration."""

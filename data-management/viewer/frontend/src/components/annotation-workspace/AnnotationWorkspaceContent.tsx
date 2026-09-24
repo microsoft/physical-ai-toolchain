@@ -1,4 +1,5 @@
 import { PackageCheck } from 'lucide-react'
+import { useMemo } from 'react'
 
 import {
   DataQualityWidget,
@@ -15,6 +16,7 @@ import { AnnotationWorkspaceTopBar } from '@/components/annotation-workspace/Ann
 import { AnnotationWorkspaceTrajectoryTab } from '@/components/annotation-workspace/AnnotationWorkspaceTrajectoryTab'
 import { ReviewQualityPanel } from '@/components/annotation-workspace/ReviewQualityPanel'
 import { EpisodeAnalysisCard, MotionMetricsPanel } from '@/components/episode-analyzer'
+import { buildEpisodeEndEffectorTrajectories } from '@/components/episode-viewer'
 import { ExportDialog } from '@/components/export'
 import { ReleaseDialog } from '@/components/release'
 import { ReleaseStatusBanner } from '@/components/release/ReleaseStatusBanner'
@@ -39,6 +41,10 @@ interface AnnotationWorkspaceContentProps {
 export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContentProps) {
   const currentDataset = shell.currentDataset
   const currentEpisode = shell.currentEpisode
+  const endEffectorTrajectories = useMemo(
+    () => (currentEpisode ? buildEpisodeEndEffectorTrajectories(currentEpisode) : []),
+    [currentEpisode],
+  )
   // Current (draft or saved) language instruction so the judge scores against
   // what the annotator sees in the Language Instruction widget; falls back to
   // dataset metadata on the backend when empty.
@@ -82,6 +88,11 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
       cameras={shell.cameras}
       selectedCamera={shell.cameraName}
       onSelectCamera={shell.setCameraName}
+      selectedCameras={shell.cameraNames}
+      onSelectionChange={shell.setCameraNames}
+      endEffectorTrajectories={endEffectorTrajectories}
+      videoWindows={shell.videoWindows}
+      datasetFps={currentDataset.fps}
       isPlaying={shell.isPlaying}
       onTogglePlayback={shell.togglePlayback}
       onStepFrame={shell.playback.stepFrame}

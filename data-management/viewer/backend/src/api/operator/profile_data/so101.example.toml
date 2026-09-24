@@ -1,0 +1,53 @@
+version = 1
+name = "so101"
+embodiment = "SO-101"
+actuator_names = [
+    "shoulder_pan",
+    "shoulder_lift",
+    "elbow_flex",
+    "wrist_flex",
+    "wrist_roll",
+    "gripper",
+]
+minimum_free_bytes = 10737418240
+teleoperation_fps = 30
+
+[leader]
+port = "<absolute-leader-device-path>"
+logical_id = "<leader-logical-id>"
+usb_vendor_id = "<vendor-id>"
+usb_product_id = "<product-id>"
+usb_serial = "<leader-serial>"
+calibration_file = "<absolute-leader-calibration-path>"
+
+[follower]
+port = "<absolute-follower-device-path>"
+logical_id = "<follower-logical-id>"
+usb_vendor_id = "<vendor-id>"
+usb_product_id = "<product-id>"
+usb_serial = "<follower-serial>"
+calibration_file = "<absolute-follower-calibration-path>"
+
+[wrist_camera]
+path = "<absolute-wrist-camera-path>"
+usb_vendor_id = "<vendor-id>"
+usb_product_id = "<product-id>"
+width = 640
+height = 480
+fps = 30
+
+[front_camera]
+usb_vendor_id = "<vendor-id>"
+usb_product_id = "<product-id>"
+usb_serial = "<front-camera-serial>"
+usb_descriptor_serial = "<front-camera-descriptor-serial>"
+product = "<front-camera-product>"
+width = 640
+height = 480
+fps = 30
+
+[recording]
+fps = 30
+episode_time_s = 60
+reset_time_s = 30
+upload_default = false

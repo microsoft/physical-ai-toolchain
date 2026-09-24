@@ -47,6 +47,9 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch):
         "DETECTION_CACHE_MAX_SIZE",
         "DETECTION_CACHE_TTL_SECONDS",
         "DETECTION_CONFIDENCE_THRESHOLD",
+        "OPERATOR_POLICY_PYTHON",
+        "OPERATOR_POLICY_CHECKPOINT",
+        "OPERATOR_POLICY_CUDA_VISIBLE_DEVICES",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -110,6 +113,20 @@ class TestLoadConfig:
         assert cfg.detection_cache_max_size == 12
         assert cfg.detection_cache_ttl_seconds == 45
         assert cfg.detection_confidence_threshold == 0.35
+
+    def test_operator_policy_configuration_is_loaded_from_trusted_environment(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv("OPERATOR_POLICY_PYTHON", "/opt/operator/python")
+        monkeypatch.setenv("OPERATOR_POLICY_CHECKPOINT", "/opt/operator/checkpoint")
+        monkeypatch.setenv("OPERATOR_POLICY_CUDA_VISIBLE_DEVICES", "2")
+
+        cfg = load_config()
+
+        assert cfg.operator_policy_python == "/opt/operator/python"
+        assert cfg.operator_policy_checkpoint == "/opt/operator/checkpoint"
+        assert cfg.operator_policy_cuda_visible_devices == "2"
 
     @pytest.mark.parametrize(
         ("name", "value"),

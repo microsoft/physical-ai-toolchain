@@ -52,6 +52,7 @@
     "react-player": "3.4.0",
     "recharts": "3.10.1",
     "tailwind-merge": "3.7.0",
+    "three": "0.185.1",
     "zustand": "5.0.15"
   },
   "devDependencies": {
@@ -64,6 +65,7 @@
     "@testing-library/user-event": "14.6.7",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@types/three": "0.185.1",
     "@vitejs/plugin-react": "6.1.1",
     "@vitest/coverage-v8": "4.1.11",
     "eslint": "10.10.0",

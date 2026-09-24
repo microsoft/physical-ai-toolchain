@@ -4,6 +4,14 @@
 
 export { CameraSelector } from './CameraSelector'
 export {
+  buildEpisodeEndEffectorTrajectories,
+  type EndEffectorPoint,
+  type EndEffectorTrajectory,
+  getEndEffectorViewBounds,
+  MAX_END_EFFECTOR_POINTS,
+} from './end-effector-trajectories'
+export { EndEffectorTrajectoryPlot } from './EndEffectorTrajectoryPlot'
+export {
   getJointColor,
   getJointLabel,
   JOINT_COLORS,

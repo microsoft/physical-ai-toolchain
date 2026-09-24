@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -26,6 +27,7 @@ from .routers import (
     export,
     joint_config,
     labels,
+    operator,
     releases,
     reviews,
     vlm_judge,
@@ -60,23 +62,83 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """Run release recovery and clean up temporary dataset directories."""
+    """Run release recovery and own operator and dataset cleanup."""
+    from .operator.host_lease import OperatorHostLease
+    from .operator.preflight import OperatorPreflightRunner
+    from .operator.profiles import load_operator_profiles
     from .release.processor import get_release_processor
+    from .services.operator_preflight_service import OperatorPreflightService
+    from .services.operator_service import OperatorService
 
     processor = get_release_processor()
-    await processor.start()
+    processor_started = False
+    host_lease = None
+    operator_service = None
     try:
+        await processor.start()
+        processor_started = True
+        profiles = load_operator_profiles(environ=os.environ)
+        preflight_service = None
+        if _config.operator_adapter_mode == "lerobot":
+            host_lease = OperatorHostLease(Path(_config.operator_host_lease_path or ""))
+            host_lease.acquire()
+            runner = OperatorPreflightRunner(
+                data_root=Path(_config.data_path),
+                worker_executable=Path(_config.operator_worker_executable or ""),
+                host_lease_fd=host_lease.fd,
+            )
+            preflight_service = OperatorPreflightService(profiles=profiles, runner=runner)
+        operator_service = OperatorService(
+            adapter_mode=_config.operator_adapter_mode,
+            preflight_service=preflight_service,
+            worker_executable=_config.operator_worker_executable,
+            host_lease_fd=host_lease.fd if host_lease is not None else None,
+            command_timeout_s=_config.operator_command_timeout_s,
+            startup_timeout_s=_config.operator_startup_timeout_s,
+            stop_timeout_s=_config.operator_stop_timeout_s,
+            recovery_timeout_s=_config.operator_recovery_timeout_s,
+            data_root=Path(_config.data_path),
+            policy_python=_config.operator_policy_python,
+            policy_checkpoint=_config.operator_policy_checkpoint,
+            policy_cuda_visible_devices=_config.operator_policy_cuda_visible_devices,
+        )
+        _app.state.operator_profiles = profiles
+        _app.state.operator_service = operator_service
+        if preflight_service is not None:
+            _app.state.operator_preflight_service = preflight_service
         yield
     finally:
-        await processor.stop()
-    from .services.dataset_service import get_dataset_service
+        active_error = sys.exc_info()[1]
+        cleanup_errors: list[Exception] = []
+        if operator_service is not None:
+            try:
+                await operator_service.shutdown()
+            except Exception as error:
+                logger.exception("Operator shutdown failed")
+                cleanup_errors.append(error)
+        if host_lease is not None:
+            try:
+                host_lease.release()
+            except Exception as error:
+                logger.exception("Operator host lease release failed")
+                cleanup_errors.append(error)
+        if processor_started:
+            try:
+                await processor.stop()
+            except Exception as error:
+                logger.exception("Release processor shutdown failed")
+                cleanup_errors.append(error)
 
-    try:
-        service = get_dataset_service()
-        service.cleanup_temp_dirs()
-        logger.info("Cleaned up blob sync temp directories")
-    except Exception:
-        pass  # Best-effort cleanup; failure here must not block shutdown
+        from .services.dataset_service import get_dataset_service
+
+        try:
+            service = get_dataset_service()
+            service.cleanup_temp_dirs()
+            logger.info("Cleaned up blob sync temp directories")
+        except Exception:
+            logger.exception("Dataset temp directory cleanup failed")
+        if cleanup_errors and active_error is None:
+            raise cleanup_errors[0]
 
 
 app = FastAPI(
@@ -163,7 +225,14 @@ app.add_middleware(
     allow_origins=_config.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-API-Key", "X-Request-ID"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-CSRF-Token",
+        "X-API-Key",
+        "X-Operator-API-Key",
+        "X-Request-ID",
+    ],
 )
 
 # All /api/* routes require authentication (health and csrf-token are on app directly)
@@ -179,6 +248,7 @@ app.include_router(joint_config.router, prefix="/api/datasets", tags=["joint-con
 app.include_router(joint_config.defaults_router, prefix="/api", tags=["joint-config"], dependencies=api_auth)
 app.include_router(reviews.router, prefix="/api", tags=["reviews"], dependencies=api_auth)
 app.include_router(releases.router, prefix="/api/releases", tags=["releases"], dependencies=api_auth)
+app.include_router(operator.router, prefix="/api/operator", tags=["operator"])
 if _config.vlm_judge_enabled:
     app.include_router(
         vlm_judge.router,

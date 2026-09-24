@@ -1,5 +1,7 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AppContent } from '@/App'
@@ -49,6 +51,38 @@ vi.mock('@/hooks/use-labels', () => ({
   useDatasetLabels: () => undefined,
 }))
 
+vi.mock('@/hooks/use-operator', () => ({
+  useOperator: () => ({
+    capabilities: {
+      enabled: false,
+      adapterMode: 'disabled',
+      adapterVersion: 1,
+      protocolVersion: 2,
+      modes: [],
+      profiles: [],
+      robots: [],
+      cameras: [],
+      preflightEnabled: false,
+      sessionStartEnabled: false,
+      reason: 'Operator disabled',
+    },
+    status: undefined,
+    calibration: undefined,
+    preflight: undefined,
+    telemetry: [],
+    connectionState: 'disabled',
+    isLoading: false,
+    isPending: false,
+    error: null,
+    calibrationError: null,
+    checkCalibration: vi.fn(),
+    runPreflight: vi.fn(),
+    startSession: vi.fn(),
+    sendCommand: vi.fn(),
+    stopSession: vi.fn(),
+  }),
+}))
+
 vi.mock('@/lib/playback-diagnostics', () => ({
   disableDiagnostics: mockDisableDiagnostics,
   enableDiagnostics: mockEnableDiagnostics,
@@ -92,6 +126,15 @@ vi.mock('@/components/annotation-workspace/AnnotationWorkspace', () => ({
   ),
 }))
 
+function renderAppContent() {
+  const queryClient = new QueryClient()
+  return render(<AppContent />, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  })
+}
+
 describe('AppContent', () => {
   beforeEach(() => {
     mockDatasets = [
@@ -126,7 +169,7 @@ describe('AppContent', () => {
   })
 
   it('switches away from a removed selected dataset when the dataset list refreshes', async () => {
-    const { rerender } = render(<AppContent />)
+    const { rerender } = renderAppContent()
 
     await waitFor(() => {
       expect(screen.getByRole('combobox', { name: 'Dataset' })).toHaveTextContent(
@@ -168,7 +211,7 @@ describe('AppContent', () => {
 
     const user = userEvent.setup()
 
-    render(<AppContent />)
+    renderAppContent()
 
     const trigger = await screen.findByRole('combobox', { name: 'Dataset' })
     expect(trigger).toHaveTextContent('customer_lerobot')
@@ -183,7 +226,7 @@ describe('AppContent', () => {
   it('supports keyboard selection from the dataset dropdown results', async () => {
     const user = userEvent.setup()
 
-    render(<AppContent />)
+    renderAppContent()
 
     const trigger = await screen.findByRole('combobox', { name: 'Dataset' })
     expect(trigger).toHaveTextContent('houston_lerobot_fixed')
@@ -200,7 +243,7 @@ describe('AppContent', () => {
   })
 
   it('uses a compact shell header so the workspace starts higher on the page', async () => {
-    render(<AppContent />)
+    renderAppContent()
 
     const banner = await screen.findByRole('banner')
 
@@ -211,7 +254,7 @@ describe('AppContent', () => {
   })
 
   it('renders a compact diagnostics button next to the dataset picker in the shell header', async () => {
-    render(<AppContent />)
+    renderAppContent()
 
     const banner = await screen.findByRole('banner')
     const diagnosticsButton = screen.getByRole('button', { name: /toggle diagnostics/i })
@@ -226,7 +269,7 @@ describe('AppContent', () => {
   it('advances to the next episode from the workspace top bar action', async () => {
     const user = userEvent.setup()
 
-    render(<AppContent />)
+    renderAppContent()
 
     await screen.findByText('Annotation Workspace')
 
@@ -240,7 +283,7 @@ describe('AppContent', () => {
   it('moves back to the previous episode from the workspace top bar action', async () => {
     const user = userEvent.setup()
 
-    render(<AppContent />)
+    renderAppContent()
 
     await screen.findByText('Annotation Workspace')
 
@@ -255,7 +298,7 @@ describe('AppContent', () => {
   it('advances from the workspace save-and-next action', async () => {
     const user = userEvent.setup()
 
-    render(<AppContent />)
+    renderAppContent()
 
     await screen.findByText('Annotation Workspace')
 
@@ -267,7 +310,7 @@ describe('AppContent', () => {
   })
 
   it('uses a single compact sidebar toolbar for filters and episode count', async () => {
-    render(<AppContent />)
+    renderAppContent()
 
     const sidebarToolbar = await screen.findByTestId('episode-list-toolbar')
 

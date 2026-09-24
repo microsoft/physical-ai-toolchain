@@ -138,6 +138,7 @@ vi.mock('@/components/episode-analyzer', () => ({
 }))
 
 vi.mock('@/components/episode-viewer', () => ({
+  buildEpisodeEndEffectorTrajectories: () => [],
   CameraSelector: (props: Record<string, unknown>) => {
     const cameraProps = props as {
       cameras?: string[]

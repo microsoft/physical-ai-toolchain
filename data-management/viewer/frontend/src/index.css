@@ -145,6 +145,59 @@
     --chart-4: 271 81% 56%;
     --chart-5: 343 75% 55%;
   }
+
+  .dark {
+    --background: 222.2 47.4% 7%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 47.4% 9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 47.4% 9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 50%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 23%;
+    --input: 217.2 32.6% 23%;
+    --ring: 212.7 26.8% 83.9%;
+
+    --status-neutral: 215 20% 65%;
+    --status-neutral-foreground: 210 40% 96%;
+    --status-neutral-subtle: 217 33% 18%;
+    --status-neutral-border: 215 19% 35%;
+
+    --status-info: 213 94% 68%;
+    --status-info-foreground: 214 100% 90%;
+    --status-info-subtle: 224 64% 20%;
+    --status-info-border: 216 65% 40%;
+
+    --status-success: 142 69% 58%;
+    --status-success-foreground: 138 76% 90%;
+    --status-success-subtle: 144 61% 15%;
+    --status-success-border: 142 45% 35%;
+
+    --status-warning: 43 96% 56%;
+    --status-warning-foreground: 48 96% 89%;
+    --status-warning-subtle: 26 83% 14%;
+    --status-warning-border: 35 75% 36%;
+
+    --status-danger: 0 91% 71%;
+    --status-danger-foreground: 0 93% 94%;
+    --status-danger-subtle: 0 63% 18%;
+    --status-danger-border: 0 55% 40%;
+
+    --chart-1: 217 91% 60%;
+    --chart-2: 160 84% 39%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 271 91% 65%;
+    --chart-5: 343 81% 66%;
+  }
 }
 
 @layer base {

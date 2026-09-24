@@ -115,6 +115,17 @@ class AppConfig:
     vlm_judge_cache_dir: str | None = None
     """Directory for the SHA256-keyed result cache; None disables disk cache."""
 
+    operator_adapter_mode: str = "disabled"
+    operator_command_timeout_s: float = 5.0
+    operator_host_lease_path: str | None = None
+    operator_worker_executable: str | None = None
+    operator_policy_python: str | None = None
+    operator_policy_checkpoint: str | None = None
+    operator_policy_cuda_visible_devices: str | None = None
+    operator_startup_timeout_s: float = 30.0
+    operator_stop_timeout_s: float = 5.0
+    operator_recovery_timeout_s: float = 10.0
+
 
 def load_config(env_path: Path | None = None) -> AppConfig:
     """
@@ -166,6 +177,30 @@ def load_config(env_path: Path | None = None) -> AppConfig:
     vlm_judge_process_method = os.environ.get("VLM_JUDGE_PROCESS_METHOD", "gvl").lower()
     vlm_judge_cache_dir = os.environ.get("VLM_JUDGE_CACHE_DIR") or None
 
+    operator_adapter_mode = os.environ.get("OPERATOR_ADAPTER_MODE", "disabled").lower()
+    if operator_adapter_mode not in {"disabled", "simulated", "lerobot"}:
+        raise ValueError("OPERATOR_ADAPTER_MODE must be disabled, simulated, or lerobot")
+    operator_command_timeout_s = _positive_float_env("OPERATOR_COMMAND_TIMEOUT_S", 5.0)
+    operator_host_lease_path = os.environ.get("OPERATOR_HOST_LEASE_PATH") or None
+    operator_worker_executable = os.environ.get("OPERATOR_WORKER_EXECUTABLE") or None
+    operator_policy_python = os.environ.get("OPERATOR_POLICY_PYTHON") or None
+    operator_policy_checkpoint = os.environ.get("OPERATOR_POLICY_CHECKPOINT") or None
+    operator_policy_cuda_visible_devices = os.environ.get("OPERATOR_POLICY_CUDA_VISIBLE_DEVICES") or None
+    operator_startup_timeout_s = _positive_float_env("OPERATOR_STARTUP_TIMEOUT_S", 30.0)
+    operator_stop_timeout_s = _positive_float_env("OPERATOR_STOP_TIMEOUT_S", 5.0)
+    operator_recovery_timeout_s = _positive_float_env("OPERATOR_RECOVERY_TIMEOUT_S", 10.0)
+    if storage_backend == "azure" and operator_adapter_mode != "disabled":
+        raise ValueError("Operator mode requires local storage")
+    if operator_adapter_mode != "disabled" and int(os.environ.get("WEB_CONCURRENCY", "1")) != 1:
+        raise ValueError("Operator mode requires exactly one backend worker")
+    if operator_adapter_mode == "lerobot":
+        if not operator_host_lease_path or not operator_worker_executable:
+            raise ValueError("LeRobot mode requires OPERATOR_HOST_LEASE_PATH and OPERATOR_WORKER_EXECUTABLE")
+        if os.environ.get("DATAVIEWER_AUTH_DISABLED", "false").lower() == "true":
+            raise ValueError("LeRobot mode requires authentication")
+        if os.environ.get("OPERATOR_CSRF_DISABLED", "false").lower() == "true":
+            raise ValueError("LeRobot mode requires operator CSRF enforcement")
+
     return AppConfig(
         storage_backend=storage_backend,
         data_path=data_path,
@@ -194,11 +229,28 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         vlm_judge_n_frames=vlm_judge_n_frames,
         vlm_judge_process_method=vlm_judge_process_method,
         vlm_judge_cache_dir=vlm_judge_cache_dir,
+        operator_adapter_mode=operator_adapter_mode,
+        operator_command_timeout_s=operator_command_timeout_s,
+        operator_host_lease_path=operator_host_lease_path,
+        operator_worker_executable=operator_worker_executable,
+        operator_policy_python=operator_policy_python,
+        operator_policy_checkpoint=operator_policy_checkpoint,
+        operator_policy_cuda_visible_devices=operator_policy_cuda_visible_devices,
+        operator_startup_timeout_s=operator_startup_timeout_s,
+        operator_stop_timeout_s=operator_stop_timeout_s,
+        operator_recovery_timeout_s=operator_recovery_timeout_s,
     )
 
 
 def _positive_int_env(name: str, default: int) -> int:
     value = int(os.environ.get(name, str(default)))
+    if value <= 0:
+        raise ValueError(f"{name} must be greater than zero")
+    return value
+
+
+def _positive_float_env(name: str, default: float) -> float:
+    value = float(os.environ.get(name, str(default)))
     if value <= 0:
         raise ValueError(f"{name} must be greater than zero")
     return value

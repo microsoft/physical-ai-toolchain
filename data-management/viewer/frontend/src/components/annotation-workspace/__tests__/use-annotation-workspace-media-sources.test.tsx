@@ -100,6 +100,38 @@ describe('useAnnotationWorkspaceMediaSources camera override', () => {
     expect(result.current.cameras).toEqual(['wrist'])
     expect(result.current.cameraName).toBe('wrist')
   })
+
+  it('intersects selected cameras across episode reloads and falls back deterministically', () => {
+    const initial = buildEpisode(['wrist', 'overhead', 'side'])
+    const overlapping = buildEpisode(['overhead', 'front'])
+    const disjoint = buildEpisode(['front', 'side'])
+
+    const { result, rerender } = renderHook(
+      (props: ReturnType<typeof defaultOptions>) => useAnnotationWorkspaceMediaSources(props),
+      { initialProps: defaultOptions(initial) },
+    )
+
+    expect(result.current.cameraNames).toEqual(['wrist'])
+
+    act(() => {
+      result.current.setCameraNames(['wrist', 'overhead'])
+    })
+    expect(result.current.cameraNames).toEqual(['wrist', 'overhead'])
+
+    rerender(defaultOptions(overlapping))
+    expect(result.current.cameraNames).toEqual(['overhead'])
+
+    rerender(defaultOptions(disjoint))
+    expect(result.current.cameraNames).toEqual(['front'])
+  })
+
+  it('returns an empty selected set when no cameras are available', () => {
+    const episode = buildEpisode([])
+
+    const { result } = renderHook(() => useAnnotationWorkspaceMediaSources(defaultOptions(episode)))
+
+    expect(result.current.cameraNames).toEqual([])
+  })
 })
 
 describe('useAnnotationWorkspaceMediaSources video time windows', () => {
