@@ -183,6 +183,7 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
             >
               <button
                 type="button"
+                aria-pressed={isSelected}
                 onClick={() => void handleToggleLabel(label)}
                 className="focus-visible:ring-ring inline-flex items-center gap-1 rounded-l-full px-2.5 py-0.5 text-xs font-semibold focus:outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2"
               >

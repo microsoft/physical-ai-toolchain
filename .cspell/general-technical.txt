@@ -253,6 +253,7 @@ concatenation
 conda
 confluent
 confs
+conftest
 congruent
 connectors
 connectwise
@@ -850,6 +851,7 @@ nojekyll
 noncompliance
 noncompliant
 nosql
+nosystem
 notnull
 notpetya
 nsgs
@@ -1056,6 +1058,7 @@ pylance
 pyodbc
 pypi
 pytest
+pytests
 pytrace
 python
 PYTHONHASHSEED

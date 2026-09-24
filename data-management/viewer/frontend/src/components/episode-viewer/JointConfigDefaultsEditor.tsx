@@ -433,7 +433,7 @@ export function JointConfigDefaultsEditor({
                     return (
                       <div
                         key={jointId}
-                        className="group/chip inline-flex items-center gap-1 rounded-sm border border-current/20 py-0.5 pr-0.5 pl-1.5 text-xs"
+                        className="group/chip focus-within:ring-ring inline-flex items-center gap-1 rounded-sm border border-current/20 py-0.5 pr-0.5 pl-1.5 text-xs focus-within:ring-2 focus-within:ring-offset-1"
                         style={{ color: getJointColor(joint.index, colors) }}
                       >
                         {editingIndex === jointId ? (
@@ -469,7 +469,7 @@ export function JointConfigDefaultsEditor({
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-4 w-4 opacity-0 transition-opacity group-hover/chip:opacity-100"
+                          className="h-6 w-6 opacity-0 transition-opacity group-focus-within/chip:opacity-100 group-hover/chip:opacity-100"
                           aria-label="Edit joint label"
                           onClick={() => setEditingJoint(jointId)}
                         >
@@ -503,7 +503,7 @@ export function JointConfigDefaultsEditor({
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-4 w-4 opacity-0 transition-opacity group-hover/chip:opacity-100"
+                            className="h-6 w-6 opacity-0 transition-opacity group-focus-within/chip:opacity-100 group-hover/chip:opacity-100"
                             aria-label="Move to group"
                             onClick={() => setMovingJoint(jointId)}
                           >
@@ -513,7 +513,7 @@ export function JointConfigDefaultsEditor({
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-4 w-4 opacity-0 transition-opacity group-hover/chip:opacity-100"
+                          className="h-6 w-6 opacity-0 transition-opacity group-focus-within/chip:opacity-100 group-hover/chip:opacity-100"
                           aria-label="Remove joint from group"
                           onClick={() => handleUnassignJoint(jointId)}
                         >
@@ -542,7 +542,7 @@ export function JointConfigDefaultsEditor({
                       return (
                         <div
                           key={jointId}
-                          className="group/chip inline-flex items-center gap-1 rounded-sm border border-current/20 py-0.5 pr-0.5 pl-1.5 text-xs"
+                          className="group/chip focus-within:ring-ring inline-flex items-center gap-1 rounded-sm border border-current/20 py-0.5 pr-0.5 pl-1.5 text-xs focus-within:ring-2 focus-within:ring-offset-1"
                           style={{ color: getJointColor(joint.index, colors) }}
                         >
                           {editingIndex === jointId ? (
@@ -578,7 +578,7 @@ export function JointConfigDefaultsEditor({
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-4 w-4 opacity-0 transition-opacity group-hover/chip:opacity-100"
+                            className="h-6 w-6 opacity-0 transition-opacity group-focus-within/chip:opacity-100 group-hover/chip:opacity-100"
                             aria-label="Edit joint label"
                             onClick={() => setEditingJoint(jointId)}
                           >
@@ -602,7 +602,7 @@ export function JointConfigDefaultsEditor({
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-4 w-4 opacity-0 transition-opacity group-hover/chip:opacity-100"
+                              className="h-6 w-6 opacity-0 transition-opacity group-focus-within/chip:opacity-100 group-hover/chip:opacity-100"
                               aria-label="Assign to group"
                               onClick={() => setAssigningJoint(jointId)}
                             >

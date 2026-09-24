@@ -6,7 +6,7 @@
  */
 
 import { Contrast, Droplets, Palette, RotateCcw, Sun, SunDim } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useId, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -62,10 +62,15 @@ function SliderControl({
   icon,
   formatValue = (v) => v.toString(),
 }: SliderControlProps) {
+  const inputId = useId()
+
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <Label className="text-muted-foreground flex items-center gap-1.5 text-xs">
+        <Label
+          htmlFor={inputId}
+          className="text-muted-foreground flex items-center gap-1.5 text-xs"
+        >
           {icon}
           {label}
         </Label>
@@ -74,11 +79,13 @@ function SliderControl({
         </span>
       </div>
       <input
+        id={inputId}
         type="range"
         min={min}
         max={max}
         step={step}
         value={value}
+        aria-valuetext={formatValue(value)}
         onChange={(e) => onChange(parseFloat(e.target.value))}
         className="bg-muted [&::-moz-range-thumb]:bg-primary [&::-webkit-slider-thumb]:bg-primary h-2 w-full cursor-pointer appearance-none rounded-lg [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:transition-all [&::-webkit-slider-thumb]:hover:scale-110"
       />

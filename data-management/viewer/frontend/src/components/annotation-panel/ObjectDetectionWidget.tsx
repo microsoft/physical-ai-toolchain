@@ -1,5 +1,4 @@
 /**
- * Open-vocabulary object detection widget.
  *
  * Runs YOLO-World on a single reference frame (default: the first frame of the
  * episode), lets the annotator refine the label list, re-run with the refined
@@ -331,7 +330,7 @@ export function ObjectDetectionWidget() {
               onKeyDown={handleLabelKeyDown}
               onBlur={handleLabelBlur}
               placeholder={labels.length === 0 ? PLACEHOLDER_LABELS : 'Add label…'}
-              className="h-7 min-w-[8ch] flex-1 border-0 px-1 shadow-none focus-visible:ring-0"
+              className="h-7 min-w-[8ch] flex-1 border-0 px-1 shadow-none focus-visible:ring-2"
             />
           </div>
         </div>
@@ -370,7 +369,10 @@ export function ObjectDetectionWidget() {
               type="button"
               size="sm"
               variant="ghost"
-              onClick={handleClearSaved}
+              onClick={() => {
+                if (globalThis.confirm?.('Remove saved detections for this frame?') ?? true)
+                  handleClearSaved()
+              }}
               title="Remove saved detections for this frame"
             >
               <Trash2 className="mr-2 h-3 w-3" />
@@ -392,7 +394,9 @@ export function ObjectDetectionWidget() {
         </div>
 
         {error && (
-          <div className="bg-destructive/10 text-destructive rounded-sm p-2 text-xs">{error}</div>
+          <div role="alert" className="bg-destructive/10 text-destructive rounded-sm p-2 text-xs">
+            {error}
+          </div>
         )}
 
         {imageUrl && (
@@ -414,7 +418,7 @@ export function ObjectDetectionWidget() {
 
         {detections && detections.length > 0 && (
           <div className="space-y-1">
-            <p className="text-muted-foreground text-xs">
+            <p role="status" aria-live="polite" className="text-muted-foreground text-xs">
               Detections ({detections.length}) · frame {frameIndex}
               {draw && ` · ${draw.imageWidth}×${draw.imageHeight}px`}
             </p>
