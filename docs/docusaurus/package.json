@@ -53,6 +53,7 @@
     "eslint": "9.39.5",
     "eslint-plugin-jsx-a11y": "6.10.2",
     "express": "4.22.1",
+    "express-rate-limit": "8.7.0",
     "identity-obj-proxy": "3.0.0",
     "jest": "30.5.1",
     "jest-axe": "11.0.0",
