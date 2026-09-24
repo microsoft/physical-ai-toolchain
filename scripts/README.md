@@ -86,8 +86,9 @@ native exit returns `1`. The CI artifact upload reports a missing results file a
 `uv lock --check` without updating the lock. The main workflow checks all projects; pull requests check changed projects.
 The hosted lock check installs the interpreter pinned in `.python-version` for the root project. An empty full-repository
 selection fails rather than reporting a successful no-op.
-The dataviewer backend CI job stops before tests while the VLM judge is absent from its lock. Add the editable dependency
-through a verified backend lock after reconciling its `transformers` pin; the workflow does not install it with `--with-editable`.
+The dataviewer backend includes the editable VLM judge package in its locked `dev` and `vlm-judge` extras. The CI job
+installs the `dev` extra from the backend lock without `--with-editable`, then runs tests with `uv run --no-sync` to
+preserve the selected extras. The judge's Qwen dependencies remain optional.
 Coverage artifacts from the Python validation jobs require a report after a successful test run. An upload error after a
 test failure does not replace the test failure.
 

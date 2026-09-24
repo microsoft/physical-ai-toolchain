@@ -41,19 +41,12 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
-      - name: Require locked VLM judge packaging
-        run: |
-          if ! grep -q '^name = "physical-ai-vlm-judge"$' uv.lock; then
-            echo '::error::VLM judge is absent from the backend lock. Resolve its packaging and transformers pin before running backend tests.'
-            exit 1
-          fi
-
       - name: Install dependencies
         run: uv sync --frozen --extra dev --extra analysis --extra hdf5 --extra export --extra auth
 
       - name: Run pytest with coverage
         id: pytest
-        run: uv run --frozen pytest -v --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml --cov-report=term-missing --cov-fail-under=90
+        run: uv run --no-sync pytest -v --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml --cov-report=term-missing --cov-fail-under=90
 
       - name: Validate coverage report
         id: coverage_report
