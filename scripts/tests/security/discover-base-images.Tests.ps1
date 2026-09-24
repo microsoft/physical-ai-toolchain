@@ -376,14 +376,14 @@ from busybox@sha256:$script:DigestD
         }
 
         It 'executes the actual PR path filter for scan and Pester triggers' {
-            $matchLine = [regex]::Match($script:PrWorkflow, '(?m)^\s*match\(\) \{[^\r\n]+').Value.Trim()
-            $scanLine = [regex]::Match($script:PrWorkflow, '(?m)^\s*scan_match=[^\r\n]+').Value.Trim()
-            $pesterLine = [regex]::Match($script:PrWorkflow, '(?m)^\s*pester_match=[^\r\n]+').Value.Trim()
-            $matchLine | Should -Not -BeNullOrEmpty
-            $scanLine | Should -Not -BeNullOrEmpty
-            $pesterLine | Should -Not -BeNullOrEmpty
-            $filter = @($matchLine, $scanLine, $pesterLine,
-                'printf "%s,%s" "$(match "$scan_match")" "$pester_match"') -join "`n"
+            $script:PrWorkflow | Should -Match 'run: node scripts/ci/select-checks\.mjs'
+            $selectorPath = Join-Path $script:RepoRoot 'scripts/ci/select-checks.mjs'
+            $filter = @'
+const { pathToFileURL } = await import('node:url');
+const { selectChecks } = await import(pathToFileURL(process.argv[2]));
+const selected = selectChecks([process.argv[3]]);
+console.log(`${selected.containers},${selected.pester}`);
+'@
             foreach ($path in @(
                 'gpu-offload/controller/Containerfile',
                 '.devcontainer/Dockerfile',
@@ -391,18 +391,18 @@ from busybox@sha256:$script:DigestD
                 'scripts/security/discover-base-images.sh',
                 'scripts/security/image-slug.sh',
                 '.github/workflows/container-scan.yml',
-                '.github/workflows/pr-validation.yml'
+                '.github/workflows/pr-validation.yml',
+                'scripts/tests/security/image-slug.Tests.ps1'
             )) {
-                $env:FILES = $path
-                try { (& bash -c $filter) | Should -Be 'true,true' }
-                finally { Remove-Item Env:FILES }
+                (& node --input-type=module -e $filter selector-test $selectorPath $path) | Should -Be 'true,true'
+                $LASTEXITCODE | Should -Be 0
             }
-            $env:FILES = 'docs/README.md'
-            try { (& bash -c $filter) | Should -Be 'false,false' }
-            finally { Remove-Item Env:FILES }
-            $env:FILES = 'scripts/tests/security/image-slug.Tests.ps1'
-            try { (& bash -c $filter) | Should -Be 'false,true' }
-            finally { Remove-Item Env:FILES }
+            (& node --input-type=module -e $filter selector-test $selectorPath 'docs/README.md') |
+                Should -Be 'false,false'
+            $LASTEXITCODE | Should -Be 0
+            (& node --input-type=module -e $filter selector-test $selectorPath 'scripts/security/Test-Example.ps1') |
+                Should -Be 'false,true'
+            $LASTEXITCODE | Should -Be 0
         }
     }
 }
