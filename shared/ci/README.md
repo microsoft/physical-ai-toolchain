@@ -2,7 +2,7 @@
 title: CI Smoke Scripts
 description: GPU-free import smoke scripts for training and evaluation domains, runnable locally and in CI.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-25
+ms.date: 2026-09-23
 ---
 
 GPU-free import smoke checks that catch syntax, import, dependency-resolution, and interpreter/ABI regressions before they reach a GPU job. The same scripts run in CI (`.github/workflows/smoke-cpu.yml`) and locally.
@@ -93,6 +93,12 @@ The CPU depth is also the cheap baseline that runs on every PR, while the runtim
 The domain locks encode pyproject `override-dependencies` and package sources. The IL and evaluation runtime-image smokes use frozen `uv sync`, matching their production entrypoints and preserving the explicit PyTorch CUDA index. The RL and OSMO replay runtime-image smokes export their locks and install with `--no-deps`, matching their production entrypoints. Both paths install the committed resolution rather than resolving dependencies again.
 
 The import step is load-bearing: dependency or ABI skew can install cleanly and fail only when imported. For the CPU depth, the export removes the CUDA local-version suffix before `--torch-backend cpu` selects CPU wheels, and strips standalone `nvidia-*` and `cuda-*` packages.
+
+When a runtime image lacks uv, `smoke-import.sh` downloads the pinned archive with at most three attempts.
+Each transfer has a 35-second limit, with two-second pauses, so transfer recovery takes less than 120 seconds.
+Only connection and timeout errors or HTTP 408, 429, and 5xx responses are retried.
+A 404, checksum mismatch, invalid archive, install failure, or failed import stops the smoke immediately.
+Run `bash shared/ci/tests/smoke-import-bootstrap.sh` to exercise the controlled transfer and archive fixtures locally.
 
 ### Per-domain runtime images and interpreters
 

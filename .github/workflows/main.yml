@@ -208,6 +208,15 @@ jobs:
     permissions:
       contents: read
 
+  uv-lock-consistency:
+    name: uv Lock Consistency
+    uses: ./.github/workflows/uv-lock-consistency.yml
+    with:
+      changed-files-only: false
+      soft-fail: false
+    permissions:
+      contents: read
+
   # Terraform linting using TFLint
   terraform-lint:
     name: Terraform Lint
@@ -320,6 +329,7 @@ jobs:
       - dataviewer-backend-pytests
       - evaluation-pytests
       - python-lint
+      - uv-lock-consistency
       - terraform-lint
       - terraform-validation
       - terraform-tests
@@ -375,6 +385,8 @@ jobs:
       - name: Setup uv
         if: ${{ steps.release.outputs.prs_created == 'true' }}
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+        with:
+          version: '0.12.8'
 
       - name: Regenerate uv.lock
         if: ${{ steps.release.outputs.prs_created == 'true' }}
@@ -566,6 +578,8 @@ jobs:
 
       - name: Set up uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+        with:
+          version: '0.12.8'
 
       - name: Build release wheel
         run: uv build --wheel --out-dir dist

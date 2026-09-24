@@ -32,19 +32,23 @@ jobs:
 
       - name: Setup uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+        with:
+          version: '0.12.8'
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
 
       - name: Run fuzz regression tests
-        run: uv run pytest -o addopts="" tests/fuzz_harness.py -v --cov=tests --cov=data-management/viewer/backend/src --cov=training --cov-report=xml:logs/coverage-fuzz.xml --cov-report=term-missing
+        run: uv run --frozen pytest -o addopts="" tests/fuzz_harness.py -v --cov=tests --cov=data-management/viewer/backend/src --cov=training --cov-report=xml:logs/coverage-fuzz.xml --cov-report=term-missing
 
       - name: Upload coverage.xml artifact
         if: ${{ inputs.code-coverage && always() }}
+        continue-on-error: ${{ job.status == 'failure' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pytest-fuzz-coverage-xml
           path: logs/coverage-fuzz.xml
+          if-no-files-found: error
           retention-days: 30
 
       - name: Upload coverage to Codecov
