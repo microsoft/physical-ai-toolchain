@@ -12,7 +12,13 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from sil.hf_revision import resolve_hf_revision  # noqa: E402
-from sil.policy_runner import InferenceMetrics, PolicyRunner, _resolve_device  # noqa: E402
+from sil.policy_runner import (  # noqa: E402
+    InferenceMetrics,
+    PolicyRunner,
+    _resolve_device,
+    load_pretrained_policy,
+    postprocess_action,
+)
 from sil.robot_types import NUM_JOINTS, JointPositionCommand, RobotObservation  # noqa: E402
 
 
@@ -182,6 +188,58 @@ class TestPolicyRunner:
         assert runner.metrics.total_inference_s >= 0
         assert runner.metrics.total_preprocess_s >= 0
 
+    @pytest.mark.parametrize("policy_type", ["pi0", "pi0_fast"])
+    def test_vla_step_requires_task(
+        self,
+        policy_type: str,
+        joint_positions: np.ndarray,
+        color_image: np.ndarray,
+        action_tensor: torch.Tensor,
+    ) -> None:
+        runner = PolicyRunner(
+            MagicMock(),
+            MagicMock(),
+            MagicMock(return_value=action_tensor),
+            "cpu",
+            policy_type,
+        )
+
+        with pytest.raises(ValueError, match="require a non-empty task description"):
+            runner.step(RobotObservation(joint_positions=joint_positions, color_image=color_image))
+
+    @pytest.mark.parametrize("policy_type", ["pi0", "pi0_fast"])
+    def test_vla_step_propagates_task_and_uses_tensor_postprocessor(
+        self,
+        policy_type: str,
+        joint_positions: np.ndarray,
+        color_image: np.ndarray,
+        action_tensor: torch.Tensor,
+    ) -> None:
+        policy = MagicMock()
+        policy.select_action.return_value = action_tensor
+        preprocessor = MagicMock(side_effect=lambda observation: observation)
+        postprocessor = MagicMock(return_value=action_tensor)
+        runner = PolicyRunner(policy, preprocessor, postprocessor, "cpu", policy_type)
+
+        runner.step(
+            RobotObservation(
+                joint_positions=joint_positions,
+                color_image=color_image,
+                task="pick up the block",
+            )
+        )
+
+        assert preprocessor.call_args.args[0]["task"] == "pick up the block"
+        postprocessor.assert_called_once_with(action_tensor)
+
+    def test_non_vla_postprocessor_uses_action_mapping(self, action_tensor: torch.Tensor) -> None:
+        postprocessor = MagicMock(return_value={"action": action_tensor})
+
+        result = postprocess_action(postprocessor, action_tensor, "diffusion")
+
+        assert result is action_tensor
+        postprocessor.assert_called_once_with({"action": action_tensor})
+
 
 class TestPolicyRunnerFromPretrained:
     """from_pretrained classmethod with mocked lerobot imports."""
@@ -232,6 +290,63 @@ class TestPolicyRunnerFromPretrained:
             mock_pipeline.PolicyProcessorPipeline.from_pretrained.call_args_list[0].kwargs["revision"]
             == "0123456789abcdef0123456789abcdef01234567"
         )
+
+    @pytest.mark.parametrize("policy_type", ["pi0", "pi0_fast"])
+    def test_loads_vla_policy_with_paired_processors(
+        self,
+        policy_type: str,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        policy = MagicMock()
+        policy_class = MagicMock()
+        policy_class.from_pretrained.return_value = policy
+        preprocessor = MagicMock()
+        postprocessor = MagicMock()
+        factory = MagicMock()
+        factory.get_policy_class.return_value = policy_class
+        factory.make_pre_post_processors.return_value = (preprocessor, postprocessor)
+        pipeline = MagicMock()
+        monkeypatch.setitem(sys.modules, "lerobot.processor.pipeline", pipeline)
+        monkeypatch.setitem(sys.modules, "lerobot.policies.factory", factory)
+
+        bundle = load_pretrained_policy(str(tmp_path), policy_type=policy_type, device="cpu")
+
+        factory.get_policy_class.assert_called_once_with(policy_type)
+        policy_class.from_pretrained.assert_called_once_with(str(tmp_path), revision=None)
+        factory.make_pre_post_processors.assert_called_once_with(
+            policy.config,
+            pretrained_path=str(tmp_path),
+            pretrained_revision=None,
+            preprocessor_overrides={"device_processor": {"device": "cpu"}},
+            postprocessor_overrides={"device_processor": {"device": "cpu"}},
+        )
+        pipeline.PolicyProcessorPipeline.from_pretrained.assert_not_called()
+        assert bundle.preprocessor is preprocessor
+        assert bundle.postprocessor is postprocessor
+        assert bundle.policy_type == policy_type
+
+    def test_loads_diffusion_policy_with_persisted_processors(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        policy_class = MagicMock()
+        factory = MagicMock()
+        factory.get_policy_class.return_value = policy_class
+        pipeline = MagicMock()
+        monkeypatch.setitem(sys.modules, "lerobot.processor.pipeline", pipeline)
+        monkeypatch.setitem(sys.modules, "lerobot.policies.factory", factory)
+
+        bundle = load_pretrained_policy(str(tmp_path), policy_type="diffusion", device="cpu")
+
+        factory.get_policy_class.assert_called_once_with("diffusion")
+        assert pipeline.PolicyProcessorPipeline.from_pretrained.call_count == 2
+        assert bundle.policy_type == "diffusion"
+
+    def test_rejects_unsupported_policy_type(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="Unsupported policy type"):
+            load_pretrained_policy(str(tmp_path), policy_type="unknown", device="cpu")
 
     def test_remote_repo_without_revision_raises(
         self,
