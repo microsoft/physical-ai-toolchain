@@ -22,7 +22,7 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy==2.5.2",
     "azure-core==1.41.0",
-    "azure-storage-blob==12.30.1",
+    "azure-storage-blob==12.30.2",
     "azure-identity==1.25.3",
     "azure-ai-ml==1.35.0",
     "azureml-mlflow==1.62.0.post6",
@@ -34,14 +34,14 @@ dependencies = [
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Track azure-ai-ml release notes; bump together when 4.x support lands.
     "marshmallow==3.26.2",
-    "mlflow-skinny==3.16.0",
-    "matplotlib==3.11.1",
+    "mlflow-skinny==3.16.1",
+    "matplotlib==3.11.2",
     "packaging==26.3",
     # Global prerelease resolution would otherwise select pydantic, sentry-sdk,
     # and hf-xet alpha/dev releases; pin stable versions unless a direct
     # dependency requires them.
     "pydantic==2.13.5",
-    "sentry-sdk==2.69.1",
+    "sentry-sdk==2.69.2",
     "hf-xet==1.6.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
@@ -74,7 +74,7 @@ dependencies = [
     # mlflow-skinny and wandb).
     "gitpython==3.1.62",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
-    "urllib3==2.7.0",
+    "urllib3==2.8.0",
     # Pin cryptography above the 48.0.1 security floor for
     # GHSA-537c-gmf6-5ccf. azureml-mlflow caps below 49.0.0, so this pin is
     # also overridden below.
@@ -113,11 +113,11 @@ override-dependencies = [
     "diffusers==0.40.0",
     # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps below 12.30.1;
     # mirror the direct 12.30.1 pin.
-    "azure-storage-blob==12.30.1",
+    "azure-storage-blob==12.30.2",
     # cryptography: azureml-mlflow caps below 49.0.0; mirror the direct pin.
     "cryptography==50.0.1",
     # mlflow-skinny: azureml-mlflow caps at <=3.13.0; mirror the direct pin.
-    "mlflow-skinny==3.16.0",
+    "mlflow-skinny==3.16.1",
     # packaging: azureml-mlflow caps below 26.x; mirror the direct pin.
     "packaging==26.3",
     # numpy: lerobot==0.6.1 caps below 2.3.0; mirror the direct 2.5.2 pin.
