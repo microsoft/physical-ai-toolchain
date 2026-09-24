@@ -3,6 +3,8 @@ import { expect, test } from '@playwright/test'
 
 import { attachJson, openEmptyViewer, openViewer } from './accessibility-fixture'
 
+// cspell:words describedby keyshortcuts spinbutton
+
 interface FocusExpectation {
   scope: string
   role: 'button' | 'link' | 'tab'

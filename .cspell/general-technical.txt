@@ -452,6 +452,7 @@ flatdict
 flatmap
 flexbox
 Flink
+flushall
 fluentbit
 fluentd
 fluxcd
@@ -1794,3 +1795,29 @@ vsmagent
 vsmserver
 WEBACCESS
 WEBADM
+
+# Docusaurus accessibility terms
+activedescendant
+bday
+bgsound
+columnheader
+contentinfo
+easyops
+foreignobject
+guidepup
+haspopup
+hideable
+hrefs
+impp
+labelledby
+networkidle
+noopener
+noreferrer
+ongesturestart
+posinset
+setsize
+stylesheet
+textareas
+unclipped
+unreviewed
+zoomable
