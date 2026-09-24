@@ -759,12 +759,12 @@ class DatasetService:
             logger.debug("Skipping episode prefetch for episode %d: %s", int(episode_idx), error)
 
     def is_safe_video_path(self, video_path: str) -> bool:
-        """Check whether a video path falls within the base path or a blob-synced temp dir."""
+        """Check whether a video path falls within an approved local dataset root."""
         normalized = os.path.normpath(os.path.realpath(video_path))
         safe_base = os.path.realpath(self.base_path)
         if normalized.startswith(safe_base + os.sep) or normalized == safe_base:
             return True
-        for synced_dirs in (self._blob_synced, self._blob_hdf5_synced):
+        for synced_dirs in (self._release_dataset_paths, self._blob_synced, self._blob_hdf5_synced):
             for synced_dir in synced_dirs.values():
                 safe_synced = os.path.realpath(str(synced_dir))
                 if normalized.startswith(safe_synced + os.sep) or normalized == safe_synced:

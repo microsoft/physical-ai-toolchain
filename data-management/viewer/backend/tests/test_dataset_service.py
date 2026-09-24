@@ -172,6 +172,24 @@ class TestCameras:
 class TestVideoFilePath:
     """Test video file serving path resolution."""
 
+    def test_given_registered_release_when_checking_video_path_then_path_is_safe(self, tmp_path):
+        # Arrange
+        base_path = tmp_path / "datasets"
+        base_path.mkdir()
+        release_path = tmp_path / "releases" / "dataset" / "release"
+        video_path = release_path / "videos" / "camera" / "episode.mp4"
+        video_path.parent.mkdir(parents=True)
+        video_path.touch()
+        release_id = "release-job-123"
+        release_service = DatasetService(base_path=str(base_path))
+        release_service._release_dataset_paths[release_id] = release_path
+
+        # Act
+        is_safe = release_service.is_safe_video_path(str(video_path))
+
+        # Assert
+        assert is_safe is True
+
     def test_get_video_file_path(self, service):
         service._discover_dataset(DATASET_ID)
         path = service.get_video_file_path(DATASET_ID, 0, "observation.images.il-camera")

@@ -35,11 +35,12 @@ export function useDataviewerShellState({ datasets, episodes }: UseDataviewerShe
     const hasSelectedDataset = datasets.some((dataset) => dataset.id === datasetIdState)
 
     if (!datasetIdState || !hasSelectedDataset) {
-      const autoId = datasets[0].id
+      const autoDataset = datasets[0]
+      const autoId = autoDataset.id
       setDatasetIdState(autoId)
       setSelectedEpisode(0)
 
-      if (autoId !== warmedRef.current) {
+      if (!autoDataset.isReadOnly && autoId !== warmedRef.current) {
         warmedRef.current = autoId
         setIsWarmingCache(true)
         void warmCache(autoId, 5).finally(() => setIsWarmingCache(false))
@@ -68,16 +69,20 @@ export function useDataviewerShellState({ datasets, episodes }: UseDataviewerShe
   const canGoPreviousEpisode = selectedEpisode > 0
   const canGoNextEpisode = totalEpisodes > 0 && selectedEpisode < totalEpisodes - 1
 
-  const setDatasetId = useCallback((nextDatasetId: string) => {
-    setDatasetIdState(nextDatasetId)
-    setSelectedEpisode(0)
+  const setDatasetId = useCallback(
+    (nextDatasetId: string) => {
+      setDatasetIdState(nextDatasetId)
+      setSelectedEpisode(0)
 
-    if (nextDatasetId && nextDatasetId !== warmedRef.current) {
-      warmedRef.current = nextDatasetId
-      setIsWarmingCache(true)
-      void warmCache(nextDatasetId, 5).finally(() => setIsWarmingCache(false))
-    }
-  }, [])
+      const nextDataset = datasets?.find((dataset) => dataset.id === nextDatasetId)
+      if (nextDataset && !nextDataset.isReadOnly && nextDatasetId !== warmedRef.current) {
+        warmedRef.current = nextDatasetId
+        setIsWarmingCache(true)
+        void warmCache(nextDatasetId, 5).finally(() => setIsWarmingCache(false))
+      }
+    },
+    [datasets],
+  )
 
   const handlePreviousEpisode = useCallback(() => {
     setSelectedEpisode((currentEpisode) => Math.max(currentEpisode - 1, 0))
