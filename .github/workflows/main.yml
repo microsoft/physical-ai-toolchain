@@ -13,6 +13,13 @@ defaults:
     shell: pwsh
 
 jobs:
+  # Validate workflow references, dependency selection, and CI contracts
+  workflow-refs-check:
+    name: Workflow Refs Check
+    uses: ./.github/workflows/workflow-refs-check.yml
+    permissions:
+      contents: read
+
   # Spell checking using cspell
   spell-check:
     name: Spell Check
@@ -93,6 +100,16 @@ jobs:
       upload-sarif: true
       exclude-paths: 'scripts/tests/Fixtures/**,shared/ci/tests/Fixtures/**'
 
+  # Advisory container base-image CVE findings
+  container-scan:
+    name: Container Scan
+    uses: ./.github/workflows/container-scan.yml
+    with:
+      soft-fail: true
+    permissions:
+      contents: read
+      security-events: write  # Required for SARIF upload to Security tab
+
   # PowerShell Pester test execution
   pester-tests:
     name: Pester Tests
@@ -151,6 +168,13 @@ jobs:
     permissions:
       contents: read
 
+  # End-to-end CPU-only smoke of the gpu-offload stack
+  gpu-offload-kind-smoke:
+    name: GPU Offload Kind Smoke
+    uses: ./.github/workflows/gpu-offload-kind-smoke.yml
+    permissions:
+      contents: read
+
   # Pytest: shared CI scripts component
   pytest-shared-ci:
     name: Pytest Shared CI
@@ -170,6 +194,15 @@ jobs:
     permissions:
       contents: read
       id-token: write
+
+  # Docusaurus documentation site tests and build verification
+  docusaurus-tests:
+    name: Docusaurus Tests
+    uses: ./.github/workflows/docusaurus-tests.yml
+    with:
+      soft-fail: false
+    permissions:
+      contents: read
 
   # Dataviewer backend pytest execution
   dataviewer-backend-pytests:
@@ -205,6 +238,16 @@ jobs:
   python-lint:
     name: Python Lint
     uses: ./.github/workflows/python-lint.yml
+    permissions:
+      contents: read
+
+  # uv lock/manifest consistency gate across all Python subprojects
+  uv-lock-consistency:
+    name: uv Lock Consistency
+    uses: ./.github/workflows/uv-lock-consistency.yml
+    with:
+      changed-files-only: false
+      soft-fail: false
     permissions:
       contents: read
 
@@ -290,6 +333,7 @@ jobs:
     with:
       rl: true
       il: true
+      vla: true
       evaluation: true
       osmo_replay: true
       dataviewer: true
@@ -299,6 +343,7 @@ jobs:
   # Automated release PR management via release-please
   release-please:
     needs:
+      - workflow-refs-check
       - spell-check
       - markdown-lint
       - toml-format
@@ -309,17 +354,22 @@ jobs:
       - link-lang-check
       - markdown-link-check
       - dependency-pinning
+      - container-scan
       - pester-tests
       - pytest-training
       - pytest-dm-tools
       - pytest-data-pipeline
       - pytest-inference
       - pytest-gpu-offload
+      - gpu-offload-kind-smoke
       - pytest-shared-ci
       - dataviewer-frontend-tests
+      - docusaurus-tests
       - dataviewer-backend-pytests
       - evaluation-pytests
+      - fuzz-regression-tests
       - python-lint
+      - uv-lock-consistency
       - terraform-lint
       - terraform-validation
       - terraform-tests
@@ -328,6 +378,7 @@ jobs:
       - shellcheck
       - terraform-docs-check
       - codeql-analysis
+      - smoke
     name: Release Please
     runs-on: ubuntu-latest
     concurrency:

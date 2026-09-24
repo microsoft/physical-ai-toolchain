@@ -153,6 +153,7 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
           onGraphSeek={shell.playback.handleGraphSeek}
           onSelectionStart={shell.playback.handleSelectionStart}
           onSelectionComplete={shell.playback.handleSelectionComplete}
+          onSelectionCancel={shell.playback.handleSelectionCancel}
           totalFrames={shell.totalFrames}
           onSubtaskSelectionChange={shell.playback.handleSubtaskSelectionChange}
         />

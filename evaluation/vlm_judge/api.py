@@ -33,6 +33,7 @@ from .service import (
     JudgeService,
     ServiceConfig,
 )
+from .swagger_ui import install_responsive_swagger_ui
 
 _LOGGER = logging.getLogger("evaluation.vlm_judge")
 
@@ -132,7 +133,8 @@ def build_app():
     cache_dir = Path(cache_dir_env) if cache_dir_env else None
 
     service = JudgeService(ServiceConfig(backend=backend, frames=frames, cache_dir=cache_dir))
-    app = FastAPI(title="VLM-as-Judge", version="0.1.0")
+    app = FastAPI(title="VLM-as-Judge", version="0.1.0", docs_url=None)
+    install_responsive_swagger_ui(app)
     app.include_router(build_router(service))
     _LOGGER.info("VLM judge API ready (backend=%s, model=%s)", backend.kind, backend.model_id)
     return app

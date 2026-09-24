@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Troubleshooting Guide
 description: Symptom-based resolution guide for common errors in the robotics reference architecture
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-19
+ms.date: 2026-09-21
 ms.topic: troubleshooting
 keywords:
   - troubleshooting
