@@ -1,5 +1,5 @@
 ---
-title: "AML → OSMO Proxy"
+title: "AML to OSMO Proxy"
 description: Run OSMO workflows from Azure Machine Learning with submission, monitoring, and metric logging
 author: Edge AI Team
 ms.date: 2026-09-22
@@ -14,6 +14,8 @@ The proxy bridges standard Azure ML tooling with OSMO cluster orchestration. An 
 
 ```mermaid
 flowchart TD
+  accTitle: Azure Machine Learning to OSMO proxy flow
+  accDescr: A developer or CI pipeline starts an Azure Machine Learning command job, which submits and monitors an OSMO workflow and returns metrics, tags, and artifact lineage to Azure Machine Learning Studio.
     A["Developer / CI pipeline"] -->|az ml job create| B["osmo_proxy.py\n(AML command job, runs inside AKS pod)"]
     B -->|"POST /api/pool/{pool}/workflow\nGET /api/workflow/{id} poll"| C["OSMO\n(KAI scheduling, NIM lifecycle)"]
     B -->|metrics, tags, artifact lineage| D["AML Studio"]

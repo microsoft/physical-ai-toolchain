@@ -22,6 +22,7 @@
 		"containerfile",
 		"CSPRNG",
 		"CXXFLAGS",
+		"ddpm",
 		"dedented",
 		"DESTDIR",
 		"directqueue",

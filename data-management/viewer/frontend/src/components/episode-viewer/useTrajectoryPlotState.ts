@@ -36,6 +36,7 @@ interface UseTrajectoryPlotStateOptions {
   onCreateSubtaskFromRange?: (range: [number, number]) => void
   onSelectionStart?: () => void
   onSelectionComplete?: (range: [number, number]) => void
+  onSelectionCancel?: () => void
   onSeekFrame?: (frame: number) => void
 }
 
@@ -102,6 +103,7 @@ export function useTrajectoryPlotState({
   onCreateSubtaskFromRange,
   onSelectionStart,
   onSelectionComplete,
+  onSelectionCancel,
   onSeekFrame,
 }: UseTrajectoryPlotStateOptions) {
   const currentEpisode = useEpisodeStore((state) => state.currentEpisode)
@@ -328,6 +330,7 @@ export function useTrajectoryPlotState({
     onSelectedRangeChange,
     onSelectionStart,
     onSelectionComplete,
+    onSelectionCancel,
     onSeekFrame,
     onSetCurrentFrame: setCurrentFrame,
     onRecordEvent: recordDiagnosticEvent,

@@ -55,7 +55,7 @@ describe('AnnotationWorkspace status and header actions', () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByText(/episode changes saved/i)).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(/episode changes saved/i)
 
     act(() => {
       vi.advanceTimersByTime(2500)

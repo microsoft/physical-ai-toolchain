@@ -154,6 +154,15 @@ export function useAnnotationWorkspaceEpisodeActions({
   }, [currentDatasetId, currentEpisodeIndex, diagnosticsEnabled, onRecordEvent])
 
   const handleResetAll = useCallback(async () => {
+    if (
+      hasPendingEpisodeChanges &&
+      (globalThis.confirm?.(
+        'Discard unsaved annotation, label, and frame-edit changes for this episode?',
+      ) ?? true) === false
+    ) {
+      return
+    }
+
     onResetEdits()
 
     if (currentEpisodeIndex === null || !hasLabelChanges) {
@@ -169,6 +178,7 @@ export function useAnnotationWorkspaceEpisodeActions({
     availableLabels,
     currentEpisodeIndex,
     hasLabelChanges,
+    hasPendingEpisodeChanges,
     onResetEdits,
     onSetEpisodeLabels,
     savedLabelsForCurrentEpisode,

@@ -86,10 +86,9 @@ case "$domain" in
     il)
         project="training/il/lerobot"
         py_version="3.12"
-        # Import lerobot + torch (the #790 interpreter/version surface) plus the
-        # first-party module. train.py.main() has side effects (HuggingFace
-        # auth), so import the module without executing it.
-        probe=(-c "import torch, lerobot; import training.il.scripts.lerobot.train")
+        # Import the policy-specific dependency surface plus the first-party
+        # module. train.py.main() has side effects, so do not execute it.
+        probe=(-c "import torch, lerobot; from diffusers.schedulers.scheduling_ddpm import DDPMScheduler; from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy; import training.il.scripts.lerobot.train")
         ;;
     vla)
         project="training/vla/lerobot"
@@ -104,9 +103,9 @@ case "$domain" in
         project="evaluation"
         py_version="3.12"
         if [[ "$mode" == "image" ]]; then
-            probe=(-c "import av, numpy, torch, torchvision; import evaluation.sil.policy_evaluation")
+            probe=(-c "import av, numpy, torch, torchvision; from diffusers.schedulers.scheduling_ddpm import DDPMScheduler; from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy; import evaluation.sil.policy_evaluation")
         else
-            probe=(-c "import numpy, torch, torchvision; import evaluation.sil.policy_evaluation")
+            probe=(-c "import numpy, torch, torchvision; from diffusers.schedulers.scheduling_ddpm import DDPMScheduler; from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy; import evaluation.sil.policy_evaluation")
         fi
         ;;
     osmo-replay)
