@@ -182,13 +182,13 @@ Rerun `02-deploy-azureml-extension.sh` to reconcile an existing extension with t
 
 ### Script Flags
 
-| Flag               | Scripts                          | Description                                  |
-|--------------------|----------------------------------|----------------------------------------------|
+| Flag               | Scripts                          | Description                                   |
+|--------------------|----------------------------------|-----------------------------------------------|
 | `--fast-prod`      | `02-deploy-azureml-extension.sh` | Set the AzureML cluster purpose to `FastProd` |
-| `--use-acr`        | `03-deploy-osmo.sh`              | Pull from Terraform-deployed ACR             |
-| `--acr-name NAME`  | `03-deploy-osmo.sh`              | Specify alternate ACR                        |
-| `--skip-backend`   | `03-deploy-osmo.sh`              | Skip backend operator deployment             |
-| `--config-preview` | All                              | Print config and exit                        |
+| `--use-acr`        | `03-deploy-osmo.sh`              | Pull from Terraform-deployed ACR              |
+| `--acr-name NAME`  | `03-deploy-osmo.sh`              | Specify alternate ACR                         |
+| `--skip-backend`   | `03-deploy-osmo.sh`              | Skip backend operator deployment              |
+| `--config-preview` | All                              | Print config and exit                         |
 
 ## ⚙️ Configuration
 
