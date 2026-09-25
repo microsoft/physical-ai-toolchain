@@ -1,739 +1,485 @@
-"""
-Integration tests for LeRobotFormatHandler against a sample LeRobot dataset.
+"""Public behavior tests for the LeRobot dataset format handler."""
 
-Tests handler discovery, episode listing, episode loading,
-trajectory extraction, camera discovery, and video path resolution.
-"""
+from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
+from src.api.models.datasources import DatasetInfo, FeatureSchema
+from src.api.services.dataset_service import lerobot_handler as handler_module
 from src.api.services.dataset_service.lerobot_handler import LeRobotFormatHandler
+from src.api.services.lerobot_loader import LeRobotDatasetInfo, LeRobotEpisodeData
 
-from .conftest import TEST_DATASET_ID, TEST_DATASET_PATH
-
-DATASET_ID = TEST_DATASET_ID
-
-
-@pytest.fixture(scope="module")
-def dataset_path():
-    """Path to the test dataset directory."""
-    from pathlib import Path
-
-    path = Path(TEST_DATASET_PATH) / DATASET_ID
-    if not path.is_dir():
-        pytest.skip(f"LeRobot dataset not found: {path}")
-    return path
-
-
-@pytest.fixture
-def handler(dataset_path):
-    """Fresh handler with loader initialized for the test dataset."""
-    h = LeRobotFormatHandler()
-    assert h.get_loader(DATASET_ID, dataset_path)
-    return h
-
-
-class TestHandlerDetection:
-    """Test format detection and loader initialization."""
-
-    def test_available(self):
-        h = LeRobotFormatHandler()
-        assert h.available is True
-
-    def test_can_handle_lerobot(self, dataset_path):
-        h = LeRobotFormatHandler()
-        assert h.can_handle(dataset_path) is True
-
-    def test_cannot_handle_missing(self, tmp_path):
-        h = LeRobotFormatHandler()
-        assert h.can_handle(tmp_path / "nonexistent") is False
-
-    def test_get_loader_success(self, dataset_path):
-        h = LeRobotFormatHandler()
-        assert h.get_loader(DATASET_ID, dataset_path) is True
-        assert h.has_loader(DATASET_ID) is True
-
-    def test_get_loader_missing(self, tmp_path):
-        h = LeRobotFormatHandler()
-        assert h.get_loader("fake", tmp_path / "nonexistent") is False
-
-
-class TestDiscover:
-    """Test dataset discovery."""
-
-    def test_discover_returns_info(self, handler, dataset_path):
-        info = handler.discover(DATASET_ID, dataset_path)
-        assert info is not None
-        assert info.id == DATASET_ID
-        assert info.total_episodes == 64
-        assert info.fps == 30.0
-
-    def test_discover_has_features(self, handler, dataset_path):
-        info = handler.discover(DATASET_ID, dataset_path)
-        assert "observation.state" in info.features
-        assert "action" in info.features
-
-
-class TestListEpisodes:
-    """Test episode listing."""
-
-    def test_returns_indices_and_meta(self, handler):
-        indices, meta = handler.list_episodes(DATASET_ID)
-        assert len(indices) == 64
-        assert 0 in meta
-        assert meta[0]["length"] > 0
-
-    def test_indices_sorted(self, handler):
-        indices, _ = handler.list_episodes(DATASET_ID)
-        assert indices == sorted(indices)
-
-
-class TestLoadEpisode:
-    """Test full episode loading."""
-
-    def test_returns_episode_data(self, handler):
-        ep = handler.load_episode(DATASET_ID, 0)
-        assert ep is not None
-        assert ep.meta.index == 0
-        assert ep.meta.length > 0
-
-    def test_trajectory_populated(self, handler):
-        ep = handler.load_episode(DATASET_ID, 0)
-        assert len(ep.trajectory_data) == ep.meta.length
-
-    def test_trajectory_point_fields(self, handler):
-        ep = handler.load_episode(DATASET_ID, 0)
-        pt = ep.trajectory_data[0]
-        assert pt.timestamp >= 0
-        assert pt.frame >= 0
-        assert len(pt.joint_positions) > 0
-        assert len(pt.end_effector_pose) == 6
-        assert len(pt.action) > 0
-        assert isinstance(pt.signals, dict)
-
-    def test_video_urls(self, handler):
-        ep = handler.load_episode(DATASET_ID, 0)
-        assert "observation.images.il-camera" in ep.video_urls
-
-
-class TestGetTrajectory:
-    """Test trajectory-only extraction."""
-
-    def test_returns_points(self, handler):
-        traj = handler.get_trajectory(DATASET_ID, 0)
-        assert len(traj) > 0
-
-    def test_timestamps_non_decreasing(self, handler):
-        traj = handler.get_trajectory(DATASET_ID, 0)
-        timestamps = [pt.timestamp for pt in traj]
-        for i in range(1, len(timestamps)):
-            assert timestamps[i] >= timestamps[i - 1]
-
-
-class TestCamerasAndVideo:
-    """Test camera and video path resolution."""
-
-    def test_get_cameras(self, handler):
-        cameras = handler.get_cameras(DATASET_ID, 0)
-        assert "observation.images.il-camera" in cameras
-
-    def test_get_video_path(self, handler):
-        path = handler.get_video_path(DATASET_ID, 0, "observation.images.il-camera")
-        assert path is not None
-        assert path.endswith(".mp4")
-
-    def test_get_video_path_missing_camera(self, handler):
-        path = handler.get_video_path(DATASET_ID, 0, "fake_camera")
-        assert path is None
-
-    def test_get_video_path_regenerates_invalid_cached_clip(self, monkeypatch, tmp_path):
-        source_path = tmp_path / "source.mp4"
-        source_path.write_bytes(b"source")
-        loader = FakeLoader()
-        loader.base_path = tmp_path
-        loader.get_video_path = lambda idx, camera: source_path
-        loader.get_video_time_window = lambda idx, camera: (0.0, 1.0)
-        handler = LeRobotFormatHandler()
-        handler._loaders["ds"] = loader
-        cache_path = handler._video_cache_path("ds", 0, "observation.images.cam0")
-        assert cache_path is not None
-        cache_path.parent.mkdir(parents=True)
-        cache_path.write_bytes(b"corrupt")
-
-        monkeypatch.setattr(handler, "_is_valid_video_file", lambda path: path != cache_path)
-
-        def regenerate(source, window, target):
-            target.write_bytes(b"valid")
-            return True
-
-        monkeypatch.setattr(handler, "_generate_episode_video_clip", regenerate)
-
-        assert handler.get_video_path("ds", 0, "observation.images.cam0") == str(cache_path)
-        assert cache_path.read_bytes() == b"valid"
-
-    def test_get_video_path_retains_valid_cached_clip(self, monkeypatch, tmp_path):
-        loader = FakeLoader()
-        loader.base_path = tmp_path
-        loader.get_video_time_window = lambda idx, camera: (0.0, 1.0)
-        handler = LeRobotFormatHandler()
-        handler._loaders["ds"] = loader
-        cache_path = handler._video_cache_path("ds", 0, "observation.images.cam0")
-        assert cache_path is not None
-        cache_path.parent.mkdir(parents=True)
-        cache_path.write_bytes(b"valid")
-        monkeypatch.setattr(handler, "_is_valid_video_file", lambda path: path == cache_path)
-        generate = MagicMock(side_effect=AssertionError("valid cached clip must not be regenerated"))
-        monkeypatch.setattr(handler, "_generate_episode_video_clip", generate)
-
-        assert handler.get_video_path("ds", 0, "observation.images.cam0") == str(cache_path)
-        assert cache_path.read_bytes() == b"valid"
-        generate.assert_not_called()
-
-
-class TestFfmpegExtraction:
-    """Test ffmpeg-based frame extraction."""
-
-    FAKE_JPEG = b"\xff\xd8\xff\xe0fake-jpeg-data"
-    FFMPEG_PATH = "/usr/bin/ffmpeg"
-
-    def test_valid_video_file_when_ffmpeg_decodes_frame(self, monkeypatch, tmp_path):
-        import subprocess as sp
-
-        video_path = tmp_path / "valid.mp4"
-        video_path.write_bytes(b"video")
-        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH))
-        monkeypatch.setattr(
-            sp,
-            "run",
-            lambda *args, **kwargs: sp.CompletedProcess(args[0], returncode=0, stdout=b"", stderr=b""),
-        )
-
-        assert LeRobotFormatHandler._is_valid_video_file(video_path) is True
-
-    @pytest.mark.parametrize("failure", ["exit", "timeout"])
-    def test_invalid_video_file_when_ffmpeg_fails(self, monkeypatch, tmp_path, failure):
-        import subprocess as sp
-
-        video_path = tmp_path / "invalid.mp4"
-        video_path.write_bytes(b"video")
-        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH))
-
-        if failure == "exit":
-            monkeypatch.setattr(
-                sp,
-                "run",
-                lambda *args, **kwargs: sp.CompletedProcess(args[0], returncode=1, stdout=b"", stderr=b"error"),
-            )
-        else:
-
-            def timeout(*args, **kwargs):
-                raise sp.TimeoutExpired(cmd=args[0], timeout=10)
-
-            monkeypatch.setattr(sp, "run", timeout)
-
-        assert LeRobotFormatHandler._is_valid_video_file(video_path) is False
-
-    @pytest.mark.parametrize(("contents", "expected"), [(b"video", True), (b"", False)])
-    def test_video_file_without_ffmpeg_uses_nonempty_fallback(self, monkeypatch, tmp_path, contents, expected):
-        video_path = tmp_path / "cached.mp4"
-        video_path.write_bytes(contents)
-        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: None))
-
-        assert LeRobotFormatHandler._is_valid_video_file(video_path) is expected
-
-    def test_successful_extraction(self, monkeypatch):
-        """Verify _extract_frame_ffmpeg returns stdout bytes on success."""
-        import subprocess as sp
-
-        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH))
-
-        def mock_run(cmd, *, capture_output=False, timeout=None):
-            assert cmd[0] == self.FFMPEG_PATH
-            assert "-ss" in cmd
-            return sp.CompletedProcess(cmd, returncode=0, stdout=self.FAKE_JPEG, stderr=b"")
-
-        monkeypatch.setattr(sp, "run", mock_run)
-
-        result = LeRobotFormatHandler._extract_frame_ffmpeg("/tmp/video.mp4", 5, 30.0)
-        assert result == self.FAKE_JPEG
-
-    def test_returns_none_when_ffmpeg_missing(self, monkeypatch):
-        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: None))
-        result = LeRobotFormatHandler._extract_frame_ffmpeg("/tmp/video.mp4", 0, 30.0)
-        assert result is None
-
-    def test_returns_none_on_nonzero_exit(self, monkeypatch):
-        import subprocess as sp
-
-        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH))
-        monkeypatch.setattr(
-            sp,
-            "run",
-            lambda *a, **kw: sp.CompletedProcess(a[0], returncode=1, stdout=b"", stderr=b"error"),
-        )
-
-        result = LeRobotFormatHandler._extract_frame_ffmpeg("/tmp/video.mp4", 0, 30.0)
-        assert result is None
-
-    def test_seek_time_calculation(self, monkeypatch):
-        """Verify frame_idx / fps produces correct -ss argument."""
-        import subprocess as sp
-
-        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH))
-
-        captured_cmd = []
-
-        def mock_run(cmd, *, capture_output=False, timeout=None):
-            captured_cmd.extend(cmd)
-            return sp.CompletedProcess(cmd, returncode=0, stdout=self.FAKE_JPEG, stderr=b"")
-
-        monkeypatch.setattr(sp, "run", mock_run)
-
-        LeRobotFormatHandler._extract_frame_ffmpeg("/tmp/video.mp4", 90, 30.0)
-        ss_idx = captured_cmd.index("-ss")
-        assert captured_cmd[ss_idx + 1] == "3.000000"
-
-    def test_returns_none_on_subprocess_exception(self, monkeypatch):
-        import shutil
-        import subprocess as sp
-
-        monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/ffmpeg")
-
-        def boom(*a, **kw):
-            raise sp.TimeoutExpired(cmd="ffmpeg", timeout=10)
-
-        monkeypatch.setattr(sp, "run", boom)
-        assert LeRobotFormatHandler._extract_frame_ffmpeg("/tmp/v.mp4", 0, 30.0) is None
-
-
-# ---------------------------------------------------------------------------
-# Synthetic-loader tests (no real dataset required).
-# A FakeLoader is injected directly into handler._loaders to exercise the
-# handler's orchestration logic without filesystem fixtures.
-# ---------------------------------------------------------------------------
-
-from pathlib import Path
-
-import numpy as np
-
-from src.api.services.dataset_service import lerobot_handler as lh_module
-
-
-class FakeLRInfo:
-    def __init__(self, *, total_episodes=2, fps=30.0, robot_type="ur10e", features=None):
-        self.total_episodes = total_episodes
-        self.fps = fps
-        self.robot_type = robot_type
-        self.features = features or {
-            "observation.state": {"dtype": "float32", "shape": [6]},
-            "action": {"dtype": "float32", "shape": [6]},
-            "observation.images.cam0": {"dtype": "video", "shape": [480, 640, 3]},
-        }
-
-
-class FakeLREpisode:
-    def __init__(self, length=4):
-        self.length = length
-        self.timestamps = np.arange(length, dtype=np.float64) / 30.0
-        self.frame_indices = np.arange(length, dtype=np.int64)
-        self.joint_positions = np.zeros((length, 6), dtype=np.float64)
-        self.joint_velocities = np.zeros((length, 6), dtype=np.float64)
-        self.actions = np.zeros((length, 6), dtype=np.float64)
-        self.task_index = 0
-        self.video_paths = {"observation.images.cam0": "/tmp/cam0.mp4"}
-        self.additional_features = {}
+_CAMERA = "observation.images.cam0"
 
 
 class FakeLoader:
-    def __init__(self, *, episodes=None, info=None, raise_on=None):
-        self._episodes = episodes if episodes is not None else {0: {"length": 4}, 1: {"length": 5}}
-        self._info = info if info is not None else FakeLRInfo()
-        self._raise_on = raise_on or set()
-        self.base_path = Path("/tmp/fake-lerobot-ds")
+    def __init__(
+        self,
+        base_path: Path,
+        *,
+        failures: set[str] | None = None,
+        video_window: tuple[float, float] | None = None,
+    ) -> None:
+        self.base_path = base_path
+        self.failures = failures or set()
+        self.video_window = video_window
+        self.video_path = base_path / "source.mp4"
+        self.video_path.write_bytes(b"video")
+        os.utime(self.video_path, (1, 1))
 
-    def _maybe_raise(self, name):
-        if name in self._raise_on:
-            raise RuntimeError(f"boom-{name}")
+    def _raise_if_requested(self, operation: str) -> None:
+        if operation in self.failures:
+            raise RuntimeError(operation)
 
-    def get_dataset_info(self):
-        self._maybe_raise("get_dataset_info")
-        return self._info
+    def get_dataset_info(self) -> LeRobotDatasetInfo:
+        self._raise_if_requested("get_dataset_info")
+        return LeRobotDatasetInfo(
+            codebase_version="v3.0",
+            robot_type="synthetic-arm",
+            total_episodes=2,
+            total_frames=7,
+            total_tasks=2,
+            total_chunks=1,
+            chunks_size=1000,
+            fps=20.0,
+            splits={"train": "0:2"},
+            data_path="data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet",
+            video_path="videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4",
+            features={
+                "observation.state": {"dtype": "float32", "shape": [3], "names": ["a", "b", "c"]},
+                "action": {"dtype": "float32", "shape": [3]},
+                _CAMERA: {"dtype": "video", "shape": [48, 64, 3]},
+            },
+        )
 
-    def list_episodes_with_meta(self):
-        self._maybe_raise("list_episodes_with_meta")
-        return self._episodes
+    def list_episodes_with_meta(self) -> dict[int, dict[str, int]]:
+        self._raise_if_requested("list_episodes_with_meta")
+        return {1: {"length": 3, "task_index": 1}, 0: {"length": 4, "task_index": 0}}
 
-    def load_episode(self, idx):
-        self._maybe_raise("load_episode")
-        return FakeLREpisode()
+    def load_episode(self, episode_index: int) -> LeRobotEpisodeData:
+        self._raise_if_requested("load_episode")
+        length = 4
+        return LeRobotEpisodeData(
+            episode_index=episode_index,
+            length=length,
+            timestamps=np.arange(length, dtype=np.float64) / 20.0,
+            frame_indices=np.arange(length, dtype=np.int64),
+            joint_positions=np.array([[0.0, 1.0, 2.0]] * length),
+            joint_velocities=np.array([[0.1, 0.2, 0.3]] * length),
+            actions=np.array([[0.4, 0.5, 0.6]] * length),
+            additional_features={},
+            task_index=1,
+            video_paths={_CAMERA: self.video_path},
+            metadata={"robot_type": "synthetic-arm"},
+        )
 
-    def get_video_path(self, idx, camera):
-        self._maybe_raise("get_video_path")
-        if camera == "missing":
-            return None
-        return f"/tmp/{camera}.mp4"
+    def get_video_path(self, episode_index: int, camera: str) -> Path | None:
+        self._raise_if_requested("get_video_path")
+        return self.video_path if camera == _CAMERA else None
 
-    def get_video_time_window(self, idx, camera):
-        self._maybe_raise("get_video_time_window")
-        return None
+    def get_video_time_window(self, episode_index: int, camera: str) -> tuple[float, float] | None:
+        self._raise_if_requested("get_video_time_window")
+        return self.video_window
 
-    def get_cameras(self):
-        self._maybe_raise("get_cameras")
-        return ["observation.images.cam0"]
+    def get_cameras(self) -> list[str]:
+        self._raise_if_requested("get_cameras")
+        return [_CAMERA]
 
-    def get_tasks(self):
-        self._maybe_raise("get_tasks")
+    def get_tasks(self) -> dict[int, str]:
+        self._raise_if_requested("get_tasks")
         return {0: "pick", 1: "place"}
 
 
-def _inject(handler, loader, dataset_id="ds"):
-    handler._loaders[dataset_id] = loader
-    return dataset_id
+def _configured_handler(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    failures: set[str] | None = None,
+    video_window: tuple[float, float] | None = None,
+) -> tuple[LeRobotFormatHandler, FakeLoader]:
+    loader = FakeLoader(tmp_path, failures=failures, video_window=video_window)
+    monkeypatch.setattr(handler_module, "is_lerobot_dataset", lambda path: True)
+    monkeypatch.setattr(handler_module, "LeRobotLoader", lambda path: loader)
+    handler = LeRobotFormatHandler()
+    assert handler.get_loader("dataset", tmp_path) is True
+    return handler, loader
 
 
-class TestGetLoaderSynthetic:
-    def test_returns_true_when_already_loaded(self, tmp_path):
-        h = LeRobotFormatHandler()
-        h._loaders["ds"] = FakeLoader()
-        assert h.get_loader("ds", tmp_path) is True
+class TestDetectionAndDiscovery:
+    def test_reports_availability(self):
+        assert LeRobotFormatHandler().available is True
 
-    def test_returns_false_when_unavailable(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(lh_module, "LEROBOT_AVAILABLE", False)
-        h = LeRobotFormatHandler()
-        assert h.get_loader("ds", tmp_path) is False
+    def test_can_handle_detected_dataset(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(handler_module, "is_lerobot_dataset", lambda path: path == tmp_path)
 
-    def test_returns_false_when_path_missing(self, tmp_path):
-        h = LeRobotFormatHandler()
-        assert h.get_loader("ds", tmp_path / "nope") is False
+        assert LeRobotFormatHandler().can_handle(tmp_path) is True
 
-    def test_returns_false_when_not_lerobot(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(lh_module, "is_lerobot_dataset", lambda p: False)
-        h = LeRobotFormatHandler()
-        assert h.get_loader("ds", tmp_path) is False
+    def test_rejects_missing_dataset(self, tmp_path):
+        assert LeRobotFormatHandler().get_loader("dataset", tmp_path / "missing") is False
 
-    def test_constructs_loader_on_success(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(lh_module, "is_lerobot_dataset", lambda p: True)
-        monkeypatch.setattr(lh_module, "LeRobotLoader", lambda p: FakeLoader())
-        h = LeRobotFormatHandler()
-        assert h.get_loader("ds", tmp_path) is True
-        assert h.has_loader("ds")
+    def test_initializes_loader_once(self, monkeypatch, tmp_path):
+        loader = FakeLoader(tmp_path)
+        constructor = MagicMock(return_value=loader)
+        monkeypatch.setattr(handler_module, "is_lerobot_dataset", lambda path: True)
+        monkeypatch.setattr(handler_module, "LeRobotLoader", constructor)
+        handler = LeRobotFormatHandler()
 
-    def test_returns_false_on_constructor_exception(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(lh_module, "is_lerobot_dataset", lambda p: True)
+        assert handler.get_loader("dataset", tmp_path) is True
+        assert handler.get_loader("dataset", tmp_path) is True
+        assert handler.has_loader("dataset") is True
+        constructor.assert_called_once_with(tmp_path)
 
-        def boom(p):
-            raise RuntimeError("nope")
+    def test_rejects_loader_constructor_failure(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(handler_module, "is_lerobot_dataset", lambda path: True)
+        constructor = MagicMock(side_effect=RuntimeError("invalid dataset"))
+        monkeypatch.setattr(handler_module, "LeRobotLoader", constructor)
+        handler = LeRobotFormatHandler()
 
-        monkeypatch.setattr(lh_module, "LeRobotLoader", boom)
-        h = LeRobotFormatHandler()
-        assert h.get_loader("ds", tmp_path) is False
+        assert handler.get_loader("dataset", tmp_path) is False
+        assert handler.has_loader("dataset") is False
+        constructor.assert_called_once_with(tmp_path)
 
+    def test_lists_episodes_without_registering_loader(self, monkeypatch, tmp_path):
+        loader = FakeLoader(tmp_path)
+        constructor = MagicMock(return_value=loader)
+        monkeypatch.setattr(handler_module, "LeRobotLoader", constructor)
 
-class TestListEpisodesFromPath:
-    def test_returns_empty_when_unavailable(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(lh_module, "LEROBOT_AVAILABLE", False)
-        h = LeRobotFormatHandler()
-        assert h.list_episodes_from_path(tmp_path) == ([], {})
+        assert LeRobotFormatHandler().list_episodes_from_path(tmp_path) == (
+            [0, 1],
+            {1: {"length": 3, "task_index": 1}, 0: {"length": 4, "task_index": 0}},
+        )
+        constructor.assert_called_once_with(tmp_path)
 
-    def test_success(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(lh_module, "LeRobotLoader", lambda p: FakeLoader())
-        h = LeRobotFormatHandler()
-        indices, meta = h.list_episodes_from_path(tmp_path)
-        assert indices == [0, 1]
-        assert meta[0]["length"] == 4
+    def test_list_from_path_failure_returns_empty(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            handler_module,
+            "LeRobotLoader",
+            MagicMock(side_effect=RuntimeError("unreadable dataset")),
+        )
 
-    def test_returns_empty_on_exception(self, monkeypatch, tmp_path):
-        def boom(p):
-            raise RuntimeError("boom")
+        assert LeRobotFormatHandler().list_episodes_from_path(tmp_path) == ([], {})
 
-        monkeypatch.setattr(lh_module, "LeRobotLoader", boom)
-        h = LeRobotFormatHandler()
-        assert h.list_episodes_from_path(tmp_path) == ([], {})
+    def test_discovers_metadata_features_and_tasks(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path)
 
+        dataset = handler.discover("dataset", tmp_path)
 
-class TestDiscoverSynthetic:
-    def test_returns_none_when_get_loader_fails(self, tmp_path):
-        h = LeRobotFormatHandler()
-        assert h.discover("ds", tmp_path / "nope") is None
-
-    def test_discover_maps_features(self):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader())
-        info = h.discover("ds", None)
-        assert info is not None
-        assert info.id == "ds"
-        assert info.total_episodes == 2
-        assert info.fps == 30.0
-        assert "observation.state" in info.features
-        assert info.features["observation.images.cam0"].dtype == "video"
-
-    def test_discover_handles_exception(self):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader(raise_on={"get_dataset_info"}))
-        assert h.discover("ds", None) is None
-
-
-class TestListEpisodesSynthetic:
-    def test_no_loader_returns_empty(self):
-        h = LeRobotFormatHandler()
-        assert h.list_episodes("missing") == ([], {})
-
-    def test_success(self):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader())
-        indices, meta = h.list_episodes("ds")
-        assert indices == [0, 1]
-        assert meta[1]["length"] == 5
-
-    def test_exception_returns_empty(self):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader(raise_on={"list_episodes_with_meta"}))
-        assert h.list_episodes("ds") == ([], {})
-
-
-class TestLoadEpisodeSynthetic:
-    def test_no_loader_returns_none(self):
-        h = LeRobotFormatHandler()
-        assert h.load_episode("missing", 0) is None
-
-    def test_success_basic(self):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader())
-        ep = h.load_episode("ds", 0)
-        assert ep is not None
-        assert ep.meta.index == 0
-        assert ep.meta.length == 4
-        assert "observation.images.cam0" in ep.video_urls
-        assert ep.video_urls["observation.images.cam0"].endswith("/observation.images.cam0")
-        assert len(ep.trajectory_data) == 4
-
-    def test_dataset_info_adds_blob_video_urls(self):
-        from src.api.models.datasources import DatasetInfo, FeatureSchema
-
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader())
-        ds_info = DatasetInfo(
-            id="ds",
-            name="ds",
-            total_episodes=1,
-            fps=30.0,
-            features={
-                "observation.images.cam0": FeatureSchema(dtype="video", shape=[480, 640, 3]),
-                "observation.images.blob_only": FeatureSchema(dtype="video", shape=[480, 640, 3]),
-                "action": FeatureSchema(dtype="float32", shape=[6]),
+        assert dataset is not None
+        assert dataset.model_dump() == {
+            "id": "dataset",
+            "name": "dataset (synthetic-arm)",
+            "group": None,
+            "total_episodes": 2,
+            "fps": 20.0,
+            "features": {
+                "observation.state": {
+                    "dtype": "float32",
+                    "shape": [3],
+                    "names": ["a", "b", "c"],
+                },
+                "action": {"dtype": "float32", "shape": [3], "names": None},
+                _CAMERA: {"dtype": "video", "shape": [48, 64, 3], "names": None},
             },
-            tasks=[],
+            "tasks": [
+                {"task_index": 0, "description": "pick"},
+                {"task_index": 1, "description": "place"},
+            ],
+        }
+
+    def test_discovery_failure_returns_none(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path, failures={"get_dataset_info"})
+
+        assert handler.discover("dataset", tmp_path) is None
+
+
+class TestEpisodeBehavior:
+    def test_lists_sorted_episodes_with_metadata(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path)
+
+        assert handler.list_episodes("dataset") == (
+            [0, 1],
+            {1: {"length": 3, "task_index": 1}, 0: {"length": 4, "task_index": 0}},
         )
-        ep = h.load_episode("ds", 0, dataset_info=ds_info)
-        assert ep is not None
-        assert "observation.images.blob_only" in ep.video_urls
-        assert "action" not in ep.video_urls
 
-    def test_exception_returns_none(self):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader(raise_on={"load_episode"}))
-        assert h.load_episode("ds", 0) is None
+    def test_loads_episode_as_public_model(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path)
+
+        episode = handler.load_episode("dataset", 1)
+
+        assert episode is not None
+        assert episode.meta.model_dump() == {
+            "index": 1,
+            "length": 4,
+            "task_index": 1,
+            "has_annotations": False,
+        }
+        assert episode.cameras == [_CAMERA]
+        assert episode.video_urls == {_CAMERA: "/api/datasets/dataset/episodes/1/video/observation.images.cam0?v=1"}
+        assert [variable.key for variable in episode.trajectory_variables] == [
+            "observation.state[0]",
+            "observation.state[1]",
+            "observation.state[2]",
+            "action[0]",
+            "action[1]",
+            "action[2]",
+        ]
+        assert len(episode.trajectory_data) == 4
+        assert episode.trajectory_data[0].model_dump() == {
+            "timestamp": 0.0,
+            "frame": 0,
+            "joint_positions": [0.0, 1.0, 2.0],
+            "joint_velocities": [0.1, 0.2, 0.3],
+            "end_effector_pose": [0.4, 0.5, 0.6],
+            "gripper_state": 0.0,
+            "variables": {
+                "observation.state[0]": 0.0,
+                "observation.state[1]": 1.0,
+                "observation.state[2]": 2.0,
+                "action[0]": 0.4,
+                "action[1]": 0.5,
+                "action[2]": 0.6,
+            },
+        }
+
+    def test_blob_only_video_feature_gets_url(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path)
+        dataset = DatasetInfo(
+            id="dataset",
+            name="dataset",
+            total_episodes=2,
+            fps=20.0,
+            features={
+                _CAMERA: FeatureSchema(dtype="video", shape=[48, 64, 3]),
+                "observation.images.blob": FeatureSchema(dtype="video", shape=[48, 64, 3]),
+            },
+        )
+
+        episode = handler.load_episode("dataset", 0, dataset_info=dataset)
+
+        assert episode is not None
+        assert episode.video_urls["observation.images.blob"] == (
+            "/api/datasets/dataset/episodes/0/video/observation.images.blob"
+        )
+
+    def test_returns_empty_public_outcomes_without_loader(self):
+        handler = LeRobotFormatHandler()
+
+        assert handler.list_episodes("missing") == ([], {})
+        assert handler.load_episode("missing", 0) is None
+        assert handler.get_trajectory("missing", 0) == []
+        assert handler.get_cameras("missing", 0) == []
+        assert handler.get_video_path("missing", 0, _CAMERA) is None
+
+    def test_trajectory_matches_loaded_episode(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path)
+
+        trajectory = handler.get_trajectory("dataset", 0)
+
+        assert len(trajectory) == 4
+        assert [point.frame for point in trajectory] == [0, 1, 2, 3]
+        assert [point.timestamp for point in trajectory] == pytest.approx([0.0, 0.05, 0.1, 0.15])
+
+    @pytest.mark.parametrize(
+        ("operation", "expected"),
+        [
+            ("list_episodes_with_meta", ([], {})),
+            ("load_episode", None),
+        ],
+    )
+    def test_loader_failures_return_public_empty_outcomes(self, monkeypatch, tmp_path, operation, expected):
+        handler, _ = _configured_handler(monkeypatch, tmp_path, failures={operation})
+
+        if operation == "list_episodes_with_meta":
+            result = handler.list_episodes("dataset")
+        else:
+            result = handler.load_episode("dataset", 0)
+
+        assert result == expected
+
+    def test_trajectory_failure_returns_empty(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path, failures={"load_episode"})
+
+        assert handler.get_trajectory("dataset", 0) == []
+
+    def test_exposes_video_time_windows(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path, video_window=(2.25, 3.75))
+
+        episode = handler.load_episode("dataset", 0)
+
+        assert episode is not None
+        assert episode.video_time_windows == {_CAMERA: [2.25, 3.75]}
+
+    def test_ignores_video_time_window_failure(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path, failures={"get_video_time_window"})
+
+        episode = handler.load_episode("dataset", 0)
+
+        assert episode is not None
+        assert episode.video_time_windows == {}
 
 
-class TestGetTrajectorySynthetic:
-    def test_no_loader_returns_empty(self):
-        h = LeRobotFormatHandler()
-        assert h.get_trajectory("missing", 0) == []
+class TestVideoAndFrames:
+    def test_returns_source_video_without_time_window(self, monkeypatch, tmp_path):
+        handler, loader = _configured_handler(monkeypatch, tmp_path)
 
-    def test_success(self):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader())
-        traj = h.get_trajectory("ds", 0)
-        assert len(traj) == 4
+        assert handler.get_video_path("dataset", 0, _CAMERA) == str(loader.video_path)
 
-    def test_exception_returns_empty(self):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader(raise_on={"load_episode"}))
-        assert h.get_trajectory("ds", 0) == []
+    def test_generates_episode_clip_through_ffmpeg_boundary(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path, video_window=(0.0, 1.0))
+        cached_clip = tmp_path / "meta" / "videos" / _CAMERA / "episode_000000.mp4"
+        commands: list[list[str]] = []
 
+        def run_ffmpeg(command, *, capture_output, timeout):
+            commands.append(command)
+            Path(command[-1]).write_bytes(b"valid-clip")
+            return subprocess.CompletedProcess(command, returncode=0, stdout=b"", stderr=b"")
 
-class TestGetFrameImageSynthetic:
-    def test_no_loader_returns_none(self):
-        h = LeRobotFormatHandler()
-        assert h.get_frame_image("missing", 0, 0, "cam0") is None
+        monkeypatch.setitem(
+            sys.modules,
+            "imageio_ffmpeg",
+            SimpleNamespace(get_ffmpeg_exe=lambda: "/fake/ffmpeg"),
+        )
+        monkeypatch.setattr(handler_module.subprocess, "run", run_ffmpeg)
 
-    def test_no_video_returns_none(self):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader())
-        assert h.get_frame_image("ds", 0, 0, "missing") is None
+        assert handler.get_video_path("dataset", 0, _CAMERA) == str(cached_clip)
+        assert cached_clip.read_bytes() == b"valid-clip"
+        assert commands == [
+            [
+                "/fake/ffmpeg",
+                "-y",
+                "-ss",
+                "0.000000",
+                "-i",
+                str(tmp_path / "source.mp4"),
+                "-t",
+                "1.000000",
+                "-an",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "23",
+                "-movflags",
+                "+faststart",
+                str(cached_clip.with_suffix(".tmp.mp4")),
+            ]
+        ]
 
-    def test_ffmpeg_path(self, monkeypatch):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader())
+    def test_retains_decodable_cached_clip(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path, video_window=(0.0, 1.0))
+        cached_clip = tmp_path / "meta" / "videos" / _CAMERA / "episode_000000.mp4"
+        cached_clip.parent.mkdir(parents=True)
+        cached_clip.write_bytes(b"valid")
+        run_ffmpeg = MagicMock(return_value=subprocess.CompletedProcess([], returncode=0, stdout=b"", stderr=b""))
+        monkeypatch.setitem(
+            sys.modules,
+            "imageio_ffmpeg",
+            SimpleNamespace(get_ffmpeg_exe=lambda: "/fake/ffmpeg"),
+        )
+        monkeypatch.setattr(handler_module.subprocess, "run", run_ffmpeg)
+
+        assert handler.get_video_path("dataset", 0, _CAMERA) == str(cached_clip)
+        run_ffmpeg.assert_called_once()
+        assert run_ffmpeg.call_args.args[0][-1] == "-"
+
+    def test_returns_source_when_clip_generation_fails(self, monkeypatch, tmp_path):
+        handler, loader = _configured_handler(monkeypatch, tmp_path, video_window=(0.0, 1.0))
+        monkeypatch.setitem(
+            sys.modules,
+            "imageio_ffmpeg",
+            SimpleNamespace(get_ffmpeg_exe=lambda: "/fake/ffmpeg"),
+        )
         monkeypatch.setattr(
-            LeRobotFormatHandler,
-            "_extract_frame_ffmpeg",
-            staticmethod(lambda *a, **kw: b"JPEG"),
+            handler_module.subprocess,
+            "run",
+            MagicMock(return_value=subprocess.CompletedProcess([], returncode=1, stdout=b"", stderr=b"encode failed")),
         )
-        assert h.get_frame_image("ds", 0, 0, "cam0") == b"JPEG"
 
-    def test_cv2_fallback_path(self, monkeypatch):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader())
-        monkeypatch.setattr(
-            LeRobotFormatHandler,
-            "_extract_frame_ffmpeg",
-            staticmethod(lambda *a, **kw: None),
+        assert handler.get_video_path("dataset", 0, _CAMERA) == str(loader.video_path)
+
+    def test_returns_none_for_unknown_video(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path)
+
+        assert handler.get_video_path("dataset", 0, "unknown") is None
+
+    def test_returns_empty_camera_outcome_on_loader_failure(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path, failures={"get_cameras"})
+
+        assert handler.get_cameras("dataset", 0) == []
+
+    def test_returns_available_cameras(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path)
+
+        assert handler.get_cameras("dataset", 0) == [_CAMERA]
+
+    def test_frame_uses_ffmpeg_boundary(self, monkeypatch, tmp_path):
+        handler, loader = _configured_handler(monkeypatch, tmp_path)
+        run_ffmpeg = MagicMock(return_value=subprocess.CompletedProcess([], returncode=0, stdout=b"jpeg", stderr=b""))
+        monkeypatch.setitem(
+            sys.modules,
+            "imageio_ffmpeg",
+            SimpleNamespace(get_ffmpeg_exe=lambda: "/fake/ffmpeg"),
         )
-        monkeypatch.setattr(
-            LeRobotFormatHandler,
-            "_extract_frame_cv2",
-            staticmethod(lambda *a, **kw: b"CV2"),
-        )
-        assert h.get_frame_image("ds", 0, 0, "cam0") == b"CV2"
+        monkeypatch.setattr(handler_module.subprocess, "run", run_ffmpeg)
 
+        assert handler.get_frame_image("dataset", 0, 3, _CAMERA) == b"jpeg"
+        assert run_ffmpeg.call_args.args[0] == [
+            "/fake/ffmpeg",
+            "-ss",
+            "0.150000",
+            "-i",
+            str(loader.video_path),
+            "-frames:v",
+            "1",
+            "-f",
+            "image2",
+            "-c:v",
+            "mjpeg",
+            "-q:v",
+            "2",
+            "pipe:1",
+        ]
 
-class TestExtractFrameCv2:
-    def test_returns_none_when_imports_missing(self, monkeypatch):
-        import builtins
-
-        real_import = builtins.__import__
-
-        def fake_import(name, *a, **kw):
-            if name in ("cv2", "PIL"):
-                raise ImportError(name)
-            return real_import(name, *a, **kw)
-
-        monkeypatch.setattr(builtins, "__import__", fake_import)
-        assert LeRobotFormatHandler._extract_frame_cv2("/tmp/v.mp4", 0) is None
-
-    def test_returns_none_when_read_fails(self, monkeypatch):
-        import sys
-        import types
-
-        fake_cv2 = types.SimpleNamespace(
+    def test_frame_falls_back_to_cv2_at_external_boundaries(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path)
+        capture = MagicMock()
+        capture.read.return_value = (True, np.zeros((2, 2, 3), dtype=np.uint8))
+        fake_cv2 = SimpleNamespace(
             CAP_PROP_POS_FRAMES=1,
-            COLOR_BGR2RGB=4,
-            cvtColor=lambda f, c: f,
-            VideoCapture=lambda path: types.SimpleNamespace(
-                set=lambda *a: None,
-                read=lambda: (False, None),
-                release=lambda: None,
-            ),
+            COLOR_BGR2RGB=2,
+            VideoCapture=MagicMock(return_value=capture),
+            cvtColor=MagicMock(side_effect=lambda frame, conversion: frame),
         )
-        fake_pil = types.ModuleType("PIL")
-        fake_pil.Image = types.SimpleNamespace(fromarray=lambda x: None)
-
-        monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
-        monkeypatch.setitem(sys.modules, "PIL", fake_pil)
-        assert LeRobotFormatHandler._extract_frame_cv2("/tmp/v.mp4", 0) is None
-
-    def test_returns_jpeg_on_success(self, monkeypatch):
-        import sys
-        import types
-
-        frame = np.zeros((4, 4, 3), dtype=np.uint8)
-
-        class FakeImg:
-            def save(self, buf, format, quality):
-                buf.write(b"JPEGBYTES")
-
-        fake_cv2 = types.SimpleNamespace(
-            CAP_PROP_POS_FRAMES=1,
-            COLOR_BGR2RGB=4,
-            cvtColor=lambda f, c: f,
-            VideoCapture=lambda path: types.SimpleNamespace(
-                set=lambda *a: None,
-                read=lambda: (True, frame),
-                release=lambda: None,
-            ),
+        monkeypatch.setitem(
+            sys.modules,
+            "imageio_ffmpeg",
+            SimpleNamespace(get_ffmpeg_exe=lambda: "/fake/ffmpeg"),
         )
-        fake_pil = types.ModuleType("PIL")
-        fake_pil.Image = types.SimpleNamespace(fromarray=lambda x: FakeImg())
-
+        monkeypatch.setitem(sys.modules, "av", None)
         monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
-        monkeypatch.setitem(sys.modules, "PIL", fake_pil)
-        assert LeRobotFormatHandler._extract_frame_cv2("/tmp/v.mp4", 0) == b"JPEGBYTES"
+        monkeypatch.setattr(
+            handler_module.subprocess,
+            "run",
+            MagicMock(return_value=subprocess.CompletedProcess([], returncode=1, stdout=b"", stderr=b"")),
+        )
 
+        image = handler.get_frame_image("dataset", 0, 2, _CAMERA)
 
-class TestGetCamerasGetVideoPathSynthetic:
-    def test_get_cameras_no_loader(self):
-        h = LeRobotFormatHandler()
-        assert h.get_cameras("missing", 0) == []
+        assert image is not None
+        assert image[:2] == b"\xff\xd8"
+        capture.set.assert_called_once_with(1, 2)
+        capture.release.assert_called_once_with()
 
-    def test_get_cameras_success(self):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader())
-        assert h.get_cameras("ds", 0) == ["observation.images.cam0"]
+    def test_frame_returns_none_without_video(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path)
 
-    def test_get_cameras_exception(self):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader(raise_on={"get_cameras"}))
-        assert h.get_cameras("ds", 0) == []
-
-    def test_get_video_path_no_loader(self):
-        h = LeRobotFormatHandler()
-        assert h.get_video_path("missing", 0, "cam0") is None
-
-    def test_get_video_path_success(self):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader())
-        assert h.get_video_path("ds", 0, "cam0") == "/tmp/cam0.mp4"
-
-    def test_get_video_path_returns_none_when_loader_returns_none(self):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader())
-        assert h.get_video_path("ds", 0, "missing") is None
-
-    def test_get_video_path_exception(self):
-        h = LeRobotFormatHandler()
-        _inject(h, FakeLoader(raise_on={"get_video_path"}))
-        assert h.get_video_path("ds", 0, "cam0") is None
-
-
-class TestResolveFfmpeg:
-    """Cover the actual imageio_ffmpeg \u2192 shutil.which fallback chain."""
-
-    IMAGEIO_BINARY = "/opt/imageio_ffmpeg/ffmpeg"
-    SYSTEM_BINARY = "/usr/bin/ffmpeg"
-
-    def test_prefers_imageio_ffmpeg(self, monkeypatch):
-        """When imageio-ffmpeg is importable, its binary path wins."""
-        import sys
-        import types
-
-        fake_module = types.ModuleType("imageio_ffmpeg")
-        fake_module.get_ffmpeg_exe = lambda: self.IMAGEIO_BINARY
-        monkeypatch.setitem(sys.modules, "imageio_ffmpeg", fake_module)
-
-        # shutil.which must not be consulted when imageio_ffmpeg succeeds.
-        import shutil
-
-        def fail_which(_name):  # pragma: no cover - guarded
-            raise AssertionError("shutil.which should not be called when imageio_ffmpeg is available")
-
-        monkeypatch.setattr(shutil, "which", fail_which)
-
-        assert LeRobotFormatHandler._resolve_ffmpeg() == self.IMAGEIO_BINARY
-
-    def test_falls_back_to_system_ffmpeg_when_imageio_missing(self, monkeypatch):
-        """Import errors trigger the shutil.which fallback path."""
-        import sys
-
-        # Force ImportError without removing any pre-existing import.
-        monkeypatch.setitem(sys.modules, "imageio_ffmpeg", None)
-
-        import shutil
-
-        monkeypatch.setattr(shutil, "which", lambda name: self.SYSTEM_BINARY if name == "ffmpeg" else None)
-
-        assert LeRobotFormatHandler._resolve_ffmpeg() == self.SYSTEM_BINARY
-
-    def test_returns_none_when_no_binary_found(self, monkeypatch):
-        """No imageio binary and no system ffmpeg yields None."""
-        import sys
-
-        monkeypatch.setitem(sys.modules, "imageio_ffmpeg", None)
-
-        import shutil
-
-        monkeypatch.setattr(shutil, "which", lambda _name: None)
-
-        assert LeRobotFormatHandler._resolve_ffmpeg() is None
+        assert handler.get_frame_image("dataset", 0, 0, "unknown") is None

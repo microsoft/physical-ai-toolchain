@@ -4,34 +4,29 @@ Unit tests for Hugging Face Hub adapter.
 These tests use mocking to avoid requiring actual Hub access.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
-import tempfile
 from pathlib import Path
-from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 
-class TestHuggingFaceHubAdapter(TestCase):
+class TestHuggingFaceHubAdapter:
     """Tests for HuggingFaceHubAdapter."""
 
-    def setUp(self):
-        """Set up test fixtures."""
-        self.repo_id = "lerobot/test-dataset"
-        self.temp_dir = tempfile.mkdtemp()
+    @pytest.fixture(autouse=True)
+    def _set_adapter_inputs(self, huggingface_repo_id: str, tmp_path: Path) -> None:
+        self.repo_id = huggingface_repo_id
+        self.temp_dir = tmp_path
 
-    def tearDown(self):
-        """Clean up test fixtures."""
-        import shutil
-
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
+    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.hf_hub_download")
     @patch("src.api.storage.huggingface.HfFileSystem")
-    def test_get_dataset_info(self, mock_fs_class, mock_download):
+    async def test_get_dataset_info(self, mock_fs_class, mock_download):
         """Test getting dataset info from Hub."""
         from src.api.storage.huggingface import HuggingFaceHubAdapter
 
@@ -56,23 +51,35 @@ class TestHuggingFaceHubAdapter(TestCase):
 
         adapter = HuggingFaceHubAdapter(
             repo_id=self.repo_id,
-            cache_dir=self.temp_dir,
+            cache_dir=str(self.temp_dir),
         )
 
-        result = asyncio.run(adapter.get_dataset_info())
+        result = await adapter.get_dataset_info()
 
         assert result.id == self.repo_id
         assert result.name == "Test Dataset"
         assert result.total_episodes == 100
         assert result.fps == 30.0
-        assert "observation.images.top" in result.features
-        assert len(result.tasks) == 1
-        assert result.tasks[0].description == "Pick up object"
+        assert result.features["observation.images.top"].model_dump() == {
+            "dtype": "video",
+            "shape": [480, 640, 3],
+            "names": None,
+        }
+        assert [task.model_dump() for task in result.tasks] == [{"task_index": 0, "description": "Pick up object"}]
+        mock_download.assert_called_once_with(
+            repo_id=self.repo_id,
+            filename="meta/info.json",
+            revision="main",
+            token=None,
+            cache_dir=str(self.temp_dir),
+            repo_type="dataset",
+        )
 
+    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.hf_hub_download")
     @patch("src.api.storage.huggingface.HfFileSystem")
-    def test_list_episodes_from_total(self, mock_fs_class, mock_download):
+    async def test_list_episodes_from_total(self, mock_fs_class, mock_download):
         """Test listing episodes using total_episodes count."""
         from src.api.storage.huggingface import HuggingFaceHubAdapter
 
@@ -96,18 +103,19 @@ class TestHuggingFaceHubAdapter(TestCase):
 
         adapter = HuggingFaceHubAdapter(
             repo_id=self.repo_id,
-            cache_dir=self.temp_dir,
+            cache_dir=str(self.temp_dir),
         )
 
-        result = asyncio.run(adapter.list_episodes())
+        result = await adapter.list_episodes()
 
         assert len(result) == 5
         assert [ep.index for ep in result] == [0, 1, 2, 3, 4]
 
+    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.hf_hub_download")
     @patch("src.api.storage.huggingface.HfFileSystem")
-    def test_get_episode_data(self, mock_fs_class, mock_download):
+    async def test_get_episode_data(self, mock_fs_class, mock_download):
         """Test getting episode data with video URLs."""
         from src.api.storage.huggingface import HuggingFaceHubAdapter
 
@@ -129,15 +137,28 @@ class TestHuggingFaceHubAdapter(TestCase):
 
         adapter = HuggingFaceHubAdapter(
             repo_id=self.repo_id,
-            cache_dir=self.temp_dir,
+            cache_dir=str(self.temp_dir),
         )
 
-        result = asyncio.run(adapter.get_episode_data(episode_index=42))
+        result = await adapter.get_episode_data(episode_index=42)
 
-        assert result.meta.index == 42
-        assert "top" in result.video_urls
-        assert "wrist" in result.video_urls
-        assert "episode_000042.mp4" in result.video_urls["top"]
+        assert result.meta.model_dump() == {
+            "index": 42,
+            "length": 0,
+            "task_index": 0,
+            "has_annotations": False,
+        }
+        assert result.video_urls == {
+            "top": (
+                f"https://huggingface.co/datasets/{self.repo_id}/resolve/main/"
+                "videos/chunk-000/observation.images.top/episode_000042.mp4"
+            ),
+            "wrist": (
+                f"https://huggingface.co/datasets/{self.repo_id}/resolve/main/"
+                "videos/chunk-000/observation.images.wrist/episode_000042.mp4"
+            ),
+        }
+        assert result.trajectory_data == []
 
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     def test_video_url_format(self):
@@ -168,10 +189,10 @@ class TestHuggingFaceHubAdapter(TestCase):
 
         url = adapter.get_video_url(episode_index=1500, camera_name="wrist")
 
-        # Episode 1500 should be in chunk-001
-        assert "chunk-001" in url
-        assert "v2.0" in url
-        assert "episode_001500.mp4" in url
+        assert url == (
+            "https://huggingface.co/datasets/lerobot/koch-pick-place/resolve/"
+            "v2.0/videos/chunk-001/observation.images.wrist/episode_001500.mp4"
+        )
 
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     def test_chunk_calculation(self):
@@ -180,20 +201,12 @@ class TestHuggingFaceHubAdapter(TestCase):
 
         adapter = HuggingFaceHubAdapter(repo_id="test/dataset")
 
-        # Episode 0-999 should be chunk-000
-        url = adapter.get_video_url(0, "cam")
-        assert "chunk-000" in url
-
-        url = adapter.get_video_url(999, "cam")
-        assert "chunk-000" in url
-
-        # Episode 1000-1999 should be chunk-001
-        url = adapter.get_video_url(1000, "cam")
-        assert "chunk-001" in url
-
-        # Episode 5500 should be chunk-005
-        url = adapter.get_video_url(5500, "cam")
-        assert "chunk-005" in url
+        expected_chunks = {0: "000", 999: "000", 1000: "001", 5500: "005"}
+        for episode_index, chunk_index in expected_chunks.items():
+            assert adapter.get_video_url(episode_index, "cam") == (
+                "https://huggingface.co/datasets/test/dataset/resolve/main/"
+                f"videos/chunk-{chunk_index}/observation.images.cam/episode_{episode_index:06d}.mp4"
+            )
 
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     def test_isinstance_storage_adapter(self):
@@ -204,69 +217,72 @@ class TestHuggingFaceHubAdapter(TestCase):
         adapter = HuggingFaceHubAdapter(repo_id="test/dataset")
         assert isinstance(adapter, StorageAdapter)
 
+    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
-    def test_write_methods_raise_not_implemented(self):
+    async def test_write_methods_raise_not_implemented(self):
         """Verify all write methods raise NotImplementedError."""
         from src.api.storage.huggingface import HuggingFaceHubAdapter
 
         adapter = HuggingFaceHubAdapter(repo_id="test/dataset")
-        with self.assertRaises(NotImplementedError):
-            asyncio.run(adapter.save_annotation("ds", 0, None))
-        with self.assertRaises(NotImplementedError):
-            asyncio.run(adapter.get_annotation("ds", 0))
-        with self.assertRaises(NotImplementedError):
-            asyncio.run(adapter.list_annotated_episodes("ds"))
-        with self.assertRaises(NotImplementedError):
-            asyncio.run(adapter.delete_annotation("ds", 0))
+        with pytest.raises(NotImplementedError):
+            await adapter.save_annotation("ds", 0, None)
+        with pytest.raises(NotImplementedError):
+            await adapter.get_annotation("ds", 0)
+        with pytest.raises(NotImplementedError):
+            await adapter.list_annotated_episodes("ds")
+        with pytest.raises(NotImplementedError):
+            await adapter.delete_annotation("ds", 0)
 
+    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.hf_hub_download")
     @patch("src.api.storage.huggingface.HfFileSystem")
-    def test_download_file_uses_async_to_thread(self, mock_fs_class, mock_download):
-        """Verify _download_file wraps hf_hub_download with asyncio.to_thread."""
+    async def test_get_dataset_info_offloads_download(self, mock_fs_class, mock_download):
+        """Verify metadata retrieval offloads its blocking Hub download."""
         from src.api.storage.huggingface import HuggingFaceHubAdapter
 
-        mock_download.return_value = str(Path(self.temp_dir) / "dummy.json")
+        info_path = self.temp_dir / "info.json"
+        info_path.write_text('{"name": "Dataset"}')
+        mock_download.return_value = str(info_path)
         adapter = HuggingFaceHubAdapter(
             repo_id=self.repo_id,
-            cache_dir=self.temp_dir,
+            cache_dir=str(self.temp_dir),
         )
         with patch("src.api.storage.huggingface.asyncio.to_thread", wraps=asyncio.to_thread) as mock_to_thread:
-            asyncio.run(adapter._download_file("meta/info.json"))
-            assert mock_to_thread.call_count >= 1
+            result = await adapter.get_dataset_info()
+
+        assert result.name == "Dataset"
+        assert mock_to_thread.call_count == 2
 
 
-class TestHuggingFaceHubAdapterBranches(TestCase):
+class TestHuggingFaceHubAdapterBranches:
     """Additional branch coverage tests for HuggingFaceHubAdapter."""
 
-    def setUp(self):
-        self.repo_id = "lerobot/test-dataset"
-        self.temp_dir = tempfile.mkdtemp()
+    @pytest.fixture(autouse=True)
+    def _set_adapter_inputs(self, huggingface_repo_id: str, tmp_path: Path) -> None:
+        self.repo_id = huggingface_repo_id
+        self.temp_dir = tmp_path
 
-    def tearDown(self):
-        import shutil
-
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
+    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
-    def test_download_file_wraps_exception_in_storage_error(self, mock_download, mock_fs_class):
-        """_download_file converts hf_hub_download failures into StorageError."""
+    async def test_get_dataset_info_wraps_download_error(self, mock_download, mock_fs_class):
+        """Metadata retrieval converts Hub download failures into StorageError."""
         from src.api.storage.base import StorageError
         from src.api.storage.huggingface import HuggingFaceHubAdapter
 
         mock_download.side_effect = RuntimeError("network down")
-        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=str(self.temp_dir))
 
-        with self.assertRaises(StorageError) as ctx:
-            asyncio.run(adapter._download_file("meta/info.json"))
-        assert "network down" in str(ctx.exception)
+        with pytest.raises(StorageError, match="network down"):
+            await adapter.get_dataset_info()
 
+    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
-    def test_get_dataset_info_wraps_parse_error(self, mock_download, mock_fs_class):
+    async def test_get_dataset_info_wraps_parse_error(self, mock_download, mock_fs_class):
         """get_dataset_info wraps non-StorageError exceptions as StorageError."""
         from src.api.storage.base import StorageError
         from src.api.storage.huggingface import HuggingFaceHubAdapter
@@ -276,15 +292,15 @@ class TestHuggingFaceHubAdapterBranches(TestCase):
         info_path.write_text("{ not valid json")
         mock_download.return_value = str(info_path)
 
-        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
-        with self.assertRaises(StorageError) as ctx:
-            asyncio.run(adapter.get_dataset_info())
-        assert self.repo_id in str(ctx.exception)
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=str(self.temp_dir))
+        with pytest.raises(StorageError, match=self.repo_id):
+            await adapter.get_dataset_info()
 
+    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
-    def test_get_dataset_info_with_string_tasks(self, mock_download, mock_fs_class):
+    async def test_get_dataset_info_with_string_tasks(self, mock_download, mock_fs_class):
         """get_dataset_info handles tasks given as plain strings."""
         from src.api.storage.huggingface import HuggingFaceHubAdapter
 
@@ -299,16 +315,17 @@ class TestHuggingFaceHubAdapterBranches(TestCase):
         info_path.write_text(json.dumps(info_data))
         mock_download.return_value = str(info_path)
 
-        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
-        result = asyncio.run(adapter.get_dataset_info())
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=str(self.temp_dir))
+        result = await adapter.get_dataset_info()
 
         assert [t.description for t in result.tasks] == ["pick", "place"]
         assert [t.task_index for t in result.tasks] == [0, 1]
 
+    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
-    def test_list_episodes_from_parquet_metadata(self, mock_download, mock_fs_class):
+    async def test_list_episodes_from_parquet_metadata(self, mock_download, mock_fs_class):
         """list_episodes parses chunk-*/episode_NNNNNN.parquet entries and skips bad names."""
         from src.api.storage.huggingface import HuggingFaceHubAdapter
 
@@ -343,75 +360,79 @@ class TestHuggingFaceHubAdapterBranches(TestCase):
         mock_fs.ls.side_effect = ls_side_effect
         mock_fs_class.return_value = mock_fs
 
-        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
-        result = asyncio.run(adapter.list_episodes())
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=str(self.temp_dir))
+        result = await adapter.list_episodes()
 
         assert [ep.index for ep in result] == [0, 2]
 
+    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
-    def test_get_dataset_info_reraises_storage_error(self, mock_download, mock_fs_class):
+    async def test_get_dataset_info_reraises_storage_error(self, mock_download, mock_fs_class):
         """get_dataset_info should re-raise StorageError from _download_file unchanged."""
         from src.api.storage.base import StorageError
         from src.api.storage.huggingface import HuggingFaceHubAdapter
 
         mock_download.side_effect = OSError("hub unreachable")
 
-        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=str(self.temp_dir))
         with pytest.raises(StorageError) as excinfo:
-            asyncio.run(adapter.get_dataset_info())
+            await adapter.get_dataset_info()
         assert "hub unreachable" in str(excinfo.value)
 
+    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
-    def test_list_episodes_reraises_storage_error(self, mock_download, mock_fs_class):
+    async def test_list_episodes_reraises_storage_error(self, mock_download, mock_fs_class):
         """list_episodes should re-raise StorageError from get_dataset_info unchanged."""
         from src.api.storage.base import StorageError
         from src.api.storage.huggingface import HuggingFaceHubAdapter
 
         mock_download.side_effect = OSError("hub unreachable")
 
-        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=str(self.temp_dir))
         with pytest.raises(StorageError) as excinfo:
-            asyncio.run(adapter.list_episodes())
+            await adapter.list_episodes()
         assert "hub unreachable" in str(excinfo.value)
 
+    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
-    def test_get_episode_data_reraises_storage_error(self, mock_download, mock_fs_class):
+    async def test_get_episode_data_reraises_storage_error(self, mock_download, mock_fs_class):
         """get_episode_data should re-raise StorageError from get_dataset_info unchanged."""
         from src.api.storage.base import StorageError
         from src.api.storage.huggingface import HuggingFaceHubAdapter
 
         mock_download.side_effect = OSError("hub unreachable")
 
-        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=str(self.temp_dir))
         with pytest.raises(StorageError) as excinfo:
-            asyncio.run(adapter.get_episode_data(0))
+            await adapter.get_episode_data(0)
         assert "hub unreachable" in str(excinfo.value)
 
+    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
-    def test_get_episode_data_wraps_unexpected_exception(self, mock_download, mock_fs_class):
+    async def test_get_episode_data_wraps_unexpected_exception(self, mock_download, mock_fs_class):
         """get_episode_data should wrap non-StorageError exceptions in StorageError."""
         from src.api.storage.base import StorageError
         from src.api.storage.huggingface import HuggingFaceHubAdapter
 
-        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=str(self.temp_dir))
         # Pre-populate cache so get_dataset_info isn't called; then make features access fail
         adapter._info_cache = MagicMock()
         adapter._info_cache.get.side_effect = RuntimeError("boom")
 
         with pytest.raises(StorageError) as excinfo:
-            asyncio.run(adapter.get_episode_data(5))
+            await adapter.get_episode_data(5)
         assert "Failed to get episode 5" in str(excinfo.value)
 
 
-class TestHuggingFaceHubAdapterImportError(TestCase):
+class TestHuggingFaceHubAdapterImportError:
     """Tests for HuggingFaceHubAdapter when huggingface_hub is not installed."""
 
     @patch("src.api.storage.huggingface.HF_AVAILABLE", False)
@@ -421,7 +442,3 @@ class TestHuggingFaceHubAdapterImportError(TestCase):
 
         with pytest.raises(ImportError, match="huggingface_hub"):
             HuggingFaceHubAdapter(repo_id="test/dataset")
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
