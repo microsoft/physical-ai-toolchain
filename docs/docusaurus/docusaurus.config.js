@@ -1,11 +1,22 @@
 // @ts-check
-const { themes: prismThemes } = require('prism-react-renderer');
+import { themes as prismThemes } from 'prism-react-renderer';
+import remarkGithubAlert from 'remark-github-blockquote-alert';
+
+import rehypeTableScope from './plugins/rehype-table-scope.mjs';
+import remarkTableCaption from './plugins/remark-table-caption.mjs';
+import labelData from './src/data/labelRegistry.cjs';
+
+const { labelRegistry, tierNavigation } = labelData;
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
   title: 'Physical AI Toolchain',
   tagline: 'Production-ready framework for training, deploying, and operating physical AI solutions on Azure with NVIDIA Isaac',
   favicon: 'img/microsoft-logo.svg',
+
+  future: {
+    v4: true,
+  },
 
   url: 'https://microsoft.github.io',
   baseUrl: '/physical-ai-toolchain/',
@@ -18,6 +29,7 @@ const config = {
 
   markdown: {
     format: 'detect',
+    mermaid: true,
     hooks: {
       onBrokenMarkdownLinks: 'throw',
     },
@@ -37,15 +49,44 @@ const config = {
           path: '../',
           routeBasePath: '/',
           sidebarPath: './sidebars.js',
-          editUrl:
-            'https://github.com/microsoft/physical-ai-toolchain/tree/main/docs/docusaurus/',
-          exclude: ['docusaurus/**', 'images/**'],
+          editUrl: ({ docPath }) =>
+            `https://github.com/microsoft/physical-ai-toolchain/edit/main/docs/${docPath}`,
+          exclude: [
+            'docusaurus/**',
+            'images/**',
+            'announcements/**',
+            '**/_*.{js,jsx,ts,tsx,md,mdx}',
+            '**/_*/**',
+            '**/*.test.{md,mdx}',
+            '**/*.spec.{md,mdx}',
+            '**/__tests__/**',
+          ],
           showLastUpdateTime: true,
+          showLastUpdateAuthor: true,
+          remarkPlugins: [remarkGithubAlert, remarkTableCaption],
+          rehypePlugins: [rehypeTableScope],
         },
         blog: false,
         theme: {
           customCss: './src/css/custom.css',
         },
+      }),
+    ],
+  ],
+
+  themes: [
+    '@docusaurus/theme-mermaid',
+    [
+      '@easyops-cn/docusaurus-search-local',
+      /** @type {import('@easyops-cn/docusaurus-search-local').PluginOptions} */
+      ({
+        hashed: true,
+        docsDir: '../',
+        docsRouteBasePath: '/',
+        indexBlog: false,
+        language: ['en'],
+        highlightSearchTermsOnTargetPage: false,
+        explicitSearchResultPath: true,
       }),
     ],
   ],
@@ -74,11 +115,17 @@ const config = {
             type: 'docSidebar',
             sidebarId: 'docsSidebar',
             position: 'left',
-            label: 'Documentation',
+            label: labelRegistry.documentation,
+          },
+          {
+            type: 'dropdown',
+            label: labelRegistry.tiers,
+            position: 'left',
+            items: tierNavigation.map(({ label, route }) => ({ label, to: route })),
           },
           {
             href: 'https://github.com/microsoft/physical-ai-toolchain',
-            label: 'GitHub',
+            label: labelRegistry.github,
             position: 'right',
           },
         ],
@@ -90,15 +137,15 @@ const config = {
             title: 'Docs',
             items: [
               {
-                label: 'Getting Started',
+                label: labelRegistry.gettingStarted,
                 to: '/getting-started/',
               },
               {
-                label: 'Deploy',
+                label: labelRegistry.infrastructure,
                 to: '/infrastructure/',
               },
               {
-                label: 'Training',
+                label: labelRegistry.training,
                 to: '/training/',
               },
             ],
@@ -107,11 +154,11 @@ const config = {
             title: 'Community',
             items: [
               {
-                label: 'Contributing',
+                label: labelRegistry.contributing,
                 to: '/contributing/',
               },
               {
-                label: 'GitHub Issues',
+                label: labelRegistry.githubIssues,
                 href: 'https://github.com/microsoft/physical-ai-toolchain/issues',
               },
             ],
@@ -120,7 +167,7 @@ const config = {
             title: 'More',
             items: [
               {
-                label: 'GitHub',
+                label: labelRegistry.github,
                 href: 'https://github.com/microsoft/physical-ai-toolchain',
               },
               {
@@ -141,7 +188,16 @@ const config = {
         defaultMode: 'light',
         respectPrefersColorScheme: true,
       },
+      docs: {
+        sidebar: {
+          hideable: true,
+          autoCollapseCategories: true,
+        },
+      },
+      mermaid: {
+        theme: { light: 'neutral', dark: 'dark' },
+      },
     }),
 };
 
-module.exports = config;
+export default config;
