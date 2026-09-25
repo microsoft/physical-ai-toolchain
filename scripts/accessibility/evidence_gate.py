@@ -90,19 +90,33 @@ _DOCUSAURUS_SCREEN_READER_CASES = (
 _DOCUSAURUS_EVIDENCE_ROOT = "artifacts/accessibility/docusaurus"
 _DOCUSAURUS_RESULTS_ROOT = "docs/docusaurus/test-results"
 _DOCUSAURUS_PACKAGE_INPUTS = (
-    "asset-journeys.json", "requirement-methods.json", "evidence-scope.json",
-    "run-context.json", "state-proofs.json", "evidence-source.json",
-    "evidence-playwright.json", "source-check-result.json",
+    "asset-journeys.json",
+    "requirement-methods.json",
+    "evidence-scope.json",
+    "run-context.json",
+    "state-proofs.json",
+    "evidence-source.json",
+    "evidence-playwright.json",
+    "source-check-result.json",
 )
 _DOCUSAURUS_PACKAGE_OUTPUTS = (
-    "source-input-manifest.json", "evidence-bundle.json", "evidence-summary.json",
-    "preparation-summary.json", "contrast-review.json", "screen-reader-method-cells.json",
-    "presentation-taxonomy.json", "validation-input.json",
-    "accessibility-validation-manifest.json", "schema-validation-report.json",
+    "source-input-manifest.json",
+    "evidence-bundle.json",
+    "evidence-summary.json",
+    "preparation-summary.json",
+    "contrast-review.json",
+    "screen-reader-method-cells.json",
+    "presentation-taxonomy.json",
+    "validation-input.json",
+    "accessibility-validation-manifest.json",
+    "schema-validation-report.json",
 )
 _DOCUSAURUS_PACKAGE_RESULTS = (
-    "playwright-results.json", "evidence-method-results.json", "browser-version.json",
-    "site-crawl-results.json", "contrast-ledger.json",
+    "playwright-results.json",
+    "evidence-method-results.json",
+    "browser-version.json",
+    "site-crawl-results.json",
+    "contrast-ledger.json",
 )
 
 
@@ -1128,9 +1142,11 @@ class EvidenceBundle(StrictModel):
                 match_ids = {result.result_id for result in matches}
                 if not any(match_ids <= set(conflict.result_ids) for conflict in conflicts.values()):
                     raise ValueError(f"Expected cell {cell.cell_id} has unrecorded duplicate current results")
-            if matches and (
-                cell.probe is ProbeId.PROJECT_PLAYWRIGHT or cell.probe.value.startswith("probe-")
-            ) and matches[0].state_proof_id is None:
+            if (
+                matches
+                and (cell.probe is ProbeId.PROJECT_PLAYWRIGHT or cell.probe.value.startswith("probe-"))
+                and matches[0].state_proof_id is None
+            ):
                 raise ValueError(f"Expected cell {cell.cell_id} requires project-owned state proof")
 
         if self.bundle_manifest.quarantine_state is QuarantineState.QUARANTINED and any(
@@ -1220,9 +1236,7 @@ def summarize_evidence(bundle: EvidenceBundle) -> EvidenceSummary:
             for item in current
             if item.invalidated or (item.valid_until is not None and item.valid_until < bundle.evaluated_at)
         ]
-        unresolved_conflicts = [
-            conflict for conflict in bundle.conflicts if conflict.state is ConflictState.UNRESOLVED
-        ]
+        unresolved_conflicts = [conflict for conflict in bundle.conflicts if conflict.state is ConflictState.UNRESOLVED]
         if bundle.bundle_manifest.quarantine_state is QuarantineState.QUARANTINED:
             reasons.append("The evidence bundle is quarantined")
         if any(item.quarantined for item in current):
@@ -1361,17 +1375,17 @@ def prepare_docusaurus_source_manifest(
         "docs/docusaurus/playwright-report/",
         "docs/docusaurus/test-results/",
     )
-    listed = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *declared_roots],
-        cwd=root,
-        check=True,
-        capture_output=True,
-    ).stdout.decode().split("\0")
-    paths = sorted(
-        path
-        for path in listed
-        if path and not any(path.startswith(prefix) for prefix in excluded_prefixes)
+    listed = (
+        subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *declared_roots],
+            cwd=root,
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .split("\0")
     )
+    paths = sorted(path for path in listed if path and not any(path.startswith(prefix) for prefix in excluded_prefixes))
     tracked_modes = {
         entry.split(maxsplit=3)[3]: entry.split(maxsplit=1)[0]
         for entry in subprocess.run(
@@ -1402,9 +1416,7 @@ def prepare_docusaurus_source_manifest(
     dirty_entries = sorted(line for line in status_output.splitlines() if line.strip())
     if cadence == "release" and dirty_entries:
         raise ValueError("Release source manifest requires clean declared source roots")
-    source_input_digest = hashlib.sha256(
-        json.dumps(files, separators=(",", ":"), sort_keys=True).encode()
-    ).hexdigest()
+    source_input_digest = hashlib.sha256(json.dumps(files, separators=(",", ":"), sort_keys=True).encode()).hexdigest()
     payload = {
         "schemaVersion": "1.0.0",
         "sourceRevision": subprocess.run(
@@ -1517,8 +1529,7 @@ def _docusaurus_catalogs(
             for assignment in requirement.methods:
                 method = assignment.method.value
                 guarded_review = (
-                    journey_id == "DCS13"
-                    and requirement.requirement_id in _DOCUSAURUS_GUARDED_REVIEW_REQUIREMENTS
+                    journey_id == "DCS13" and requirement.requirement_id in _DOCUSAURUS_GUARDED_REVIEW_REQUIREMENTS
                 )
                 if method not in required_methods and not guarded_review:
                     continue
@@ -1629,15 +1640,12 @@ def prepare_docusaurus_composition(
         "docusaurus-source-inputs": root / "artifacts" / "accessibility" / "docusaurus" / "source-input-manifest.json",
     }
     playwright_artifacts = [
-        _artifact_record(path, root, artifact_id)
-        for artifact_id, path in sorted(playwright_artifact_paths.items())
+        _artifact_record(path, root, artifact_id) for artifact_id, path in sorted(playwright_artifact_paths.items())
     ]
     source_artifacts = [_artifact_record(source_check_path, root, "docusaurus-source-checks")]
     playwright_artifact_ids = [item["artifactId"] for item in playwright_artifacts]
     source_artifact_ids = [item["artifactId"] for item in source_artifacts]
-    method_manifest = json.loads(
-        playwright_artifact_paths["docusaurus-method-results"].read_text(encoding="utf-8")
-    )
+    method_manifest = json.loads(playwright_artifact_paths["docusaurus-method-results"].read_text(encoding="utf-8"))
     exact_results = _docusaurus_exact_results(method_manifest, requirement_catalog["requirements"])
     browser = json.loads(playwright_artifact_paths["docusaurus-browser"].read_text(encoding="utf-8"))
 
@@ -1685,8 +1693,7 @@ def prepare_docusaurus_composition(
     playwright_requirements = [
         requirement
         for requirement in requirement_catalog["requirements"]
-        if not requirement["methods"][0]["human"]
-        and requirement["methods"][0]["probe"] == "project-playwright"
+        if not requirement["methods"][0]["human"] and requirement["methods"][0]["probe"] == "project-playwright"
     ]
     automated_journeys = sorted({requirement["journeyIds"][0] for requirement in playwright_requirements})
     state_proofs = []
@@ -1766,9 +1773,7 @@ def prepare_docusaurus_composition(
                 }
             )
 
-    binding = {
-        key: run_context[key] for key in ("sourceRevision", "buildDigest", "configDigest", "fixtureDigest")
-    }
+    binding = {key: run_context[key] for key in ("sourceRevision", "buildDigest", "configDigest", "fixtureDigest")}
     playwright_source = {
         "schemaVersion": "1.0.0",
         "sourceKind": "playwright",
@@ -1835,28 +1840,29 @@ def _docusaurus_contract(
     for requirement in requirements["requirements"]:
         journey_id = requirement["journeyIds"][0]
         assignment = requirement["methods"][0]
-        if journey_id not in scope["selectors"]["journeyIds"] or (
-            assignment["human"] and cadence != "release"
-        ):
+        if journey_id not in scope["selectors"]["journeyIds"] or (assignment["human"] and cadence != "release"):
             continue
         state = journeys[journey_id]["state"]
         cell_digest = _hve_canonical_digest(
             [requirement["requirementId"], journey_id, state, assignment["method"]], "hve-a11y:cell:v1"
         )
-        cells.append({
-            "cellId": f"cell-{cell_digest[:20]}",
-            "requirementId": requirement["requirementId"],
-            "journeyId": journey_id,
-            "state": state,
-            "method": assignment["method"],
-            "probe": assignment["probe"],
-            "disposition": assignment["disposition"],
-            "expected": assignment["proposition"],
-            "human": assignment["human"],
-        })
+        cells.append(
+            {
+                "cellId": f"cell-{cell_digest[:20]}",
+                "requirementId": requirement["requirementId"],
+                "journeyId": journey_id,
+                "state": state,
+                "method": assignment["method"],
+                "probe": assignment["probe"],
+                "disposition": assignment["disposition"],
+                "expected": assignment["proposition"],
+                "human": assignment["human"],
+            }
+        )
     if cadence == "release":
         deciding_ids = {
-            item["sourceRequirementId"] for item in requirements["requirements"]
+            item["sourceRequirementId"]
+            for item in requirements["requirements"]
             if item["methods"][0]["disposition"] == "decides"
         }
         if deciding_ids != source_ids:
@@ -1905,8 +1911,10 @@ def _current_docusaurus_results(
             continue
         previous = results.get(previous_id)
         if (
-            previous is None or previous_id == result["resultId"]
-            or previous["cellId"] != result["cellId"] or previous_id in successors
+            previous is None
+            or previous_id == result["resultId"]
+            or previous["cellId"] != result["cellId"]
+            or previous_id in successors
         ):
             raise ValueError("Evidence result has invalid supersession")
         try:
@@ -1987,8 +1995,7 @@ def validate_composed_docusaurus_bundle(
         raise ValueError(str(error)) from error
     current = _current_docusaurus_results(bundle, cells)
     selected = {
-        cell_id: cell for cell_id, cell in cells.items()
-        if not cell["human"] or required_completeness != "automated"
+        cell_id: cell for cell_id, cell in cells.items() if not cell["human"] or required_completeness != "automated"
     }
     completeness = bundle["scopeCompleteness"]
     complete = completeness["automatedCollection"] == "complete"
@@ -1997,8 +2004,10 @@ def validate_composed_docusaurus_bundle(
     if required_completeness == "release":
         complete = complete and cadence == "release" and completeness["releaseEvidence"] == "complete"
     blocked = (
-        not complete or bundle.get("historyState") == "invalid"
-        or manifest["quarantineState"] != "clear" or bool(manifest["quarantineReasons"])
+        not complete
+        or bundle.get("historyState") == "invalid"
+        or manifest["quarantineState"] != "clear"
+        or bool(manifest["quarantineReasons"])
         or any(item["state"] == "unresolved" for item in bundle["conflicts"])
         or any(item.get("quarantined", False) for values in current.values() for item in values)
     )
@@ -2020,13 +2029,13 @@ def validate_composed_docusaurus_bundle(
     if not statuses:
         blocked = True
     verdict = (
-        EvidenceStatus.FAIL if "FAIL" in statuses else
-        EvidenceStatus.CANT_TELL if blocked or any(status not in {"PASS", "INAPPLICABLE"} for status in statuses)
+        EvidenceStatus.FAIL
+        if "FAIL" in statuses
+        else EvidenceStatus.CANT_TELL
+        if blocked or any(status not in {"PASS", "INAPPLICABLE"} for status in statuses)
         else EvidenceStatus.PASS
     )
-    source_requirements = {
-        item["sourceRequirementId"] for item in requirements["requirements"]
-    }
+    source_requirements = {item["sourceRequirementId"] for item in requirements["requirements"]}
     return {
         "attestation": False,
         "bundleDigest": bundle["bundleDigest"],
@@ -2142,12 +2151,8 @@ def prepare_docusaurus_contrast_review(
 
     families = []
     for family_id, members in sorted(family_members.items()):
-        member_statuses = [
-            {item["methodStatus"] for item in member["evidence"]} for member in members
-        ]
-        member_tuple_digests = [
-            {item["tupleDigest"] for item in member["evidence"]} for member in members
-        ]
+        member_statuses = [{item["methodStatus"] for item in member["evidence"]} for member in members]
+        member_tuple_digests = [{item["tupleDigest"] for item in member["evidence"]} for member in members]
         stable_statuses = {next(iter(statuses)) for statuses in member_statuses if len(statuses) == 1}
         stable_tuple_digests = {
             next(iter(tuple_digests)) for tuple_digests in member_tuple_digests if len(tuple_digests) == 1
@@ -2505,12 +2510,13 @@ def prepare_docusaurus_validation_input(
         text=True,
     ).stdout
     node_version = subprocess.run(
-        ["node", "--version"], check=True, capture_output=True, text=True,
+        ["node", "--version"],
+        check=True,
+        capture_output=True,
+        text=True,
         env={**os.environ, "NODE_DISABLE_COMPILE_CACHE": "1"},
     ).stdout.strip()
-    uv_version = subprocess.run(
-        ["uv", "--version"], check=True, capture_output=True, text=True
-    ).stdout.strip()
+    uv_version = subprocess.run(["uv", "--version"], check=True, capture_output=True, text=True).stdout.strip()
     payload = {
         "revision": {
             "sourceRevision": source_revision,
@@ -2551,19 +2557,22 @@ def prepare_docusaurus_validation_input(
 
 def _package_path(root: Path, relative: str) -> Path:
     if (
-        not isinstance(relative, str) or not relative or "\\" in relative or ":" in relative
+        not isinstance(relative, str)
+        or not relative
+        or "\\" in relative
+        or ":" in relative
         or PurePosixPath(relative).is_absolute()
         or any(part in {"", ".", ".."} for part in relative.split("/"))
     ):
         raise ValueError(f"Unsafe retained package path: {relative}")
     parts = PurePosixPath(relative).parts
     hidden_exceptions = {
-        "docs/docusaurus/.gitignore", "docs/docusaurus/static/.nojekyll",
+        "docs/docusaurus/.gitignore",
+        "docs/docusaurus/static/.nojekyll",
         "docs/docusaurus/build/.nojekyll",
     }
     if relative not in hidden_exceptions and any(
-        part.startswith(".") and not (index == 0 and part == ".github")
-        for index, part in enumerate(parts)
+        part.startswith(".") and not (index == 0 and part == ".github") for index, part in enumerate(parts)
     ):
         raise ValueError(f"Hidden retained package path: {relative}")
     if {"node_modules", "__pycache__", "coverage", "retained"} & set(parts):
@@ -2574,23 +2583,26 @@ def _package_path(root: Path, relative: str) -> Path:
         raise ValueError(f"Restricted retained package file type: {relative}")
     allowed = (
         relative.startswith(("docs/docusaurus/", ".github/accessibility/"))
-        or relative in {
-            ".github/workflows/docusaurus-tests.yml", "scripts/accessibility/evidence_gate.py",
+        or relative
+        in {
+            ".github/workflows/docusaurus-tests.yml",
+            "scripts/accessibility/evidence_gate.py",
             "tests/test_accessibility_evidence.py",
-            ".github/workflows/deploy-docs.yml", ".github/workflows/docusaurus-accessibility-promotion.yml",
-            "scripts/accessibility/promotion.py", "tests/test_accessibility_promotion.py",
+            ".github/workflows/deploy-docs.yml",
+            ".github/workflows/docusaurus-accessibility-promotion.yml",
+            "scripts/accessibility/promotion.py",
+            "tests/test_accessibility_promotion.py",
         }
         or relative in {f"{_DOCUSAURUS_EVIDENCE_ROOT}/{name}" for name in _DOCUSAURUS_PACKAGE_OUTPUTS}
         or relative in {f"{_DOCUSAURUS_EVIDENCE_ROOT}/inputs/{name}" for name in _DOCUSAURUS_PACKAGE_INPUTS}
-        or relative in {
-            f"{_DOCUSAURUS_EVIDENCE_ROOT}/command-results/{name}.json"
-            for name in _DOCUSAURUS_VALIDATION_COMMANDS
-        }
+        or relative
+        in {f"{_DOCUSAURUS_EVIDENCE_ROOT}/command-results/{name}.json" for name in _DOCUSAURUS_VALIDATION_COMMANDS}
         or relative == f"{_DOCUSAURUS_EVIDENCE_ROOT}/reviewer-handoff/reviewer-campaign.json"
         or re.fullmatch(
             rf"{_DOCUSAURUS_EVIDENCE_ROOT}/reviewer-handoff/supplement-templates/cell-[0-9a-f]{{20}}\.json",
             relative,
-        ) is not None
+        )
+        is not None
     )
     if not allowed:
         raise ValueError(f"Path is outside the retained package allowlist: {relative}")
@@ -2618,18 +2630,20 @@ def _package_references(document: Any, key: str) -> list[Any]:
 
 
 def _docusaurus_package_inventory(root: Path) -> tuple[dict[str, dict[str, Any]], list[str], dict[str, Any]]:
-    required = {
-        f"{_DOCUSAURUS_EVIDENCE_ROOT}/{name}" for name in _DOCUSAURUS_PACKAGE_OUTPUTS
-    } | {
-        f"{_DOCUSAURUS_EVIDENCE_ROOT}/inputs/{name}" for name in _DOCUSAURUS_PACKAGE_INPUTS
-    } | {
-        f"{_DOCUSAURUS_RESULTS_ROOT}/{name}" for name in _DOCUSAURUS_PACKAGE_RESULTS
-    } | {
-        ".github/accessibility/asset-journeys.json", ".github/accessibility/requirement-evidence.json",
-        "docs/docusaurus/build/deployed-routes.json", "docs/docusaurus/build/mermaid-routes.json",
-        "docs/docusaurus/playwright-report/index.html", "docs/docusaurus/e2e/contrast-baseline.json",
-        "docs/docusaurus/a11y-screen-reader.bindings.json",
-    }
+    required = (
+        {f"{_DOCUSAURUS_EVIDENCE_ROOT}/{name}" for name in _DOCUSAURUS_PACKAGE_OUTPUTS}
+        | {f"{_DOCUSAURUS_EVIDENCE_ROOT}/inputs/{name}" for name in _DOCUSAURUS_PACKAGE_INPUTS}
+        | {f"{_DOCUSAURUS_RESULTS_ROOT}/{name}" for name in _DOCUSAURUS_PACKAGE_RESULTS}
+        | {
+            ".github/accessibility/asset-journeys.json",
+            ".github/accessibility/requirement-evidence.json",
+            "docs/docusaurus/build/deployed-routes.json",
+            "docs/docusaurus/build/mermaid-routes.json",
+            "docs/docusaurus/playwright-report/index.html",
+            "docs/docusaurus/e2e/contrast-baseline.json",
+            "docs/docusaurus/a11y-screen-reader.bindings.json",
+        }
+    )
     records = {}
     documents = {}
     missing = set()
@@ -2637,8 +2651,7 @@ def _docusaurus_package_inventory(root: Path) -> tuple[dict[str, dict[str, Any]]
     def retain(relative: str, expected: dict[str, Any] | None = None) -> None:
         if relative in records:
             if expected is not None and any(
-                field in expected and expected[field] != records[relative][field]
-                for field in ("sha256", "sizeBytes")
+                field in expected and expected[field] != records[relative][field] for field in ("sha256", "sizeBytes")
             ):
                 missing.add(f"{relative}:digest-or-size-mismatch")
             return
@@ -2684,7 +2697,8 @@ def _docusaurus_package_inventory(root: Path) -> tuple[dict[str, dict[str, Any]]
             if relative == bundle_path or relative.endswith(("/evidence-source.json", "/evidence-playwright.json")):
                 artifacts = (
                     document.get("bundleManifest", {}).get("artifacts", [])
-                    if relative == bundle_path else document.get("artifacts", [])
+                    if relative == bundle_path
+                    else document.get("artifacts", [])
                 )
                 _unique_records(artifacts, "artifactId", "package artifact")
                 for artifact in artifacts:
@@ -2726,7 +2740,8 @@ def _docusaurus_package_inventory(root: Path) -> tuple[dict[str, dict[str, Any]]
                     retain(artifact["path"], artifact)
                 expected_templates = {
                     f"supplement-templates/{cell['cellId']}.json"
-                    for cell in bundle.get("expectedCells", []) if cell.get("human")
+                    for cell in bundle.get("expectedCells", [])
+                    if cell.get("human")
                 }
                 if not expected_templates or {item["path"] for item in templates} != expected_templates:
                     raise ValueError("Retained reviewer template inventory drifted")
@@ -2753,9 +2768,7 @@ def _docusaurus_package_inventory(root: Path) -> tuple[dict[str, dict[str, Any]]
                             if not attachment_path.startswith(f"{_DOCUSAURUS_RESULTS_ROOT}/"):
                                 raise ValueError("Playwright attachment must belong to the retained results root")
                             retain(attachment_path)
-    build_files = [
-        root / relative for relative in sorted(records) if relative.startswith("docs/docusaurus/build/")
-    ]
+    build_files = [root / relative for relative in sorted(records) if relative.startswith("docs/docusaurus/build/")]
     build_digest = _digest_paths(build_files, root) if build_files else None
     expected_build = bundle.get("runManifest", {}).get("buildDigest")
     if expected_build and build_files and build_digest != expected_build:
@@ -2797,9 +2810,7 @@ def _docusaurus_package_inventory(root: Path) -> tuple[dict[str, dict[str, Any]]
         campaign_path = f"{_DOCUSAURUS_EVIDENCE_ROOT}/reviewer-handoff/reviewer-campaign.json"
         if campaign_path in documents:
             prefix = f"{_DOCUSAURUS_EVIDENCE_ROOT}/reviewer-handoff/"
-            expected_templates = {
-                prefix + item["path"] for item in documents[campaign_path].get("templates", [])
-            }
+            expected_templates = {prefix + item["path"] for item in documents[campaign_path].get("templates", [])}
             retained_templates = {
                 relative for relative in records if relative.startswith(prefix + "supplement-templates/")
             }
@@ -2825,15 +2836,18 @@ def _docusaurus_package_inventory(root: Path) -> tuple[dict[str, dict[str, Any]]
     deciding_results = [result for cell in automated_deciding for result in current[cell["cellId"]]]
     observed_at = datetime.fromisoformat(bundle["composedAt"].replace("Z", "+00:00")) if bundle else None
     promotable = (
-        not missing and summary.get("verdict") == "PASS"
+        not missing
+        and summary.get("verdict") == "PASS"
         and summary.get("bundleDigest") == bundle.get("bundleDigest")
         and schema_report.get("status") == "valid"
         and bundle.get("scopeCompleteness", {}).get("automatedCollection") == "complete"
         and {item.get("commandId") for item in commands} == set(_DOCUSAURUS_VALIDATION_COMMANDS)
         and all(item.get("status") == "passed" for item in commands)
-        and bool(automated_deciding) and all(current[cell["cellId"]] for cell in automated)
+        and bool(automated_deciding)
+        and all(current[cell["cellId"]] for cell in automated)
         and all(
-            result["status"] in {"PASS", "INAPPLICABLE"} and not result.get("invalidated")
+            result["status"] in {"PASS", "INAPPLICABLE"}
+            and not result.get("invalidated")
             and not result.get("quarantined")
             and (
                 not result.get("validUntil")
@@ -2844,12 +2858,16 @@ def _docusaurus_package_inventory(root: Path) -> tuple[dict[str, dict[str, Any]]
         and bundle.get("bundleManifest", {}).get("quarantineState") == "clear"
         and not any(item["state"] == "unresolved" for item in bundle.get("conflicts", []))
     )
-    return records, sorted(missing), {
-        "buildDigest": build_digest,
-        "bundleDigest": bundle.get("bundleDigest"),
-        "sourceRevision": bundle.get("runManifest", {}).get("sourceRevision"),
-        "promotable": promotable,
-    }
+    return (
+        records,
+        sorted(missing),
+        {
+            "buildDigest": build_digest,
+            "bundleDigest": bundle.get("bundleDigest"),
+            "sourceRevision": bundle.get("runManifest", {}).get("sourceRevision"),
+            "promotable": promotable,
+        },
+    )
 
 
 def stage_docusaurus_package(
@@ -2869,9 +2887,12 @@ def stage_docusaurus_package(
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(_package_path(root, relative), destination)
     manifest = {
-        "schemaVersion": "1.0.0", "attestation": False,
-        "complete": not missing, "missing": missing,
-        "files": [records[key] for key in sorted(records)], **identity,
+        "schemaVersion": "1.0.0",
+        "attestation": False,
+        "complete": not missing,
+        "missing": missing,
+        "files": [records[key] for key in sorted(records)],
+        **identity,
     }
     _write_json(output / "package-manifest.json", manifest)
     _verify_docusaurus_package_structure(output)
@@ -2889,13 +2910,22 @@ def _verify_docusaurus_package_structure(package_root: Path) -> dict[str, Any]:
         raise ValueError("Retained package manifest is missing or unsafe")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     fields = {
-        "schemaVersion", "attestation", "complete", "promotable", "missing",
-        "files", "buildDigest", "bundleDigest", "sourceRevision",
+        "schemaVersion",
+        "attestation",
+        "complete",
+        "promotable",
+        "missing",
+        "files",
+        "buildDigest",
+        "bundleDigest",
+        "sourceRevision",
     }
     if (
-        set(manifest) != fields or manifest["schemaVersion"] != "1.0.0"
+        set(manifest) != fields
+        or manifest["schemaVersion"] != "1.0.0"
         or manifest["attestation"] is not False
-        or not isinstance(manifest["complete"], bool) or not isinstance(manifest["promotable"], bool)
+        or not isinstance(manifest["complete"], bool)
+        or not isinstance(manifest["promotable"], bool)
     ):
         raise ValueError("Invalid retained package manifest")
     declared = _unique_records(manifest["files"], "path", "retained file")
@@ -2923,7 +2953,8 @@ def _verify_docusaurus_package_structure(package_root: Path) -> dict[str, Any]:
             raise ValueError(f"Retained file size or digest mismatch: {relative}")
     records, missing, identity = _docusaurus_package_inventory(root)
     if (
-        records != declared or missing != manifest["missing"]
+        records != declared
+        or missing != manifest["missing"]
         or manifest["complete"] != (not missing)
         or any(manifest[key] != value for key, value in identity.items())
     ):
@@ -3067,7 +3098,9 @@ def validate_github_surfaces(repository_root: Path) -> dict[str, int | str]:
         raise ValueError(f"Expected 9 zero-input dispatch workflows, found {zero_input_dispatches}")
     typed_by_name = dict(typed_dispatches)
     if set(typed_by_name) != {
-        "accessibility-evidence.yml", "docusaurus-accessibility-promotion.yml", "sha-staleness-check.yml",
+        "accessibility-evidence.yml",
+        "docusaurus-accessibility-promotion.yml",
+        "sha-staleness-check.yml",
     }:
         raise ValueError(f"Expected evidence, promotion, and SHA typed dispatches, found {typed_dispatches}")
     sha_inputs = typed_by_name["sha-staleness-check.yml"]
@@ -3081,7 +3114,10 @@ def validate_github_surfaces(repository_root: Path) -> dict[str, int | str]:
         raise ValueError("Accessibility evidence dispatch must expose only evidence-cadence")
     promotion_inputs = typed_by_name["docusaurus-accessibility-promotion.yml"]
     if set(promotion_inputs) != {
-        "collection-run-id", "collection-artifact-id", "review-evidence-revision", "prior-bundle-digest",
+        "collection-run-id",
+        "collection-artifact-id",
+        "review-evidence-revision",
+        "prior-bundle-digest",
     } or any(
         not isinstance(value, dict) or value.get("type") != "string" or value.get("required") is not True
         for value in promotion_inputs.values()
@@ -3125,7 +3161,9 @@ def create_parser() -> argparse.ArgumentParser:
         help="Validate a composed HVE Docusaurus evidence bundle",
     )
     parser.add_argument(
-        "--require-completeness", choices=("automated", "reviewer", "release"), default="automated",
+        "--require-completeness",
+        choices=("automated", "reviewer", "release"),
+        default="automated",
         help="Required evidence completeness dimension independent of collection cadence",
     )
     parser.add_argument("--stage-docusaurus-package", type=Path, help="Stage an exact retained evidence mirror")
@@ -3240,14 +3278,16 @@ def run(arguments: argparse.Namespace) -> int:
         return EXIT_SUCCESS if summary["verdict"] == EvidenceStatus.PASS.value else EXIT_FAILURE
     if arguments.stage_docusaurus_package:
         manifest = stage_docusaurus_package(
-            arguments.repository_root, arguments.stage_docusaurus_package,
+            arguments.repository_root,
+            arguments.stage_docusaurus_package,
             harness_root=arguments.harness_root,
         )
         print(json.dumps(manifest, indent=2, sort_keys=True))
         return EXIT_SUCCESS if manifest["promotable"] else EXIT_FAILURE
     if arguments.verify_docusaurus_package:
         manifest = verify_docusaurus_package(
-            arguments.verify_docusaurus_package, require_complete=arguments.require_complete_package,
+            arguments.verify_docusaurus_package,
+            require_complete=arguments.require_complete_package,
             harness_root=arguments.harness_root,
         )
         print(json.dumps(manifest, indent=2, sort_keys=True))
@@ -3257,9 +3297,7 @@ def run(arguments: argparse.Namespace) -> int:
         return EXIT_SUCCESS
     if arguments.prepare_docusaurus_contrast_review:
         if arguments.contrast_baseline is None or arguments.site_crawl_results is None:
-            raise ValueError(
-                "Docusaurus contrast review requires --contrast-baseline and --site-crawl-results"
-            )
+            raise ValueError("Docusaurus contrast review requires --contrast-baseline and --site-crawl-results")
         payload = prepare_docusaurus_contrast_review(
             arguments.repository_root,
             arguments.contrast_baseline,

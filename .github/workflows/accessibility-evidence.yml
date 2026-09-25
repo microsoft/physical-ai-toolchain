@@ -38,9 +38,9 @@ permissions:
 env:
   HVE_ACCESSIBILITY_REF: 56c30bcbbba1a8235970c44f5e79a9d83e296f54
   HVE_ACCESSIBILITY_TREE: c6875ad36ceeca2acec665195c385792f4b1f32f
-  HVE_CRITERION_MAP_SHA256: 4297ee41d235f2d66697a669d81c1612e5cf21fbb368268fed57d89aa462684f
-  HVE_NODE_LOCK_SHA256: c7b069b44e7f4e3db6008bad8a0d956e88fd5966e70432781935c6cf081960d3
-  HVE_UV_LOCK_SHA256: 0930c70adfa8a4e86fff9e326f13e3dd710cde447c3674036aa25898deba665d
+  HVE_CRITERION_MAP_SHA256: ef1de7239be999bb271184337e9edc15eb48fb66a69ca5dcb9628182350893a4
+  HVE_NODE_LOCK_SHA256: dd7689d6b058e42facba4539f8414d6090d95ea82853c665e05026857a09026f
+  HVE_UV_LOCK_SHA256: f0265e2d836fb9765be0a6f15e4c21fefc72a46651e97490dea27535172b6377
 
 jobs:
   evidence:
@@ -78,7 +78,7 @@ jobs:
           git init --quiet "$hve_root"
           git -C "$hve_root" remote add origin https://github.com/microsoft/hve-core.git
           git -C "$hve_root" fetch --depth 1 origin "$HVE_ACCESSIBILITY_REF"
-          git -C "$hve_root" checkout --quiet --detach FETCH_HEAD
+          git -c core.autocrlf=false -C "$hve_root" checkout --quiet --detach FETCH_HEAD
 
           actual_ref=$(git -C "$hve_root" rev-parse HEAD)
           if [ "$actual_ref" != "$HVE_ACCESSIBILITY_REF" ]; then
@@ -95,11 +95,11 @@ jobs:
 
           skill_root="$hve_root/$skill_path"
           printf '%s  %s\n' "$HVE_CRITERION_MAP_SHA256" \
-            "$skill_root/scripts/runtime_a11y/probe-criteria-map.json" | sha256sum --check --status
+            "$skill_root/scripts/runtime_a11y/probe-criteria-map.json" | sha256sum --check
           printf '%s  %s\n' "$HVE_NODE_LOCK_SHA256" \
-            "$skill_root/scripts/runtime_a11y/package-lock.json" | sha256sum --check --status
+            "$skill_root/scripts/runtime_a11y/package-lock.json" | sha256sum --check
           printf '%s  %s\n' "$HVE_UV_LOCK_SHA256" \
-            "$skill_root/uv.lock" | sha256sum --check --status
+            "$skill_root/uv.lock" | sha256sum --check
 
           jq -n \
             --arg commit "$actual_ref" \

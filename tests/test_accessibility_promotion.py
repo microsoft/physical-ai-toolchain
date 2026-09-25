@@ -92,8 +92,9 @@ class TestRunIdentity:
     def test_accepts_only_current_main_dispatch(self) -> None:
         promotion.validate_dispatch("refs/heads/main", _SHA, _SHA)
 
-    @pytest.mark.parametrize("ref,sha", [("refs/heads/topic", _SHA), ("refs/tags/main", _SHA),
-                                         ("refs/heads/main", _REVIEW_SHA)])
+    @pytest.mark.parametrize(
+        "ref,sha", [("refs/heads/topic", _SHA), ("refs/tags/main", _SHA), ("refs/heads/main", _REVIEW_SHA)]
+    )
     def test_rejects_untrusted_dispatch(self, ref: str, sha: str) -> None:
         with pytest.raises(ValueError):
             promotion.validate_dispatch(ref, sha, _SHA)
@@ -104,11 +105,17 @@ class TestRunIdentity:
     @pytest.mark.parametrize(
         "field,value",
         [
-            ("id", 124), ("repository", {"full_name": "fork/project"}),
-            ("head_repository", {"full_name": "fork/project"}), ("path", ".github/workflows/other.yml"),
+            ("id", 124),
+            ("repository", {"full_name": "fork/project"}),
+            ("head_repository", {"full_name": "fork/project"}),
+            ("path", ".github/workflows/other.yml"),
             ("name", "Untrusted collection"),
-            ("event", "pull_request"), ("event", "workflow_dispatch"), ("head_branch", "topic"),
-            ("head_sha", _REVIEW_SHA), ("conclusion", "failure"), ("status", "in_progress"),
+            ("event", "pull_request"),
+            ("event", "workflow_dispatch"),
+            ("head_branch", "topic"),
+            ("head_sha", _REVIEW_SHA),
+            ("conclusion", "failure"),
+            ("status", "in_progress"),
         ],
     )
     def test_rejects_wrong_collection(self, field: str, value: Any) -> None:
@@ -128,8 +135,11 @@ class TestRunIdentity:
     @pytest.mark.parametrize(
         "field,value",
         [
-            ("id", 457), ("name", "docusaurus-accessibility-evidence-release-124"), ("expired", True),
-            ("expires_at", "2026-09-24T00:00:00Z"), ("expires_at", "2026-09-25T00:00:00"),
+            ("id", 457),
+            ("name", "docusaurus-accessibility-evidence-release-124"),
+            ("expired", True),
+            ("expires_at", "2026-09-24T00:00:00Z"),
+            ("expires_at", "2026-09-25T00:00:00"),
             ("workflow_run", {"id": 124, "head_sha": _SHA, "head_branch": "main"}),
             ("workflow_run", {"id": 123, "head_sha": _REVIEW_SHA, "head_branch": "main"}),
         ],
@@ -142,7 +152,10 @@ class TestRunIdentity:
 
     @pytest.mark.parametrize("field,value", [("path", ".github/workflows/other.yml"), ("name", "Not CI")])
     def test_collection_artifact_lookup_requires_expected_producer(
-        self, monkeypatch: pytest.MonkeyPatch, field: str, value: str,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        field: str,
+        value: str,
     ) -> None:
         run = _run()
         run[field] = value
@@ -157,10 +170,21 @@ class TestRunIdentity:
             raise AssertionError("Artifact lookup must not precede producer validation")
 
         monkeypatch.setattr(promotion.GitHub, "get", fake_get)
-        result = promotion.main([
-            "check-collection", "--repository", _REPO, "--run-id", "123", "--artifact-id", "456",
-            "--dispatch-ref", "refs/heads/main", "--dispatch-sha", _SHA,
-        ])
+        result = promotion.main(
+            [
+                "check-collection",
+                "--repository",
+                _REPO,
+                "--run-id",
+                "123",
+                "--artifact-id",
+                "456",
+                "--dispatch-ref",
+                "refs/heads/main",
+                "--dispatch-sha",
+                _SHA,
+            ]
+        )
         assert result == 1
         assert not any(route.startswith("actions/artifacts/") for route in calls)
 
@@ -168,7 +192,9 @@ class TestRunIdentity:
 class TestReviewerBoundary:
     @pytest.mark.parametrize("changed", [False, True])
     def test_current_registry_must_match_promoted_anchor(
-        self, monkeypatch: pytest.MonkeyPatch, changed: bool,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        changed: bool,
     ) -> None:
         registry = {"schemaVersion": "1.0.0", "records": [{"status": "current"}]}
         registry["digest"] = _hve_canonical_digest(registry, "hve-a11y:review-registry:v1")
@@ -187,17 +213,29 @@ class TestReviewerBoundary:
             f"git/commits/{_SHA}": {"sha": _SHA, "tree": {"sha": _SHA}},
             f"git/trees/{_SHA}?recursive=1": {
                 "truncated": False,
-                "tree": [{"path": f"reviewer-evidence/docusaurus/{_SHA}/review-registry.json",
-                          "mode": "100644", "type": "blob", "sha": blob_sha, "size": len(data)}],
+                "tree": [
+                    {
+                        "path": f"reviewer-evidence/docusaurus/{_SHA}/review-registry.json",
+                        "mode": "100644",
+                        "type": "blob",
+                        "sha": blob_sha,
+                        "size": len(data),
+                    }
+                ],
             },
             f"git/blobs/{blob_sha}": {
-                "sha": blob_sha, "encoding": "base64", "content": promotion.base64.b64encode(data).decode(),
+                "sha": blob_sha,
+                "encoding": "base64",
+                "content": promotion.base64.b64encode(data).decode(),
             },
         }
         monkeypatch.setattr(promotion.GitHub, "get", lambda _self, route: responses[route])
         arguments = {
-            "branch_name": "review-evidence", "reviewer_revision": _REVIEW_SHA, "source_sha": _SHA,
-            "promoted_digest": expected, "expected_digest": expected,
+            "branch_name": "review-evidence",
+            "reviewer_revision": _REVIEW_SHA,
+            "source_sha": _SHA,
+            "promoted_digest": expected,
+            "expected_digest": expected,
         }
         if changed:
             with pytest.raises(ValueError, match="registry"):
@@ -209,8 +247,12 @@ class TestReviewerBoundary:
         monkeypatch.setattr(promotion.GitHub, "get", lambda *_: pytest.fail("Must reject missing anchor first"))
         with pytest.raises(ValueError):
             promotion.verify_current_registry(
-                promotion.GitHub(_REPO), branch_name="review-evidence", reviewer_revision=_REVIEW_SHA,
-                source_sha=_SHA, promoted_digest=_DIGEST, expected_digest="",
+                promotion.GitHub(_REPO),
+                branch_name="review-evidence",
+                reviewer_revision=_REVIEW_SHA,
+                source_sha=_SHA,
+                promoted_digest=_DIGEST,
+                expected_digest="",
             )
 
     @pytest.mark.parametrize("status", ["ahead", "identical"])
@@ -218,22 +260,31 @@ class TestReviewerBoundary:
         promotion.validate_review_ref(
             {"name": "review-evidence", "protected": True, "commit": {"sha": _SHA}},
             {"status": status, "merge_base_commit": {"sha": _REVIEW_SHA}},
-            branch_name="review-evidence", revision=_REVIEW_SHA,
+            branch_name="review-evidence",
+            revision=_REVIEW_SHA,
         )
 
     @pytest.mark.parametrize(
         "protected,status,base",
-        [(False, "ahead", _REVIEW_SHA), (True, "behind", _REVIEW_SHA),
-         (True, "diverged", _REVIEW_SHA), (True, "ahead", _SHA)],
+        [
+            (False, "ahead", _REVIEW_SHA),
+            (True, "behind", _REVIEW_SHA),
+            (True, "diverged", _REVIEW_SHA),
+            (True, "ahead", _SHA),
+        ],
     )
     def test_rejects_unprotected_unknown_or_reverse_ancestry(
-        self, protected: bool, status: str, base: str,
+        self,
+        protected: bool,
+        status: str,
+        base: str,
     ) -> None:
         with pytest.raises(ValueError):
             promotion.validate_review_ref(
                 {"name": "review-evidence", "protected": protected, "commit": {"sha": _SHA}},
                 {"status": status, "merge_base_commit": {"sha": base}},
-                branch_name="review-evidence", revision=_REVIEW_SHA,
+                branch_name="review-evidence",
+                revision=_REVIEW_SHA,
             )
 
     @pytest.mark.parametrize("name", ["", "../main", "refs/heads/main", "review~1", "review@{1}", "-main"])
@@ -243,10 +294,16 @@ class TestReviewerBoundary:
 
     @pytest.mark.parametrize(
         "path,mode,kind",
-        [("supplements/../review.json", "100644", "blob"), (".secret.json", "100644", "blob"),
-         ("supplements/nested/review.json", "100644", "blob"), ("run.py", "100644", "blob"),
-         ("supplements/link.json", "120000", "blob"), ("supplements/exec.json", "100755", "blob"),
-         ("supplements/module.json", "160000", "commit"), ("supplements\\review.json", "100644", "blob")],
+        [
+            ("supplements/../review.json", "100644", "blob"),
+            (".secret.json", "100644", "blob"),
+            ("supplements/nested/review.json", "100644", "blob"),
+            ("run.py", "100644", "blob"),
+            ("supplements/link.json", "120000", "blob"),
+            ("supplements/exec.json", "100755", "blob"),
+            ("supplements/module.json", "160000", "commit"),
+            ("supplements\\review.json", "100644", "blob"),
+        ],
     )
     def test_rejects_unsafe_git_entry(self, path: str, mode: str, kind: str) -> None:
         with pytest.raises(ValueError):
@@ -311,7 +368,9 @@ class TestReviewerBoundary:
             promotion.verify_review_package(root, _SHA)
 
     def test_does_not_fetch_blobs_from_truncated_or_unprotected_tree(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         calls = []
 
@@ -321,14 +380,23 @@ class TestReviewerBoundary:
 
         monkeypatch.setattr(promotion.GitHub, "get", fake_get)
         with pytest.raises(ValueError, match="protection"):
-            promotion.acquire_review(promotion.GitHub(_REPO), revision=_REVIEW_SHA,
-                                     branch_name="review-evidence", source_sha=_SHA, output=tmp_path / "review")
+            promotion.acquire_review(
+                promotion.GitHub(_REPO),
+                revision=_REVIEW_SHA,
+                branch_name="review-evidence",
+                source_sha=_SHA,
+                output=tmp_path / "review",
+            )
         assert calls == ["branches/review-evidence"]
         assert not (tmp_path / "review").exists()
 
     @pytest.mark.parametrize("truncated,extra_mode", [(True, None), (False, "120000"), (False, "100755")])
     def test_rejects_git_tree_before_reading_reviewer_content(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, truncated: bool, extra_mode: str | None,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        truncated: bool,
+        extra_mode: str | None,
     ) -> None:
         responses = {
             "branches/review-evidence": {"name": "review-evidence", "protected": True, "commit": {"sha": _SHA}},
@@ -336,8 +404,15 @@ class TestReviewerBoundary:
             f"git/commits/{_REVIEW_SHA}": {"sha": _REVIEW_SHA, "tree": {"sha": _SHA}},
             f"git/trees/{_SHA}?recursive=1": {
                 "truncated": truncated,
-                "tree": [{"path": f"reviewer-evidence/docusaurus/{_SHA}/review-registry.json",
-                          "mode": extra_mode, "type": "blob", "sha": _SHA, "size": 2}],
+                "tree": [
+                    {
+                        "path": f"reviewer-evidence/docusaurus/{_SHA}/review-registry.json",
+                        "mode": extra_mode,
+                        "type": "blob",
+                        "sha": _SHA,
+                        "size": 2,
+                    }
+                ],
             },
         }
         calls = []
@@ -348,8 +423,13 @@ class TestReviewerBoundary:
 
         monkeypatch.setattr(promotion.GitHub, "get", fake_get)
         with pytest.raises(ValueError):
-            promotion.acquire_review(promotion.GitHub(_REPO), revision=_REVIEW_SHA,
-                                     branch_name="review-evidence", source_sha=_SHA, output=tmp_path / "review")
+            promotion.acquire_review(
+                promotion.GitHub(_REPO),
+                revision=_REVIEW_SHA,
+                branch_name="review-evidence",
+                source_sha=_SHA,
+                output=tmp_path / "review",
+            )
         assert not any(route.startswith("git/blobs/") for route in calls)
         assert not (tmp_path / "review").exists()
 
@@ -378,9 +458,14 @@ class TestDigestAnchors:
 
     def test_refreshes_evaluation_not_observations(self) -> None:
         original = {
-            "sourceRevision": _SHA, "composedAt": "2026-09-24T00:00:00Z", "buildDigest": _DIGEST,
-            "harnessDigest": "d" * 64, "toolDigest": "e" * 64, "mappingDigest": "f" * 64,
-            "lockfileDigest": "0" * 64, "runId": "original-run",
+            "sourceRevision": _SHA,
+            "composedAt": "2026-09-24T00:00:00Z",
+            "buildDigest": _DIGEST,
+            "harnessDigest": "d" * 64,
+            "toolDigest": "e" * 64,
+            "mappingDigest": "f" * 64,
+            "lockfileDigest": "0" * 64,
+            "runId": "original-run",
             "environment": {"operatingSystem": "collection-host", "inputModes": ["keyboard", "pointer"]},
         }
         updated = promotion.evaluation_context(original, now=_NOW)
@@ -393,15 +478,20 @@ class TestDigestAnchors:
             promotion.evaluation_context({"composedAt": "2026-09-26T00:00:00Z"}, now=_NOW)
 
     def test_recomposition_preserves_sources_and_prior_and_keeps_upstream_failure(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         collection = tmp_path / "collection"
         metadata = collection / "artifacts/accessibility/docusaurus"
         review = tmp_path / "review"
         registry, _ = _review_package(review)
         context = {
-            "sourceRevision": _SHA, "buildDigest": _DIGEST, "configDigest": _DIGEST,
-            "fixtureDigest": _DIGEST, "campaignId": "docusaurus-accessibility",
+            "sourceRevision": _SHA,
+            "buildDigest": _DIGEST,
+            "configDigest": _DIGEST,
+            "fixtureDigest": _DIGEST,
+            "campaignId": "docusaurus-accessibility",
             "composedAt": "2026-09-24T00:00:00Z",
         }
         prior = {"runManifest": context}
@@ -418,8 +508,13 @@ class TestDigestAnchors:
         monkeypatch.setattr(subprocess, "run", failing_hve)
         with pytest.raises(ValueError, match="exit 7"):
             promotion._compose(
-                collection, review, tmp_path / "output", harness_root=tmp_path / "hve",
-                prior_digest=prior["bundleDigest"], registry_digest=registry["digest"], now=_NOW,
+                collection,
+                review,
+                tmp_path / "output",
+                harness_root=tmp_path / "hve",
+                prior_digest=prior["bundleDigest"],
+                registry_digest=registry["digest"],
+                now=_NOW,
             )
         command = calls[0]
         assert command[command.index("--require-completeness") + 1] == "release"
@@ -435,11 +530,20 @@ class TestDigestAnchors:
         collection = tmp_path / "collection"
         review = tmp_path / "review"
         registry, _ = _review_package(review)
-        _write(collection / "artifacts/accessibility/docusaurus/evidence-bundle.json",
-               {"runManifest": {"sourceRevision": _SHA}, "bundleDigest": _DIGEST})
+        _write(
+            collection / "artifacts/accessibility/docusaurus/evidence-bundle.json",
+            {"runManifest": {"sourceRevision": _SHA}, "bundleDigest": _DIGEST},
+        )
         with pytest.raises(ValueError, match="anchor"):
-            promotion._compose(collection, review, tmp_path / "output", harness_root=tmp_path / "hve",
-                               prior_digest=_DIGEST, registry_digest=registry["digest"], now=_NOW)
+            promotion._compose(
+                collection,
+                review,
+                tmp_path / "output",
+                harness_root=tmp_path / "hve",
+                prior_digest=_DIGEST,
+                registry_digest=registry["digest"],
+                now=_NOW,
+            )
         assert not (tmp_path / "output").exists()
 
 
@@ -447,10 +551,17 @@ class TestDeploymentMetadata:
     @pytest.fixture()
     def documents(self) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         identity = {
-            "sourceRevision": _SHA, "buildDigest": _DIGEST, "configDigest": _DIGEST,
-            "fixtureDigest": _DIGEST, "campaignId": "docusaurus-accessibility",
-            "harnessDigest": _DIGEST, "toolDigest": _DIGEST, "mappingDigest": _DIGEST,
-            "lockfileDigest": _DIGEST, "runId": "original-run", "schemaVersion": "1.0.0",
+            "sourceRevision": _SHA,
+            "buildDigest": _DIGEST,
+            "configDigest": _DIGEST,
+            "fixtureDigest": _DIGEST,
+            "campaignId": "docusaurus-accessibility",
+            "harnessDigest": _DIGEST,
+            "toolDigest": _DIGEST,
+            "mappingDigest": _DIGEST,
+            "lockfileDigest": _DIGEST,
+            "runId": "original-run",
+            "schemaVersion": "1.0.0",
             "environment": {"operatingSystem": "collection-host", "inputModes": ["keyboard", "pointer"]},
             "composedAt": "2026-09-24T00:00:00Z",
         }
@@ -458,20 +569,31 @@ class TestDeploymentMetadata:
         bundle = {
             "bundleDigest": "d" * 64,
             "runManifest": {**deepcopy(identity), "composedAt": "2026-09-25T00:00:00Z"},
-            "composedAt": "2026-09-25T00:00:00Z", "scopeCompleteness": {"releaseEvidence": "complete"},
+            "composedAt": "2026-09-25T00:00:00Z",
+            "scopeCompleteness": {"releaseEvidence": "complete"},
         }
         manifest = {
-            "schemaVersion": "1.0.0", "sourceRevision": _SHA, "buildDigest": _DIGEST,
-            "bundleDigest": bundle["bundleDigest"], "priorBundleDigest": _DIGEST,
-            "reviewRegistryDigest": _DIGEST, "reviewerRevision": _REVIEW_SHA,
-            "collectionRunId": "123", "collectionArtifactId": "456", "promotionRunId": "789",
-            "hveRevision": promotion._HVE_REF, "hveTree": promotion._HVE_TREE,
-            "releaseEvidence": "complete", "attestation": False, "evaluatedAt": bundle["composedAt"],
+            "schemaVersion": "1.0.0",
+            "sourceRevision": _SHA,
+            "buildDigest": _DIGEST,
+            "bundleDigest": bundle["bundleDigest"],
+            "priorBundleDigest": _DIGEST,
+            "reviewRegistryDigest": _DIGEST,
+            "reviewerRevision": _REVIEW_SHA,
+            "collectionRunId": "123",
+            "collectionArtifactId": "456",
+            "promotionRunId": "789",
+            "hveRevision": promotion._HVE_REF,
+            "hveTree": promotion._HVE_TREE,
+            "releaseEvidence": "complete",
+            "attestation": False,
+            "evaluatedAt": bundle["composedAt"],
         }
         return manifest, prior, bundle
 
     def test_valid_metadata_binding_is_not_a_release_attestation(
-        self, documents: tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
+        self,
+        documents: tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
     ) -> None:
         promotion.validate_promotion_manifest(*documents, source_sha=_SHA, promotion_run_id="789")
         assert documents[0]["attestation"] is False
@@ -479,47 +601,72 @@ class TestDeploymentMetadata:
     @pytest.mark.parametrize(
         "field,value",
         [
-            ("sourceRevision", _REVIEW_SHA), ("promotionRunId", "790"), ("buildDigest", "0" * 64),
-            ("bundleDigest", "0" * 64), ("priorBundleDigest", "0" * 64), ("hveRevision", _REVIEW_SHA),
-            ("hveTree", _REVIEW_SHA), ("releaseEvidence", "incomplete"), ("attestation", True),
-            ("evaluatedAt", "2026-09-24T00:00:00Z"), ("collectionArtifactId", "../456"),
+            ("sourceRevision", _REVIEW_SHA),
+            ("promotionRunId", "790"),
+            ("buildDigest", "0" * 64),
+            ("bundleDigest", "0" * 64),
+            ("priorBundleDigest", "0" * 64),
+            ("hveRevision", _REVIEW_SHA),
+            ("hveTree", _REVIEW_SHA),
+            ("releaseEvidence", "incomplete"),
+            ("attestation", True),
+            ("evaluatedAt", "2026-09-24T00:00:00Z"),
+            ("collectionArtifactId", "../456"),
         ],
     )
     def test_rejects_forged_manifest_identity(
-        self, documents: tuple[dict[str, Any], dict[str, Any], dict[str, Any]], field: str, value: Any,
+        self,
+        documents: tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
+        field: str,
+        value: Any,
     ) -> None:
         documents[0][field] = value
         with pytest.raises(ValueError):
             promotion.validate_promotion_manifest(*documents, source_sha=_SHA, promotion_run_id="789")
 
     @pytest.mark.parametrize(
-        "binding", [
-            "sourceRevision", "buildDigest", "configDigest", "fixtureDigest", "campaignId",
-            "harnessDigest", "toolDigest", "mappingDigest", "lockfileDigest", "runId", "environment",
+        "binding",
+        [
+            "sourceRevision",
+            "buildDigest",
+            "configDigest",
+            "fixtureDigest",
+            "campaignId",
+            "harnessDigest",
+            "toolDigest",
+            "mappingDigest",
+            "lockfileDigest",
+            "runId",
+            "environment",
         ],
     )
     def test_rejects_promoted_bundle_binding_drift(
-        self, documents: tuple[dict[str, Any], dict[str, Any], dict[str, Any]], binding: str,
+        self,
+        documents: tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
+        binding: str,
     ) -> None:
         documents[2]["runManifest"][binding] = "unexpected"
         with pytest.raises(ValueError):
             promotion.validate_promotion_manifest(*documents, source_sha=_SHA, promotion_run_id="789")
 
     def test_rejects_unexpected_new_run_binding(
-        self, documents: tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
+        self,
+        documents: tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
     ) -> None:
         documents[2]["runManifest"]["unexpectedBinding"] = _DIGEST
         with pytest.raises(ValueError):
             promotion.validate_promotion_manifest(*documents, source_sha=_SHA, promotion_run_id="789")
 
     def test_canonical_environment_order_preserves_run_binding(
-        self, documents: tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
+        self,
+        documents: tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
     ) -> None:
         documents[2]["runManifest"]["environment"]["inputModes"].reverse()
         promotion.validate_promotion_manifest(*documents, source_sha=_SHA, promotion_run_id="789")
 
     def test_rejects_claimed_success_for_incomplete_bundle(
-        self, documents: tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
+        self,
+        documents: tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
     ) -> None:
         documents[2]["scopeCompleteness"]["releaseEvidence"] = "incomplete"
         with pytest.raises(ValueError, match="incomplete"):
@@ -535,31 +682,40 @@ class TestDeploymentMetadata:
 
     @pytest.fixture()
     def deadline_documents(self) -> tuple[dict[str, Any], dict[str, Any]]:
-        registry = {"records": [
-            {"recordId": "qualification", "validUntil": "2026-10-01T00:00:00Z"},
-            {"recordId": "approval", "validUntil": "2026-09-28T00:00:00Z"},
-            {"recordId": "unused", "validUntil": "2026-09-01T00:00:00Z"},
-        ]}
+        registry = {
+            "records": [
+                {"recordId": "qualification", "validUntil": "2026-10-01T00:00:00Z"},
+                {"recordId": "approval", "validUntil": "2026-09-28T00:00:00Z"},
+                {"recordId": "unused", "validUntil": "2026-09-01T00:00:00Z"},
+            ]
+        }
         bundle = {
             "scopeCompleteness": {"releaseEvidence": "complete"},
             "expectedCells": [{"cellId": "human", "human": True}],
             "evidenceResults": [{"cellId": "human", "resultId": "current"}],
             "supplements": [
                 {"supplementId": "historical", "validUntil": "2026-09-01T00:00:00Z"},
-                {"supplementId": "current", "qualificationRecordId": "qualification",
-                 "approvalRecordId": "approval", "validUntil": "2026-09-27T00:00:00Z"},
+                {
+                    "supplementId": "current",
+                    "qualificationRecordId": "qualification",
+                    "approvalRecordId": "approval",
+                    "validUntil": "2026-09-27T00:00:00Z",
+                },
             ],
         }
         return registry, bundle
 
     def test_deadline_uses_only_current_evidence(
-        self, deadline_documents: tuple[dict[str, Any], dict[str, Any]],
+        self,
+        deadline_documents: tuple[dict[str, Any], dict[str, Any]],
     ) -> None:
         assert promotion.release_valid_until(*deadline_documents, now=_NOW) == "2026-09-27T00:00:00Z"
 
     @pytest.mark.parametrize("record", ["qualification", "approval", "supplement", "automated"])
     def test_deadline_rejects_expired_current_evidence(
-        self, deadline_documents: tuple[dict[str, Any], dict[str, Any]], record: str,
+        self,
+        deadline_documents: tuple[dict[str, Any], dict[str, Any]],
+        record: str,
     ) -> None:
         registry, bundle = deadline_documents
         expired = "2026-09-24T00:00:00Z"
@@ -573,7 +729,8 @@ class TestDeploymentMetadata:
             promotion.release_valid_until(registry, bundle, now=_NOW)
 
     def test_deadline_ignores_superseded_automated_evidence(
-        self, deadline_documents: tuple[dict[str, Any], dict[str, Any]],
+        self,
+        deadline_documents: tuple[dict[str, Any], dict[str, Any]],
     ) -> None:
         deadline_documents[1]["evidenceResults"].append(
             {"resultId": "old", "cellId": "auto", "current": False, "validUntil": "2026-09-01T00:00:00Z"},
@@ -610,7 +767,10 @@ class TestWorkflowBoundary:
         assert "npm run build" not in text and "docusaurus-tests.yml" not in text
         assert workflow["jobs"]["deploy"]["environment"]["name"] == "github-pages"
         assert workflow["jobs"]["deploy"]["permissions"] == {
-            "contents": "read", "actions": "read", "pages": "write", "id-token": "write",
+            "contents": "read",
+            "actions": "read",
+            "pages": "write",
+            "id-token": "write",
         }
         deploy_steps = workflow["jobs"]["deploy"]["steps"]
         download = next(step for step in deploy_steps if "download-artifact@" in step.get("uses", ""))

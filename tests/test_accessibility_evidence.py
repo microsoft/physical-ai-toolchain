@@ -46,12 +46,8 @@ _ASSET_LEDGER_PATH = _REPOSITORY_ROOT / ".github" / "accessibility" / "asset-jou
 _REQUIREMENT_LEDGER_PATH = _REPOSITORY_ROOT / ".github" / "accessibility" / "requirement-evidence.json"
 _ACCESSIBILITY_WORKFLOW_PATH = _REPOSITORY_ROOT / ".github" / "workflows" / "accessibility-evidence.yml"
 _DOCUSAURUS_PLAYWRIGHT_CONFIG_PATH = _REPOSITORY_ROOT / "docs" / "docusaurus" / "playwright.config.ts"
-_DOCUSAURUS_SCREEN_READER_CATALOG_PATH = (
-    _REPOSITORY_ROOT / "docs" / "docusaurus" / "a11y-screen-reader-cases.json"
-)
-_DOCUSAURUS_SCREEN_READER_BINDING_PATH = (
-    _REPOSITORY_ROOT / "docs" / "docusaurus" / "a11y-screen-reader.bindings.json"
-)
+_DOCUSAURUS_SCREEN_READER_CATALOG_PATH = _REPOSITORY_ROOT / "docs" / "docusaurus" / "a11y-screen-reader-cases.json"
+_DOCUSAURUS_SCREEN_READER_BINDING_PATH = _REPOSITORY_ROOT / "docs" / "docusaurus" / "a11y-screen-reader.bindings.json"
 _DOCUSAURUS_WORKFLOW_PATH = _REPOSITORY_ROOT / ".github" / "workflows" / "docusaurus-tests.yml"
 _VIEWER_WORKFLOW_PATH = _REPOSITORY_ROOT / ".github" / "workflows" / "dataviewer-frontend-tests.yml"
 _PR_WORKFLOW_PATH = _REPOSITORY_ROOT / ".github" / "workflows" / "pr-validation.yml"
@@ -283,9 +279,7 @@ class TestEvidenceBundleValidation:
         with pytest.raises(ValidationError, match="Conflicting current outcomes"):
             EvidenceBundle.model_validate(valid_bundle)
 
-    def test_given_cross_framework_result_when_validated_then_rejects_reuse(
-        self, valid_bundle: dict[str, Any]
-    ) -> None:
+    def test_given_cross_framework_result_when_validated_then_rejects_reuse(self, valid_bundle: dict[str, Any]) -> None:
         # Arrange
         valid_bundle["results"][0]["framework"] = "SECTION_504"
 
@@ -309,9 +303,7 @@ class TestEvidenceBundleValidation:
         with pytest.raises(ValidationError, match="at least 1 item"):
             EvidenceBundle.model_validate(valid_bundle)
 
-    def test_given_informing_pass_when_validated_then_rejects_transition(
-        self, valid_bundle: dict[str, Any]
-    ) -> None:
+    def test_given_informing_pass_when_validated_then_rejects_transition(self, valid_bundle: dict[str, Any]) -> None:
         # Arrange
         valid_bundle["requirement_ledger"]["requirements"][0]["methods"][0]["disposition"] = "INFORMS"
         valid_bundle["results"][0]["disposition"] = "INFORMS"
@@ -395,9 +387,7 @@ class TestEvidenceBundleValidation:
         with pytest.raises(ValidationError, match="HVE probes require the HVE_PROBE method"):
             EvidenceBundle.model_validate(valid_bundle)
 
-    def test_given_unknown_state_action_when_validated_then_rejects_setup(
-        self, valid_bundle: dict[str, Any]
-    ) -> None:
+    def test_given_unknown_state_action_when_validated_then_rejects_setup(self, valid_bundle: dict[str, Any]) -> None:
         # Arrange
         valid_bundle["state_proofs"][0]["setup_steps"][0]["action"] = "visit"
 
@@ -583,9 +573,7 @@ class TestFailSafeAggregation:
         assert summary.verdict.value == "CANT_TELL"
         assert "stale or invalidated" in " ".join(summary.reasons)
 
-    def test_given_invalidated_pass_when_summarized_then_pass_is_prevented(
-        self, valid_bundle: dict[str, Any]
-    ) -> None:
+    def test_given_invalidated_pass_when_summarized_then_pass_is_prevented(self, valid_bundle: dict[str, Any]) -> None:
         # Arrange
         valid_bundle["results"][0]["invalidated"] = True
         valid_bundle["results"][0]["invalidation_reasons"] = ["Fixture meaning changed"]
@@ -723,13 +711,15 @@ class TestAccessibilityWorkflowSource:
         ],
     )
     def test_real_composer_tests_use_the_acquired_pinned_runtime(
-        self, path: Path, job_id: str, step_name: str,
+        self,
+        path: Path,
+        job_id: str,
+        step_name: str,
     ) -> None:
         steps = _load_yaml(path)["jobs"][job_id]["steps"]
         contract_index = next(index for index, step in enumerate(steps) if step["name"] == step_name)
         acquire_index = next(
-            index for index, step in enumerate(steps)
-            if step["name"].startswith("Acquire reviewed HVE")
+            index for index, step in enumerate(steps) if step["name"].startswith("Acquire reviewed HVE")
         )
         contract = steps[contract_index]
         assert acquire_index < contract_index
@@ -748,9 +738,9 @@ class TestAccessibilityWorkflowSource:
         for workflow in workflows:
             assert "56c30bcbbba1a8235970c44f5e79a9d83e296f54" in workflow
             assert "c6875ad36ceeca2acec665195c385792f4b1f32f" in workflow
-            assert "4297ee41d235f2d66697a669d81c1612e5cf21fbb368268fed57d89aa462684f" in workflow
-            assert "c7b069b44e7f4e3db6008bad8a0d956e88fd5966e70432781935c6cf081960d3" in workflow
-            assert "0930c70adfa8a4e86fff9e326f13e3dd710cde447c3674036aa25898deba665d" in workflow
+            assert "ef1de7239be999bb271184337e9edc15eb48fb66a69ca5dcb9628182350893a4" in workflow
+            assert "dd7689d6b058e42facba4539f8414d6090d95ea82853c665e05026857a09026f" in workflow
+            assert "f0265e2d836fb9765be0a6f15e4c21fefc72a46651e97490dea27535172b6377" in workflow
 
     def test_given_accessibility_workflow_when_reviewed_then_runtime_and_retention_contracts_are_present(
         self,
@@ -797,7 +787,7 @@ class TestAccessibilityWorkflowSource:
         handoff_run = steps["Prepare qualified-review handoff"]["run"]
         manifest_run = steps["Emit Docusaurus accessibility validation manifest"]["run"]
         assert "--prepare-docusaurus-composition" in prepare_run
-        assert 'compose-evidence \\' in compose_run
+        assert "compose-evidence \\" in compose_run
         assert compose_run.count('--source "$GITHUB_WORKSPACE/artifacts/accessibility/docusaurus/inputs/') == 2
         assert '--artifact-root "$GITHUB_WORKSPACE"' in compose_run
         assert '--require-completeness "$REQUIRED_COMPLETENESS"' in compose_run
@@ -823,8 +813,7 @@ class TestAccessibilityWorkflowSource:
         assert upload["with"]["path"] == "${{ runner.temp }}/docusaurus-retained/"
         assert not any("browser diagnostics" in name.lower() for name in steps)
         binding_validation = (
-            'PYTHONPATH="$skill_root/scripts" '
-            'uv run --project "$skill_root" --frozen python - <<\'PY\''
+            'PYTHONPATH="$skill_root/scripts" uv run --project "$skill_root" --frozen python - <<\'PY\''
         )
         assert binding_validation in steps["Validate Docusaurus screen-reader binding"]["run"]
 
@@ -1008,10 +997,25 @@ def hve_runtime(monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Any]:
     return root, importlib.import_module("runtime_a11y.evidence_bundle._compose")
 
 
+def test_hve_integrity_pins_match_immutable_git_bytes(hve_runtime: tuple[Path, Any]) -> None:
+    from scripts.accessibility import promotion
+
+    skill_root, _ = hve_runtime
+    checkout = skill_root.parents[3]
+    for relative, expected in promotion._HVE_HASHES.items():
+        content = subprocess.run(
+            ["git", "-C", str(checkout), "show", f"{promotion._HVE_REF}:{promotion._HVE_PATH}/{relative}"],
+            check=True,
+            capture_output=True,
+        ).stdout
+        actual = hashlib.sha256(content).hexdigest()
+        assert expected == actual, f"Integrity pin must hash Git bytes, not checkout line endings: {relative}"
+        for workflow_path in (_ACCESSIBILITY_WORKFLOW_PATH, _DOCUSAURUS_WORKFLOW_PATH):
+            assert actual in workflow_path.read_text(encoding="utf-8")
+
+
 @pytest.fixture()
-def composed_docs_bundle(
-    tmp_path: Path, hve_runtime: tuple[Path, Any]
-) -> tuple[Path, Path, dict[str, Any]]:
+def composed_docs_bundle(tmp_path: Path, hve_runtime: tuple[Path, Any]) -> tuple[Path, Path, dict[str, Any]]:
     root, composer = hve_runtime
     for source in (_ASSET_LEDGER_PATH, _REQUIREMENT_LEDGER_PATH):
         destination = tmp_path / ".github" / "accessibility" / source.name
@@ -1026,16 +1030,27 @@ def composed_docs_bundle(
         "campaignId": "docusaurus-accessibility",
         "composedAt": "2026-09-24T12:00:00Z",
         "sourceRevision": "a" * 40,
-        **{key: _DIGEST for key in (
-            "buildDigest", "configDigest", "fixtureDigest", "lockfileDigest",
-            "toolDigest", "harnessDigest", "mappingDigest",
-        )},
+        **{
+            key: _DIGEST
+            for key in (
+                "buildDigest",
+                "configDigest",
+                "fixtureDigest",
+                "lockfileDigest",
+                "toolDigest",
+                "harnessDigest",
+                "mappingDigest",
+            )
+        },
         "environment": {"class": "local-ci", "operatingSystem": "test", "locale": "en-US", "inputModes": ["keyboard"]},
     }
     cells, _ = composer._obligations(asset_catalog, requirements, scope)
     source = {
-        "schemaVersion": "1.0.0", "sourceKind": "source", "producer": "contract test",
-        "sourceRunId": "source-test", "observedAt": run["composedAt"],
+        "schemaVersion": "1.0.0",
+        "sourceKind": "source",
+        "producer": "contract test",
+        "sourceRunId": "source-test",
+        "observedAt": run["composedAt"],
         "boundTo": {key: run[key] for key in ("sourceRevision", "buildDigest", "configDigest", "fixtureDigest")},
         "results": [
             {
@@ -1043,17 +1058,24 @@ def composed_docs_bundle(
                     key: cell[key]
                     for key in ("requirementId", "journeyId", "state", "method", "probe", "disposition", "expected")
                 },
-                "resultId": f"result-{index}", "status": "PASS", "observed": "Synthetic test observation",
+                "resultId": f"result-{index}",
+                "status": "PASS",
+                "observed": "Synthetic test observation",
                 "artifactIds": [],
             }
-            for index, cell in enumerate(cells) if not cell["human"]
+            for index, cell in enumerate(cells)
+            if not cell["human"]
         ],
         "artifacts": [],
     }
     source["sourceDigest"] = gate._hve_canonical_digest(source, "hve-a11y:evidence-source:v1")
     bundle = composer.compose_evidence(
-        asset_catalog=asset_catalog, requirement_catalog=requirements, scope=scope,
-        run_context=run, sources=[source], state_proofs=[],
+        asset_catalog=asset_catalog,
+        requirement_catalog=requirements,
+        scope=scope,
+        run_context=run,
+        sources=[source],
+        state_proofs=[],
     )
     path = tmp_path / "bundle.json"
     path.write_text(json.dumps(bundle), encoding="utf-8")
@@ -1062,9 +1084,7 @@ def composed_docs_bundle(
 
 class TestComposedDocusaurusVerdict:
     @staticmethod
-    def _validate(
-        fixture: tuple[Path, Path, dict[str, Any]], *, completeness: str = "automated"
-    ) -> dict[str, Any]:
+    def _validate(fixture: tuple[Path, Path, dict[str, Any]], *, completeness: str = "automated") -> dict[str, Any]:
         harness, path, bundle = fixture
         bundle["bundleDigest"] = gate._hve_canonical_digest(
             {key: value for key, value in bundle.items() if key != "bundleDigest"},
@@ -1094,9 +1114,7 @@ class TestComposedDocusaurusVerdict:
         assert bundle["scopeCompleteness"]["releaseEvidence"] == "incomplete"
         assert self._validate(composed_docs_bundle, completeness="release")["verdict"] == "CANT_TELL"
 
-    def test_altered_bundle_digest_is_rejected(
-        self, composed_docs_bundle: tuple[Path, Path, dict[str, Any]]
-    ) -> None:
+    def test_altered_bundle_digest_is_rejected(self, composed_docs_bundle: tuple[Path, Path, dict[str, Any]]) -> None:
         harness, path, bundle = composed_docs_bundle
         bundle["bundleDigest"] = "0" * 64
         gate._write_json(path, bundle)
@@ -1157,10 +1175,14 @@ class TestComposedDocusaurusVerdict:
         elif mutation == "quarantine":
             result["quarantined"] = True
         elif mutation == "conflict":
-            bundle["conflicts"].append({
-                "conflictId": "conflict-test", "cellId": result["cellId"],
-                "resultIds": [result["resultId"], "other-result"], "state": "unresolved",
-            })
+            bundle["conflicts"].append(
+                {
+                    "conflictId": "conflict-test",
+                    "cellId": result["cellId"],
+                    "resultIds": [result["resultId"], "other-result"],
+                    "state": "unresolved",
+                }
+            )
         elif mutation == "incomplete":
             bundle["scopeCompleteness"]["automatedCollection"] = "incomplete"
         else:
@@ -1255,43 +1277,79 @@ class TestDocusaurusRetainedPackage:
         crop = results_root / "contrast-crops" / "test.png"
         crop.parent.mkdir()
         crop.write_bytes(b"synthetic-crop")
-        gate._write_json(results_root / "site-crawl-results.json", {
-            "results": [{"contrastEvidence": [{"evidencePath": "contrast-crops/test.png"}]}],
-        })
-        gate._write_json(evidence_root / "contrast-review.json", {
-            "signatures": [{"evidence": [{
-                "evidencePath": "contrast-crops/test.png",
-                "evidenceDigest": hashlib.sha256(crop.read_bytes()).hexdigest(),
-            }]}],
-        })
+        gate._write_json(
+            results_root / "site-crawl-results.json",
+            {
+                "results": [{"contrastEvidence": [{"evidencePath": "contrast-crops/test.png"}]}],
+            },
+        )
+        gate._write_json(
+            evidence_root / "contrast-review.json",
+            {
+                "signatures": [
+                    {
+                        "evidence": [
+                            {
+                                "evidencePath": "contrast-crops/test.png",
+                                "evidenceDigest": hashlib.sha256(crop.read_bytes()).hexdigest(),
+                            }
+                        ]
+                    }
+                ],
+            },
+        )
         gate._write_json(root / "docs" / "docusaurus" / "e2e" / "contrast-baseline.json", {"entries": []})
         gate._write_json(root / "docs" / "docusaurus" / "a11y-screen-reader.bindings.json", {"caseBindings": {}})
         source_files = [
-            {"path": path.relative_to(root).as_posix(), "mode": "100644",
-             "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            {
+                "path": path.relative_to(root).as_posix(),
+                "mode": "100644",
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
             for path in sorted((root / ".github" / "accessibility").glob("*.json"))
         ]
-        gate._write_json(evidence_root / "source-input-manifest.json", {
-            "files": source_files,
-            "sourceInputDigest": hashlib.sha256(
-                json.dumps(source_files, separators=(",", ":"), sort_keys=True).encode()
-            ).hexdigest(),
-            "sourceRevision": original["runManifest"]["sourceRevision"],
-        })
+        gate._write_json(
+            evidence_root / "source-input-manifest.json",
+            {
+                "files": source_files,
+                "sourceInputDigest": hashlib.sha256(
+                    json.dumps(source_files, separators=(",", ":"), sort_keys=True).encode()
+                ).hexdigest(),
+                "sourceRevision": original["runManifest"]["sourceRevision"],
+            },
+        )
         assets, requirements, scope, cells = gate._docusaurus_contract(root, "release")
         run = {**original["runManifest"], "buildDigest": gate._digest_paths(list(build_root.iterdir()), root)}
         artifact = gate._artifact_record(results_root / "playwright-results.json", root, "test-report")
         source = {
-            "schemaVersion": "1.0.0", "sourceKind": "source", "producer": "contract test",
-            "sourceRunId": "test-source", "observedAt": run["composedAt"],
+            "schemaVersion": "1.0.0",
+            "sourceKind": "source",
+            "producer": "contract test",
+            "sourceRunId": "test-source",
+            "observedAt": run["composedAt"],
             "boundTo": {key: run[key] for key in ("sourceRevision", "buildDigest", "configDigest", "fixtureDigest")},
-            "results": [{
-                **{key: cell[key] for key in (
-                    "requirementId", "journeyId", "state", "method", "probe", "disposition", "expected",
-                )},
-                "resultId": f"result-{index}", "status": "PASS", "observed": "Synthetic test",
-                "artifactIds": ["test-report"],
-            } for index, cell in enumerate(cells) if not cell["human"]],
+            "results": [
+                {
+                    **{
+                        key: cell[key]
+                        for key in (
+                            "requirementId",
+                            "journeyId",
+                            "state",
+                            "method",
+                            "probe",
+                            "disposition",
+                            "expected",
+                        )
+                    },
+                    "resultId": f"result-{index}",
+                    "status": "PASS",
+                    "observed": "Synthetic test",
+                    "artifactIds": ["test-report"],
+                }
+                for index, cell in enumerate(cells)
+                if not cell["human"]
+            ],
             "artifacts": [artifact],
         }
         source["sourceDigest"] = gate._hve_canonical_digest(source, "hve-a11y:evidence-source:v1")
@@ -1301,34 +1359,56 @@ class TestDocusaurusRetainedPackage:
             "hve-a11y:evidence-source:v1",
         )
         bundle = hve_runtime[1].compose_evidence(
-            asset_catalog=assets, requirement_catalog=requirements, scope=scope, run_context=run,
-            sources=[source, empty_source], state_proofs=[],
+            asset_catalog=assets,
+            requirement_catalog=requirements,
+            scope=scope,
+            run_context=run,
+            sources=[source, empty_source],
+            state_proofs=[],
         )
         for name, value in {
-            "asset-journeys.json": assets, "requirement-methods.json": requirements, "evidence-scope.json": scope,
-            "run-context.json": run, "state-proofs.json": [], "evidence-source.json": source,
-            "evidence-playwright.json": empty_source, "source-check-result.json": {"status": "passed"},
+            "asset-journeys.json": assets,
+            "requirement-methods.json": requirements,
+            "evidence-scope.json": scope,
+            "run-context.json": run,
+            "state-proofs.json": [],
+            "evidence-source.json": source,
+            "evidence-playwright.json": empty_source,
+            "source-check-result.json": {"status": "passed"},
         }.items():
             gate._write_json(evidence_root / "inputs" / name, value)
         gate._write_json(evidence_root / "evidence-bundle.json", bundle)
-        gate._write_json(evidence_root / "evidence-summary.json", {
-            "verdict": "PASS", "bundleDigest": bundle["bundleDigest"],
-        })
+        gate._write_json(
+            evidence_root / "evidence-summary.json",
+            {
+                "verdict": "PASS",
+                "bundleDigest": bundle["bundleDigest"],
+            },
+        )
         handoff = evidence_root / "reviewer-handoff"
         templates = []
         for cell in cells:
             if cell["human"]:
                 path = handoff / "supplement-templates" / f"{cell['cellId']}.json"
                 gate._write_json(path, {"cellId": cell["cellId"], "templateStatus": "awaiting-qualified-review"})
-                templates.append({"path": path.relative_to(handoff).as_posix(),
-                                  "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+                templates.append(
+                    {
+                        "path": path.relative_to(handoff).as_posix(),
+                        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    }
+                )
         gate._write_json(handoff / "reviewer-campaign.json", {"templates": templates, "artifacts": {}})
         commands = []
         for command_id in gate._DOCUSAURUS_VALIDATION_COMMANDS:
             path = evidence_root / "command-results" / f"{command_id}.json"
             gate._write_json(path, {"commandId": command_id, "status": "passed"})
-            commands.append({"commandId": command_id, "status": "passed",
-                             "resultArtifactDigest": hashlib.sha256(path.read_bytes()).hexdigest()})
+            commands.append(
+                {
+                    "commandId": command_id,
+                    "status": "passed",
+                    "resultArtifactDigest": hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
+            )
         validation = {"commands": commands, "revision": {"sourceRevision": run["sourceRevision"]}}
         gate._write_json(evidence_root / "validation-input.json", validation)
         validation["manifestDigest"] = gate._hve_canonical_digest(validation, "hve-a11y:validation-manifest:v1")
@@ -1350,16 +1430,23 @@ class TestDocusaurusRetainedPackage:
         assert (inputs / "evidence-source.json").read_bytes() == (original_inputs / "evidence-source.json").read_bytes()
         values = {path.name: json.loads(path.read_text(encoding="utf-8")) for path in inputs.glob("*.json")}
         rebuilt = hve_runtime[1].compose_evidence(
-            asset_catalog=values["asset-journeys.json"], requirement_catalog=values["requirement-methods.json"],
-            scope=values["evidence-scope.json"], run_context=values["run-context.json"],
+            asset_catalog=values["asset-journeys.json"],
+            requirement_catalog=values["requirement-methods.json"],
+            scope=values["evidence-scope.json"],
+            run_context=values["run-context.json"],
             sources=[values["evidence-source.json"], values["evidence-playwright.json"]],
             state_proofs=values["state-proofs.json"],
         )
         assert rebuilt["bundleDigest"] == manifest["bundleDigest"]
-        assert gate.validate_composed_docusaurus_bundle(
-            moved / gate._DOCUSAURUS_EVIDENCE_ROOT / "evidence-bundle.json", moved,
-            harness_root=hve_runtime[0], required_completeness="automated",
-        )["verdict"] == "PASS"
+        assert (
+            gate.validate_composed_docusaurus_bundle(
+                moved / gate._DOCUSAURUS_EVIDENCE_ROOT / "evidence-bundle.json",
+                moved,
+                harness_root=hve_runtime[0],
+                required_completeness="automated",
+            )["verdict"]
+            == "PASS"
+        )
         assert (moved / "docs" / "docusaurus" / "test-results" / "contrast-crops" / "test.png").is_file()
         build_files = list((moved / "docs" / "docusaurus" / "build").rglob("*"))
         assert gate._digest_paths([path for path in build_files if path.is_file()], moved) == manifest["buildDigest"]
@@ -1372,7 +1459,9 @@ class TestDocusaurusRetainedPackage:
 
     @pytest.mark.parametrize("changed", ["build", "crop", "template", "source", "manifest", "input"])
     def test_changed_dependency_is_retained_only_as_non_promotable_diagnostics(
-        self, package_source: Path, changed: str,
+        self,
+        package_source: Path,
+        changed: str,
     ) -> None:
         paths = {
             "build": package_source / "docs" / "docusaurus" / "build" / "index.html",
@@ -1380,8 +1469,11 @@ class TestDocusaurusRetainedPackage:
             "source": package_source / ".github" / "accessibility" / "asset-journeys.json",
             "manifest": package_source / gate._DOCUSAURUS_EVIDENCE_ROOT / "evidence-bundle.json",
             "input": package_source / gate._DOCUSAURUS_EVIDENCE_ROOT / "inputs" / "asset-journeys.json",
-            "template": next((package_source / gate._DOCUSAURUS_EVIDENCE_ROOT / "reviewer-handoff"
-                              / "supplement-templates").glob("*.json")),
+            "template": next(
+                (package_source / gate._DOCUSAURUS_EVIDENCE_ROOT / "reviewer-handoff" / "supplement-templates").glob(
+                    "*.json"
+                )
+            ),
         }
         if changed == "manifest":
             bundle = json.loads(paths[changed].read_text(encoding="utf-8"))
@@ -1433,10 +1525,16 @@ class TestDocusaurusRetainedPackage:
             raise AssertionError(f"Partial packaging must not import HVE: {name}")
 
         monkeypatch.setattr(gate.importlib, "import_module", unavailable_hve)
-        status = main([
-            "--stage-docusaurus-package", str(target), "--repository-root", str(source),
-            "--harness-root", str(tmp_path / "missing-hve"),
-        ])
+        status = main(
+            [
+                "--stage-docusaurus-package",
+                str(target),
+                "--repository-root",
+                str(source),
+                "--harness-root",
+                str(tmp_path / "missing-hve"),
+            ]
+        )
         result = json.loads(capsys.readouterr().out)
         assert status == gate.EXIT_FAILURE
         assert result["complete"] is False
@@ -1544,12 +1642,15 @@ class TestDocusaurusSourceManifest:
 
         assert first["sourceInputDigest"] == second["sourceInputDigest"]
 
-    @pytest.mark.parametrize("relative", [
-        "scripts/accessibility/promotion.py",
-        "tests/test_accessibility_promotion.py",
-        ".github/workflows/deploy-docs.yml",
-        ".github/workflows/docusaurus-accessibility-promotion.yml",
-    ])
+    @pytest.mark.parametrize(
+        "relative",
+        [
+            "scripts/accessibility/promotion.py",
+            "tests/test_accessibility_promotion.py",
+            ".github/workflows/deploy-docs.yml",
+            ".github/workflows/docusaurus-accessibility-promotion.yml",
+        ],
+    )
     def test_promotion_controls_bind_source_identity_and_remain_portable(self, tmp_path: Path, relative: str) -> None:
         root = self._repository(tmp_path)
         first = prepare_docusaurus_source_manifest(
@@ -1621,9 +1722,7 @@ class TestDocusaurusContrastReview:
                 "theme": theme,
                 "tupleDigest": "a" * 64,
             }
-            for (signature, theme), status in zip(
-                (("1" * 16, "light"), ("2" * 16, "dark")), statuses, strict=True
-            )
+            for (signature, theme), status in zip((("1" * 16, "light"), ("2" * 16, "dark")), statuses, strict=True)
         ]
         if not include_second:
             measurements.pop()
@@ -1634,23 +1733,17 @@ class TestDocusaurusContrastReview:
         )
         return baseline_path, crawl_path
 
-    def test_given_complete_signature_evidence_when_built_then_family_identity_is_stable(
-        self, tmp_path: Path
-    ) -> None:
+    def test_given_complete_signature_evidence_when_built_then_family_identity_is_stable(self, tmp_path: Path) -> None:
         baseline_path, crawl_path = self._write_inputs(tmp_path)
 
-        first = prepare_docusaurus_contrast_review(
-            tmp_path, baseline_path, crawl_path, tmp_path / "first.json"
-        )
+        first = prepare_docusaurus_contrast_review(tmp_path, baseline_path, crawl_path, tmp_path / "first.json")
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
         baseline["entries"].reverse()
         baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
         crawl = json.loads(crawl_path.read_text(encoding="utf-8"))
         crawl["results"][0]["contrastEvidence"].reverse()
         crawl_path.write_text(json.dumps(crawl), encoding="utf-8")
-        second = prepare_docusaurus_contrast_review(
-            tmp_path, baseline_path, crawl_path, tmp_path / "second.json"
-        )
+        second = prepare_docusaurus_contrast_review(tmp_path, baseline_path, crawl_path, tmp_path / "second.json")
 
         assert first["totals"] == {
             "families": 1,
@@ -1671,9 +1764,7 @@ class TestDocusaurusContrastReview:
             statuses=("computed-ratio-pass-candidate", "computed-ratio-failure-candidate"),
         )
 
-        result = prepare_docusaurus_contrast_review(
-            tmp_path, baseline_path, crawl_path, tmp_path / "review.json"
-        )
+        result = prepare_docusaurus_contrast_review(tmp_path, baseline_path, crawl_path, tmp_path / "review.json")
 
         assert result["totals"]["statuses"] == {
             "computed-ratio-failure-candidate": 1,
@@ -1692,21 +1783,15 @@ class TestDocusaurusContrastReview:
             crawl["results"][0]["contrastEvidence"].append(mixed)
         crawl_path.write_text(json.dumps(crawl), encoding="utf-8")
 
-        result = prepare_docusaurus_contrast_review(
-            tmp_path, baseline_path, crawl_path, tmp_path / "review.json"
-        )
+        result = prepare_docusaurus_contrast_review(tmp_path, baseline_path, crawl_path, tmp_path / "review.json")
 
         assert result["families"][0]["sharedConclusion"] is None
 
-    def test_given_missing_signature_evidence_when_built_then_generation_fails_closed(
-        self, tmp_path: Path
-    ) -> None:
+    def test_given_missing_signature_evidence_when_built_then_generation_fails_closed(self, tmp_path: Path) -> None:
         baseline_path, crawl_path = self._write_inputs(tmp_path, include_second=False)
 
         with pytest.raises(ValueError, match=r"missing=.*2222222222222222"):
-            prepare_docusaurus_contrast_review(
-                tmp_path, baseline_path, crawl_path, tmp_path / "review.json"
-            )
+            prepare_docusaurus_contrast_review(tmp_path, baseline_path, crawl_path, tmp_path / "review.json")
 
 
 class TestDocusaurusReviewerHandoff:
@@ -1722,9 +1807,7 @@ class TestDocusaurusReviewerHandoff:
             cells.pop()
         release = {
             "bundleDigest": "b" * 64,
-            "catalogs": {
-                "assetJourney": assets
-            },
+            "catalogs": {"assetJourney": assets},
             "expectedCells": cells,
             "runManifest": {
                 "buildDigest": "c" * 64,
@@ -1776,21 +1859,18 @@ class TestDocusaurusReviewerHandoff:
     ) -> None:
         release_path, contrast_path = self._write_inputs(tmp_path)
 
-        result = prepare_docusaurus_reviewer_handoff(
-            tmp_path, release_path, contrast_path, tmp_path / "handoff"
-        )
-        template = json.loads(
-            (tmp_path / "handoff" / result["templates"][0]["path"]).read_text(encoding="utf-8")
-        )
+        result = prepare_docusaurus_reviewer_handoff(tmp_path, release_path, contrast_path, tmp_path / "handoff")
+        template = json.loads((tmp_path / "handoff" / result["templates"][0]["path"]).read_text(encoding="utf-8"))
 
         assert result["totals"] == {"humanCells": 64, "templates": 64}
         assert result["methodCounts"]["JAWS"] == 4
         assert result["methodCounts"]["NVDA"] == 4
         assert result["assistiveTechnologyRunbook"]["methods"] == ["NVDA", "JAWS"]
         assert len(result["assistiveTechnologyRunbook"]["executionRecipes"]) == 6
-        assert result["templates"][0]["sha256"] == hashlib.sha256(
-            (tmp_path / "handoff" / result["templates"][0]["path"]).read_bytes()
-        ).hexdigest()
+        assert (
+            result["templates"][0]["sha256"]
+            == hashlib.sha256((tmp_path / "handoff" / result["templates"][0]["path"]).read_bytes()).hexdigest()
+        )
         assert template["templateStatus"] == "awaiting-qualified-review"
         assert template["schemaVersion"] == "1.0.0-template"
         assert set(template["requiredReviewerFields"].values()) == {None}
@@ -1801,9 +1881,7 @@ class TestDocusaurusReviewerHandoff:
         release_path, contrast_path = self._write_inputs(tmp_path, remove_cell=True)
 
         with pytest.raises(ValueError, match="canonical human cell inventory drifted"):
-            prepare_docusaurus_reviewer_handoff(
-                tmp_path, release_path, contrast_path, tmp_path / "handoff"
-            )
+            prepare_docusaurus_reviewer_handoff(tmp_path, release_path, contrast_path, tmp_path / "handoff")
 
     @pytest.mark.parametrize("mutation", ["duplicate", "proposition", "method"])
     def test_human_cell_identity_and_proposition_cannot_drift(self, tmp_path: Path, mutation: str) -> None:
@@ -1996,11 +2074,7 @@ class TestAccessibilityRuntimeConfigs:
     def runtime_configs(self) -> dict[str, dict[str, Any]]:
         paths = {
             "viewer": _REPOSITORY_ROOT / "data-management" / "viewer" / "frontend" / "a11y-runtime.config.json",
-            "viewer-docs": _REPOSITORY_ROOT
-            / "data-management"
-            / "viewer"
-            / "backend"
-            / "a11y-runtime.config.json",
+            "viewer-docs": _REPOSITORY_ROOT / "data-management" / "viewer" / "backend" / "a11y-runtime.config.json",
             "vlm-docs": _REPOSITORY_ROOT / "evaluation" / "vlm_judge" / "a11y-api-runtime.config.json",
             "shim-docs": _REPOSITORY_ROOT / "evaluation" / "vlm_judge" / "a11y-openai-shim-runtime.config.json",
         }
@@ -2118,9 +2192,7 @@ class TestGitHubSurfaceContracts:
         # Act
         viewer_workflow = _load_yaml(_VIEWER_WORKFLOW_PATH)
         accessibility_workflow = _load_yaml(_ACCESSIBILITY_WORKFLOW_PATH)
-        viewer_steps = {
-            step["name"]: step for step in viewer_workflow["jobs"]["frontend-checks"]["steps"]
-        }
+        viewer_steps = {step["name"]: step for step in viewer_workflow["jobs"]["frontend-checks"]["steps"]}
         evidence_steps = {step["name"]: step for step in accessibility_workflow["jobs"]["evidence"]["steps"]}
 
         # Assert
@@ -2489,8 +2561,7 @@ class TestCanonicalRequirementEvidenceLedger:
 
         # Act
         guarded_bindings = {
-            criterion: set(requirements[criterion].journey_ids) & {"DCS12", "DCS13"}
-            for criterion in guarded_criteria
+            criterion: set(requirements[criterion].journey_ids) & {"DCS12", "DCS13"} for criterion in guarded_criteria
         }
 
         # Assert
@@ -2530,24 +2601,19 @@ class TestCanonicalRequirementEvidenceLedger:
 
 
 def test_given_accessibility_runtime_contracts_when_inspected_then_native_toolchains_own_them() -> None:
-    annotation_model = (
-        _REPOSITORY_ROOT / "data-management/viewer/backend/src/api/models/annotations.py"
-    ).read_text(encoding="utf-8")
+    annotation_model = (_REPOSITORY_ROOT / "data-management/viewer/backend/src/api/models/annotations.py").read_text(
+        encoding="utf-8"
+    )
     viewer_manifest = json.loads(
         (_REPOSITORY_ROOT / "data-management/viewer/frontend/package.json").read_text(encoding="utf-8")
     )
-    viewer_lock = json.loads(
-        (_REPOSITORY_ROOT / "package-lock.json").read_text(encoding="utf-8")
-    )
+    viewer_lock = json.loads((_REPOSITORY_ROOT / "package-lock.json").read_text(encoding="utf-8"))
     breadcrumb_tsx = _REPOSITORY_ROOT / "docs/docusaurus/src/theme/DocBreadcrumbs/index.tsx"
     breadcrumb_js = _REPOSITORY_ROOT / "docs/docusaurus/src/theme/DocBreadcrumbs/index.js"
 
     assert annotation_model.splitlines()[7] == "from __future__ import annotations"
     assert viewer_manifest["devDependencies"]["@playwright/test"] == "1.61.1"
-    assert (
-        viewer_lock["packages"]["data-management/viewer/frontend"]["devDependencies"]["@playwright/test"]
-        == "1.61.1"
-    )
+    assert viewer_lock["packages"]["data-management/viewer/frontend"]["devDependencies"]["@playwright/test"] == "1.61.1"
     assert breadcrumb_tsx.is_file()
     assert not breadcrumb_js.exists()
     assert "interface BreadcrumbLinkProps" in breadcrumb_tsx.read_text(encoding="utf-8")
