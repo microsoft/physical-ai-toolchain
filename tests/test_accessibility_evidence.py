@@ -1402,7 +1402,12 @@ class TestDocusaurusValidationManifestInput:
         # Assert
         assert changes_job["outputs"]["accessibility"] == "${{ steps.filter.outputs.accessibility }}"
         filter_step = next(step for step in changes_job["steps"] if step.get("id") == "filter")
-        assert 'echo "accessibility=$(match' in filter_step["run"]
+        assert filter_step["run"] == "node scripts/ci/select-checks.mjs"
+        contract = json.loads((_REPOSITORY_ROOT / "scripts/ci/ci-contract.json").read_text(encoding="utf-8"))
+        assert "accessibility" in contract["selectors"]
+        lane = next(item for item in contract["lanes"] if item["id"] == "accessibility-evidence")
+        assert lane["selector"] == "accessibility"
+        assert lane["outcomeSchema"] == "required"
         assert accessibility_job["uses"] == "./.github/workflows/accessibility-evidence.yml"
         assert accessibility_job["needs"] == "changes"
         assert accessibility_job["if"] == "needs.changes.outputs.accessibility == 'true'"
@@ -1947,14 +1952,17 @@ def test_given_accessibility_runtime_contracts_when_inspected_then_native_toolch
         (_REPOSITORY_ROOT / "data-management/viewer/frontend/package.json").read_text(encoding="utf-8")
     )
     viewer_lock = json.loads(
-        (_REPOSITORY_ROOT / "data-management/viewer/frontend/package-lock.json").read_text(encoding="utf-8")
+        (_REPOSITORY_ROOT / "package-lock.json").read_text(encoding="utf-8")
     )
     breadcrumb_tsx = _REPOSITORY_ROOT / "docs/docusaurus/src/theme/DocBreadcrumbs/index.tsx"
     breadcrumb_js = _REPOSITORY_ROOT / "docs/docusaurus/src/theme/DocBreadcrumbs/index.js"
 
     assert annotation_model.splitlines()[7] == "from __future__ import annotations"
     assert viewer_manifest["devDependencies"]["@playwright/test"] == "1.61.1"
-    assert viewer_lock["packages"][""]["devDependencies"]["@playwright/test"] == "1.61.1"
+    assert (
+        viewer_lock["packages"]["data-management/viewer/frontend"]["devDependencies"]["@playwright/test"]
+        == "1.61.1"
+    )
     assert breadcrumb_tsx.is_file()
     assert not breadcrumb_js.exists()
     assert "interface BreadcrumbLinkProps" in breadcrumb_tsx.read_text(encoding="utf-8")

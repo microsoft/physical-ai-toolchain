@@ -19,6 +19,14 @@ updates:
       update-types:
       - minor
       - patch
+  # Remove when eslint-plugin-jsx-a11y and eslint-plugin-react support ESLint 10.
+  ignore:
+  - dependency-name: "@eslint/js"
+    versions:
+    - ">=10"
+  - dependency-name: eslint
+    versions:
+    - ">=10"
   open-pull-requests-limit: 5
   labels:
   - dependencies
@@ -386,29 +394,6 @@ updates:
   labels:
   - dependencies
   - python
-  - dataviewer
-  commit-message:
-    prefix: chore
-    include: scope
-- package-ecosystem: npm
-  directory: /data-management/viewer/frontend
-  schedule:
-    interval: weekly
-    day: monday
-  cooldown:
-    default-days: 7
-    semver-major-days: 14
-  groups:
-    dataviewer-frontend-patch-minor:
-      patterns:
-      - "*"
-      update-types:
-      - minor
-      - patch
-  open-pull-requests-limit: 10
-  labels:
-  - dependencies
-  - npm
   - dataviewer
   commit-message:
     prefix: chore

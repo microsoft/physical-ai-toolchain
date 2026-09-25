@@ -1,5 +1,5 @@
 import React from 'react'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { axe } from 'jest-axe'
 
 let mockLocation = { pathname: '/', hash: '' }
@@ -7,6 +7,9 @@ let mockHistory = { action: 'POP' }
 let mockLayoutHasMain = true
 let mockCollapsed = true
 const mockToggleCollapsed = jest.fn()
+let mockNavigationExpanded = false
+let mockNavbarHasSidebar = true
+const mockNavbarToggle = jest.fn()
 let mockBreadcrumbs = [
   { label: 'Getting started', type: 'category', href: '/getting-started/' },
   { label: 'Quickstart', type: 'doc', href: '/getting-started/quickstart/' },
@@ -58,7 +61,24 @@ jest.mock('@theme-original/Layout', () => ({
 
 jest.mock('@theme-original/Navbar', () => ({
   __esModule: true,
-  default: () => <nav aria-label="Primary" />,
+  default: () => (
+    <nav aria-label="Primary">
+      <button
+        type="button"
+        className="navbar__toggle"
+        aria-expanded={String(mockNavigationExpanded)}
+        onClick={mockNavbarToggle}
+      >
+        Toggle navigation
+      </button>
+      {mockNavbarHasSidebar && (
+        <div className="navbar-sidebar">
+          <a href="/first">First navigation item</a>
+          <button type="button">Last navigation item</button>
+        </div>
+      )}
+    </nav>
+  ),
 }), { virtual: true })
 
 jest.mock('@theme-original/Footer/LinkItem', () => ({
@@ -144,6 +164,9 @@ describe('semantic theme contracts', () => {
     mockHistory = { action: 'POP' }
     mockLayoutHasMain = true
     mockCollapsed = true
+    mockNavigationExpanded = false
+    mockNavbarHasSidebar = true
+    mockNavbarToggle.mockReset()
     mockBreadcrumbs = [
       { label: 'Getting started', type: 'category', href: '/getting-started/' },
       { label: 'Quickstart', type: 'doc', href: '/getting-started/quickstart/' },
@@ -163,6 +186,71 @@ describe('semantic theme contracts', () => {
       expect(screen.getByRole('list', { name })).toHaveAttribute('aria-labelledby', heading.id)
     }
     expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it('contains mobile navigation focus and restores the toggle on dismissal', async () => {
+    const getClientRects = jest
+      .spyOn(HTMLElement.prototype, 'getClientRects')
+      .mockReturnValue([{} as DOMRect])
+    const requestAnimationFrame = jest
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        callback(0)
+        return 1
+      })
+    const { rerender, unmount } = render(
+      <>
+        <main>Main content</main>
+        <Navbar />
+        <footer>Footer content</footer>
+      </>,
+    )
+    const main = screen.getByRole('main')
+    const footer = screen.getByText('Footer content')
+    const toggle = screen.getByRole('button', { name: 'Toggle navigation' })
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(mockNavbarToggle).not.toHaveBeenCalled()
+
+    mockNavigationExpanded = true
+    rerender(
+      <>
+        <main>Main content</main>
+        <Navbar />
+        <footer>Footer content</footer>
+      </>,
+    )
+    await waitFor(() => {
+      expect(main).toHaveAttribute('inert')
+      expect(footer).toHaveAttribute('inert')
+    })
+
+    const first = screen.getByRole('link', { name: 'First navigation item' })
+    const last = screen.getByRole('button', { name: 'Last navigation item' })
+    last.focus()
+    fireEvent.keyDown(document, { key: 'Tab' })
+    expect(first).toHaveFocus()
+
+    first.focus()
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
+    expect(last).toHaveFocus()
+
+    toggle.focus()
+    fireEvent.keyDown(document, { key: 'Tab' })
+    expect(first).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: 'ArrowRight' })
+    expect(first).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(mockNavbarToggle).toHaveBeenCalledTimes(1)
+    expect(toggle).toHaveFocus()
+
+    unmount()
+    expect(main).not.toHaveAttribute('inert')
+    expect(footer).not.toHaveAttribute('inert')
+    getClientRects.mockRestore()
+    requestAnimationFrame.mockRestore()
   })
 
   it('supports absent and simple footer configurations', () => {

@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Edge Deployment
 description: Deploy trained models to edge devices for on-premises robot operation
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-24
+ms.date: 2026-09-22
 ms.topic: overview
 keywords:
   - edge

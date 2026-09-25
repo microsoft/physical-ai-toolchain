@@ -2,18 +2,18 @@
 title: CI Smoke Scripts
 description: GPU-free import smoke scripts for training and evaluation domains, runnable locally and in CI.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-25
+ms.date: 2026-09-23
 ---
 
 GPU-free import smoke checks that catch syntax, import, dependency-resolution, and interpreter/ABI regressions before they reach a GPU job. The same scripts run in CI (`.github/workflows/smoke-cpu.yml`) and locally.
 
 ## 📋 Prerequisites
 
-| Tool   | Required for                             | Install                                            |
-|--------|------------------------------------------|----------------------------------------------------|
-| Docker | `smoke-image.sh` (any local host)        | <https://docs.docker.com/get-docker/>              |
-| uv     | `smoke-import.sh` direct on linux/x86_64 | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-| bash   | All modes                                | Preinstalled on macOS and Linux                    |
+| Tool   | Required for                             | Install                               |
+|--------|------------------------------------------|---------------------------------------|
+| Docker | `smoke-image.sh` (any local host)        | <https://docs.docker.com/get-docker/> |
+| uv     | `smoke-import.sh` direct on linux/x86_64 | `mise install uv`                     |
+| bash   | All modes                                | Preinstalled on macOS and Linux       |
 
 Run every command from the repository root.
 
@@ -27,9 +27,11 @@ shared/ci/smoke-image.sh rl --mode cpu           # CPU import smoke, lightweight
 shared/ci/smoke-image.sh il --mode cpu
 shared/ci/smoke-image.sh vla --mode cpu
 shared/ci/smoke-image.sh evaluation --mode cpu
+shared/ci/smoke-image.sh vlm-judge --mode cpu
 shared/ci/smoke-image.sh osmo-replay --mode cpu
 shared/ci/smoke-image.sh rl                       # runtime-image smoke (Isaac Lab)
 shared/ci/smoke-image.sh il                       # runtime-image smoke (PyTorch)
+shared/ci/smoke-image.sh vla                      # runtime-image smoke (PyTorch)
 shared/ci/smoke-image.sh evaluation               # runtime-image smoke (PyTorch)
 shared/ci/smoke-image.sh osmo-replay               # runtime-image smoke (Python slim)
 
@@ -51,19 +53,20 @@ shared/ci/smoke-import.sh rl --mode cpu
 
 ## 🧪 Domains
 
-| Domain        | Python | Runtime image                          | CPU smoke | Runtime-image smoke |
-|---------------|--------|----------------------------------------|-----------|---------------------|
-| `rl`          | 3.11   | Isaac Lab (`DEFAULT_ISAAC_LAB_IMAGE`)  | yes       | yes                 |
-| `il`          | 3.12   | PyTorch (`lerobot-train.yaml` default) | yes       | yes                 |
-| `vla`         | 3.12   | none                                   | yes       | no                  |
-| `evaluation`  | 3.12   | PyTorch (`evaluate.yaml`)              | yes       | yes                 |
-| `osmo-replay` | 3.11   | Python (`replay-azureml.yaml`)         | yes       | yes                 |
+| Domain        | Python | Runtime image                           | CPU smoke | Runtime-image smoke |
+|---------------|--------|-----------------------------------------|-----------|---------------------|
+| `rl`          | 3.11   | Isaac Lab (`DEFAULT_ISAAC_LAB_IMAGE`)   | yes       | yes                 |
+| `il`          | 3.12   | PyTorch (`lerobot-train.yaml` default)  | yes       | yes                 |
+| `vla`         | 3.12   | PyTorch (`DEFAULT_LEROBOT_TRAIN_IMAGE`) | yes       | yes                 |
+| `evaluation`  | 3.12   | PyTorch (`evaluate.yaml`)               | yes       | yes                 |
+| `vlm-judge`   | 3.12   | none                                    | yes       | no                  |
+| `osmo-replay` | 3.11   | Python (`replay-azureml.yaml`)          | yes       | yes                 |
 
-Image references come from their source of truth: `scripts/lib/common.sh` for `rl`, `training/il/workflows/osmo/lerobot-train.yaml` for `il`, `evaluation/sil/workflows/azureml/components/evaluate.yaml` for `evaluation`, and `workflows/osmo/replay-azureml.yaml` for `osmo-replay`.
+Image references come from their source of truth: `scripts/lib/common.sh` for `rl` and `vla`, `training/il/workflows/osmo/lerobot-train.yaml` for `il`, `evaluation/sil/workflows/azureml/components/evaluate.yaml` for `evaluation`, and `workflows/osmo/replay-azureml.yaml` for `osmo-replay`.
 
 ## 🔍 What each depth catches
 
-CPU import smoke installs CPU torch wheels, so it validates a different dependency graph than the production CUDA one. It catches import, resolution, and interpreter-syntax errors — not the production CUDA resolution.
+CPU import smoke installs exported locked versions with CPU torch wheels and omits GPU-only packages. It catches import, installation, and interpreter-syntax errors, not the production CUDA wheel set.
 
 The runtime-image smoke installs the committed lock exactly as production does and imports the domain on the real interpreter. It catches the interpreter and ABI-at-import class. It does not prove CUDA, Vulkan, MIG, or a real training loop.
 
@@ -77,38 +80,39 @@ The rationale behind the gate's shape. Change these invariants only with equival
 
 ### Two depths are complementary, not redundant
 
-For one domain the runtime-image smoke is higher fidelity, yet it does not make the CPU import smoke redundant: the two install different dependency graphs. The CPU smoke resolves CPU torch wheels (`--torch-backend cpu`); the runtime-image smoke installs the production CUDA lock on the real interpreter. A break can exist in one graph and not the other.
+For one domain the runtime-image smoke is higher fidelity, yet it does not make the CPU import smoke redundant: the two install different wheel sets. The CPU smoke selects CPU torch wheels (`--torch-backend cpu`) from exported pinned versions; the runtime-image smoke installs the production CUDA lock on the real interpreter. A break can exist in one wheel set and not the other.
 
 The CPU depth is also the cheap baseline that runs on every PR, while the runtime-image depth is multi-gigabyte and minutes long, so it is reserved for the changed domain.
 
-### The CPU baseline is unconditional — never path-gate it
+### The CPU baseline is unconditional
 
 > [!IMPORTANT]
-> The `import-smoke` matrix runs for every domain on every PR with no path filter, by design. A path filter that returns the wrong answer skips the job, and a skipped required job counts as a pass — the gate goes green while testing nothing. That exact failure has shipped before (a broken path-filter regex; a folder restructure that stopped jobs from running).
+> The `import-smoke` matrix runs for every domain on every PR with no path filter. The required summary rejects skipped selected mandatory jobs, including the always-selected `smoke` caller. Keep the CPU matrix unconditional so expensive runtime-image selection cannot remove the import baseline.
 >
 > Only the expensive runtime-image depth is path-gated, and those filters must fail open: when in doubt, run. Do not add an `if:` or path filter to `import-smoke`.
 
 ### Install preserves the committed resolution
 
-The domain locks encode pyproject `override-dependencies` and package sources. The IL and evaluation runtime-image smokes use frozen `uv sync`, matching their production entrypoints and preserving the explicit PyTorch CUDA index. The RL and OSMO replay runtime-image smokes export their locks and install with `--no-deps`, matching their production entrypoints. Both paths install the committed resolution rather than resolving dependencies again.
+The domain locks encode pyproject `override-dependencies` and package sources. The IL, VLA, and evaluation runtime-image smokes use frozen `uv sync`, preserving the explicit PyTorch CUDA index. Evaluation uses the IL runtime lock in `training/il/lerobot`; its CPU smoke uses the `evaluation` lock. The RL and OSMO replay runtime-image smokes export their locks and install with `--no-deps`. Both paths install the committed resolution rather than resolving dependencies again.
 
-The import step is load-bearing: dependency or ABI skew can install cleanly and fail only when imported. For the CPU depth, the export removes the CUDA local-version suffix before `--torch-backend cpu` selects CPU wheels, and strips standalone `nvidia-*` and `cuda-*` packages.
+The import step is required: dependency or ABI skew can install cleanly and fail only when imported. For the CPU depth, the export removes the CUDA local-version suffix from torch and torchvision before `--torch-backend cpu` selects CPU wheels, and strips standalone `nvidia-*`, `cuda-*`, and `torchcodec` packages. Installation uses `--no-deps` to retain the exported versions.
 
 ### Per-domain runtime images and interpreters
 
-Each domain runs in its own production runtime; there is no single image. Image references are read from their source of truth: `DEFAULT_ISAAC_LAB_IMAGE` in `scripts/lib/common.sh` for `rl`, the `lerobot-train.yaml` default for `il`, the Azure ML `evaluate.yaml` component for `evaluation`, and the `replay-azureml.yaml` default for `osmo-replay`.
+Each image-enabled domain runs in its production runtime; there is no single image. Image references are read from their source of truth: `DEFAULT_ISAAC_LAB_IMAGE` and `DEFAULT_LEROBOT_TRAIN_IMAGE` in `scripts/lib/common.sh` for `rl` and `vla`, respectively, the `lerobot-train.yaml` default for `il`, the Azure ML `evaluate.yaml` component for `evaluation`, and the `replay-azureml.yaml` default for `osmo-replay`.
 
-The LeRobot lock requires Python 3.12 while its PyTorch image ships 3.11, so the `il` and `evaluation` runtime-image smokes provision 3.12 in a venv, mirroring their production entry scripts; `rl` uses the Isaac Lab kit interpreter.
+The LeRobot locks require Python 3.12, so the `il`, `vla`, and `evaluation` runtime-image smokes provision 3.12 in a venv rather than relying on the image's Python version; `rl` uses the Isaac Lab kit interpreter when available.
 
 ### Required-check wiring
 
-The reusable `smoke` workflow is a caller in `pr-validation.yml` and is listed in `pr-validation-summary.needs`, the single required check. Skipped needed jobs count as a pass, so only the path-gated runtime-image jobs may ever skip — the CPU baseline always runs and always reports. `main.yml` has no aggregator or path-filter job, so the same caller is added there unconditionally.
+The `smoke` job in `pr-validation.yml` calls the reusable `smoke-cpu.yml` workflow and is listed in `pr-validation-summary.needs`, the single required check. The canonical evaluator requires selected mandatory jobs to succeed; only jobs deselected by verified dependency selection may skip. The `smoke` caller is always selected, while its runtime-image jobs are gated by caller inputs. In `main.yml`, smoke runs unconditionally with all image inputs enabled, and `release-please` depends on its result.
 
 ### What the gate does not prove
 
 - No GPU execution: CUDA, Vulkan, MIG, or a real training/inference loop.
 - The RL probe loads the pip-package ABI surface (numpy, torch, skrl, and the Azure/MLflow stack via `training.utils`) but not Isaac's `omni`/`isaaclab` plugins, which are imported lazily in code and require the Isaac app. Isaac plugin-load regressions need GPU end-to-end coverage.
-- VLA has no standalone runtime-image smoke because its GPU workflow requires gated model access; the CPU smoke validates its portable lock and pi0 imports.
+- VLA runtime-image smoke imports torch, TorchCodec, Transformers, the video decoder, and pi0 configuration without downloading gated model weights or running inference. It does not validate model access or GPU execution.
+- `vlm-judge` has CPU import coverage only; it does not have a runtime-image smoke.
 
 ### Adding a domain
 

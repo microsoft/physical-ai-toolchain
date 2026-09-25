@@ -8,16 +8,20 @@ server {
     # Container Apps internal DNS; forces per-request resolution via variables
     resolver ${NGINX_RESOLVER} valid=10s;
 
+    proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+    proxy_ssl_verify on;
+    proxy_ssl_server_name on;
+    proxy_ssl_name ${NGINX_BACKEND_HOST};
+
     # Proxy API requests to the backend service.
     # NGINX_BACKEND_HOST defaults to "backend:8000" for local docker-compose.
-    # In Azure Container Apps, set to the app name (same-environment routing).
+    # For HTTPS, set it to the certificate-valid backend FQDN.
+    # Custom HTTPS backends must chain to a CA in ca-certificates.crt.
     # Using a variable forces nginx to resolve DNS per-request via the resolver.
     location /api/ {
         set $backend_upstream ${NGINX_BACKEND_SCHEME}://${NGINX_BACKEND_HOST};
         proxy_pass $backend_upstream;
         proxy_http_version 1.1;
-        proxy_ssl_verify off;
-        proxy_ssl_server_name on;
         proxy_set_header Host ${NGINX_BACKEND_HOST};
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -35,8 +39,6 @@ server {
         set $backend_health ${NGINX_BACKEND_SCHEME}://${NGINX_BACKEND_HOST}/health;
         proxy_pass $backend_health;
         proxy_http_version 1.1;
-        proxy_ssl_verify off;
-        proxy_ssl_server_name on;
         proxy_set_header Host ${NGINX_BACKEND_HOST};
     }
 

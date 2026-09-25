@@ -11,7 +11,28 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "
 # shellcheck source=training/il/scripts/lerobot/lerobot-azureml.sh
 source "${REPO_ROOT}/training/il/scripts/lerobot/lerobot-azureml.sh"
 
-ensure_lerobot_runtime "${LEROBOT_EVAL_VENV:-/opt/lerobot-eval-venv}" "${REPO_ROOT}/training/il/lerobot" av azure.ai.ml azure.identity azure.storage.blob azureml.mlflow lerobot matplotlib mlflow pyarrow
+LEROBOT_PROJECT="${LEROBOT_PROJECT:-training/il/lerobot}"
+case "${LEROBOT_PROJECT}" in
+  /*|../*|*/../*|*/..)
+    echo "ERROR: LEROBOT_PROJECT must be a repo-relative path without parent traversal: ${LEROBOT_PROJECT}" >&2
+    exit 1
+    ;;
+esac
+LEROBOT_PROJECT_PATH="${REPO_ROOT}/${LEROBOT_PROJECT}"
+if [[ ! -f "${LEROBOT_PROJECT_PATH}/pyproject.toml" || ! -f "${LEROBOT_PROJECT_PATH}/uv.lock" ]]; then
+  echo "ERROR: LeRobot project must contain pyproject.toml and uv.lock: ${LEROBOT_PROJECT_PATH}" >&2
+  exit 1
+fi
+
+runtime_modules=(av azure.ai.ml azure.identity azure.storage.blob azureml.mlflow lerobot matplotlib mlflow pyarrow)
+case "${POLICY_TYPE:-act}" in
+  diffusion) runtime_modules+=(diffusers) ;;
+  pi0|pi0_fast) runtime_modules+=(scipy tokenizers transformers) ;;
+esac
+ensure_lerobot_runtime \
+  "${LEROBOT_EVAL_VENV:-/opt/lerobot-eval-venv}" \
+  "${LEROBOT_PROJECT_PATH}" \
+  "${runtime_modules[@]}"
 
 if [[ -n "${AZURE_ML_OUTPUT_eval_results:-}" ]]; then
   export OUTPUT_DIR="${AZURE_ML_OUTPUT_eval_results}"

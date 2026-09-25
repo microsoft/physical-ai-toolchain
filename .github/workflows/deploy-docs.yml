@@ -26,7 +26,6 @@ jobs:
     uses: ./.github/workflows/docusaurus-tests.yml
     permissions:
       contents: read
-      id-token: write
     with:
       soft-fail: false
       evidence-cadence: release
