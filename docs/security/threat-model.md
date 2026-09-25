@@ -155,18 +155,18 @@ The following entries preserve the prior assessment, including claims that requi
 
 #### T-3: AzureML Real-Time Inference Exposure
 
-| Field            | Value                                                                                                                                                                      |
-|------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Threat           | An extension-hosted real-time inference router can expose model-scoring traffic without transport encryption                                                              |
-| Affected Assets  | AzureML Kubernetes compute                                                                                                                                                 |
-| Trust Boundary   | TB-3                                                                                                                                                                       |
-| Likelihood       | Low                                                                                                                                                                        |
-| Impact           | Medium                                                                                                                                                                     |
-| Risk Rating      | Medium                                                                                                                                                                     |
-| Current Controls | The extension enables training and batch scoring only; `enableInference` is `false`, and inference-router service and insecure-connection settings are absent             |
+| Field            | Value                                                                                                                                                                        |
+|------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Threat           | An extension-hosted real-time inference router can expose model-scoring traffic without transport encryption                                                                 |
+| Affected Assets  | AzureML Kubernetes compute                                                                                                                                                   |
+| Trust Boundary   | TB-3                                                                                                                                                                         |
+| Likelihood       | Low                                                                                                                                                                          |
+| Impact           | Medium                                                                                                                                                                       |
+| Risk Rating      | Medium                                                                                                                                                                       |
+| Current Controls | The extension enables training and batch scoring only; `enableInference` is `false`, and inference-router service and insecure-connection settings are absent                |
 | Evidence         | `infrastructure/setup/config/azureml-aks-config.template.json`; checked-in AzureML consumers submit training and batch jobs and do not provision a real-time online endpoint |
-| Status           | Mitigated                                                                                                                                                                  |
-| Rationale        | The repository-managed extension does not deploy a network-facing real-time inference router                                                                               |
+| Status           | Mitigated                                                                                                                                                                    |
+| Rationale        | The repository-managed extension does not deploy a network-facing real-time inference router                                                                                 |
 
 ### Repudiation
 
