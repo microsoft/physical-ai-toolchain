@@ -74,17 +74,12 @@ jobs:
       - name: Run Frontmatter Validation
         id: frontmatter
         run: |
-          $args = @()
-          if ('${{ inputs.changed-files-only }}' -eq 'true') {
-            $args += '-ChangedFilesOnly'
+          $validationParams = @{
+            ChangedFilesOnly = '${{ inputs.changed-files-only }}' -eq 'true'
+            WarningsAsErrors = '${{ inputs.warnings-as-errors }}' -eq 'true'
+            EnableSchemaValidation = '${{ inputs.enable-schema-validation }}' -eq 'true'
           }
-          if ('${{ inputs.warnings-as-errors }}' -eq 'true') {
-            $args += '-WarningsAsErrors'
-          }
-          if ('${{ inputs.enable-schema-validation }}' -eq 'true') {
-            $args += '-EnableSchemaValidation'
-          }
-          & scripts/linting/Invoke-FrontmatterValidation.ps1 @args
+          & scripts/linting/Invoke-FrontmatterValidation.ps1 @validationParams
         continue-on-error: ${{ inputs.soft-fail }}
 
       - name: Upload frontmatter validation results

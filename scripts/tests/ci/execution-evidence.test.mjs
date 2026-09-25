@@ -705,7 +705,7 @@ test('publication: changed raw report cannot replace measured evidence', t => {
 test('publication: output names and summary escaping are deterministic', t => {
   const workspace = fixture(t);
   write(workspace, 'results/linux.xml', junit);
-  const receipt = recordOutcome(options(workspace, { selectionReason: 'caller | <script> [bad](url)' }), contract);
+  const receipt = recordOutcome(options(workspace, { selectionReason: 'caller | <script> <SCRIPT> <ScRiPt> [bad](url)' }), contract);
   const summary = join(workspace, 'summary');
   const outputs = publishOutcome(receipt, { workspace, githubSummary: summary });
   assert.deepEqual(Object.keys(outcomeOutputs(receipt)), [
@@ -714,7 +714,7 @@ test('publication: output names and summary escaping are deterministic', t => {
   assert.equal(outputs['skipped-count'], '1');
   assert.equal(outputs['first-failure'], '');
   assert.equal(receipt['first-failure'], '');
-  assert.doesNotMatch(readFileSync(summary, 'utf8'), /<script>|\[bad\]/);
+  assert.doesNotMatch(readFileSync(summary, 'utf8'), /<script>|\[bad\]/i);
 });
 
 test('aggregate: current exact shard receipts are remeasured from raw artifacts', t => {

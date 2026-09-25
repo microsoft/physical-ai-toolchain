@@ -7,7 +7,7 @@ import {
   appendFileSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync,
   readdirSync, realpathSync, writeFileSync,
 } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));

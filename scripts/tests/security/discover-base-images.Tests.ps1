@@ -16,7 +16,7 @@ BeforeDiscovery {
 
 BeforeAll {
     $script:DiscoverScript = (Resolve-Path (Join-Path $PSScriptRoot '../../security/discover-base-images.sh')).Path
-    $script:BashPath = (Get-Command bash -CommandType Application -ErrorAction Stop).Source
+    $script:BashPath = (Get-Command bash -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     if ($IsWindows) {
         # Git for Windows Bash accepts the native paths used to create fixture repositories.
         $gitDirectory = Split-Path (Get-Command git -CommandType Application -ErrorAction Stop).Source -Parent

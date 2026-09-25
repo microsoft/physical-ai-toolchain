@@ -89,6 +89,12 @@ and reconcile their counts with exposed workflow outputs. Missing, duplicate, st
 contradictory mandatory evidence blocks the gate even when GitHub retains earlier successful
 job outputs. Missing advisory receipts produce warnings without blocking required checks.
 
+Receipt readers validate and read the same open file descriptor, reject linked or replaced
+receipt files, and close descriptors on success and failure. CodeQL SARIF evidence uses the
+native `CodeQL` driver name; keep the workflow report declaration and canonical contract aligned.
+PowerShell workflow steps pass named switches through hashtable splatting rather than arrays
+of flag-shaped strings.
+
 `pr-validation-summary` remains the stable required check. `main-validation-summary` evaluates
 full execution before `release-please` can start. Markdown links, Terraform tests, Terraform
 documentation freshness, OSV, and Terraform security remain advisory and visible in summaries.

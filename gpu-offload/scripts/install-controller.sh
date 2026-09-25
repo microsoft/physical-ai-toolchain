@@ -46,7 +46,7 @@ metadata:
 spec:
   containers:
     - name: probe
-      image: probe
+      image: probe # pinning-ignore: server-side admission dry-run; no image is pulled
       command: ["true"]
 YAML
 

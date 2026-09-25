@@ -1,4 +1,7 @@
-# Fleet Deployment
+---
+title: Fleet Deployment
+description: Deliver trained robot policies across sites with FluxCD GitOps, image automation, and deployment safety gating.
+---
 
 The **fleet-delivery control plane (T4 — Scale)**: deliver trained robot policies onto robots across
 sites you cannot directly reach, via FluxCD GitOps pipelines, image automation, and a safety gate

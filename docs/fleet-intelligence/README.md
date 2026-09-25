@@ -1,4 +1,7 @@
-# Fleet Intelligence
+---
+title: Fleet Intelligence
+description: Roadmap for fleet-wide robot telemetry, operational dashboards, drift detection, and human-supervised retraining triggers.
+---
 
 The **fleet-intelligence cognition layer (T5 — Operate)**: fleet-wide telemetry collection, operational
 dashboards, drift detection, and retraining triggers across a fleet of deployed robots. "Fleet" means a

@@ -1,4 +1,7 @@
-# Azure Storage Architecture
+---
+title: Azure Storage Architecture
+description: Storage account roles, container layouts, and data paths for AzureML system data and robotics datasets and checkpoints.
+---
 
 Storage architecture for robotics data across two Azure Storage accounts: an ML workspace storage account for AzureML system data, and an optional ADLS Gen2 data lake for domain data (datasets, model checkpoints).
 

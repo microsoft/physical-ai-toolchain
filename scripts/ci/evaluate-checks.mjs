@@ -1,7 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // SPDX-License-Identifier: MIT
 
-import { appendFileSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync, closeSync, constants, fstatSync, lstatSync, mkdirSync,
+  openSync, readFileSync, readdirSync, writeFileSync,
+} from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +27,20 @@ const markdown = value => safeText(value).replace(/[<>&|`[\]\\]/g, character => 
 const knownTools = new Set(['node', 'git', 'npm', 'uv', 'python', 'pwsh', 'go', 'terraform', 'tflint', 'actionlint', 'shellcheck', 'ruff', 'trivy', 'docker']);
 const requireEvidence = (condition, message) => { if (!condition) throw new Error(message); };
 
+function readReceipt(path) {
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  try {
+    const opened = fstatSync(fd);
+    requireEvidence(opened.isFile(), 'Invalid receipt file');
+    const named = lstatSync(path);
+    requireEvidence(named.isFile() && !named.isSymbolicLink() &&
+      named.dev === opened.dev && named.ino === opened.ino, 'Invalid receipt file identity');
+    return JSON.parse(readFileSync(fd, 'utf8'));
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function downloadedReceipts(directory) {
   if (!directory) return [];
   try {
@@ -32,8 +49,7 @@ function downloadedReceipts(directory) {
       try {
         requireEvidence(entry.isDirectory() && !entry.isSymbolicLink(), 'Invalid artifact directory');
         const path = resolve(artifact.directory, 'receipt.json');
-        requireEvidence(lstatSync(path).isFile() && !lstatSync(path).isSymbolicLink(), 'Invalid receipt file');
-        artifact.receipt = JSON.parse(readFileSync(path, 'utf8'));
+        artifact.receipt = readReceipt(path);
       } catch {
         artifact.invalid = true;
       }
@@ -162,8 +178,7 @@ export function readReceiptTools(directory, context) {
   return readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).map(entry => {
     if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error('Invalid summary artifact directory');
     const path = resolve(directory, entry.name, 'receipt.json');
-    if (lstatSync(path).isSymbolicLink()) throw new Error('Invalid summary receipt path');
-    const receipt = JSON.parse(readFileSync(path, 'utf8'));
+    const receipt = readReceipt(path);
     if (receipt['run-id'] !== context.runId || receipt['run-attempt'] !== context.runAttempt || receipt.sha !== context.head) {
       throw new Error('Stale summary receipt identity');
     }

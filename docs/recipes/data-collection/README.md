@@ -1,4 +1,7 @@
-# Data Collection Recipes
+---
+title: Data Collection Recipes
+description: Recipes for capturing, processing, and managing robotic training datasets.
+---
 
 Guides for capturing, processing, and managing robotic training datasets.
 

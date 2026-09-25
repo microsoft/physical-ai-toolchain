@@ -1,4 +1,7 @@
-# T5 — Operate: Fleet Intelligence (Roadmap)
+---
+title: "T5 — Operate: Fleet Intelligence (Roadmap)"
+description: Roadmap for fleet intelligence, aggregate telemetry, drift detection, and human-supervised retraining beyond multi-site policy delivery.
+---
 
 > [!WARNING]
 > **Roadmap direction, not shipped.** The fleet-intelligence domain is currently specified, with

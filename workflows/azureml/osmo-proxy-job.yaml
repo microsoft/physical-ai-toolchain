@@ -28,7 +28,7 @@ identity:
 code: ../..
 
 environment:
-  image: mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu22.04:latest
+  image: mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu22.04:latest@sha256:7481fbfbbc1c7d7ab0e9e4633180c809413bd77e108b605d6e4d3a60aa35bf67
 
 compute: azureml:k8s-compute
 
@@ -37,7 +37,7 @@ resources:
   shm_size: 512m
 
 command: >-
-  pip install --quiet uv &&
+  pip install --quiet uv==0.12.8 &&
   uv --directory workflows/azureml/osmo-proxy export --frozen --no-hashes --no-emit-project |
   uv pip install --no-deps --quiet --system -r /dev/stdin &&
   python workflows/azureml/osmo-proxy/osmo_proxy.py

@@ -1,4 +1,7 @@
-# Security
+---
+title: Security
+description: Security vulnerability reporting, remediation targets, and security considerations for Physical AI Toolchain deployers.
+---
 
 <!-- BEGIN MICROSOFT SECURITY.MD V0.0.9 BLOCK -->
 

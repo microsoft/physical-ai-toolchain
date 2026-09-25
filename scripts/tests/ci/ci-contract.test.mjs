@@ -4,12 +4,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { buildSummary, evaluateChecks, readReceiptTools, requiredLanes, visibleLanes } from '../../ci/evaluate-checks.mjs';
-import { aggregateOutcomes, outcomeOutputs, publishOutcome, recordOutcome } from '../../ci/publish-outcome.mjs';
+import { aggregateOutcomes, inspectReport, outcomeOutputs, publishOutcome, recordOutcome } from '../../ci/publish-outcome.mjs';
 import { comparePaths, loadContract, parseChangedPaths, selectChecks, selectionOutputs } from '../../ci/select-checks.mjs';
 import { readWorkflowGraph, validateWorkflows } from '../../ci/validate-workflows.mjs';
 
@@ -1131,6 +1132,57 @@ function mainSuccessNeeds() {
   ]));
 }
 
+test('CodeQL contract: native producer reports satisfy every language shard', t => {
+  const workspace = temporaryDirectory(t);
+  const metadata = contract.execution['codeql-analysis'].jobs.analyze;
+  for (const shard of metadata.shards) {
+    const spec = { ...metadata.reports[0], path: metadata.reports[0].path.replaceAll('{shard}', shard) };
+    const path = `${spec.path}/results.sarif`;
+    writeFixture(workspace, path, JSON.stringify({
+      version: '2.1.0',
+      runs: [{ tool: { driver: { name: 'CodeQL' } }, invocations: [{ executionSuccessful: true }], results: [] }],
+    }));
+    assert.equal(spec.tool, 'CodeQL');
+    assert.equal(inspectReport(workspace, spec).successful, true);
+    assert.throws(() => inspectReport(workspace, { ...spec, tool: 'unrelated-scanner' }), /Wrong SARIF tool/);
+  }
+});
+
+test('frontmatter workflow: booleans bind to the actual script parameters without replacing scan paths', t => {
+  const workspace = temporaryDirectory(t);
+  const step = graph['.github/workflows/frontmatter-validation.yml'].jobs['frontmatter-validation'].steps
+    .find(item => item.id === 'frontmatter');
+  for (let bits = 0; bits < 8; bits++) {
+    const values = {
+      'changed-files-only': Boolean(bits & 1),
+      'warnings-as-errors': Boolean(bits & 2),
+      'enable-schema-validation': Boolean(bits & 4),
+    };
+    const run = step.run.replace(/\$\{\{ inputs\.([a-z-]+) \}\}/g, (_, key) => String(values[key]));
+    const script = `
+      $ErrorActionPreference = 'Stop'
+      $tokens = $null
+      $errors = $null
+      $ast = [System.Management.Automation.Language.Parser]::ParseFile($env:FRONTMATTER_SOURCE, [ref]$tokens, [ref]$errors)
+      if ($errors.Count -gt 0) { throw 'Cannot parse frontmatter parameters' }
+      New-Item -ItemType Directory -Path scripts/linting -Force | Out-Null
+      $capture = '[PSCustomObject]@{ Paths = $Paths; ChangedFilesOnly = [bool]$ChangedFilesOnly; WarningsAsErrors = [bool]$WarningsAsErrors; EnableSchemaValidation = [bool]$EnableSchemaValidation } | ConvertTo-Json -Compress'
+      Set-Content -Path scripts/linting/Invoke-FrontmatterValidation.ps1 -Value ($ast.ParamBlock.Extent.Text + [Environment]::NewLine + $capture)
+      ${run}
+    `;
+    const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      cwd: workspace, encoding: 'utf8', timeout: 30_000,
+      env: { ...process.env, FRONTMATTER_SOURCE: join(root, 'scripts/linting/Invoke-FrontmatterValidation.ps1') },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      Paths: ['.'], ChangedFilesOnly: values['changed-files-only'], WarningsAsErrors: values['warnings-as-errors'],
+      EnableSchemaValidation: values['enable-schema-validation'],
+    });
+  }
+});
+
 test('receipt gate: real main success outputs without downloaded receipts never pass', () => {
   const summary = buildSummary(mainSuccessNeeds(), contract, 'main', { runId: '123', runAttempt: '2', head: 'b'.repeat(40) });
   assert.equal(summary.report.status, 'failure');
@@ -1328,6 +1380,100 @@ test('summary tools: reject loose files and malformed receipts', t => {
   rmSync(join(cwd, 'untrusted.txt'));
   writeFixture(cwd, 'artifact/receipt.json', '{');
   assert.throws(() => readReceiptTools(cwd, {}));
+});
+
+test('receipt readers: missing, malformed, non-file and linked receipts fail closed', t => {
+  const needs = mainSuccessNeeds();
+  const { context, roots } = freshEvidence(t, needs);
+  const { path } = roots.get('python-lint');
+  const original = readFileSync(path, 'utf8');
+  for (const kind of ['missing', 'malformed', 'directory', 'link']) {
+    rmSync(path, { recursive: true, force: true });
+    if (kind === 'malformed') writeFileSync(path, '{');
+    if (kind === 'directory') mkdirSync(path);
+    if (kind === 'link') {
+      const target = join(dirname(path), 'link-target');
+      if (process.platform === 'win32') mkdirSync(target);
+      else writeFileSync(target, original);
+      symlinkSync(target, path, process.platform === 'win32' ? 'junction' : 'file');
+    }
+    assert.throws(() => readReceiptTools(context.receiptsDirectory, context), undefined, kind);
+    const summary = buildSummary(needs, contract, 'main', context);
+    assert.equal(summary.report.status, 'failure', kind);
+    assert.ok(summary.report.errors.some(error => error.includes('Malformed execution receipt artifact')), kind);
+  }
+});
+
+test('receipt readers: reject a replaced file identity and close the opened descriptor', t => {
+  const nativeStat = fs.fstatSync;
+  for (const consumer of ['tools', 'gate']) {
+    const needs = mainSuccessNeeds();
+    const { context, roots } = freshEvidence(t, needs);
+    const { path } = roots.get('python-lint');
+    const identity = fs.lstatSync(path);
+    let opened;
+    t.mock.method(fs, 'fstatSync', fd => {
+      const stats = nativeStat(fd);
+      if (opened === undefined && stats.dev === identity.dev && stats.ino === identity.ino) {
+        opened = fd;
+        renameSync(path, `${path}.original`);
+        writeFileSync(path, '{}');
+      }
+      return stats;
+    });
+    syncBuiltinESMExports();
+    try {
+      if (consumer === 'tools') {
+        assert.throws(() => readReceiptTools(context.receiptsDirectory, context), /Invalid receipt file identity/);
+      } else {
+        const summary = buildSummary(needs, contract, 'main', context);
+        assert.ok(summary.report.errors.some(error => error.includes('Malformed execution receipt artifact')));
+      }
+      assert.notEqual(opened, undefined);
+      assert.throws(() => nativeStat(opened), { code: 'EBADF' });
+    } finally {
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+  }
+});
+
+test('receipt readers: retain the validated descriptor after a later path replacement and close it', t => {
+  const nativeLstat = fs.lstatSync;
+  const nativeStat = fs.fstatSync;
+  for (const consumer of ['tools', 'gate']) {
+    const needs = mainSuccessNeeds();
+    const { context, roots } = freshEvidence(t, needs);
+    const { path } = roots.get('python-lint');
+    const identity = nativeLstat(path);
+    let opened;
+    t.mock.method(fs, 'fstatSync', fd => {
+      const stats = nativeStat(fd);
+      if (opened === undefined && stats.dev === identity.dev && stats.ino === identity.ino) opened = fd;
+      return stats;
+    });
+    t.mock.method(fs, 'lstatSync', (...args) => {
+      const stats = nativeLstat(...args);
+      if (args[0] === path && opened !== undefined && stats.ino === identity.ino) {
+        renameSync(path, `${path}.original`);
+        writeFileSync(path, '{');
+      }
+      return stats;
+    });
+    syncBuiltinESMExports();
+    try {
+      if (consumer === 'tools') {
+        assert.ok(readReceiptTools(context.receiptsDirectory, context).some(item => item.workflow === 'python-lint'));
+      } else {
+        assert.equal(buildSummary(needs, contract, 'main', context).report.status, 'success');
+      }
+      assert.notEqual(opened, undefined);
+      assert.throws(() => nativeStat(opened), { code: 'EBADF' });
+    } finally {
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+  }
 });
 
 test('summary CLI: missing receipt directory fails closed and persists JSON and Markdown', t => {

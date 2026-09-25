@@ -74,7 +74,7 @@ jobs:
           shard: ${{ matrix.language }}
           steps-json: ${{ toJSON(steps) }}
           required-steps: '["init","autobuild","analyze"]'
-          reports: '[{"path":"logs/codeql/${{ matrix.language }}","kind":"sarif","tool":"CodeQL command-line toolchain"}]'
+          reports: '[{"path":"logs/codeql/${{ matrix.language }}","kind":"sarif","tool":"CodeQL"}]'
 
   aggregate:
     name: CodeQL Execution Summary
