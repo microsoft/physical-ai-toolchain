@@ -2199,6 +2199,7 @@ class TestGitHubSurfaceContracts:
         assert all("npm run test:a11y" not in str(step.get("run", "")) for step in viewer_steps.values())
         assert any("npm run test:coverage" in str(step.get("run", "")) for step in viewer_steps.values())
         product_run = evidence_steps["Run deterministic product evidence"]["run"]
+        assert 'npm --prefix "$GITHUB_WORKSPACE" ci' in product_run
         assert "npm run test:a11y" in product_run
         assert "viewer-evidence-manifest.json" in product_run
         assert "expected_titles != actual_titles" in product_run
