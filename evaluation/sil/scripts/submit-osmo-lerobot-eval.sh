@@ -26,7 +26,7 @@ fi
 
 show_help() {
   cat << 'EOF'
-Usage: submit-osmo-lerobot-inference.sh [OPTIONS] [-- osmo-submit-flags]
+Usage: submit-osmo-lerobot-eval.sh [OPTIONS] [-- osmo-submit-flags]
 
 Submit a LeRobot inference/evaluation workflow to OSMO.
 Evaluates trained policies from HuggingFace Hub or Azure ML model registry.
@@ -43,6 +43,7 @@ POLICY SOURCE (one required):
 DATASET SOURCE (one required):
     -d, --dataset-repo-id ID     HuggingFace dataset for replay evaluation
         --dataset-revision SHA    HuggingFace commit SHA to pin the dataset download (required for Hub)
+    --dataset-trust MODE      Dataset trust: unverified or verified (default: unverified)
         --from-blob-dataset       Download dataset from Azure Blob Storage
         --storage-account NAME    Azure storage account (default: from Terraform)
         --storage-container NAME  Blob container name (default: datasets)

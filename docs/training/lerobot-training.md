@@ -44,14 +44,16 @@ LeRobot behavioral cloning training for ACT and Diffusion policy architectures. 
 
 ### End-to-End Pipeline (OSMO)
 
-Train, evaluate, and register in one command:
+Train from a HuggingFace dataset, register, and evaluate in one command. The revision pins evaluation, not the training download:
 
 ```bash
-./scripts/run-lerobot-pipeline.sh \
+training/pipelines/run-lerobot-pipeline.sh \
   -d lerobot/aloha_sim_insertion_human \
-  --policy-repo-id user/my-act-policy \
+  --dataset-revision <dataset-commit-sha> \
   -r my-act-model
 ```
+
+Use [Record Episodes for a Verified Experiment](../recipes/data-collection/record-to-verified-experiment.md) for the Azure Viewer release path.
 
 ## 🧠 Policy Architectures
 

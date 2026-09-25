@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# End-to-end LeRobot pipeline: train → wait → evaluate → register
-# Orchestrates training and inference workflows with automatic polling
+# End-to-end LeRobot pipeline: train, register, wait, and evaluate
+# Orchestrates training and evaluation workflows with automatic polling
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,14 +28,15 @@ show_help() {
   cat << 'EOF'
 Usage: run-lerobot-pipeline.sh [OPTIONS] [-- osmo-submit-flags]
 
-End-to-end LeRobot pipeline: train → wait → evaluate → register.
+End-to-end LeRobot pipeline: train → register → wait → evaluate.
 
-Submits a training workflow, polls for completion, then submits an inference
-workflow against the trained policy. Optionally registers the model to Azure ML.
+Submits a training workflow, polls for completion, resolves the model version
+registered by that job, then submits an evaluation workflow against the model.
 
 REQUIRED:
     -d, --dataset-repo-id ID      HuggingFace dataset repository (e.g., user/dataset)
-        --policy-repo-id ID       HuggingFace repo where trained policy will be pushed
+    --dataset-revision SHA    HuggingFace commit SHA for evaluation
+  -r, --register-model NAME     Azure ML model name for the trained checkpoint
 
 TRAINING OPTIONS:
     -p, --policy-type TYPE        Policy architecture: act, diffusion (default: act)
@@ -44,16 +45,16 @@ TRAINING OPTIONS:
         --training-steps N        Total training iterations
         --batch-size N            Training batch size
         --save-freq N             Checkpoint save frequency (default: 5000)
+        --policy-repo-id ID       Optional HuggingFace policy for fine-tuning
 
 LOGGING OPTIONS:
         --experiment-name NAME    MLflow experiment name
 
-INFERENCE OPTIONS:
+EVALUATION OPTIONS:
         --eval-episodes N         Evaluation episodes (default: 10)
-        --skip-inference          Skip the inference stage
+  --skip-inference          Skip the evaluation stage
 
 REGISTRATION OPTIONS:
-    -r, --register-model NAME     Register model to Azure ML after inference
         --skip-register           Skip model registration during training
 
 PIPELINE OPTIONS:
@@ -75,23 +76,26 @@ EXAMPLES:
     # Full pipeline: train ACT → evaluate → register
     run-lerobot-pipeline.sh \
       -d lerobot/aloha_sim_insertion_human \
-      --policy-repo-id user/my-act-policy \
+      --dataset-revision <commit-sha> \
       -r my-act-model
 
     # Train and evaluate without registration
     run-lerobot-pipeline.sh \
       -d user/my-dataset \
-      --policy-repo-id user/my-policy
+      --dataset-revision <commit-sha> \
+      -r my-act-model
 
     # Async mode (submit training and exit)
     run-lerobot-pipeline.sh \
       -d user/my-dataset \
+      --dataset-revision <commit-sha> \
+      -r my-act-model \
       --skip-wait
 
     # MLflow pipeline with custom training
     run-lerobot-pipeline.sh \
       -d user/my-dataset \
-      --policy-repo-id user/my-policy \
+      --dataset-revision <commit-sha> \
       -p diffusion \
       --training-steps 100000 \
       -r my-diffusion-model
@@ -103,6 +107,7 @@ EOF
 #------------------------------------------------------------------------------
 
 dataset_repo_id="${DATASET_REPO_ID:-}"
+dataset_revision="${DATASET_REVISION:-}"
 policy_repo_id="${POLICY_REPO_ID:-}"
 policy_type="${POLICY_TYPE:-act}"
 job_name="${JOB_NAME:-lerobot-pipeline}"
@@ -140,6 +145,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)                    show_help; exit 0 ;;
     -d|--dataset-repo-id)         dataset_repo_id="$2"; shift 2 ;;
+    --dataset-revision)           dataset_revision="$2"; shift 2 ;;
     --policy-repo-id)             policy_repo_id="$2"; shift 2 ;;
     -p|--policy-type)             policy_type="$2"; shift 2 ;;
     -j|--job-name)                job_name="$2"; shift 2 ;;
@@ -172,10 +178,13 @@ done
 [[ "$use_local_osmo" == "true" ]] && activate_local_osmo
 
 require_tools osmo jq
+[[ "$skip_wait" == "false" && "$skip_inference" == "false" ]] && require_tools az
 
 [[ -z "$dataset_repo_id" ]] && fatal "--dataset-repo-id is required"
 if [[ "$skip_wait" == "false" && "$skip_inference" == "false" ]]; then
-  [[ -z "$policy_repo_id" ]] && fatal "--policy-repo-id is required for the inference stage (or use --skip-inference)"
+  [[ -z "$dataset_revision" ]] && fatal "--dataset-revision is required for evaluation (or use --skip-inference)"
+  [[ -z "$register_model" ]] && fatal "--register-model is required for evaluation (or use --skip-inference)"
+  [[ "$skip_register" == "true" ]] && fatal "--skip-register cannot be combined with evaluation"
 fi
 
 case "$policy_type" in
@@ -193,10 +202,11 @@ eval_job_name="${job_name}-eval"
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Dataset" "$dataset_repo_id"
-  print_kv "Policy Repo" "${policy_repo_id:-<not set>}"
+  print_kv "Dataset Revision" "${dataset_revision:-<not set>}"
+  print_kv "Warm-start Policy" "${policy_repo_id:-<none>}"
   print_kv "Policy Type" "$policy_type"
   print_kv "Training Job" "${job_name}-train"
-  print_kv "Inference Job" "${job_name}-eval"
+  print_kv "Evaluation Job" "${job_name}-eval"
   print_kv "Training Steps" "${training_steps:-<default>}"
   print_kv "Batch Size" "${batch_size:-<default>}"
   print_kv "Save Freq" "$save_freq"
@@ -261,8 +271,8 @@ if [[ "$skip_wait" == "true" ]]; then
   print_kv "Monitor" "osmo workflow query $train_job_name"
   info "To continue the pipeline after training completes:"
   info "  $0 --skip-wait is not applicable for the remaining stages."
-  info "  Instead, run inference separately:"
-  info "  ./submit-osmo-lerobot-inference.sh --policy-repo-id $policy_repo_id"
+  info "  After registration, run evaluation with:"
+  info "  $REPO_ROOT/evaluation/sil/scripts/submit-osmo-lerobot-eval.sh --from-aml-model ..."
   exit 0
 fi
 
@@ -312,29 +322,43 @@ if [[ $elapsed -ge $timeout_secs ]]; then
 fi
 
 #------------------------------------------------------------------------------
-# Stage 3: Submit Inference
+# Stage 3: Submit Evaluation
 #------------------------------------------------------------------------------
 
 if [[ "$skip_inference" == "true" ]]; then
-  info "Skipping inference stage per --skip-inference"
+  info "Skipping evaluation stage per --skip-inference"
 else
-  section "Stage 3: Inference"
-  info "Submitting LeRobot inference workflow..."
+  section "Stage 3: Evaluation"
+  info "Resolving the Azure ML model registered by $train_job_name..."
+
+  registered_model_name="${register_model//_/-}"
+  if ! registered_model_version=$(az ml model list \
+      --name "$registered_model_name" \
+      --resource-group "$resource_group" \
+      --workspace-name "$workspace_name" \
+      --query "sort_by([?tags.job_name=='$train_job_name'], &creation_context.created_at)[-1].version" \
+      --output tsv); then
+    fatal "Failed to query registered models for training job: $train_job_name"
+  fi
+  [[ -n "$registered_model_version" ]] ||
+    fatal "No registered model found for training job: $train_job_name"
+
+  info "Submitting LeRobot evaluation workflow..."
 
   eval_args=(
-    "$REPO_ROOT/scripts/submit-osmo-lerobot-inference.sh"
-    --policy-repo-id "$policy_repo_id"
+    "$REPO_ROOT/evaluation/sil/scripts/submit-osmo-lerobot-eval.sh"
+    --from-aml-model
+    --model-name "$registered_model_name"
+    --model-version "$registered_model_version"
     --policy-type "$policy_type"
+    --dataset-repo-id "$dataset_repo_id"
+    --dataset-revision "$dataset_revision"
     --job-name "$eval_job_name"
     --eval-episodes "$eval_episodes"
+    --mlflow-enable
   )
 
   [[ -n "$image" ]]   && eval_args+=(--image "$image")
-  [[ -n "$dataset_repo_id" ]] && eval_args+=(--dataset-repo-id "$dataset_repo_id")
-
-  if [[ -n "$register_model" ]]; then
-    eval_args+=(--register-model "$register_model")
-  fi
 
   if [[ -n "$subscription_id" ]]; then
     eval_args+=(--azure-subscription-id "$subscription_id")
@@ -348,9 +372,9 @@ else
 
   [[ "$use_local_osmo" == "true" ]] && eval_args+=(--use-local-osmo)
 
-  bash "${eval_args[@]}" || fatal "Inference submission failed"
+  bash "${eval_args[@]}" || fatal "Evaluation submission failed"
 
-  info "Inference workflow submitted: $eval_job_name"
+  info "Evaluation workflow submitted: $eval_job_name"
 fi
 
 #------------------------------------------------------------------------------
@@ -361,8 +385,8 @@ section "Deployment Summary"
 print_kv "Dataset" "$dataset_repo_id"
 print_kv "Policy Type" "$policy_type"
 print_kv "Training Job" "$train_job_name"
-[[ "$skip_inference" == "false" ]] && print_kv "Inference Job" "$eval_job_name"
-[[ -n "$policy_repo_id" ]] && print_kv "Policy Repo" "$policy_repo_id"
+[[ "$skip_inference" == "false" ]] && print_kv "Evaluation Job" "$eval_job_name"
+[[ -n "$policy_repo_id" ]] && print_kv "Warm-start Policy" "$policy_repo_id"
 [[ -n "$register_model" ]] && print_kv "Model Name" "$register_model"
 
 info "Monitor workflows:"

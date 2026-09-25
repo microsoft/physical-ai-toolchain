@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Script Reference
 description: Submission script inventory, CLI arguments, variable reference, and configuration for AzureML and OSMO training and inference pipelines.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-01
+ms.date: 2026-09-25
 ms.topic: reference
 keywords:
   - scripts
@@ -29,8 +29,9 @@ Inventory of submission scripts for training, evaluation, and inference workflow
 | `submit-osmo-training.sh`               | Package code and submit OSMO workflow               | OSMO     |
 | `submit-osmo-dataset-training.sh`       | Submit OSMO workflow using dataset folder injection | OSMO     |
 | `submit-osmo-lerobot-training.sh`       | Submit LeRobot behavioral cloning training          | OSMO     |
-| `submit-osmo-lerobot-inference.sh`      | Submit LeRobot inference/evaluation                 | OSMO     |
-| `run-lerobot-pipeline.sh`               | End-to-end train → evaluate → register pipeline     | OSMO     |
+| `submit-osmo-lerobot-eval.sh`           | Submit LeRobot evaluation                           | OSMO     |
+| `submit-azureml-lerobot-eval.sh`        | Submit LeRobot evaluation                           | Azure ML |
+| `run-lerobot-pipeline.sh`               | Train, register, and evaluate a Hub dataset         | OSMO     |
 
 ## Quick Start
 
@@ -49,20 +50,25 @@ Scripts auto-detect Azure context from Terraform outputs in `infrastructure/terr
 # LeRobot behavioral cloning (OSMO)
 ./submit-osmo-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
 
-# LeRobot behavioral cloning from Azure Blob (OSMO)
+# LeRobot behavioral cloning from a verified Viewer release (OSMO)
 ./submit-osmo-lerobot-training.sh \
-  --blob-url https://account.blob.core.windows.net/datasets/pusht
+  --blob-url https://account.blob.core.windows.net/datasets/exports/releases/pusht/release-1 \
+  --dataset-trust verified
 
 # LeRobot behavioral cloning (Azure ML)
 ./submit-azureml-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
 
-# LeRobot inference/evaluation
-./submit-osmo-lerobot-inference.sh --policy-repo-id user/trained-policy
+# LeRobot evaluation
+./evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
+  --policy-repo-id user/trained-policy \
+  --policy-revision <policy-commit-sha> \
+  --dataset-repo-id user/evaluation-dataset \
+  --dataset-revision <dataset-commit-sha>
 
-# End-to-end pipeline: train → evaluate → register
-./run-lerobot-pipeline.sh \
+# End-to-end Hub pipeline: train → register → evaluate
+./training/pipelines/run-lerobot-pipeline.sh \
   -d lerobot/aloha_sim_insertion_human \
-  --policy-repo-id user/my-policy \
+  --dataset-revision <dataset-commit-sha> \
   -r my-model
 
 # Evaluation (requires registered model)

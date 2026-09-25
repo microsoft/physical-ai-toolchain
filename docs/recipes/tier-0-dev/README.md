@@ -84,6 +84,8 @@ cd data-management/viewer && DATA_DIR=~/datasets ./start.sh
 Wait for `[OK] Both services are running`, then open the printed `http://localhost:...` URL to browse
 episodes, inspect frames, and drop bad demonstrations before training.
 
+T0 local folders are suitable for unverified experimentation. When the dataset must become a shared, immutable input, continue with [Record Episodes for a Verified Experiment](../data-collection/record-to-verified-experiment.md) at T1 storage or T2 cloud training.
+
 ### Step 4: Train an imitation policy locally
 
 Train an ACT policy with LeRobot's `lerobot-train` CLI. It runs as a plain local process against your

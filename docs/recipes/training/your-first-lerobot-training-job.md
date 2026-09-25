@@ -65,14 +65,15 @@ Customize training hyperparameters:
 
 ### Step 3: Train with data from Azure Blob Storage
 
-Use `--blob-url` when your dataset is in Azure Storage instead of HuggingFace:
+Use the exact Viewer release URL with `--dataset-trust verified` for a governed T1 or T2 dataset:
 
 ```bash
 ./submit-osmo-lerobot-training.sh \
-  --blob-url https://<your-storage-account>.blob.core.windows.net/datasets/my-dataset/v1
+  --blob-url https://<your-storage-account>.blob.core.windows.net/datasets/exports/releases/<dataset-id>/<release-id> \
+  --dataset-trust verified
 ```
 
-The workflow downloads the dataset with managed identity credentials before training starts. Grant Blob data access to the OSMO workload identity before submitting private datasets.
+The workflow downloads and verifies the release with managed identity credentials before training starts. Grant Blob data access to the OSMO workload identity before submitting private datasets. Follow [Record Episodes for a Verified Experiment](../data-collection/record-to-verified-experiment.md) to create the release.
 
 ### Step 4: Monitor training progress
 
@@ -122,6 +123,7 @@ The recipe succeeded when:
 |----------------------------|------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
 | `-d, --dataset-repo-id`    | Required for HuggingFace; `dataset` for Blob sources | HuggingFace dataset repository or logical local dataset name                                        |
 | `--blob-url`               | (none)                                               | Direct Azure Blob dataset URL; repeatable                                                           |
+| `--dataset-trust`          | `unverified`                                         | Use `verified` only for marker-complete Viewer releases                                              |
 | `--policy-type`            | `act`                                                | Policy architecture (`act` or `diffusion`)                                                          |
 | `--training-steps`         | `100000`                                             | Total training iterations                                                                           |
 | `--batch-size`             | `32`                                                 | Training batch size                                                                                 |
@@ -138,6 +140,7 @@ See [Scripts Reference](../../reference/scripts.md) for the full parameter table
 
 - [End-to-End LeRobot Pipeline](end-to-end-lerobot-pipeline.md) — automated train → evaluate → register
 - [Preparing Datasets for Training](../data-collection/preparing-datasets-for-training.md) — dataset download and validation
+- [Record Episodes for a Verified Experiment](../data-collection/record-to-verified-experiment.md) — verified release, training, and evaluation
 - [Migrate LeRobot Checkpoints](../../training/lerobot-checkpoint-migration.md) for pre-0.6 checkpoint conversion and validation
 - [Your First RL Training Job](your-first-rl-training-job.md) — reinforcement learning alternative
 - [LeRobot Training Guide](../../training/lerobot-training.md) — detailed IL reference documentation

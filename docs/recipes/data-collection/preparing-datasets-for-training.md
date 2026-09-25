@@ -1,9 +1,11 @@
 # Preparing Datasets for Training
 
-Download a dataset from Azure Blob Storage or HuggingFace, inspect its structure, validate format compliance, and connect it to a LeRobot training workflow. By the end of this recipe, you will have a training-ready dataset on your local machine or in a cloud-accessible location.
+Download a dataset from Azure Blob Storage or HuggingFace, inspect its structure, and connect it to a LeRobot training workflow. Raw folders support unverified experimentation; a verified T1 or T2 workflow requires Dataset Analysis Tool review and an immutable Azure release.
 
 > [!NOTE]
 > This recipe covers dataset preparation. For training with the prepared dataset, continue to [Your First LeRobot Training Job](../training/your-first-lerobot-training-job.md).
+
+For the complete capture, review, Azure publication, verified training, and evaluation path, follow [Record Episodes for a Verified Experiment](record-to-verified-experiment.md).
 
 ## 📋 Prerequisites
 
@@ -116,7 +118,7 @@ print(f'Rows: {table.num_rows}')
 "
 ```
 
-### Step 5: Browse with the Dataset Viewer (optional)
+### Step 5: Review and release verified datasets
 
 Launch the Dataset Analysis Tool for visual episode inspection:
 
@@ -125,7 +127,7 @@ cd data-management/viewer
 ./start.sh
 ```
 
-Open `http://localhost:5173` in a browser. The viewer provides episode browsing, frame-level annotation, trajectory visualization, and data quality metrics.
+Open `http://localhost:5173` in a browser. For unverified experimentation, use the viewer for inspection. For verified T1 or T2 use, configure its Azure backend, save changes, run quality, accept eligible episodes, and publish an immutable release directly to Azure. See [Record Episodes for a Verified Experiment](record-to-verified-experiment.md).
 
 ### Step 6: Connect to training
 
@@ -136,9 +138,10 @@ With the dataset validated, submit a training job using the repository ID or dir
 cd training/il/scripts
 ./submit-osmo-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
 
-# From Azure Blob (dataset downloaded at job start)
+# From a marker-complete Viewer release in Azure Blob
 ./submit-osmo-lerobot-training.sh \
-  --blob-url https://<your-storage-account>.blob.core.windows.net/datasets/my-dataset/v1
+  --blob-url https://<your-storage-account>.blob.core.windows.net/datasets/exports/releases/<dataset-id>/<release-id> \
+  --dataset-trust verified
 ```
 
 See [Your First LeRobot Training Job](../training/your-first-lerobot-training-job.md) for the full training recipe.
@@ -150,7 +153,8 @@ The recipe succeeded when:
 - Dataset directory contains `meta/info.json` with valid metadata
 - Episode parquet files are readable with expected columns
 - `info.json` reports expected episode and frame counts
-- (Optional) Dataset Viewer displays episodes without errors
+- Dataset Viewer displays episodes without errors
+- Verified workflows publish `.published.json` beneath `exports/releases/<dataset-id>/<release-id>/`
 
 ## ⚙️ Configuration Reference
 
@@ -165,6 +169,7 @@ The recipe succeeded when:
 ## 🔗 Related Recipes
 
 - [Configuring Edge Data Recording](configuring-edge-data-recording.md) — capture your own training data
+- [Record Episodes for a Verified Experiment](record-to-verified-experiment.md) — review, publish, train, and evaluate with verified trust
 - [Your First LeRobot Training Job](../training/your-first-lerobot-training-job.md) — train with the prepared dataset
 - [End-to-End LeRobot Pipeline](../training/end-to-end-lerobot-pipeline.md) — automated train → evaluate → register
 

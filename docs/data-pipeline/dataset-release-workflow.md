@@ -2,7 +2,7 @@
 title: Dataset Release Workflow
 description: Review, package, publish, and verify immutable dataset releases from the Dataset Analysis Tool
 author: Microsoft
-ms.date: 2026-09-24
+ms.date: 2026-09-25
 ms.topic: how-to
 ---
 
@@ -72,6 +72,9 @@ Durable jobs and worker staging remain on the backend filesystem in Azure mode. 
 
 Azure browsing uses an optimized media cache, but quality and release operations do not. Each operation materializes the complete source dataset, including Parquet, HDF5, metadata, and video files, into an operation-owned temporary workspace. The backend deletes that workspace after the operation completes. Source containers remain read-only; mutable annotation and label sidecars remain beneath the backend-owned export prefix.
 
+> [!IMPORTANT]
+> Publish cloud releases directly from a Viewer configured with `STORAGE_BACKEND=azure`. A generic recursive upload of a local release is not a supported promotion path because it does not guarantee destination verification or creation of `.published.json` after every other object. Follow [Record Episodes for a Verified Experiment](../recipes/data-collection/record-to-verified-experiment.md) for the T1 and T2 workflow.
+
 ## Create a Release
 
 1. Open a dataset and episode in the annotation workspace.
@@ -140,6 +143,8 @@ Set `--dataset-trust verified` when a training or evaluation Blob source points 
 A single verified release remains immutable. Combining multiple verified releases creates a separate `derived` workspace with ordered parent summaries and its own digest. The derived workspace never inherits a parent release digest.
 
 Training runs, evaluation results, and registered models retain release identity and source episode mapping. The demonstrated simulation endpoint is `evaluation/sil`. Hardware-in-the-loop or physical robot execution is optional and outside this workflow's critical path.
+
+Use [Record Episodes for a Verified Experiment](../recipes/data-collection/record-to-verified-experiment.md) for complete Azure publication, verified training, evaluation, and lineage commands.
 
 ## Recover and Cancel Jobs
 

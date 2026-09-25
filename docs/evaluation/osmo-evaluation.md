@@ -1,9 +1,9 @@
 ---
 sidebar_position: 3
-title: OSMO Inference Workflows
-description: Execute trained robotics policy inference using NVIDIA OSMO with Isaac Lab and LeRobot frameworks
+title: OSMO Evaluation Workflows
+description: Evaluate trained robotics policies using NVIDIA OSMO with Isaac Lab and LeRobot frameworks
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-01
+ms.date: 2026-09-25
 ms.topic: how-to
 keywords:
   - OSMO
@@ -112,6 +112,9 @@ osmo workflow logs <workflow-id> | grep "checkpoint"
 | `--policy-type`      | No       | `act`   | Policy architecture                             |
 | `--dataset-repo-id`  | No       | —       | Evaluation dataset                              |
 | `--dataset-revision` | Cond.‡   | —       | HuggingFace commit SHA pinning the dataset repo |
+| `--from-blob-dataset` | No      | `false` | Load the dataset from Azure Blob Storage        |
+| `--blob-prefix`      | Cond.    | —       | Blob dataset or release prefix                  |
+| `--dataset-trust`    | No       | `unverified` | Dataset trust contract                    |
 | `--eval-episodes`    | No       | `10`    | Number of evaluation episodes                   |
 | `--eval-batch-size`  | No       | `1`     | Batch size for evaluation                       |
 | `--record-video`     | No       | `false` | Enable video recording                          |
@@ -125,11 +128,19 @@ osmo workflow logs <workflow-id> | grep "checkpoint"
 Basic evaluation:
 
 ```bash
-osmo workflow submit \
-  --file workflows/osmo/lerobot-eval.yaml \
-  --set policy_repo_id=<hf-repo-id> \
-  --set policy_revision=<commit-sha>
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
+  --from-aml-model \
+  --model-name <model-name> \
+  --model-version <model-version> \
+  --from-blob-dataset \
+  --storage-account <storage-account> \
+  --storage-container datasets \
+  --blob-prefix "exports/releases/<dataset-id>/<release-id>" \
+  --dataset-trust verified \
+  --mlflow-enable
 ```
+
+See [Record Episodes for a Verified Experiment](../recipes/data-collection/record-to-verified-experiment.md) for the T1 release and T2 evaluation workflow.
 
 With video recording:
 

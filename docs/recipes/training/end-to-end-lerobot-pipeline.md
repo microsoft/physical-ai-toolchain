@@ -1,6 +1,6 @@
 # End-to-End LeRobot Pipeline
 
-Run the full LeRobot pipeline — train a policy, evaluate it against simulation episodes, and register the model to Azure ML — in a single command. The pipeline script handles workflow submission, status polling, and stage transitions automatically.
+Train from a HuggingFace dataset, register the checkpoint in Azure ML, and evaluate that exact model version in one command. The pipeline script handles OSMO submission, status polling, model-version resolution, and evaluation submission. The dataset revision pins evaluation; use the verified Azure release workflow when training and evaluation must share one immutable dataset input.
 
 > [!NOTE]
 > Complete [Your First LeRobot Training Job](your-first-lerobot-training-job.md) before this recipe to verify that single-stage submission works.
@@ -12,7 +12,8 @@ Run the full LeRobot pipeline — train a policy, evaluate it against simulation
 | Infrastructure       | Azure resources deployed via Terraform                    |
 | OSMO                 | Control plane and backend running                         |
 | Basic LeRobot recipe | Single-stage training verified successfully               |
-| HuggingFace account  | Write access to a policy repo for pushing trained weights |
+| HuggingFace dataset  | Repository ID and evaluation commit SHA                   |
+| Azure ML registry    | Workspace for the registered training checkpoint           |
 
 ## 🚀 Steps
 
@@ -21,11 +22,10 @@ Run the full LeRobot pipeline — train a policy, evaluate it against simulation
 The `run-lerobot-pipeline.sh` script orchestrates three stages:
 
 ```text
-Train → Wait → Evaluate → Register
-  │              │           │
-  │              │           └── Register model to Azure ML
-  │              └── Submit inference/eval workflow
-  └── Submit training workflow, poll until complete
+Train and register → Wait → Resolve model version → Evaluate
+  │                                      │
+  │                                      └── Submit the current OSMO evaluation workflow
+  └── Submit training and register its final checkpoint
 ```
 
 Each stage submits an OSMO workflow and polls for completion before advancing.
@@ -36,18 +36,19 @@ Each stage submits an OSMO workflow and polls for completion before advancing.
 cd training/pipelines
 ./run-lerobot-pipeline.sh \
   -d lerobot/aloha_sim_insertion_human \
-  --policy-repo-id <your-hf-username>/aloha-act-policy \
+  --dataset-revision <dataset-commit-sha> \
+  -r my-aloha-act-model \
   --config-preview
 ```
 
-The preview shows both training and inference configurations, polling intervals, and timeout settings.
+The preview shows training, registration, evaluation, polling, and timeout settings.
 
 ### Step 3: Run the full pipeline
 
 ```bash
 ./run-lerobot-pipeline.sh \
   -d lerobot/aloha_sim_insertion_human \
-  --policy-repo-id <your-hf-username>/aloha-act-policy \
+  --dataset-revision <dataset-commit-sha> \
   -r my-aloha-act-model
 ```
 
@@ -55,8 +56,8 @@ This command:
 
 1. Submits an ACT training job with the ALOHA sim insertion dataset
 2. Polls OSMO every 60 seconds until training completes (default timeout: 720 minutes)
-3. Submits an evaluation workflow against the trained policy
-4. Registers the model as `my-aloha-act-model` in Azure ML
+3. Resolves the Azure ML model version tagged with the training job name
+4. Submits the current OSMO evaluation workflow against that version
 
 ### Step 4: Customize pipeline parameters
 
@@ -65,7 +66,7 @@ Adjust training and evaluation settings:
 ```bash
 ./run-lerobot-pipeline.sh \
   -d lerobot/aloha_sim_insertion_human \
-  --policy-repo-id <your-hf-username>/aloha-act-policy \
+  --dataset-revision <dataset-commit-sha> \
   --policy-type act \
   --training-steps 50000 \
   --save-freq 5000 \
@@ -82,7 +83,6 @@ Use `--skip-inference` when iterating on training hyperparameters:
 ```bash
 ./run-lerobot-pipeline.sh \
   -d lerobot/aloha_sim_insertion_human \
-  --policy-repo-id <your-hf-username>/aloha-act-policy \
   --skip-inference
 ```
 
@@ -93,7 +93,7 @@ Submit training without waiting for completion:
 ```bash
 ./run-lerobot-pipeline.sh \
   -d lerobot/aloha_sim_insertion_human \
-  --policy-repo-id <your-hf-username>/aloha-act-policy \
+  -r my-aloha-act-model \
   --skip-wait
 ```
 
@@ -104,7 +104,7 @@ Check status manually through the OSMO UI or pod logs.
 The recipe succeeded when:
 
 - Training pod completed successfully
-- Evaluation pod completed with success-rate metrics logged to MLflow
+- Evaluation pod completed with replay metrics logged to MLflow
 - Model appears in Azure ML registry:
 
 ```bash
@@ -119,7 +119,8 @@ az ml model show \
 | Parameter               | Default        | Description                                |
 |-------------------------|----------------|--------------------------------------------|
 | `-d, --dataset-repo-id` | (required)     | HuggingFace dataset repository             |
-| `--policy-repo-id`      | (required)     | HuggingFace repo for trained policy        |
+| `--dataset-revision`    | (required*)    | Dataset commit SHA used by evaluation      |
+| `--policy-repo-id`      | (none)         | Optional policy repository for fine-tuning |
 | `--policy-type`         | `act`          | Policy architecture (`act` or `diffusion`) |
 | `--training-steps`      | (task default) | Total training iterations                  |
 | `--eval-episodes`       | `10`           | Evaluation episodes                        |
@@ -127,7 +128,9 @@ az ml model show \
 | `--timeout`             | `720`          | Training timeout in minutes                |
 | `--skip-inference`      | (disabled)     | Skip evaluation stage                      |
 | `--skip-wait`           | (disabled)     | Async mode — submit without waiting        |
-| `-r, --register-model`  | (none)         | Model name for Azure ML registration       |
+| `-r, --register-model`  | (required*)    | Model name for registration and evaluation |
+
+*Required unless evaluation is skipped. The wrapper supports HuggingFace dataset inputs. Use [Record Episodes for a Verified Experiment](../data-collection/record-to-verified-experiment.md) for Azure Viewer releases.
 
 See [Scripts Reference](../../reference/scripts.md) for the full parameter table.
 
@@ -136,6 +139,7 @@ See [Scripts Reference](../../reference/scripts.md) for the full parameter table
 - [Your First LeRobot Training Job](your-first-lerobot-training-job.md) — single-stage training
 - [Your First RL Training Job](your-first-rl-training-job.md) — reinforcement learning alternative
 - [Preparing Datasets for Training](../data-collection/preparing-datasets-for-training.md) — dataset download and validation
+- [Record Episodes for a Verified Experiment](../data-collection/record-to-verified-experiment.md) — verified Azure release workflow
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

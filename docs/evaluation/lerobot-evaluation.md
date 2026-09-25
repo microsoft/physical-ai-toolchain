@@ -1,9 +1,9 @@
 ---
 sidebar_position: 2
-title: LeRobot ACT Policy Inference
-description: Run a trained ACT policy locally, on OSMO with MLflow plots, or on a UR10E robot via ROS2
+title: LeRobot Policy Evaluation
+description: Evaluate a trained LeRobot policy locally, on OSMO, or on Azure ML
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-14
+ms.date: 2026-09-25
 ms.topic: how-to
 keywords:
   - lerobot
@@ -13,7 +13,10 @@ keywords:
   - ur10e
 ---
 
-Run a trained ACT (Action Chunking with Transformers) policy locally against dataset observations or on a live UR10E robot via ROS2.
+Evaluate trained ACT or Diffusion policies against recorded LeRobot episodes. Use local replay for T0 experiments and verified Azure releases for T2 Azure ML or OSMO evaluation.
+
+> [!IMPORTANT]
+> A Blob location alone does not establish release trust. Follow [Record Episodes for a Verified Experiment](../recipes/data-collection/record-to-verified-experiment.md) and use `--dataset-trust verified` only with a marker-complete Viewer release.
 
 ## 📋 Prerequisites
 
@@ -74,14 +77,13 @@ uv pip install lerobot av pyarrow
 Evaluate the model against recorded dataset observations:
 
 ```bash
-python scripts/test-lerobot-inference.py \
-  --policy-repo alizaidi/hve-robo-act-train \
+uv run python evaluation/sil/scripts/run-local-lerobot-eval.py \
+  --policy-path ./checkpoint/hve-robo-act-train \
   --dataset-dir /path/to/hve-robo-cell \
-  --episode 0 --start-frame 100 --num-steps 30 \
-  --device cuda
+  --episodes 5 \
+  --device cuda \
+  --output-dir outputs/local-eval
 ```
-
-Use `--policy-repo ./checkpoint/hve-robo-act-train` when loading from a local path instead of HuggingFace Hub.
 
 Expected output:
 
@@ -103,15 +105,13 @@ Inference Results
 
 ### Inference Script Parameters
 
-| Parameter       | Default                       | Description                             |
-|-----------------|-------------------------------|-----------------------------------------|
-| `--policy-repo` | `alizaidi/hve-robo-act-train` | HuggingFace repo ID or local path       |
-| `--dataset-dir` | (required)                    | LeRobot v3 dataset root directory       |
-| `--episode`     | `0`                           | Episode index for test observations     |
-| `--start-frame` | `0`                           | Starting frame within the episode       |
-| `--num-steps`   | `30`                          | Number of inference steps               |
-| `--device`      | `cuda`                        | Inference device (`cuda`, `cpu`, `mps`) |
-| `--output`      | (none)                        | Save predictions to `.npz` file         |
+| Parameter       | Default    | Description                             |
+|-----------------|------------|-----------------------------------------|
+| `--policy-path` | (required) | HuggingFace repo ID or local path       |
+| `--dataset-dir` | (required) | LeRobot v3 dataset root directory       |
+| `--episodes`    | `5`        | Number of episodes to replay            |
+| `--device`      | `cpu`      | Inference device (`cuda`, `cpu`, `mps`) |
+| `--output-dir`  | `outputs/local-eval` | Evaluation metrics and trajectory plots |
 
 ### Model Details
 
@@ -132,9 +132,15 @@ Run batch evaluation across multiple episodes on OSMO with trajectory plots logg
 ### Submit with MLflow Enabled
 
 ```bash
-scripts/submit-osmo-lerobot-inference.sh \
-  --policy-repo-id alizaidi/hve-robo-act-train \
-  --dataset-repo-id alizaidi/hve-robo-cell \
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
+  --from-aml-model \
+  --model-name <model-name> \
+  --model-version <model-version> \
+  --from-blob-dataset \
+  --storage-account <storage-account> \
+  --storage-container datasets \
+  --blob-prefix "exports/releases/<dataset-id>/<release-id>" \
+  --dataset-trust verified \
   --eval-episodes 10 \
   --mlflow-enable \
   --experiment-name lerobot-act-eval
@@ -158,14 +164,16 @@ Numeric metrics are on the **Metrics** tab: per-episode values (`ep0_mse`, `ep0_
 
 ### OSMO Inference Script Parameters
 
-| Parameter           | Default      | Description                                 |
-|---------------------|--------------|---------------------------------------------|
-| `--policy-repo-id`  | (required)   | HuggingFace policy repository               |
-| `--dataset-repo-id` | (none)       | HuggingFace dataset for replay evaluation   |
-| `--eval-episodes`   | `10`         | Number of episodes to evaluate              |
-| `--mlflow-enable`   | `false`      | Log plots and metrics to AzureML via MLflow |
-| `--experiment-name` | auto-derived | MLflow experiment name                      |
-| `--register-model`  | (none)       | Register model to AzureML after evaluation  |
+| Parameter            | Default      | Description                                      |
+|----------------------|--------------|--------------------------------------------------|
+| `--from-aml-model`   | disabled     | Load a registered Azure ML policy                |
+| `--model-name`       | (none)       | Registered model name                            |
+| `--model-version`    | (none)       | Immutable registered model version               |
+| `--from-blob-dataset` | disabled    | Load evaluation data from Azure Blob Storage     |
+| `--blob-prefix`      | (none)       | Dataset or release prefix within the container   |
+| `--dataset-trust`    | `unverified` | Use `verified` only for marker-complete releases |
+| `--eval-episodes`    | `10`         | Number of episodes to evaluate                   |
+| `--mlflow-enable`    | `false`      | Log plots and metrics to Azure ML through MLflow |
 
 ## 🤖 ROS2 Deployment
 

@@ -69,9 +69,10 @@ The `training/il/scripts/submit-osmo-lerobot-training.sh` script submits LeRobot
   -p diffusion \
   -r my-model-name
 
-# Train from Azure Blob Storage
+# Train from a verified Viewer release in Azure Blob Storage
 ./training/il/scripts/submit-osmo-lerobot-training.sh \
-  --blob-url https://account.blob.core.windows.net/datasets/pusht \
+  --blob-url https://account.blob.core.windows.net/datasets/exports/releases/pusht/release-1 \
+  --dataset-trust verified \
   -r pusht-model
 
 # Fine-tune from pre-trained policy
@@ -88,6 +89,7 @@ The `training/il/scripts/submit-osmo-lerobot-training.sh` script submits LeRobot
 |---------------------|------------------------------------------------------|-----------------------------------------------------------------|
 | `--dataset-repo-id` | Required for HuggingFace; `dataset` for Blob sources | HuggingFace dataset repository ID or logical local dataset name |
 | `--blob-url`        | (none)                                               | Direct Azure Blob dataset URL; repeatable                       |
+| `--dataset-trust`   | `unverified`                                         | Use `verified` only for marker-complete Viewer releases         |
 | `--policy-type`     | `act`                                                | Policy: `act`, `diffusion`                                      |
 | `--job-name`        | `lerobot-act-training`                               | Job identifier                                                  |
 | `--policy-repo-id`  | (none)                                               | Pre-trained policy for fine-tuning                              |
@@ -164,7 +166,7 @@ The `training/il/scripts/submit-azureml-lerobot-training.sh` script submits LeRo
 
 ## End-to-End Pipeline
 
-The `training/pipelines/run-lerobot-pipeline.sh` wrapper is intended to orchestrate training, polling, evaluation, and registration on OSMO. Its evaluation stage still calls the missing `scripts/submit-osmo-lerobot-inference.sh`; it is not a working end-to-end path. Submit training and evaluation with the individual scripts above until the wrapper is repaired.
+The `training/pipelines/run-lerobot-pipeline.sh` wrapper trains from a HuggingFace dataset, registers the final checkpoint in Azure ML, resolves the version tagged with the training job name, and calls the current OSMO evaluation submitter.
 
 ### Pipeline Stages
 
@@ -172,7 +174,8 @@ The `training/pipelines/run-lerobot-pipeline.sh` wrapper is intended to orchestr
 |-------|---------------------------------------|-------------------------------------------------------|
 | 1     | Submit training workflow              | `training/il/scripts/submit-osmo-lerobot-training.sh` |
 | 2     | Poll workflow status until completion | `osmo workflow query`                                 |
-| 3     | Blocked: internal target missing      | `scripts/submit-osmo-lerobot-inference.sh`            |
+| 3     | Resolve registered model version      | `az ml model list`                                    |
+| 4     | Submit evaluation workflow            | `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh`  |
 
 ### Pipeline Examples
 
@@ -180,6 +183,8 @@ The `training/pipelines/run-lerobot-pipeline.sh` wrapper is intended to orchestr
 # Async mode (submit training and exit)
 ./training/pipelines/run-lerobot-pipeline.sh \
   -d user/my-dataset \
+  --dataset-revision <dataset-commit-sha> \
+  -r my-model \
   --skip-wait
 
 # Skip inference (training only with polling)
@@ -193,13 +198,14 @@ The `training/pipelines/run-lerobot-pipeline.sh` wrapper is intended to orchestr
 | Parameter           | Default     | Description                      |
 |---------------------|-------------|----------------------------------|
 | `--dataset-repo-id` | (required)  | HuggingFace dataset repository   |
-| `--policy-repo-id`  | (required*) | HuggingFace policy target repo   |
+| `--dataset-revision` | (required*) | Dataset commit SHA for evaluation |
+| `--policy-repo-id`  | (none)      | Optional fine-tuning policy repo  |
 | `--policy-type`     | `act`       | Policy: `act`, `diffusion`       |
-| `--register-model`  | (none)      | Azure ML model registration name |
+| `--register-model`  | (required*) | Model name used for evaluation    |
 | `--poll-interval`   | `60`        | Status check interval (seconds)  |
 | `--timeout`         | `720`       | Training timeout (minutes)       |
 | `--skip-wait`       | disabled    | Async mode: submit and exit      |
-| `--skip-inference`  | disabled    | Skip inference stage             |
+| `--skip-inference`  | disabled    | Skip evaluation stage            |
 
 ## Related Documentation
 

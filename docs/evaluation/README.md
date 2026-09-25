@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Evaluation Guide
 description: Evaluate trained robotics policies in simulation and on physical hardware using Azure ML and NVIDIA OSMO
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-13
+ms.date: 2026-09-25
 ms.topic: overview
 keywords:
   - evaluation
@@ -20,7 +20,7 @@ Evaluate trained robotics policies using local environments, Azure ML compute, o
 
 | Guide                                                  | Description                                              |
 |--------------------------------------------------------|----------------------------------------------------------|
-| [LeRobot ACT Policy Evaluation](lerobot-evaluation.md) | Run LeRobot ACT policies locally with ROS2 deployment    |
+| [LeRobot Policy Evaluation](lerobot-evaluation.md)     | Evaluate LeRobot policies locally, on Azure ML, or OSMO  |
 | [OSMO Evaluation Workflows](osmo-evaluation.md)        | Execute Isaac Lab and LeRobot evaluation via NVIDIA OSMO |
 | [HiL Evaluation](hil-evaluation.md)                    | Run CPU and independently no-command HiL gates           |
 
@@ -39,18 +39,29 @@ Evaluate trained robotics policies using local environments, Azure ML compute, o
 LeRobot local evaluation:
 
 ```bash
-python lerobot/scripts/eval.py \
-  --policy.path=<path-to-checkpoint> \
-  -p lerobot/configs/policy/act.yaml
+uv run python evaluation/sil/scripts/run-local-lerobot-eval.py \
+  --policy-path <path-to-checkpoint> \
+  --dataset-dir <path-to-lerobot-dataset> \
+  --episodes 5 \
+  --output-dir outputs/local-eval
 ```
 
-OSMO evaluation submission:
+OSMO evaluation of an Azure ML model against a verified Viewer release:
 
 ```bash
-osmo workflow submit \
-  --file evaluation/sil/workflows/osmo/eval.yaml \
-  --set checkpoint_uri=<checkpoint-uri>
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
+  --from-aml-model \
+  --model-name <model-name> \
+  --model-version <model-version> \
+  --from-blob-dataset \
+  --storage-account <storage-account> \
+  --storage-container datasets \
+  --blob-prefix "exports/releases/<dataset-id>/<release-id>" \
+  --dataset-trust verified \
+  --mlflow-enable
 ```
+
+Follow [Record Episodes for a Verified Experiment](../recipes/data-collection/record-to-verified-experiment.md) to create the release and run the complete T1-to-T2 workflow.
 
 ## 📚 Related Documentation
 

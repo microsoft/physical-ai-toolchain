@@ -31,7 +31,7 @@ Record on each robot as in T0, then land the data on a shared NFS/SMB disk so th
 or have each robot `rsync` its datasets to the GPU box. The recording mechanics are unchanged from
 [Configuring Edge Data Recording](../data-collection/configuring-edge-data-recording.md).
 
-### Step 2: Move data to one Blob container
+### Step 2: Land source data in one Blob container
 
 Upload datasets to your single Blob container with `azcopy` or the Azure CLI:
 
@@ -47,11 +47,12 @@ See [Blob storage structure](../../cloud/blob-storage-structure.md) for the expe
 layout, and [Preparing Datasets for Training](../data-collection/preparing-datasets-for-training.md)
 for downloading, inspecting, and validating Blob datasets.
 
-### Step 3: Curate against the Blob container
+This upload creates mutable source data, not a verified release. Do not use its URL with `--dataset-trust verified`.
+
+### Step 3: Curate and publish an Azure release
 
 Run the dataviewer against the Blob container (managed identity or SAS) instead of a local directory.
-The curation workflow is the same as T0; only the data source changes from local disk to cloud
-storage.
+Save changes, run quality, accept eligible episodes, and publish the release directly to Azure. Follow [Record Episodes for a Verified Experiment](../data-collection/record-to-verified-experiment.md) for the complete T1 handoff. The release URL is distinct from the mutable source URL.
 
 ### Step 4: Train locally, or reach to AzureML when needed
 
@@ -59,7 +60,7 @@ Keep training on the shared local GPU box exactly as in T0. When that box satura
 first point where reaching to AzureML becomes optional, but it is **not** required at T1. If you do
 submit a cloud job, see [AzureML training](../../training/azureml-training.md) and
 [LeRobot training](../../training/lerobot-training.md). Datasets now live in Blob, so train directly
-from Blob URLs.
+from the marker-complete release URL with `--dataset-trust verified`. Raw Blob folders remain valid only as explicitly unverified inputs.
 
 ### Step 5: Track locally, or promote to managed MLflow
 
@@ -84,4 +85,5 @@ with `docker pull` across 2–3 robots) are unchanged from T0.
 - [Tier model (canonical reference)](../../design/tier-model.md)
 - [Architecture: T1 — Lab](../../contributing/architecture.md#t1--lab)
 - [Blob storage structure](../../cloud/blob-storage-structure.md)
+- [Record Episodes for a Verified Experiment](../data-collection/record-to-verified-experiment.md)
 - [T0 — Dev](../tier-0-dev/README.md) · [T2 — Pilot](../tier-2-pilot/README.md)

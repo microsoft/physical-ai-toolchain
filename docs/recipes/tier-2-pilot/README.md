@@ -34,16 +34,14 @@ Provision the AzureML workspace, storage, and registry. Follow the
 recipe assumes that infrastructure is deployed rather than duplicating its steps; for the
 infrastructure reference see [Infrastructure](../../infrastructure/README.md).
 
-### Step 2: Prepare the dataset in cloud storage
+### Step 2: Publish a verified dataset release
 
-Land and validate datasets in Blob as at [T1 — Lab](../tier-1-lab/README.md), following
-[Preparing Datasets for Training](../data-collection/preparing-datasets-for-training.md) and the
-[Blob storage structure](../../cloud/blob-storage-structure.md).
+Land source datasets in Blob as at [T1 — Lab](../tier-1-lab/README.md), then use the hosted dataviewer to review episodes and publish an immutable Azure release. Follow [Record Episodes for a Verified Experiment](../data-collection/record-to-verified-experiment.md) for the release path and exact Blob URL.
 
 ### Step 3: Train on cloud GPU (default)
 
 Submit a LeRobot behavioral-cloning job to AzureML or OSMO: multi-GPU, queued jobs, multiple people,
-VLA scale. Use the existing recipes rather than re-deriving the commands here:
+VLA scale. Pass the release root with `--dataset-trust verified`; do not train a governed run from the mutable source prefix. Use the existing recipes rather than re-deriving the commands here:
 
 - [Your First LeRobot Training Job](../training/your-first-lerobot-training-job.md): submit a single
   cloud training job.
@@ -61,18 +59,11 @@ load-bearing**. Trained checkpoints are registered and versioned automatically a
 See [Experiment tracking](../../training/experiment-tracking.md) and
 [MLflow integration](../../training/mlflow-integration.md).
 
-### Step 5: Curate with the hosted dataviewer
+### Step 5: Validate
 
-The dataviewer is deployed as a **shared web app** rather than localhost, so the whole team browses
-and annotates the same catalogs.
+Validate registered models directly from the registry against the same release. Use `--dataset-trust verified` so evaluation verifies the release and retains source episode mapping. [Record Episodes for a Verified Experiment](../data-collection/record-to-verified-experiment.md) provides Azure ML and OSMO commands, and [Evaluation](../../evaluation/README.md) covers the evaluation surfaces.
 
-### Step 6: Validate
-
-Validate registered models directly from the registry. The local entry point
-(`run-local-lerobot-eval.py`) accepts `--model-name` / `--model-version` to pull a registered model,
-and [Evaluation](../../evaluation/README.md) covers the cloud and batch evaluation paths.
-
-### Step 7: Run on robot (manual `docker pull`)
+### Step 6: Run on robot (manual `docker pull`)
 
 Deployment is still manual: hand-update a handful of reachable robots with `docker pull`. This stays
 tractable at one site with several robots. Declarative GitOps deployment is the
@@ -89,4 +80,5 @@ tractable at one site with several robots. Declarative GitOps deployment is the
 - [Tier model (canonical reference)](../../design/tier-model.md)
 - [Architecture: T2 — Pilot](../../contributing/architecture.md#t2--pilot)
 - [Getting Started](../../getting-started/README.md) · [Training docs](../../training/README.md)
+- [Record Episodes for a Verified Experiment](../data-collection/record-to-verified-experiment.md)
 - [T1 — Lab](../tier-1-lab/README.md) · [T3 — Production](../tier-3-production/README.md)
