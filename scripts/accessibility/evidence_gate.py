@@ -1979,7 +1979,9 @@ def validate_composed_docusaurus_bundle(
     if matched is None:
         raise ValueError("Composed bundle scope does not match a canonical cadence")
     cadence, assets, requirements, _, expected = matched
-    if catalogs["assetJourney"] != assets or catalogs["requirementMethod"] != requirements:
+    if _hve_canonicalize(catalogs["assetJourney"]) != _hve_canonicalize(assets) or _hve_canonicalize(
+        catalogs["requirementMethod"]
+    ) != _hve_canonicalize(requirements):
         raise ValueError("Composed bundle canonical catalog obligations drifted")
     cells = _unique_records(bundle["expectedCells"], "cellId", "expected cell")
     if cells != _unique_records(expected, "cellId", "canonical cell") or not cells or bundle["deferredCells"]:
@@ -2788,7 +2790,7 @@ def _docusaurus_package_inventory(root: Path) -> tuple[dict[str, dict[str, Any]]
             ("state-proofs.json", bundle["stateProofs"]),
         ):
             relative = f"{_DOCUSAURUS_EVIDENCE_ROOT}/inputs/{name}"
-            if relative in documents and documents[relative] != expected:
+            if relative in documents and _hve_canonicalize(documents[relative]) != _hve_canonicalize(expected):
                 missing.add(f"{relative}:composition-input-mismatch")
         if (
             scope

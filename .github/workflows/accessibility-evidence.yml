@@ -157,6 +157,7 @@ jobs:
         run: |
           set -euo pipefail
           npm --prefix "$GITHUB_WORKSPACE" ci
+          npx playwright install ffmpeg
           npm run test:a11y
           node --experimental-strip-types e2e/accessibility-manifest.ts \
             ../../../artifacts/accessibility/current/viewer-evidence-manifest.json

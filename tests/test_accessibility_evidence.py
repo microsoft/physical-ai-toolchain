@@ -1083,6 +1083,19 @@ def composed_docs_bundle(tmp_path: Path, hve_runtime: tuple[Path, Any]) -> tuple
 
 
 class TestComposedDocusaurusVerdict:
+    def test_cli_canonical_serialization_preserves_catalog_identity(
+        self, composed_docs_bundle: tuple[Path, Path, dict[str, Any]]
+    ) -> None:
+        harness, path, bundle = composed_docs_bundle
+        canonical_json = importlib.import_module("runtime_a11y.evidence_bundle").canonical_json
+        path.write_text(canonical_json(bundle), encoding="utf-8")
+        assert (
+            gate.validate_composed_docusaurus_bundle(
+                path, path.parent, harness_root=harness, required_completeness="automated"
+            )["verdict"]
+            == "PASS"
+        )
+
     @staticmethod
     def _validate(fixture: tuple[Path, Path, dict[str, Any]], *, completeness: str = "automated") -> dict[str, Any]:
         harness, path, bundle = fixture
@@ -1377,7 +1390,8 @@ class TestDocusaurusRetainedPackage:
             "source-check-result.json": {"status": "passed"},
         }.items():
             gate._write_json(evidence_root / "inputs" / name, value)
-        gate._write_json(evidence_root / "evidence-bundle.json", bundle)
+        canonical_json = importlib.import_module("runtime_a11y.evidence_bundle").canonical_json
+        (evidence_root / "evidence-bundle.json").write_text(canonical_json(bundle), encoding="utf-8")
         gate._write_json(
             evidence_root / "evidence-summary.json",
             {
@@ -2200,6 +2214,8 @@ class TestGitHubSurfaceContracts:
         assert any("npm run test:coverage" in str(step.get("run", "")) for step in viewer_steps.values())
         product_run = evidence_steps["Run deterministic product evidence"]["run"]
         assert 'npm --prefix "$GITHUB_WORKSPACE" ci' in product_run
+        assert "npx playwright install ffmpeg" in product_run
+        assert product_run.index("npx playwright install ffmpeg") < product_run.index("npm run test:a11y")
         assert "npm run test:a11y" in product_run
         assert "viewer-evidence-manifest.json" in product_run
         assert "expected_titles != actual_titles" in product_run
