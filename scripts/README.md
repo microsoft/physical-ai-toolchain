@@ -2,7 +2,7 @@
 title: Scripts
 description: CI/CD scripts, shared libraries, linting, security, and Pester tests for the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-23
+ms.date: 2026-09-25
 ms.topic: reference
 keywords:
   - scripts
@@ -104,7 +104,57 @@ Security scanning and dependency management scripts.
 | `security/Modules/PinnedToolVersions.psm1` | Provide pin discovery functions for binary freshness checks                                   |
 | `security/Test-HveCoreFreshness.ps1`       | Check hve-core-derived files against their reviewed release or source-header baselines        |
 | `security/zap-to-sarif.py`                 | Convert ZAP results to SARIF format                                                           |
+| `security/gitleaks-scan.mjs`               | Scan tested-revision history and report explicit secret-scan outcomes                         |
 | `update-chart-hashes.sh`                   | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
+
+### Gitleaks Scan Scope
+
+The [Gitleaks workflow](../.github/workflows/gitleaks-scan.yml) scans the complete
+history reachable from the exact checked-out revision. PR checks scan the tested
+merge revision; main-push checks scan the pushed revision. Other fetched branches
+and tags are excluded unless their commits are reachable from that revision.
+Full checkout history remains required.
+
+The helper uses `--full-history --diff-merges=first-parent <revision>`: merge
+resolution changes are scanned without restricting ancestry traversal to the first
+parent. Secrets introduced and later removed remain detectable. This is not a
+repository-wide all-ref audit or a changed-lines-only scan.
+
+Run from the repository root with Node 24, Git, and the workflow-pinned Gitleaks
+8.30.0 binary:
+
+```powershell
+$env:GITLEAKS_BIN = (Get-Command gitleaks).Source
+$revision = git rev-parse HEAD
+node scripts/security/gitleaks-scan.mjs scan --expected-revision $revision
+node --test scripts/tests/security/gitleaks-scan.test.mjs
+```
+
+In CI the expected revision comes from `GITHUB_SHA`; the helper rejects mismatched
+or shallow checkouts. Reports use `logs/gitleaks-results.sarif`, redact detected
+values, and retain the existing 90-day artifact policy. Each scan removes its old
+untracked report first so stale output cannot validate a failed run.
+
+| Result     | Meaning                                                                   | Exit behavior                                                 |
+|------------|---------------------------------------------------------------------------|---------------------------------------------------------------|
+| `clean`    | Scanner exits 0 with a valid empty SARIF report                           | Success                                                       |
+| `findings` | Scanner exits 1 with a valid nonempty report                              | Failure unless `--soft-fail true` is explicitly supplied      |
+| `error`    | Invalid identity, scanner failure, missing report, or inconsistent report | Failure even with soft-fail                                   |
+| `not-run`  | Summary has no scan outputs and the scan never ran                        | Never reported as clean; earlier job failures remain failures |
+
+The workflow emits `scan-status`, `scan-revision`, and `scan-exit-code`. Its
+always-run summary checks those outputs against the scan step outcome before
+claiming `No Secrets Found`. Findings remain visible when soft-fail is enabled.
+Operational failures do not become secret-free results.
+
+Native regressions run against isolated repositories and the checksum-verified
+scanner before the real scan. Missing test prerequisites fail rather than skip.
+Existing exact ignore-file behavior is preserved; this scope correction adds no
+suppression. Any intentional all-ref audit needs separate ownership and
+false-positive adjudication rather than attributing another branch's findings to
+a PR.
+
+### Binary and Derived-File Checks
 
 The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.yml` workflow on a weekly schedule. It downloads each pinned GPG key, installer, and CLI archive, compares SHA-256 hashes against the canonical pin files listed below, and queries upstream Helm repositories for chart version drift.
 
