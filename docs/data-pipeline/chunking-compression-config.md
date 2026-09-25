@@ -301,7 +301,22 @@ topics:
 | Write latency is high     | Measure sustained disk throughput and cache behavior; bag splitting is not a flush control |
 | Upload is slow            | Transfer completed files; test split sizes against the upload workflow                     |
 
-Compression, caches, and chunk sizes trade CPU, memory, and throughput. Benchmark each change and validate recorded messages; none guarantees durability after a crash.
+```mermaid
+flowchart TD
+  accTitle: Recording performance troubleshooting flow
+  accDescr: Decision tree for measuring recording performance and selecting tests for storage growth, CPU saturation, write latency, and slow uploads.
+    A[Recording problem detected] --> B{Primary observation?}
+    B -- Storage fills quickly --> C[Measure bag rate]
+    C --> D[Test writer compression<br/>or reduce publisher rate]
+    B -- CPU saturated --> E[Test a faster codec or level<br/>or reduce input volume]
+    B -- Write latency high --> F[Measure sustained disk throughput<br/>and cache behavior]
+    F --> G[Do not treat bag splitting<br/>as a flush control]
+    B -- Upload slow --> H[Transfer completed files]
+    H --> I[Test split sizes against<br/>the upload workflow]
+```
+
+> [!IMPORTANT]
+> Compression, caches, and chunk sizes trade CPU, memory, and throughput. Benchmark each change and validate recorded messages; none guarantees durability after a crash.
 
 ## Troubleshooting
 
