@@ -546,11 +546,7 @@ Without `--write-analysis`, the JSONL and CSV files remain standalone exports an
 ### Docker Compose (local)
 
 ```bash
-# Stage reviewed model weights outside the repository.
-export DATAVIEWER_HOST_MODELS_DIR=/absolute/path/to/models
-export DETECTION_MODEL_DIGESTS='{"yolo11n":"<sha256>","yolov8s-world":"<sha256>"}'
-
-# Local storage mode
+# Local storage mode without object detection
 DATAVIEWER_HOST_DATA_DIR=/path/to/datasets docker compose up --build
 
 # Azure Blob Storage mode
@@ -558,6 +554,16 @@ export STORAGE_BACKEND=azure
 export AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
 export AZURE_STORAGE_DATASET_CONTAINER=datasets
 export AZURE_STORAGE_ANNOTATION_CONTAINER=annotations
+docker compose up --build
+```
+
+Local storage requires write access to `DATAVIEWER_HOST_DATA_DIR` because annotations and labels are persisted atomically under each dataset directory.
+
+Object detection is optional. To enable it, stage reviewed model weights outside the repository before starting the services:
+
+```bash
+export DATAVIEWER_HOST_MODELS_DIR=/absolute/path/to/models
+export DETECTION_MODEL_DIGESTS='{"yolo11n":"<sha256>","yolov8s-world":"<sha256>"}'
 docker compose up --build
 ```
 
