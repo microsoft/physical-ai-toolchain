@@ -19,17 +19,14 @@ Expected blob layout per dataset:
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import aiofiles
 import pyarrow.parquet as pq
-
-if TYPE_CHECKING:
-    pass
 
 from .paths import dataset_id_to_blob_prefix
 
@@ -416,8 +413,6 @@ class BlobDatasetProvider:
         dataset_id: str,
     ) -> dict[int, dict[str, tuple[int, int, float, float]]] | None:
         """Download and parse meta/episodes/chunk-*/file-*.parquet for video lookup."""
-        import io
-
         prefix = self.get_blob_prefix(dataset_id)
         meta_prefix = f"{prefix}/meta/episodes/"
         result: dict[int, dict[str, tuple[int, int, float, float]]] = {}

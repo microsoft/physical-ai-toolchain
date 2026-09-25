@@ -537,6 +537,50 @@ class TestUploadVideo(TestCase):
         result = asyncio.run(provider.upload_video("org--repo", "cam0", 0, Path("missing.mp4")))
         assert result is False
 
+    @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.blob_dataset.AsyncDefaultAzureCredential")
+    @patch("src.api.storage.blob_dataset.BlobServiceClient")
+    def test_upload_video_closes_credential_on_failure(
+        self,
+        mock_blob_service_cls,
+        mock_credential_cls,
+    ):
+        credential = MagicMock()
+        credential.close = AsyncMock()
+        mock_credential_cls.return_value = credential
+
+        mock_blob = MagicMock()
+        mock_blob.upload_blob = AsyncMock(side_effect=RuntimeError("upload failed"))
+        mock_container = MagicMock()
+        mock_container.get_blob_client.return_value = mock_blob
+        mock_client = MagicMock()
+        mock_client.get_container_client.return_value = mock_container
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_blob_service_cls.return_value = mock_client
+
+        from src.api.storage.blob_dataset import BlobDatasetProvider
+
+        provider = BlobDatasetProvider(account_name="testaccount", container_name="testcontainer")
+        result = asyncio.run(provider.upload_video("org--repo", "cam0", 0, Path("missing.mp4")))
+
+        assert result is False
+        credential.close.assert_awaited_once()
+
+    @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
+    def test_read_file_chunks_yields_bounded_chunks(self):
+        from tempfile import TemporaryDirectory
+
+        provider = _build_provider()
+        with TemporaryDirectory() as td:
+            path = Path(td) / "video.mp4"
+            path.write_bytes(b"abcdefgh")
+
+            async def collect():
+                return [chunk async for chunk in provider._read_file_chunks(path, chunk_size=3)]
+
+            assert asyncio.run(collect()) == [b"abc", b"def", b"gh"]
+
 
 class TestSyncDatasetToLocal(TestCase):
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
@@ -797,6 +841,22 @@ class TestClose(TestCase):
         # Should be a no-op without raising.
         asyncio.run(provider.close())
         assert provider._client is None
+
+    @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
+    def test_close_releases_credential_when_client_close_fails(self):
+        mock_client = MagicMock()
+        mock_client.close = AsyncMock(side_effect=RuntimeError("close failed"))
+        mock_credential = MagicMock()
+        mock_credential.close = AsyncMock()
+        provider = _build_provider(mock_client)
+        provider._credential = mock_credential
+
+        with pytest.raises(RuntimeError, match="close failed"):
+            asyncio.run(provider.close())
+
+        mock_credential.close.assert_awaited_once()
+        assert provider._client is None
+        assert provider._credential is None
 
 
 def _build_episodes_parquet(*, episodes, cameras_by_episode):

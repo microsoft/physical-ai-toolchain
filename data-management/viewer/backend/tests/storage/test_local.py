@@ -13,6 +13,7 @@ import pytest
 
 from src.api.models.annotations import TaskCompletenessRating
 from src.api.storage.local import LocalStorageAdapter, RevisionConflictError, StorageError
+from src.api.validation import validate_path_containment
 
 from .conftest import create_test_annotation
 
@@ -221,6 +222,14 @@ class TestLocalStorageAdapter(TestCase):
         with patch("src.api.storage.local.asyncio.to_thread", wraps=asyncio.to_thread) as mock_to_thread:
             asyncio.run(self.adapter.save_annotation(self.dataset_id, 0, annotation))
             assert mock_to_thread.call_count >= 1
+
+    def test_get_versioned_delegates_path_resolution(self):
+        """Versioned reads delegate filesystem path resolution to a worker thread."""
+        with patch("src.api.storage.local.asyncio.to_thread", wraps=asyncio.to_thread) as mock_to_thread:
+            asyncio.run(self.adapter.get_annotation_versioned(self.dataset_id, 0))
+
+        assert any(call.args[0] == self.adapter._get_annotation_path for call in mock_to_thread.call_args_list)
+        assert any(call.args[0] == validate_path_containment for call in mock_to_thread.call_args_list)
 
     def test_path_traversal_rejected(self):
         """Verify dataset_id with path traversal components raises StorageError."""
