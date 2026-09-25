@@ -15,7 +15,7 @@ BeforeAll {
     function uv { }
 }
 
-Describe 'Get-UvLockProject' -Tag 'Unit' {
+Describe 'Get-UvProject' -Tag 'Unit' {
     BeforeEach {
         Mock git {
             $global:LASTEXITCODE = 0
@@ -33,7 +33,7 @@ Describe 'Get-UvLockProject' -Tag 'Unit' {
         '[project]' | Set-Content (Join-Path $TestDrive 'training/rl/pyproject.toml')
         '[project]' | Set-Content (Join-Path $TestDrive 'evaluation/pyproject.toml')
 
-        $projects = Get-UvLockProject -RepoRoot $TestDrive
+        $projects = Get-UvProject -RepoRoot $TestDrive
 
         $projects | Should -Contain '.'
         $projects | Should -Contain 'training/rl'
@@ -47,7 +47,7 @@ Describe 'Get-UvLockProject' -Tag 'Unit' {
         '[project]' | Set-Content (Join-Path $TestDrive 'external/IsaacLab/pyproject.toml')
         '[project]' | Set-Content (Join-Path $TestDrive '.venv/pyproject.toml')
 
-        $projects = Get-UvLockProject -RepoRoot $TestDrive
+        $projects = Get-UvProject -RepoRoot $TestDrive
 
         $projects | Should -Not -Contain 'external/IsaacLab'
         $projects | Should -Not -Contain '.venv'
@@ -57,7 +57,7 @@ Describe 'Get-UvLockProject' -Tag 'Unit' {
         $emptyRoot = Join-Path $TestDrive 'empty'
         New-Item -ItemType Directory -Force -Path $emptyRoot | Out-Null
 
-        $projects = @(Get-UvLockProject -RepoRoot $emptyRoot)
+        $projects = @(Get-UvProject -RepoRoot $emptyRoot)
 
         $projects.Count | Should -Be 0
     }
@@ -68,14 +68,14 @@ Describe 'Get-UvLockProject' -Tag 'Unit' {
             '[project]' | Set-Content (Join-Path $TestDrive "$project/pyproject.toml")
         }
         'lock' | Set-Content (Join-Path $TestDrive 'intact/uv.lock')
-        $projects = @(Get-UvLockProject -RepoRoot $TestDrive)
+        $projects = @(Get-UvProject -RepoRoot $TestDrive)
         $projects | Should -Contain 'intact'
         $projects | Should -Contain 'missing-lock'
     }
 
     It 'Fails manifest discovery when Git fails' {
         Mock git { $global:LASTEXITCODE = 1 } -ParameterFilter { $args[0] -eq '-C' }
-        { Get-UvLockProject -RepoRoot $TestDrive } | Should -Throw '*tracked project manifests*'
+        { Get-UvProject -RepoRoot $TestDrive } | Should -Throw '*tracked project manifests*'
     }
 }
 
@@ -121,7 +121,7 @@ Describe 'Test-UvLockProject' -Tag 'Unit' {
         Mock Invoke-UvLockCheck { throw 'must not execute' }
         $result = Test-UvLockProject -Project 'evaluation' -RepoRoot $TestDrive
         $result.Passed | Should -BeFalse
-        $result.Detail | Should -Match 'tracked uv.lock'
+        $result.Detail | Should -Be 'uv.lock is missing'
         Should -Not -Invoke Invoke-UvLockCheck
     }
 
@@ -129,6 +129,18 @@ Describe 'Test-UvLockProject' -Tag 'Unit' {
         Mock git { $global:LASTEXITCODE = 1 } -ParameterFilter { $args -contains 'ls-files' }
         (Test-UvLockProject -Project 'evaluation' -RepoRoot $TestDrive).Passed | Should -BeFalse
     }
+
+    It 'Rejects an explicitly selected project without a manifest' {
+        Remove-Item (Join-Path $TestDrive 'evaluation/pyproject.toml')
+        Mock Invoke-UvLockCheck { throw 'should not run' }
+
+        $result = Test-UvLockProject -Project 'evaluation' -RepoRoot $TestDrive
+
+        $result.Passed | Should -BeFalse
+        $result.Detail | Should -Be 'pyproject.toml is missing'
+        Should -Not -Invoke Invoke-UvLockCheck
+    }
+
     It 'Reports Passed when uv lock --check exits zero' {
         Mock Invoke-UvLockCheck {
             [pscustomobject]@{ ExitCode = 0; Output = '' }
@@ -199,6 +211,21 @@ Describe 'New-UvLockReport' -Tag 'Unit' {
         $json.drift_count | Should -Be 1
         $report.MarkdownPath | Should -Exist
         (Get-Content $report.MarkdownPath -Raw) | Should -Match 'evaluation'
+    }
+
+    It 'Reports an unavailable interpreter as a failed check, not lock drift' {
+        $results = @([pscustomobject]@{
+                Project = '.'
+                Passed = $false
+                Detail = 'No interpreter found for Python 3.12.13'
+            })
+
+        $report = New-UvLockReport -Results $results -OutputPath $script:OutputPath
+
+        $summary = Get-Content $report.MarkdownPath -Raw
+        $summary | Should -Match 'Failed Checks'
+        $summary | Should -Match 'No interpreter found for Python 3.12.13'
+        $summary | Should -Not -Match 'Run `uv lock`'
     }
 
     It 'Writes a step summary' {
@@ -314,6 +341,20 @@ Describe 'Invoke-UvLockConsistencyCheckCore' -Tag 'Unit' {
         }
     }
 
+    It 'Fails a discovered manifest without a checked-in lock' {
+        New-Item -ItemType Directory -Force -Path (Join-Path $TestDrive 'evaluation') | Out-Null
+        'manifest' | Set-Content (Join-Path $TestDrive 'evaluation/pyproject.toml')
+        Mock Get-UvProject { @('evaluation') }
+        Mock Invoke-UvLockCheck { throw 'should not run' }
+
+        $result = Invoke-UvLockConsistencyCheckCore -OutputPath $script:OutputPath
+
+        $result | Should -Be 1
+        (Get-Content $script:OutputPath -Raw | ConvertFrom-Json).results[0].Detail | Should -Be 'uv.lock is missing'
+        Should -Invoke Write-CIAnnotation -ParameterFilter { $File -eq 'evaluation/uv.lock' }
+        Should -Not -Invoke Invoke-UvLockCheck
+    }
+
     It 'Writes the JSON results file' {
         Mock Test-UvLockProject {
             [pscustomobject]@{ Project = $Project; Passed = $true; Detail = '' }
@@ -348,7 +389,7 @@ Describe 'Invoke-UvLockConsistencyCheckCore' -Tag 'Unit' {
     }
 
     It 'Auto-discovers projects when none are supplied' {
-        Mock Get-UvLockProject { @('training/rl') }
+        Mock Get-UvProject { @('training/rl') }
         Mock Test-UvLockProject {
             [pscustomobject]@{ Project = $Project; Passed = $true; Detail = '' }
         }
@@ -356,22 +397,22 @@ Describe 'Invoke-UvLockConsistencyCheckCore' -Tag 'Unit' {
         $result = Invoke-UvLockConsistencyCheckCore -OutputPath $script:OutputPath
 
         $result | Should -Be 0
-        Should -Invoke Get-UvLockProject -Times 1
+        Should -Invoke Get-UvProject -Times 1
     }
 
     It 'Fails full validation when discovery finds no projects' {
-        Mock Get-UvLockProject { @() }
+        Mock Get-UvProject { @() }
         Mock Test-UvLockProject { throw 'should not run' }
 
         $result = Invoke-UvLockConsistencyCheckCore -OutputPath $script:OutputPath
 
         $result | Should -Be 1
         Should -Not -Invoke Test-UvLockProject
-        Should -Invoke Write-CIAnnotation -ParameterFilter { $Level -eq 'Error' }
+        Should -Invoke Write-CIAnnotation -ParameterFilter { $Level -eq 'Error' -and $Message -like '*no tracked project manifests*' }
     }
 
     It 'Derives the output path under the repository root when none is supplied' {
-        Mock Get-UvLockProject { @('training/rl') }
+        Mock Get-UvProject { @('training/rl') }
         Mock Test-UvLockProject {
             [pscustomobject]@{ Project = $Project; Passed = $true; Detail = '' }
         }
@@ -383,11 +424,11 @@ Describe 'Invoke-UvLockConsistencyCheckCore' -Tag 'Unit' {
 
     It 'Falls back to a derived repo root when git rev-parse yields nothing' {
         Mock git { return $null } -ParameterFilter { $args[0] -eq 'rev-parse' }
-        Mock Get-UvLockProject { @() }
+        Mock Get-UvProject { @() }
 
         $result = Invoke-UvLockConsistencyCheckCore -OutputPath $script:OutputPath
 
         $result | Should -Be 1
-        Should -Invoke Get-UvLockProject -Times 1
+        Should -Invoke Get-UvProject -Times 1
     }
 }

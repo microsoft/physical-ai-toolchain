@@ -97,6 +97,12 @@ The domain locks encode pyproject `override-dependencies` and package sources. T
 
 The import step is required: dependency or ABI skew can install cleanly and fail only when imported. For the CPU depth, the export removes the CUDA local-version suffix from torch and torchvision before `--torch-backend cpu` selects CPU wheels, and strips standalone `nvidia-*`, `cuda-*`, and `torchcodec` packages. Installation uses `--no-deps` to retain the exported versions.
 
+When a runtime image lacks uv, `smoke-import.sh` downloads the pinned archive with at most three attempts.
+Each transfer has a 35-second limit, with two-second pauses, so transfer recovery takes less than 120 seconds.
+Only connection and timeout errors or HTTP 408, 429, and 5xx responses are retried.
+A 404, checksum mismatch, invalid archive, install failure, or failed import stops the smoke immediately.
+Run `bash shared/ci/tests/smoke-import-bootstrap.sh` to exercise the controlled transfer and archive fixtures locally.
+
 ### Per-domain runtime images and interpreters
 
 Each image-enabled domain runs in its production runtime; there is no single image. Image references are read from their source of truth: `DEFAULT_ISAAC_LAB_IMAGE` and `DEFAULT_LEROBOT_TRAIN_IMAGE` in `scripts/lib/common.sh` for `rl` and `vla`, respectively, the `lerobot-train.yaml` default for `il`, the Azure ML `evaluate.yaml` component for `evaluation`, and the `replay-azureml.yaml` default for `osmo-replay`.

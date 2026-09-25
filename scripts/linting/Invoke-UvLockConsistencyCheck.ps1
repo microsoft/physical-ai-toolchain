@@ -10,9 +10,8 @@
 .DESCRIPTION
     Discovers tracked pyproject.toml projects (excluding .venv/, external/, node_modules/,
     .git/, .copilot-tracking/, docs/docusaurus/), requires a tracked lock in each, and runs
-    `uv lock --check`. The script writes
-    results to logs/. Drift is surfaced as CI annotations and a GitHub step summary, and the
-    script exits non-zero when any lock drifts from its manifest.
+    `uv lock --check`. The script writes results to logs/. Missing or stale locks are
+    surfaced as CI annotations and a GitHub step summary.
 .PARAMETER OutputPath
     Path for the JSON results file. Defaults to logs/uv-lock-consistency-results.json.
 .PARAMETER Projects
@@ -46,7 +45,7 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Modules/CIHelpers.psm1') -Force
 
 #region Helper Functions
 
-function Get-UvLockProject {
+function Get-UvProject {
     <#
     .SYNOPSIS
         Discovers repository-relative projects from tracked pyproject.toml manifests.
@@ -130,12 +129,17 @@ function Test-UvLockProject {
     )
 
     $absDir = if ($Project -eq '.') { $RepoRoot } else { Join-Path $RepoRoot $Project }
+    $manifestPath = Join-Path $absDir 'pyproject.toml'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        return [pscustomobject]@{ Project = $Project; Passed = $false; Detail = 'pyproject.toml is missing' }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $absDir 'uv.lock') -PathType Leaf)) {
+        return [pscustomobject]@{ Project = $Project; Passed = $false; Detail = 'uv.lock is missing' }
+    }
     $lockPath = if ($Project -eq '.') { 'uv.lock' } else { "$Project/uv.lock" }
     $PSNativeCommandUseErrorActionPreference = $false
     $trackedLock = @(& git -C $RepoRoot ls-files --error-unmatch -- $lockPath 2>$null)
-    if ($LASTEXITCODE -ne 0 -or $trackedLock.Count -ne 1 -or
-        -not (Test-Path (Join-Path $absDir 'uv.lock') -PathType Leaf) -or
-        -not (Test-Path (Join-Path $absDir 'pyproject.toml') -PathType Leaf)) {
+    if ($LASTEXITCODE -ne 0 -or $trackedLock.Count -ne 1) {
         return [pscustomobject]@{
             Project = $Project
             Passed  = $false
@@ -225,7 +229,7 @@ function New-UvLockReport {
     }
     $payload | ConvertTo-Json -Depth 10 | Out-File -FilePath $OutputPath -Encoding utf8
 
-    $status = if ($allPassed) { '✅ Passed' } else { "❌ Failed ($($driftResults.Count) drifted)" }
+    $status = if ($allPassed) { '✅ Passed' } else { "❌ Failed ($($driftResults.Count) failed checks)" }
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add('### uv Lock Consistency Results')
     $lines.Add('')
@@ -234,19 +238,19 @@ function New-UvLockReport {
     $lines.Add('| Metric | Count |')
     $lines.Add('|--------|-------|')
     $lines.Add("| Projects Checked | $totalProjects |")
-    $lines.Add("| Drifted | $($driftResults.Count) |")
+    $lines.Add("| Failed Checks | $($driftResults.Count) |")
 
     if ($driftResults.Count -gt 0) {
         $lines.Add('')
-        $lines.Add('## 🚨 Drifted Projects')
+        $lines.Add('## 🚨 Failed Projects')
         $lines.Add('')
-        $lines.Add('Run `uv lock` in each directory below to resync the lock with its manifest.')
+        $lines.Add('Review each failure below. Regenerate a lock only when its manifest has changed.')
         $lines.Add('')
         $lines.Add('| Project | Detail |')
         $lines.Add('|---------|--------|')
         foreach ($drift in ($driftResults | Sort-Object -Property Project)) {
             $detail = ($drift.Detail -replace '\r?\n', ' ').Trim()
-            if ([string]::IsNullOrEmpty($detail)) { $detail = 'lock is out of date with pyproject.toml' }
+            if ([string]::IsNullOrEmpty($detail)) { $detail = 'uv lock check failed without diagnostic output' }
             $lines.Add("| $($drift.Project) | $detail |")
         }
     }
@@ -293,7 +297,7 @@ function Invoke-UvLockConsistencyCheckCore {
     }
 
     if ($Projects.Count -eq 0) {
-        $Projects = @(Get-UvLockProject -RepoRoot $repoRoot)
+        $Projects = @(Get-UvProject -RepoRoot $repoRoot)
     }
 
     if ($ChangedFilesOnly) {
@@ -324,7 +328,7 @@ function Invoke-UvLockConsistencyCheckCore {
             Write-Host "  ❌ $project"
             $lockPath = if ($project -eq '.') { 'uv.lock' } else { "$project/uv.lock" }
             Write-CIAnnotation -Level Error -File $lockPath `
-                -Message "uv.lock is out of date with pyproject.toml. Run 'uv lock' in $project to resync."
+                -Message "uv.lock check failed in $project`: $($result.Detail)"
         }
     }
 
@@ -332,7 +336,7 @@ function Invoke-UvLockConsistencyCheckCore {
     Write-Host "Results written to $($report.JsonPath)"
 
     if ($report.DriftCount -gt 0) {
-        Write-Host "`n❌ $($report.DriftCount) project(s) have a drifted uv.lock"
+        Write-Host "`n❌ $($report.DriftCount) project(s) failed the uv lock check"
         return 1
     }
 

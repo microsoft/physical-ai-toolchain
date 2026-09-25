@@ -60,8 +60,15 @@ function Invoke-TerraformValidationCore {
         return 1
     }
 
-    $terraformVersion = & terraform version -json 2>$null | ConvertFrom-Json
-    $versionString = if ($terraformVersion) { $terraformVersion.terraform_version } else { 'unknown' }
+    $versionOutput = & terraform version -json 2>&1
+    $versionExit = $LASTEXITCODE
+    $terraformVersion = if ($versionExit -eq 0) {
+        try { $versionOutput | Out-String | ConvertFrom-Json -AsHashtable } catch { $null }
+    }
+    if ($versionExit -eq 0 -and ($null -eq $terraformVersion -or -not $terraformVersion['terraform_version'])) {
+        $versionExit = 1
+    }
+    $versionString = if ($versionExit -eq 0) { $terraformVersion['terraform_version'] } else { 'unknown' }
 
     $deployDirs = @('.', 'vpn', 'dns', 'automation')
 
@@ -92,12 +99,22 @@ function Invoke-TerraformValidationCore {
     $fmtOutput = & terraform fmt -check -recursive -diff $TerraformDir 2>&1
     $fmtExitCode = $LASTEXITCODE
     $fmtPassed = ($fmtExitCode -eq 0)
+    $firstFailure = if ($versionExit -ne 0) { $versionExit } elseif (-not $fmtPassed) { $fmtExitCode } else { 0 }
+    if ($versionExit -ne 0) {
+        $versionMessage = ($versionOutput | Out-String).Trim()
+        Write-Host $versionMessage
+        Write-CIAnnotation -Level Error -Message "Terraform version failed: $versionMessage"
+    }
 
     $unformattedFiles = @()
     if (-not $fmtPassed) {
+        Write-Host ($fmtOutput | Out-String).Trim()
         $unformattedFiles = @($fmtOutput | ForEach-Object { $_.ToString() } | Where-Object { $_ -match '\.tf$' })
         foreach ($file in $unformattedFiles) {
             Write-CIAnnotation -Level Warning -Message "File is not formatted: $file" -File $file
+        }
+        if ($unformattedFiles.Count -eq 0) {
+            Write-CIAnnotation -Level Error -Message "Terraform format check failed (exit $fmtExitCode)"
         }
     }
 
@@ -112,6 +129,7 @@ function Invoke-TerraformValidationCore {
                 directory = $displayPath
                 passed    = $true
                 skipped   = $true
+                exit_code = $null
                 errors    = @()
                 warnings  = @()
             }
@@ -119,10 +137,12 @@ function Invoke-TerraformValidationCore {
         }
 
         if (-not (Test-Path $fullPath -PathType Container)) {
+            if ($firstFailure -eq 0) { $firstFailure = 1 }
             $validationResults += @{
                 directory = $displayPath
                 passed    = $false
                 skipped   = $false
+                exit_code = 1
                 errors    = @(@{ severity = 'error'; summary = 'Required deployment directory is missing.' })
                 warnings  = @()
             }
@@ -134,6 +154,7 @@ function Invoke-TerraformValidationCore {
             $initOutput = & terraform init -backend=false -input=false -no-color 2>&1
             $validateExit = $LASTEXITCODE
             if ($validateExit -ne 0) {
+                if ($firstFailure -eq 0) { $firstFailure = $validateExit }
                 $validateResult = @{
                     diagnostics = @(@{
                             severity = 'error'
@@ -150,12 +171,19 @@ function Invoke-TerraformValidationCore {
                     if ($null -eq $validateResult -or -not $validateResult.Contains('diagnostics')) {
                         throw 'Terraform validation output has no diagnostics field.'
                     }
-                    if ($validateResult['valid'] -ne $true -or $validateResult['error_count'] -ne 0) {
+                    if ($validateExit -eq 0 -and ($validateResult['valid'] -ne $true -or $validateResult['error_count'] -ne 0)) {
                         $validateExit = 1
+                    }
+                    if ($validateExit -ne 0 -and -not $validateResult.diagnostics) {
+                        $validateResult.diagnostics = @(@{
+                                severity = 'error'
+                                summary  = "Terraform validation failed: $displayPath (exit $validateExit)"
+                                detail   = ($validateOutput | Out-String).Trim()
+                            })
                     }
                 }
                 catch {
-                    $validateExit = 1
+                    if ($validateExit -eq 0) { $validateExit = 1 }
                     $validateResult = @{
                         diagnostics = @(@{
                                 severity = 'error'
@@ -164,6 +192,7 @@ function Invoke-TerraformValidationCore {
                             })
                     }
                 }
+                if ($validateExit -ne 0 -and $firstFailure -eq 0) { $firstFailure = $validateExit }
             }
 
             $errors = @()
@@ -205,6 +234,7 @@ function Invoke-TerraformValidationCore {
                 directory = $displayPath
                 passed    = ($validateExit -eq 0)
                 skipped   = $false
+                exit_code = $validateExit
                 errors    = $errors
                 warnings  = $warnings
             }
@@ -219,7 +249,7 @@ function Invoke-TerraformValidationCore {
     $directoriesPassed = @($validationResults | Where-Object { -not $_.skipped -and $_.passed }).Count
     $directoriesSkipped = @($validationResults | Where-Object { $_.skipped }).Count
     $expectedDirectories = @($dirsToValidate).Count
-    $overallPassed = $fmtPassed -and ($directoriesChecked -eq $directoriesPassed) -and
+    $overallPassed = $versionExit -eq 0 -and $fmtPassed -and ($directoriesChecked -eq $directoriesPassed) -and
         ($directoriesChecked -eq $expectedDirectories) -and ($ChangedFilesOnly -or $directoriesChecked -eq $deployDirs.Count)
 
     $results = @{
@@ -234,6 +264,7 @@ function Invoke-TerraformValidationCore {
                     directory = $_.directory
                     passed    = $_.passed
                     skipped   = if ($_.skipped) { $true } else { $false }
+                    exit_code = $_.exit_code
                     errors    = $_.errors
                     warnings  = $_.warnings
                 }
@@ -278,7 +309,9 @@ function Invoke-TerraformValidationCore {
     Write-CIStepSummary -Content $summaryContent
     Write-Host $summaryContent
 
-    if ($overallPassed) { return 0 } else { return 1 }
+    if ($overallPassed -and $versionExit -eq 0) { return 0 }
+    if ($firstFailure -ne 0) { return $firstFailure }
+    return 1
 }
 
 #region Main Execution
