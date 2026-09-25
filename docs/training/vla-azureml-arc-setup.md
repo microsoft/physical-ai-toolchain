@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Azure ML Arc VLA Setup and Operations
 description: Prepare an Ubuntu K3s GPU host, connect it through Azure Arc, attach it to Azure ML, and run PI 0.5 VLA training
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-17
+ms.date: 2026-09-25
 ms.topic: how-to
 keywords:
   - vla
@@ -34,7 +34,7 @@ Azure Arc-enabled Server and Azure Arc-enabled Kubernetes are separate resources
 | Azure ML Kubernetes compute   | Workspace-visible job placement target                | Yes                           |
 
 > [!IMPORTANT]
-> `infrastructure/setup/02-deploy-azureml-extension.sh` supports `Microsoft.ContainerService/managedClusters` only. Do not run it against Arc K3s or change its cluster type at runtime. The current Arc extension and compute attachment path remains manual until a dedicated Arc setup script with configuration preview is implemented.
+> `infrastructure/setup/02-deploy-azureml-extension.sh` supports `Microsoft.ContainerService/managedClusters` only. Do not run it against Arc K3s or change its cluster type at runtime. Use `data-pipeline/setup/edge/06-deploy-azureml-extension.sh` for Arc K3s.
 
 ## Prerequisites
 
@@ -194,6 +194,29 @@ Arc-enabled Server does not replace Arc-enabled Kubernetes and is not sufficient
 
 ## Install the Azure ML Kubernetes Extension
 
+Preview the Arc extension, InstanceType, identity-role, and compute attachment configuration:
+
+```bash
+data-pipeline/setup/edge/06-deploy-azureml-extension.sh \
+  --subscription-id "<arc-subscription-id>" \
+  --cluster-resource-group "<arc-resource-group>" \
+  --cluster-name "<arc-cluster-name>" \
+  --workspace-subscription-id "<workspace-subscription-id>" \
+  --workspace-resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --extension-name "<azureml-extension-name>" \
+  --compute-name "<compute-name>" \
+  --identity-resource-id "<compute-identity-resource-id>" \
+  --kubeconfig "$KUBECONFIG" \
+  --context "$KUBE_CONTEXT" \
+  --bundle-dir "infrastructure/setup/generated/<environment>" \
+  --config-preview
+```
+
+Remove `--config-preview` after reviewing the target. The script creates or updates the training-only extension, applies the reviewed InstanceTypes, attaches the Kubernetes compute, reconciles required workspace and storage roles, and writes a sanitized deployment receipt under the ignored bundle directory.
+
+Use the following raw commands only to diagnose or recover an incomplete automated deployment.
+
 Create the Azure ML workload namespace before attachment:
 
 ```bash
@@ -266,6 +289,8 @@ Confirm that the `gpu` InstanceType requests exactly one GPU and fits the host's
 
 ## Attach the Arc Cluster to Azure ML
 
+The Arc setup script performs this attachment during the primary workflow. Use the following commands only to diagnose or recover the attachment manually.
+
 Use an immutable Azure ML compute name. Do not repoint an existing compute name to another Kubernetes cluster.
 
 Resolve the Arc cluster and user-assigned identity resource IDs:
@@ -320,30 +345,41 @@ Connect the operator workstation to the environment's point-to-site VPN when wor
 Preview the validated conservative configuration:
 
 ```bash
-./training/vla/scripts/submit-azureml-vla-pi0-training.sh \
-  --dataset-asset "azureml:<dataset-name>:<version>" \
-  --policy-type pi05 \
-  --init-from-policy-hf-repo lerobot/pi05_base \
-  --init-from-policy-hf-revision b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba \
-  --policy-dtype bfloat16 \
-  --gradient-checkpointing \
-  --mixed-precision bf16 \
-  --train-expert-only \
-  --batch-size 16 \
-  --training-steps 40000 \
-  --save-freq 1000 \
-  --log-freq 1 \
-  --rename-map '{"observation.images.d435":"observation.images.base_0_rgb","observation.images.d405":"observation.images.left_wrist_0_rgb"}' \
-  --compute "<compute-name>" \
-  --instance-type gpu \
-  --config-preview \
-  -- \
-  --set environment_variables.PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+CODE_REVISION=$(git rev-parse HEAD)
+RENAME_MAP_B64=$(printf '%s' \
+  '{"observation.images.d435":"observation.images.base_0_rgb","observation.images.d405":"observation.images.left_wrist_0_rgb"}' |
+  base64 --wrap=0)
+
+az ml job create \
+  --file training/vla/workflows/azureml/vla-training-pipeline.yaml \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --set inputs.dataset_repo_id="<hugging-face-dataset>" \
+  --set inputs.dataset_revision="<dataset-commit-sha>" \
+  --set inputs.policy_type=pi05 \
+  --set inputs.init_from_policy_hf_repo_id=lerobot/pi05_base \
+  --set inputs.init_from_policy_hf_revision=b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba \
+  --set inputs.adapter_name=lerobot-pi \
+  --set inputs.code_repository=https://github.com/microsoft/physical-ai-toolchain.git \
+  --set inputs.code_revision="$CODE_REVISION" \
+  --set inputs.train_expert_only=true \
+  --set inputs.gradient_checkpointing=true \
+  --set inputs.rename_map_b64="$RENAME_MAP_B64" \
+  --set inputs.candidate_batch_sizes=1,2,4 \
+  --set inputs.training_steps=40000 \
+  --set inputs.save_freq=1000 \
+  --set inputs.compute_calibrate="azureml:<compute-name>" \
+  --set inputs.compute_train="azureml:<compute-name>" \
+  --set inputs.subscription_id="<workspace-subscription-id>" \
+  --set inputs.resource_group="<workspace-resource-group>" \
+  --set inputs.workspace_name="<workspace-name>" \
+  --set inputs.hf_key_vault_url="<key-vault-url>" \
+  --set inputs.hf_token_secret_name="<secret-name>"
 ```
 
-Review the resolved dataset, image, compute, InstanceType, precision, memory controls, rename map, and token presence. Remove `--config-preview` to submit. Add `--stream` before the `--` separator to keep the terminal attached to Azure ML logs.
+Review the pinned dataset and model revisions, code revision, compute target, candidate batch sizes, training duration, camera mapping, and Key Vault reference before submission. The calibration job measures the candidate micro-batches and passes its generated workload contract and report directly to training.
 
-The submitter prints the accepted Azure ML job name and portal URL. If the command is interrupted before it prints the job name, check the Azure ML jobs page before resubmitting.
+Azure CLI prints the accepted pipeline name and portal URL. If the command is interrupted before it prints the job name, check the Azure ML jobs page before resubmitting.
 
 ## Monitor Azure ML
 
