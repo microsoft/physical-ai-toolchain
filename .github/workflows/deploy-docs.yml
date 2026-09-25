@@ -1,82 +1,181 @@
-# Docusaurus documentation site deployment
-# Prerequisite: Enable GitHub Pages in repo Settings > Pages > Source: GitHub Actions
-# and allow the target branch in Settings > Environments > github-pages > Deployment branches
-
 name: Deploy Documentation Site
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'docs/**'
-      - '.github/workflows/deploy-docs.yml'
-  workflow_dispatch:
+  workflow_run:
+    workflows: [Docusaurus Accessibility Promotion]
+    types: [completed]
+    branches: [main]
 
 concurrency:
-  group: pages-deploy-${{ github.ref }}
+  group: pages-deploy
   cancel-in-progress: false
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  test:
-    name: Docusaurus Tests
-    uses: ./.github/workflows/docusaurus-tests.yml
-    permissions:
-      contents: read
-    with:
-      soft-fail: false
-
   build:
-    name: Build Docusaurus
-    needs: test
+    name: Verify retained Docusaurus build
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.repository.full_name == github.repository &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
+      actions: read
       pages: write
+    outputs:
+      source-sha: ${{ steps.promotion.outputs.source_sha }}
+      artifact-id: ${{ steps.promotion.outputs.artifact_id }}
+      build-digest: ${{ steps.verify.outputs.build_digest }}
+      valid-until: ${{ steps.verify.outputs.valid_until }}
+      artifact-expires-at: ${{ steps.promotion.outputs.artifact_expires_at }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PROMOTION_RUN_ID: ${{ github.event.workflow_run.id }}
+      PROMOTION_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      HVE_SKILL_ROOT: artifacts/accessibility/deploy-hve/.github/skills/accessibility/accessibility
     steps:
-      - name: Checkout
+      - name: Checkout trusted main implementation
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/heads/main
           persist-credentials: false
-          fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Setup uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          node-version: '24.14.1'
-          cache: npm
-          cache-dependency-path: docs/docusaurus/package-lock.json
+          python-version: '3.12'
 
-      - name: Install dependencies
-        working-directory: docs/docusaurus
-        run: npm ci
+      - name: Validate promotion producer and current-main identity
+        id: promotion
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PROMOTION_HEAD_SHA"
+          uv run --no-project --with pydantic==2.13.5 python -m scripts.accessibility.promotion \
+            check-promotion --run-id "$PROMOTION_RUN_ID"
 
-      - name: Build site
-        working-directory: docs/docusaurus
-        run: npm run build
+      - name: Download exact promoted package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.promotion.outputs.artifact_id }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          merge-multiple: true
+          path: artifacts/accessibility/publish
+
+      - name: Acquire reviewed HVE composer
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --no-project --with pydantic==2.13.5 python -m scripts.accessibility.promotion \
+            acquire-harness --output artifacts/accessibility/deploy-hve
+          uv sync --project "$HVE_SKILL_ROOT" --frozen
+
+      - name: Verify release completeness and retained build digest
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --project "$HVE_SKILL_ROOT" --frozen --with pydantic==2.13.5 python \
+            -m scripts.accessibility.promotion verify-promoted \
+            --output artifacts/accessibility/publish --source-sha "$PROMOTION_HEAD_SHA" \
+            --promotion-run-id "$PROMOTION_RUN_ID" --harness-root "$HVE_SKILL_ROOT" \
+            --scratch artifacts/accessibility/deploy-expiry-check
 
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
-      - name: Upload artifact
+      - name: Upload exact reviewed site bytes
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: docs/docusaurus/build
+          path: artifacts/accessibility/publish/collection/docs/docusaurus/build
 
   deploy:
     name: Deploy to GitHub Pages
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
+      contents: read
+      actions: read
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PROMOTION_RUN_ID: ${{ github.event.workflow_run.id }}
+      SOURCE_SHA: ${{ needs.build.outputs.source-sha }}
+      ACCESSIBILITY_REVIEWER_EVIDENCE_BRANCH: ${{ vars.ACCESSIBILITY_REVIEWER_EVIDENCE_BRANCH }}
+      ACCESSIBILITY_REVIEW_REGISTRY_DIGEST: ${{ secrets.ACCESSIBILITY_REVIEW_REGISTRY_DIGEST }}
+      HVE_SKILL_ROOT: artifacts/accessibility/deploy-hve/.github/skills/accessibility/accessibility
     steps:
+      - name: Checkout trusted main implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: '3.12'
+
+      - name: Recheck promotion after deployment approval
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          uv run --no-project --with pydantic==2.13.5 python -m scripts.accessibility.promotion \
+            check-promotion --run-id "$PROMOTION_RUN_ID"
+
+      - name: Download the same promoted package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          merge-multiple: true
+          path: artifacts/accessibility/publish
+
+      - name: Acquire reviewed HVE composer
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --no-project --with pydantic==2.13.5 python -m scripts.accessibility.promotion \
+            acquire-harness --output artifacts/accessibility/deploy-hve
+          uv sync --project "$HVE_SKILL_ROOT" --frozen
+
+      - name: Revalidate evidence immediately before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --no-project --with pydantic==2.13.5 python -m scripts.accessibility.promotion \
+            check-promotion --run-id "$PROMOTION_RUN_ID"
+          uv run --project "$HVE_SKILL_ROOT" --frozen --with pydantic==2.13.5 python \
+            -m scripts.accessibility.promotion verify-promoted \
+            --output artifacts/accessibility/publish --source-sha "$SOURCE_SHA" \
+            --promotion-run-id "$PROMOTION_RUN_ID" --harness-root "$HVE_SKILL_ROOT" \
+            --refresh-review-registry \
+            --scratch artifacts/accessibility/publish-expiry-check
+
+      - name: Recheck current main immediately before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --no-project --with pydantic==2.13.5 python -m scripts.accessibility.promotion \
+            check-current --source-sha "$SOURCE_SHA"
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

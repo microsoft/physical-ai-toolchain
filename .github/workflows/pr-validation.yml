@@ -34,6 +34,7 @@ jobs:
       shared_ci: ${{ steps.filter.outputs.shared_ci }}
       dv_backend: ${{ steps.filter.outputs.dv_backend }}
       dv_frontend: ${{ steps.filter.outputs.dv_frontend }}
+      accessibility: ${{ steps.filter.outputs.accessibility }}
       fuzz: ${{ steps.filter.outputs.fuzz }}
       docusaurus: ${{ steps.filter.outputs.docusaurus }}
       pester: ${{ steps.filter.outputs.pester }}
@@ -254,6 +255,18 @@ jobs:
       contents: read
       id-token: write
 
+  # Accessibility contracts and deterministic product and bundle evidence.
+  accessibility-evidence:
+    name: Accessibility Evidence
+    needs: changes
+    if: needs.changes.outputs.accessibility == 'true'
+    uses: ./.github/workflows/accessibility-evidence.yml
+    with:
+      run-product-evidence: true
+    permissions:
+      contents: read
+      id-token: write
+
   # Docusaurus documentation site tests and build verification
   docusaurus-tests:
     name: Docusaurus Tests
@@ -264,6 +277,7 @@ jobs:
       soft-fail: false
     permissions:
       contents: read
+      id-token: write
 
   # Pytest: training component
   pytest-training:
@@ -510,6 +524,7 @@ jobs:
       - dependency-pinning
       - pester-tests
       - dataviewer-frontend-tests
+      - accessibility-evidence
       - docusaurus-tests
       - pytest-training
       - pytest-dm-tools
