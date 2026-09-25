@@ -210,7 +210,8 @@ jobs:
     uses: ./.github/workflows/docusaurus-tests.yml
     with:
       soft-fail: false
-      evidence-cadence: scheduled
+      evidence-cadence: release
+      required-completeness: automated
     permissions:
       contents: read
 

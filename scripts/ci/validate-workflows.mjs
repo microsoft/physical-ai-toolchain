@@ -34,6 +34,16 @@ function excludesRootEvents(value, rootEvents, declaredEvents) {
     && rootEvents.every(event => !selectedEvents.includes(event.toLowerCase()));
 }
 
+function promotionCommandIndex(step, command) {
+  const run = (step?.run ?? '').replace(/\\\r?\n\s*/g, ' ');
+  const matches = [...run.matchAll(new RegExp(`\\bpython\\s+-m\\s+scripts\\.accessibility\\.promotion\\s+${command}(?:\\s|$)`, 'g'))];
+  return matches.at(-1)?.index ?? -1;
+}
+
+function hasPromotionCommand(step, command) {
+  return promotionCommandIndex(step, command) >= 0;
+}
+
 export function readWorkflowGraph(root = process.cwd()) {
   const graph = {};
   const readYaml = path => {
@@ -200,6 +210,11 @@ export function validateWorkflows(graph, contract = loadContract()) {
     const workflow = graph[config.path];
     if (!workflow) { errors.push(`Missing orchestrator: ${config.path}`); continue; }
     check(isDeepStrictEqual(events(workflow).sort(), [...config.events].sort()), `${config.path}: event ownership mismatch`);
+    if (config.name) check(workflow.name === config.name, `${config.path}: workflow name mismatch`);
+    if (config.permissionProfile) {
+      check(Object.hasOwn(contract.permissionProfiles, config.permissionProfile)
+        && isDeepStrictEqual(workflow.permissions, contract.permissionProfiles[config.permissionProfile]), `${config.path}: workflow permission profile mismatch`);
+    }
     for (const id of Object.keys(workflow.jobs ?? {})) check(ownership.has(`${config.path}:${id}`), `${config.path}: undeclared job ${id}`);
     if (config.aggregate) {
       const aggregate = workflow.jobs?.[config.aggregate];
@@ -250,8 +265,95 @@ export function validateWorkflows(graph, contract = loadContract()) {
     check(expression(pr.smoke?.with?.[input]) === expected, `PR smoke input mismatch: ${input}`);
     check(main.smoke?.with?.[input] === true, `Main must run smoke input: ${input}`);
   }
+  const promotion = graph[contract.orchestrators.promotion.path];
+  const promote = promotion?.jobs?.promote;
+  const environmentName = job => typeof job?.environment === 'string' ? job.environment : job?.environment?.name;
+  check(environmentName(promote) === 'accessibility-release', 'Documentation promotion must use the protected accessibility-release environment');
+  check(promote?.needs === undefined && promote?.['continue-on-error'] === undefined
+    && ['', "github.ref == 'refs/heads/main'"].includes(expression(promote?.if)), 'Documentation promotion must retain fail-closed manual execution');
+
   const docs = graph[contract.orchestrators.docs.path];
-  check(Boolean(docs?.on?.push) && !events(docs ?? {}).includes('workflow_run'), 'Documentation deployment must remain independent');
+  const trigger = docs?.on?.workflow_run;
+  check(isDeepStrictEqual(trigger?.workflows, ['Docusaurus Accessibility Promotion'])
+    && isDeepStrictEqual(trigger?.types, ['completed'])
+    && (trigger?.branches === undefined || isDeepStrictEqual(trigger.branches, ['main'])), 'Documentation deployment must consume only completed accessibility promotion runs');
+  const build = docs?.jobs?.build;
+  const deploy = docs?.jobs?.deploy;
+  const conditions = expression(build?.if).split('&&').map(term => term.trim().replace(/\s*==\s*/g, ' == ')).sort();
+  check(isDeepStrictEqual(conditions, [
+    "github.event.workflow_run.conclusion == 'success'",
+    "github.event.workflow_run.event == 'workflow_dispatch'",
+    "github.event.workflow_run.head_branch == 'main'",
+    'github.event.workflow_run.repository.full_name == github.repository',
+    'github.event.workflow_run.head_repository.full_name == github.repository',
+  ].sort()), 'Documentation artifact verification must require successful main-branch same-repository promotion');
+  check(build?.needs === undefined && build?.['continue-on-error'] === undefined, 'Documentation artifact verification must execute without failure suppression or prerequisites');
+  check(isDeepStrictEqual(array(deploy?.needs), ['build']) && deploy?.['continue-on-error'] === undefined
+    && ['', 'success()'].includes(expression(deploy?.if)), 'Documentation deployment must require successful artifact verification');
+  check(environmentName(deploy) === 'github-pages', 'Documentation deployment must use the github-pages environment');
+  for (const [name, job] of [['promotion', promote], ['artifact verification', build], ['deployment', deploy]]) {
+    const checkouts = job?.steps?.filter(step => step.uses?.startsWith('actions/checkout@')) ?? [];
+    check(checkouts.length === 1 && ['main', 'refs/heads/main'].includes(checkouts[0].with?.ref)
+      && checkouts[0].with?.['persist-credentials'] === false, `Documentation ${name} must check out trusted main without persisted credentials`);
+  }
+  check(![...(build?.steps ?? []), ...(deploy?.steps ?? [])].some(step => /\b(?:npm|npx|pnpm|yarn|docusaurus)\s/.test(step.run ?? '')), 'Documentation deployment must publish the retained build without rebuilding or retesting');
+  const uploads = build?.steps?.filter(step => step.uses?.startsWith('actions/upload-pages-artifact@')) ?? [];
+  check(uploads.length === 1 && uploads[0].if === undefined && uploads[0]['continue-on-error'] === undefined,
+    'Documentation artifact verification must publish one unconditional Pages artifact');
+  const deployments = deploy?.steps?.filter(step => step.uses?.startsWith('actions/deploy-pages@')) ?? [];
+  check(deployments.length === 1 && deployments[0].if === undefined && deployments[0]['continue-on-error'] === undefined,
+    'Documentation deployment must publish one unconditional Pages deployment');
+
+  const unconditional = step => Boolean(step) && step.if === undefined && step['continue-on-error'] === undefined;
+  const exactDownload = (step, artifactId, runId) => unconditional(step)
+    && step.with?.['artifact-ids'] === artifactId && step.with?.['run-id'] === runId
+    && step.with?.repository === '${{ github.repository }}' && step.with?.name === undefined;
+  for (const [name, job, command, artifactId, runId] of [
+    ['promotion', promote, 'check-collection', '${{ inputs.collection-artifact-id }}', '${{ inputs.collection-run-id }}'],
+    ['artifact verification', build, 'check-promotion', '${{ steps.promotion.outputs.artifact_id }}', '${{ github.event.workflow_run.id }}'],
+  ]) {
+    const steps = job?.steps ?? [];
+    const downloads = steps.filter(step => step.uses?.startsWith('actions/download-artifact@'));
+    const producerCheck = steps.findIndex(step => hasPromotionCommand(step, command));
+    check(downloads.length === 1 && exactDownload(downloads[0], artifactId, runId)
+      && producerCheck >= 0 && producerCheck < steps.indexOf(downloads[0]) && unconditional(steps[producerCheck]),
+    `Documentation ${name} must validate producer identity before downloading the exact same-repository artifact`);
+  }
+  const promotionSteps = promote?.steps ?? [];
+  const promotionUploads = promotionSteps.filter(step => step.uses?.startsWith('actions/upload-artifact@'));
+  const promotionUpload = promotionUploads[0];
+  const promotionVerification = promotionSteps[promotionSteps.indexOf(promotionUpload) - 1];
+  check(promotionUploads.length === 1 && unconditional(promotionUpload)
+    && promotionUpload.with?.name === 'docusaurus-accessibility-promoted-${{ github.run_id }}'
+    && promotionUpload.with?.path === 'artifacts/accessibility/promoted/'
+    && promotionUpload.with?.['include-hidden-files'] === true && promotionUpload.with?.['if-no-files-found'] === 'error'
+    && unconditional(promotionVerification) && hasPromotionCommand(promotionVerification, 'verify-promoted')
+    && hasPromotionCommand(promotionVerification, 'check-current'),
+  'Documentation promotion must verify release evidence and current main immediately before retaining the complete package');
+  const recompose = promotionSteps.find(step => hasPromotionCommand(step, 'promote'));
+  check(unconditional(recompose) && /--require-completeness\s+release(?:\s|$)/.test(recompose.run),
+    'Documentation promotion must require release-complete recomposition');
+  const buildSteps = build?.steps ?? [];
+  const verifyIndex = buildSteps.findIndex(step => hasPromotionCommand(step, 'verify-promoted'));
+  check(verifyIndex >= 0 && verifyIndex < buildSteps.indexOf(uploads[0]) && unconditional(buildSteps[verifyIndex])
+    && uploads[0]?.with?.path === 'artifacts/accessibility/publish/collection/docs/docusaurus/build',
+  'Documentation artifact verification must verify the exact retained build before Pages upload');
+  const deploySteps = deploy?.steps ?? [];
+  const currentMain = deploySteps[deploySteps.indexOf(deployments[0]) - 1];
+  check(unconditional(currentMain) && hasPromotionCommand(currentMain, 'check-current')
+    && deploy?.env?.SOURCE_SHA === '${{ needs.build.outputs.source-sha }}',
+    'Documentation deployment must recheck current main immediately before publication');
+  const deployDownloads = deploySteps.filter(step => step.uses?.startsWith('actions/download-artifact@'));
+  const finalVerifyIndex = deploySteps.findLastIndex(step => hasPromotionCommand(step, 'verify-promoted'));
+  const currentMainIndex = deploySteps.indexOf(currentMain);
+  const verificationPrecedesCurrentMain = finalVerifyIndex < currentMainIndex
+    || (finalVerifyIndex === currentMainIndex
+      && promotionCommandIndex(currentMain, 'verify-promoted') < promotionCommandIndex(currentMain, 'check-current'));
+  check(deployDownloads.length === 1
+    && exactDownload(deployDownloads[0], '${{ needs.build.outputs.artifact-id }}', '${{ github.event.workflow_run.id }}')
+    && finalVerifyIndex > deploySteps.indexOf(deployDownloads[0]) && verificationPrecedesCurrentMain
+    && unconditional(deploySteps[finalVerifyIndex]),
+  'Documentation deployment must revalidate the same retained package after environment approval');
   return errors;
 }
 

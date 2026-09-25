@@ -3,7 +3,8 @@
   "orchestrators": {
     "pr": { "path": ".github/workflows/pr-validation.yml", "events": ["pull_request"], "aggregate": "pr-validation-summary" },
     "main": { "path": ".github/workflows/main.yml", "events": ["push"], "aggregate": "release-please" },
-    "docs": { "path": ".github/workflows/deploy-docs.yml", "events": ["push", "workflow_dispatch"] }
+    "promotion": { "path": ".github/workflows/docusaurus-accessibility-promotion.yml", "events": ["workflow_dispatch"], "name": "Docusaurus Accessibility Promotion", "permissionProfile": "artifact-read" },
+    "docs": { "path": ".github/workflows/deploy-docs.yml", "events": ["workflow_run"], "permissionProfile": "artifact-read" }
   },
   "secondaryCallers": {
     ".github/workflows/weekly-validation.yml": {
@@ -17,6 +18,7 @@
   },
   "permissionProfiles": {
     "read": { "contents": "read" },
+    "artifact-read": { "contents": "read", "actions": "read" },
     "coverage": { "contents": "read", "id-token": "write" },
     "security": { "contents": "read", "security-events": "write" },
     "codeql": { "contents": "read", "security-events": "write", "actions": "read" },
@@ -24,8 +26,8 @@
     "release-assets": { "contents": "write" },
     "attestation": { "contents": "write", "id-token": "write", "attestations": "write" },
     "release-publish": { "contents": "read", "issues": "write" },
-    "pages-build": { "contents": "read", "pages": "write" },
-    "pages-deploy": { "pages": "write", "id-token": "write" }
+    "pages-build": { "contents": "read", "actions": "read", "pages": "write" },
+    "pages-deploy": { "contents": "read", "actions": "read", "pages": "write", "id-token": "write" }
   },
   "outcomeSchemas": {
     "required": { "selected": ["success"], "unselected": ["success", "skipped"] },
@@ -83,7 +85,7 @@
     { "id": "pester-tests", "classification": "mandatory", "owners": { "pr": "pester-tests", "main": "pester-tests" }, "target": "pester-tests.yml", "selector": "pester", "outcomeSchema": "required", "permissionProfile": "coverage", "softFailPolicy": { "pr": false, "main": false } },
     { "id": "dataviewer-frontend-tests", "classification": "mandatory", "owners": { "pr": "dataviewer-frontend-tests", "main": "dataviewer-frontend-tests" }, "target": "dataviewer-frontend-tests.yml", "selector": "dv_frontend", "outcomeSchema": "required", "permissionProfile": "coverage" },
     { "id": "accessibility-evidence", "classification": "mandatory", "owners": { "pr": "accessibility-evidence", "main": "accessibility-evidence" }, "target": "accessibility-evidence.yml", "allowedEvents": ["schedule", "workflow_dispatch"], "selector": "accessibility", "outcomeSchema": "required", "permissionProfile": "read" },
-    { "id": "docusaurus-tests", "classification": "mandatory", "owners": { "pr": "docusaurus-tests", "main": "docusaurus-tests", "docs": "test" }, "target": "docusaurus-tests.yml", "selector": "docusaurus", "outcomeSchema": "required", "permissionProfile": "read", "softFailPolicy": { "pr": false, "main": false, "docs": false } },
+    { "id": "docusaurus-tests", "classification": "mandatory", "owners": { "pr": "docusaurus-tests", "main": "docusaurus-tests" }, "target": "docusaurus-tests.yml", "selector": "docusaurus", "outcomeSchema": "required", "permissionProfile": "read", "softFailPolicy": { "pr": false, "main": false } },
     { "id": "pytest-training", "classification": "mandatory", "owners": { "pr": "pytest-training", "main": "pytest-training" }, "target": "pytest-training.yml", "selector": "training", "outcomeSchema": "required", "permissionProfile": "coverage" },
     { "id": "pytest-dm-tools", "classification": "mandatory", "owners": { "pr": "pytest-dm-tools", "main": "pytest-dm-tools" }, "target": "pytest-dm-tools.yml", "selector": "dm_tools", "outcomeSchema": "required", "permissionProfile": "coverage" },
     { "id": "pytest-data-pipeline", "classification": "mandatory", "owners": { "pr": "pytest-data-pipeline", "main": "pytest-data-pipeline" }, "target": "pytest-data-pipeline.yml", "selector": "data_pipeline", "outcomeSchema": "required", "permissionProfile": "coverage" },
@@ -112,7 +114,8 @@
     { "id": "sbom-diff", "classification": "release", "owners": { "main": "sbom-diff" }, "inlineException": "Existing advisory release dependency comparison", "selector": "always", "outcomeSchema": "advisory", "permissionProfile": "release-assets" },
     { "id": "append-verification-notes", "classification": "release", "owners": { "main": "append-verification-notes" }, "inlineException": "Existing release verification notes", "selector": "always", "outcomeSchema": "coordination", "permissionProfile": "release-assets" },
     { "id": "publish-release", "classification": "release", "owners": { "main": "publish-release" }, "inlineException": "Existing draft promotion and milestone closure", "selector": "always", "outcomeSchema": "coordination", "permissionProfile": "release-publish" },
-    { "id": "docs-build", "classification": "deployment", "owners": { "docs": "build" }, "inlineException": "Independent Pages deployment artifact build", "selector": "always", "outcomeSchema": "coordination", "permissionProfile": "pages-build" },
-    { "id": "docs-deploy", "classification": "deployment", "owners": { "docs": "deploy" }, "inlineException": "Independent Pages deployment", "selector": "always", "outcomeSchema": "coordination", "permissionProfile": "pages-deploy" }
+    { "id": "docusaurus-promotion", "classification": "deployment", "owners": { "promotion": "promote" }, "inlineException": "Validate retained accessibility evidence and publish a promotion package", "selector": "always", "outcomeSchema": "coordination", "permissionProfile": "artifact-read" },
+    { "id": "docs-build", "classification": "deployment", "owners": { "docs": "build" }, "inlineException": "Verify promotion provenance and publish the retained Pages artifact", "selector": "always", "outcomeSchema": "coordination", "permissionProfile": "pages-build" },
+    { "id": "docs-deploy", "classification": "deployment", "owners": { "docs": "deploy" }, "inlineException": "Deploy the promotion-approved Pages artifact", "selector": "always", "outcomeSchema": "coordination", "permissionProfile": "pages-deploy" }
   ]
 }

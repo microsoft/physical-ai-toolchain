@@ -70,27 +70,6 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts/accessibility/ci logs
 
-      - name: Validate project evidence contracts
-        shell: bash
-        run: |
-          set -euo pipefail
-          uv run --no-project \
-            --with pydantic==2.13.5 \
-            --with pytest==9.1.1 \
-            --with pyyaml==6.0.3 \
-            pytest -c /dev/null -q \
-            --junitxml=logs/accessibility-evidence-tests.xml \
-            tests/test_accessibility_evidence.py
-          uvx --from ruff==0.16.5 ruff check \
-            scripts/accessibility/evidence_gate.py \
-            tests/test_accessibility_evidence.py
-          uv run --no-project --with pydantic==2.13.5 --with pyyaml==6.0.3 \
-            scripts/accessibility/evidence_gate.py --config-preview \
-            > artifacts/accessibility/ci/contract-preview.json
-          uv run --no-project --with pydantic==2.13.5 --with pyyaml==6.0.3 \
-            scripts/accessibility/evidence_gate.py --validate-github --repository-root . \
-            > artifacts/accessibility/ci/github-source-summary.json
-
       - name: Acquire reviewed HVE accessibility harness
         shell: bash
         run: |
@@ -145,7 +124,31 @@ jobs:
           skill_root="$RUNNER_TEMP/hve-core/.github/skills/accessibility/accessibility"
           npm ci --prefix "$skill_root/scripts/runtime_a11y"
           uv sync --project "$skill_root" --frozen
-          uv run --project "$skill_root" --frozen pytest -q
+          (
+            cd "$skill_root"
+            uv run --frozen pytest -q
+          )
+
+      - name: Validate project evidence contracts
+        shell: bash
+        env:
+          HVE_SKILL_ROOT: ${{ runner.temp }}/hve-core/.github/skills/accessibility/accessibility
+        run: |
+          set -euo pipefail
+          uv run --project "$HVE_SKILL_ROOT" --frozen --with pydantic==2.13.5 \
+            pytest -c /dev/null -q \
+            --junitxml=logs/accessibility-evidence-tests.xml \
+            tests/test_accessibility_evidence.py tests/test_accessibility_promotion.py
+          uvx --from ruff==0.16.5 ruff check \
+            scripts/accessibility/evidence_gate.py \
+            scripts/accessibility/promotion.py \
+            tests/test_accessibility_evidence.py tests/test_accessibility_promotion.py
+          uv run --no-project --with pydantic==2.13.5 --with pyyaml==6.0.3 \
+            scripts/accessibility/evidence_gate.py --config-preview \
+            > artifacts/accessibility/ci/contract-preview.json
+          uv run --no-project --with pydantic==2.13.5 --with pyyaml==6.0.3 \
+            scripts/accessibility/evidence_gate.py --validate-github --repository-root . \
+            > artifacts/accessibility/ci/github-source-summary.json
 
       - name: Run deterministic product evidence
         if: ${{ inputs.run-product-evidence == true || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}

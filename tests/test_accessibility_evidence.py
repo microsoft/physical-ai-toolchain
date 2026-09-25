@@ -1,9 +1,14 @@
 """Behavior tests for the accessibility evidence gate."""
 
+# cspell:ignore syspath
+
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
+import os
+import shutil
 import subprocess
 from copy import deepcopy
 from pathlib import Path
@@ -13,6 +18,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from scripts.accessibility import evidence_gate as gate
 from scripts.accessibility.evidence_gate import (
     AssetJourneyLedger,
     EvidenceBundle,
@@ -709,6 +715,28 @@ class TestBundleIntegrity:
 
 
 class TestAccessibilityWorkflowSource:
+    @pytest.mark.parametrize(
+        ("path", "job_id", "step_name"),
+        [
+            (_ACCESSIBILITY_WORKFLOW_PATH, "evidence", "Validate project evidence contracts"),
+            (_DOCUSAURUS_WORKFLOW_PATH, "docusaurus", "Validate project accessibility evidence contracts"),
+        ],
+    )
+    def test_real_composer_tests_use_the_acquired_pinned_runtime(
+        self, path: Path, job_id: str, step_name: str,
+    ) -> None:
+        steps = _load_yaml(path)["jobs"][job_id]["steps"]
+        contract_index = next(index for index, step in enumerate(steps) if step["name"] == step_name)
+        acquire_index = next(
+            index for index, step in enumerate(steps)
+            if step["name"].startswith("Acquire reviewed HVE")
+        )
+        contract = steps[contract_index]
+        assert acquire_index < contract_index
+        assert contract["env"]["HVE_SKILL_ROOT"].startswith("${{ runner.temp }}/hve-core/")
+        assert 'uv run --project "$HVE_SKILL_ROOT" --frozen' in contract["run"]
+        assert "tests/test_accessibility_evidence.py tests/test_accessibility_promotion.py" in contract["run"]
+
     def test_given_accessibility_workflow_when_reviewed_then_hve_provenance_is_immutable(self) -> None:
         # Act
         workflows = [
@@ -745,7 +773,9 @@ class TestAccessibilityWorkflowSource:
         assert steps["Validate generated evidence bundle"]["if"] == "${{ inputs.validate-generated-bundle == true }}"
         contract_run = steps["Validate project evidence contracts"]["run"]
         assert "scripts/accessibility/evidence_gate.py --config-preview" in contract_run
-        assert "uv run --project \"$skill_root\" --frozen pytest -q" in steps["Run HVE accessibility self-tests"]["run"]
+        self_test_run = steps["Run HVE accessibility self-tests"]["run"]
+        assert 'cd "$skill_root"' in self_test_run
+        assert "uv run --frozen pytest -q" in self_test_run
 
     def test_given_docusaurus_workflow_when_reviewed_then_composition_is_fail_closed(self) -> None:
         # Act
@@ -757,6 +787,9 @@ class TestAccessibilityWorkflowSource:
         # Assert
         assert inputs["evidence-cadence"]["type"] == "string"
         assert inputs["evidence-cadence"]["default"] == "pull-request"
+        assert inputs["required-completeness"]["type"] == "string"
+        assert inputs["required-completeness"]["default"] == "automated"
+        assert workflow["env"]["REQUIRED_COMPLETENESS"] == "${{ inputs.required-completeness }}"
         assert workflow["permissions"] == {"contents": "read"}
         prepare_run = steps["Prepare Docusaurus evidence composition"]["run"]
         compose_run = steps["Compose Docusaurus accessibility evidence"]["run"]
@@ -767,8 +800,10 @@ class TestAccessibilityWorkflowSource:
         assert 'compose-evidence \\' in compose_run
         assert compose_run.count('--source "$GITHUB_WORKSPACE/artifacts/accessibility/docusaurus/inputs/') == 2
         assert '--artifact-root "$GITHUB_WORKSPACE"' in compose_run
-        assert "--require-completeness \"$completeness\"" in compose_run
+        assert '--require-completeness "$REQUIRED_COMPLETENESS"' in compose_run
         assert "--validate-composed-docusaurus-bundle" in validate_run
+        assert '--require-completeness "$REQUIRED_COMPLETENESS"' in validate_run
+        assert '--harness-root "$skill_root"' in validate_run
         assert "--prepare-docusaurus-validation-input" in manifest_run
         assert "emit-validation-manifest" in manifest_run
         assert "accessibility-validation-manifest.json" in manifest_run
@@ -778,6 +813,15 @@ class TestAccessibilityWorkflowSource:
         assert "contrast-review=${{ steps.contrast-review.outcome }}" in manifest_run
         retention_days = steps["Upload Docusaurus accessibility evidence"]["with"]["retention-days"]
         assert retention_days == "${{ inputs.evidence-cadence == 'release' && 90 || 30 }}"
+        stage = steps["Stage portable Docusaurus evidence"]
+        assert stage["if"] == "always()"
+        assert '--stage-docusaurus-package "$RUNNER_TEMP/docusaurus-retained"' in stage["run"]
+        assert '--verify-docusaurus-package "$RUNNER_TEMP/docusaurus-retained"' in stage["run"]
+        assert "--repository-root ." in stage["run"]
+        upload = steps["Upload Docusaurus accessibility evidence"]
+        assert upload["if"] == "always()"
+        assert upload["with"]["path"] == "${{ runner.temp }}/docusaurus-retained/"
+        assert not any("browser diagnostics" in name.lower() for name in steps)
         binding_validation = (
             'PYTHONPATH="$skill_root/scripts" '
             'uv run --project "$skill_root" --frozen python - <<\'PY\''
@@ -916,9 +960,9 @@ class TestDocusaurusCompositionAdapter:
         assert "DCS13" in release_scope["selectors"]["journeyIds"]
         assert release_scope["manualEvidencePolicy"] == "required"
         assert any(item["methods"][0]["human"] for item in release_requirements["requirements"])
-        assert len(release_requirements["requirements"]) == 180
-        assert sum(item["methods"][0]["human"] for item in release_requirements["requirements"]) == 54
-        assert sum(item["journeyIds"] == ["DCS13"] for item in release_requirements["requirements"]) == 34
+        assert len(release_requirements["requirements"]) == 190
+        assert sum(item["methods"][0]["human"] for item in release_requirements["requirements"]) == 64
+        assert sum(item["journeyIds"] == ["DCS13"] for item in release_requirements["requirements"]) == 44
         assert {
             item["requirementId"]
             for item in release_requirements["requirements"]
@@ -929,6 +973,525 @@ class TestDocusaurusCompositionAdapter:
             "WCAG22-4.1.2:DCS13:JAWS",
             "WCAG22-4.1.3:DCS13:JAWS",
         }
+
+    def test_guarded_criteria_retain_exact_qualified_deciding_propositions(self) -> None:
+        assets = AssetJourneyLedger.model_validate_json(_ASSET_LEDGER_PATH.read_text(encoding="utf-8"))
+        ledger = RequirementEvidenceLedger.model_validate_json(_REQUIREMENT_LEDGER_PATH.read_text(encoding="utf-8"))
+        _, catalog, _ = _docusaurus_catalogs(assets, ledger, "release")
+        deciding = {
+            item["sourceRequirementId"]
+            for item in catalog["requirements"]
+            if item["methods"][0]["disposition"] == "decides"
+        }
+        assert len(deciding) == 55
+        for criterion in ("2.1.4", "2.2.1", "2.5.1", "2.5.4", "3.3.1"):
+            requirement = next(item for item in ledger.requirements if item.criterion == criterion)
+            expected = {item.proposition for item in requirement.methods if item.disposition == "DECIDES"}
+            actual = {
+                item["methods"][0]["proposition"]
+                for item in catalog["requirements"]
+                if item["sourceRequirementId"] == requirement.requirement_id
+                and item["journeyIds"] == ["DCS13"]
+                and item["methods"][0]["disposition"] == "decides"
+                and item["methods"][0]["probe"] == "qualified-human"
+            }
+            assert actual == expected
+
+
+@pytest.fixture()
+def hve_runtime(monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Any]:
+    configured = os.environ.get("HVE_SKILL_ROOT")
+    if not configured:
+        pytest.skip("Set HVE_SKILL_ROOT to the reviewed pinned accessibility skill")
+    root = Path(configured).resolve()
+    monkeypatch.syspath_prepend(str(root / "scripts"))
+    return root, importlib.import_module("runtime_a11y.evidence_bundle._compose")
+
+
+@pytest.fixture()
+def composed_docs_bundle(
+    tmp_path: Path, hve_runtime: tuple[Path, Any]
+) -> tuple[Path, Path, dict[str, Any]]:
+    root, composer = hve_runtime
+    for source in (_ASSET_LEDGER_PATH, _REQUIREMENT_LEDGER_PATH):
+        destination = tmp_path / ".github" / "accessibility" / source.name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+    assets = AssetJourneyLedger.model_validate_json(_ASSET_LEDGER_PATH.read_text(encoding="utf-8"))
+    ledger = RequirementEvidenceLedger.model_validate_json(_REQUIREMENT_LEDGER_PATH.read_text(encoding="utf-8"))
+    asset_catalog, requirements, scope = _docusaurus_catalogs(assets, ledger, "release")
+    run = {
+        "schemaVersion": "1.0.0",
+        "runId": "test-run",
+        "campaignId": "docusaurus-accessibility",
+        "composedAt": "2026-09-24T12:00:00Z",
+        "sourceRevision": "a" * 40,
+        **{key: _DIGEST for key in (
+            "buildDigest", "configDigest", "fixtureDigest", "lockfileDigest",
+            "toolDigest", "harnessDigest", "mappingDigest",
+        )},
+        "environment": {"class": "local-ci", "operatingSystem": "test", "locale": "en-US", "inputModes": ["keyboard"]},
+    }
+    cells, _ = composer._obligations(asset_catalog, requirements, scope)
+    source = {
+        "schemaVersion": "1.0.0", "sourceKind": "source", "producer": "contract test",
+        "sourceRunId": "source-test", "observedAt": run["composedAt"],
+        "boundTo": {key: run[key] for key in ("sourceRevision", "buildDigest", "configDigest", "fixtureDigest")},
+        "results": [
+            {
+                **{
+                    key: cell[key]
+                    for key in ("requirementId", "journeyId", "state", "method", "probe", "disposition", "expected")
+                },
+                "resultId": f"result-{index}", "status": "PASS", "observed": "Synthetic test observation",
+                "artifactIds": [],
+            }
+            for index, cell in enumerate(cells) if not cell["human"]
+        ],
+        "artifacts": [],
+    }
+    source["sourceDigest"] = gate._hve_canonical_digest(source, "hve-a11y:evidence-source:v1")
+    bundle = composer.compose_evidence(
+        asset_catalog=asset_catalog, requirement_catalog=requirements, scope=scope,
+        run_context=run, sources=[source], state_proofs=[],
+    )
+    path = tmp_path / "bundle.json"
+    path.write_text(json.dumps(bundle), encoding="utf-8")
+    return root, path, bundle
+
+
+class TestComposedDocusaurusVerdict:
+    @staticmethod
+    def _validate(
+        fixture: tuple[Path, Path, dict[str, Any]], *, completeness: str = "automated"
+    ) -> dict[str, Any]:
+        harness, path, bundle = fixture
+        bundle["bundleDigest"] = gate._hve_canonical_digest(
+            {key: value for key, value in bundle.items() if key != "bundleDigest"},
+            "hve-a11y:evidence-bundle:v1",
+        )
+        path.write_text(json.dumps(bundle), encoding="utf-8")
+        return gate.validate_composed_docusaurus_bundle(
+            path, path.parent, harness_root=harness, required_completeness=completeness
+        )
+
+    def test_automated_completeness_allows_pending_review_but_never_release(
+        self, composed_docs_bundle: tuple[Path, Path, dict[str, Any]]
+    ) -> None:
+        assert self._validate(composed_docs_bundle)["verdict"] == "PASS"
+        assert self._validate(composed_docs_bundle, completeness="reviewer")["verdict"] == "CANT_TELL"
+        assert self._validate(composed_docs_bundle, completeness="release")["verdict"] == "CANT_TELL"
+
+    def test_declared_upstream_release_incomplete_is_never_overridden(
+        self, composed_docs_bundle: tuple[Path, Path, dict[str, Any]]
+    ) -> None:
+        bundle = composed_docs_bundle[2]
+        for result in bundle["evidenceResults"]:
+            if result["status"] == "NOT_ASSESSED":
+                result["status"] = "PASS"
+        bundle["scopeCompleteness"]["reviewerEvidence"] = "complete"
+        assert any(result["status"] == "CANT_TELL" for result in bundle["evidenceResults"])
+        assert bundle["scopeCompleteness"]["releaseEvidence"] == "incomplete"
+        assert self._validate(composed_docs_bundle, completeness="release")["verdict"] == "CANT_TELL"
+
+    def test_altered_bundle_digest_is_rejected(
+        self, composed_docs_bundle: tuple[Path, Path, dict[str, Any]]
+    ) -> None:
+        harness, path, bundle = composed_docs_bundle
+        bundle["bundleDigest"] = "0" * 64
+        gate._write_json(path, bundle)
+        with pytest.raises(ValueError, match="bundle digest mismatch"):
+            gate.validate_composed_docusaurus_bundle(path, path.parent, harness_root=harness)
+
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_current_fail_dominates_regardless_of_result_order(
+        self, composed_docs_bundle: tuple[Path, Path, dict[str, Any]], reverse: bool
+    ) -> None:
+        bundle = composed_docs_bundle[2]
+        result = next(item for item in bundle["evidenceResults"] if item["status"] == "PASS")
+        failed = {**result, "resultId": "failing-result", "status": "FAIL"}
+        bundle["evidenceResults"].append(failed)
+        if reverse:
+            bundle["evidenceResults"].reverse()
+        assert self._validate(composed_docs_bundle)["verdict"] == "FAIL"
+
+    def test_valid_supersession_ignores_historical_failure(
+        self, composed_docs_bundle: tuple[Path, Path, dict[str, Any]]
+    ) -> None:
+        bundle = composed_docs_bundle[2]
+        result = next(item for item in bundle["evidenceResults"] if item["status"] == "PASS")
+        previous = {**result, "resultId": "historical-result", "status": "FAIL", "current": False}
+        previous["observedAt"] = "2026-09-24T11:00:00Z"
+        result["supersedesResultId"] = previous["resultId"]
+        bundle["evidenceResults"].append(previous)
+        assert self._validate(composed_docs_bundle)["verdict"] == "PASS"
+
+    @pytest.mark.parametrize("mutation", ["unknown", "cross-cell", "current-flag", "duplicate", "cycle"])
+    def test_invalid_supersession_is_rejected(
+        self, composed_docs_bundle: tuple[Path, Path, dict[str, Any]], mutation: str
+    ) -> None:
+        bundle = composed_docs_bundle[2]
+        results = [item for item in bundle["evidenceResults"] if item["status"] == "PASS"]
+        first, second = results[:2]
+        if mutation == "unknown":
+            first["supersedesResultId"] = "unknown"
+        elif mutation == "cross-cell":
+            first["supersedesResultId"] = second["resultId"]
+        elif mutation == "current-flag":
+            first["current"] = False
+        elif mutation == "duplicate":
+            bundle["evidenceResults"].append(deepcopy(first))
+        else:
+            first["supersedesResultId"] = first["resultId"]
+        with pytest.raises(ValueError):
+            self._validate(composed_docs_bundle)
+
+    @pytest.mark.parametrize("mutation", ["missing", "quarantine", "conflict", "incomplete", "expired"])
+    def test_unresolved_evidence_cannot_pass(
+        self, composed_docs_bundle: tuple[Path, Path, dict[str, Any]], mutation: str
+    ) -> None:
+        bundle = composed_docs_bundle[2]
+        result = next(item for item in bundle["evidenceResults"] if item["status"] == "PASS")
+        if mutation == "missing":
+            bundle["evidenceResults"].remove(result)
+        elif mutation == "quarantine":
+            result["quarantined"] = True
+        elif mutation == "conflict":
+            bundle["conflicts"].append({
+                "conflictId": "conflict-test", "cellId": result["cellId"],
+                "resultIds": [result["resultId"], "other-result"], "state": "unresolved",
+            })
+        elif mutation == "incomplete":
+            bundle["scopeCompleteness"]["automatedCollection"] = "incomplete"
+        else:
+            result["validUntil"] = "2026-09-24T11:00:00Z"
+        assert self._validate(composed_docs_bundle)["verdict"] != "PASS"
+
+    @pytest.mark.parametrize("mutation", ["schema", "empty", "remove", "duplicate", "catalog", "digest"])
+    def test_schema_and_canonical_obligations_fail_closed(
+        self, composed_docs_bundle: tuple[Path, Path, dict[str, Any]], mutation: str
+    ) -> None:
+        bundle = composed_docs_bundle[2]
+        if mutation == "schema":
+            bundle["unexpected"] = True
+        elif mutation == "empty":
+            bundle["expectedCells"] = []
+        elif mutation == "remove":
+            bundle["expectedCells"].pop()
+        elif mutation == "duplicate":
+            bundle["expectedCells"].append(bundle["expectedCells"][0])
+        elif mutation == "catalog":
+            bundle["catalogs"]["requirementMethod"]["requirements"][0]["methods"][0]["proposition"] = "drift"
+        else:
+            bundle["catalogs"]["assetJourneyDigest"] = "0" * 64
+        with pytest.raises(ValueError):
+            self._validate(composed_docs_bundle)
+
+
+class TestDocusaurusRetainedPackage:
+    def test_exact_build_marker_is_retained_in_original_build_digest(self, tmp_path: Path) -> None:
+        source = tmp_path / "repository"
+        build = source / "docs" / "docusaurus" / "build"
+        build.mkdir(parents=True)
+        marker = build / ".nojekyll"
+        marker.write_bytes(b"")
+        page = build / "index.html"
+        page.write_text("<main>Retained build</main>", encoding="utf-8")
+        package = tmp_path / "retained"
+
+        manifest = gate.stage_docusaurus_package(source, package)
+
+        retained_marker = package / "docs" / "docusaurus" / "build" / ".nojekyll"
+        assert retained_marker.is_file()
+        assert retained_marker.read_bytes() == marker.read_bytes()
+        assert manifest["buildDigest"] == gate._digest_paths([marker, page], source)
+        assert manifest["buildDigest"] != gate._digest_paths([page], source)
+        assert gate.verify_docusaurus_package(package)["buildDigest"] == manifest["buildDigest"]
+
+    @pytest.mark.parametrize("relative", [".hidden", ".gitignore", "nested/.nojekyll", ".cache/asset.json"])
+    def test_build_marker_exception_does_not_allow_other_hidden_paths(self, tmp_path: Path, relative: str) -> None:
+        source = tmp_path / "repository"
+        hidden = source / "docs" / "docusaurus" / "build" / relative
+        hidden.parent.mkdir(parents=True)
+        hidden.write_bytes(b"not an audited marker")
+        with pytest.raises(ValueError, match="Hidden"):
+            gate.stage_docusaurus_package(source, tmp_path / "retained")
+
+    def test_build_marker_exception_does_not_allow_symlinks(self, tmp_path: Path) -> None:
+        source = tmp_path / "repository"
+        marker = source / "docs" / "docusaurus" / "build" / ".nojekyll"
+        marker.parent.mkdir(parents=True)
+        target = tmp_path / "outside-marker"
+        target.write_bytes(b"")
+        try:
+            marker.symlink_to(target)
+        except OSError:
+            pytest.skip("Symbolic links require privileges on this host")
+        with pytest.raises(ValueError, match="Symlink"):
+            gate.stage_docusaurus_package(source, tmp_path / "retained")
+
+    @pytest.fixture()
+    def package_source(
+        self, composed_docs_bundle: tuple[Path, Path, dict[str, Any]], hve_runtime: tuple[Path, Any]
+    ) -> Path:
+        _, bundle_path, original = composed_docs_bundle
+        root = bundle_path.parent
+        evidence_root = root / "artifacts" / "accessibility" / "docusaurus"
+        results_root = root / "docs" / "docusaurus" / "test-results"
+        build_root = root / "docs" / "docusaurus" / "build"
+        results_root.mkdir(parents=True)
+        build_root.mkdir(parents=True)
+        for name in gate._DOCUSAURUS_PACKAGE_OUTPUTS:
+            gate._write_json(evidence_root / name, {})
+        for name in gate._DOCUSAURUS_PACKAGE_RESULTS:
+            gate._write_json(results_root / name, {})
+        gate._write_json(build_root / "deployed-routes.json", {"routes": ["/"]})
+        gate._write_json(build_root / "mermaid-routes.json", {"routes": []})
+        (build_root / "index.html").write_text("<main>Test build</main>", encoding="utf-8")
+        (build_root / ".nojekyll").write_bytes(b"")
+        report = root / "docs" / "docusaurus" / "playwright-report" / "index.html"
+        report.parent.mkdir()
+        report.write_text("<main>Test report</main>", encoding="utf-8")
+        crop = results_root / "contrast-crops" / "test.png"
+        crop.parent.mkdir()
+        crop.write_bytes(b"synthetic-crop")
+        gate._write_json(results_root / "site-crawl-results.json", {
+            "results": [{"contrastEvidence": [{"evidencePath": "contrast-crops/test.png"}]}],
+        })
+        gate._write_json(evidence_root / "contrast-review.json", {
+            "signatures": [{"evidence": [{
+                "evidencePath": "contrast-crops/test.png",
+                "evidenceDigest": hashlib.sha256(crop.read_bytes()).hexdigest(),
+            }]}],
+        })
+        gate._write_json(root / "docs" / "docusaurus" / "e2e" / "contrast-baseline.json", {"entries": []})
+        gate._write_json(root / "docs" / "docusaurus" / "a11y-screen-reader.bindings.json", {"caseBindings": {}})
+        source_files = [
+            {"path": path.relative_to(root).as_posix(), "mode": "100644",
+             "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            for path in sorted((root / ".github" / "accessibility").glob("*.json"))
+        ]
+        gate._write_json(evidence_root / "source-input-manifest.json", {
+            "files": source_files,
+            "sourceInputDigest": hashlib.sha256(
+                json.dumps(source_files, separators=(",", ":"), sort_keys=True).encode()
+            ).hexdigest(),
+            "sourceRevision": original["runManifest"]["sourceRevision"],
+        })
+        assets, requirements, scope, cells = gate._docusaurus_contract(root, "release")
+        run = {**original["runManifest"], "buildDigest": gate._digest_paths(list(build_root.iterdir()), root)}
+        artifact = gate._artifact_record(results_root / "playwright-results.json", root, "test-report")
+        source = {
+            "schemaVersion": "1.0.0", "sourceKind": "source", "producer": "contract test",
+            "sourceRunId": "test-source", "observedAt": run["composedAt"],
+            "boundTo": {key: run[key] for key in ("sourceRevision", "buildDigest", "configDigest", "fixtureDigest")},
+            "results": [{
+                **{key: cell[key] for key in (
+                    "requirementId", "journeyId", "state", "method", "probe", "disposition", "expected",
+                )},
+                "resultId": f"result-{index}", "status": "PASS", "observed": "Synthetic test",
+                "artifactIds": ["test-report"],
+            } for index, cell in enumerate(cells) if not cell["human"]],
+            "artifacts": [artifact],
+        }
+        source["sourceDigest"] = gate._hve_canonical_digest(source, "hve-a11y:evidence-source:v1")
+        empty_source = {**source, "sourceRunId": "test-empty-source", "results": [], "artifacts": []}
+        empty_source["sourceDigest"] = gate._hve_canonical_digest(
+            {key: value for key, value in empty_source.items() if key != "sourceDigest"},
+            "hve-a11y:evidence-source:v1",
+        )
+        bundle = hve_runtime[1].compose_evidence(
+            asset_catalog=assets, requirement_catalog=requirements, scope=scope, run_context=run,
+            sources=[source, empty_source], state_proofs=[],
+        )
+        for name, value in {
+            "asset-journeys.json": assets, "requirement-methods.json": requirements, "evidence-scope.json": scope,
+            "run-context.json": run, "state-proofs.json": [], "evidence-source.json": source,
+            "evidence-playwright.json": empty_source, "source-check-result.json": {"status": "passed"},
+        }.items():
+            gate._write_json(evidence_root / "inputs" / name, value)
+        gate._write_json(evidence_root / "evidence-bundle.json", bundle)
+        gate._write_json(evidence_root / "evidence-summary.json", {
+            "verdict": "PASS", "bundleDigest": bundle["bundleDigest"],
+        })
+        handoff = evidence_root / "reviewer-handoff"
+        templates = []
+        for cell in cells:
+            if cell["human"]:
+                path = handoff / "supplement-templates" / f"{cell['cellId']}.json"
+                gate._write_json(path, {"cellId": cell["cellId"], "templateStatus": "awaiting-qualified-review"})
+                templates.append({"path": path.relative_to(handoff).as_posix(),
+                                  "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+        gate._write_json(handoff / "reviewer-campaign.json", {"templates": templates, "artifacts": {}})
+        commands = []
+        for command_id in gate._DOCUSAURUS_VALIDATION_COMMANDS:
+            path = evidence_root / "command-results" / f"{command_id}.json"
+            gate._write_json(path, {"commandId": command_id, "status": "passed"})
+            commands.append({"commandId": command_id, "status": "passed",
+                             "resultArtifactDigest": hashlib.sha256(path.read_bytes()).hexdigest()})
+        validation = {"commands": commands, "revision": {"sourceRevision": run["sourceRevision"]}}
+        gate._write_json(evidence_root / "validation-input.json", validation)
+        validation["manifestDigest"] = gate._hve_canonical_digest(validation, "hve-a11y:validation-manifest:v1")
+        gate._write_json(evidence_root / "accessibility-validation-manifest.json", validation)
+        gate._write_json(evidence_root / "schema-validation-report.json", {"status": "valid"})
+        return root
+
+    def test_complete_package_relocates_and_recomposes_without_changing_envelopes(
+        self, package_source: Path, hve_runtime: tuple[Path, Any]
+    ) -> None:
+        staged = package_source / "retained-output"
+        manifest = gate.stage_docusaurus_package(package_source, staged)
+        moved = package_source / "fresh-download"
+        shutil.copytree(staged, moved)
+        assert manifest["complete"] is True
+        assert gate.verify_docusaurus_package(moved, require_complete=True, harness_root=hve_runtime[0]) == manifest
+        inputs = moved / gate._DOCUSAURUS_EVIDENCE_ROOT / "inputs"
+        original_inputs = package_source / gate._DOCUSAURUS_EVIDENCE_ROOT / "inputs"
+        assert (inputs / "evidence-source.json").read_bytes() == (original_inputs / "evidence-source.json").read_bytes()
+        values = {path.name: json.loads(path.read_text(encoding="utf-8")) for path in inputs.glob("*.json")}
+        rebuilt = hve_runtime[1].compose_evidence(
+            asset_catalog=values["asset-journeys.json"], requirement_catalog=values["requirement-methods.json"],
+            scope=values["evidence-scope.json"], run_context=values["run-context.json"],
+            sources=[values["evidence-source.json"], values["evidence-playwright.json"]],
+            state_proofs=values["state-proofs.json"],
+        )
+        assert rebuilt["bundleDigest"] == manifest["bundleDigest"]
+        assert gate.validate_composed_docusaurus_bundle(
+            moved / gate._DOCUSAURUS_EVIDENCE_ROOT / "evidence-bundle.json", moved,
+            harness_root=hve_runtime[0], required_completeness="automated",
+        )["verdict"] == "PASS"
+        assert (moved / "docs" / "docusaurus" / "test-results" / "contrast-crops" / "test.png").is_file()
+        build_files = list((moved / "docs" / "docusaurus" / "build").rglob("*"))
+        assert gate._digest_paths([path for path in build_files if path.is_file()], moved) == manifest["buildDigest"]
+
+    def test_complete_verification_requires_pinned_harness(self, package_source: Path) -> None:
+        staged = package_source / "retained-output"
+        gate.stage_docusaurus_package(package_source, staged)
+        with pytest.raises(ValueError, match="harness"):
+            gate.verify_docusaurus_package(staged, require_complete=True)
+
+    @pytest.mark.parametrize("changed", ["build", "crop", "template", "source", "manifest", "input"])
+    def test_changed_dependency_is_retained_only_as_non_promotable_diagnostics(
+        self, package_source: Path, changed: str,
+    ) -> None:
+        paths = {
+            "build": package_source / "docs" / "docusaurus" / "build" / "index.html",
+            "crop": package_source / gate._DOCUSAURUS_RESULTS_ROOT / "contrast-crops" / "test.png",
+            "source": package_source / ".github" / "accessibility" / "asset-journeys.json",
+            "manifest": package_source / gate._DOCUSAURUS_EVIDENCE_ROOT / "evidence-bundle.json",
+            "input": package_source / gate._DOCUSAURUS_EVIDENCE_ROOT / "inputs" / "asset-journeys.json",
+            "template": next((package_source / gate._DOCUSAURUS_EVIDENCE_ROOT / "reviewer-handoff"
+                              / "supplement-templates").glob("*.json")),
+        }
+        if changed == "manifest":
+            bundle = json.loads(paths[changed].read_text(encoding="utf-8"))
+            bundle["bundleDigest"] = "0" * 64
+            gate._write_json(paths[changed], bundle)
+        elif changed == "input":
+            catalog = json.loads(paths[changed].read_text(encoding="utf-8"))
+            catalog["journeys"][0]["role"] = "different role"
+            gate._write_json(paths[changed], catalog)
+        else:
+            paths[changed].write_bytes(b"changed")
+        target = package_source / "retained-output"
+        manifest = gate.stage_docusaurus_package(package_source, target)
+        assert manifest["complete"] is False
+        assert manifest["promotable"] is False
+        assert any("mismatch" in failure for failure in manifest["missing"])
+        assert (target / paths[changed].relative_to(package_source)).read_bytes() == paths[changed].read_bytes()
+        assert gate.verify_docusaurus_package(target) == manifest
+        with pytest.raises(ValueError, match="incomplete"):
+            gate.verify_docusaurus_package(target, require_complete=True)
+
+    def test_missing_producer_retains_available_diagnostics_without_a_pass(self, tmp_path: Path) -> None:
+        source = tmp_path / "repository"
+        artifact = source / "docs" / "docusaurus" / "test-results" / "browser-version.json"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text('{"channel":"chrome","version":"test"}', encoding="utf-8")
+        package = source / "artifacts" / "accessibility" / "docusaurus" / "retained"
+
+        result = gate.stage_docusaurus_package(source, package)
+
+        assert result["complete"] is False
+        assert result["promotable"] is False
+        assert result["missing"]
+        assert (package / artifact.relative_to(source)).read_bytes() == artifact.read_bytes()
+        relocated = tmp_path / "download"
+        shutil.copytree(package, relocated)
+        assert gate.verify_docusaurus_package(relocated)["complete"] is False
+        with pytest.raises(ValueError, match="incomplete"):
+            gate.verify_docusaurus_package(relocated, require_complete=True)
+
+    def test_partial_staging_does_not_import_unavailable_hve(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        source = tmp_path / "repository"
+        source.mkdir()
+        target = tmp_path / "retained"
+
+        def unavailable_hve(name: str, package: str | None = None) -> Any:
+            raise AssertionError(f"Partial packaging must not import HVE: {name}")
+
+        monkeypatch.setattr(gate.importlib, "import_module", unavailable_hve)
+        status = main([
+            "--stage-docusaurus-package", str(target), "--repository-root", str(source),
+            "--harness-root", str(tmp_path / "missing-hve"),
+        ])
+        result = json.loads(capsys.readouterr().out)
+        assert status == gate.EXIT_FAILURE
+        assert result["complete"] is False
+        assert result["promotable"] is False
+        assert gate.verify_docusaurus_package(target)["complete"] is False
+
+    @pytest.mark.parametrize("tamper", ["bytes", "size", "extra", "hidden", "duplicate", "escape"])
+    def test_package_manifest_rejects_mutation(self, tmp_path: Path, tamper: str) -> None:
+        source = tmp_path / "repository"
+        artifact = source / "docs" / "docusaurus" / "test-results" / "browser-version.json"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text('{"version":"123"}', encoding="utf-8")
+        package = tmp_path / "retained"
+        gate.stage_docusaurus_package(source, package)
+        retained = package / artifact.relative_to(source)
+        if tamper == "bytes":
+            retained.write_text('{"version":"321"}', encoding="utf-8")
+        elif tamper == "size":
+            retained.write_bytes(b"x")
+        elif tamper in {"extra", "hidden"}:
+            (package / (".hidden" if tamper == "hidden" else "extra.json")).write_text("{}", encoding="utf-8")
+        else:
+            manifest_path = package / "package-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if tamper == "duplicate":
+                manifest["files"].append(manifest["files"][0])
+            else:
+                manifest["files"][0]["path"] = "../outside.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        with pytest.raises(ValueError):
+            gate.verify_docusaurus_package(package)
+
+    def test_existing_nonempty_target_is_not_overwritten(self, tmp_path: Path) -> None:
+        source = tmp_path / "repository"
+        source.mkdir()
+        target = tmp_path / "retained"
+        target.mkdir()
+        marker = target / "unrelated.json"
+        marker.write_text("{}", encoding="utf-8")
+        with pytest.raises(ValueError, match="empty"):
+            gate.stage_docusaurus_package(source, target)
+        assert marker.read_text(encoding="utf-8") == "{}"
+
+    def test_symlinked_producer_is_rejected(self, tmp_path: Path) -> None:
+        source = tmp_path / "repository"
+        artifact = source / "docs" / "docusaurus" / "test-results" / "browser-version.json"
+        artifact.parent.mkdir(parents=True)
+        outside = tmp_path / "outside.json"
+        outside.write_text("{}", encoding="utf-8")
+        try:
+            artifact.symlink_to(outside)
+        except OSError:
+            pytest.skip("Symbolic links require privileges on this host")
+        with pytest.raises(ValueError, match="Symlink"):
+            gate.stage_docusaurus_package(source, tmp_path / "retained")
 
 
 class TestDocusaurusSourceManifest:
@@ -980,6 +1543,26 @@ class TestDocusaurusSourceManifest:
         )
 
         assert first["sourceInputDigest"] == second["sourceInputDigest"]
+
+    @pytest.mark.parametrize("relative", [
+        "scripts/accessibility/promotion.py",
+        "tests/test_accessibility_promotion.py",
+        ".github/workflows/deploy-docs.yml",
+        ".github/workflows/docusaurus-accessibility-promotion.yml",
+    ])
+    def test_promotion_controls_bind_source_identity_and_remain_portable(self, tmp_path: Path, relative: str) -> None:
+        root = self._repository(tmp_path)
+        first = prepare_docusaurus_source_manifest(
+            root, root / "artifacts/accessibility/docusaurus/source-input-manifest.json", "pull-request"
+        )
+        added = root / relative
+        added.write_text("controlled source\n", encoding="utf-8")
+        second = prepare_docusaurus_source_manifest(
+            root, root / "artifacts/accessibility/docusaurus/source-input-manifest.json", "pull-request"
+        )
+        assert first["sourceInputDigest"] != second["sourceInputDigest"]
+        assert relative in {item["path"] for item in second["files"]}
+        assert gate._package_path(root, relative) == added
 
     def test_given_dirty_release_sources_when_manifested_then_rejects(self, tmp_path: Path) -> None:
         root = self._repository(tmp_path)
@@ -1129,40 +1712,18 @@ class TestDocusaurusContrastReview:
 class TestDocusaurusReviewerHandoff:
     @staticmethod
     def _write_inputs(root: Path, *, remove_cell: bool = False) -> tuple[Path, Path]:
-        methods = {
-            "COGNITIVE_REVIEW": 25,
-            "JAWS": 4,
-            "MANUAL_KEYBOARD": 1,
-            "MEDIA_EQUIVALENCE_REVIEW": 14,
-            "NVDA": 4,
-            "PLAYWRIGHT_KEYBOARD": 3,
-            "PLAYWRIGHT_POINTER": 1,
-            "UNIT_TEST": 2,
-        }
-        cells = []
-        for method, count in methods.items():
-            for index in range(count):
-                cells.append(
-                    {
-                        "cellId": f"cell-{len(cells):020d}",
-                        "disposition": "decides",
-                        "expected": f"Review {method} proposition {index}",
-                        "human": True,
-                        "journeyId": "DCS13",
-                        "method": method,
-                        "probe": "qualified-human",
-                        "requirementId": f"WCAG22-{method}-{index}:DCS13:{method}",
-                        "state": "release review",
-                    }
-                )
+        for source in (_ASSET_LEDGER_PATH, _REQUIREMENT_LEDGER_PATH):
+            destination = root / ".github" / "accessibility" / source.name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+        assets, _, _, expected = gate._docusaurus_contract(root, "release")
+        cells = [item for item in expected if item["human"]]
         if remove_cell:
             cells.pop()
         release = {
             "bundleDigest": "b" * 64,
             "catalogs": {
-                "assetJourney": {
-                    "journeys": [{"fixtureId": "FIXTURE-DOCUSAURUS", "journeyId": "DCS13"}]
-                }
+                "assetJourney": assets
             },
             "expectedCells": cells,
             "runManifest": {
@@ -1222,7 +1783,7 @@ class TestDocusaurusReviewerHandoff:
             (tmp_path / "handoff" / result["templates"][0]["path"]).read_text(encoding="utf-8")
         )
 
-        assert result["totals"] == {"humanCells": 54, "templates": 54}
+        assert result["totals"] == {"humanCells": 64, "templates": 64}
         assert result["methodCounts"]["JAWS"] == 4
         assert result["methodCounts"]["NVDA"] == 4
         assert result["assistiveTechnologyRunbook"]["methods"] == ["NVDA", "JAWS"]
@@ -1234,15 +1795,29 @@ class TestDocusaurusReviewerHandoff:
         assert template["schemaVersion"] == "1.0.0-template"
         assert set(template["requiredReviewerFields"].values()) == {None}
         assert template["privacyBoundary"]["restrictedObservationsStoredInGit"] is False
-        assert len(list((tmp_path / "handoff" / "supplement-templates").glob("*.json"))) == 54
+        assert len(list((tmp_path / "handoff" / "supplement-templates").glob("*.json"))) == 64
 
     def test_given_release_inventory_drift_when_built_then_handoff_fails_closed(self, tmp_path: Path) -> None:
         release_path, contrast_path = self._write_inputs(tmp_path, remove_cell=True)
 
-        with pytest.raises(ValueError, match="exactly 54 human cells"):
+        with pytest.raises(ValueError, match="canonical human cell inventory drifted"):
             prepare_docusaurus_reviewer_handoff(
                 tmp_path, release_path, contrast_path, tmp_path / "handoff"
             )
+
+    @pytest.mark.parametrize("mutation", ["duplicate", "proposition", "method"])
+    def test_human_cell_identity_and_proposition_cannot_drift(self, tmp_path: Path, mutation: str) -> None:
+        release_path, contrast_path = self._write_inputs(tmp_path)
+        bundle = json.loads(release_path.read_text(encoding="utf-8"))
+        if mutation == "duplicate":
+            bundle["expectedCells"].append(bundle["expectedCells"][0])
+        elif mutation == "proposition":
+            bundle["expectedCells"][0]["expected"] = "Unreviewed proposition"
+        else:
+            bundle["expectedCells"][0]["method"] = "SOURCE_INSPECTION"
+        gate._write_json(release_path, bundle)
+        with pytest.raises(ValueError, match=r"Duplicate|inventory drifted"):
+            prepare_docusaurus_reviewer_handoff(tmp_path, release_path, contrast_path, tmp_path / "handoff")
 
 
 class TestDocusaurusScreenReaderConsumer:
@@ -1358,6 +1933,7 @@ class TestDocusaurusValidationManifestInput:
             if command[:2] == ["git", "status"]:
                 return SimpleNamespace(stdout="")
             if command[0] == "node":
+                assert kwargs["env"]["NODE_DISABLE_COMPILE_CACHE"] == "1"
                 return SimpleNamespace(stdout="v24.19.0\n")
             return SimpleNamespace(stdout="uv 0.9.0\n")
 
@@ -1511,7 +2087,7 @@ class TestGitHubSurfaceContracts:
             "markdownTemplates": 1,
             "contactLinks": 2,
             "zeroInputDispatches": 9,
-            "typedDispatches": 2,
+            "typedDispatches": 3,
             "providerOutcomes": "NOT_ASSESSED",
         }
 
@@ -1533,7 +2109,8 @@ class TestGitHubSurfaceContracts:
         assert accessibility_job["uses"] == "./.github/workflows/accessibility-evidence.yml"
         assert accessibility_job["with"]["run-product-evidence"] is True
         assert docusaurus_job["uses"] == "./.github/workflows/docusaurus-tests.yml"
-        assert docusaurus_job["with"]["evidence-cadence"] == "scheduled"
+        assert docusaurus_job["with"]["evidence-cadence"] == "release"
+        assert docusaurus_job["with"]["required-completeness"] == "automated"
         assert release_needs.count("accessibility-evidence") == 1
         assert release_needs.count("docusaurus-tests") == 1
 
@@ -1576,7 +2153,15 @@ class TestGitHubSurfaceContracts:
     def test_given_docs_publication_when_parsed_then_release_evidence_is_required(self) -> None:
         workflow = _load_yaml(_REPOSITORY_ROOT / ".github" / "workflows" / "deploy-docs.yml")
 
-        assert workflow["jobs"]["test"]["with"]["evidence-cadence"] == "release"
+        triggers = workflow.get("on", workflow.get(True))
+        assert triggers["workflow_run"]["workflows"] == ["Docusaurus Accessibility Promotion"]
+        steps = {step["name"]: step for step in workflow["jobs"]["build"]["steps"]}
+        verification = steps["Verify release completeness and retained build digest"]["run"]
+        assert "verify-promoted" in verification
+        assert '--harness-root "$HVE_SKILL_ROOT"' in verification
+        upload = steps["Upload exact reviewed site bytes"]
+        assert upload["with"]["path"] == "artifacts/accessibility/publish/collection/docs/docusaurus/build"
+        assert not any("npm run build" in str(step.get("run", "")) for step in steps.values())
 
 
 class TestCanonicalAssetJourneyLedger:
