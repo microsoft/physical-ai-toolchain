@@ -14,6 +14,12 @@ export const DIAGNOSTIC_CHANNEL_OPTIONS = [
 ] as const
 
 const MAX_DIAGNOSTIC_EVENTS = 200
+const PERFORMANCE_ENTRY_CLEANUP_INTERVAL_MS = 1_000
+
+interface PerformanceEntryCleanupApi {
+  clearMarks: () => void
+  clearMeasures: () => void
+}
 
 export interface DataviewerDiagnosticEvent {
   channel: string
@@ -23,6 +29,21 @@ export interface DataviewerDiagnosticEvent {
 }
 
 export type PlaybackDiagnosticEvent = DataviewerDiagnosticEvent
+
+export function startPerformanceEntryCleanup(
+  performanceApi: PerformanceEntryCleanupApi = window.performance,
+  intervalMs = PERFORMANCE_ENTRY_CLEANUP_INTERVAL_MS,
+) {
+  const clearEntries = () => {
+    performanceApi.clearMeasures()
+    performanceApi.clearMarks()
+  }
+
+  clearEntries()
+  const intervalId = window.setInterval(clearEntries, intervalMs)
+
+  return () => window.clearInterval(intervalId)
+}
 
 declare global {
   interface Window {

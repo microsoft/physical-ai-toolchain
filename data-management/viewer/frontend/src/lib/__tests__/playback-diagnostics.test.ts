@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   clearDiagnosticEvents,
@@ -10,6 +10,7 @@ import {
   isDiagnosticsEnabled,
   readDiagnosticEvents,
   recordDiagnosticEvent,
+  startPerformanceEntryCleanup,
 } from '../playback-diagnostics'
 
 describe('playback diagnostics', () => {
@@ -31,6 +32,7 @@ describe('playback diagnostics', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: originalLocation,
@@ -108,5 +110,29 @@ describe('playback diagnostics', () => {
 
     expect(readDiagnosticEvents('labels')).toEqual([])
     expect(readDiagnosticEvents('playback')).toHaveLength(1)
+  })
+
+  it('bounds React development performance entries during continuous playback', () => {
+    vi.useFakeTimers()
+    const performanceApi = {
+      clearMarks: vi.fn(),
+      clearMeasures: vi.fn(),
+    }
+
+    const stop = startPerformanceEntryCleanup(performanceApi, 1_000)
+
+    expect(performanceApi.clearMeasures).toHaveBeenCalledTimes(1)
+    expect(performanceApi.clearMarks).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(3_000)
+
+    expect(performanceApi.clearMeasures).toHaveBeenCalledTimes(4)
+    expect(performanceApi.clearMarks).toHaveBeenCalledTimes(4)
+
+    stop()
+    vi.advanceTimersByTime(1_000)
+
+    expect(performanceApi.clearMeasures).toHaveBeenCalledTimes(4)
+    expect(performanceApi.clearMarks).toHaveBeenCalledTimes(4)
   })
 })

@@ -85,6 +85,12 @@ Core parameters shared across platforms:
 
 Values resolve in order: CLI arguments → environment variables → Terraform outputs.
 
+The shared image default targets Isaac Lab 3.0 with Python 3.12. Runtime setup keeps
+the image's Torch/CUDA packages, reinstalls the remaining locked dependencies, and
+uses a writable overlay when interpreter site-packages are read-only. The
+`RUNTIME_PROVENANCE` log reports versions from the actual install location, including
+that overlay, rather than a shadowed container distribution.
+
 ### Training Backends
 
 | Backend | Algorithms                 | Use Case                            |

@@ -174,8 +174,8 @@ if [[ -d "${ISAACLAB_DIR}" ]]; then
 else
   info "Cloning Isaac Lab for intellisense/Pylance support..."
   mkdir -p "${SCRIPT_DIR}/external"
-  # Pin to the commit matching the runtime image tag (v2.3.2); bump with the image.
-  ISAACLAB_COMMIT="37ddf626871758333d6ed89cf64ad702aef127d0"
+  # Pin to the commit matching the runtime image tag; bump with the image.
+  ISAACLAB_COMMIT="ffff603eafc6b74264a5261cc0183d6a65390d78"
   # Clone-and-checkout into a temp dir, then move into place so an interrupted run never
   # leaves a half-pinned clone that a re-run would skip (the directory guard above).
   ISAACLAB_TMP="$(mktemp -d "${SCRIPT_DIR}/external/.IsaacLab.XXXXXX")"

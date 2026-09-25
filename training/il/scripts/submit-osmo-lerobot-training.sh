@@ -112,7 +112,7 @@ EXAMPLES:
 
     # Train from Azure Blob Storage
     submit-osmo-lerobot-training.sh \
-      --blob-url https://stosmorbt3dev001.blob.core.windows.net/datasets/hve-robo/hve-robo-cell \
+      --blob-url "https://<storage-account>.blob.core.windows.net/datasets/<dataset-prefix>" \
       --no-val-split \
       -r my-act-model
 

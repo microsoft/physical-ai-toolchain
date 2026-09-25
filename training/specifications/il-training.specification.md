@@ -17,13 +17,13 @@ Active — secondary training approach for manipulation tasks.
 
 ## Runtime Environment
 
-LeRobot is runtime-installed via `uv pip` inside the Isaac Lab container. Training uses the same base container as RL training with additional Python dependencies.
+LeRobot is runtime-installed via `uv pip` inside its pinned PyTorch container.
 
-| Setting        | Value                                                                                     |
-|----------------|-------------------------------------------------------------------------------------------|
-| Container      | `DEFAULT_ISAAC_LAB_IMAGE` from `scripts/lib/common.sh` (`nvcr.io/nvidia/isaac-lab:2.3.2`) |
-| Framework      | LeRobot (installed at runtime via `uv pip`)                                               |
-| Dataset format | Hugging Face LeRobot-compatible                                                           |
+| Setting        | Value                                                      |
+|----------------|------------------------------------------------------------|
+| Container      | `DEFAULT_LEROBOT_TRAIN_IMAGE` from `scripts/lib/common.sh` |
+| Framework      | LeRobot (installed at runtime via `uv pip`)                |
+| Dataset format | Hugging Face LeRobot-compatible                            |
 
 ## Submission Paths
 

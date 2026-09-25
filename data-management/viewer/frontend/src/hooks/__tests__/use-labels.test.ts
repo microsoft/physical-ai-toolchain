@@ -168,6 +168,66 @@ describe('use-labels hooks', () => {
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
+    it('does not reconcile stale labels when only the cached ETag changes', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(
+          {
+            dataset_id: 'ds-1',
+            available_labels: ['SUCCESS', 'FAILURE'],
+            episodes: { '0': ['SUCCESS'] },
+          },
+          { headers: { ETag: '"one"' } },
+        ),
+      )
+      selectDataset('ds-1')
+      const { result, queryClient } = renderHookWithProviders(() => useDatasetLabels())
+      await waitFor(() => expect(useLabelStore.getState().isLoaded).toBe(true))
+      const cached = result.current.data
+      if (!cached) throw new Error('Dataset labels did not load')
+
+      await act(async () => {
+        useLabelStore.getState().setEpisodeLabels(0, ['FAILURE'])
+        useLabelStore.getState().commitSubmittedEpisodeLabels(0, ['FAILURE'], ['FAILURE'])
+        queryClient.setQueryData(labelKeys.dataset('ds-1'), { ...cached, etag: '"two"' })
+      })
+
+      expect(useLabelStore.getState().episodeLabels[0]).toEqual(['FAILURE'])
+      expect(useLabelStore.getState().savedEpisodeLabels[0]).toEqual(['FAILURE'])
+    })
+
+    it('does not restore an old persisted draft after a server refetch', async () => {
+      labelDraftMocks.load.mockResolvedValueOnce(undefined).mockResolvedValue({
+        draft: { availableLabels: ['SUCCESS', 'FAILURE'], episodeLabels: { 0: ['FAILURE'] } },
+        baseline: { episodeLabels: { 0: ['SUCCESS'] } },
+      })
+      mockFetch
+        .mockResolvedValueOnce(
+          jsonResponse({
+            dataset_id: 'ds-1',
+            available_labels: ['SUCCESS', 'FAILURE', 'PARTIAL'],
+            episodes: { '0': ['SUCCESS'] },
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            dataset_id: 'ds-1',
+            available_labels: ['SUCCESS', 'FAILURE', 'PARTIAL'],
+            episodes: { '0': ['PARTIAL'] },
+          }),
+        )
+      selectDataset('ds-1')
+      const { result } = renderHookWithProviders(() => useDatasetLabels())
+      await waitFor(() => expect(useLabelStore.getState().isLoaded).toBe(true))
+
+      await act(async () => {
+        await result.current.refetch()
+      })
+      await waitFor(() => expect(result.current.data?.data.episodes['0']).toEqual(['PARTIAL']))
+
+      expect(useLabelStore.getState().episodeLabels[0]).toEqual(['PARTIAL'])
+      expect(useLabelStore.getState().savedEpisodeLabels[0]).toEqual(['PARTIAL'])
+    })
+
     it('clears the previous dataset labels while the next dataset loads', async () => {
       mockFetch.mockImplementation(() => new Promise<JsonResponseLike>(() => undefined))
       selectDataset('ds-1')

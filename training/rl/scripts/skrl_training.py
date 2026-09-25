@@ -24,13 +24,16 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from training.rl.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
 from training.rl.simulation_shutdown import prepare_for_shutdown
 from training.stream import install_ansi_stripping
-from training.utils import AzureMLContext, set_env_defaults
+from training.utils import set_env_defaults
 from training.utils.integrity import safe_load_skrl_checkpoint
+
+if TYPE_CHECKING:
+    from training.utils.context import AzureMLContext
 
 _LOGGER = logging.getLogger("isaaclab.skrl")
 

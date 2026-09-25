@@ -12,7 +12,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel 2>/dev/null || (cd "${SCRIPT_DIR}/../.." && pwd))"
 BACKEND_DIR="${SCRIPT_DIR}/backend"
 FRONTEND_DIR="${SCRIPT_DIR}/frontend"
 
@@ -65,6 +65,7 @@ Options:
     --backend             Start backend only
     --frontend            Start frontend only
     --data-dir <path>     Local datasets directory (overrides DATA_DIR env var)
+    --check               Check installed launch prerequisites without starting services
     --config-preview      Print configuration and exit without changes
     --help, -h            Show this help message
 
@@ -85,6 +86,8 @@ EOF
 }
 
 cleanup() {
+    local status=$?
+    trap - EXIT SIGINT SIGTERM SIGHUP
     log_info "Shutting down services..."
 
     if [[ -n "${BACKEND_PID}" ]] && kill -0 "${BACKEND_PID}" 2>/dev/null; then
@@ -100,14 +103,13 @@ cleanup() {
     fi
 
     log_success "All services stopped"
+    return "${status}"
 }
 
-handle_shutdown() {
-    cleanup
-    exit 0
-}
-
-trap handle_shutdown SIGINT SIGTERM
+trap cleanup EXIT
+trap 'exit 130' SIGINT
+trap 'exit 143' SIGTERM
+trap 'exit 129' SIGHUP
 
 check_prerequisites() {
     local missing=()
@@ -124,31 +126,53 @@ check_prerequisites() {
         missing+=("npm")
     fi
 
+    if ! command -v curl &>/dev/null; then
+        missing+=("curl")
+    fi
+
+    if ! command -v uv &>/dev/null; then
+        missing+=("uv")
+    fi
+
     if [[ ${#missing[@]} -gt 0 ]]; then
         log_error "Missing prerequisites: ${missing[*]}"
         exit 1
     fi
+
+    for port in "${BACKEND_PORT}" "${FRONTEND_PORT}"; do
+        if [[ ! "${port}" =~ ^[0-9]+$ ]] || (( port < 1024 || port > 65535 )); then
+            log_error "Ports must be integers from 1024 through 65535"
+            exit 1
+        fi
+    done
+    if [[ "${BACKEND_PORT}" == "${FRONTEND_PORT}" ]] || [[ ! "${HEALTH_TIMEOUT}" =~ ^[1-9][0-9]*$ ]]; then
+        log_error "Select distinct ports and a positive HEALTH_TIMEOUT"
+        exit 1
+    fi
 }
 
-wait_for_backend() {
-    # Use IPv4 loopback explicitly because uvicorn binds to 127.0.0.1 by default.
-    # On systems where localhost resolves to ::1 first, curl localhost can fail
-    # even when the backend is healthy.
-    local url="http://127.0.0.1:${BACKEND_PORT}/health"
+wait_for_service() {
+    local url="$1"
+    local pid="$2"
+    local label="$3"
     local elapsed=0
 
-    log_info "Waiting for backend to be ready..."
+    log_info "Waiting for ${label} to be ready..."
 
     while [[ ${elapsed} -lt ${HEALTH_TIMEOUT} ]]; do
-        if curl -sf "${url}" >/dev/null 2>&1; then
-            log_success "Backend is healthy"
+        if ! kill -0 "${pid}" 2>/dev/null; then
+            log_error "${label} exited before readiness"
+            return 1
+        fi
+        if curl --max-time 2 -sf "${url}" >/dev/null 2>&1; then
+            log_success "${label} is healthy"
             return 0
         fi
         sleep 1
         elapsed=$((elapsed + 1))
     done
 
-    log_error "Backend failed to start within ${HEALTH_TIMEOUT} seconds"
+    log_error "${label} failed to start within ${HEALTH_TIMEOUT} seconds"
     return 1
 }
 
@@ -162,7 +186,7 @@ start_backend() {
     # so that setting it only in .env (the common local-dev pattern) still triggers install.
     if [[ -z "${VLM_JUDGE_ENABLED:-}" ]] && [[ -f "${BACKEND_DIR}/.env" ]]; then
         local env_vlm_enabled
-        env_vlm_enabled="$(grep -E '^VLM_JUDGE_ENABLED=' "${BACKEND_DIR}/.env" | tail -n 1 | cut -d '=' -f 2-)"
+        env_vlm_enabled="$(sed -n 's/^VLM_JUDGE_ENABLED=//p' "${BACKEND_DIR}/.env" | tail -n 1)"
         if [[ -n "${env_vlm_enabled}" ]]; then
             VLM_JUDGE_ENABLED="${env_vlm_enabled}"
         fi
@@ -170,7 +194,7 @@ start_backend() {
     # Similarly resolve VLM_JUDGE_BACKEND from .env when not already set.
     if [[ -z "${VLM_JUDGE_BACKEND:-}" ]] && [[ -f "${BACKEND_DIR}/.env" ]]; then
         local env_vlm_backend
-        env_vlm_backend="$(grep -E '^VLM_JUDGE_BACKEND=' "${BACKEND_DIR}/.env" | tail -n 1 | cut -d '=' -f 2-)"
+        env_vlm_backend="$(sed -n 's/^VLM_JUDGE_BACKEND=//p' "${BACKEND_DIR}/.env" | tail -n 1)"
         if [[ -n "${env_vlm_backend}" ]]; then
             VLM_JUDGE_BACKEND="${env_vlm_backend}"
         fi
@@ -196,7 +220,7 @@ start_backend() {
     if [[ -z "${DATA_DIR:-}" ]]; then
         if [[ -f "${BACKEND_DIR}/.env" ]]; then
             local env_data_dir
-            env_data_dir="$(grep -E '^DATA_DIR=' "${BACKEND_DIR}/.env" | tail -n 1 | cut -d '=' -f 2-)"
+            env_data_dir="$(sed -n 's/^DATA_DIR=//p' "${BACKEND_DIR}/.env" | tail -n 1)"
             if [[ -n "${env_data_dir}" ]]; then
                 DATA_DIR="${env_data_dir}"
                 log_info "Using DATA_DIR from backend/.env: ${DATA_DIR}"
@@ -241,25 +265,35 @@ start_backend() {
         cd "${BACKEND_DIR}"
         # shellcheck source=/dev/null
         source .venv/bin/activate
-        uvicorn src.api.main:app --reload --port "${BACKEND_PORT}" 2>&1
+        exec uvicorn src.api.main:app --reload --host 127.0.0.1 --port "${BACKEND_PORT}" 2>&1
     ) &
     BACKEND_PID=$!
 
     log_info "Backend started (PID: ${BACKEND_PID})"
 }
 
+resolve_vite_bin() {
+    local vite_package
+    vite_package="$(cd "${FRONTEND_DIR}" && node -p 'require.resolve("vite/package.json")')" || return 1
+    printf '%s/bin/vite.js\n' "${vite_package%/*}"
+}
+
 start_frontend() {
     log_info "Starting frontend on port ${FRONTEND_PORT}..."
+    local frontend_api_base_url="${VITE_API_BASE_URL:-http://localhost:${BACKEND_PORT}}"
+    local vite_bin
 
     if [[ ! -d "${REPO_ROOT}/node_modules" ]]; then
         log_warn "node_modules not found"
         log_info "Installing dependencies..."
         (cd "${REPO_ROOT}" && npm ci)
     fi
+    vite_bin="$(resolve_vite_bin)"
 
     (
         cd "${FRONTEND_DIR}"
-        npm run dev -- --port "${FRONTEND_PORT}" 2>&1
+        VITE_API_BASE_URL="${frontend_api_base_url}" \
+            exec node "${vite_bin}" --host 127.0.0.1 --port "${FRONTEND_PORT}" --strictPort 2>&1
     ) &
     FRONTEND_PID=$!
 
@@ -269,6 +303,7 @@ start_frontend() {
 main() {
     local backend_only=false
     local frontend_only=false
+    local check_only=false
     local config_preview=false
 
     while [[ $# -gt 0 ]]; do
@@ -279,6 +314,10 @@ main() {
                 ;;
             --frontend)
                 frontend_only=true
+                shift
+                ;;
+            --check)
+                check_only=true
                 shift
                 ;;
             --data-dir)
@@ -312,16 +351,38 @@ main() {
     done
 
     if [[ "${config_preview}" == "true" ]]; then
+        local mode="both"
+        if [[ "${backend_only}" == "true" ]]; then
+            mode="backend"
+        elif [[ "${frontend_only}" == "true" ]]; then
+            mode="frontend"
+        fi
         log_info "Configuration Preview"
         printf 'Backend Port: %s\n' "${BACKEND_PORT}"
         printf 'Frontend Port: %s\n' "${FRONTEND_PORT}"
         printf 'Data Directory: %s\n' "${DATA_DIR:-${REPO_ROOT}/datasets}"
-        printf 'Mode: %s\n' "$([[ "${backend_only}" == "true" ]] && echo backend || ([[ "${frontend_only}" == "true" ]] && echo frontend || echo both))"
+        printf 'Mode: %s\n' "${mode}"
         printf 'Mutation: None\n'
         return 0
     fi
 
     check_prerequisites
+
+    if [[ "${check_only}" == "true" ]]; then
+        if [[ "${frontend_only}" != "true" && ! -x "${BACKEND_DIR}/.venv/bin/uvicorn" ]]; then
+            log_error "Backend environment is missing; run the dataviewer launcher to install it"
+            return 1
+        fi
+        if [[ "${backend_only}" != "true" ]]; then
+            local vite_bin
+            if ! vite_bin="$(resolve_vite_bin)" || [[ ! -f "${vite_bin}" ]]; then
+                log_error "Frontend dependencies are missing; run npm ci in ${REPO_ROOT}"
+                return 1
+            fi
+        fi
+        log_success "Launch prerequisites are available; no services started"
+        return 0
+    fi
 
     echo ""
     echo "========================================"
@@ -331,21 +392,22 @@ main() {
 
     if [[ "${frontend_only}" == "true" ]]; then
         start_frontend
+        wait_for_service "http://127.0.0.1:${FRONTEND_PORT}" "${FRONTEND_PID}" Frontend
         log_success "Frontend available at http://localhost:${FRONTEND_PORT}"
         wait "${FRONTEND_PID}"
     elif [[ "${backend_only}" == "true" ]]; then
         start_backend
-        if wait_for_backend; then
-            log_success "Backend available at http://localhost:${BACKEND_PORT}"
-            log_info "API docs: http://localhost:${BACKEND_PORT}/docs"
-        fi
+        wait_for_service "http://127.0.0.1:${BACKEND_PORT}/health" "${BACKEND_PID}" Backend
+        log_success "Backend available at http://localhost:${BACKEND_PORT}"
+        log_info "API docs: http://localhost:${BACKEND_PORT}/docs"
         wait "${BACKEND_PID}"
     else
         # Start both services
         start_backend
 
-        if wait_for_backend; then
+        if wait_for_service "http://127.0.0.1:${BACKEND_PORT}/health" "${BACKEND_PID}" Backend; then
             start_frontend
+            wait_for_service "http://127.0.0.1:${FRONTEND_PORT}" "${FRONTEND_PID}" Frontend
 
             echo ""
             log_success "Both services are running:"
@@ -360,10 +422,10 @@ main() {
             while kill -0 "${BACKEND_PID}" 2>/dev/null && kill -0 "${FRONTEND_PID}" 2>/dev/null; do
                 sleep 1
             done
-            cleanup
+            log_error "A service exited unexpectedly"
+            return 1
         else
-            cleanup
-            exit 1
+            return 1
         fi
     fi
 }

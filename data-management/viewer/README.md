@@ -2,7 +2,7 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-09-17
+ms.date: 2026-09-23
 ms.topic: overview
 ---
 
@@ -10,19 +10,19 @@ A full-stack application for analyzing and annotating robotic training data from
 
 ## 🏗️ Architecture
 
-| Component | Stack | Default port |
-| --- | --- | --- |
-| Backend | FastAPI and Python | 8000 |
-| Frontend | React, Vite, and TypeScript | 5173 |
+| Component | Stack                       | Default port |
+|-----------|-----------------------------|--------------|
+| Backend   | FastAPI and Python          | 8000         |
+| Frontend  | React, Vite, and TypeScript | 5173         |
 
 ## 📋 Prerequisites
 
-| Tool | Version |
-| --- | --- |
-| Python | 3.12+ |
-| Node.js | 24+ |
-| npm | Bundled with Node.js |
-| uv | Current stable release |
+| Tool    | Version                |
+|---------|------------------------|
+| Python  | 3.12+                  |
+| Node.js | 24+                    |
+| npm     | Bundled with Node.js   |
+| uv      | Current stable release |
 
 ## 📦 Installation
 
@@ -48,6 +48,26 @@ npm ci
 
 The repository root lockfile is the source of truth for the frontend npm workspace.
 
+From the repository root on Bash hosts, launch against a captured dataset parent without changing environment files:
+
+```bash
+bash data-management/viewer/start.sh --check
+bash data-management/viewer/start.sh --config-preview --data-dir /path/to/datasets
+bash data-management/viewer/start.sh --data-dir /path/to/datasets
+```
+
+The launcher resolves Vite from the npm workspace, binds both services to loopback,
+and fails if either service exits or misses readiness. It requires the selected ports
+to be available; it does not switch to a different frontend port. Optional VLM settings
+may be omitted from `backend/.env`.
+
+`--config-preview` prints resolved launch arguments without checking dependencies or
+starting services. Set `NO_COLOR=1` to disable colored launcher output.
+
+Use **Save & Next Episode** to save labels and continue reviewing. The last episode
+shows **Save Episode** instead. A successful save updates the saved baseline without
+restoring an older browser draft; later label edits remain unsaved until the next save.
+
 ### Dev Container
 
 Open the repository in its VS Code devcontainer or GitHub Codespaces for a preconfigured Python, Node.js, npm, and uv environment. Ports 5173 and 8000 are forwarded for the frontend and backend.
@@ -57,6 +77,65 @@ Run the cross-platform development command after the container finishes setup:
 ```bash
 npm run dataviewer:dev
 ```
+
+## 📄 Accepted Dataset Contract
+
+Local dataset exporters can write `accepted-dataset.json` beside
+`capture-provenance.json` and `export-validation.json` in the dataset directory.
+`GET /api/datasets/{id}/capabilities` returns its validated metadata as
+`dataset_contract`; datasets without this optional descriptor remain supported.
+Blob-only datasets do not fetch these sidecars automatically.
+
+Version 1 has this structure. Replace the example identities and hash placeholders
+with the exporter's values:
+
+```json
+{
+  "schema_version": 1,
+  "dataset_id": "sample-dataset",
+  "output_adapter_id": "lerobot_v3",
+  "output_adapter_version": "0.6.0",
+  "viewer_adapter_id": "dataviewer_v1",
+  "profile_id": "sample-profile",
+  "profile_sha256": "<profile-sha256>",
+  "capture_features": [
+    {"feature_id": "state", "kind": "observation_state"}
+  ],
+  "sensors": [
+    {"sensor_id": "front", "media_kind": "rgb"}
+  ],
+  "artifacts": {
+    "capture_provenance": {
+      "file": "capture-provenance.json",
+      "sha256": "<sha256-of-capture-provenance.json>"
+    },
+    "export_validation": {
+      "file": "export-validation.json",
+      "sha256": "<sha256-of-export-validation.json>"
+    }
+  }
+}
+```
+
+All identity fields are required strings. `capture_features` and `sensors` are
+required arrays of objects, including when empty. `dataset_id` must match the
+requested dataset ID; nested dataset IDs use the viewer's `--` separator.
+The two artifact filenames are fixed, and each SHA-256 must match the file's exact
+bytes, including whitespace.
+
+The response follows the shared
+[AcceptedDatasetContract model](backend/src/api/models/datasources.py).
+It exposes the two verified digests as `capture_provenance_sha256` and
+`export_validation_sha256` instead of returning the descriptor's `artifacts` map.
+Matching hashes establish consistency with the descriptor, not authenticity or
+semantic validity of an export. The producing adapter owns profile, feature,
+sensor, and export validation.
+
+A missing descriptor yields `dataset_contract: null`. Malformed JSON, missing or
+mistyped fields, missing artifacts, and hash mismatches also yield `null` with a
+backend warning rather than breaking the capabilities endpoint. Workflows that
+require an accepted dataset must treat `null` as an unmet contract and stop before
+annotation or training.
 
 ## ⚙️ Configuration
 

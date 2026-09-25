@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -44,6 +46,35 @@ TEST_DATASET_PATH = os.environ.get(
 )
 
 TEST_DATASET_ID = os.environ.get("TEST_DATASET_ID", "lerobot")
+
+
+@pytest.fixture
+def accepted_dataset_path(tmp_path: Path) -> Path:
+    """Create an accepted dataset descriptor with matching artifact hashes."""
+    dataset_path = tmp_path / "accepted-dataset"
+    dataset_path.mkdir()
+    artifacts = {}
+    for name, content in {
+        "capture_provenance": b'{"profile_id":"profile-alpha"}',
+        "export_validation": b'{"status":"pass"}',
+    }.items():
+        filename = f"{name.replace('_', '-')}.json"
+        (dataset_path / filename).write_bytes(content)
+        artifacts[name] = {"file": filename, "sha256": hashlib.sha256(content).hexdigest()}
+    descriptor = {
+        "schema_version": 1,
+        "dataset_id": dataset_path.name,
+        "output_adapter_id": "lerobot_v3",
+        "output_adapter_version": "0.6.0",
+        "viewer_adapter_id": "dataviewer_v1",
+        "profile_id": "profile-alpha",
+        "profile_sha256": "a" * 64,
+        "capture_features": [{"feature_id": "state-alpha", "kind": "observation_state"}],
+        "sensors": [{"sensor_id": "view-alpha", "media_kind": "rgb"}],
+        "artifacts": artifacts,
+    }
+    (dataset_path / "accepted-dataset.json").write_text(json.dumps(descriptor), encoding="utf-8")
+    return dataset_path
 
 
 def _write_accessibility_episode(path: Path, *, length: int, phase: float) -> None:

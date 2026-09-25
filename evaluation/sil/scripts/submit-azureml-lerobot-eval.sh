@@ -99,11 +99,11 @@ EXAMPLES:
     # Evaluate an AzureML-registered model against blob dataset
     submit-azureml-lerobot-eval.sh \
       --from-aml-model \
-      --model-name hex-pickup-act \
-      --model-version 3 \
+      --model-name "<model-name>" \
+      --model-version "<model-version>" \
       --from-blob \
-      --storage-account stosmorbt3dev001 \
-      --blob-prefix lerobot \
+      --storage-account "<storage-account>" \
+      --blob-prefix "<dataset-prefix>" \
       --mlflow-enable \
       --eval-episodes 10
 

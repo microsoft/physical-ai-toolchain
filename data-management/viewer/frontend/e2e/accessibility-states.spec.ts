@@ -7,7 +7,8 @@ test('V03 and V04 episode list failure is exposed as an alert', async ({ page },
   await page.goto('/')
   await expect(page.getByRole('banner')).toBeVisible()
   const alert = page.getByRole('alert')
-  await expect(alert).toContainText('Synthetic episode list failure')
+  await expect(alert).toContainText('The server could not complete the request')
+  await expect(alert).not.toContainText('Synthetic episode list failure')
   await attachJson(testInfo, 'episode-list-error-state', {
     journeys: ['V03', 'V04'],
     expected: 'Episode list failure is exposed as an alert',

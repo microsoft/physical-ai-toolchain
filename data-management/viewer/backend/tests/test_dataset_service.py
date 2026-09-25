@@ -5,7 +5,10 @@ Tests dataset discovery, episode listing with pagination and filtering,
 episode data retrieval, trajectory extraction, and capability reporting.
 """
 
+from __future__ import annotations
+
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -72,6 +75,28 @@ class TestDatasetDiscovery:
 
     def test_has_lerobot_support(self, service):
         assert service.has_lerobot_support() is True
+
+    def test_dataset_contract_requires_matching_artifact_hashes(self, accepted_dataset_path: Path) -> None:
+        dataset_id = accepted_dataset_path.name
+        descriptor = json.loads((accepted_dataset_path / "accepted-dataset.json").read_text(encoding="utf-8"))
+        contract_service = DatasetService(base_path=str(accepted_dataset_path.parent))
+        contract = contract_service.get_dataset_contract(dataset_id)
+        assert contract is not None
+        assert contract.model_dump() == {
+            "dataset_id": dataset_id,
+            "output_adapter_id": "lerobot_v3",
+            "output_adapter_version": "0.6.0",
+            "viewer_adapter_id": "dataviewer_v1",
+            "profile_id": "profile-alpha",
+            "profile_sha256": "a" * 64,
+            "capture_provenance_sha256": descriptor["artifacts"]["capture_provenance"]["sha256"],
+            "export_validation_sha256": descriptor["artifacts"]["export_validation"]["sha256"],
+            "capture_features": descriptor["capture_features"],
+            "sensors": descriptor["sensors"],
+        }
+
+        (accepted_dataset_path / "capture-provenance.json").write_text("changed", encoding="utf-8")
+        assert contract_service.get_dataset_contract(dataset_id) is None
 
 
 class TestListEpisodes:

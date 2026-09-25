@@ -6,7 +6,7 @@ argument-hint: "<datasetId> [mode=vlm-judge] [backend=qwen3-vl|echo|openai-compa
 
 # Dataviewer Annotate
 
-Launch the dataviewer, ensure the VLM-as-judge harness is enabled, and walk an entire dataset, scoring every episode with the chosen judge backend. Designed for fast operator triage — one chat command, no other plumbing.
+Launch the dataviewer, ensure the VLM-as-judge harness is enabled, and score dataset episodes with the chosen judge backend.
 
 ## Inputs
 
@@ -20,7 +20,9 @@ Launch the dataviewer, ensure the VLM-as-judge harness is enabled, and walk an e
 
 ## Requirements
 
-Drive the **Dataviewer Developer** agent through Phase 5 ("VLM-as-Judge Evaluation") with these specific instructions. Re-use any running shim/dataviewer if their endpoints respond — do not relaunch unless required.
+Drive the Dataviewer Developer agent through Phase 5 ("VLM-as-Judge Evaluation"). Reuse running services only when their dataset, model, and backend settings match this request. Do not stop processes the workflow does not own.
+
+The URLs below use default ports. Substitute the resolved service URLs consistently when different ports are requested.
 
 1. **Resolve aliases** for `datasetId`:
     * `leisaac-pickup-orange` → `leisaac-pick-orange`
@@ -29,28 +31,30 @@ Drive the **Dataviewer Developer** agent through Phase 5 ("VLM-as-Judge Evaluati
     * Otherwise pass through verbatim.
     Confirm the resolved id exists as `${DATA_DIR}/<id>` before continuing.
 
-2. **Configure `data-management/viewer/backend/.env`** to enable the judge:
+2. Resolve session-only settings for the viewer's child process. Do not rewrite `backend/.env` unless persistent defaults are explicitly requested:
 
     ```env
-    DATA_DIR=<absolute path to repo>/datasets
+    DATA_DIR=<resolved absolute dataset parent>
     DATAVIEWER_AUTH_DISABLED=true
 
     VLM_JUDGE_ENABLED=true
     VLM_JUDGE_BACKEND=${backend}
     VLM_JUDGE_MODEL_ID=${modelId}
     VLM_JUDGE_BASE_URL=<resolve below>
-    VLM_JUDGE_API_KEY=EMPTY
     VLM_JUDGE_N_FRAMES=12
     VLM_JUDGE_CACHE_DIR=outputs/vlm-judge/cache
     ```
 
     Resolve `VLM_JUDGE_BASE_URL`:
-    * `backend=qwen3-vl` → `http://127.0.0.1:8001/v1` (the shim) and rewrite `VLM_JUDGE_BACKEND=openai-compat` so the dataviewer's lightweight venv doesn't try to load Torch.
+    * `backend=qwen3-vl` → `http://127.0.0.1:8001/v1` (the shim) and pass `VLM_JUDGE_BACKEND=openai-compat` so the dataviewer's lightweight venv doesn't try to load Torch.
     * `backend=openai-compat` → `${baseUrl}` exactly as provided. Fail fast if missing.
     * `backend=echo` → leave unset.
 
+    Use existing protected credentials for remote endpoints; never replace an API key with a placeholder. Disable authentication only for an owned loopback development session. Preserve authentication and CSRF requirements on existing authenticated services.
+
 3. **Launch the model server** when `backend=qwen3-vl`:
-    * Probe `GET http://127.0.0.1:8001/health`. If 200, reuse it.
+    * Probe `GET http://127.0.0.1:8001/health` and `/v1/models`. Reuse the service only when it is healthy and exposes the requested model.
+    * If another process owns the port with different settings, stop and ask before proceeding.
     * Otherwise start the shim in a background terminal from the **root** `.venv` (it has Torch + transformers):
 
         ```bash
@@ -61,15 +65,16 @@ Drive the **Dataviewer Developer** agent through Phase 5 ("VLM-as-Judge Evaluati
 
     * Wait for `/health` to return `{"status":"ok"}` before continuing.
 
-4. **Launch (or refresh) the dataviewer**:
-    * Probe `GET http://localhost:8000/health`. If reachable AND `GET /api/datasets/<id>/episodes/0/judge` returns `enabled: true`, reuse it.
-    * Otherwise: stop any stale uvicorn/vite, then run
+4. Launch or reuse the dataviewer:
+    * Probe `GET http://localhost:8000/health` and `GET /api/datasets/<id>/capabilities`. Reuse a matching instance only when `vlm_judge_enabled` is true.
+    * Otherwise restart only an owned instance. If another process owns the requested ports, stop and ask before proceeding. Pass the resolved settings from step 2 through the child process environment, then run
 
         ```bash
-        cd data-management/viewer && set -a && source backend/.env && set +a && ./start.sh
+        cd data-management/viewer && ./start.sh --data-dir "${DATA_DIR}"
         ```
 
       `start.sh` already exports `PYTHONPATH` to include the `evaluation` package when `VLM_JUDGE_ENABLED=true`.
+      Wait for both services to become ready, and follow the dataviewer skill's accepted-dataset checks when a descriptor is present.
 
 5. **Open the dataviewer UI** at `http://localhost:5173`:
     * Try `open_browser_page("http://localhost:5173")` first; if SimpleBrowser flakes, fall back to `mcp_playwright_browser_navigate`.
@@ -84,7 +89,7 @@ Drive the **Dataviewer Developer** agent through Phase 5 ("VLM-as-Judge Evaluati
           * `outcome_success == true` and `outcome_confidence >= 0.7` → `SUCCESS`
           * `outcome_success == false` and `outcome_confidence >= 0.7` → `FAILURE`
           * otherwise → `PARTIAL`
-          Then `PUT /api/datasets/<id>/episodes/<idx>/labels` with the chosen label, followed by `POST /api/datasets/<id>/labels/save` once at the end.
+          Read the latest dataset labels and ETag, preserve unrelated labels, and replace the outcome label with the selected value. Send `PUT /api/datasets/<id>/episodes/<idx>/labels` with `If-Match: <ETag>`, or `If-None-Match: *` when no ETag exists, plus required authentication and CSRF headers. Successful PUT requests persist immediately. Stop and reconcile HTTP 412 conflicts; do not retry with stale state. Verify the saved labels with GET instead of issuing a separate save request.
     * Stream progress to the user every ~10 episodes (e.g. `15/60 done — 11 SUCCESS, 4 FAILURE, mean VOC 0.62`).
 
 7. **Verify in the UI** by Playwright-navigating to a randomly chosen sample episode in the resolved dataset and asserting the **VLM Judge** panel renders an outcome badge.

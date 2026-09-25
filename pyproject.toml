@@ -87,6 +87,7 @@ max_examples = 50
 deadline = 500
 
 [tool.ruff]
+required-version = ">=0.16.0"
 target-version = "py312"
 line-length = 120
 

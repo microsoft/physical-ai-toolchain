@@ -9,24 +9,9 @@ import pytest
 from conftest import load_training_module
 
 
-class _AzureConfigError(Exception):
-    pass
-
-
 class _AzureMLContext:
     def __init__(self, tracking_uri: str = "azureml://tracking") -> None:
         self.tracking_uri = tracking_uri
-
-
-def _bootstrap_azure_ml(experiment_name: str | None = None, **_: object) -> _AzureMLContext:
-    return _AzureMLContext()
-
-
-_fake_utils = ModuleType("training.utils")
-_fake_utils.AzureConfigError = _AzureConfigError
-_fake_utils.AzureMLContext = _AzureMLContext
-_fake_utils.bootstrap_azure_ml = _bootstrap_azure_ml
-sys.modules.setdefault("training.utils", _fake_utils)
 
 
 _MOD = load_training_module("training_rl_scripts_launch", "training/rl/scripts/launch.py")
@@ -191,13 +176,14 @@ class TestInitializeMlflowContext:
         assert context is None
         assert name is None
 
-    def test_explicit_experiment_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_defers_bootstrap_and_reuses_context(self, monkeypatch: pytest.MonkeyPatch) -> None:
         bootstrap_mock = MagicMock(return_value=_AzureMLContext("uri-1"))
         monkeypatch.setattr(_MOD, "bootstrap_azure_ml", bootstrap_mock)
         args = SimpleNamespace(disable_mlflow=False, experiment_name="exp", task="Walk")
         context, name = _MOD._initialize_mlflow_context(args)
         assert name == "exp"
-        assert context.tracking_uri == "uri-1"
+        bootstrap_mock.assert_not_called()
+        assert (context.tracking_uri, context.tracking_uri) == ("uri-1", "uri-1")
         bootstrap_mock.assert_called_once_with(experiment_name="exp")
 
     def test_default_with_task(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -359,10 +345,9 @@ class TestMain:
 
     def test_azure_config_error_raises_system_exit(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_dependencies(monkeypatch)
-        monkeypatch.setattr(_MOD, "AzureConfigError", _AzureConfigError)
 
-        def _raise(args):
-            raise _AzureConfigError("auth failure")
+        def _raise(args: object) -> None:
+            raise _MOD.AzureConfigError("auth failure")
 
         monkeypatch.setattr(_MOD, "_initialize_mlflow_context", _raise)
         with pytest.raises(SystemExit) as exc_info:

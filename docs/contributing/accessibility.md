@@ -86,8 +86,8 @@ The [frontend ESLint configuration](../../data-management/viewer/frontend/eslint
 
 The Docusaurus test workflow separates deterministic automation from qualified human judgment. Automated tooling can decide only the propositions its method is adequate to verify; it does not establish complete conformance.
 
-| Evidence layer     | Required coverage                                                                                           |
-|--------------------|-------------------------------------------------------------------------------------------------------------|
+| Evidence layer     | Required coverage                                                                                          |
+|--------------------|------------------------------------------------------------------------------------------------------------|
 | Source and unit    | Content activation guards, component semantics, route and feature inventories                              |
 | Browser automation | Axe, keyboard paths, focus, live regions, accessibility-tree relationships, contrast, reflow, and geometry |
 | Qualified review   | Spoken output, reading order, meaning, label quality, graphic equivalence, and exception approval          |
@@ -117,11 +117,11 @@ Review DCS02-DCS08 and DCS10-DCS11 against the exact local production build:
 
 Qualified review uses two cadences:
 
-| Cadence          | Review boundary                                                                                         |
-|------------------|---------------------------------------------------------------------------------------------------------|
-| Initial baseline | Full-site evaluation of all applicable routes, states, complete processes, and qualified-human methods |
-| Routine release  | Representative WCAG-EM sample plus a random 10 percent of the eligible page set                         |
-| Full reevaluation| Repeat after changes to build identity, navigation, search, rendering, evidence methods, or scope       |
+| Cadence           | Review boundary                                                                                        |
+|-------------------|--------------------------------------------------------------------------------------------------------|
+| Initial baseline  | Full-site evaluation of all applicable routes, states, complete processes, and qualified-human methods |
+| Routine release   | Representative WCAG-EM sample plus a random 10 percent of the eligible page set                        |
+| Full reevaluation | Repeat after changes to build identity, navigation, search, rendering, evidence methods, or scope      |
 
 The composed bundle always retains `attestation: false`. A qualified result contributes evidence; it does not independently authorize a public conformance claim.
 

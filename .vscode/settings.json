@@ -26,18 +26,17 @@
     },
     "diffEditor.ignoreTrimWhitespace": false,
     "editor.insertSpaces": true,
-    "markdownlint.configFile": ".markdownlint-cli2.jsonc",
+    "markdownlint.appliesTo": "workspaceFiles",
     "markdownlint.lintWorkspaceGlobs": [
-        "**/*.{md,mkd,mdwn,mdown,markdown,markdn,mdtxt,mdtext,workbook}",
-        "!**/.copilot-tracking/**",
-        "!**/*.code-search",
-        "!**/bower_components",
-        "!**/node_modules",
-        "!**/.git",
-        "!**/vendor"
+        "**/*.md"
     ],
     "[markdown]": {
+        "editor.defaultFormatter": "DavidAnson.vscode-markdownlint",
         "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.fixAll": "never",
+            "source.fixAll.markdownlint": "explicit"
+        },
         "editor.wordWrap": "on",
         "editor.detectIndentation": false,
     },
@@ -81,8 +80,10 @@
         "editor.formatOnSave": true,
         "editor.tabSize": 4,
         "editor.codeActionsOnSave": {
-            "source.fixAll": "explicit",
-            "source.organizeImports": "explicit"
+            "source.fixAll": "never",
+            "source.organizeImports": "never",
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports.ruff": "explicit"
         }
     },
 

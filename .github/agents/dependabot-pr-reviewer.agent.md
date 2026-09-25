@@ -53,16 +53,16 @@ Resolve advisory and release-notes context in this ordered chain. Stop at the fi
 
 Apply the surface rubric below to every package bump. Any row marked high-risk triggers the `⚠️ Maintainer review recommended` banner and forces the verdict to `COMMENT`.
 
-| Surface | Ecosystems and manifests | High-risk triggers | Validation advice |
-| --- | --- | --- | --- |
-| dataviewer-frontend | `npm` under `data-management/viewer/frontend/` | Major bump; peer-dep conflict from `npm view <pkg>@<ver> peerDependencies`; React / Tailwind / Vite / TypeScript crossing a major boundary | `npm run validate` in `data-management/viewer/frontend` |
-| python-runtime | `pip` / `uv` under `/`, `data-management/viewer/backend/`, `evaluation/` | Bumps to `numpy`, `torch`, `tensordict`, `onnxruntime-gpu`, `scipy`, `scikit-learn`, `pyarrow`, `opencv*`, `pynvml` (Isaac Sim / CUDA ABI sensitivity) | `ruff check` plus targeted `pytest` in the owning package |
-| training-rl-abi | `pip` under `training/rl/` | Any `numpy` change that violates the `train.sh` pin `>=1.26.0,<2.0.0`; `torch` / `tensordict` / `onnxruntime-gpu` majors | Re-run RL smoke training on GPU nodes before merge |
-| terraform-providers | `terraform` provider blocks under `infrastructure/terraform/**` | `azurerm` major bump; any provider crossing a documented breaking-change boundary | `terraform init -upgrade && terraform plan -var-file=terraform.tfvars` per deployment directory |
-| terraform-modules | `terraform` module sources under `infrastructure/terraform/**` | Registry module major bump with breaking inputs/outputs. Local path modules are N/A for Dependabot | `terraform plan` and `terraform test` on affected modules |
-| gomod | `gomod` under Terraform e2e test tree | Major version bump of direct dependency; replaced or retracted modules | `go mod verify`, `go vet ./...`, `go build ./...` in the e2e directory |
-| docker | Base images referenced in containers and workflows | Digest drift without changelog; CUDA / driver compatibility shifts on GPU images; Isaac Sim or NVIDIA-adjacent base images | Rebuild and smoke-run the affected image locally |
-| github-actions | Third-party action pins in `.github/workflows/**` | Tag-based replacement (not a pinned SHA); action switching publishers | Verify the bump resolves to a 40-character SHA and matches the upstream release |
+| Surface             | Ecosystems and manifests                                                 | High-risk triggers                                                                                                                                     | Validation advice                                                                               |
+|---------------------|--------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
+| dataviewer-frontend | `npm` under `data-management/viewer/frontend/`                           | Major bump; peer-dep conflict from `npm view <pkg>@<ver> peerDependencies`; React / Tailwind / Vite / TypeScript crossing a major boundary             | `npm run validate` in `data-management/viewer/frontend`                                         |
+| python-runtime      | `pip` / `uv` under `/`, `data-management/viewer/backend/`, `evaluation/` | Bumps to `numpy`, `torch`, `tensordict`, `onnxruntime-gpu`, `scipy`, `scikit-learn`, `pyarrow`, `opencv*`, `pynvml` (Isaac Sim / CUDA ABI sensitivity) | `ruff check` plus targeted `pytest` in the owning package                                       |
+| training-rl-abi     | `pip` under `training/rl/`                                               | Any `numpy` change that violates the `train.sh` pin `>=1.26.0,<2.0.0`; `torch` / `tensordict` / `onnxruntime-gpu` majors                               | Re-run RL smoke training on GPU nodes before merge                                              |
+| terraform-providers | `terraform` provider blocks under `infrastructure/terraform/**`          | `azurerm` major bump; any provider crossing a documented breaking-change boundary                                                                      | `terraform init -upgrade && terraform plan -var-file=terraform.tfvars` per deployment directory |
+| terraform-modules   | `terraform` module sources under `infrastructure/terraform/**`           | Registry module major bump with breaking inputs/outputs. Local path modules are N/A for Dependabot                                                     | `terraform plan` and `terraform test` on affected modules                                       |
+| gomod               | `gomod` under Terraform e2e test tree                                    | Major version bump of direct dependency; replaced or retracted modules                                                                                 | `go mod verify`, `go vet ./...`, `go build ./...` in the e2e directory                          |
+| docker              | Base images referenced in containers and workflows                       | Digest drift without changelog; CUDA / driver compatibility shifts on GPU images; Isaac Sim or NVIDIA-adjacent base images                             | Rebuild and smoke-run the affected image locally                                                |
+| github-actions      | Third-party action pins in `.github/workflows/**`                        | Tag-based replacement (not a pinned SHA); action switching publishers                                                                                  | Verify the bump resolves to a 40-character SHA and matches the upstream release                 |
 
 Uncovered-manifest fallback: if the diff touches a manifest that is **not** covered by `.github/dependabot.yml` (for example `training/il/lerobot/pyproject.toml`), append an informational note to the review body identifying the manifest path and suggesting a Dependabot entry. Do not gate the verdict on this note.
 
@@ -120,18 +120,18 @@ checks API — the workflow's resolver step already enumerated failing
 check-runs server-side. Use this table only to map a failing check name
 back to the dependency surface it covers when composing the review body.
 
-| Surface | Authoritative check runs |
-| --- | --- |
-| dataviewer-frontend | `Dataviewer Frontend Tests` |
-| python-runtime (dataviewer) | `Dataviewer Backend Pytest`, `Pytest Data Management Tools`, `Python Lint` |
-| python-runtime (evaluation) | `Evaluation Pytest Tests`, `Pytest Inference`, `Python Lint` |
-| python-runtime (training) | `Pytest Training`, `Python Lint` |
-| training-rl-abi | `Pytest Training` (hosted CI cannot exercise Isaac Sim GPU paths) |
-| terraform-providers | `Terraform Validation`, `Terraform Lint`, `Terraform Tests` |
-| terraform-modules | `Terraform Tests`, `Terraform Validation` |
-| gomod | `Go Tests`, `Go Lint` |
-| docker | `Binary Integrity Check`, `Binary Dependency Freshness` |
-| github-actions | `Workflow Permissions Scan`, `SHA Staleness Check`, `Dependency Pinning Scan` |
+| Surface                     | Authoritative check runs                                                      |
+|-----------------------------|-------------------------------------------------------------------------------|
+| dataviewer-frontend         | `Dataviewer Frontend Tests`                                                   |
+| python-runtime (dataviewer) | `Dataviewer Backend Pytest`, `Pytest Data Management Tools`, `Python Lint`    |
+| python-runtime (evaluation) | `Evaluation Pytest Tests`, `Pytest Inference`, `Python Lint`                  |
+| python-runtime (training)   | `Pytest Training`, `Python Lint`                                              |
+| training-rl-abi             | `Pytest Training` (hosted CI cannot exercise Isaac Sim GPU paths)             |
+| terraform-providers         | `Terraform Validation`, `Terraform Lint`, `Terraform Tests`                   |
+| terraform-modules           | `Terraform Tests`, `Terraform Validation`                                     |
+| gomod                       | `Go Tests`, `Go Lint`                                                         |
+| docker                      | `Binary Integrity Check`, `Binary Dependency Freshness`                       |
+| github-actions              | `Workflow Permissions Scan`, `SHA Staleness Check`, `Dependency Pinning Scan` |
 
 ### Static Impact Reasoning
 
@@ -141,11 +141,13 @@ must run regardless of CI conclusion:
 
 * **Isaac Sim ABI guard (training-rl-abi).** When the diff touches
   `training/rl/uv.lock` or `training/rl/pyproject.toml`, read
-  `training/rl/scripts/train.sh` and confirm the pin
-  `numpy>=1.26.0,<2.0.0` is still satisfied by the resolved version in
-  `training/rl/uv.lock`. A `numpy` 2.x bump MUST be flagged as
-  high-risk regardless of advisory severity or CI conclusion. Cite both file
-  paths in the comment.
+  `training/rl/scripts/setup_isaac_runtime.sh` and the image default in
+  `scripts/lib/common.sh`. Check the locked Python and NumPy versions against
+  the current manifest and runtime image, not a universal NumPy major-version
+  ceiling. Flag changes to ABI-sensitive pins or the image-provided Torch/CUDA
+  stack for maintainer review regardless of hosted CI success. Require
+  target-image smoke evidence for compatibility claims and cite the affected
+  manifest, lock, and runtime configuration.
 * **Torch / tensordict / onnxruntime-gpu.** A major bump invalidates GPU
   smoke testing; flag as high-risk and note that hosted CI cannot validate
   Isaac Sim behavior.

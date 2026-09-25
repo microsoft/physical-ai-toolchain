@@ -9,6 +9,12 @@ import App from './App'
 import { AuthGate } from './components/auth/AuthGate'
 import { isAuthEnabled, msalConfig } from './lib/auth-config'
 import { setMsalInstance } from './lib/auth-headers'
+import { startPerformanceEntryCleanup } from './lib/playback-diagnostics'
+
+if (import.meta.env.DEV) {
+  const stopPerformanceEntryCleanup = startPerformanceEntryCleanup()
+  import.meta.hot?.dispose(stopPerformanceEntryCleanup)
+}
 
 let msalInstance: PublicClientApplication | null = null
 

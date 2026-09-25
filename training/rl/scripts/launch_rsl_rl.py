@@ -11,8 +11,10 @@ import sys
 import tempfile
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
-from training.utils import AzureConfigError, AzureMLContext, bootstrap_azure_ml
+if TYPE_CHECKING:
+    from training.utils.context import AzureMLContext
 
 _LOGGER = logging.getLogger("isaaclab.launch_rsl_rl")
 _REQUIRED_MODULES = {
@@ -20,6 +22,21 @@ _REQUIRED_MODULES = {
     "azure.ai.ml": "azure-ai-ml",
     "mlflow": "mlflow",
 }
+
+
+class AzureConfigError(RuntimeError):
+    """Lazy launcher boundary for Azure configuration failures."""
+
+
+def bootstrap_azure_ml(*, experiment_name: str) -> AzureMLContext:
+    """Load Azure ML dependencies only when tracking is enabled."""
+    from training.utils.context import AzureConfigError as ContextAzureConfigError
+    from training.utils.context import bootstrap_azure_ml as bootstrap
+
+    try:
+        return bootstrap(experiment_name=experiment_name)
+    except ContextAzureConfigError as exc:
+        raise AzureConfigError(str(exc)) from exc
 
 
 def _optional_int(value_str: str | None) -> int | None:

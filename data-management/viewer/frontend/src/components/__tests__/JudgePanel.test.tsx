@@ -6,6 +6,7 @@ import { JudgePanel } from '@/components/vlm-judge'
 import type { VlmJudgeResult, VlmJudgeStatus } from '@/types'
 
 const mockUseStatus = vi.fn()
+const mockUseCapabilities = vi.fn()
 const mockMutate = vi.fn()
 const mockUseRun = vi.fn()
 const mockSaveLabels = vi.fn()
@@ -15,8 +16,12 @@ const mockCancel = vi.fn()
 const mockBatch = vi.fn()
 
 vi.mock('@/hooks/use-vlm-judge', () => ({
-  useVlmJudgeStatus: () => mockUseStatus(),
+  useVlmJudgeStatus: (...args: unknown[]) => mockUseStatus(...args),
   useRunVlmJudge: () => mockUseRun(),
+}))
+
+vi.mock('@/hooks/use-datasets', () => ({
+  useCapabilities: (...args: unknown[]) => mockUseCapabilities(...args),
 }))
 
 vi.mock('@/hooks/use-labels', () => ({
@@ -67,6 +72,7 @@ function judgeResult(partial: Partial<VlmJudgeResult> = {}): VlmJudgeResult {
 describe('JudgePanel', () => {
   beforeEach(() => {
     mockUseStatus.mockReset()
+    mockUseCapabilities.mockReset()
     mockMutate.mockReset()
     mockUseRun.mockReset()
     mockSaveLabels.mockReset()
@@ -80,6 +86,10 @@ describe('JudgePanel', () => {
       error: null,
       data: undefined,
     })
+    mockUseCapabilities.mockReturnValue({
+      data: { vlmJudgeEnabled: true },
+      isLoading: false,
+    })
     mockBatch.mockReturnValue({
       progress: null,
       error: null,
@@ -91,12 +101,21 @@ describe('JudgePanel', () => {
   })
 
   it('shows a disabled hint when the judge backend is not enabled', () => {
+    mockUseCapabilities.mockReturnValue({
+      data: { vlmJudgeEnabled: false },
+      isLoading: false,
+    })
     mockUseStatus.mockReturnValue({
-      data: status({ enabled: false }),
+      data: undefined,
       isLoading: false,
       error: null,
     })
     render(<JudgePanel datasetId="demo" episodeIndex={0} />)
+    expect(mockUseStatus).toHaveBeenCalledWith({
+      datasetId: 'demo',
+      episodeIndex: 0,
+      enabled: false,
+    })
     expect(screen.getByText(/not enabled for this server/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /run judge/i })).not.toBeInTheDocument()
   })

@@ -28,16 +28,18 @@ Run a trained ACT (Action Chunking with Transformers) policy locally against dat
 
 ### Pull the Model
 
-The trained checkpoint is available from two sources.
+Use a model registered in your Azure ML workspace or the public Hugging Face example below.
 
 **From Azure ML:**
 
+Replace the placeholders with your model registration and workspace details.
+
 ```bash
 az ml model download \
-  --name hve-robo-act-train --version 1 \
+  --name "<model-name>" --version "<model-version>" \
   --download-path ./checkpoint \
-  --resource-group rg-osmorbt3-dev-001 \
-  --workspace-name mlw-osmorbt3-dev-001
+  --resource-group "<resource-group>" \
+  --workspace-name "<workspace-name>"
 ```
 
 **From HuggingFace Hub:**
@@ -47,7 +49,7 @@ pip install huggingface-hub
 huggingface-cli download alizaidi/hve-robo-act-train --local-dir ./checkpoint/hve-robo-act-train
 ```
 
-Both produce the same directory:
+Downloaded LeRobot checkpoints have a structure similar to this public example:
 
 ```text
 hve-robo-act-train/

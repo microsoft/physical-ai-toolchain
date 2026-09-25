@@ -1,5 +1,10 @@
 {
+  "gitignore": true,
   "ignores": [
+    "**/.git/**",
+    "**/*.code-search",
+    "**/bower_components/**",
+    "**/vendor/**",
     "**/node_modules/**",
     ".agent/reviews/**",
     ".copilot-tracking/**",
@@ -80,9 +85,10 @@
       "shortcut": true,
       "url_inline": true
     },
-    "MD055": { "style": "consistent" },
+    "MD055": { "style": "leading_and_trailing" },
     "MD056": true,
     "MD058": true,
-    "MD060": { "style": "leading_and_trailing" }
+    // markdown-table-formatter owns table layout; MD060 measures emoji widths differently.
+    "MD060": false
   }
 }

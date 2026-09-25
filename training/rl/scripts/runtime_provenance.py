@@ -24,13 +24,17 @@ def _expected_versions(requirements_file: Path) -> dict[str, str]:
     return expected
 
 
-def _installed_versions(expected: dict[str, str]) -> tuple[dict[str, str], list[str], list[str]]:
+def _installed_versions(
+    expected: dict[str, str], *, install_root: Path | None = None
+) -> tuple[dict[str, str], list[str], list[str]]:
     actual = {}
     missing = []
     unresolved = []
-    install_roots = {
-        Path(path).resolve() for name in ("purelib", "platlib") if (path := sysconfig.get_path(name)) is not None
-    }
+    install_roots = (
+        {install_root.resolve()}
+        if install_root is not None
+        else {Path(path).resolve() for name in ("purelib", "platlib") if (path := sysconfig.get_path(name)) is not None}
+    )
     for name in expected:
         distributions = list(importlib.metadata.distributions(name=name))
         installed = next(
@@ -52,10 +56,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("project_dir", type=Path)
     parser.add_argument("requirements_file", type=Path)
+    parser.add_argument("--install-root", type=Path, help="Writable overlay used instead of interpreter site-packages")
     args = parser.parse_args()
 
     expected = _expected_versions(args.requirements_file)
-    actual, missing, unresolved = _installed_versions(expected)
+    actual, missing, unresolved = _installed_versions(expected, install_root=args.install_root)
     provenance = {
         "actual": actual,
         "expected": expected,
