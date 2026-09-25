@@ -203,6 +203,7 @@ jobs:
       run-product-evidence: true
     permissions:
       contents: read
+      id-token: write
 
   # Docusaurus documentation site tests and build verification
   docusaurus-tests:
@@ -214,6 +215,7 @@ jobs:
       required-completeness: automated
     permissions:
       contents: read
+      id-token: write
 
   # Dataviewer backend pytest execution
   dataviewer-backend-pytests:

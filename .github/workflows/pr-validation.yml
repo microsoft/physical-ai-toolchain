@@ -265,6 +265,7 @@ jobs:
       run-product-evidence: true
     permissions:
       contents: read
+      id-token: write
 
   # Docusaurus documentation site tests and build verification
   docusaurus-tests:
@@ -276,6 +277,7 @@ jobs:
       soft-fail: false
     permissions:
       contents: read
+      id-token: write
 
   # Pytest: training component
   pytest-training:

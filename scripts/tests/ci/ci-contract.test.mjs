@@ -37,6 +37,29 @@ const smokePath = '.github/workflows/smoke-cpu.yml';
 const weeklyPath = '.github/workflows/weekly-validation.yml';
 const summaryId = 'pr-validation-summary';
 const unknownSha = '0'.repeat(40);
+
+for (const owner of [prPath, mainPath]) {
+  for (const jobId of ['accessibility-evidence', 'docusaurus-tests']) {
+    test(`reusable permissions: ${owner}:${jobId} grants coverage OIDC through the entire call chain`, () => {
+      assert.equal(graph[owner].jobs[jobId].permissions['id-token'], 'write');
+      const candidate = structuredClone(graph);
+      const policy = structuredClone(contract);
+      delete candidate[owner].jobs[jobId].permissions['id-token'];
+      policy.permissionProfiles['missing-oidc'] = { contents: 'read' };
+      const lane = policy.lanes.find(item => item.id === jobId);
+      lane.permissionProfile = 'missing-oidc';
+      assert.ok(validateWorkflows(candidate, policy).some(message =>
+        message.includes(`${owner}:${jobId}`) && message.includes('callee permission id-token: write')));
+    });
+  }
+}
+
+test('reusable permissions: skipped scheduled callers still require upstream permission grants', () => {
+  const candidate = structuredClone(graph);
+  delete candidate['.github/workflows/accessibility-evidence.yml'].jobs['scheduled-docusaurus'].permissions['id-token'];
+  assert.ok(validateWorkflows(candidate, contract).some(message =>
+    message.includes('scheduled-docusaurus') && message.includes('callee permission id-token: write')));
+});
 const nodeEnvironment = { ...process.env, NODE_DISABLE_COMPILE_CACHE: '1' };
 
 function expectedSelection(selected, strings = false) {

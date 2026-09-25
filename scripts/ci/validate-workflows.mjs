@@ -202,6 +202,18 @@ export function validateWorkflows(graph, contract = loadContract()) {
         const target = job.uses.slice(2);
         check(Boolean(graph[target]), `${path}:${id}: unresolved local call ${target}`);
         check(events(graph[target] ?? {}).includes('workflow_call'), `${path}:${id}: target missing workflow_call`);
+        const granted = job.permissions ?? workflow.permissions;
+        if (isObject(granted)) {
+          for (const [calleeId, calleeJob] of Object.entries(graph[target]?.jobs ?? {})) {
+            const requested = calleeJob.permissions ?? graph[target].permissions;
+            if (!isObject(requested)) continue;
+            for (const [permission, level] of Object.entries(requested)) {
+              const rank = { none: 0, read: 1, write: 2 };
+              check((rank[granted[permission] ?? 'none'] ?? -1) >= (rank[level] ?? Infinity),
+                `${path}:${id}: callee permission ${permission}: ${level} exceeds the caller grant (${target}:${calleeId})`);
+            }
+          }
+        }
       }
     }
   }
