@@ -1,6 +1,12 @@
-# Record Episodes for a Verified Experiment
+---
+title: Record Episodes for a Verified Experiment
+description: Publish verified LeRobot releases and consume them through exact Azure ML assets or Blob URLs
+author: Microsoft Robotics-AI Team
+ms.date: 2026-09-25
+ms.topic: tutorial
+---
 
-Record LeRobot episodes, review them in the Dataset Analysis Tool, publish an immutable release to Azure Blob Storage, and use that release for verified training and evaluation. Use this workflow when moving from T0 local experimentation to shared T1 data or T2 cloud training.
+Record LeRobot episodes, review them in the Dataset Analysis Tool, publish an immutable release to Azure Blob Storage, and use that release for verified training and evaluation. At T2, register the release as an exact version-pinned Azure ML `uri_folder` asset.
 
 ## When to Use This Guide
 
@@ -20,6 +26,7 @@ A raw upload to Azure Blob Storage is not a verified release. Verified consumers
 | Azure Storage | Storage account and dataset container for T1 and T2 |
 | Dataset Analysis Tool | Backend, frontend, and release worker from `data-management/viewer` |
 | T2 compute | Azure ML or OSMO configured for cloud training and evaluation |
+| Azure ML registration | Azure ML workspace access and the Viewer backend `azureml` extra for native asset consumption |
 
 The repository does not provide a generic ROS 2 bag-to-LeRobot converter. Native ROS 2 bag capture requires a separate conversion step before the dataset can enter this workflow.
 
@@ -60,6 +67,24 @@ cd data-management/viewer
 
 Use Azure CLI, managed identity, or workload identity authentication. Do not create a local release and copy it with a generic recursive upload. Direct Azure publication verifies the destination and creates `.published.json` last.
 
+For T2 Azure ML training, restore the registration dependency and configure the
+workspace before starting the Viewer:
+
+```bash
+cd data-management/viewer
+uv sync --frozen --project backend --extra azureml
+
+export DATAVIEWER_AZUREML_REGISTRATION_ENABLED=true
+export AZURE_SUBSCRIPTION_ID=<subscription-id>
+export AZURE_RESOURCE_GROUP=<resource-group>
+export AZUREML_WORKSPACE_NAME=<workspace-name>
+./start.sh
+```
+
+Registration applies only to marker-complete Azure releases. Use a release ID of
+1 to 30 characters matching `[A-Za-z0-9][A-Za-z0-9._-]*`; the exact release ID
+becomes the immutable Azure ML asset version.
+
 ## Review and Publish a Release
 
 1. Open the Azure-backed dataset in the annotation workspace.
@@ -91,6 +116,21 @@ az storage blob exists \
 
 Continue only when the command returns `true`.
 
+When Azure ML registration is enabled, confirm that the published release is
+available as a version-pinned data asset:
+
+```bash
+az ml data list \
+  --resource-group <resource-group> \
+  --workspace-name <workspace-name> \
+  --query "[?version=='<release-id>' && properties.dataset_id=='<dataset-id>'].{name:name,version:version}" \
+  --output table
+```
+
+Continue with Azure ML training only when the command returns one matching asset.
+The asset name is the lowercase dataset slug plus a collision-resistant SHA-256
+suffix.
+
 ## Train from the Verified Release
 
 At T2, submit training with the exact release root and verified trust. The runtime rejects incomplete, changed, or non-release inputs.
@@ -108,11 +148,15 @@ Azure ML:
 
 ```bash
 training/il/scripts/submit-azureml-lerobot-training.sh \
-  --blob-url "https://<storage-account>.blob.core.windows.net/datasets/exports/releases/<dataset-id>/<release-id>" \
+  --dataset-asset "azureml:<asset-name>:<release-id>" \
   --dataset-trust verified \
   --register-checkpoint <model-name> \
   --stream
 ```
+
+Azure ML mounts the exact `uri_folder` version with `ro_mount`. OSMO cannot
+consume Azure ML asset identifiers and continues to use the exact release Blob
+URL with workload identity authentication.
 
 ## Evaluate the Registered Model
 
@@ -150,12 +194,23 @@ evaluation/sil/scripts/submit-azureml-lerobot-eval.sh \
 
 ## Verify Lineage
 
+Generate the runtime release-to-model report after training and model
+registration:
+
+```bash
+cd data-management/lineage-report
+uv sync --frozen
+uv run lineage-report
+```
+
 The workflow is complete when:
 
-- The Viewer release contains `.published.json`, `metadata/release-manifest.json`, and `checksums.sha256`.
+- The Viewer release contains `.published.json`, `metadata/release-manifest.json`, `metadata/release-statistics.json`, and `checksums.sha256`.
+- The Azure ML data asset version equals the Viewer release ID and references the marker-complete release folder.
 - Training records `dataset.trust=verified`, the release ID, and `lineage/dataset-lineage.json` in MLflow.
 - The registered model contains `azureml_lineage.json` with the same release identity.
 - Evaluation results retain the release ID and source episode mapping.
+- The lineage report joins the data asset and model on both release ID and manifest digest.
 
 ## Troubleshooting
 
@@ -163,6 +218,7 @@ The workflow is complete when:
 |---------|--------|
 | Blob folder exists but verified training fails | Confirm the URL points to the release root, not the mutable source dataset, and check `.published.json` exists |
 | Release destination does not offer Azure | Restart the Viewer with `STORAGE_BACKEND=azure` and complete Azure storage configuration |
+| Azure ML asset is missing | Confirm registration is enabled, the release ID meets the 30-character contract, and the Viewer identity can access the workspace |
 | Episode is excluded | Save changes, rerun quality, and accept the current source identity before creating a new release |
 | Evaluation rejects the dataset | Use `--from-blob-dataset` for OSMO or `--from-blob` for Azure ML together with the exact release prefix |
 
@@ -171,4 +227,5 @@ The workflow is complete when:
 - [Dataset Release Workflow](../../data-pipeline/dataset-release-workflow.md)
 - [Preparing Datasets for Training](preparing-datasets-for-training.md)
 - [LeRobot Training](../../training/lerobot-training.md)
+- [Azure ML Lineage Report](../../../data-management/lineage-report/README.md)
 - [Evaluation Guide](../../evaluation/README.md)

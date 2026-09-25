@@ -1,4 +1,10 @@
-# T2 — Pilot: Cloud Training, Registry, and Shared Catalogs (Recommended)
+---
+title: "T2 - Pilot: Cloud Training, Registry, and Shared Catalogs"
+description: Run cloud training with immutable dataset assets, model registration, and shared MLflow tracking
+author: Microsoft Robotics-AI Team
+ms.date: 2026-09-25
+ms.topic: tutorial
+---
 
 The **recommended production** path. This is the tier where cloud training genuinely becomes the
 *default* rather than an option: one site, several robots, real training scale, and a team
@@ -36,12 +42,12 @@ infrastructure reference see [Infrastructure](../../infrastructure/README.md).
 
 ### Step 2: Publish a verified dataset release
 
-Land source datasets in Blob as at [T1 — Lab](../tier-1-lab/README.md), then use the hosted dataviewer to review episodes and publish an immutable Azure release. Follow [Record Episodes for a Verified Experiment](../data-collection/record-to-verified-experiment.md) for the release path and exact Blob URL.
+Land source datasets in Blob as at [T1 — Lab](../tier-1-lab/README.md), then use the hosted dataviewer to review episodes and publish an immutable Azure release. Enable Azure ML registration and use an Azure ML-compatible release ID so the Viewer registers the marker-complete release as an exact version-pinned `uri_folder` asset. Follow [Record Episodes for a Verified Experiment](../data-collection/record-to-verified-experiment.md) for the release, registration, and verification path.
 
 ### Step 3: Train on cloud GPU (default)
 
 Submit a LeRobot behavioral-cloning job to AzureML or OSMO: multi-GPU, queued jobs, multiple people,
-VLA scale. Pass the release root with `--dataset-trust verified`; do not train a governed run from the mutable source prefix. Use the existing recipes rather than re-deriving the commands here:
+VLA scale. For Azure ML, pass the exact registered asset version with `--dataset-asset` and `--dataset-trust verified`; Azure ML mounts it with `ro_mount`. For OSMO, pass the exact release Blob URL with `--blob-url` and verified trust. Do not train a governed run from the mutable source prefix. Use the existing recipes rather than re-deriving the commands here:
 
 - [Your First LeRobot Training Job](../training/your-first-lerobot-training-job.md): submit a single
   cloud training job.
@@ -57,7 +63,9 @@ Reference docs: [AzureML training](../../training/azureml-training.md),
 Managed MLflow on AzureML is the default tracking backend, and the **model registry becomes
 load-bearing**. Trained checkpoints are registered and versioned automatically at job completion.
 See [Experiment tracking](../../training/experiment-tracking.md) and
-[MLflow integration](../../training/mlflow-integration.md).
+[MLflow integration](../../training/mlflow-integration.md). Generate the
+[Azure ML Lineage Report](../../../data-management/lineage-report/README.md) to join release assets,
+registered models, and referenced MLflow runs on immutable release evidence.
 
 ### Step 5: Validate
 
