@@ -27,9 +27,13 @@ const EpisodeListItem = memo(function EpisodeListItem({
         className={`hover:bg-accent w-full px-4 py-3 text-left transition-colors ${isSelected ? 'bg-accent' : ''}`}
       >
         <div className="font-medium">Episode {episode.index}</div>
-        <div className="text-muted-foreground text-sm">
+        <div
+          className={isSelected ? 'text-foreground/80 text-sm' : 'text-muted-foreground text-sm'}
+        >
           {episode.length} frames • Task {episode.taskIndex}
-          {episode.hasAnnotations && <span className="ml-2 text-green-600">✓ Annotated</span>}
+          {episode.hasAnnotations && (
+            <span className="text-status-success-foreground ml-2">✓ Annotated</span>
+          )}
         </div>
         {labels.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
@@ -68,7 +72,11 @@ export function DataviewerEpisodeList({
   }
 
   if (error) {
-    return <div className="p-4 text-red-500">Error: {error.message}</div>
+    return (
+      <div role="alert" className="p-4 text-red-500">
+        Error: {error.message}
+      </div>
+    )
   }
 
   if (!episodes || episodes.length === 0) {

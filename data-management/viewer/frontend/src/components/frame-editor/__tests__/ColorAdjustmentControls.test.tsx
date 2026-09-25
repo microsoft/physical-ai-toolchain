@@ -274,4 +274,12 @@ describe('ColorAdjustmentControls', () => {
 
     expect(container.firstChild).toHaveClass('custom-class')
   })
+  it('associates every adjustment label with its slider', () => {
+    setup()
+    render(<ColorAdjustmentControls />)
+
+    for (const name of ['Brightness', 'Contrast', 'Saturation', 'Gamma', 'Hue']) {
+      expect(screen.getByRole('slider', { name })).toBeInTheDocument()
+    }
+  })
 })

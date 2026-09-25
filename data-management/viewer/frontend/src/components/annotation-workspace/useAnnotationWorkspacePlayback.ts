@@ -43,7 +43,7 @@ export function useAnnotationWorkspacePlayback({
 }: UseAnnotationWorkspacePlaybackOptions) {
   const [selectedSubtaskId, setSelectedSubtaskId] = useState<string | null>(null)
   const [selectedRange, setSelectedRange] = useState<[number, number] | null>(null)
-  const shouldResumeAfterSelectionRef = useRef(false)
+  const selectionTransactionRef = useRef<{ shouldResume: boolean; frame: number } | null>(null)
 
   const activeSubtask = useMemo(
     () => subtasks.find((segment) => segment.id === selectedSubtaskId) ?? null,
@@ -88,7 +88,7 @@ export function useAnnotationWorkspacePlayback({
   )
 
   const clearPlaybackSelection = useCallback(() => {
-    shouldResumeAfterSelectionRef.current = false
+    selectionTransactionRef.current = null
     setSelectedSubtaskId(null)
     setSelectedRange(null)
     onRecordEvent('playback', 'selection-clear', { source: 'workspace-action' })
@@ -105,7 +105,7 @@ export function useAnnotationWorkspacePlayback({
   const handleSubtaskSelectionChange = useCallback(
     (id: string | null) => {
       setSelectedSubtaskId(id)
-      shouldResumeAfterSelectionRef.current = false
+      selectionTransactionRef.current = null
       onRecordEvent('subtasks', 'select', { id })
 
       if (!id) {
@@ -125,7 +125,7 @@ export function useAnnotationWorkspacePlayback({
 
   const handleCreateSubtaskFromRange = useCallback(
     (segment: SubtaskSegment) => {
-      shouldResumeAfterSelectionRef.current = false
+      selectionTransactionRef.current = null
       setSelectedRange(null)
       setSelectedSubtaskId(segment.id)
       setFrameWithinPlaybackRange(segment.frameRange[0], segment.frameRange)
@@ -141,7 +141,7 @@ export function useAnnotationWorkspacePlayback({
   const handleDraftRangeChange = useCallback(
     (range: [number, number] | null) => {
       if (!range) {
-        shouldResumeAfterSelectionRef.current = false
+        selectionTransactionRef.current = null
       }
 
       setSelectedSubtaskId(null)
@@ -155,22 +155,31 @@ export function useAnnotationWorkspacePlayback({
   )
 
   const handleSelectionStart = useCallback(() => {
-    shouldResumeAfterSelectionRef.current = isPlaying
+    if (selectionTransactionRef.current) {
+      return
+    }
+
+    selectionTransactionRef.current = { shouldResume: isPlaying, frame: currentFrame }
     onRecordEvent('playback', 'selection-start', { shouldResume: isPlaying })
 
     if (isPlaying) {
       onTogglePlayback()
     }
-  }, [isPlaying, onRecordEvent, onTogglePlayback])
+  }, [currentFrame, isPlaying, onRecordEvent, onTogglePlayback])
 
   const handleSelectionComplete = useCallback(
     (range: [number, number]) => {
-      const shouldResume = shouldResumeAfterSelectionRef.current
+      const transaction = selectionTransactionRef.current
+      if (!transaction) {
+        return
+      }
+
+      selectionTransactionRef.current = null
+      const { shouldResume } = transaction
       const nextFrame = setFrameWithinPlaybackRange(range[0], range)
 
       setSelectedSubtaskId(null)
       setSelectedRange(range)
-      shouldResumeAfterSelectionRef.current = false
       onRecordEvent('playback', 'selection-finish', {
         shouldResume,
         rangeStart: range[0],
@@ -186,6 +195,24 @@ export function useAnnotationWorkspacePlayback({
     [onRecordEvent, onResumePlayback, onTogglePlayback, setFrameWithinPlaybackRange],
   )
 
+  const handleSelectionCancel = useCallback(() => {
+    const transaction = selectionTransactionRef.current
+    if (!transaction) {
+      return
+    }
+
+    selectionTransactionRef.current = null
+    onRecordEvent('playback', 'selection-clear', {
+      source: 'pointer-cancel',
+      shouldResume: transaction.shouldResume,
+    })
+
+    if (transaction.shouldResume) {
+      onTogglePlayback()
+      onResumePlayback(transaction.frame)
+    }
+  }, [onRecordEvent, onResumePlayback, onTogglePlayback])
+
   const stepFrame = useCallback(
     (delta: number) => {
       setFrameWithinPlaybackRange(currentFrame + delta)
@@ -196,7 +223,7 @@ export function useAnnotationWorkspacePlayback({
   useEffect(() => {
     setSelectedSubtaskId(null)
     setSelectedRange(null)
-    shouldResumeAfterSelectionRef.current = false
+    selectionTransactionRef.current = null
   }, [currentDatasetId, currentEpisodeIndex])
 
   useEffect(() => {
@@ -225,6 +252,7 @@ export function useAnnotationWorkspacePlayback({
     handleDraftRangeChange,
     handleGraphSeek,
     handleSelectionComplete,
+    handleSelectionCancel,
     handleSelectionStart,
     handleSubtaskSelectionChange,
     playbackRange,

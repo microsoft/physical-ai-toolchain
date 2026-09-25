@@ -1,0 +1,42 @@
+{
+  "documents": [
+    {
+      "relativePath": "README.md",
+      "source": "---\nslug: \"/documentation\"\n---\n",
+      "routeBasePath": "/",
+      "expectedId": "README",
+      "expectedRoute": "/documentation"
+    },
+    {
+      "relativePath": "guides/quoted.md",
+      "source": "---\nid: 'quoted''id'\nslug: 'relative-route'\n---\n",
+      "routeBasePath": "/docs",
+      "expectedId": "quoted'id",
+      "expectedRoute": "/docs/guides/relative-route"
+    },
+    {
+      "relativePath": "nested/README.mdx",
+      "source": "---\ntitle: Nested\n---\n",
+      "routeBasePath": "/",
+      "expectedId": "nested/README",
+      "expectedRoute": "/nested"
+    }
+  ],
+  "invalid": [
+    {
+      "relativePath": "unterminated.md",
+      "source": "---\nslug: broken\n",
+      "error": "front matter is not terminated"
+    },
+    {
+      "relativePath": "duplicate.md",
+      "source": "---\nslug: first\nslug: second\n---\n",
+      "error": "front matter slug must appear once"
+    },
+    {
+      "relativePath": "structured.md",
+      "source": "---\nslug:\n  nested: route\n---\n",
+      "error": "unsupported slug metadata form"
+    }
+  ]
+}
