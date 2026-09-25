@@ -12,6 +12,12 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "
 source "${REPO_ROOT}/training/il/scripts/lerobot/lerobot-azureml.sh"
 
 LEROBOT_PROJECT="${LEROBOT_PROJECT:-training/il/lerobot}"
+case "${POLICY_TYPE:-act}" in
+  pi0|pi0_fast|pi05)
+    [[ "${LEROBOT_PROJECT}" == "training/il/lerobot" ]] && LEROBOT_PROJECT="training/vla/lerobot"
+    ;;
+esac
+
 case "${LEROBOT_PROJECT}" in
   /*|../*|*/../*|*/..)
     echo "ERROR: LEROBOT_PROJECT must be a repo-relative path without parent traversal: ${LEROBOT_PROJECT}" >&2
@@ -27,7 +33,7 @@ fi
 runtime_modules=(av azure.ai.ml azure.identity azure.storage.blob azureml.mlflow lerobot matplotlib mlflow pyarrow)
 case "${POLICY_TYPE:-act}" in
   diffusion) runtime_modules+=(diffusers) ;;
-  pi0|pi0_fast) runtime_modules+=(scipy tokenizers transformers) ;;
+  pi0|pi0_fast|pi05) runtime_modules+=(scipy tokenizers transformers) ;;
 esac
 ensure_lerobot_runtime \
   "${LEROBOT_EVAL_VENV:-/opt/lerobot-eval-venv}" \
@@ -38,13 +44,23 @@ if [[ -n "${AZURE_ML_OUTPUT_eval_results:-}" ]]; then
   export OUTPUT_DIR="${AZURE_ML_OUTPUT_eval_results}"
 fi
 
+if [[ -n "${AZURE_ML_INPUT_dataset_asset:-}" ]]; then
+  export DATASET_DIR="${AZURE_ML_INPUT_dataset_asset}"
+  echo "Using AzureML dataset asset at: ${DATASET_DIR}"
+fi
+
+if [[ -n "${AZURE_ML_INPUT_model_asset:-}" ]]; then
+  export POLICY_REPO_ID="${AZURE_ML_INPUT_model_asset}"
+  echo "Using AzureML model asset at: ${POLICY_REPO_ID}"
+fi
+
 # HuggingFace auth
 if [[ -n "${HF_TOKEN:-}" ]]; then
   python3 -c "import os; from huggingface_hub import login; login(token=os.environ['HF_TOKEN'], add_to_git_credential=False)"
 fi
 
 # Download model from AzureML registry if specified
-if [[ -n "${AML_MODEL_NAME:-}" && "${AML_MODEL_NAME}" != "none" && -n "${AML_MODEL_VERSION:-}" && "${AML_MODEL_VERSION}" != "none" ]]; then
+if [[ -z "${AZURE_ML_INPUT_model_asset:-}" && -n "${AML_MODEL_NAME:-}" && "${AML_MODEL_NAME}" != "none" && -n "${AML_MODEL_VERSION:-}" && "${AML_MODEL_VERSION}" != "none" ]]; then
   echo "Downloading model from AzureML registry: ${AML_MODEL_NAME}:${AML_MODEL_VERSION}..."
 
   python3 "${REPO_ROOT}/evaluation/sil/scripts/download_aml_model.py"

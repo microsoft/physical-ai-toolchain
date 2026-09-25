@@ -868,6 +868,7 @@ nvjitlink
 nvme
 nvml
 nvshmem
+nvtop
 nvtx
 nygard
 nzlua

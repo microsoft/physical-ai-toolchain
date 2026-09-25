@@ -27,8 +27,8 @@ from .robot_types import (
     RobotObservation,
 )
 
-SUPPORTED_POLICY_TYPES = frozenset({"act", "diffusion", "pi0", "pi0_fast"})
-VLA_POLICY_TYPES = frozenset({"pi0", "pi0_fast"})
+SUPPORTED_POLICY_TYPES = frozenset({"act", "diffusion", "pi0", "pi0_fast", "pi05"})
+VLA_POLICY_TYPES = frozenset({"pi0", "pi0_fast", "pi05"})
 
 
 def _resolve_device(requested: str) -> str:

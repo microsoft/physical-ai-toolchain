@@ -1,4 +1,4 @@
-# AzureML GPU Instance Types for AKS
+# Azure ML GPU InstanceTypes for Kubernetes compute
 # Applied after AzureML extension creates the InstanceType CRD
 apiVersion: amlarc.azureml.com/v1alpha1
 kind: InstanceType

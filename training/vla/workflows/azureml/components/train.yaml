@@ -1,0 +1,102 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+name: vla_train_from_calibration
+display_name: VLA Training from Calibration
+version: "1"
+description: Train a VLA policy using a workload-bound calibration recommendation.
+
+code: ../../../../..
+
+inputs:
+  calibration_report:
+    type: uri_folder
+    description: Calibration report containing the recommended micro-batch size.
+  workload_contract:
+    type: uri_folder
+    description: Generated workload JSON used to validate calibration lineage.
+  adapter_name:
+    type: string
+  dataset_repo_id:
+    type: string
+  dataset_revision:
+    type: string
+  policy_type:
+    type: string
+  init_from_policy_hf_repo_id:
+    type: string
+  init_from_policy_hf_revision:
+    type: string
+  train_expert_only:
+    type: string
+  gradient_checkpointing:
+    type: string
+  use_imagenet_stats:
+    type: string
+  rename_map_b64:
+    type: string
+    default: none
+  training_steps:
+    type: integer
+    default: 2
+  save_freq:
+    type: integer
+    default: 1
+  log_freq:
+    type: integer
+    default: 1
+  job_name:
+    type: string
+    default: vla-calibrated-training
+  output_dir:
+    type: string
+    default: /workspace/outputs/train
+  mixed_precision:
+    type: string
+    default: bf16
+  policy_dtype:
+    type: string
+    default: none
+  subscription_id:
+    type: string
+  resource_group:
+    type: string
+  workspace_name:
+    type: string
+  mlflow_token_refresh_retries:
+    type: integer
+    default: 3
+  mlflow_http_request_timeout:
+    type: integer
+    default: 60
+  azure_client_id:
+    type: string
+    default: none
+  hf_key_vault_url:
+    type: string
+    default: none
+  hf_token_secret_name:
+    type: string
+    default: none
+  register_checkpoint:
+    type: string
+    default: none
+  code_repository:
+    type: string
+  code_revision:
+    type: string
+  compute_target:
+    type: string
+  runtime_image:
+    type: string
+    default: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
+
+outputs:
+  checkpoints:
+    type: uri_folder
+    mode: upload
+    description: Training checkpoints produced with the calibrated micro-batch size.
+
+environment:
+  image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
+
+command: bash training/vla/scripts/azureml-component-entry.sh train

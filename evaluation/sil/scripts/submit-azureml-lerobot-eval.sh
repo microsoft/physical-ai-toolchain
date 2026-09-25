@@ -41,6 +41,7 @@ POLICY SOURCE (one required):
 
 DATASET SOURCE:
     -d, --dataset-repo-id ID     HuggingFace dataset for replay evaluation
+        --dataset-asset URI       AzureML uri_folder dataset asset
         --dataset-revision SHA    HuggingFace commit SHA to pin the dataset download
         --from-blob               Download dataset from Azure Blob Storage
         --storage-account NAME    Azure storage account (default: from Terraform)
@@ -55,7 +56,7 @@ AZUREML ASSET OPTIONS:
 
 EVALUATION OPTIONS:
     -w, --job-file PATH           Job YAML template (default: evaluation/sil/workflows/azureml/lerobot-eval.yaml)
-    -p, --policy-type TYPE        Policy architecture: act, diffusion, pi0, pi0_fast (default: act)
+    -p, --policy-type TYPE        Policy architecture: act, diffusion, pi0, pi0_fast, pi05 (default: act)
     -j, --job-name NAME           Job identifier (default: lerobot-eval)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/eval)
         --lerobot-version VER     Specific LeRobot version or "latest" (default: latest)
@@ -64,6 +65,7 @@ EVALUATION OPTIONS:
         --eval-episodes N         Number of evaluation episodes (default: 10)
         --eval-batch-size N       Evaluation batch size (default: 10)
         --record-video            Record evaluation videos
+        --task-prompt TEXT        Language task for PI-family policies
 
 LOGGING:
         --mlflow-enable           Enable MLflow logging with trajectory plots to AzureML
@@ -73,7 +75,7 @@ MODEL REGISTRATION:
     -r, --register-model NAME     Model name for Azure ML registration
         --hf-token TOKEN          HuggingFace access token forwarded as HF_TOKEN
                                    (default: $HF_TOKEN if set; required for pi0
-                                   and pi0_fast)
+                                   pi0_fast, and pi05)
 
 AZURE CONTEXT:
         --subscription-id ID      Azure subscription ID
@@ -81,6 +83,7 @@ AZURE CONTEXT:
         --workspace-name NAME     Azure ML workspace
         --compute TARGET          Compute target override
         --instance-type NAME      Instance type (default: gpuspot)
+        --hf-token TOKEN          HuggingFace token for gated PI-family processors
         --display-name NAME       Display name override
         --stream                  Stream logs after submission
 
@@ -142,6 +145,7 @@ policy_repo_id="${POLICY_REPO_ID:-}"
 policy_revision="${POLICY_REVISION:-}"
 policy_type="${POLICY_TYPE:-act}"
 dataset_repo_id="${DATASET_REPO_ID:-}"
+dataset_asset="${DATASET_ASSET:-}"
 dataset_revision="${DATASET_REVISION:-}"
 job_name="${JOB_NAME:-lerobot-eval}"
 output_dir="${OUTPUT_DIR:-/workspace/outputs/eval}"
@@ -151,6 +155,7 @@ lerobot_project="${LEROBOT_PROJECT:-training/il/lerobot}"
 eval_episodes="${EVAL_EPISODES:-10}"
 eval_batch_size="${EVAL_BATCH_SIZE:-10}"
 record_video="${RECORD_VIDEO:-false}"
+task_prompt="${TASK_PROMPT:-}"
 mlflow_enable="${MLFLOW_ENABLE:-false}"
 experiment_name="${EXPERIMENT_NAME:-}"
 register_model="${REGISTER_MODEL:-}"
@@ -193,6 +198,7 @@ while [[ $# -gt 0 ]]; do
     --policy-revision)            policy_revision="$2"; shift 2 ;;
     -p|--policy-type)             policy_type="$2"; shift 2 ;;
     -d|--dataset-repo-id)         dataset_repo_id="$2"; shift 2 ;;
+    --dataset-asset)              dataset_asset="$2"; shift 2 ;;
     --dataset-revision)           dataset_revision="$2"; shift 2 ;;
     -j|--job-name)                job_name="$2"; shift 2 ;;
     -o|--output-dir)              output_dir="$2"; shift 2 ;;
@@ -201,6 +207,7 @@ while [[ $# -gt 0 ]]; do
     --eval-episodes)              eval_episodes="$2"; shift 2 ;;
     --eval-batch-size)            eval_batch_size="$2"; shift 2 ;;
     --record-video)               record_video="true"; shift ;;
+    --task-prompt)                task_prompt="$2"; shift 2 ;;
     --mlflow-enable)              mlflow_enable="true"; shift ;;
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     --from-aml-model)             from_aml_model=true; shift ;;
@@ -236,6 +243,7 @@ fi
 #------------------------------------------------------------------------------
 
 require_tools az
+require_tools tar
 ensure_ml_extension
 
 # Policy source validation
@@ -254,7 +262,11 @@ else
 fi
 
 # Dataset source validation
-if [[ "$from_blob" == "true" ]]; then
+if [[ -n "$dataset_asset" ]]; then
+  if [[ -n "$dataset_repo_id" || "$from_blob" == "true" ]]; then
+    fatal "--dataset-asset cannot be combined with --dataset-repo-id or --from-blob"
+  fi
+elif [[ "$from_blob" == "true" ]]; then
   [[ -z "$blob_prefix" ]] && fatal "--blob-prefix is required with --from-blob"
   [[ -z "$storage_account" ]] && storage_account="$(get_storage_account)"
   [[ -z "$storage_account" ]] && fatal "--storage-account is required with --from-blob"
@@ -268,17 +280,18 @@ fi
 [[ -n "$workspace_name" ]] || fatal "AZUREML_WORKSPACE_NAME required"
 
 case "$policy_type" in
-  act|diffusion|pi0|pi0_fast) ;;
-  *) fatal "Unsupported policy type: $policy_type (use: act, diffusion, pi0, pi0_fast)" ;;
+  act|diffusion|pi0|pi0_fast|pi05) ;;
+  *) fatal "Unsupported policy type: $policy_type (use: act, diffusion, pi0, pi0_fast, pi05)" ;;
 esac
 
-if [[ "$policy_type" == "pi0" || "$policy_type" == "pi0_fast" ]]; then
-  [[ -n "$hf_token" ]] || fatal "HF_TOKEN or --hf-token is required for $policy_type evaluation"
+if [[ "$policy_type" == "pi0" || "$policy_type" == "pi0_fast" || "$policy_type" == "pi05" ]]; then
+  [[ -n "$task_prompt" ]] || fatal "--task-prompt is required for PI-family policies"
+  [[ -n "$hf_token" ]] || fatal "--hf-token or HF_TOKEN is required for gated PI-family processors"
   [[ "$lerobot_project" == "training/il/lerobot" ]] && lerobot_project="training/vla/lerobot"
 fi
 
 case "$lerobot_project" in
-  /*) fatal "--lerobot-project must be a repo-relative path (got: $lerobot_project)" ;;
+  /*|../*|*/../*|*/..) fatal "--lerobot-project must be a repo-relative path without parent traversal (got: $lerobot_project)" ;;
 esac
 project_local="$REPO_ROOT/$lerobot_project"
 [[ -f "$project_local/pyproject.toml" ]] || fatal "--lerobot-project: pyproject.toml not found at $project_local"
@@ -299,6 +312,9 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Record Video" "$record_video"
   print_kv "MLflow" "$mlflow_enable"
   print_kv "Dataset" "${dataset_repo_id:-<not set>}"
+  print_kv "Dataset Asset" "${dataset_asset:-<not set>}"
+  print_kv "Task Prompt" "${task_prompt:-<not set>}"
+  print_kv "HF Token" "$([[ -n "$hf_token" ]] && echo '<set>' || echo '<none>')"
   [[ "$from_blob" == "true" ]] && print_kv "Blob Source" "$storage_account/$storage_container/$blob_prefix"
   [[ "$from_aml_model" == "true" ]] && print_kv "Model Source" "AzureML (${model_name}:${model_version})"
   print_kv "Register Model" "${register_model:-<none>}"
@@ -333,14 +349,67 @@ managed_identity_client_id=$(resolve_azureml_compute_identity_client_id \
 # Build Submission Command
 #------------------------------------------------------------------------------
 
+snapshot_dir="$(mktemp -d "${TMPDIR:-/tmp}/lerobot-eval-code.XXXXXX")"
+rendered_job_file=""
+
+cleanup_temp_files() {
+  rm -rf "$snapshot_dir"
+  [[ -z "$rendered_job_file" ]] || rm -f "$rendered_job_file"
+}
+trap cleanup_temp_files EXIT
+
+tar --create --file "$snapshot_dir/lerobot-eval-payload.tar" --directory "$REPO_ROOT" \
+  --exclude='*/.venv' \
+  --exclude='*/.venv/**' \
+  --exclude='*/__pycache__' \
+  --exclude='*/__pycache__/**' \
+  --exclude='*/.pytest_cache' \
+  --exclude='*/.pytest_cache/**' \
+  --exclude='*/.mypy_cache' \
+  --exclude='*/.mypy_cache/**' \
+  --exclude='*.env' \
+  evaluation training workflows
+
 az_args=(
   az ml job create
   --resource-group "$resource_group"
   --workspace-name "$workspace_name"
   --file "$job_file"
-  --set "code=$REPO_ROOT"
+  --set "code=$snapshot_dir"
+  --set "command=tar --extract --file lerobot-eval-payload.tar && bash evaluation/sil/workflows/azureml/lerobot-eval-entry.sh"
   --set "environment=azureml:${environment_name}:${environment_version}"
 )
+
+if [[ -n "$dataset_asset" ]]; then
+  rendered_job_file=$(mktemp "${TMPDIR:-/tmp}/lerobot-eval-job.XXXXXX.yaml")
+  python3 - "$job_file" "$rendered_job_file" "$dataset_asset" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+dataset_asset = sys.argv[3]
+lines = source.read_text(encoding="utf-8").splitlines()
+inputs_index = next(i for i, line in enumerate(lines) if line.rstrip() == "inputs:")
+mounted_inputs = []
+if dataset_asset:
+    mounted_inputs.extend(
+        [
+            "  dataset_asset:",
+            "    type: uri_folder",
+            "    mode: ro_mount",
+            f"    path: {json.dumps(dataset_asset)}",
+        ]
+    )
+target.write_text(
+    "\n".join(lines[: inputs_index + 1] + mounted_inputs + lines[inputs_index + 1 :]) + "\n",
+    encoding="utf-8",
+)
+PY
+  job_file="$rendered_job_file"
+  az_args[9]="$job_file"
+fi
 
 [[ -n "$compute" ]] && az_args+=(--set "compute=$compute")
 [[ -n "$instance_type" ]] && az_args+=(--set "resources.instance_type=$instance_type")
@@ -398,6 +467,7 @@ az_args+=(
   --set "environment_variables.EVAL_EPISODES=$eval_episodes"
   --set "environment_variables.EVAL_BATCH_SIZE=$eval_batch_size"
   --set "environment_variables.RECORD_VIDEO=$record_video"
+  --set "environment_variables.TASK_PROMPT=$task_prompt"
   --set "environment_variables.MLFLOW_ENABLE=$mlflow_enable"
   --set "environment_variables.AZURE_SUBSCRIPTION_ID=$subscription_id"
   --set "environment_variables.AZURE_RESOURCE_GROUP=$resource_group"
@@ -408,7 +478,9 @@ az_args+=(
   --set "environment_variables.DATASET_REVISION=$dataset_revision"
 )
 
+[[ -n "$hf_token" ]] && az_args+=(--set "environment_variables.HF_TOKEN=$hf_token")
 [[ -n "$dataset_repo_id" ]] && az_args+=(--set "environment_variables.DATASET_REPO_ID=$dataset_repo_id")
+[[ -n "$dataset_asset" ]] && az_args+=(--set "environment_variables.DATASET_ASSET=$dataset_asset")
 [[ -n "$lerobot_version" ]] && az_args+=(--set "environment_variables.LEROBOT_VERSION=$lerobot_version")
 [[ -n "$experiment_name" ]] && az_args+=(--set "environment_variables.EXPERIMENT_NAME=$experiment_name")
 [[ -n "$register_model" ]] && az_args+=(--set "environment_variables.REGISTER_MODEL=$register_model")
@@ -430,6 +502,7 @@ info "  Image: $image"
 info "  Eval Episodes: $eval_episodes"
 info "  LeRobot Project: $lerobot_project"
 [[ -n "$dataset_repo_id" ]] && info "  Dataset: $dataset_repo_id"
+[[ -n "$dataset_asset" ]] && info "  Dataset: $dataset_asset"
 [[ "$from_blob" == "true" ]] && info "  Dataset: Azure Blob ($storage_account/$storage_container/$blob_prefix)"
 [[ "$from_aml_model" == "true" ]] && info "  Model source: AzureML registry (${model_name}:${model_version})"
 [[ "$mlflow_enable" == "true" ]] && info "  MLflow: enabled (plots logged to AzureML)"

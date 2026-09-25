@@ -37,16 +37,45 @@ uv venv --python 3.12 "${LEROBOT_VENV}"
 source "${LEROBOT_VENV}/bin/activate"
 uv sync --active --frozen --no-config --no-install-project --project "${LEROBOT_PROJECT}"
 
-# HuggingFace login: must run before any code path that pulls gated models or
-# datasets from the Hub. pi0 reaches the Hub during policy init to download the
-# google/paligemma-3b-pt-224 backbone, which is gated, so logging in only on
-# the "no mounted assets" branch (the original placement) breaks the
-# blob-storage and data-asset paths where datasets are local but the backbone
-# is still pulled. Lift the login here so it runs once per container whenever
-# the caller forwards HF_TOKEN, before train.py is invoked. No-op for callers
-# that don't set HF_TOKEN.
+# Authenticate before any gated model or dataset access. Only non-secret Key
+# Vault coordinates enter the job spec; the compute identity retrieves the
+# token at runtime and the value is never passed on a command line.
 if [[ -n "${HF_TOKEN:-}" ]]; then
-  python3 -c "import os; from huggingface_hub import login; login(token=os.environ['HF_TOKEN'], add_to_git_credential=False)"
+  echo "ERROR: HF_TOKEN plaintext injection is not supported" >&2
+  exit 1
+fi
+if [[ -n "${HF_KEY_VAULT_URL:-}" || -n "${HF_TOKEN_SECRET_NAME:-}" ]]; then
+  if [[ -z "${HF_KEY_VAULT_URL:-}" || -z "${HF_TOKEN_SECRET_NAME:-}" ]]; then
+    echo "ERROR: HF_KEY_VAULT_URL and HF_TOKEN_SECRET_NAME must be set together" >&2
+    exit 1
+  fi
+  hf_token=$(python3 <<'PY'
+import os
+import sys
+
+from azure.identity import ManagedIdentityCredential
+from azure.keyvault.secrets import SecretClient
+
+credential = ManagedIdentityCredential(client_id=os.environ.get("AZURE_CLIENT_ID") or None)
+client = SecretClient(vault_url=os.environ["HF_KEY_VAULT_URL"], credential=credential)
+secret = client.get_secret(os.environ["HF_TOKEN_SECRET_NAME"])
+if not secret.value:
+    raise RuntimeError("Hugging Face token secret is empty")
+sys.stdout.write(secret.value)
+PY
+  )
+  printf '%s' "$hf_token" | python3 -c \
+    'import sys; from huggingface_hub import login; login(token=sys.stdin.read(), add_to_git_credential=False)'
+  unset hf_token
+  echo "[HUGGINGFACE] Authenticated with Azure Key Vault secret"
+fi
+if [[ "${HF_AUTH_PROBE_ONLY:-false}" == "true" ]]; then
+  if [[ -z "${HF_KEY_VAULT_URL:-}" ]]; then
+    echo "ERROR: HF_AUTH_PROBE_ONLY requires Key Vault authentication" >&2
+    exit 1
+  fi
+  echo "[HUGGINGFACE] Authentication probe completed"
+  exit 0
 fi
 
 # Build args forwarded to the MLflow training wrapper. Only flags whose values
@@ -65,6 +94,16 @@ train_args=(
   --wandb.enable=false
 )
 
+# VLA adapters resolve image normalization from the policy configuration.
+use_imagenet_stats="${USE_IMAGENET_STATS:-true}"
+case "$use_imagenet_stats" in
+  true|false) ;;
+  *)
+    echo "ERROR: USE_IMAGENET_STATS must be true or false, got '$use_imagenet_stats'" >&2
+    exit 1
+    ;;
+esac
+
 # Warm-start from a previously registered policy model: load weights only;
 # optimizer, scheduler, and step counter all start fresh. Setting --policy.path
 # makes lerobot-train reconstruct the policy from the loaded config.json, so
@@ -77,6 +116,56 @@ train_args=(
 # input key declared by the submission script (inputs.init_from_policy_model)
 # and must stay in sync with it.
 init_from_policy_model_path="${AZURE_ML_INPUT_init_from_policy_model:-}"
+init_from_policy_hf_repo_id="${INIT_FROM_POLICY_HF_REPO_ID:-}"
+init_from_policy_hf_revision="${INIT_FROM_POLICY_HF_REVISION:-}"
+
+if [[ -n "${init_from_policy_hf_repo_id}" || -n "${init_from_policy_hf_revision}" ]]; then
+  [[ -n "${init_from_policy_hf_repo_id}" && -n "${init_from_policy_hf_revision}" ]] || {
+    echo "ERROR: INIT_FROM_POLICY_HF_REPO_ID and INIT_FROM_POLICY_HF_REVISION must be set together" >&2
+    exit 1
+  }
+  [[ -z "${init_from_policy_model_path}" ]] || {
+    echo "ERROR: Azure ML model input and direct Hugging Face policy initialization are mutually exclusive" >&2
+    exit 1
+  }
+  [[ "${init_from_policy_hf_revision}" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "ERROR: INIT_FROM_POLICY_HF_REVISION must be a full 40-character lowercase Git commit" >&2
+    exit 1
+  }
+  init_from_policy_model_path="${INIT_FROM_POLICY_HF_DIR:-/tmp/lerobot-hf-policy}"
+  python3 - "${init_from_policy_hf_repo_id}" "${init_from_policy_hf_revision}" \
+    "${init_from_policy_model_path}" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+from huggingface_hub import snapshot_download
+from safetensors import safe_open
+
+repo_id, revision, output_dir = sys.argv[1:]
+snapshot_download(
+    repo_id=repo_id,
+    revision=revision,
+    repo_type="model",
+    token=os.environ.get("HF_TOKEN") or None,
+    local_dir=output_dir,
+)
+
+output_path = Path(output_dir)
+config_path = output_path / "config.json"
+model_path = output_path / "model.safetensors"
+if not config_path.is_file():
+    raise RuntimeError(f"Hugging Face policy snapshot is missing config.json: {config_path}")
+if not model_path.is_file():
+    raise RuntimeError(f"Hugging Face policy snapshot is missing model.safetensors: {model_path}")
+with safe_open(model_path, framework="pt", device="cpu") as model:
+    if not model.keys():
+        raise RuntimeError(f"Hugging Face policy has no tensors: {model_path}")
+print(f"[INIT-FROM-POLICY-HF] Downloaded and validated {repo_id}@{revision}")
+PY
+  export INIT_FROM_POLICY_MODEL_SOURCE="hf://${init_from_policy_hf_repo_id}@${init_from_policy_hf_revision}"
+fi
+
 if [[ -n "${init_from_policy_model_path}" ]]; then
   echo "[INIT-FROM-POLICY-MODEL] Source URI: ${INIT_FROM_POLICY_MODEL_SOURCE:-<unset>}"
   echo "[INIT-FROM-POLICY-MODEL] Mount path: ${init_from_policy_model_path}"
@@ -84,6 +173,14 @@ if [[ -n "${init_from_policy_model_path}" ]]; then
   train_args+=(--policy.path="${init_from_policy_model_path}")
 else
   echo "[INIT-FROM-POLICY-MODEL] Not set; training from random initialization."
+fi
+
+if [[ -n "${RENAME_MAP_B64:-}" ]]; then
+  if ! rename_map=$(printf "%s" "${RENAME_MAP_B64}" | base64 --decode); then
+    echo "ERROR: RENAME_MAP_B64 is not valid base64" >&2
+    exit 1
+  fi
+  train_args+=(--rename_map="${rename_map}")
 fi
 
 echo "[ENTRY] Final lerobot-train args:"
@@ -175,19 +272,19 @@ if [[ ${total_sources} -eq 0 ]]; then
   # video_backend=pyav avoids torchcodec's dynamic-link dependency on
   # libnvrtc.so (shipped as a pip wheel whose lib/ is not on LD_LIBRARY_PATH
   # in a fresh venv). Consistent with the local-data paths below.
-  train_args+=(--dataset.video_backend=pyav)
+  train_args+=(
+    --dataset.use_imagenet_stats="${use_imagenet_stats}"
+    --dataset.video_backend=pyav
+  )
 elif [[ ${total_sources} -eq 1 ]]; then
   # Single source — use directly, no merge needed.
-  # use_imagenet_stats=true so lerobot normalizes images with ImageNet (3,1,1)
-  # per-channel mean/std instead of trying to use the v3.0 dataset's image stats,
-  # whose shape does not match lerobot 0.4.x's normalize_processor.
   # video_backend=pyav is the most reliable decoder for the AzureML container.
   # tolerance_s=0.04 (~1 frame at 30fps) accommodates real-world recording jitter;
   # the lerobot default 1e-4s is unrealistically tight and rejects most non-synthetic
   # videos. The flag is top-level (--tolerance_s), not under --dataset.
   train_args+=(
     --dataset.root="${all_sources[0]}"
-    --dataset.use_imagenet_stats=true
+    --dataset.use_imagenet_stats="${use_imagenet_stats}"
     --dataset.video_backend=pyav
     --tolerance_s=0.04
   )
@@ -251,10 +348,57 @@ EOF
   # Same lerobot flags as the single-source path; see comment above for rationale.
   train_args+=(
     --dataset.root="${MERGE_DEST}"
-    --dataset.use_imagenet_stats=true
+    --dataset.use_imagenet_stats="${use_imagenet_stats}"
     --dataset.video_backend=pyav
     --tolerance_s=0.04
   )
+fi
+
+if [[ "${CALIBRATION_MODE:-false}" == "true" ]]; then
+  calibration_output_dir="${CALIBRATION_OUTPUT_DIR:-${AZURE_ML_OUTPUT_calibration_report:-}}"
+  calibration_workload_output_dir="${CALIBRATION_WORKLOAD_OUTPUT_DIR:-${AZURE_ML_OUTPUT_workload_contract:-}}"
+  [[ -n "${calibration_output_dir}" ]] || {
+    echo "ERROR: CALIBRATION_OUTPUT_DIR or AZURE_ML_OUTPUT_calibration_report is required" >&2
+    exit 1
+  }
+  [[ -n "${calibration_workload_output_dir}" ]] || {
+    echo "ERROR: CALIBRATION_WORKLOAD_OUTPUT_DIR or AZURE_ML_OUTPUT_workload_contract is required" >&2
+    exit 1
+  }
+
+  calibration_args=(
+    python3 training/vla/scripts/calibrate_vla.py
+    --workload-output-dir "${calibration_workload_output_dir}"
+    --output-dir "${calibration_output_dir}"
+    --candidate-batch-sizes "${CALIBRATION_BATCH_SIZES:-1}"
+    --headroom-fraction "${CALIBRATION_HEADROOM_FRACTION:-0.1}"
+    --probe-timeout-seconds "${CALIBRATION_PROBE_TIMEOUT_SECONDS:-3600}"
+    --
+    "${train_args[@]}"
+  )
+  printf '  %s\n' "${calibration_args[@]}"
+  "${calibration_args[@]}"
+  echo "=== Calibration Complete ==="
+  exit 0
+fi
+
+if [[ -n "${CALIBRATION_REPORT_DIR:-}" || -n "${CALIBRATION_WORKLOAD_CONTRACT:-}" ]]; then
+  [[ -n "${CALIBRATION_REPORT_DIR:-}" && -f "${CALIBRATION_REPORT_DIR}/calibration-report.json" ]] || {
+    echo "ERROR: CALIBRATION_REPORT_DIR must contain calibration-report.json" >&2
+    exit 1
+  }
+  [[ -f "${CALIBRATION_WORKLOAD_CONTRACT:-}" ]] || {
+    echo "ERROR: CALIBRATION_WORKLOAD_CONTRACT must identify workload.json" >&2
+    exit 1
+  }
+  batch_size=$(python3 training/vla/scripts/calibrate_vla.py \
+    --resolve-training-batch-size \
+    --calibration-report "${CALIBRATION_REPORT_DIR}/calibration-report.json" \
+    --workload-contract "${CALIBRATION_WORKLOAD_CONTRACT}" \
+    -- \
+    "${train_args[@]}")
+  export BATCH_SIZE="${batch_size}"
+  echo "[CALIBRATION] Validated recommended micro-batch size: ${BATCH_SIZE}"
 fi
 
 echo "Running: python -m training.il.scripts.lerobot.train ${train_args[*]}"

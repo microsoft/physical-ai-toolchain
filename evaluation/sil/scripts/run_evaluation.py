@@ -273,21 +273,32 @@ def plot_aggregate_summary(episode_metrics):
 
 
 def _find_data_file(ds_dir: str, ep_idx: int, episode_record: dict | None = None) -> str | None:
+    info_path = os.path.join(ds_dir, "meta", "info.json")
+    if os.path.exists(info_path):
+        with open(info_path) as f:
+            ds_info = json.load(f)
+    else:
+        ds_info = {}
+
     if episode_record is not None:
         chunk_index = episode_record.get("data/chunk_index")
         file_index = episode_record.get("data/file_index")
         if isinstance(chunk_index, int) and isinstance(file_index, int):
-            candidate = os.path.join(
-                ds_dir,
-                "data",
-                f"chunk-{chunk_index:03d}",
-                f"file-{file_index:03d}.parquet",
-            )
+            data_path_template = ds_info.get("data_path")
+            if isinstance(data_path_template, str):
+                candidate = os.path.join(
+                    ds_dir,
+                    data_path_template.format(chunk_index=chunk_index, file_index=file_index),
+                )
+            else:
+                candidate = os.path.join(
+                    ds_dir,
+                    "data",
+                    f"chunk-{chunk_index:03d}",
+                    f"file-{file_index:03d}.parquet",
+                )
             return candidate if os.path.exists(candidate) else None
 
-    info_path = os.path.join(ds_dir, "meta", "info.json")
-    with open(info_path) as f:
-        ds_info = json.load(f)
     chunks_size = ds_info.get("chunks_size", 1000)
     ep_chunk = ep_idx // chunks_size
     candidates = [
@@ -300,28 +311,43 @@ def _find_data_file(ds_dir: str, ep_idx: int, episode_record: dict | None = None
     return None
 
 
-def _find_video_file(ds_dir: str, vk: str, ep_idx: int, episode_record: dict | None = None) -> str | None:
+def _find_video_file(ds_dir: str, video_key: str, ep_idx: int, episode_record: dict | None = None) -> str | None:
+    info_path = os.path.join(ds_dir, "meta", "info.json")
+    if os.path.exists(info_path):
+        with open(info_path) as f:
+            ds_info = json.load(f)
+    else:
+        ds_info = {}
+
     if episode_record is not None:
-        chunk_index = episode_record.get(f"videos/{vk}/chunk_index")
-        file_index = episode_record.get(f"videos/{vk}/file_index")
+        chunk_index = episode_record.get(f"videos/{video_key}/chunk_index")
+        file_index = episode_record.get(f"videos/{video_key}/file_index")
         if isinstance(chunk_index, int) and isinstance(file_index, int):
-            candidate = os.path.join(
-                ds_dir,
-                "videos",
-                vk,
-                f"chunk-{chunk_index:03d}",
-                f"file-{file_index:03d}.mp4",
-            )
+            video_path_template = ds_info.get("video_path")
+            if isinstance(video_path_template, str):
+                candidate = os.path.join(
+                    ds_dir,
+                    video_path_template.format(
+                        video_key=video_key,
+                        chunk_index=chunk_index,
+                        file_index=file_index,
+                    ),
+                )
+            else:
+                candidate = os.path.join(
+                    ds_dir,
+                    "videos",
+                    video_key,
+                    f"chunk-{chunk_index:03d}",
+                    f"file-{file_index:03d}.mp4",
+                )
             return candidate if os.path.exists(candidate) else None
 
-    info_path = os.path.join(ds_dir, "meta", "info.json")
-    with open(info_path) as f:
-        ds_info = json.load(f)
     chunks_size = ds_info.get("chunks_size", 1000)
     ep_chunk = ep_idx // chunks_size
     candidates = [
-        os.path.join(ds_dir, "videos", vk, f"chunk-{ep_chunk:03d}", f"episode_{ep_idx:06d}.mp4"),
-        os.path.join(ds_dir, "videos", vk, f"chunk-{ep_idx:03d}", f"file-{ep_idx:03d}.mp4"),
+        os.path.join(ds_dir, "videos", video_key, f"chunk-{ep_chunk:03d}", f"episode_{ep_idx:06d}.mp4"),
+        os.path.join(ds_dir, "videos", video_key, f"chunk-{ep_idx:03d}", f"file-{ep_idx:03d}.mp4"),
     ]
     for c in candidates:
         if os.path.exists(c):
@@ -475,6 +501,7 @@ def main() -> int:
     policy_repo_id = os.environ.get("POLICY_REPO_ID", "").strip()
     policy_type = os.environ.get("POLICY_TYPE", "act").strip().lower()
     dataset_repo_id = os.environ.get("DATASET_REPO_ID", "")
+    task_prompt = os.environ.get("TASK_PROMPT", "").strip()
     policy_revision = os.environ.get("POLICY_REVISION", "").strip() or None
     dataset_revision = os.environ.get("DATASET_REVISION") or None
     eval_episodes = int(os.environ.get("EVAL_EPISODES", "10"))
@@ -521,15 +548,13 @@ def main() -> int:
     action_names = info.get("features", {}).get("action", {}).get("names")
     JOINT_NAMES = list(action_names) if isinstance(action_names, list) else []
 
-    # Identify video key from features
+    # Identify video keys from features
     features = info.get("features", {})
     video_keys = [k for k, v in features.items() if v.get("dtype") in ("video", "image")]
-    # Prefer an observation.images.* key for a deterministic choice on
-    # multi-camera datasets; fall back to the first video/image feature.
-    image_key = next(
-        (k for k in video_keys if k.startswith("observation.images.")),
-        video_keys[0] if video_keys else "observation.images.color",
-    )
+    image_keys = [key for key in video_keys if key.startswith("observation.images.")] or video_keys
+    if not image_keys:
+        print("[ERROR] Dataset has no video or image observation features")
+        return 1
 
     # Load policy (normalization is handled internally by select_action)
     print(f"[INFO] Loading policy from: {policy_repo_id}")
@@ -564,6 +589,7 @@ def main() -> int:
                 "policy_repo_id": policy_repo_id,
                 "policy_type": policy_type,
                 "dataset_repo_id": dataset_repo_id,
+                "task": task_prompt,
                 "eval_episodes": num_episodes,
                 "device": str(device),
                 "fps": fps,
@@ -590,19 +616,25 @@ def main() -> int:
             continue
         n_frames = len(data["timestamp"])
 
-        # Load video frames
-        video_file = _find_video_file(dataset_dir, image_key, ep, episode_record)
-        if not video_file:
-            print(f"  [WARNING] No video for episode {ep} ({image_key}), skipping")
+        video_files = {
+            image_key: _find_video_file(dataset_dir, image_key, ep, episode_record)
+            for image_key in image_keys
+        }
+        missing_video_keys = [image_key for image_key, video_file in video_files.items() if not video_file]
+        if missing_video_keys:
+            print(f"  [WARNING] Missing videos for episode {ep}: {', '.join(missing_video_keys)}, skipping")
             continue
 
-        container = av.open(video_file)
-        stream = container.streams.video[0]
-        frames = [av_frame.to_ndarray(format="rgb24") for av_frame in container.decode(stream)]
-        container.close()
-        frames = _slice_episode_frames(frames, episode_record, image_key, fps)
-        if not frames:
-            print(f"  [WARNING] No video frames for episode {ep}, skipping")
+        frames_by_key = {}
+        for image_key, video_file in video_files.items():
+            container = av.open(video_file)
+            stream = container.streams.video[0]
+            frames = [av_frame.to_ndarray(format="rgb24") for av_frame in container.decode(stream)]
+            container.close()
+            frames_by_key[image_key] = _slice_episode_frames(frames, episode_record, image_key, fps)
+        empty_video_keys = [image_key for image_key, frames in frames_by_key.items() if not frames]
+        if empty_video_keys:
+            print(f"  [WARNING] Empty videos for episode {ep}: {', '.join(empty_video_keys)}, skipping")
             continue
 
         policy.reset()
@@ -610,21 +642,24 @@ def main() -> int:
         actions_ground_truth = []
         inference_times_list = []
 
-        for step in range(min(n_frames - 1, len(frames))):
+        available_frames = min(len(frames) for frames in frames_by_key.values())
+        for step in range(min(n_frames - 1, available_frames)):
             state = np.array(data["observation.state"][step], dtype=np.float32)
             gt_action = np.array(data["action"][step], dtype=np.float32)
-            image = frames[step]
 
             obs = {
                 "observation.state": torch.from_numpy(state).float(),
-                image_key: torch.from_numpy(image).float().permute(2, 0, 1) / 255.0,
+                **{
+                    image_key: torch.from_numpy(frames[step]).float().permute(2, 0, 1) / 255.0
+                    for image_key, frames in frames_by_key.items()
+                },
             }
             if bundle.policy_type in VLA_POLICY_TYPES:
-                task = _resolve_frame_task(step, ep, data, task_descriptions, episode_tasks)
-                if not task:
+                frame_task = task_prompt or _resolve_frame_task(step, ep, data, task_descriptions, episode_tasks)
+                if not frame_task:
                     print(f"[ERROR] Episode {ep} frame {step} has no task description required by {bundle.policy_type}")
                     return 1
-                obs["task"] = task
+                obs["task"] = frame_task
             processed_obs = bundle.preprocessor(obs)
 
             t_start = time.time()

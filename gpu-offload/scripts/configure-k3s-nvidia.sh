@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Configure k3s containerd and the NVIDIA device plugin for bare-metal GPU workloads
-# cspell:ignore dropin
+# Configure k3s containerd and one NVIDIA GPU resource owner
+# cspell:ignore dropin dxg
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,20 +8,20 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../..
 # shellcheck source=../../scripts/lib/common.sh
 source "$REPO_ROOT/scripts/lib/common.sh"
 
-# Pinned NVIDIA Kubernetes device plugin. Bare metal exposes a working NVML, so
-# the official plugin replaces the generic device plugin the WSL path needs.
+# Pinned device plugins for native NVIDIA and WSL GPU-PV hosts.
 DEVICE_PLUGIN_VERSION="${DEVICE_PLUGIN_VERSION:-v0.17.4}"
 # Digest for the default DEVICE_PLUGIN_VERSION above. Kubernetes pulls by digest
 # when both tag and digest are present, so an overridden --plugin-version must come
 # with a matching --plugin-digest or the node silently runs the old pinned image.
 DEVICE_PLUGIN_DIGEST="${DEVICE_PLUGIN_DIGEST:-sha256:3c54348fe5a57e5700e7d8068e7531d2ef2d5f3ccb70c8f6bac0953432527abd}"
+WSL_DEVICE_PLUGIN_IMAGE="${WSL_DEVICE_PLUGIN_IMAGE:-docker.io/squat/generic-device-plugin@sha256:66c8d5c270eb2b721f1064c549b9b7898152a6d2f0163380a5d37dc7636c20ff}"
 
 show_help() {
   cat << EOF
 Usage: $(basename "$0") [OPTIONS]
 
 Point k3s containerd at the NVIDIA container runtime and install the NVIDIA
-Kubernetes device plugin so pods can request nvidia.com/gpu.
+GPU resource owner appropriate for the selected host platform.
 
 The NVIDIA runtime is made the containerd default rather than an opt-in
 RuntimeClass because the offload spec has no runtimeClassName field, so
@@ -30,6 +30,7 @@ generated server Deployments cannot select a runtime handler themselves.
 OPTIONS:
     -h, --help               Show this help message
     -c, --context NAME       Kubeconfig context (default: $DEFAULT_CONTEXT)
+    --platform NAME          Host platform: auto, wsl-nvidia, or baremetal-nvidia
     --plugin-version VER     Device plugin version (default: $DEVICE_PLUGIN_VERSION)
     --plugin-digest DIGEST   Device plugin image digest, sha256:<hex> (default: $DEVICE_PLUGIN_DIGEST)
     --config-preview         Print configuration and exit
@@ -43,18 +44,32 @@ EOF
 # Defaults
 DEFAULT_CONTEXT="gpu-offload-k3s"
 context="$DEFAULT_CONTEXT"
+platform="${GPU_OFFLOAD_PLATFORM:-auto}"
 config_preview=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)          show_help; exit 0 ;;
     -c|--context)       context="$2"; shift 2 ;;
+    --platform)         platform="$2"; shift 2 ;;
     --plugin-version)   DEVICE_PLUGIN_VERSION="$2"; shift 2 ;;
     --plugin-digest)    DEVICE_PLUGIN_DIGEST="$2"; shift 2 ;;
     --config-preview)   config_preview=true; shift ;;
     *)                  fatal "Unknown option: $1" ;;
   esac
 done
+
+if [[ "$platform" == "auto" ]]; then
+  if [[ -c /dev/dxg && -d /usr/lib/wsl ]]; then
+    platform="wsl-nvidia"
+  else
+    platform="baremetal-nvidia"
+  fi
+fi
+case "$platform" in
+  wsl-nvidia|baremetal-nvidia) ;;
+  *) fatal "Invalid platform: $platform (expected auto, wsl-nvidia, or baremetal-nvidia)" ;;
+esac
 
 # A --plugin-version override without a matching --plugin-digest would pull by
 # digest (Kubernetes prefers digest over tag when both are set) and silently keep
@@ -63,7 +78,7 @@ if [[ "$DEVICE_PLUGIN_VERSION" != "v0.17.4" && "$DEVICE_PLUGIN_DIGEST" == "sha25
   fatal "--plugin-version was overridden to $DEVICE_PLUGIN_VERSION but --plugin-digest was not; pass the matching digest with --plugin-digest to avoid pinning the new version's tag to the old default's image"
 fi
 
-require_tools kubectl nvidia-smi
+require_tools kubectl nvidia-ctk nvidia-smi
 
 #------------------------------------------------------------------------------
 # Gather Configuration
@@ -74,11 +89,18 @@ generated_config="$containerd_dir/config.toml"
 k3s_dropin_dir=/etc/rancher/k3s/config.yaml.d
 k3s_dropin="$k3s_dropin_dir/10-nvidia-default-runtime.yaml"
 register_timeout="${GPU_PLUGIN_REGISTER_TIMEOUT:-600}"
+rollout_timeout="${GPU_PLUGIN_ROLLOUT_TIMEOUT:-600}"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Kube context" "$context"
-  print_kv "Device plugin" "$DEVICE_PLUGIN_VERSION@$DEVICE_PLUGIN_DIGEST"
+  print_kv "Host platform" "$platform"
+  if [[ "$platform" == "wsl-nvidia" ]]; then
+    print_kv "Device plugin" "$WSL_DEVICE_PLUGIN_IMAGE"
+    print_kv "GPU device" "/dev/dxg"
+  else
+    print_kv "Device plugin" "$DEVICE_PLUGIN_VERSION@$DEVICE_PLUGIN_DIGEST"
+  fi
   print_kv "k3s drop-in" "$k3s_dropin"
   exit 0
 fi
@@ -86,15 +108,21 @@ fi
 command -v nvidia-container-runtime > /dev/null 2>&1 \
   || fatal "nvidia-container-runtime not found; run the NVIDIA Container Toolkit task first"
 
+if [[ "$platform" == "wsl-nvidia" ]]; then
+  [[ -c /dev/dxg ]] || fatal "WSL GPU-PV device not found at /dev/dxg"
+  [[ -d /usr/lib/wsl ]] || fatal "WSL driver libraries not found at /usr/lib/wsl"
+  nvidia-ctk cdi list | grep -qx 'nvidia.com/gpu=all' \
+    || fatal "NVIDIA CDI device nvidia.com/gpu=all is unavailable"
+else
+  [[ -c /dev/nvidiactl ]] || fatal "Native NVIDIA control device not found at /dev/nvidiactl"
+fi
+
 #------------------------------------------------------------------------------
 # Configure Containerd
 #------------------------------------------------------------------------------
 section "Configuring the Default Container Runtime"
 
 sudo test -f "$generated_config" || fatal "k3s containerd config not found at $generated_config"
-
-sudo grep -q 'nvidia-container-runtime' "$generated_config" \
-  || fatal "k3s did not auto-detect the NVIDIA runtime; confirm nvidia-container-runtime is on PATH and restart k3s"
 
 # k3s regenerates the containerd configuration on every start, so the default
 # runtime is set through k3s's own config drop-in instead of editing containerd
@@ -111,6 +139,8 @@ info "Restarting k3s to apply the default runtime"
 sudo systemctl restart k3s
 kubectl --context "$context" wait --for=condition=Ready node --all --timeout=180s
 
+sudo grep -q 'nvidia-container-runtime' "$generated_config" \
+  || fatal "k3s did not auto-detect the NVIDIA runtime after restart"
 sudo grep -q "default_runtime_name = 'nvidia'" "$generated_config" \
   || sudo grep -q 'default_runtime_name = "nvidia"' "$generated_config" \
   || fatal "k3s did not apply the NVIDIA default runtime; inspect $generated_config"
@@ -119,9 +149,61 @@ info "Containerd default runtime is nvidia"
 #------------------------------------------------------------------------------
 # Install the NVIDIA Device Plugin
 #------------------------------------------------------------------------------
-section "Installing the NVIDIA Device Plugin"
+section "Installing the GPU Device Plugin"
 
-kubectl --context "$context" apply -f - << EOF
+if [[ "$platform" == "wsl-nvidia" ]]; then
+  if kubectl --context "$context" get daemonset/nvidia-device-plugin-daemonset \
+      --namespace kube-system > /dev/null 2>&1; then
+    fatal "Official NVIDIA device plugin already exists; remove the competing owner before continuing"
+  fi
+  kubectl --context "$context" apply -f - << EOF
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: wsl-gpu-device-plugin
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: wsl-gpu-device-plugin
+  template:
+    metadata:
+      labels:
+        app: wsl-gpu-device-plugin
+    spec:
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: device-plugin
+          image: $WSL_DEVICE_PLUGIN_IMAGE
+          args:
+            - --domain=nvidia.com
+            - --device={"name":"gpu","groups":[{"paths":[{"path":"/dev/dxg"}]}]}
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: dxg
+              mountPath: /dev/dxg
+      volumes:
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+        - name: dxg
+          hostPath:
+            path: /dev/dxg
+            type: CharDevice
+EOF
+  plugin_name=wsl-gpu-device-plugin
+  plugin_selector=app=wsl-gpu-device-plugin
+else
+  if kubectl --context "$context" get daemonset/wsl-gpu-device-plugin \
+      --namespace kube-system > /dev/null 2>&1; then
+    fatal "WSL GPU device plugin already exists; remove the competing owner before continuing"
+  fi
+  kubectl --context "$context" apply -f - << EOF
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -157,19 +239,24 @@ spec:
           hostPath:
             path: /var/lib/kubelet/device-plugins
 EOF
+  plugin_name=nvidia-device-plugin-daemonset
+  plugin_selector=name=nvidia-device-plugin-ds
+fi
 
 # A device plugin pod created before the runtime change keeps its original
 # sandbox across CrashLoopBackOff restarts, so it never picks up the nvidia
 # runtime and fails with "invalid device discovery strategy". Delete any
 # existing pods so they are recreated under the configured default runtime.
-kubectl --context "$context" delete pod \
-  --namespace kube-system \
-  --selector name=nvidia-device-plugin-ds \
-  --ignore-not-found
+if [[ "$platform" == "baremetal-nvidia" ]]; then
+  kubectl --context "$context" delete pod \
+    --namespace kube-system \
+    --selector "$plugin_selector" \
+    --ignore-not-found
+fi
 
-kubectl --context "$context" rollout status daemonset/nvidia-device-plugin-daemonset \
+kubectl --context "$context" rollout status "daemonset/$plugin_name" \
   --namespace kube-system \
-  --timeout="${register_timeout}s"
+  --timeout="${rollout_timeout}s"
 
 #------------------------------------------------------------------------------
 # Wait for GPU Registration
@@ -189,7 +276,7 @@ while :; do
   fi
   if [[ "$elapsed" -ge "$register_timeout" ]]; then
     kubectl --context "$context" logs --namespace kube-system \
-      --selector name=nvidia-device-plugin-ds --tail=50 >&2 || true
+      --selector "$plugin_selector" --tail=50 >&2 || true
     fatal "Timed out after ${register_timeout}s waiting for nvidia.com/gpu; raise GPU_PLUGIN_REGISTER_TIMEOUT"
   fi
   info "Waiting for the device plugin to register nvidia.com/gpu (${elapsed}s/${register_timeout}s)"
@@ -197,12 +284,15 @@ while :; do
   elapsed=$((elapsed + interval))
 done
 
+kubectl --context "$context" label node "$node" accelerator=nvidia --overwrite
+
 #------------------------------------------------------------------------------
 # Summary
 #------------------------------------------------------------------------------
 section "Deployment Summary"
 print_kv "Kube context" "$context"
 print_kv "Node" "$node"
+print_kv "Host platform" "$platform"
 print_kv "Allocatable nvidia.com/gpu" "$gpu_allocatable"
-print_kv "Device plugin" "$DEVICE_PLUGIN_VERSION@$DEVICE_PLUGIN_DIGEST"
-info "Bare-metal GPU is available to Kubernetes workloads"
+print_kv "Device plugin" "$plugin_name"
+info "NVIDIA GPU is available to Kubernetes workloads"
