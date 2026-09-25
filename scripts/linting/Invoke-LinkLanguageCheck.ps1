@@ -83,7 +83,7 @@ function Invoke-LinkLanguageCheckCore {
                     total_issues   = @($results).Count
                     files_affected = @($results | Select-Object -ExpandProperty file -Unique).Count
                 }
-                issues    = $results
+                issues    = @($results)
             }
             $outputData | ConvertTo-Json -Depth 3 | Out-File (Join-Path $logsDir "link-lang-check-results.json") -Encoding utf8
 

@@ -38,16 +38,37 @@ name: Smoke (GPU-free)
         required: false
         default: false
         type: boolean
+    outputs:
+      work-status:
+        description: Aggregate execution status
+        value: ${{ jobs.outcome.outputs.work-status }}
+      expected-count:
+        description: Selected operation count
+        value: ${{ jobs.outcome.outputs.expected-count }}
+      executed-count:
+        description: Executed operation count
+        value: ${{ jobs.outcome.outputs.executed-count }}
+      artifact-id:
+        description: Execution evidence artifact ID
+        value: ${{ jobs.outcome.outputs.artifact-id }}
+      artifact-url:
+        description: Execution evidence artifact URL
+        value: ${{ jobs.outcome.outputs.artifact-url }}
+      test-count:
+        description: Executed test case count
+        value: ${{ jobs.outcome.outputs.test-count }}
+      skipped-count:
+        description: Skipped operation and test case count
+        value: ${{ jobs.outcome.outputs.skipped-count }}
+      first-failure:
+        description: First failing operation
+        value: ${{ jobs.outcome.outputs.first-failure }}
 
 permissions:
   contents: read
 
 jobs:
-  # Unconditional fail-safe baseline: import every domain on CPU on every PR.
-  # DO NOT add an `if:` or path filter here -- a skipped required job counts as a
-  # pass, so path-gating this would let the gate go green while testing nothing
-  # (the silent-skip failure that has shipped before). Only the runtime-image
-  # depth below is path-gated. See shared/ci/README.md (Design) for the rationale.
+  # Every CPU domain is required; only runtime-image work is caller-selected.
   import-smoke:
     name: CPU Import Smoke (${{ matrix.domain }})
     runs-on: ubuntu-latest
@@ -68,7 +89,19 @@ jobs:
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
 
       - name: CPU import smoke
+        id: smoke
         run: shared/ci/smoke-import.sh ${{ matrix.domain }} --mode cpu
+
+      - name: Publish execution evidence
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: smoke-cpu
+          shard: cpu-${{ matrix.domain }}
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["smoke"]'
+          selection-reason: Unconditional CPU domain baseline
+          tools: '["node", "git", "uv"]'
 
   # Runtime-image smoke: import the domain inside its real production container,
   # on the real interpreter. Path-gated (large image pull) via the caller input.
@@ -91,7 +124,18 @@ jobs:
           tool-cache: true
 
       - name: Runtime-image smoke
+        id: smoke
         run: shared/ci/smoke-image.sh rl
+
+      - name: Publish execution evidence
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: smoke-cpu
+          shard: image-rl
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["smoke"]'
+          selection-reason: Caller selected RL runtime image
 
   image-smoke-il:
     name: Runtime-Image Smoke (il)
@@ -112,7 +156,18 @@ jobs:
           tool-cache: true
 
       - name: Runtime-image smoke
+        id: smoke
         run: shared/ci/smoke-image.sh il
+
+      - name: Publish execution evidence
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: smoke-cpu
+          shard: image-il
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["smoke"]'
+          selection-reason: Caller selected IL runtime image
 
   image-smoke-evaluation:
     name: Runtime-Image Smoke (evaluation)
@@ -133,7 +188,18 @@ jobs:
           tool-cache: true
 
       - name: Runtime-image smoke
+        id: smoke
         run: shared/ci/smoke-image.sh evaluation
+
+      - name: Publish execution evidence
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: smoke-cpu
+          shard: image-evaluation
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["smoke"]'
+          selection-reason: Caller selected evaluation runtime image
 
   image-smoke-vla:
     name: Runtime-Image Smoke (vla)
@@ -154,7 +220,18 @@ jobs:
           tool-cache: true
 
       - name: Runtime-image smoke
+        id: smoke
         run: shared/ci/smoke-image.sh vla
+
+      - name: Publish execution evidence
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: smoke-cpu
+          shard: image-vla
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["smoke"]'
+          selection-reason: Caller selected VLA runtime image
 
   image-smoke-osmo-replay:
     name: Runtime-Image Smoke (osmo-replay)
@@ -170,7 +247,18 @@ jobs:
           persist-credentials: false
 
       - name: Runtime-image smoke
+        id: smoke
         run: shared/ci/smoke-image.sh osmo-replay
+
+      - name: Publish execution evidence
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: smoke-cpu
+          shard: image-osmo-replay
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["smoke"]'
+          selection-reason: Caller selected OSMO replay runtime image
 
   # Docker compose smoke: build the dataviewer images on their pinned bases,
   # start the stack, and wait for both services to report healthy. Path-gated by
@@ -188,4 +276,62 @@ jobs:
         with:
           persist-credentials: false
       - name: Build and run compose stack
+        id: smoke
         run: shared/ci/smoke-docker.sh
+
+      - name: Publish execution evidence
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: smoke-cpu
+          shard: compose-dataviewer
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["smoke"]'
+          selection-reason: Caller selected dataviewer compose stack
+
+  outcome:
+    name: Smoke Execution Summary
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    needs:
+      - import-smoke
+      - image-smoke-rl
+      - image-smoke-il
+      - image-smoke-evaluation
+      - image-smoke-vla
+      - image-smoke-osmo-replay
+      - build-smoke-dataviewer
+    outputs:
+      work-status: ${{ steps.evidence.outputs.work-status }}
+      expected-count: ${{ steps.evidence.outputs.expected-count }}
+      executed-count: ${{ steps.evidence.outputs.executed-count }}
+      artifact-id: ${{ steps.evidence.outputs.artifact-id }}
+      artifact-url: ${{ steps.evidence.outputs.artifact-url }}
+      test-count: ${{ steps.evidence.outputs.test-count }}
+      skipped-count: ${{ steps.evidence.outputs.skipped-count }}
+      first-failure: ${{ steps.evidence.outputs.first-failure }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Aggregate execution evidence
+        id: evidence
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: smoke-cpu
+          needs-json: ${{ toJSON(needs) }}
+          expected-shards: >-
+            {
+              "import-smoke": ["cpu-rl", "cpu-il", "cpu-vla", "cpu-evaluation", "cpu-vlm-judge", "cpu-osmo-replay"],
+              "image-smoke-rl": ${{ inputs.rl && '["image-rl"]' || '[]' }},
+              "image-smoke-il": ${{ inputs.il && '["image-il"]' || '[]' }},
+              "image-smoke-evaluation": ${{ inputs.evaluation && '["image-evaluation"]' || '[]' }},
+              "image-smoke-vla": ${{ inputs.vla && '["image-vla"]' || '[]' }},
+              "image-smoke-osmo-replay": ${{ inputs.osmo_replay && '["image-osmo-replay"]' || '[]' }},
+              "build-smoke-dataviewer": ${{ inputs.dataviewer && '["compose-dataviewer"]' || '[]' }}
+            }

@@ -1,0 +1,138 @@
+# Copyright (c) Microsoft Corporation.
+# SPDX-License-Identifier: MIT
+
+name: Publish CI execution evidence
+description: Publish measured execution receipts and raw reports before enforcing the result.
+
+inputs:
+  workflow:
+    description: Stable reusable workflow stem
+    required: true
+  shard:
+    description: Stable artifact-safe shard identifier
+    default: default
+  target:
+    description: Full immutable target identity, defaulting to shard
+    default: ''
+  steps-json:
+    description: JSON step outcomes for record mode
+    default: '{}'
+  required-steps:
+    description: JSON array matching canonical required operation IDs
+    default: '[]'
+  reports:
+    description: JSON array of canonical required report paths and kinds
+    default: '[]'
+  selected:
+    description: Whether work was selected by the caller
+    default: 'true'
+  selection-reason:
+    description: Static or verified selection reason
+    default: Selected by caller
+  expected-shards:
+    description: Aggregate mode JSON map from needs job ID to exact selected shard IDs
+    default: ''
+  expected-targets:
+    description: Aggregate mode JSON map from job ID to shard and full target identities
+    default: '{}'
+  needs-json:
+    description: JSON needs results and independently discovered target outputs
+    default: '{}'
+  fail-on-error:
+    description: Fail explicitly after publishing unsuccessful execution evidence
+    default: 'true'
+  tools:
+    description: JSON array of allowlisted version probes
+    default: '["node","git"]'
+
+outputs:
+  work-status:
+    description: Truthful success, failure, cancelled, or planned-skip outcome
+    value: ${{ steps.receipt.outputs.work-status }}
+  expected-count:
+    description: Required selected operation count
+    value: ${{ steps.receipt.outputs.expected-count }}
+  executed-count:
+    description: Operations that succeeded or failed, excluding skips
+    value: ${{ steps.receipt.outputs.executed-count }}
+  artifact-id:
+    description: Uploaded execution evidence artifact ID
+    value: ${{ steps.upload.outputs.artifact-id }}
+  artifact-url:
+    description: Uploaded execution evidence artifact URL
+    value: ${{ steps.upload.outputs.artifact-url }}
+  test-count:
+    description: Executed testcases excluding skipped testcases
+    value: ${{ steps.receipt.outputs.test-count }}
+  skipped-count:
+    description: Skipped testcases and skipped operations
+    value: ${{ steps.receipt.outputs.skipped-count }}
+  first-failure:
+    description: First unsuccessful operation or invalid evidence identity
+    value: ${{ steps.receipt.outputs.first-failure }}
+
+runs:
+  using: composite
+  steps:
+    - name: Download shard execution evidence
+      if: ${{ always() && inputs.expected-shards != '' }}
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        pattern: ci-outcome-${{ inputs.workflow }}-*-${{ github.run_id }}-${{ github.run_attempt }}
+        path: .ci-outcome-downloads
+        merge-multiple: false
+
+    - name: Measure actual execution and required reports
+      id: receipt
+      if: always()
+      continue-on-error: true
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        INPUT_WORKFLOW: ${{ inputs.workflow }}
+        INPUT_SHARD: ${{ inputs.shard }}
+        INPUT_TARGET: ${{ inputs.target }}
+        INPUT_STEPS_JSON: ${{ inputs.steps-json }}
+        INPUT_REQUIRED_STEPS: ${{ inputs.required-steps }}
+        INPUT_REPORTS: ${{ inputs.reports }}
+        INPUT_SELECTED: ${{ inputs.selected }}
+        INPUT_SELECTION_REASON: ${{ inputs.selection-reason }}
+        INPUT_EXPECTED_SHARDS: ${{ inputs.expected-shards }}
+        INPUT_EXPECTED_TARGETS: ${{ inputs.expected-targets }}
+        INPUT_NEEDS_JSON: ${{ inputs.needs-json }}
+        INPUT_FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        INPUT_TOOLS: ${{ inputs.tools }}
+      run: node "$GITHUB_ACTION_PATH/../../../scripts/ci/publish-outcome.mjs"
+
+    - name: Upload named execution receipt and raw reports
+      id: upload
+      if: ${{ always() && steps.receipt.outputs.artifact-path != '' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ steps.receipt.outputs.artifact-name }}
+        path: ${{ steps.receipt.outputs.artifact-path }}
+        if-no-files-found: error
+        retention-days: 14
+
+    - name: Enforce published execution result
+      if: always()
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        WORK_STATUS: ${{ steps.receipt.outputs.work-status }}
+        ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+      run: |
+        if [[ -z "$ARTIFACT_ID" || -z "$ARTIFACT_URL" ]]; then
+          echo "::error::CI execution evidence upload is missing"
+          exit 1
+        fi
+        if [[ "$FAIL_ON_ERROR" != "true" && "$FAIL_ON_ERROR" != "false" ]]; then
+          echo "::error::Invalid fail-on-error input"
+          exit 1
+        fi
+        if [[ "$FAIL_ON_ERROR" == "true" && "$WORK_STATUS" != "success" && "$WORK_STATUS" != "planned-skip" ]]; then
+          echo "::error::Required CI execution did not succeed"
+          exit 1
+        fi

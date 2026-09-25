@@ -18,6 +18,23 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status:
+        value: ${{ jobs.terraform-tests.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.terraform-tests.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.terraform-tests.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.terraform-tests.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.terraform-tests.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.terraform-tests.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.terraform-tests.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.terraform-tests.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -30,6 +47,16 @@ jobs:
   terraform-tests:
     name: Terraform Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
       id-token: write
@@ -59,7 +86,9 @@ jobs:
           scripts/linting/Invoke-TerraformTest.ps1 @params
 
       - name: Convert test results to JUnit XML
+        id: report
         if: always() && steps.terraform-tests.outcome != 'skipped'
+        continue-on-error: ${{ inputs.soft-fail }}
         run: scripts/linting/ConvertTo-JUnitXml.ps1
 
       - name: Upload Terraform test results
@@ -83,3 +112,14 @@ jobs:
           name: terraform-test-results
           verbose: true
           fail_ci_if_error: false
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: terraform-tests
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["terraform-tests","report"]'
+          reports: '[{"path":"logs/terraform-test-results.xml","kind":"junit"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

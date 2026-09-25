@@ -12,11 +12,16 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   # Detect changed paths to gate expensive test jobs
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     outputs:
@@ -42,6 +47,7 @@ jobs:
       base_sha: ${{ steps.filter.outputs.base_sha }}
       head_sha: ${{ steps.filter.outputs.head_sha }}
       file_count: ${{ steps.filter.outputs.file_count }}
+      selection_reasons: ${{ steps.filter.outputs.selection_reasons }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -182,14 +188,18 @@ jobs:
       upload-sarif: true
       exclude-paths: 'scripts/tests/Fixtures/**,shared/ci/tests/Fixtures/**'
 
-  # OSV-Scanner: advisory-only vulnerability scan across manifests using
-  # osv-scanner.toml. The scan step uses continue-on-error so the job always
-  # reports success (green) even when vulnerabilities are found; findings still
-  # surface in the Security tab via SARIF. This job is intentionally excluded
-  # from the pr-validation-summary gate.
+  # OSV findings remain advisory and visible in the validation summary.
   osv-scanner:
     name: OSV-Scanner
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.osv-scan.outcome }}
+      expected-count: '1'
+      executed-count: ${{ (steps.osv-scan.outcome == 'success' || steps.osv-scan.outcome == 'failure') && '1' || '0' }}
+      test-count: '0'
+      skipped-count: ${{ steps.osv-scan.outcome == 'skipped' && '1' || '0' }}
+      first-failure: ${{ steps.osv-scan.outcome != 'success' && 'osv-scan' || '' }}
     permissions:
       contents: read
       security-events: write  # Required for SARIF upload to Security tab
@@ -199,6 +209,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Run OSV-Scanner
+        id: osv-scan
         uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc  # v2.6.0
         continue-on-error: true
         with:
@@ -465,6 +476,7 @@ jobs:
     with:
       soft-fail: false
       code-coverage: true
+      changed-files-only: false
     permissions:
       contents: read
       id-token: write
@@ -493,6 +505,7 @@ jobs:
   pr-validation-summary:
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs:
       - changes
       - workflow-refs-check
@@ -508,6 +521,7 @@ jobs:
       - markdown-link-check
       - dependency-review
       - dependency-pinning
+      - osv-scanner
       - pester-tests
       - dataviewer-frontend-tests
       - docusaurus-tests
@@ -524,6 +538,7 @@ jobs:
       - uv-lock-consistency
       - terraform-lint
       - terraform-validation
+      - terraform-security
       - terraform-tests
       - go-lint
       - terraform-docs-check
@@ -544,7 +559,31 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24.14.1'
+      - name: Download execution receipts
+        if: always()
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          pattern: ci-outcome-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .ci-validation-receipts
+          merge-multiple: false
+      - name: Record workflow cancellation
+        id: cancellation
+        if: cancelled()
+        shell: bash
+        run: printf 'cancelled=true\n' >> "$GITHUB_OUTPUT"
       - name: Evaluate needed job results
+        if: always()
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
+          CI_OWNER: pr
+          CI_CANCELLED: ${{ steps.cancellation.outputs.cancelled || 'false' }}
+          CI_RECEIPTS_DIRECTORY: .ci-validation-receipts
+          HEAD_SHA: ${{ github.sha }}
         run: node scripts/ci/evaluate-checks.mjs
+      - name: Upload validation summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: pr-validation-summary-${{ github.run_attempt }}
+          path: logs/ci-validation-summary.*
+          if-no-files-found: error

@@ -18,6 +18,15 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.msdate-freshness.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.msdate-freshness.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.msdate-freshness.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.msdate-freshness.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.msdate-freshness.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.msdate-freshness.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.msdate-freshness.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.msdate-freshness.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -30,6 +39,16 @@ jobs:
   msdate-freshness:
     name: Check ms.date Freshness
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -48,6 +67,7 @@ jobs:
           Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Force -Scope CurrentUser
 
       - name: Run ms.date Freshness Check
+        id: freshness
         env:
           THRESHOLD_DAYS: ${{ inputs.staleness-threshold-days }}
           CHANGED_FILES_ONLY: ${{ inputs.changed-files-only }}
@@ -75,3 +95,14 @@ jobs:
           if (Test-Path logs/msdate-summary.md) {
             Get-Content logs/msdate-summary.md >> $env:GITHUB_STEP_SUMMARY
           }
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: msdate-freshness-check
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["freshness"]'
+          reports: '[{"path":"logs/msdate-freshness-results.json","kind":"json"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

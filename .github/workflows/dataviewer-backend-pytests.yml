@@ -8,6 +8,23 @@ on:
         required: false
         default: false
         type: boolean
+    outputs:
+      work-status:
+        value: ${{ jobs.pytest-dataviewer.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.pytest-dataviewer.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.pytest-dataviewer.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.pytest-dataviewer.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.pytest-dataviewer.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.pytest-dataviewer.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.pytest-dataviewer.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.pytest-dataviewer.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -16,6 +33,16 @@ jobs:
   pytest-dataviewer:
     name: Pytest Dataviewer Backend
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     defaults:
       run:
         working-directory: data-management/viewer/backend
@@ -37,13 +64,20 @@ jobs:
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
 
       - name: Install system dependencies
+        id: system-dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Install dependencies
+        id: install
         run: uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
 
       - name: Run pytest with coverage
-        run: uv run --with-editable ../../../evaluation/vlm_judge pytest -v --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml --cov-report=term-missing --cov-fail-under=90
+        id: test
+        run: >-
+          uv run --with-editable ../../../evaluation/vlm_judge pytest -v
+          --junitxml=../../../logs/pytest-dataviewer-results.xml
+          --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml
+          --cov-report=term-missing --cov-fail-under=90
 
       - name: Upload coverage.xml artifact
         if: ${{ inputs.code-coverage && always() }}
@@ -63,3 +97,13 @@ jobs:
           verbose: true
           flags: pytest-dataviewer
           name: pytest-dataviewer-coverage
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: dataviewer-backend-pytests
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["system-dependencies","install","test"]'
+          reports: '[{"path":"logs/pytest-dataviewer-results.xml","kind":"junit"}]'

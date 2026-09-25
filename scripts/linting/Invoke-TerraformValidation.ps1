@@ -118,6 +118,17 @@ function Invoke-TerraformValidationCore {
             continue
         }
 
+        if (-not (Test-Path $fullPath -PathType Container)) {
+            $validationResults += @{
+                directory = $displayPath
+                passed    = $false
+                skipped   = $false
+                errors    = @(@{ severity = 'error'; summary = 'Required deployment directory is missing.' })
+                warnings  = @()
+            }
+            continue
+        }
+
         Push-Location $fullPath
         try {
             $initOutput = & terraform init -backend=false -input=false -no-color 2>&1
@@ -138,6 +149,9 @@ function Invoke-TerraformValidationCore {
                     $validateResult = $validateOutput | Out-String | ConvertFrom-Json -AsHashtable
                     if ($null -eq $validateResult -or -not $validateResult.Contains('diagnostics')) {
                         throw 'Terraform validation output has no diagnostics field.'
+                    }
+                    if ($validateResult['valid'] -ne $true -or $validateResult['error_count'] -ne 0) {
+                        $validateExit = 1
                     }
                 }
                 catch {
@@ -204,7 +218,9 @@ function Invoke-TerraformValidationCore {
     $directoriesChecked = @($validationResults | Where-Object { -not $_.skipped }).Count
     $directoriesPassed = @($validationResults | Where-Object { -not $_.skipped -and $_.passed }).Count
     $directoriesSkipped = @($validationResults | Where-Object { $_.skipped }).Count
-    $overallPassed = $fmtPassed -and ($directoriesChecked -eq $directoriesPassed)
+    $expectedDirectories = @($dirsToValidate).Count
+    $overallPassed = $fmtPassed -and ($directoriesChecked -eq $directoriesPassed) -and
+        ($directoriesChecked -eq $expectedDirectories) -and ($ChangedFilesOnly -or $directoriesChecked -eq $deployDirs.Count)
 
     $results = @{
         timestamp         = (Get-Date -Format 'o')
@@ -223,6 +239,7 @@ function Invoke-TerraformValidationCore {
                 }
             })
         summary           = @{
+            directories_expected = $expectedDirectories
             directories_checked = $directoriesChecked
             directories_passed  = $directoriesPassed
             directories_skipped = $directoriesSkipped

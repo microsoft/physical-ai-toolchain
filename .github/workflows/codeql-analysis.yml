@@ -5,6 +5,15 @@ on:
     # Weekly scan: Sundays at 04:00 UTC
     - cron: '0 4 * * 0'
   workflow_call:
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.aggregate.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.aggregate.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.aggregate.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.aggregate.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.aggregate.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.aggregate.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.aggregate.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.aggregate.outputs.first-failure }}'}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,6 +30,7 @@ jobs:
   analyze:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       security-events: write
@@ -38,28 +48,64 @@ jobs:
           persist-credentials: false
 
       - name: Initialize CodeQL
+        id: init
         uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           languages: ${{ matrix.language }}
           queries: security-extended,security-and-quality
 
       - name: Autobuild
+        id: autobuild
         uses: github/codeql-action/autobuild@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
 
       - name: Perform CodeQL Analysis
+        id: analyze
         uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           category: "/language:${{ matrix.language }}"
+          output: logs/codeql/${{ matrix.language }}
 
-      - name: Add job summary
+      - name: Publish language execution evidence
+        id: outcome
         if: always()
-        run: |
-          Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
-          $md = @(
-            '## CodeQL Security Analysis Complete'
-            '**Language:** ${{ matrix.language }}'
-            '**Queries:** security-extended, security-and-quality'
-            ''
-            '📊 View results in the Security tab under Code Scanning'
-          )
-          Write-CIStepSummary -Content ($md -join "`n")
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: codeql-analysis
+          shard: ${{ matrix.language }}
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["init","autobuild","analyze"]'
+          reports: '[{"path":"logs/codeql/${{ matrix.language }}","kind":"sarif","tool":"CodeQL command-line toolchain"}]'
+
+  aggregate:
+    name: CodeQL Execution Summary
+    needs: analyze
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Aggregate language execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: codeql-analysis
+          shard: aggregate
+          needs-json: ${{ toJSON(needs) }}
+          expected-shards: '{"analyze":["javascript-typescript","python","go","actions"]}'

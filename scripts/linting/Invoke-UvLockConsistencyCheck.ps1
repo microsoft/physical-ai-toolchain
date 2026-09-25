@@ -8,15 +8,16 @@
 .SYNOPSIS
     Verifies committed uv.lock files stay consistent with their pyproject.toml manifests.
 .DESCRIPTION
-    Discovers every directory carrying a uv.lock (excluding .venv/, external/, node_modules/,
-    .git/, .copilot-tracking/, docs/docusaurus/), runs `uv lock --check` in each, and writes
+    Discovers tracked pyproject.toml projects (excluding .venv/, external/, node_modules/,
+    .git/, .copilot-tracking/, docs/docusaurus/), requires a tracked lock in each, and runs
+    `uv lock --check`. The script writes
     results to logs/. Drift is surfaced as CI annotations and a GitHub step summary, and the
     script exits non-zero when any lock drifts from its manifest.
 .PARAMETER OutputPath
     Path for the JSON results file. Defaults to logs/uv-lock-consistency-results.json.
 .PARAMETER Projects
     Explicit list of repository-relative project directories to check. When omitted, every
-    directory containing a uv.lock is discovered automatically.
+    directory containing a tracked pyproject.toml is discovered automatically.
 .PARAMETER ChangedFilesOnly
     When set, only check projects whose uv.lock or pyproject.toml changed relative to BaseBranch.
 .PARAMETER BaseBranch
@@ -48,7 +49,7 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Modules/CIHelpers.psm1') -Force
 function Get-UvLockProject {
     <#
     .SYNOPSIS
-        Discovers repository-relative directories that contain a uv.lock file.
+        Discovers repository-relative projects from tracked pyproject.toml manifests.
     .OUTPUTS
         [string[]] Sorted, unique directory paths (forward-slash, '.' for the root).
     #>
@@ -62,8 +63,13 @@ function Get-UvLockProject {
 
     $excludeDirs = @('.venv', 'external', 'node_modules', '.git', '.copilot-tracking', 'docs/docusaurus')
 
-    $lockFiles = @(Get-ChildItem -Path $RepoRoot -Filter 'uv.lock' -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
-            $relativePath = $_.FullName.Substring($RepoRoot.Length + 1) -replace '\\', '/'
+    $PSNativeCommandUseErrorActionPreference = $false
+    $manifestFiles = @(& git -C $RepoRoot ls-files -- 'pyproject.toml' '**/pyproject.toml')
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to discover tracked project manifests.'
+    }
+    $manifestFiles = @($manifestFiles | Where-Object {
+            $relativePath = $_ -replace '\\', '/'
             $excluded = $false
             foreach ($dir in $excludeDirs) {
                 if ($relativePath -like "$dir/*" -or $relativePath -like "*/$dir/*") {
@@ -74,8 +80,8 @@ function Get-UvLockProject {
             -not $excluded
         })
 
-    $dirs = foreach ($lock in $lockFiles) {
-        $parent = (Split-Path $lock.FullName -Parent).Substring($RepoRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, '/', '\') -replace '\\', '/'
+    $dirs = foreach ($manifest in $manifestFiles) {
+        $parent = (Split-Path $manifest -Parent) -replace '\\', '/'
         if ([string]::IsNullOrEmpty($parent)) { '.' } else { $parent }
     }
 
@@ -124,6 +130,18 @@ function Test-UvLockProject {
     )
 
     $absDir = if ($Project -eq '.') { $RepoRoot } else { Join-Path $RepoRoot $Project }
+    $lockPath = if ($Project -eq '.') { 'uv.lock' } else { "$Project/uv.lock" }
+    $PSNativeCommandUseErrorActionPreference = $false
+    $trackedLock = @(& git -C $RepoRoot ls-files --error-unmatch -- $lockPath 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $trackedLock.Count -ne 1 -or
+        -not (Test-Path (Join-Path $absDir 'uv.lock') -PathType Leaf) -or
+        -not (Test-Path (Join-Path $absDir 'pyproject.toml') -PathType Leaf)) {
+        return [pscustomobject]@{
+            Project = $Project
+            Passed  = $false
+            Detail  = 'Project requires its tracked uv.lock and pyproject.toml.'
+        }
+    }
     $check = Invoke-UvLockCheck -ProjectDirectory $absDir
 
     return [pscustomobject]@{
@@ -288,9 +306,8 @@ function Invoke-UvLockConsistencyCheckCore {
     }
 
     if ($Projects.Count -eq 0) {
-        Write-Host 'No uv.lock files found to check'
-        New-UvLockReport -Results @() -OutputPath $OutputPath | Out-Null
-        return 0
+        Write-CIAnnotation -Level Error -Message 'Full lock validation has no tracked project manifests.'
+        return 1
     }
 
     Write-Host "Checking $($Projects.Count) uv.lock project(s)"

@@ -8,6 +8,23 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status:
+        value: ${{ jobs.docusaurus.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.docusaurus.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.docusaurus.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.docusaurus.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.docusaurus.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.docusaurus.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.docusaurus.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.docusaurus.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -16,6 +33,19 @@ jobs:
   docusaurus:
     name: Docusaurus Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
+    defaults:
+      run:
+        working-directory: docs/docusaurus
     permissions:
       contents: read
     steps:
@@ -32,19 +62,44 @@ jobs:
           cache-dependency-path: docs/docusaurus/package-lock.json
 
       - name: Install dependencies
-        working-directory: docs/docusaurus
-        run: npm ci
+        id: install
+        run: npm ci && mkdir -p test-results
 
-      - name: Run tests
-        working-directory: docs/docusaurus
-        run: npm test
+      - name: Type check
+        id: type-check
+        run: npm run typecheck
+
+      - name: Build documentation
+        id: build
+        run: npm run build
+
+      - name: Run Jest tests
+        id: jest
+        run: npx --no-install jest --json --outputFile=test-results/docusaurus-jest.json
         continue-on-error: ${{ inputs.soft-fail }}
 
-      - name: Upload test results
+      - name: Run Mermaid validator tests
+        id: node-test
+        run: >-
+          node --test --test-reporter=junit
+          --test-reporter-destination=test-results/docusaurus-node.xml
+          scripts/validate-mermaid-accessibility.test.mjs
+        continue-on-error: ${{ inputs.soft-fail }}
+
+      - name: Validate Mermaid accessibility
+        id: mermaid
+        run: node scripts/validate-mermaid-accessibility.mjs
+        continue-on-error: ${{ inputs.soft-fail }}
+
+      - name: Publish execution evidence
+        id: outcome
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: ./.github/actions/ci-outcome
         with:
-          name: docusaurus-test-results
-          path: docs/docusaurus/test-results/
-          retention-days: 30
-          if-no-files-found: ignore
+          workflow: docusaurus-tests
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["install","type-check","build","jest","node-test","mermaid"]'
+          reports: >-
+            [{"path":"docs/docusaurus/test-results/docusaurus-jest.json","kind":"jest"},
+            {"path":"docs/docusaurus/test-results/docusaurus-node.xml","kind":"junit"}]
+          fail-on-error: ${{ !inputs.soft-fail }}

@@ -8,6 +8,15 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.table-format.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.table-format.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.table-format.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.table-format.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.table-format.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.table-format.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.table-format.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.table-format.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -20,6 +29,16 @@ jobs:
   table-format:
     name: Table Format Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -35,9 +54,11 @@ jobs:
         id: table-format
         run: |
           npm run format:tables 2>&1 | Tee-Object -FilePath table-format-output.txt
-          if ($LASTEXITCODE -ne 0) {
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) {
             'TABLE_FORMAT_FAILED=true' >> $env:GITHUB_ENV
           }
+          exit $exitCode
         continue-on-error: true
 
       - name: Create annotations
@@ -66,7 +87,7 @@ jobs:
         if: always()
         run: |
           Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
-          if ($env:TABLE_FORMAT_FAILED -eq 'true') {
+          if ('${{ steps.table-format.outcome }}' -ne 'success') {
             $changed = (git diff --name-only -- '*.md' 2>$null) | Where-Object { $_ }
             $md = @(
               '## Table Format Check Results'
@@ -107,3 +128,14 @@ jobs:
           Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
           Write-CIAnnotation -Level Error -Message "Table format check failed — run 'npm run format:tables' locally to fix. See step summary for details"
           exit 1
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: table-format
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["table-format"]'
+          reports: '[{"path":"table-format-output.txt","kind":"file"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

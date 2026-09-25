@@ -3,6 +3,23 @@ name: Pytest GPU Offload
 
 'on':
   workflow_call:
+    outputs:
+      work-status:
+        value: ${{ jobs.aggregate.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.aggregate.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.aggregate.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.aggregate.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.aggregate.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.aggregate.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.aggregate.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.aggregate.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -19,6 +36,7 @@ jobs:
           - name: runtime
             path: gpu-offload/runtime
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -36,9 +54,53 @@ jobs:
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
 
       - name: Install dependencies
+        id: install
         working-directory: ${{ matrix.path }}
         run: uv sync --locked --extra test
 
       - name: Run pytest
+        id: test
         working-directory: ${{ matrix.path }}
-        run: uv run pytest -o addopts="" tests -v
+        run: uv run pytest -o addopts="" tests -v --junitxml="$GITHUB_WORKSPACE/logs/pytest-gpu-offload-${{ matrix.name }}-results.xml"
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: pytest-gpu-offload
+          shard: ${{ matrix.name }}
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["install","test"]'
+          reports: '[{"path":"logs/pytest-gpu-offload-${{ matrix.name }}-results.xml","kind":"junit"}]'
+
+  aggregate:
+    name: Aggregate GPU offload tests
+    if: always()
+    needs: pytest-gpu-offload
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Aggregate execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: pytest-gpu-offload
+          needs-json: ${{ toJSON(needs) }}
+          expected-shards: '{"pytest-gpu-offload":["controller","runtime"]}'

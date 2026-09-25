@@ -9,6 +9,23 @@ name: Pytest Shared CI
         required: false
         default: false
         type: boolean
+    outputs:
+      work-status:
+        value: ${{ jobs.pytest-shared-ci.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.pytest-shared-ci.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.pytest-shared-ci.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.pytest-shared-ci.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.pytest-shared-ci.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.pytest-shared-ci.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.pytest-shared-ci.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.pytest-shared-ci.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -17,6 +34,16 @@ jobs:
   pytest-shared-ci:
     name: Pytest Shared CI
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
       id-token: write
@@ -35,11 +62,14 @@ jobs:
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
 
       - name: Install dependencies
+        id: install
         run: uv sync --group dev
 
       - name: Run pytest
+        id: test
         run: >-
           uv run pytest -o addopts="" shared/ci/tests -v
+          --junitxml=logs/pytest-shared-ci-results.xml
           --cov=shared/ci
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-shared-ci.xml
@@ -63,3 +93,13 @@ jobs:
           verbose: true
           flags: pytest-shared-ci
           name: pytest-shared-ci-coverage
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: pytest-shared-ci
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["install","test"]'
+          reports: '[{"path":"logs/pytest-shared-ci-results.xml","kind":"junit"}]'

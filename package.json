@@ -31,7 +31,7 @@
     "format:toml": "taplo fmt",
     "format:tables": "markdown-table-formatter \"**/*.md\"",
     "test:ps": "pwsh -File ./scripts/tests/Invoke-PesterTests.ps1",
-    "test:ci": "node --test --experimental-test-coverage --test-coverage-include=\"scripts/ci/*.mjs\" --test-coverage-exclude=\"scripts/tests/**\" --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 scripts/tests/ci/ci-contract.test.mjs",
+    "test:ci": "node --test --experimental-test-coverage --test-coverage-include=\"scripts/ci/*.mjs\" --test-coverage-exclude=\"scripts/tests/**\" --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 scripts/tests/ci/ci-contract.test.mjs scripts/tests/ci/execution-evidence.test.mjs",
     "test:tf": "pwsh -File scripts/linting/Invoke-TerraformTest.ps1",
     "test:go": "pwsh -File scripts/linting/Invoke-GoTest.ps1",
     "prepare": "husky",

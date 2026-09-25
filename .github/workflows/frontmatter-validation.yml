@@ -23,6 +23,15 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.frontmatter-validation.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.frontmatter-validation.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.frontmatter-validation.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.frontmatter-validation.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.frontmatter-validation.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.frontmatter-validation.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.frontmatter-validation.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.frontmatter-validation.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -35,6 +44,16 @@ jobs:
   frontmatter-validation:
     name: Validate Markdown Frontmatter
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -53,6 +72,7 @@ jobs:
           Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Force -Scope CurrentUser
 
       - name: Run Frontmatter Validation
+        id: frontmatter
         run: |
           $args = @()
           if ('${{ inputs.changed-files-only }}' -eq 'true') {
@@ -63,9 +83,6 @@ jobs:
           }
           if ('${{ inputs.enable-schema-validation }}' -eq 'true') {
             $args += '-EnableSchemaValidation'
-          }
-          if ('${{ inputs.soft-fail }}' -eq 'true') {
-            $args += '-SoftFail'
           }
           & scripts/linting/Invoke-FrontmatterValidation.ps1 @args
         continue-on-error: ${{ inputs.soft-fail }}
@@ -85,3 +102,14 @@ jobs:
             Write-Host "Frontmatter validation failed. Failing the job."
             exit 1
           }
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: frontmatter-validation
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["frontmatter"]'
+          reports: '[{"path":"logs/frontmatter-validation-results.json","kind":"json"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

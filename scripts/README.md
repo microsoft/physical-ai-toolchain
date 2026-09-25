@@ -56,6 +56,53 @@ CI bootstrap and release automation.
 | `ci/New-SigningArtifacts.ps1`         | Generate release signing artifacts                      |
 | `ci/Update-ChangelogMsDate.ps1`       | Refresh changelog metadata dates                        |
 
+### Required validation gates
+
+`ci/ci-contract.json` declares lane ownership, selection, permissions, operation identities,
+required reports, matrix shards, and reusable output bindings. `ci/select-checks.mjs` compares
+the PR event base to the tested merge SHA and publishes explicit selection reasons.
+Selected PR lanes and every main lane disable inner changed-file filtering.
+Execution bindings pin each required `run` scalar by SHA-256 and each action by its immutable
+`uses` reference and the SHA-256 of `JSON.stringify` of its parsed `with` mapping.
+Review operation changes before updating these hashes; do not regenerate them to dismiss
+unexplained workflow drift.
+
+| Status         | Required-gate behavior                                                        |
+|----------------|-------------------------------------------------------------------------------|
+| `success`      | Require all expected operations, valid reports, counts, and artifact identity |
+| `failure`      | Block the aggregate and report the first failed or missing operation          |
+| `cancelled`    | Block the aggregate; report cancellation separately from validation failure   |
+| `planned-skip` | Accept only a lane excluded by verified PR selection                          |
+| Missing        | Block the aggregate; a green job result alone is not execution evidence       |
+
+GitHub omits empty job outputs. An absent `first-failure` value is accepted only with otherwise
+valid success or verified planned-skip evidence; required status, count, and artifact fields
+must remain present.
+
+`.github/actions/ci-outcome` validates actual step outcomes and suite-specific reports before
+publishing receipts. Matrix aggregates require the complete expected job/shard inventory and
+current run ID, attempt, and commit SHA. Test counts exclude skipped cases. Summary JSON and
+Markdown retain comparison SHAs, selection reasons, operation/test counts, first failures,
+tool versions, and artifact links without copying arbitrary step outputs.
+Summaries revalidate mandatory output receipts and raw child reports from the current attempt
+and reconcile their counts with exposed workflow outputs. Missing, duplicate, stale, or
+contradictory mandatory evidence blocks the gate even when GitHub retains earlier successful
+job outputs. Missing advisory receipts produce warnings without blocking required checks.
+
+`pr-validation-summary` remains the stable required check. `main-validation-summary` evaluates
+full execution before `release-please` can start. Markdown links, Terraform tests, Terraform
+documentation freshness, OSV, and Terraform security remain advisory and visible in summaries.
+Container findings are advisory; container discovery, scanning, and report publication remain
+required execution. Only superseded PR runs cancel automatically; main and release runs do not.
+Summaries consume the workflow cancellation context even when no child started. A cancelled
+or superseded run never produces a successful release gate.
+
+Use a full workflow rerun after a failure. Partial reruns cannot reuse receipts from an earlier
+attempt. Run `npm run lint:ci` and `npm run test:ci` for graph validation, negative mutations,
+report-adapter tests, and the existing 80% line/branch/function coverage gate.
+Local validation does not verify hosted PR checks, branch protection, or post-merge execution;
+verify those separately without treating a local green result as hosted evidence.
+
 ## 🔍 Linting Scripts
 
 PowerShell scripts for validating code quality and documentation.
