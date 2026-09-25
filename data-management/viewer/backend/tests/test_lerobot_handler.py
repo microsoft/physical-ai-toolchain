@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.api.services.dataset_service import lerobot_handler as lerobot_handler_module
 from src.api.services.dataset_service.lerobot_handler import LeRobotFormatHandler
 
 from .conftest import TEST_DATASET_ID, TEST_DATASET_PATH
@@ -147,6 +148,38 @@ class TestCamerasAndVideo:
     def test_get_video_path_missing_camera(self, handler):
         path = handler.get_video_path(DATASET_ID, 0, "fake_camera")
         assert path is None
+
+    def test_video_cache_path_does_not_mutate_dataset_inventory(self, monkeypatch, tmp_path):
+        dataset_path = tmp_path / "dataset"
+        dataset_path.mkdir()
+        source_path = dataset_path / "source.mp4"
+        source_path.write_bytes(b"source")
+        cache_root = tmp_path / "cache"
+        monkeypatch.setattr(lerobot_handler_module, "_VIDEO_CACHE_ROOT", cache_root)
+        loader = FakeLoader()
+        loader.base_path = dataset_path
+        loader.get_video_path = lambda idx, camera: source_path
+        loader.get_video_time_window = lambda idx, camera: (0.0, 1.0)
+        handler = LeRobotFormatHandler()
+        handler._loaders["ds"] = loader
+        inventory_before = {path.relative_to(dataset_path) for path in dataset_path.rglob("*") if path.is_file()}
+
+        cache_path = handler._video_cache_path("ds", 0, "observation.images.cam0")
+        assert cache_path is not None
+
+        def generate(source, window, target):
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"clip")
+            return True
+
+        monkeypatch.setattr(handler, "_generate_episode_video_clip", generate)
+
+        assert handler.get_video_path("ds", 0, "observation.images.cam0") == str(cache_path)
+
+        assert cache_path.is_relative_to(cache_root)
+        assert not cache_path.is_relative_to(dataset_path)
+        inventory_after = {path.relative_to(dataset_path) for path in dataset_path.rglob("*") if path.is_file()}
+        assert inventory_after == inventory_before
 
     def test_get_video_path_regenerates_invalid_cached_clip(self, monkeypatch, tmp_path):
         source_path = tmp_path / "source.mp4"

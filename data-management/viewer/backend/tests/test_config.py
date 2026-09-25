@@ -50,6 +50,10 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch):
         "OPERATOR_POLICY_PYTHON",
         "OPERATOR_POLICY_CHECKPOINT",
         "OPERATOR_POLICY_CUDA_VISIBLE_DEVICES",
+        "DATAVIEWER_AZUREML_REGISTRATION_ENABLED",
+        "AZURE_SUBSCRIPTION_ID",
+        "AZURE_RESOURCE_GROUP",
+        "AZUREML_WORKSPACE_NAME",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -71,6 +75,7 @@ class TestLoadConfig:
         assert cfg.detection_cache_max_size == 100
         assert cfg.detection_cache_ttl_seconds == 3600
         assert cfg.detection_confidence_threshold == 0.1
+        assert cfg.azureml_registration_enabled is False
         assert "http://localhost:5173" in cfg.cors_origins
 
     def test_storage_backend_lowercased(self, monkeypatch: pytest.MonkeyPatch):
@@ -165,6 +170,39 @@ class TestLoadConfig:
         assert cfg.azure_dataset_export_prefix == "curated/releases"
         assert cfg.azure_sas_token == "sv=token"
         assert cfg.dataviewer_release_root == "/srv/dataviewer-exports"
+
+    def test_azureml_registration_configuration_is_loaded(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("STORAGE_BACKEND", "azure")
+        monkeypatch.setenv("DATAVIEWER_AZUREML_REGISTRATION_ENABLED", "true")
+        monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", "subscription")
+        monkeypatch.setenv("AZURE_RESOURCE_GROUP", "resource-group")
+        monkeypatch.setenv("AZUREML_WORKSPACE_NAME", "workspace")
+
+        cfg = load_config()
+
+        assert cfg.azureml_registration_enabled is True
+        assert cfg.azure_subscription_id == "subscription"
+        assert cfg.azure_resource_group == "resource-group"
+        assert cfg.azureml_workspace_name == "workspace"
+
+    @pytest.mark.parametrize(
+        "missing_name",
+        ["AZURE_SUBSCRIPTION_ID", "AZURE_RESOURCE_GROUP", "AZUREML_WORKSPACE_NAME"],
+    )
+    def test_azureml_registration_missing_configuration_is_rejected(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        missing_name: str,
+    ):
+        monkeypatch.setenv("STORAGE_BACKEND", "azure")
+        monkeypatch.setenv("DATAVIEWER_AZUREML_REGISTRATION_ENABLED", "true")
+        monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", "subscription")
+        monkeypatch.setenv("AZURE_RESOURCE_GROUP", "resource-group")
+        monkeypatch.setenv("AZUREML_WORKSPACE_NAME", "workspace")
+        monkeypatch.delenv(missing_name)
+
+        with pytest.raises(ValueError, match=missing_name):
+            load_config()
 
 
 class TestCreateReviewRepository:

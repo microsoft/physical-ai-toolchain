@@ -18,7 +18,14 @@ COPY pyproject.toml uv.lock ./
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PATH=/app/.venv/bin:$PATH
+
+FROM base AS production-dependencies
 RUN uv sync --frozen --no-dev --extra azure --extra analysis --extra export --extra auth --extra yolo
+
+FROM base AS azureml-dependencies
+RUN uv sync --frozen --no-dev --extra azure --extra azureml --extra analysis --extra export --extra auth --extra yolo
+
+FROM production-dependencies AS runtime
 
 # Copy application source
 COPY src/ ./src/
@@ -43,3 +50,8 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${BACKEND_PORT}/health')"
 
 CMD ["sh", "-c", "uvicorn src.api.main:app --host ${BACKEND_HOST} --port ${BACKEND_PORT}"]
+
+FROM runtime AS azureml
+COPY --from=azureml-dependencies /app/.venv /app/.venv
+
+FROM runtime AS production

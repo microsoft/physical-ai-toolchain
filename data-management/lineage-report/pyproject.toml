@@ -1,0 +1,40 @@
+[project]
+name = "physical-ai-lineage-report"
+version = "0.1.0"
+description = "Runtime Azure ML release-to-model lineage report"
+requires-python = ">=3.12"
+dependencies = [
+    "azure-ai-ml==1.35.0",
+    "azure-identity==1.25.3",
+    "azureml-mlflow==1.62.0.post6",
+    "marshmallow==3.26.2",
+    "mlflow-skinny==3.16.0",
+]
+
+[project.scripts]
+lineage-report = "lineage_report.cli:entrypoint"
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.16.7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lineage_report"]
+
+[tool.ruff]
+extend = "../../pyproject.toml"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv]
+override-dependencies = [
+    "cryptography==50.0.1",
+    "mlflow-skinny==3.16.0",
+]

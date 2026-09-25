@@ -42,7 +42,7 @@ OPTIONS:
 DATA SOURCE (combinable):
         --dataset-asset URI           AzureML data asset to mount (ro_mount, repeatable, max 64).
                                       Accepted forms:
-                                        azureml:NAME:VERSION       (numeric version required)
+                                        azureml:NAME:VERSION       (explicit immutable version)
                                         azureml://.../data/NAME/versions/VERSION
                                       Shorthands like azureml:NAME or azureml:NAME@latest
                                       are rejected to keep runs reproducible.
@@ -397,27 +397,9 @@ fi
 [[ ${#dataset_assets[@]} -le $dataset_asset_count_max ]] || fatal \
   "--dataset-asset: too many data assets (${#dataset_assets[@]}); maximum is ${dataset_asset_count_max}."
 
-# Accept only fully-qualified, version-pinned URIs for data assets.
-# Version must be a canonical positive integer or "0" — leading zeros are
-# rejected to keep the asset URI canonical with AzureML's stored form.
-_VALID_VERSION_RE='^([1-9][0-9]*|0)$'
 if [[ ${#dataset_assets[@]} -gt 0 ]]; then
   for _asset in "${dataset_assets[@]}"; do
-    case "$_asset" in
-      azureml://*/data/*/versions/*)
-        version="${_asset##*/versions/}"
-        [[ "$version" =~ $_VALID_VERSION_RE ]] || fatal \
-          "--dataset-asset: version must be a canonical integer with no leading zeros (got '$_asset'). Use azureml://.../data/NAME/versions/VERSION."
-        ;;
-      azureml:*:*)
-        version="${_asset##*:}"
-        [[ "$version" =~ $_VALID_VERSION_RE ]] || fatal \
-          "--dataset-asset: version must be a canonical integer with no leading zeros (got '$_asset'). Use azureml:NAME:VERSION; @latest and shorthands are not accepted."
-        ;;
-      *)
-        fatal "--dataset-asset: unsupported URI form '$_asset'. Use azureml:NAME:VERSION or azureml://.../data/NAME/versions/VERSION."
-        ;;
-    esac
+    validate_azureml_data_asset_uri "$_asset"
   done
 fi
 
@@ -425,6 +407,7 @@ fi
 # azureml:NAME so reruns of the same job spec do not silently drift to a newer
 # registered model.
 if [[ -n "$init_from_policy_model" ]]; then
+  _VALID_VERSION_RE='^([1-9][0-9]*|0)$'
   case "$init_from_policy_model" in
     azureml://*/models/*/versions/*)
       version="${init_from_policy_model##*/versions/}"

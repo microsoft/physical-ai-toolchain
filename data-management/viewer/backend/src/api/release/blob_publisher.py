@@ -6,10 +6,13 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import quote
 
 from ..storage.review_base import validate_review_identifier
 from .integrity import verify_release
 from .local_publisher import PublicationConflictError, _json_bytes
+
+_PUBLISHED_MARKER = ".published.json"
 
 try:
     from azure.core.exceptions import ResourceExistsError
@@ -67,7 +70,7 @@ class BlobReleasePublisher:
         claim_download = await self._container.get_blob_client(claim_name).download_blob()
         if await claim_download.readall() != claim:
             raise PublicationConflictError(f"Release claim ownership changed: {release_id}")
-        marker_name = f"{release_prefix}.published.json"
+        marker_name = f"{release_prefix}{_PUBLISHED_MARKER}"
         marker = _json_bytes(
             {"dataset_id": dataset_id, "owner": owner, "release_id": release_id, "schema_version": "1.0.0"}
         )
@@ -77,7 +80,7 @@ class BlobReleasePublisher:
         releases_prefix = f"{self._prefix}/releases/"
         published: list[tuple[str, str]] = []
         async for item in self._container.list_blobs(name_starts_with=releases_prefix):
-            if not item.name.endswith("/.published.json"):
+            if not item.name.endswith(f"/{_PUBLISHED_MARKER}"):
                 continue
             parts = PurePosixPath(item.name).parts
             dataset_id = parts[-3]
@@ -94,6 +97,29 @@ class BlobReleasePublisher:
             ):
                 published.append((dataset_id, release_id))
         return sorted(set(published))
+
+    async def read_published_file(self, dataset_id: str, release_id: str, relative_path: str) -> bytes:
+        """Read one file from a marker-visible published release."""
+        dataset_id = validate_review_identifier(dataset_id)
+        release_id = validate_review_identifier(release_id)
+        path = PurePosixPath(relative_path)
+        if not relative_path or path.is_absolute() or "\\" in relative_path or ".." in path.parts:
+            raise ValueError("Invalid published release path")
+        release_prefix = f"{self._prefix}/releases/{dataset_id}/{release_id}"
+        if path.as_posix() != _PUBLISHED_MARKER:
+            marker = self._container.get_blob_client(f"{release_prefix}/{_PUBLISHED_MARKER}")
+            await marker.download_blob()
+        name = f"{release_prefix}/{path.as_posix()}"
+        download = await self._container.get_blob_client(name).download_blob()
+        return await download.readall()
+
+    def published_release_url(self, dataset_id: str, release_id: str) -> str:
+        """Return the canonical HTTPS folder URL for a published release."""
+        dataset_id = validate_review_identifier(dataset_id)
+        release_id = validate_review_identifier(release_id)
+        container_url = str(self._container.url).rstrip("/")
+        encoded_prefix = "/".join(quote(part, safe="") for part in PurePosixPath(self._prefix).parts)
+        return f"{container_url}/{encoded_prefix}/releases/{quote(dataset_id, safe='')}/{quote(release_id, safe='')}"
 
     async def _upload_create_only(self, name: str, payload: bytes, release_id: str) -> None:
         try:

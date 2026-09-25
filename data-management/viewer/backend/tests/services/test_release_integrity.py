@@ -130,6 +130,9 @@ def test_given_staging_package_when_finalized_then_ledgers_manifest_and_checksum
     data_path = package_root / "data" / "episode.parquet"
     data_path.parent.mkdir(parents=True)
     data_path.write_bytes(b"episode-data")
+    statistics_path = package_root / "metadata" / "release-statistics.json"
+    statistics_path.parent.mkdir(parents=True)
+    statistics_path.write_bytes(b'{"schema_version":"1.0.0"}\n')
     accepted = _decision(ReviewDecisionValue.ACCEPT, "decision-accepted")
     rejected = _decision(ReviewDecisionValue.REJECT, "decision-rejected", episode_index=1)
     excluded = EligibilityCandidate(
@@ -158,6 +161,7 @@ def test_given_staging_package_when_finalized_then_ledgers_manifest_and_checksum
         "metadata/package-quality.json",
         "metadata/quality/quality-1.json",
         "metadata/rejected.json",
+        "metadata/release-statistics.json",
     }
     assert finalized.candidate_count == 3
     assert finalized.nonincluded_count == 2
@@ -191,6 +195,54 @@ def test_given_modified_covered_file_when_verified_then_digest_mismatch_is_rejec
         assert "SHA-256 mismatch" in str(exc)
     else:
         raise AssertionError("Modified release file was accepted")
+
+
+def test_given_symlink_when_finalized_then_release_is_rejected(tmp_path: Path) -> None:
+    # Arrange
+    package_root = tmp_path / "staging"
+    data_path = package_root / "data" / "episode.parquet"
+    data_path.parent.mkdir(parents=True)
+    data_path.write_bytes(b"episode-data")
+    link_path = package_root / "meta" / "videos" / "episode.mp4"
+    link_path.parent.mkdir(parents=True)
+    link_path.symlink_to(data_path)
+    accepted = _decision(ReviewDecisionValue.ACCEPT, "decision-accepted")
+
+    # Act & Assert
+    with pytest.raises(ValueError, match="symbolic links"):
+        finalize_release(
+            package_root,
+            _manifest(accepted),
+            (accepted,),
+            (),
+            (_quality_report(accepted),),
+            _package_quality(),
+        )
+
+
+def test_given_symlink_added_after_finalization_when_verified_then_release_is_rejected(tmp_path: Path) -> None:
+    # Arrange
+    package_root = tmp_path / "staging"
+    payload_path = package_root / "payload.bin"
+    package_root.mkdir()
+    payload_path.write_bytes(b"original")
+    accepted = _decision(ReviewDecisionValue.ACCEPT, "decision-accepted")
+    finalize_release(
+        package_root,
+        _manifest(accepted),
+        (accepted,),
+        (),
+        (_quality_report(accepted),),
+        _package_quality(),
+    )
+    external_path = tmp_path / "external.bin"
+    external_path.write_bytes(b"original")
+    payload_path.unlink()
+    payload_path.symlink_to(external_path)
+
+    # Act & Assert
+    with pytest.raises(ValueError, match="symbolic links"):
+        verify_release(package_root)
 
 
 def test_given_mismatched_quality_report_when_finalized_then_release_is_rejected(tmp_path: Path) -> None:

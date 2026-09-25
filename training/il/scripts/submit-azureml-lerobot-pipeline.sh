@@ -53,7 +53,7 @@ REQUIRED:
                                   e.g. user/koch-pick-place-5-lego-random-pose)
         --dataset-asset URI       AzureML data asset URI for the raw dataset.
                                   Accepted forms:
-                                    azureml:NAME:VERSION       (numeric version)
+                                    azureml:NAME:VERSION       (explicit immutable version)
                                     azureml://.../data/NAME/versions/VERSION
                                   Shorthands like azureml:NAME or azureml:NAME@latest
                                   are rejected to keep runs reproducible.
@@ -283,23 +283,7 @@ if [[ "$with_register" != "true" && -n "$compute_register" ]]; then
   warn "--compute-register was set but --with-register is off; ignored."
 fi
 
-# Validate dataset asset URI form (same as training submit script)
-_VALID_VERSION_RE='^([1-9][0-9]*|0)$'
-case "$dataset_asset" in
-  azureml://*/data/*/versions/*)
-    version="${dataset_asset##*/versions/}"
-    [[ "$version" =~ $_VALID_VERSION_RE ]] || fatal \
-      "--dataset-asset: version must be a canonical integer with no leading zeros (got '$dataset_asset'). Use azureml://.../data/NAME/versions/VERSION."
-    ;;
-  azureml:*:*)
-    version="${dataset_asset##*:}"
-    [[ "$version" =~ $_VALID_VERSION_RE ]] || fatal \
-      "--dataset-asset: version must be a canonical integer with no leading zeros (got '$dataset_asset'). Use azureml:NAME:VERSION; @latest and shorthands are not accepted."
-    ;;
-  *)
-    fatal "--dataset-asset: unsupported URI form '$dataset_asset'. Use azureml:NAME:VERSION or azureml://.../data/NAME/versions/VERSION."
-    ;;
-esac
+validate_azureml_data_asset_uri "$dataset_asset"
 
 # Resolve per-step compute defaults
 compute_preprocess="${compute_preprocess:-$compute_default}"

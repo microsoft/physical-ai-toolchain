@@ -9,6 +9,7 @@ from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy import fft as scipy_fft
 
 SmoothnessMode = Literal["log-scaled", "radian-based"]
 SMOOTHNESS_MODES: tuple[SmoothnessMode, ...] = ("log-scaled", "radian-based")
@@ -222,38 +223,20 @@ class TrajectoryAnalyzer:
         if len(velocity) < 10:
             return 0.0
 
-        try:
-            # Use scipy if available, otherwise basic numpy
-            from scipy import fft as scipy_fft
-
-            # Compute velocity magnitude
-            vel_magnitude = np.linalg.norm(velocity, axis=1)
-
-            # FFT of velocity
-            n = len(vel_magnitude)
-            freq_spectrum = np.abs(scipy_fft.fft(vel_magnitude))[: n // 2]
-
-            # Estimate sample rate
-            avg_dt = np.mean(np.diff(timestamps[: len(velocity) + 1]))
-            if avg_dt <= 0:
-                avg_dt = 1.0 / 30.0  # Default 30 FPS
-
-            frequencies = scipy_fft.fftfreq(n, avg_dt)[: n // 2]
-
-            # High frequency power (above threshold)
-            high_freq_mask = np.abs(frequencies) > self.jitter_frequency_threshold
-            high_freq_power = np.sum(freq_spectrum[high_freq_mask] ** 2)
-            total_power = np.sum(freq_spectrum**2)
-
-            if total_power < 1e-10:
-                return 0.0
-
-            jitter = high_freq_power / total_power
-            return float(np.clip(jitter, 0.0, 1.0))
-
-        except ImportError:
-            # Fallback without scipy
+        vel_magnitude = np.linalg.norm(velocity, axis=1)
+        n = len(vel_magnitude)
+        freq_spectrum = np.abs(scipy_fft.fft(vel_magnitude))[: n // 2]
+        avg_dt = np.mean(np.diff(timestamps[: len(velocity) + 1]))
+        if avg_dt <= 0:
+            avg_dt = 1.0 / 30.0
+        frequencies = scipy_fft.fftfreq(n, avg_dt)[: n // 2]
+        high_freq_mask = np.abs(frequencies) > self.jitter_frequency_threshold
+        high_freq_power = np.sum(freq_spectrum[high_freq_mask] ** 2)
+        total_power = np.sum(freq_spectrum**2)
+        if total_power < 1e-10:
             return 0.0
+        jitter = high_freq_power / total_power
+        return float(np.clip(jitter, 0.0, 1.0))
 
     def _count_hesitations(self, velocity: NDArray[np.float64]) -> int:
         """

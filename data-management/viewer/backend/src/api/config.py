@@ -64,6 +64,18 @@ class AppConfig:
     azure_dataset_export_prefix: str = "exports"
     """Backend-owned Blob prefix for review records, staging, and releases."""
 
+    azureml_registration_enabled: bool = False
+    """Whether published Azure releases are registered as Azure ML data assets."""
+
+    azure_subscription_id: str | None = None
+    """Azure subscription containing the target Azure ML workspace."""
+
+    azure_resource_group: str | None = None
+    """Resource group containing the target Azure ML workspace."""
+
+    azureml_workspace_name: str | None = None
+    """Azure ML workspace receiving immutable release asset versions."""
+
     cors_origins: list[str] = field(default_factory=list)
     """Allowed CORS origins for the frontend."""
 
@@ -154,6 +166,21 @@ def load_config(env_path: Path | None = None) -> AppConfig:
     azure_sas_token = os.environ.get("AZURE_STORAGE_SAS_TOKEN") or None
     dataviewer_release_root = os.environ.get("DATAVIEWER_RELEASE_ROOT", "./data-exports")
     azure_dataset_export_prefix = os.environ.get("AZURE_STORAGE_DATASET_EXPORT_PREFIX", "exports")
+    azureml_registration_enabled = os.environ.get("DATAVIEWER_AZUREML_REGISTRATION_ENABLED", "false").lower() == "true"
+    azure_subscription_id = os.environ.get("AZURE_SUBSCRIPTION_ID") or None
+    azure_resource_group = os.environ.get("AZURE_RESOURCE_GROUP") or None
+    azureml_workspace_name = os.environ.get("AZUREML_WORKSPACE_NAME") or None
+    if azureml_registration_enabled:
+        required_azureml = {
+            "AZURE_SUBSCRIPTION_ID": azure_subscription_id,
+            "AZURE_RESOURCE_GROUP": azure_resource_group,
+            "AZUREML_WORKSPACE_NAME": azureml_workspace_name,
+        }
+        missing = [name for name, value in required_azureml.items() if value is None]
+        if missing:
+            raise ValueError(f"Azure ML registration requires {', '.join(missing)}")
+        if storage_backend != "azure":
+            raise ValueError("DATAVIEWER_AZUREML_REGISTRATION_ENABLED requires STORAGE_BACKEND=azure")
 
     backend_host = os.environ.get("BACKEND_HOST", "127.0.0.1")
     backend_port = int(os.environ.get("BACKEND_PORT", "8000"))
@@ -216,6 +243,10 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         backend_port=backend_port,
         dataviewer_release_root=dataviewer_release_root,
         azure_dataset_export_prefix=azure_dataset_export_prefix,
+        azureml_registration_enabled=azureml_registration_enabled,
+        azure_subscription_id=azure_subscription_id,
+        azure_resource_group=azure_resource_group,
+        azureml_workspace_name=azureml_workspace_name,
         cors_origins=cors_origins,
         episode_cache_capacity=episode_cache_capacity,
         episode_cache_max_mb=episode_cache_max_mb,

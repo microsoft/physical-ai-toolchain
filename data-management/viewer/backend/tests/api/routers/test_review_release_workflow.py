@@ -19,6 +19,12 @@ from src.api.services.review_workflow_service import ReviewWorkflowService, get_
 from src.api.storage.review_local import LocalReviewRepository
 
 
+def _write_statistics_stub(root: Path, _manifest: ReleaseManifest) -> None:
+    path = root / "metadata" / "release-statistics.json"
+    path.parent.mkdir(parents=True)
+    path.write_text('{"schema_version":"1.0.0"}\n', encoding="utf-8")
+
+
 @pytest.fixture
 def workflow_client(
     tmp_path: Path,
@@ -121,6 +127,7 @@ def workflow_client(
         staging_root=tmp_path / "staging",
         assembler=assemble,
         local_publisher=LocalReleasePublisher(tmp_path / "published"),
+        statistics_writer=_write_statistics_stub,
     )
 
     def notify(job_id: str) -> None:

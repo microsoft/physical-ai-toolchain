@@ -7,10 +7,12 @@ parquet data files, mp4 video files, and meta/info.json metadata.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,6 +23,8 @@ if TYPE_CHECKING:
     from ..lerobot_loader import LeRobotLoader as LeRobotLoaderType
 
 logger = logging.getLogger(__name__)
+
+_VIDEO_CACHE_ROOT = Path(tempfile.gettempdir()) / "dvw_video_cache" / "lerobot"
 
 # LeRobot parquet support is optional
 try:
@@ -493,8 +497,9 @@ class LeRobotFormatHandler:
         if loader is None:
             return None
 
-        safe_camera = camera.replace("/", "_").replace("\\", "_")
-        return loader.base_path / "meta" / "videos" / safe_camera / f"episode_{episode_idx:06d}.mp4"
+        dataset_key = hashlib.sha256(str(loader.base_path.resolve()).encode()).hexdigest()[:16]
+        camera_key = hashlib.sha256(camera.encode()).hexdigest()[:16]
+        return _VIDEO_CACHE_ROOT / dataset_key / camera_key / f"episode_{episode_idx:06d}.mp4"
 
     @staticmethod
     def _is_valid_video_file(video_path: Path) -> bool:

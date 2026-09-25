@@ -4,7 +4,7 @@ Covers:
 * `_register_model_via_aml` `dataset_source` lineage tag selection across the
   azureml-data-asset / azure-blob / mixed / huggingface code paths.
 * Submission-script URI validation (`--dataset-asset`, `--init-from-policy-model`)
-  for canonical-integer version, `@latest`, leading-zero rejection.
+    for explicit immutable data versions and canonical-integer model versions.
 
 `download_dataset.py` is not imported here; its module-level coverage is
 exercised by `test_lerobot_download_dataset.py`, which is gated on `pyarrow`
@@ -309,8 +309,15 @@ class TestRegisterModelLineage:
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SUBMIT_SCRIPT = _REPO_ROOT / "training/il/scripts/submit-azureml-lerobot-training.sh"
+_PIPELINE_SUBMIT_SCRIPT = _REPO_ROOT / "training/il/scripts/submit-azureml-lerobot-pipeline.sh"
+_VLA_SUBMIT_SCRIPT = _REPO_ROOT / "training/vla/scripts/submit-azureml-vla-pi0-training.sh"
 _OSMO_SUBMIT_SCRIPT = _REPO_ROOT / "training/il/scripts/submit-osmo-lerobot-training.sh"
 _ENTRY_SCRIPT = _REPO_ROOT / "training/il/scripts/lerobot/azureml-train-entry.sh"
+_AZUREML_SUBMIT_CASES = (
+    (_SUBMIT_SCRIPT, ("--compute", "c")),
+    (_PIPELINE_SUBMIT_SCRIPT, ("--dataset-repo-id", "user/ds", "--compute", "c")),
+    (_VLA_SUBMIT_SCRIPT, ("--compute", "c")),
+)
 
 
 # Stub `az` covering only the calls that `submit-azureml-lerobot-training.sh`
@@ -349,6 +356,14 @@ def _stub_az_on_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def _run_submit(*args: str, env_extra: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    return _run_azureml_submit(_SUBMIT_SCRIPT, *args, env_extra=env_extra)
+
+
+def _run_azureml_submit(
+    script: Path,
+    *args: str,
+    env_extra: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env.update(
         {
@@ -364,7 +379,7 @@ def _run_submit(*args: str, env_extra: dict[str, str] | None = None) -> subproce
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
-        ["bash", str(_SUBMIT_SCRIPT), *args, "--config-preview"],
+        ["bash", str(script), *args, "--config-preview"],
         capture_output=True,
         text=True,
         env=env,
@@ -593,13 +608,15 @@ def _run_entrypoint(tmp_path: Path, *, extra: dict[str, str] | None = None) -> s
     "uri",
     [
         "azureml:ds:1",
-        "azureml:ds:42",
-        "azureml:ds:0",
-        "azureml://subscriptions/x/resourceGroups/y/workspaces/z/data/ds/versions/7",
+        "azureml:ds:01",
+        "azureml:ds:release-2026.09_25",
+        f"azureml:ds:{'v' * 30}",
+        "azureml://subscriptions/x/resourceGroups/y/workspaces/z/data/ds/versions/release-2026.09_25",
     ],
 )
-def test_dataset_asset_accepts_canonical_versions(uri):
-    proc = _run_submit("--dataset-asset", uri, "--compute", "c")
+@pytest.mark.parametrize(("script", "base_args"), _AZUREML_SUBMIT_CASES)
+def test_dataset_asset_accepts_safe_explicit_versions(script, base_args, uri):
+    proc = _run_azureml_submit(script, *base_args, "--dataset-asset", uri)
     assert proc.returncode == 0, proc.stderr
 
 
@@ -608,16 +625,18 @@ def test_dataset_asset_accepts_canonical_versions(uri):
     [
         "azureml:ds:latest",
         "azureml:ds:@latest",
-        "azureml:ds:01",
-        "azureml:ds:1.0",
         "azureml:ds:",
+        "azureml:ds:release:extra",
+        "azureml:ds:unsafe/version",
+        f"azureml:ds:{'v' * 31}",
         "azureml://subscriptions/x/resourceGroups/y/workspaces/z/data/ds/versions/latest",
-        "azureml://subscriptions/x/resourceGroups/y/workspaces/z/data/ds/versions/01",
+        "azureml://subscriptions/x/resourceGroups/y/workspaces/z/data/ds/versions/unsafe%version",
         "https://example.com/ds",  # not an azureml URI
     ],
 )
-def test_dataset_asset_rejects_non_canonical_versions(uri):
-    proc = _run_submit("--dataset-asset", uri, "--compute", "c")
+@pytest.mark.parametrize(("script", "base_args"), _AZUREML_SUBMIT_CASES)
+def test_dataset_asset_rejects_mutable_or_unsafe_versions(script, base_args, uri):
+    proc = _run_azureml_submit(script, *base_args, "--dataset-asset", uri)
     assert proc.returncode != 0
     assert "--dataset-asset" in proc.stderr
 

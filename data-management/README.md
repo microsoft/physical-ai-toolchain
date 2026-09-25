@@ -13,6 +13,7 @@ Dataset curation, storage, annotation, versioning, and the viewer application fo
 ```text
 data-management/
 ├── viewer/                            # Dataset Analysis Tool (FastAPI + React)
+├── lineage-report/                    # Runtime Azure ML release-to-model report
 ├── setup/                             # Viewer deployment scripts
 ├── tools/                             # CLI tools for dataset operations
 ├── specifications/                    # Domain specification documents
@@ -44,18 +45,20 @@ docker compose up
 |-----------------|--------------------|---------------------------------------------------------------|
 | Viewer Backend  | `viewer/backend/`  | FastAPI REST API for dataset browsing, annotation, export     |
 | Viewer Frontend | `viewer/frontend/` | React/Vite/TypeScript UI for episode visualization            |
+| Lineage Report  | `lineage-report/`  | Azure ML release, model, and MLflow lineage Markdown          |
 | Deploy Script   | `setup/`           | Kubernetes deployment for hosted viewer                       |
 | CLI Tools       | `tools/`           | Dataset filtering, splitting, merging, conversion, validation |
 | Specifications  | `specifications/`  | Domain contracts and interface definitions                    |
 
 ## 📖 Documentation
 
-| Guide                                                                       | Description                                           |
-|-----------------------------------------------------------------------------|-------------------------------------------------------|
-| [Viewer README](viewer/README.md)                                           | Architecture, API reference, auth configuration       |
-| [Dataset Release Workflow](../docs/data-pipeline/dataset-release-workflow.md) | Review-gated immutable packaging and publication      |
-| [Dataset Curation Spec](specifications/dataset-curation.specification.md)   | Filtering, splitting, merging, conversion, validation |
-| [Viewer Deployment Spec](specifications/viewer-deployment.specification.md) | Kubernetes deployment architecture                    |
+| Guide                                                                         | Description                                            |
+|-------------------------------------------------------------------------------|--------------------------------------------------------|
+| [Viewer README](viewer/README.md)                                             | Architecture, API reference, auth configuration        |
+| [Dataset Release Workflow](../docs/data-pipeline/dataset-release-workflow.md) | Review-gated immutable packaging and publication       |
+| [Azure ML Lineage Report](lineage-report/README.md)                           | Generate release-to-model lineage from runtime records |
+| [Dataset Curation Spec](specifications/dataset-curation.specification.md)     | Filtering, splitting, merging, conversion, validation  |
+| [Viewer Deployment Spec](specifications/viewer-deployment.specification.md)   | Kubernetes deployment architecture                     |
 
 ## 🗂️ Dataset Storage
 

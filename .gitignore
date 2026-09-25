@@ -80,6 +80,7 @@ project.fragment.lock.json
 artifacts/
 **/.artifacts/
 /outputs/
+/data-management/lineage-report/output/
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt

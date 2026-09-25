@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -21,11 +22,20 @@ from ..services.lerobot_loader import LeRobotLoader
 from ..services.release_workflow_service import ReleaseWorkflowService
 from ..storage.review_base import ReviewRepository
 from ..storage.source_workspace import SourceWorkspace
+from .azureml_asset_registration import (
+    AzureMLAssetRegistrationService,
+    StatisticsUnavailableError,
+    create_azureml_asset_registration_service,
+    hydrate_registration_evidence,
+)
 from .blob_publisher import BlobReleasePublisher
 from .integrity import finalize_release, verify_release
 from .jobs import JobState, ReleaseJobStore
 from .lerobot import LeRobotReleaseAdapter, ReleaseEpisode, ReleaseEpisodeReference
 from .local_publisher import LocalReleasePublisher, PublicationConflictError
+from .statistics import write_release_statistics
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -45,6 +55,7 @@ ReleaseAssembler = Callable[
     Awaitable[ReleaseAssembly],
 ]
 AzurePublisherFactory = Callable[[], Awaitable[BlobReleasePublisher]]
+StatisticsWriter = Callable[[Path, ReleaseManifest], None]
 
 
 class ReleasePackageAssembler:
@@ -391,6 +402,8 @@ class ReleaseProcessor:
         assembler: ReleaseAssembler,
         local_publisher: LocalReleasePublisher,
         azure_publisher_factory: AzurePublisherFactory | None = None,
+        azureml_registration_service: AzureMLAssetRegistrationService | None = None,
+        statistics_writer: StatisticsWriter = write_release_statistics,
     ) -> None:
         self._workflow = workflow
         self._jobs = jobs
@@ -398,18 +411,26 @@ class ReleaseProcessor:
         self._assembler = assembler
         self._local_publisher = local_publisher
         self._azure_publisher_factory = azure_publisher_factory
+        self._azureml_registration_service = azureml_registration_service
+        self._statistics_writer = statistics_writer
         self._active: dict[str, asyncio.Task[None]] = {}
 
     async def start(self) -> None:
         """Reconcile interrupted work and resume queued jobs."""
         published = set(self._local_publisher.list_published_releases())
+        azure_publisher = None
+        azure_published: set[tuple[str, str]] = set()
         if self._azure_publisher_factory is not None:
             azure_publisher = await self._azure_publisher_factory()
-            published.update(await azure_publisher.list_published_releases())
+            azure_published.update(await azure_publisher.list_published_releases())
+            published.update(azure_published)
         self._jobs.reconcile(
             staging_root=self._staging_root,
             is_published=lambda dataset_id, release_id: (dataset_id, release_id) in published,
         )
+        if self._azureml_registration_service is not None and azure_publisher is not None:
+            for dataset_id, release_id in sorted(azure_published):
+                await self._ensure_azureml_registration(azure_publisher, dataset_id, release_id)
         for job in self._jobs.list_jobs():
             if job.state is JobState.QUEUED:
                 self.notify(job.job_id)
@@ -440,6 +461,11 @@ class ReleaseProcessor:
             if self._jobs.cancellation_checkpoint(job_id):
                 return
             assembly = await self._assembler(request, request.episodes, staging_root)
+            await asyncio.to_thread(
+                self._statistics_writer,
+                staging_root,
+                assembly.manifest,
+            )
             await asyncio.to_thread(
                 finalize_release,
                 staging_root,
@@ -473,6 +499,11 @@ class ReleaseProcessor:
                     staging_root,
                     owner=job.job_id,
                 )
+                await self._ensure_azureml_registration(
+                    azure_publisher,
+                    request.dataset_id,
+                    request.release_id,
+                )
                 release_path = f"releases/{request.dataset_id}/{request.release_id}"
                 manifest_path = f"{release_path}/metadata/release-manifest.json"
                 checksums_path = f"{release_path}/checksums.sha256"
@@ -488,6 +519,42 @@ class ReleaseProcessor:
             self._workflow.complete_failure(job_id, str(exc), conflict=True)
         except Exception as exc:
             self._workflow.complete_failure(job_id, str(exc))
+
+    async def _ensure_azureml_registration(
+        self,
+        publisher: BlobReleasePublisher,
+        dataset_id: str,
+        release_id: str,
+    ) -> None:
+        service = self._azureml_registration_service
+        if service is None:
+            return
+        diagnostic = {
+            "dataset_id": dataset_id,
+            "release_id": release_id,
+            "event_name": "release.azureml.registration",
+        }
+        try:
+            evidence = await hydrate_registration_evidence(publisher, dataset_id, release_id)
+        except StatisticsUnavailableError:
+            _LOGGER.warning(
+                "Azure ML registration skipped: statistics-unavailable",
+                extra={**diagnostic, "diagnostic_code": "statistics-unavailable"},
+            )
+            return
+        except Exception:
+            _LOGGER.exception(
+                "Azure ML registration evidence is invalid",
+                extra={**diagnostic, "diagnostic_code": "invalid-evidence"},
+            )
+            return
+        try:
+            await asyncio.to_thread(service.ensure, evidence)
+        except Exception:
+            _LOGGER.exception(
+                "Azure ML registration failed",
+                extra={**diagnostic, "diagnostic_code": "registration-failed"},
+            )
 
 
 def _remove_staging(staging_root: Path) -> None:
@@ -507,6 +574,7 @@ def get_release_processor() -> ReleaseProcessor:
         from ..services.release_workflow_service import get_release_workflow_service
 
         config = get_app_config()
+        azureml_registration_service = create_azureml_asset_registration_service(config)
         workflow = get_release_workflow_service()
         root = Path(config.dataviewer_release_root)
         azure_factory: AzurePublisherFactory | None = None
@@ -531,6 +599,7 @@ def get_release_processor() -> ReleaseProcessor:
             ),
             local_publisher=LocalReleasePublisher(root / "releases"),
             azure_publisher_factory=azure_factory,
+            azureml_registration_service=azureml_registration_service,
         )
         workflow.set_job_notifier(_release_processor.notify)
     return _release_processor

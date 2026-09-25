@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from pydantic import ConfigDict, Field, JsonValue, model_validator
 
@@ -59,6 +59,42 @@ class PackageQualityReport(ImmutableContract):
     visual_samples: tuple[VisualReadbackSample, ...]
     inventory_verified: bool
     checksums_verified: bool
+
+
+class ReleaseStatisticsProfile(ImmutableContract):
+    """Versioned parameters used to compute release trajectory statistics."""
+
+    version: str = Field(default="1.0.0", pattern=r"^\d+\.\d+\.\d+$")
+    smoothness_mode: Literal["log-scaled", "radian-based"] = "log-scaled"
+    velocity_threshold: float = Field(default=0.01, gt=0)
+    hesitation_min_frames: int = Field(default=5, ge=1)
+    jitter_frequency_threshold: float = Field(default=10.0, gt=0)
+
+
+class ReleaseEpisodeStatistics(ImmutableContract):
+    """Descriptive trajectory statistics for one released episode."""
+
+    release_episode_index: int = Field(ge=0)
+    frame_count: int = Field(ge=0)
+    duration_seconds: float = Field(ge=0)
+    smoothness: float = Field(ge=0, le=1)
+    normalized_smoothness: float = Field(ge=0, le=1)
+    efficiency: float = Field(ge=0, le=1)
+    jitter: float = Field(ge=0, le=1)
+    hesitation_count: int = Field(ge=0)
+    correction_count: int = Field(ge=0)
+    overall_score: int = Field(ge=1, le=5)
+    flags: tuple[str, ...]
+
+
+class ReleaseStatistics(ImmutableContract):
+    """Descriptive statistics protected by the immutable release checksum."""
+
+    schema_version: str = Field(default="1.0.0", pattern=r"^\d+\.\d+\.\d+$")
+    statistics_profile: ReleaseStatisticsProfile
+    tool_versions: dict[str, str]
+    feature_schema_sha256: Sha256Digest
+    episodes: tuple[ReleaseEpisodeStatistics, ...]
 
 
 class ReleaseManifest(ImmutableContract):

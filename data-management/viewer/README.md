@@ -2,7 +2,7 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-09-24
+ms.date: 2026-09-25
 ms.topic: overview
 ---
 
@@ -24,14 +24,13 @@ A full-stack application for analyzing and annotating robotic training data from
 ### Backend Setup
 
 ```bash
-cd backend
+cd data-management/viewer
 
-# Create virtual environment (using uv)
-uv venv --python 3.12
-source .venv/bin/activate
+# Install the locked development environment with Blob storage support
+uv sync --frozen --project backend --extra azure --extra export
 
-# Install dependencies (include 'azure' extra for blob storage support)
-uv pip install -e ".[dev,export,azure]"
+# Include optional Azure ML release registration support
+uv sync --frozen --project backend --extra azureml
 ```
 
 ### Frontend Setup
@@ -81,20 +80,62 @@ Expected blob structure:
 
 ### Full Environment Variable Reference
 
-| Variable                             | Default         | Description                                                    |
-|--------------------------------------|-----------------|----------------------------------------------------------------|
-| `STORAGE_BACKEND`                    | `local`         | Storage backend: `local` or `azure`                            |
-| `DATA_DIR`                           | `./data`        | Local dataset directory (local mode)                           |
-| `AZURE_STORAGE_ACCOUNT_NAME`         | —               | Azure Storage account name (azure mode)                        |
-| `AZURE_STORAGE_DATASET_CONTAINER`    | —               | Blob container for dataset files                               |
-| `AZURE_STORAGE_ANNOTATION_CONTAINER` | —               | Blob container for annotations (defaults to dataset container) |
-| `AZURE_STORAGE_SAS_TOKEN`            | —               | SAS token (omit to use DefaultAzureCredential / MSI)           |
-| `DATAVIEWER_RELEASE_ROOT`             | `./data-exports` | Backend-owned local review, staging, and release root           |
-| `AZURE_STORAGE_DATASET_EXPORT_PREFIX` | `exports`        | Backend-owned Azure review, staging, and release prefix         |
-| `BACKEND_HOST`                       | `127.0.0.1`     | Bind address (`0.0.0.0` for containers)                        |
-| `BACKEND_PORT`                       | `8000`          | API server port                                                |
-| `FRONTEND_PORT`                      | `5173`          | Dev server port                                                |
-| `CORS_ORIGINS`                       | localhost ports | Comma-separated allowed CORS origins                           |
+| Variable                                  | Default          | Description                                                    |
+|-------------------------------------------|------------------|----------------------------------------------------------------|
+| `STORAGE_BACKEND`                         | `local`          | Storage backend: `local` or `azure`                            |
+| `DATA_DIR`                                | `./data`         | Local dataset directory (local mode)                           |
+| `AZURE_STORAGE_ACCOUNT_NAME`              | —                | Azure Storage account name (azure mode)                        |
+| `AZURE_STORAGE_DATASET_CONTAINER`         | —                | Blob container for dataset files                               |
+| `AZURE_STORAGE_ANNOTATION_CONTAINER`      | —                | Blob container for annotations (defaults to dataset container) |
+| `AZURE_STORAGE_SAS_TOKEN`                 | —                | SAS token (omit to use DefaultAzureCredential / MSI)           |
+| `DATAVIEWER_RELEASE_ROOT`                 | `./data-exports` | Backend-owned local review, staging, and release root          |
+| `AZURE_STORAGE_DATASET_EXPORT_PREFIX`     | `exports`        | Backend-owned Azure review, staging, and release prefix        |
+| `DATAVIEWER_AZUREML_REGISTRATION_ENABLED` | `false`          | Register verified published releases in Azure ML               |
+| `AZURE_SUBSCRIPTION_ID`                   | —                | Azure ML workspace subscription when registration is enabled   |
+| `AZURE_RESOURCE_GROUP`                    | —                | Azure ML workspace resource group when registration is enabled |
+| `AZUREML_WORKSPACE_NAME`                  | —                | Azure ML workspace name when registration is enabled           |
+| `BACKEND_HOST`                            | `127.0.0.1`      | Bind address (`0.0.0.0` for containers)                        |
+| `BACKEND_PORT`                            | `8000`           | API server port                                                |
+| `FRONTEND_PORT`                           | `5173`           | Dev server port                                                |
+| `CORS_ORIGINS`                            | localhost ports  | Comma-separated allowed CORS origins                           |
+
+### Azure ML Release Registration
+
+Enable registration only for a Viewer that publishes releases to Azure Blob
+Storage. The backend registers each marker-complete release after publication
+as an Azure ML `uri_folder` data asset.
+
+```env
+STORAGE_BACKEND=azure
+DATAVIEWER_AZUREML_REGISTRATION_ENABLED=true
+AZURE_SUBSCRIPTION_ID=<subscription-id>
+AZURE_RESOURCE_GROUP=<resource-group>
+AZUREML_WORKSPACE_NAME=<workspace-name>
+```
+
+Use an Azure ML-compatible release ID of 1 to 30 characters matching
+`[A-Za-z0-9][A-Za-z0-9._-]*`. The exact release ID becomes the asset version.
+The asset name is a deterministic lowercase dataset slug plus a short SHA-256
+suffix, so datasets that normalize to the same slug remain distinct.
+
+Registration reads the publication marker, release manifest, statistics, and
+checksum ledger from the published Blob release. A matching existing version is
+an idempotent success. A conflicting version is never overwritten.
+
+Registration failures do not invalidate a published release. The backend emits
+a structured `release.azureml.registration` diagnostic and retries missing
+registrations during startup reconciliation. Releases created before
+`metadata/release-statistics.json` was introduced remain valid but are skipped
+for registration with a `statistics-unavailable` diagnostic.
+
+The Azure ML-enabled container target includes the optional dependencies:
+
+```bash
+docker build --target azureml -t dataviewer-backend-azureml ./backend
+```
+
+The default production image excludes Azure ML dependencies. Local releases are
+not registered because they do not provide the canonical published Blob URL.
 
 ### VLM-as-Judge (experimental)
 
@@ -574,6 +615,9 @@ Mount the reviewed model directory read-only at `/models`. Update the mount and 
 # Backend
 docker build -t dataviewer-backend ./backend
 
+# Backend with optional Azure ML release registration dependencies
+docker build --target azureml -t dataviewer-backend-azureml ./backend
+
 # Frontend
 docker build -t dataviewer-frontend ./frontend
 ```
@@ -621,19 +665,26 @@ npm run build        # Production build
 
 The release workflow gates episodes on immutable review decisions and versioned quality evidence, builds a LeRobot 3.0 package in an isolated worker, and publishes only after semantic read-back and SHA-256 verification. The existing HDF5 Export action remains a separate non-release operation.
 
+Release packages contain regular files and directories only. Finalization and verification reject symbolic links so local and Azure Blob inventories remain identical.
+
+Each release includes `metadata/release-statistics.json`, which records
+deterministic descriptive trajectory metrics and their statistics profile. The
+statistics are checksum-protected package evidence and never change quality outcomes,
+release eligibility, or the byte-level verification trust boundary.
+
 Use the workspace actions independently:
 
-| Action             | Behavior                                                                                                         |
-|--------------------|------------------------------------------------------------------------------------------------------------------|
-| **Save**           | Persists current annotations, labels, and edits without navigating                                                |
+| Action             | Behavior                                                                                                             |
+|--------------------|----------------------------------------------------------------------------------------------------------------------|
+| **Save**           | Persists current annotations, labels, and edits without navigating                                                   |
 | **Run quality**    | Captures current source identity and checks timestamps, streams, frames, features, metadata, labels, and calibration |
-| **Accept episode** | Binds a review decision to the saved source bytes and quality evidence                                           |
-| **Create Release** | Publishes the accepted episode as an immutable, verified LeRobot package                                         |
-| **Next**           | Navigates independently and confirms before discarding unsaved changes                                           |
+| **Accept episode** | Binds a review decision to the saved source bytes and quality evidence                                               |
+| **Create Release** | Publishes the accepted episode as an immutable, verified LeRobot package                                             |
+| **Next**           | Navigates independently and confirms before discarding unsaved changes                                               |
 
 Run quality is disabled while the episode has unsaved changes. Saving after acceptance changes the reviewed source identity; rerun quality and accept the current saved version before creating a release.
 
-See [Dataset Release Workflow](../../docs/data-pipeline/dataset-release-workflow.md) for destination configuration, user steps, package artifacts, worker setup, cancellation, recovery, and troubleshooting.
+See [Dataset Release Workflow](../../docs/data-pipeline/dataset-release-workflow.md) for destination configuration, user steps, package artifacts, Azure ML registration, worker setup, cancellation, recovery, and troubleshooting. Generate release-to-model observability with the [Azure ML Lineage Report](../lineage-report/README.md).
 
 ## 📖 API Documentation
 

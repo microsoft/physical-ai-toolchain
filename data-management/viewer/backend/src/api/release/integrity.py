@@ -89,6 +89,7 @@ def finalize_release(
     """Write canonical ledgers, complete the manifest inventory, and write checksums."""
     if not package_root.is_dir():
         raise FileNotFoundError(package_root)
+    _reject_symbolic_links(package_root)
     accepted = tuple(sorted(accepted, key=lambda decision: decision.decision_id))
     rejected = tuple(sorted(rejected, key=lambda decision: decision.decision_id))
     accepted_ids = tuple(decision.decision_id for decision in accepted)
@@ -141,6 +142,7 @@ def finalize_release(
 
 def verify_release(package_root: Path) -> ReleaseManifest:
     """Verify exact release inventory, sizes, and application-owned SHA-256 values."""
+    _reject_symbolic_links(package_root)
     manifest_path = package_root / _MANIFEST_PATH
     checksums_path = package_root / _CHECKSUMS_PATH
     try:
@@ -305,6 +307,11 @@ def _release_file(path: Path, package_root: Path) -> ReleaseFile:
     relative_path = path.relative_to(package_root).as_posix()
     _validate_relative_path(relative_path)
     return ReleaseFile(path=relative_path, size_bytes=path.stat().st_size, sha256=_sha256_file(path))
+
+
+def _reject_symbolic_links(package_root: Path) -> None:
+    if package_root.is_symlink() or any(path.is_symlink() for path in package_root.rglob("*")):
+        raise ValueError("Release packages cannot contain symbolic links")
 
 
 def _sha256_file(path: Path) -> str:

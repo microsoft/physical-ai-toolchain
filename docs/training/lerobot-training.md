@@ -212,11 +212,11 @@ Supported dataset delivery differs by platform.
 
 Every submission uses an explicit dataset trust contract:
 
-| Trust | Input contract | Lineage behavior |
-|-------|----------------|------------------|
-| `unverified` | Generic Hub, Blob, local, or data-asset input | Emits `dataset.trust=unverified` without release IDs or evidence digests |
-| `verified` | One immutable Viewer release from Blob, or one version-pinned Azure ML data asset | Verifies release evidence before training and emits the release ID and manifest digest |
-| `derived` | Runtime-created merge of multiple verified Blob releases | Verifies every parent before mutation and emits a derived-input digest with ordered parent summaries |
+| Trust        | Input contract                                                                    | Lineage behavior                                                                                     |
+|--------------|-----------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
+| `unverified` | Generic Hub, Blob, local, or data-asset input                                     | Emits `dataset.trust=unverified` without release IDs or evidence digests                             |
+| `verified`   | One immutable Viewer release from Blob, or one version-pinned Azure ML data asset | Verifies release evidence before training and emits the release ID and manifest digest               |
+| `derived`    | Runtime-created merge of multiple verified Blob releases                          | Verifies every parent before mutation and emits a derived-input digest with ordered parent summaries |
 
 ### HuggingFace Hub (Default)
 
@@ -278,13 +278,15 @@ Combine datasets from different containers or storage accounts:
 
 LeRobot verifies each release, validates dataset compatibility, and merges into a derived workspace before training. The workspace records ordered parent release summaries and a deterministic derived-input digest.
 
-### AzureML Data Asset (Native Mount, AzureML only)
+### Azure ML Data Asset (Native Mount, Azure ML only)
 
-Use registered AzureML data assets, mounted read-only into the training container via AzureML's native `ro_mount` mechanism. No download step is required — datasets are available immediately at a FUSE mount path.
+Use registered Azure ML data assets, mounted read-only into the training container
+through the native `ro_mount` mechanism. The Viewer registers each compatible
+marker-complete Azure release with its exact release ID as the asset version.
 
 ```bash
 ./scripts/submit-azureml-lerobot-training.sh \
-  --dataset-asset azureml:pusht-episodes:3 \
+  --dataset-asset azureml:plate-grasping-001-v3-db084943fe26:pg-v3-20260925-r1 \
   --dataset-trust verified \
   -r pusht-model
 ```
@@ -298,9 +300,17 @@ Multiple data assets can be merged:
   -r merged-model
 ```
 
-The data asset URI must be version-pinned (`azureml:NAME:VERSION` or the full ARM path `azureml://.../data/NAME/versions/VERSION`). Shorthands like `@latest` are rejected to keep runs reproducible.
+The data asset URI must be version-pinned (`azureml:NAME:VERSION` or the full ARM
+path `azureml://.../data/NAME/versions/VERSION`). Use a version of 1 to 30
+characters matching `[A-Za-z0-9][A-Za-z0-9._-]*`. Shorthands such as `latest`
+and `@latest` are rejected to keep runs reproducible.
 
 Verified mode accepts exactly one mounted data asset. Multiple data assets and mixed data-asset plus Blob submissions remain explicitly unverified because their transformed bytes do not identify one immutable Viewer release.
+
+The training runtime verifies `.published.json`, the release manifest, quality
+evidence, exact file inventory, sizes, and SHA-256 values from the mounted path
+before training. Azure ML asset existence and metadata do not replace this byte
+verification.
 
 ### Combined Sources (AzureML only)
 
@@ -318,6 +328,9 @@ Data assets and blob URLs can be combined. All sources are merged automatically 
 MLflow tags retain bounded trust, release or derived identity, target format, source dataset, quality profile, and parent counts. The `lineage/dataset-lineage.json` artifact retains accepted decisions, source identities, quality artifact references, source-to-release episode mapping, and ordered parent summaries.
 
 Registered checkpoints embed the same dataset record in `azureml_lineage.json` with Azure ML and MLflow run IDs. Evaluation under `evaluation/sil` writes the same trust and identity into `eval_results.json`, `metrics.json`, and failure records while retaining each runtime release episode index and its original Viewer source episode reference.
+
+Generate a release-to-model report after registration and training with the
+[Azure ML Lineage Report](../../data-management/lineage-report/README.md).
 
 The release-to-experiment lifecycle uses `evaluation/sil` as its simulation endpoint. Hardware-in-the-loop and physical robot execution are optional and outside this validated path.
 

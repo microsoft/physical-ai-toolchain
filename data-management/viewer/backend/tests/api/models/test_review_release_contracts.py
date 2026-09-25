@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
+from src.api.models.release_workflow import ReleaseSubmitRequest
 from src.api.models.releases import (
     OperationalEvent,
     QualityEvidenceReference,
@@ -246,3 +247,20 @@ def test_given_operational_event_when_serialized_then_otel_fields_are_present() 
     assert payload["schema_version"] == "1.0.0"
     assert payload["event_name"] == "release.queued"
     assert payload["actor_id"] == "localuser"
+
+
+@pytest.mark.parametrize("release_id", ["release:2026", "release@production", "release+candidate"])
+def test_given_platform_neutral_release_id_when_submitted_then_azureml_delimiters_remain_valid(
+    release_id: str,
+) -> None:
+    request = ReleaseSubmitRequest(
+        release_id=release_id,
+        dataset_id="sample-dataset",
+        actor_id="localuser",
+        reason="Publish reviewed episodes",
+        destination_kind="local",
+        idempotency_key="request-1",
+        target_format=ReleaseFormat(name="lerobot", version="3.0"),
+    )
+
+    assert request.release_id == release_id

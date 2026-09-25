@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import numpy as np
 import pyarrow as pa
@@ -30,6 +30,7 @@ from src.api.models.reviews import (
     SourceFileIdentity,
     SourceIdentity,
 )
+from src.api.release.azureml_asset_registration import StatisticsUnavailableError
 from src.api.release.jobs import JobConflictError, JobState, ReleaseJobStore
 from src.api.release.lerobot import ReleaseReadback, ReleaseWriteResult
 from src.api.release.local_publisher import LocalReleasePublisher
@@ -86,6 +87,12 @@ def _package_quality(
         inventory_verified=True,
         checksums_verified=True,
     )
+
+
+def _write_statistics_stub(root: Path, _manifest: ReleaseManifest) -> None:
+    path = root / "metadata" / "release-statistics.json"
+    path.parent.mkdir(parents=True)
+    path.write_text('{"schema_version":"1.0.0"}\n', encoding="utf-8")
 
 
 async def _persist_evidence(
@@ -323,6 +330,8 @@ async def test_given_eligible_request_when_submitted_reordered_and_cancelled_the
 async def test_given_queued_release_when_processor_starts_then_verified_package_is_published(
     tmp_path: Path,
     destination_kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     # Arrange
     repository = LocalReviewRepository(tmp_path / "review", source_roots=(tmp_path / "source",))
@@ -386,9 +395,30 @@ async def test_given_queued_release_when_processor_starts_then_verified_package_
     )
     submitted = await service.submit(request)
     blob_publisher = MagicMock()
-    blob_publisher.publish = AsyncMock()
+    operation_order: list[str] = []
+
+    async def publish(*_args, **_kwargs) -> None:
+        operation_order.append("publish")
+
+    blob_publisher.publish = AsyncMock(side_effect=publish)
     blob_publisher.list_published_releases = AsyncMock(return_value=[])
     azure_publisher_factory = AsyncMock(return_value=blob_publisher)
+    evidence = MagicMock()
+
+    async def hydrate_evidence(*_args) -> MagicMock:
+        operation_order.append("hydrate")
+        return evidence
+
+    hydrate = AsyncMock(side_effect=hydrate_evidence)
+    monkeypatch.setattr("src.api.release.processor.hydrate_registration_evidence", hydrate)
+    registration_service = MagicMock()
+    if destination_kind == "azure":
+
+        def fail_registration(_evidence: object) -> None:
+            operation_order.append("ensure")
+            raise RuntimeError("Azure ML unavailable")
+
+        registration_service.ensure.side_effect = fail_registration
     processor = ReleaseProcessor(
         service,
         jobs,
@@ -396,6 +426,8 @@ async def test_given_queued_release_when_processor_starts_then_verified_package_
         assembler=assemble,
         local_publisher=LocalReleasePublisher(tmp_path / "releases"),
         azure_publisher_factory=azure_publisher_factory,
+        azureml_registration_service=registration_service,
+        statistics_writer=_write_statistics_stub,
     )
 
     # Act
@@ -410,8 +442,10 @@ async def test_given_queued_release_when_processor_starts_then_verified_package_
     if destination_kind == "local":
         assert (destination / ".published.json").is_file()
         assert (destination / "metadata" / "release-manifest.json").is_file()
+        assert (destination / "metadata" / "release-statistics.json").is_file()
         assert (destination / "checksums.sha256").is_file()
         blob_publisher.publish.assert_not_awaited()
+        registration_service.ensure.assert_not_called()
     else:
         blob_publisher.publish.assert_awaited_once_with(
             request.dataset_id,
@@ -419,6 +453,56 @@ async def test_given_queued_release_when_processor_starts_then_verified_package_
             tmp_path / "staging" / request.dataset_id / submitted.job_id,
             owner=submitted.job_id,
         )
+        registration_service.ensure.assert_called_once_with(evidence)
+        assert operation_order[:3] == ["publish", "hydrate", "ensure"]
+        assert "Azure ML registration failed" in caplog.text
+        blob_publisher.list_published_releases.return_value = [(request.dataset_id, request.release_id)]
+        await processor.start()
+        registration_service.ensure.assert_has_calls([call(evidence), call(evidence)])
+        assert hydrate.await_args_list[-2:] == [
+            call(blob_publisher, request.dataset_id, request.release_id),
+            call(blob_publisher, request.dataset_id, request.release_id),
+        ]
+
+
+async def test_given_registration_failures_when_processor_reconciles_then_other_releases_continue(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Arrange
+    blob_publisher = MagicMock()
+    blob_publisher.list_published_releases = AsyncMock(
+        return_value=[("dataset-1", "legacy"), ("dataset-1", "corrupt"), ("dataset-1", "release-1")]
+    )
+    azure_publisher_factory = AsyncMock(return_value=blob_publisher)
+    evidence = MagicMock()
+    hydrate = AsyncMock(
+        side_effect=[
+            StatisticsUnavailableError("statistics unavailable"),
+            ValueError("statistics digest mismatch"),
+            evidence,
+        ]
+    )
+    monkeypatch.setattr("src.api.release.processor.hydrate_registration_evidence", hydrate)
+    registration_service = MagicMock()
+    processor = ReleaseProcessor(
+        MagicMock(),
+        ReleaseJobStore(tmp_path / "jobs"),
+        staging_root=tmp_path / "staging",
+        assembler=AsyncMock(),
+        local_publisher=LocalReleasePublisher(tmp_path / "releases"),
+        azure_publisher_factory=azure_publisher_factory,
+        azureml_registration_service=registration_service,
+    )
+
+    # Act
+    await processor.start()
+
+    # Assert
+    registration_service.ensure.assert_called_once_with(evidence)
+    assert "statistics-unavailable" in caplog.text
+    assert "registration evidence is invalid" in caplog.text
 
 
 async def test_given_lerobot_source_when_assembled_then_worker_receives_complete_numeric_frames(tmp_path: Path) -> None:

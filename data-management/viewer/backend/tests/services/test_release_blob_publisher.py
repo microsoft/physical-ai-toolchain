@@ -42,6 +42,7 @@ class _Blob:
 class _Container:
     def __init__(self) -> None:
         self.payloads: dict[str, bytes] = {}
+        self.url = "https://storage.example/datasets"
 
     def get_blob_client(self, name: str) -> _Blob:
         return _Blob(self, name)
@@ -87,3 +88,19 @@ async def test_given_verified_blobs_when_marker_created_then_reader_exposes_rele
     assert await publisher.list_published_releases() == [("sample-dataset", "release-1")]
     marker_name = "exports/releases/sample-dataset/release-1/.published.json"
     assert list(container.payloads)[-1] == marker_name
+    assert await publisher.read_published_file("sample-dataset", "release-1", "payload.bin") == b"release"
+    assert (
+        publisher.published_release_url("sample-dataset", "release-1")
+        == "https://storage.example/datasets/exports/releases/sample-dataset/release-1"
+    )
+
+
+async def test_given_unmarked_blobs_when_published_file_read_then_payload_is_hidden() -> None:
+    # Arrange
+    container = _Container()
+    container.payloads["exports/releases/sample-dataset/release-1/payload.bin"] = b"release"
+    publisher = BlobReleasePublisher(container, export_prefix="exports")
+
+    # Act & Assert
+    with pytest.raises(KeyError):
+        await publisher.read_published_file("sample-dataset", "release-1", "payload.bin")

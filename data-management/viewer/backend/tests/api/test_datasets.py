@@ -14,24 +14,36 @@ from src.api.models.datasources import DatasetInfo, FeatureSchema, TaskInfo
 @pytest.fixture
 def client(monkeypatch):
     """Create test client with isolated singletons and empty temp data path."""
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory() as data_root, tempfile.TemporaryDirectory() as release_root:
         monkeypatch.setenv("STORAGE_BACKEND", "local")
-        monkeypatch.setenv("DATA_DIR", tmp)
+        monkeypatch.setenv("DATA_DIR", data_root)
+        monkeypatch.setenv("DATAVIEWER_RELEASE_ROOT", release_root)
 
         import src.api.config as config_mod
+        import src.api.release.processor as processor_mod
         import src.api.services.annotation_service as ann_mod
         import src.api.services.dataset_service as ds_mod
+        import src.api.services.release_workflow_service as release_mod
+        import src.api.services.review_workflow_service as review_mod
 
         config_mod._app_config = None
+        processor_mod._release_processor = None
         ds_mod._dataset_service = None
         ann_mod._annotation_service = None
+        release_mod._release_workflow_service = None
+        review_mod._review_repository = None
+        review_mod._review_workflow_service = None
 
         with TestClient(app) as c:
             yield c
 
         config_mod._app_config = None
+        processor_mod._release_processor = None
         ds_mod._dataset_service = None
         ann_mod._annotation_service = None
+        release_mod._release_workflow_service = None
+        review_mod._review_repository = None
+        review_mod._review_workflow_service = None
 
 
 @pytest.fixture

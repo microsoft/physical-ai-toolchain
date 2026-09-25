@@ -45,6 +45,31 @@ else
 fi
 fatal() { error "$@"; exit 1; }
 
+validate_azureml_data_asset_uri() {
+  local asset_uri="${1:?data asset URI required}" version remainder name
+
+  case "$asset_uri" in
+    azureml://*/data/*/versions/*)
+      version="${asset_uri##*/versions/}"
+      ;;
+    azureml:*)
+      remainder="${asset_uri#azureml:}"
+      name="${remainder%%:*}"
+      version="${remainder#*:}"
+      if [[ -z "$name" || "$version" == "$remainder" || "$version" == *:* ]]; then
+        fatal "--dataset-asset: unsupported URI form '$asset_uri'. Use azureml:NAME:VERSION or azureml://.../data/NAME/versions/VERSION."
+      fi
+      ;;
+    *)
+      fatal "--dataset-asset: unsupported URI form '$asset_uri'. Use azureml:NAME:VERSION or azureml://.../data/NAME/versions/VERSION."
+      ;;
+  esac
+
+  if [[ "$version" == "latest" || ! "$version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,29}$ ]]; then
+    fatal "--dataset-asset: version must be an explicit immutable value of 1-30 characters matching [A-Za-z0-9][A-Za-z0-9._-]* (got '$asset_uri'); latest and @latest are not accepted."
+  fi
+}
+
 derive_azureml_environment_version_from_image() {
   local image="$1" tag_ref tag digest version
 
