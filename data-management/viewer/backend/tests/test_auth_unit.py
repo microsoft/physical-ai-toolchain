@@ -19,6 +19,7 @@ from src.api.auth import (
     require_auth,
     require_role,
     reset_auth_provider,
+    resolve_principal_context,
 )
 from tests.conftest import make_asgi_request
 
@@ -143,13 +144,13 @@ class TestJwtProvider:
         result = asyncio.run(
             provider.authenticate(make_asgi_request("POST", "/api/x", headers={"Authorization": "Bearer my-token"}))
         )
-        assert result == {"sub": "abc", "aud": "aud"}
+        assert result == {"sub": "abc", "aud": "aud", "auth_method": "azure_ad"}
         fake_jwt.decode.assert_called_once()
         # JWKS client is cached on the provider after first use.
         result2 = asyncio.run(
             provider.authenticate(make_asgi_request("POST", "/api/x", headers={"Authorization": "Bearer my-token"}))
         )
-        assert result2 == {"sub": "abc", "aud": "aud"}
+        assert result2 == {"sub": "abc", "aud": "aud", "auth_method": "azure_ad"}
         fake_jwt.PyJWKClient.assert_called_once()
 
     def test_decode_error_returns_none(self, monkeypatch: pytest.MonkeyPatch):
@@ -297,6 +298,43 @@ class TestRequireAuth:
         monkeypatch.setenv("DATAVIEWER_API_KEY", "right")
         user = asyncio.run(require_auth(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "right"})))
         assert user is not None and user["auth_method"] == "apikey"
+
+
+class TestPrincipalContext:
+    def test_given_authenticated_subject_when_resolved_then_scope_is_stable_and_opaque(self):
+        user = {"sub": "alice@example.com", "auth_method": "azure_ad"}
+
+        first = resolve_principal_context(user)
+        second = resolve_principal_context(user)
+
+        assert first == second
+        assert first.auth_mode == "azure_ad"
+        assert "alice" not in first.scope_id
+
+    def test_given_different_providers_when_resolved_then_scopes_are_distinct(self):
+        azure = resolve_principal_context({"sub": "shared-subject", "auth_method": "azure_ad"})
+        auth0 = resolve_principal_context({"sub": "shared-subject", "auth_method": "auth0"})
+
+        assert azure.scope_id != auth0.scope_id
+
+    def test_given_disabled_auth_when_resolved_then_local_scope_is_non_personal(self):
+        context = resolve_principal_context(None)
+
+        assert context.auth_mode == "local"
+        assert context.scope_id
+
+    @pytest.mark.parametrize(
+        "user",
+        [
+            {"sub": "subject", "auth_method": "unsupported"},
+            {"sub": "", "auth_method": "apikey"},
+        ],
+    )
+    def test_given_invalid_identity_claims_when_resolved_then_request_is_rejected(self, user):
+        with pytest.raises(HTTPException) as exc_info:
+            resolve_principal_context(user)
+
+        assert exc_info.value.status_code == 401
 
 
 class TestRequireRole:

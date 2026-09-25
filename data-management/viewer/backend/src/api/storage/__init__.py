@@ -5,13 +5,15 @@ Provides backends for saving/retrieving episode annotations and
 reading dataset files across local and Azure Blob Storage providers.
 """
 
-from .base import StorageAdapter, StorageError
+from .base import RevisionConflictError, StorageAdapter, StorageError, VersionedValue
 from .local import LocalStorageAdapter
 
 __all__ = [
     "LocalStorageAdapter",
+    "RevisionConflictError",
     "StorageAdapter",
     "StorageError",
+    "VersionedValue",
 ]
 
 

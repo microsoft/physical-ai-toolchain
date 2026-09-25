@@ -43,6 +43,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends shellcheck jq ffmpeg
 
       - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
         run: scripts/setup/install-actionlint.sh
 
       - name: Install OSV-Scanner v2.3.8
@@ -57,22 +59,22 @@ jobs:
           rm -f /tmp/osv-scanner
           osv-scanner --version
 
-      - name: Setup Python 3.12
+      - name: Setup root Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
-          python-version: '3.12'
+          python-version-file: .python-version
 
       - name: Setup uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+        with:
+          version: '0.12.8'
 
       - name: Setup Node.js (frontend pin)
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version-file: data-management/viewer/frontend/.nvmrc
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            data-management/viewer/frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
@@ -83,6 +85,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
         with:
+          terraform_version: '1.16.2'
           terraform_wrapper: false
 
       - name: Setup TFLint
@@ -99,23 +102,19 @@ jobs:
           Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -SkipPublisherCheck -Scope CurrentUser
           Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Force -SkipPublisherCheck -Scope CurrentUser
 
-      - name: Install root Node tooling (markdownlint, cspell, table-formatter, link-check)
+      - name: Install Node dependencies
         run: npm ci
 
       - name: Presync root Python dev group
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
 
       - name: Presync dataviewer backend Python (dev + analysis + hdf5 + export + auth)
         working-directory: data-management/viewer/backend
-        run: uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
+        run: uv sync --frozen --extra dev --extra analysis --extra hdf5 --extra export --extra auth
 
       - name: Presync evaluation Python dev group
         working-directory: evaluation
-        run: uv sync --only-group dev
-
-      - name: Presync dataviewer frontend
-        working-directory: data-management/viewer/frontend
-        run: npm ci
+        run: uv sync --frozen --only-group dev
 
       - name: Presync Go modules (terraform e2e)
         working-directory: infrastructure/terraform/e2e

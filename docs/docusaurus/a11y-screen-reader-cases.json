@@ -1,0 +1,94 @@
+{
+    "$schema": "https://microsoft.github.io/hve-core/accessibility/screen-reader-case.schema.json",
+    "schemaVersion": "1.0.0",
+    "catalogId": "physical-ai-toolchain-screen-reader-cases",
+    "cases": [
+        {
+            "caseId": "SR-INTEGRITY-001",
+            "outcomeClass": "integrity",
+            "requiredCapabilities": [
+                "real-nvda",
+                "structured-node-assertions"
+            ],
+            "targetRefs": [
+                "positiveControl.checkbox",
+                "positiveControl.headings"
+            ],
+            "states": [
+                "initial"
+            ],
+            "privacyClass": "ordinary",
+            "cadence": "advisory-manual",
+            "promotion": "integrity-gate"
+        },
+        {
+            "caseId": "HVE-NVDA-006",
+            "outcomeClass": "structure",
+            "requiredCapabilities": [
+                "table-navigation",
+                "real-nvda"
+            ],
+            "targetRefs": [
+                "docs.table"
+            ],
+            "states": [
+                "initial"
+            ],
+            "privacyClass": "ordinary",
+            "cadence": "both",
+            "promotion": "candidate-until-calibrated"
+        },
+        {
+            "caseId": "HVE-NVDA-010",
+            "outcomeClass": "announcement",
+            "requiredCapabilities": [
+                "action-scoped-speech",
+                "real-nvda"
+            ],
+            "targetRefs": [
+                "search.status"
+            ],
+            "states": [
+                "results",
+                "no-results"
+            ],
+            "privacyClass": "ordinary",
+            "cadence": "both",
+            "promotion": "candidate-until-calibrated"
+        },
+        {
+            "caseId": "HVE-NVDA-011",
+            "outcomeClass": "structure",
+            "requiredCapabilities": [
+                "heading-navigation",
+                "structured-node-assertions"
+            ],
+            "targetRefs": [
+                "docs.heading"
+            ],
+            "states": [
+                "route-inventory"
+            ],
+            "privacyClass": "ordinary",
+            "cadence": "both",
+            "promotion": "candidate-until-calibrated"
+        },
+        {
+            "caseId": "HVE-NVDA-014",
+            "outcomeClass": "announcement",
+            "requiredCapabilities": [
+                "structured-node-assertions"
+            ],
+            "targetRefs": [
+                "search.pageInput",
+                "search.regionHeading"
+            ],
+            "states": [
+                "refocus"
+            ],
+            "privacyClass": "ordinary",
+            "cadence": "both",
+            "promotion": "candidate-until-calibrated"
+        }
+    ]
+}

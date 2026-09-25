@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -13,6 +14,8 @@ from urllib.parse import urlparse
 import pytest
 
 from tests.e2e._common import (
+    E2EHandle,
+    command_tuple,
     e2e_name,
     env_value,
     format_command_failure,
@@ -38,9 +41,11 @@ def archive_aml_asset(
     aml_workspace: AzureMLWorkspace,
     asset_type: str,
     name: str,
-    version: str,
+    version: str | None,
 ) -> None:
-    log_e2e(f"Archiving AzureML {asset_type} {name}:{version}")
+    rendered_version = f":{version}" if version is not None else ""
+    log_e2e(f"Archiving AzureML {asset_type} {name}{rendered_version}")
+    version_args = ["--version", version] if version is not None else []
     result = run_command(
         [
             "az",
@@ -49,15 +54,14 @@ def archive_aml_asset(
             "archive",
             "--name",
             name,
-            "--version",
-            version,
+            *version_args,
             *aml_workspace_args(aml_workspace),
         ],
         cwd=repo_root,
     )
     if result.returncode != 0:
         raise AssertionError(
-            f"Failed to archive AzureML {asset_type} {name}:{version}\n\n{format_command_failure(result)}"
+            f"Failed to archive AzureML {asset_type} {name}{rendered_version}\n\n{format_command_failure(result)}"
         )
 
 
@@ -66,6 +70,7 @@ class AzureMLJob:
     name: str
     workspace: AzureMLWorkspace
     experiment_name: str
+    handle: E2EHandle = field(default_factory=E2EHandle)
     is_terminal: bool = False
     terminal_status: str | None = None
 
@@ -176,6 +181,69 @@ def archive_all_model_versions(repo_root: Path, aml_workspace: AzureMLWorkspace,
     """Archive every registered version of an AzureML model (best-effort cleanup)."""
     for version in _list_model_versions(repo_root, aml_workspace, model_name):
         archive_aml_asset(repo_root, aml_workspace, "model", model_name, str(version))
+
+
+def archive_aml_data_asset(repo_root: Path, aml_workspace: AzureMLWorkspace, asset_name: str) -> None:
+    result = run_command(
+        [
+            "az",
+            "ml",
+            "data",
+            "list",
+            "--name",
+            asset_name,
+            *aml_workspace_args(aml_workspace),
+            "-o",
+            "json",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        if "container was not found" in result.stderr:
+            return
+        raise AssertionError(
+            f"Failed to list AzureML data asset versions for {asset_name!r}\n\n{format_command_failure(result)}"
+        )
+    payload = parse_json_from_output(result.stdout)
+    if not isinstance(payload, list) or not payload:
+        return
+    archive_aml_asset(repo_root, aml_workspace, "data", asset_name, None)
+
+
+def assert_aml_data_asset_exists(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    asset_name: str,
+    expected_path: str,
+) -> None:
+    result = run_command(
+        [
+            "az",
+            "ml",
+            "data",
+            "show",
+            "--name",
+            asset_name,
+            "--label",
+            "latest",
+            *aml_workspace_args(aml_workspace),
+            "-o",
+            "json",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"AzureML data asset {asset_name!r} was not registered\n\n{format_command_failure(result)}"
+        )
+    payload = parse_json_from_output(result.stdout)
+    if not isinstance(payload, Mapping):
+        raise AssertionError(f"AzureML data asset {asset_name!r} payload was not a JSON object")
+    actual_path = payload.get("path")
+    if actual_path != expected_path:
+        raise AssertionError(f"AzureML data asset {asset_name!r} had path {actual_path!r}, expected {expected_path!r}")
+    log_e2e(f"AzureML data asset passed: name={asset_name}, path={actual_path}")
 
 
 def _parse_azureml_job_name(output: str) -> str | None:
@@ -416,6 +484,9 @@ def submit_aml_lerobot_eval(
     policy_args = list(policy_source.args)
     policy_description = policy_source.description
     experiment_name = e2e_name("il-eval-e2e-aml")
+    submission_script = (
+        "submit-azureml-vla-pi0-eval.sh" if policy_type in {"pi0", "pi0_fast"} else "submit-azureml-lerobot-eval.sh"
+    )
     log_e2e(
         "Submitting AzureML LeRobot eval job "
         f"for policy={policy_description}, policy_type={policy_type}, eval_episodes={eval_episodes}, "
@@ -423,7 +494,7 @@ def submit_aml_lerobot_eval(
     )
     result = run_command(
         [
-            str(repo_root / "evaluation/sil/scripts/submit-azureml-lerobot-eval.sh"),
+            str(repo_root / "evaluation/sil/scripts" / submission_script),
             *policy_args,
             "--policy-type",
             policy_type,
@@ -449,6 +520,118 @@ def submit_aml_lerobot_eval(
         raise AssertionError(f"AzureML LeRobot eval e2e submission failed\n\n{format_command_failure(result)}")
 
     return _aml_job_from_submission(result, aml_workspace, experiment_name, "AzureML LeRobot eval")
+
+
+def _reject_non_finite_json(value: str) -> None:
+    raise ValueError(f"non-finite JSON value {value}")
+
+
+def _load_strict_json(path: Path) -> Any:
+    with path.open(encoding="utf-8") as stream:
+        return json.load(stream, parse_constant=_reject_non_finite_json)
+
+
+def _find_downloaded_output_file(download_root: Path, filename: str) -> Path:
+    matches = list(download_root.rglob(filename))
+    if len(matches) != 1:
+        rendered = ", ".join(str(path.relative_to(download_root)) for path in matches) or "<none>"
+        raise AssertionError(f"Expected exactly one {filename!r} in AzureML eval output, found: {rendered}")
+    return matches[0]
+
+
+def assert_aml_lerobot_eval_artifact_contract(job: AzureMLJob, *, eval_episodes: int) -> None:
+    """Download and validate the policy-independent replay evaluation artifacts."""
+    from azure.ai.ml import MLClient
+    from azure.identity import DefaultAzureCredential
+
+    client = MLClient(
+        credential=DefaultAzureCredential(),
+        subscription_id=job.workspace.subscription_id,
+        resource_group_name=job.workspace.resource_group,
+        workspace_name=job.workspace.workspace_name,
+    )
+
+    with tempfile.TemporaryDirectory(prefix=f"{job.name}-eval-output-") as download_dir:
+        download_root = Path(download_dir)
+        client.jobs.download(name=job.name, download_path=str(download_root), output_name="eval_results")
+
+        metrics = _load_strict_json(_find_downloaded_output_file(download_root, "metrics.json"))
+        results = _load_strict_json(_find_downloaded_output_file(download_root, "eval_results.json"))
+        failure_cases_path = _find_downloaded_output_file(download_root, "failure_cases.jsonl")
+
+        assert isinstance(metrics, dict)
+        assert set(metrics) == {
+            "evaluation_schema_version",
+            "aggregate_verdict",
+            "baseline_model_version",
+            "metrics",
+        }
+        assert metrics["evaluation_schema_version"] == 1
+        assert metrics["aggregate_verdict"] == "pass"
+        assert metrics["baseline_model_version"] == "none"
+
+        metric_entries = metrics["metrics"]
+        assert isinstance(metric_entries, list)
+        assert {entry["name"] for entry in metric_entries} == {
+            "action_accuracy_l1",
+            "action_accuracy_l2",
+            "inference_latency_mean_ms",
+            "throughput_hz",
+        }
+        for entry in metric_entries:
+            assert set(entry) == {
+                "name",
+                "value",
+                "absolute_threshold",
+                "absolute_verdict",
+                "baseline_value",
+                "regression_pct",
+                "regression_verdict",
+            }
+            assert isinstance(entry["value"], int | float)
+            assert entry["absolute_threshold"] is None
+            assert entry["absolute_verdict"] == "pass"
+            assert entry["baseline_value"] is None
+            assert entry["regression_pct"] == 0.0
+            assert entry["regression_verdict"] == "skipped"
+
+        assert isinstance(results, dict)
+        assert set(results) == {
+            "job_name",
+            "policy_repo_id",
+            "policy_type",
+            "dataset_repo_id",
+            "device",
+            "episodes_evaluated",
+            "aggregate_mse",
+            "aggregate_mae",
+            "aggregate_avg_inference_ms",
+            "aggregate_throughput_hz",
+            "per_episode",
+            "status",
+        }
+        assert results["status"] == "completed"
+        assert results["episodes_evaluated"] == eval_episodes
+        assert len(results["per_episode"]) == eval_episodes
+
+        for line in failure_cases_path.read_text(encoding="utf-8").splitlines():
+            record = json.loads(line, parse_constant=_reject_non_finite_json)
+            assert set(record) == {
+                "evaluation_schema_version",
+                "episode_id",
+                "dataset_id",
+                "dataset_version",
+                "domain_category",
+                "model_version",
+                "artifact_refs",
+                "failure_mode",
+                "metric_values",
+                "metric_thresholds_violated",
+            }
+            assert record["evaluation_schema_version"] == 1
+            assert record["failure_mode"] == "rollout_error"
+
+    log_e2e(f"AzureML LeRobot eval artifact contract passed for job {job.name}")
 
 
 def resolve_aml_isaac_eval_model_override() -> AmlModelRef | None:
@@ -560,6 +743,9 @@ def _aml_job_from_submission(
     aml_workspace: AzureMLWorkspace,
     experiment_name: str,
     description: str,
+    *,
+    handle: E2EHandle | None = None,
+    expected_job_name: str | None = None,
 ) -> AzureMLJob:
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     job_name = _parse_azureml_job_name(combined_output)
@@ -567,8 +753,20 @@ def _aml_job_from_submission(
         raise AssertionError(
             f"Unable to parse {description} job name from submission output\n\n{combined_output.strip()}"
         )
+    if expected_job_name is not None and job_name != expected_job_name:
+        raise AssertionError(f"{description} returned job name {job_name!r}, expected {expected_job_name!r}")
     log_e2e(f"Submitted {description} job name={job_name}")
-    return AzureMLJob(name=job_name, workspace=aml_workspace, experiment_name=experiment_name)
+    active_handle = handle or E2EHandle()
+    active_handle.submission_commands.append(command_tuple(result.args))
+    active_handle.resource_identifiers["azureml_job"] = job_name
+    active_handle.attempts["azureml_job"] = ["initial"]
+    active_handle.retry_classifications["azureml_job"] = "none"
+    return AzureMLJob(
+        name=job_name,
+        workspace=aml_workspace,
+        experiment_name=experiment_name,
+        handle=active_handle,
+    )
 
 
 def fetch_aml_job_payload(job: AzureMLJob, repo_root: Path) -> dict[str, Any]:
@@ -651,9 +849,39 @@ def wait_until_aml_completed(
     log_e2e(f"AzureML job {job.name} completed successfully")
 
 
+def fetch_aml_job_logs(job: AzureMLJob, repo_root: Path) -> str:
+    with tempfile.TemporaryDirectory(prefix=f"e2e-aml-logs-{job.name}-") as download_root:
+        result = run_command(
+            [
+                "az",
+                "ml",
+                "job",
+                "download",
+                "--name",
+                job.name,
+                "--all",
+                "--download-path",
+                download_root,
+                *aml_workspace_args(job.workspace),
+            ],
+            cwd=repo_root,
+        )
+        if result.returncode != 0:
+            raise AssertionError(f"Unable to fetch AzureML job {job.name!r} logs\n\n{format_command_failure(result)}")
+
+        user_logs = sorted(Path(download_root).rglob("user_logs/*.txt"))
+        logs = "\n".join(path.read_text(encoding="utf-8", errors="replace") for path in user_logs)
+        if not logs:
+            raise AssertionError(f"AzureML job {job.name!r} did not produce downloadable user logs")
+
+    job.handle.logs["azureml_job"] = logs
+    return logs
+
+
 def _mark_job_terminal(job: AzureMLJob, terminal_status: str) -> None:
     job.is_terminal = True
     job.terminal_status = terminal_status
+    job.handle.terminal_states["azureml_job"] = terminal_status
 
 
 def assert_job_has_checkpoint(job: AzureMLJob) -> None:

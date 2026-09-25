@@ -123,3 +123,45 @@ class TestApi:
             },
         )
         assert rsp.status_code == 404
+
+
+class TestAccessibilityDocumentationApps:
+    def test_vlm_echo_app_exposes_documentation_without_model_loading(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Arrange
+        fastapi = pytest.importorskip("fastapi")
+        pytest.importorskip("httpx")
+        from fastapi.testclient import TestClient
+        from vlm_judge.api import build_app
+
+        monkeypatch.setenv("VLM_JUDGE_BACKEND", "echo")
+        monkeypatch.setenv("VLM_JUDGE_CACHE_DIR", "")
+
+        # Act
+        with TestClient(build_app()) as documentation_client:
+            responses = [documentation_client.get(path) for path in ("/docs", "/redoc", "/openapi.json", "/health")]
+
+        # Assert
+        assert all(response.status_code == fastapi.status.HTTP_200_OK for response in responses)
+        assert responses[-1].json()["backend_kind"] == "echo"
+
+    def test_openai_echo_app_exposes_safe_documentation_and_completion(self) -> None:
+        # Arrange
+        pytest.importorskip("fastapi")
+        pytest.importorskip("httpx")
+        from fastapi.testclient import TestClient
+        from vlm_judge.openai_shim import build_echo_app
+
+        # Act
+        with TestClient(build_echo_app()) as documentation_client:
+            docs_response = documentation_client.get("/docs")
+            redoc_response = documentation_client.get("/redoc")
+            completion_response = documentation_client.post(
+                "/v1/chat/completions",
+                json={"messages": [{"role": "user", "content": "Return a deterministic test response"}]},
+            )
+
+        # Assert
+        assert docs_response.status_code == 200
+        assert redoc_response.status_code == 200
+        assert completion_response.status_code == 200
+        assert completion_response.json()["model"] == "echo"

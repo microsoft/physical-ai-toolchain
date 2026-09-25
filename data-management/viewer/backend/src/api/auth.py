@@ -12,16 +12,30 @@ Failed authentication attempts are logged with the client IP and requested
 resource; credentials are never logged.
 """
 
+from __future__ import annotations
+
+import hashlib
 import logging
 import os
 import secrets
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal, cast
 
 from fastapi import Depends, HTTPException, Request, status
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+AuthMode = Literal["azure_ad", "auth0", "easy_auth", "apikey", "local"]
+
+
+class PrincipalContext(BaseModel):
+    """Opaque browser-safe identity for ownership and draft isolation."""
+
+    scope_id: str
+    auth_mode: AuthMode
+
 
 # ============================================================================
 # Provider ABCs
@@ -75,10 +89,17 @@ class ApiKeyProvider(AuthProvider):
 class JwtProvider(AuthProvider):
     """Validates Bearer JWTs using a JWKS endpoint (Azure AD or Auth0)."""
 
-    def __init__(self, jwks_uri: str, audience: str, issuer: str) -> None:
+    def __init__(
+        self,
+        jwks_uri: str,
+        audience: str,
+        issuer: str,
+        auth_method: Literal["azure_ad", "auth0"] = "azure_ad",
+    ) -> None:
         self._jwks_uri = jwks_uri
         self._audience = audience
         self._issuer = issuer
+        self._auth_method = auth_method
         self._jwks_client: Any = None
 
     def _get_jwks_client(self) -> Any:
@@ -116,6 +137,7 @@ class JwtProvider(AuthProvider):
                 audience=self._audience,
                 issuer=self._issuer,
             )
+            payload["auth_method"] = self._auth_method
             return payload
         except jwt.PyJWTError:
             return None
@@ -190,14 +212,14 @@ def _build_provider() -> AuthProvider:
         client_id = os.environ.get("DATAVIEWER_AZURE_CLIENT_ID", "")
         jwks_uri = f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys"
         issuer = f"https://login.microsoftonline.com/{tenant_id}/v2.0"
-        return JwtProvider(jwks_uri=jwks_uri, audience=client_id, issuer=issuer)
+        return JwtProvider(jwks_uri=jwks_uri, audience=client_id, issuer=issuer, auth_method="azure_ad")
 
     if provider_name == "auth0":
         domain = os.environ.get("DATAVIEWER_AUTH0_DOMAIN", "")
         audience = os.environ.get("DATAVIEWER_AUTH0_AUDIENCE", "")
         jwks_uri = f"https://{domain}/.well-known/jwks.json"
         issuer = f"https://{domain}/"
-        return JwtProvider(jwks_uri=jwks_uri, audience=audience, issuer=issuer)
+        return JwtProvider(jwks_uri=jwks_uri, audience=audience, issuer=issuer, auth_method="auth0")
 
     if provider_name == "easy_auth":
         return EasyAuthProvider()
@@ -255,6 +277,31 @@ async def require_auth(request: Request) -> dict[str, Any] | None:
         )
 
     return user
+
+
+def resolve_principal_context(user: dict[str, Any] | None) -> PrincipalContext:
+    """Resolve authenticated claims to an opaque stable ownership scope."""
+    if user is None:
+        auth_mode: AuthMode = "local"
+        subject = "disabled-auth-session"
+    else:
+        raw_auth_mode = str(user.get("auth_method", ""))
+        if raw_auth_mode not in {"azure_ad", "auth0", "easy_auth", "apikey"}:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unsupported authentication identity")
+        auth_mode = cast(AuthMode, raw_auth_mode)
+        subject = str(user.get("sub", "")).strip()
+        if not subject:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication subject is required")
+
+    digest = hashlib.sha256(f"{auth_mode}\0{subject}".encode()).hexdigest()
+    return PrincipalContext(scope_id=f"principal-{digest}", auth_mode=auth_mode)
+
+
+def require_principal_context(
+    user: dict[str, Any] | None = Depends(require_auth),
+) -> PrincipalContext:
+    """Return the server-authoritative principal context for the request."""
+    return resolve_principal_context(user)
 
 
 def require_role(required_role: str) -> Callable:

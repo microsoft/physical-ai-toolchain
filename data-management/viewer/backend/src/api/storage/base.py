@@ -6,8 +6,25 @@ annotation persistence across different storage backends.
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from ..models.annotations import EpisodeAnnotationFile
+
+
+@dataclass(frozen=True)
+class VersionedValue[T]:
+    """A stored value and its strong revision validator."""
+
+    value: T | None
+    etag: str | None
+
+
+class RevisionConflictError(Exception):
+    """A conditional storage operation did not match the current revision."""
+
+    def __init__(self, current_etag: str | None) -> None:
+        super().__init__("Resource revision precondition failed")
+        self.current_etag = current_etag
 
 
 class StorageAdapter(ABC):
@@ -28,7 +45,15 @@ class StorageAdapter(ABC):
         pass
 
     @abstractmethod
-    async def save_annotation(self, dataset_id: str, episode_index: int, annotation: EpisodeAnnotationFile) -> None:
+    async def save_annotation(
+        self,
+        dataset_id: str,
+        episode_index: int,
+        annotation: EpisodeAnnotationFile,
+        *,
+        if_match: str | None = None,
+        if_none_match: bool = False,
+    ) -> str:
         """
         Save annotations for an episode.
 
@@ -41,6 +66,14 @@ class StorageAdapter(ABC):
             StorageError: If the save operation fails.
         """
         pass
+
+    async def get_annotation_versioned(
+        self,
+        dataset_id: str,
+        episode_index: int,
+    ) -> VersionedValue[EpisodeAnnotationFile]:
+        """Retrieve an annotation with its revision validator."""
+        return VersionedValue(value=await self.get_annotation(dataset_id, episode_index), etag=None)
 
     @abstractmethod
     async def list_annotated_episodes(self, dataset_id: str) -> list[int]:
@@ -56,7 +89,13 @@ class StorageAdapter(ABC):
         pass
 
     @abstractmethod
-    async def delete_annotation(self, dataset_id: str, episode_index: int) -> bool:
+    async def delete_annotation(
+        self,
+        dataset_id: str,
+        episode_index: int,
+        *,
+        if_match: str | None = None,
+    ) -> bool:
         """
         Delete annotations for an episode.
 

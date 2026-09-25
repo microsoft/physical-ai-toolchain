@@ -17,6 +17,7 @@ if str(_EVALUATION_ROOT) not in sys.path:
     sys.path.insert(0, str(_EVALUATION_ROOT))
 
 from sil.hf_revision import resolve_hf_revision  # noqa: E402
+from sil.policy_runner import VLA_POLICY_TYPES, load_pretrained_policy, postprocess_action  # noqa: E402
 
 JOINT_NAMES: list[str] = []
 
@@ -45,7 +46,7 @@ def _write_vla_schema_v1(
 
     The toolchain has no gate / threshold / baseline system (governance was
     explicitly removed during the upstream port), so every metric is emitted
-    with absolute_threshold=inf, absolute_verdict=pass, baseline_value=null,
+    with absolute_threshold=null, absolute_verdict=pass, baseline_value=null,
     regression_verdict=skipped. metrics.json carries the aggregate verdict;
     failure_cases.jsonl is empty unless an episode raised a rollout_error
     during the inference loop.
@@ -58,7 +59,7 @@ def _write_vla_schema_v1(
             {
                 "name": _TOOLCHAIN_TO_VLA_METRIC.get(toolchain_name, toolchain_name),
                 "value": float(value),
-                "absolute_threshold": float("inf"),
+                "absolute_threshold": None,
                 "absolute_verdict": _VERDICT_PASS,
                 "baseline_value": None,
                 "regression_pct": 0.0,
@@ -70,7 +71,7 @@ def _write_vla_schema_v1(
 
     metrics_path = output_dir / "metrics.json"
     with open(metrics_path, "w") as f:
-        json.dump(metrics_payload, f, indent=2)
+        json.dump(metrics_payload, f, indent=2, allow_nan=False)
     print(f"[INFO] VLA schema v1 metrics: {metrics_path}")
 
     failure_cases_path = output_dir / "failure_cases.jsonl"
@@ -271,52 +272,32 @@ def plot_aggregate_summary(episode_metrics):
     return fig
 
 
-def _load_episode_records(ds_dir: str) -> list[dict[str, Any]]:
-    import pyarrow.parquet as pq
+def _find_data_file(ds_dir: str, ep_idx: int, episode_record: dict | None = None) -> str | None:
+    info_path = os.path.join(ds_dir, "meta", "info.json")
+    if os.path.exists(info_path):
+        with open(info_path) as f:
+            ds_info = json.load(f)
+    else:
+        ds_info = {}
 
-    episodes_dir = Path(ds_dir) / "meta" / "episodes"
-    records = []
-    for path in sorted(episodes_dir.glob("chunk-*/file-*.parquet")):
-        records.extend(pq.read_table(path).to_pylist())
-    return records
-
-
-def _find_episode_record(
-    episode_records: list[dict[str, Any]],
-    ep_idx: int,
-) -> dict[str, Any] | None:
-    return next(
-        (record for record in episode_records if record.get("episode_index") == ep_idx),
-        None,
-    )
-
-
-def _find_data_file(
-    ds_dir: str,
-    ep_idx: int,
-    ds_info: dict[str, Any],
-    episode_records: list[dict[str, Any]],
-) -> tuple[str, int, int | None] | None:
-    episode_record = _find_episode_record(episode_records, ep_idx)
-    data_path_template = ds_info.get("data_path")
-    if episode_record and isinstance(data_path_template, str):
-        chunk_index = int(episode_record["data/chunk_index"])
-        file_index = int(episode_record["data/file_index"])
-        path = Path(ds_dir) / data_path_template.format(
-            chunk_index=chunk_index,
-            file_index=file_index,
-        )
-        matching_records = [
-            record
-            for record in episode_records
-            if record.get("data/chunk_index") == chunk_index
-            and record.get("data/file_index") == file_index
-        ]
-        file_start = min(int(record["dataset_from_index"]) for record in matching_records)
-        row_start = int(episode_record["dataset_from_index"]) - file_start
-        row_end = int(episode_record["dataset_to_index"]) - file_start
-        if path.exists():
-            return str(path), row_start, row_end
+    if episode_record is not None:
+        chunk_index = episode_record.get("data/chunk_index")
+        file_index = episode_record.get("data/file_index")
+        if isinstance(chunk_index, int) and isinstance(file_index, int):
+            data_path_template = ds_info.get("data_path")
+            if isinstance(data_path_template, str):
+                candidate = os.path.join(
+                    ds_dir,
+                    data_path_template.format(chunk_index=chunk_index, file_index=file_index),
+                )
+            else:
+                candidate = os.path.join(
+                    ds_dir,
+                    "data",
+                    f"chunk-{chunk_index:03d}",
+                    f"file-{file_index:03d}.parquet",
+                )
+            return candidate if os.path.exists(candidate) else None
 
     chunks_size = ds_info.get("chunks_size", 1000)
     ep_chunk = ep_idx // chunks_size
@@ -326,40 +307,47 @@ def _find_data_file(
     ]
     for c in candidates:
         if os.path.exists(c):
-            return c, 0, None
+            return c
     return None
 
 
-def _find_video_file(
-    ds_dir: str,
-    video_key: str,
-    ep_idx: int,
-    ds_info: dict[str, Any],
-    episode_records: list[dict[str, Any]],
-) -> str | None:
-    episode_record = _find_episode_record(episode_records, ep_idx)
-    video_path_template = ds_info.get("video_path")
-    chunk_key = f"videos/{video_key}/chunk_index"
-    file_key = f"videos/{video_key}/file_index"
-    if (
-        episode_record
-        and isinstance(video_path_template, str)
-        and chunk_key in episode_record
-        and file_key in episode_record
-    ):
-        path = Path(ds_dir) / video_path_template.format(
-            video_key=video_key,
-            chunk_index=int(episode_record[chunk_key]),
-            file_index=int(episode_record[file_key]),
-        )
-        if path.exists():
-            return str(path)
+def _find_video_file(ds_dir: str, video_key: str, ep_idx: int, episode_record: dict | None = None) -> str | None:
+    info_path = os.path.join(ds_dir, "meta", "info.json")
+    if os.path.exists(info_path):
+        with open(info_path) as f:
+            ds_info = json.load(f)
+    else:
+        ds_info = {}
+
+    if episode_record is not None:
+        chunk_index = episode_record.get(f"videos/{video_key}/chunk_index")
+        file_index = episode_record.get(f"videos/{video_key}/file_index")
+        if isinstance(chunk_index, int) and isinstance(file_index, int):
+            video_path_template = ds_info.get("video_path")
+            if isinstance(video_path_template, str):
+                candidate = os.path.join(
+                    ds_dir,
+                    video_path_template.format(
+                        video_key=video_key,
+                        chunk_index=chunk_index,
+                        file_index=file_index,
+                    ),
+                )
+            else:
+                candidate = os.path.join(
+                    ds_dir,
+                    "videos",
+                    video_key,
+                    f"chunk-{chunk_index:03d}",
+                    f"file-{file_index:03d}.mp4",
+                )
+            return candidate if os.path.exists(candidate) else None
 
     chunks_size = ds_info.get("chunks_size", 1000)
     ep_chunk = ep_idx // chunks_size
     candidates = [
         os.path.join(ds_dir, "videos", video_key, f"chunk-{ep_chunk:03d}", f"episode_{ep_idx:06d}.mp4"),
-        os.path.join(ds_dir, "videos", video_key, f"chunk-{ep_chunk:03d}", f"file-{ep_idx:03d}.mp4"),
+        os.path.join(ds_dir, "videos", video_key, f"chunk-{ep_idx:03d}", f"file-{ep_idx:03d}.mp4"),
     ]
     for c in candidates:
         if os.path.exists(c):
@@ -367,46 +355,141 @@ def _find_video_file(
     return None
 
 
-def _load_policy(
-    policy_repo_id: str,
-    policy_revision: str | None,
-    device: torch.device,
-):
-    from lerobot.configs import PreTrainedConfig
-    from lerobot.policies import get_policy_class, make_pre_post_processors
+def _load_task_metadata(ds_dir: str) -> tuple[dict[int, str], dict[int, str], dict[int, dict]]:
+    task_descriptions: dict[int, str] = {}
+    tasks_parquet_path = Path(ds_dir) / "meta" / "tasks.parquet"
+    if tasks_parquet_path.exists():
+        import pyarrow.parquet as pq
 
-    policy_config = PreTrainedConfig.from_pretrained(
-        policy_repo_id,
-        revision=policy_revision,
-    )
-    policy_config.device = str(device)
-    policy_class = get_policy_class(policy_config.type)
-    policy = policy_class.from_pretrained(
-        policy_repo_id,
-        config=policy_config,
-        revision=policy_revision,
-    )
-    policy.to(device)
-    policy.eval()
-    preprocessor, postprocessor = make_pre_post_processors(
-        policy_cfg=policy_config,
-        pretrained_path=policy_repo_id,
-        pretrained_revision=policy_revision,
-        preprocessor_overrides={"device_processor": {"device": str(device)}},
-    )
-    return policy_config.type, policy, preprocessor, postprocessor
+        task_table = pq.read_table(tasks_parquet_path)
+        task_columns = task_table.to_pydict()
+        text_column = (
+            "task"
+            if "task" in task_columns
+            else next(
+                (name for name in task_columns if name != "task_index"),
+                None,
+            )
+        )
+        if text_column is not None:
+            for task_index, task in zip(
+                task_columns.get("task_index", []),
+                task_columns[text_column],
+                strict=True,
+            ):
+                if isinstance(task_index, int) and isinstance(task, str) and task.strip():
+                    task_descriptions[task_index] = task
+    else:
+        tasks_path = os.path.join(ds_dir, "meta", "tasks.jsonl")
+        if os.path.exists(tasks_path):
+            with open(tasks_path) as f:
+                for line in f:
+                    record = json.loads(line)
+                    task_index = record.get("task_index")
+                    task = record.get("task")
+                    if isinstance(task_index, int) and isinstance(task, str) and task.strip():
+                        task_descriptions[task_index] = task
+
+    episode_tasks: dict[int, str] = {}
+    episode_records: dict[int, dict] = {}
+    episode_files = sorted((Path(ds_dir) / "meta" / "episodes").glob("chunk-*/file-*.parquet"))
+    if episode_files:
+        import pyarrow.parquet as pq
+
+        for episode_file in episode_files:
+            for record in pq.read_table(episode_file).to_pylist():
+                episode_index = record.get("episode_index")
+                task = _task_from_episode_record(record, task_descriptions)
+                if isinstance(episode_index, int):
+                    episode_records[episode_index] = record
+                    if task:
+                        episode_tasks[episode_index] = task
+    else:
+        episodes_path = os.path.join(ds_dir, "meta", "episodes.jsonl")
+        if os.path.exists(episodes_path):
+            with open(episodes_path) as f:
+                for line in f:
+                    record = json.loads(line)
+                    episode_index = record.get("episode_index")
+                    task = _task_from_episode_record(record, task_descriptions)
+                    if isinstance(episode_index, int):
+                        episode_records[episode_index] = record
+                        if task:
+                            episode_tasks[episode_index] = task
+
+    return task_descriptions, episode_tasks, episode_records
 
 
-def _prepare_observation(
-    state: np.ndarray,
-    images: dict[str, np.ndarray],
-    device: torch.device,
-    task: str,
-) -> dict:
-    from lerobot.policies.utils import prepare_observation_for_inference
+def _task_from_episode_record(record: dict, task_descriptions: dict[int, str]) -> str:
+    tasks = record.get("tasks")
+    if hasattr(tasks, "tolist"):
+        tasks = tasks.tolist()
+    if isinstance(tasks, str) and tasks.strip():
+        return tasks
+    if isinstance(tasks, list) and tasks:
+        resolved_tasks = {
+            task.strip() if isinstance(task, str) else task_descriptions.get(task, "") if isinstance(task, int) else ""
+            for task in tasks
+        }
+        resolved_tasks.discard("")
+        if len(resolved_tasks) == 1:
+            return resolved_tasks.pop()
+        if resolved_tasks:
+            return ""
 
-    observation = {"observation.state": state, **images}
-    return prepare_observation_for_inference(observation, device, task=task)
+    task_index = record.get("task_index")
+    if isinstance(task_index, int):
+        return task_descriptions.get(task_index, "")
+    return ""
+
+
+def _resolve_frame_task(
+    step: int,
+    episode_index: int,
+    data: dict[str, list],
+    task_descriptions: dict[int, str],
+    episode_tasks: dict[int, str],
+) -> str:
+    task_indices = data.get("task_index", [])
+    if step < len(task_indices):
+        task_index = task_indices[step]
+        if isinstance(task_index, int) and task_index in task_descriptions:
+            return task_descriptions[task_index]
+
+    if episode_index in episode_tasks:
+        return episode_tasks[episode_index]
+
+    if len(task_descriptions) == 1:
+        return next(iter(task_descriptions.values()))
+    return ""
+
+
+def _filter_episode_table(table: Any, episode_index: int, *, is_shared_file: bool) -> Any:
+    if not is_shared_file or "episode_index" not in table.column_names:
+        return table
+
+    import pyarrow.compute as pc
+
+    return table.filter(pc.equal(table["episode_index"], episode_index))
+
+
+def _slice_episode_frames(
+    frames: list[np.ndarray],
+    episode_record: dict | None,
+    image_key: str,
+    fps: int | float,
+) -> list[np.ndarray]:
+    if episode_record is None:
+        return frames
+
+    from_timestamp = episode_record.get(f"videos/{image_key}/from_timestamp")
+    to_timestamp = episode_record.get(f"videos/{image_key}/to_timestamp")
+    if not isinstance(from_timestamp, (int, float)) or not isinstance(to_timestamp, (int, float)):
+        return frames
+
+    start_frame = max(0, round(from_timestamp * fps))
+    end_frame = min(len(frames), round(to_timestamp * fps))
+    return frames[start_frame:end_frame]
 
 
 def main() -> int:
@@ -416,9 +499,9 @@ def main() -> int:
     import pyarrow.parquet as pq
 
     policy_repo_id = os.environ.get("POLICY_REPO_ID", "").strip()
-    policy_type = os.environ.get("POLICY_TYPE", "act")
+    policy_type = os.environ.get("POLICY_TYPE", "act").strip().lower()
     dataset_repo_id = os.environ.get("DATASET_REPO_ID", "")
-    task = os.environ.get("TASK_PROMPT", "").strip()
+    task_prompt = os.environ.get("TASK_PROMPT", "").strip()
     policy_revision = os.environ.get("POLICY_REVISION", "").strip() or None
     dataset_revision = os.environ.get("DATASET_REVISION") or None
     eval_episodes = int(os.environ.get("EVAL_EPISODES", "10"))
@@ -458,7 +541,7 @@ def main() -> int:
     with open(os.path.join(dataset_dir, "meta", "info.json")) as f:
         info = json.load(f)
     fps = info["fps"]
-    episode_records = _load_episode_records(dataset_dir)
+    task_descriptions, episode_tasks, episode_records = _load_task_metadata(dataset_dir)
 
     # Resolve dimension labels from the dataset's action feature names so plots
     # carry real joint names; fall back to generic dim_N labels otherwise.
@@ -473,38 +556,28 @@ def main() -> int:
         print("[ERROR] Dataset has no video or image observation features")
         return 1
 
-    # Load policy and its saved normalization/tokenization processors.
+    # Load policy (normalization is handled internally by select_action)
     print(f"[INFO] Loading policy from: {policy_repo_id}")
     try:
         policy_revision = resolve_hf_revision(policy_repo_id, policy_revision, revision_name="POLICY_REVISION")
     except ValueError as exc:
         print(f"[ERROR] {exc}")
         return 1
-    loaded_policy_type, policy, preprocessor, postprocessor = _load_policy(
-        policy_repo_id,
-        policy_revision,
-        device,
-    )
-    if loaded_policy_type != policy_type:
-        print(
-            f"[ERROR] Requested policy type {policy_type!r} does not match "
-            f"checkpoint type {loaded_policy_type!r}"
+    try:
+        bundle = load_pretrained_policy(
+            repo_id=policy_repo_id,
+            policy_type=policy_type,
+            device=str(device),
+            revision=policy_revision,
         )
+    except ValueError as exc:
+        print(f"[ERROR] {exc}")
         return 1
-    if loaded_policy_type in {"pi0", "pi0_fast", "pi05"} and not task:
-        print("[ERROR] TASK_PROMPT is required for PI-family policy evaluation")
-        return 1
+    policy = bundle.policy
 
     # Determine episode range
-    episodes_meta_path = os.path.join(dataset_dir, "meta", "episodes.jsonl")
-    if os.path.exists(episodes_meta_path):
-        with open(episodes_meta_path) as f:
-            total_episodes = sum(1 for _ in f)
-    elif episode_records:
-        total_episodes = len(episode_records)
-    else:
-        total_episodes = int(info.get("total_episodes", eval_episodes))
-    num_episodes = min(eval_episodes, total_episodes)
+    episode_indices = sorted(episode_records)[:eval_episodes] if episode_records else list(range(eval_episodes))
+    num_episodes = len(episode_indices)
 
     # Start MLflow run
     if mlflow_enable:
@@ -516,7 +589,7 @@ def main() -> int:
                 "policy_repo_id": policy_repo_id,
                 "policy_type": policy_type,
                 "dataset_repo_id": dataset_repo_id,
-                "task": task,
+                "task": task_prompt,
                 "eval_episodes": num_episodes,
                 "device": str(device),
                 "fps": fps,
@@ -525,43 +598,46 @@ def main() -> int:
 
     all_episode_metrics = []
 
-    for ep in range(num_episodes):
+    for ep in episode_indices:
         print(f"\n{'=' * 60}")
         print(f"Episode {ep}")
         print(f"{'=' * 60}")
 
-        data_source = _find_data_file(dataset_dir, ep, info, episode_records)
-        if not data_source:
+        episode_record = episode_records.get(ep)
+        data_file = _find_data_file(dataset_dir, ep, episode_record)
+        if not data_file:
             print(f"  [WARNING] No data file for episode {ep}, skipping")
             continue
-        data_file, row_start, row_end = data_source
         table = pq.read_table(data_file)
-        if row_end is not None:
-            table = table.slice(row_start, row_end - row_start)
+        table = _filter_episode_table(table, ep, is_shared_file=episode_record is not None)
         data = {col: table[col].to_pylist() for col in table.column_names}
+        if not data.get("timestamp"):
+            print(f"  [WARNING] No data rows for episode {ep}, skipping")
+            continue
         n_frames = len(data["timestamp"])
 
-        # Load all camera streams used by the policy.
         video_files = {
-            key: _find_video_file(dataset_dir, key, ep, info, episode_records)
-            for key in image_keys
+            image_key: _find_video_file(dataset_dir, image_key, ep, episode_record)
+            for image_key in image_keys
         }
-        missing_video_keys = [key for key, path in video_files.items() if not path]
+        missing_video_keys = [image_key for image_key, video_file in video_files.items() if not video_file]
         if missing_video_keys:
             print(f"  [WARNING] Missing videos for episode {ep}: {', '.join(missing_video_keys)}, skipping")
             continue
+
         frames_by_key = {}
         for image_key, video_file in video_files.items():
             container = av.open(video_file)
             stream = container.streams.video[0]
-            frames_by_key[image_key] = [
-                av_frame.to_ndarray(format="rgb24") for av_frame in container.decode(stream)
-            ]
+            frames = [av_frame.to_ndarray(format="rgb24") for av_frame in container.decode(stream)]
             container.close()
+            frames_by_key[image_key] = _slice_episode_frames(frames, episode_record, image_key, fps)
+        empty_video_keys = [image_key for image_key, frames in frames_by_key.items() if not frames]
+        if empty_video_keys:
+            print(f"  [WARNING] Empty videos for episode {ep}: {', '.join(empty_video_keys)}, skipping")
+            continue
 
         policy.reset()
-        preprocessor.reset()
-        postprocessor.reset()
         actions_predicted = []
         actions_ground_truth = []
         inference_times_list = []
@@ -570,20 +646,36 @@ def main() -> int:
         for step in range(min(n_frames - 1, available_frames)):
             state = np.array(data["observation.state"][step], dtype=np.float32)
             gt_action = np.array(data["action"][step], dtype=np.float32)
-            images = {key: frames[step] for key, frames in frames_by_key.items()}
-            obs = _prepare_observation(state, images, device, task)
+
+            obs = {
+                "observation.state": torch.from_numpy(state).float(),
+                **{
+                    image_key: torch.from_numpy(frames[step]).float().permute(2, 0, 1) / 255.0
+                    for image_key, frames in frames_by_key.items()
+                },
+            }
+            if bundle.policy_type in VLA_POLICY_TYPES:
+                frame_task = task_prompt or _resolve_frame_task(step, ep, data, task_descriptions, episode_tasks)
+                if not frame_task:
+                    print(f"[ERROR] Episode {ep} frame {step} has no task description required by {bundle.policy_type}")
+                    return 1
+                obs["task"] = frame_task
+            processed_obs = bundle.preprocessor(obs)
 
             t_start = time.time()
             with torch.inference_mode():
-                obs = preprocessor(obs)
-                action = policy.select_action(obs)
-                action = postprocessor(action)
+                action = policy.select_action(processed_obs)
             t_inf = time.time() - t_start
             inference_times_list.append(t_inf)
 
-            action_np = action.squeeze(0).cpu().numpy()
+            processed_action = postprocess_action(bundle.postprocessor, action, bundle.policy_type)
+            action_np = processed_action.squeeze(0).cpu().numpy()
             actions_predicted.append(action_np)
             actions_ground_truth.append(gt_action)
+
+        if not actions_predicted:
+            print(f"  [WARNING] No inference steps for episode {ep}, skipping")
+            continue
 
         pred = np.array(actions_predicted)
         gt = np.array(actions_ground_truth)
@@ -644,18 +736,14 @@ def main() -> int:
             mlflow.log_artifact(str(npz_path), "predictions")
             print(f"  Logged 4 plots + metrics to MLflow for episode {ep}")
 
-    if not all_episode_metrics:
-        if mlflow_enable:
-            import mlflow
-
-            mlflow.end_run(status="FAILED")
-        raise RuntimeError("Evaluation produced no episode metrics")
-
     # Aggregate metrics
-    agg_mse = float(np.mean([m["mse"] for m in all_episode_metrics]))
-    agg_mae = float(np.mean([m["mae"] for m in all_episode_metrics]))
-    agg_inf_ms = float(np.mean([m["avg_inference_ms"] for m in all_episode_metrics]))
-    agg_throughput = float(np.mean([m["throughput_hz"] for m in all_episode_metrics]))
+    if all_episode_metrics:
+        agg_mse = float(np.mean([m["mse"] for m in all_episode_metrics]))
+        agg_mae = float(np.mean([m["mae"] for m in all_episode_metrics]))
+        agg_inf_ms = float(np.mean([m["avg_inference_ms"] for m in all_episode_metrics]))
+        agg_throughput = float(np.mean([m["throughput_hz"] for m in all_episode_metrics]))
+    else:
+        agg_mse = agg_mae = agg_inf_ms = agg_throughput = 0.0
 
     results = {
         "job_name": job_name,

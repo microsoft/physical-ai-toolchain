@@ -40,9 +40,11 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
+          terraform_version: '1.16.2'
           terraform_wrapper: false
 
       - name: Run Terraform Validation
+        id: validation
         continue-on-error: ${{ inputs.soft-fail }}
         run: |
           $params = @{}
@@ -53,8 +55,10 @@ jobs:
 
       - name: Upload Terraform results
         if: always()
+        continue-on-error: ${{ job.status == 'failure' || steps.validation.outcome == 'failure' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: terraform-validation-results
           path: logs/terraform-validation-results.json
+          if-no-files-found: error
           retention-days: 30

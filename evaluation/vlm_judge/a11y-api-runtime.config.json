@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "1.0.0",
+  "baseUrl": "http://127.0.0.1:8001",
+  "serveMode": "served",
+  "allowlist": ["127.0.0.1:8001/docs*", "127.0.0.1:8001/redoc*", "127.0.0.1:8001/openapi.json", "127.0.0.1:8001/health", "127.0.0.1:8001/judge"],
+  "routes": [
+    {"path": "/docs", "title": "VLM Judge Swagger UI", "surfaceIds": ["F03"]},
+    {"path": "/redoc", "title": "VLM Judge ReDoc", "surfaceIds": ["F04"]}
+  ],
+  "surfaces": [
+    {"id": "F03", "type": "page", "route": "/docs", "selector": "#swagger-ui", "states": [{"state": "default"}, {"state": "open"}, {"state": "health"}, {"state": "echo-success"}, {"state": "missing-video"}, {"state": "invalid-request"}, {"state": "focus"}, {"state": "reflow-320"}]},
+    {"id": "F04", "type": "page", "route": "/redoc", "selector": "redoc, .redoc-wrap", "states": [{"state": "default"}, {"state": "navigation"}, {"state": "open"}, {"state": "long-schema"}, {"state": "error-model"}, {"state": "focus"}, {"state": "reflow-320"}]}
+  ],
+  "probeScoping": [
+    {"probe": "probe-axe", "surfaces": ["F03", "F04"], "states": ["default", "open", "invalid-request", "missing-video"]},
+    {"probe": "probe-aria-tree", "surfaces": ["F03", "F04"], "states": ["default", "open", "focus"]},
+    {"probe": "probe-keyboard-traversal", "surfaces": ["F03", "F04"], "states": ["default", "open", "focus"]},
+    {"probe": "probe-reflow-resize", "surfaces": ["F03", "F04"], "states": ["default", "reflow-320"]},
+    {"probe": "probe-contrast", "surfaces": ["F03", "F04"], "states": ["default"]},
+    {"probe": "probe-console-errors", "surfaces": ["F03", "F04"], "states": ["default", "invalid-request"]},
+    {"probe": "probe-broken-links", "surfaces": ["F03", "F04"], "states": ["default"]},
+    {"probe": "probe-title-lang", "surfaces": ["F03", "F04"], "states": ["default"]}
+  ],
+  "visualReview": {
+    "enabled": true,
+    "evidenceRoot": "artifacts/accessibility/current/hve-vlm-docs",
+    "publicLoopbackOnly": true,
+    "rejectPersonalData": true,
+    "operatorConfirmedNoPersonalData": true,
+    "fullPage": true,
+    "traceSnapshots": true,
+    "routes": [{"path": "/docs", "state": "default", "surfaceId": "F03"}, {"path": "/redoc", "state": "default", "surfaceId": "F04"}],
+    "states": ["default", "open", "reflow-320"]
+  }
+}

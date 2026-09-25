@@ -2,7 +2,7 @@
 title: Scripts
 description: CI/CD scripts, shared libraries, linting, security, and Pester tests for the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-02
+ms.date: 2026-09-23
 ms.topic: reference
 keywords:
   - scripts
@@ -60,21 +60,37 @@ CI bootstrap and release automation.
 
 PowerShell scripts for validating code quality and documentation.
 
-| Script                             | Purpose                                     |
-|------------------------------------|---------------------------------------------|
-| `Invoke-PSScriptAnalyzer.ps1`      | Static analysis for PowerShell files        |
-| `Invoke-FrontmatterValidation.ps1` | Validate YAML frontmatter in markdown files |
-| `Invoke-LinkLanguageCheck.ps1`     | Detect en-us language paths in URLs         |
-| `Link-Lang-Check.ps1`              | Link language checking entry point          |
-| `Markdown-Link-Check.ps1`          | Validate markdown links                     |
-| `Invoke-YamlLint.ps1`              | YAML file validation                        |
-| `Invoke-TFLint.ps1`                | Terraform linting                           |
-| `Invoke-TerraformValidation.ps1`   | Terraform format and validate               |
-| `Invoke-TerraformTest.ps1`         | Terraform test runner                       |
-| `Invoke-GoLint.ps1`                | Go linting via golangci-lint                |
-| `Invoke-GoTest.ps1`                | Go test runner                              |
-| `Invoke-MsDateFreshnessCheck.ps1`  | Check ms.date frontmatter freshness         |
-| `ConvertTo-JUnitXml.ps1`           | Convert test results to JUnit XML           |
+| Script                              | Purpose                                     |
+|-------------------------------------|---------------------------------------------|
+| `Invoke-PSScriptAnalyzer.ps1`       | Static analysis for PowerShell files        |
+| `Invoke-FrontmatterValidation.ps1`  | Validate YAML frontmatter in markdown files |
+| `Invoke-LinkLanguageCheck.ps1`      | Detect en-us language paths in URLs         |
+| `Link-Lang-Check.ps1`               | Link language checking entry point          |
+| `Markdown-Link-Check.ps1`           | Validate markdown links                     |
+| `Invoke-YamlLint.ps1`               | YAML file validation                        |
+| `Invoke-TFLint.ps1`                 | Terraform linting                           |
+| `Invoke-TerraformValidation.ps1`    | Terraform format and validate               |
+| `Invoke-UvLockConsistencyCheck.ps1` | Require current locks for Python projects   |
+| `Invoke-TerraformTest.ps1`          | Terraform test runner                       |
+| `Invoke-GoLint.ps1`                 | Go linting via golangci-lint                |
+| `Invoke-GoTest.ps1`                 | Go test runner                              |
+| `Invoke-MsDateFreshnessCheck.ps1`   | Check ms.date frontmatter freshness         |
+| `ConvertTo-JUnitXml.ps1`            | Convert test results to JUnit XML           |
+
+`Invoke-TerraformValidation.ps1` writes `logs/terraform-validation-results.json` after format and per-directory validation.
+Each directory records its native `exit_code` (or `null` when skipped), with initialization and parsing failures preserved as errors.
+The script returns the first nonzero Terraform exit code and prints native failure output; an invalid JSON response with a zero
+native exit returns `1`. The CI artifact upload reports a missing results file as an error when validation otherwise succeeds.
+
+`Invoke-UvLockConsistencyCheck.ps1` discovers every repository Python manifest, requires a neighboring `uv.lock`, and runs
+`uv lock --check` without updating the lock. The main workflow checks all projects; pull requests check changed projects.
+The hosted lock check installs the interpreter pinned in `.python-version` for the root project. An empty full-repository
+selection fails rather than reporting a successful no-op.
+The dataviewer backend includes the editable VLM judge package in its locked `dev` and `vlm-judge` extras. The CI job
+installs the `dev` extra from the backend lock without `--with-editable`, then runs tests with `uv run --no-sync` to
+preserve the selected extras. The judge's Qwen dependencies remain optional.
+Coverage artifacts from the Python validation jobs require a report after a successful test run. An upload error after a
+test failure does not replace the test failure.
 
 ## 🔒 Security Scripts
 
