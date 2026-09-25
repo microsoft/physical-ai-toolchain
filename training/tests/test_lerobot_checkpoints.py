@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
@@ -111,6 +112,77 @@ class TestRegisterModelViaAml:
         assert kwargs["name"] == "my-model-name"
         assert kwargs["tags"]["source"] == "osmo"
         assert kwargs["tags"]["checkpoint"] == "ckpt-001"
+
+    def test_registers_verified_dataset_lineage(self, azure_env, fake_azure_modules, monkeypatch, tmp_path):
+        lineage_path = tmp_path / "dataset-lineage.json"
+        lineage_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0.0",
+                    "trust": "verified",
+                    "release": {
+                        "release_id": "release-1",
+                        "manifest_evidence_digest": "a" * 64,
+                        "target_format_name": "lerobot",
+                        "target_format_version": "3.0",
+                        "source_dataset_ids": ["dataset-a"],
+                        "episode_count": 2,
+                        "frame_count": 20,
+                        "quality_profile_versions": ["quality-v1"],
+                        "accepted_decision_ids": ["decision-a"],
+                        "parent_release_ids": [],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("DATASET_LINEAGE_PATH", str(lineage_path))
+
+        assert _MOD._register_model_via_aml(tmp_path, "ckpt-lineage") is True
+
+        artifact = json.loads((tmp_path / "azureml_lineage.json").read_text())
+        assert artifact["dataset"]["release"]["accepted_decision_ids"] == ["decision-a"]
+        tags = fake_azure_modules.model_cls.call_args.kwargs["tags"]
+        assert tags["dataset_trust"] == "verified"
+        assert tags["dataset_release_id"] == "release-1"
+        assert tags["dataset_manifest_digest"] == "a" * 64
+
+    def test_registers_derived_dataset_lineage(self, azure_env, fake_azure_modules, monkeypatch, tmp_path):
+        lineage_path = tmp_path / "dataset-lineage.json"
+        lineage_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0.0",
+                    "trust": "derived",
+                    "derived_input_digest": "d" * 64,
+                    "parent_releases": [{"release_id": "release-1"}, {"release_id": "release-2"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("DATASET_LINEAGE_PATH", str(lineage_path))
+
+        assert _MOD._register_model_via_aml(tmp_path, "ckpt-derived") is True
+
+        tags = fake_azure_modules.model_cls.call_args.kwargs["tags"]
+        assert tags["dataset_trust"] == "derived"
+        assert tags["dataset_derived_input_digest"] == "d" * 64
+        assert tags["dataset_parent_release_count"] == "2"
+
+    def test_unverified_lineage_omits_release_identity(self, azure_env, fake_azure_modules, monkeypatch, tmp_path):
+        lineage_path = tmp_path / "dataset-lineage.json"
+        lineage_path.write_text(
+            json.dumps({"schema_version": "1.0.0", "trust": "unverified", "source": "huggingface"}),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("DATASET_LINEAGE_PATH", str(lineage_path))
+
+        assert _MOD._register_model_via_aml(tmp_path, "ckpt-unverified") is True
+
+        tags = fake_azure_modules.model_cls.call_args.kwargs["tags"]
+        assert tags["dataset_trust"] == "unverified"
+        assert "dataset_release_id" not in tags
+        assert "dataset_manifest_digest" not in tags
 
     def test_falls_back_to_job_name_when_no_register_env(self, azure_env, fake_azure_modules, monkeypatch, tmp_path):
         monkeypatch.setenv("JOB_NAME", "fallback_job")

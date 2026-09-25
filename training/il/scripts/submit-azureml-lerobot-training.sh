@@ -46,6 +46,9 @@ DATA SOURCE (combinable):
         --blob-url URL                Add blob dataset URL (repeatable; use multiple times for merge)
         --dataset-root DIR            Container path where datasets are materialized
                                       (default: /workspace/data)
+        --dataset-trust MODE          Dataset trust mode: unverified or verified
+                                      (default: unverified). Verified mode requires
+                                      Blob release sources or one version-pinned data asset.
 
 AZUREML ASSET OPTIONS:
     --environment-name NAME       AzureML environment name (default: lerobot-training-env)
@@ -262,6 +265,7 @@ dataset_asset_count_max=64
 dataset_assets=()
 blob_urls=()
 dataset_root="${DATASET_ROOT:-/workspace/data}"
+dataset_trust="${DATASET_TRUST:-unverified}"
 
 training_steps="${TRAINING_STEPS:-}"
 batch_size="${BATCH_SIZE:-}"
@@ -309,6 +313,7 @@ while [[ $# -gt 0 ]]; do
     --dataset-asset)              dataset_assets+=("$2"); shift 2 ;;
     --blob-url)                   blob_urls+=("$2"); shift 2 ;;
     --dataset-root)               dataset_root="$2"; shift 2 ;;
+    --dataset-trust)              dataset_trust="$2"; shift 2 ;;
     --training-steps)             training_steps="$2"; shift 2 ;;
     --batch-size)                 batch_size="$2"; shift 2 ;;
     --eval-freq)                  eval_freq="$2"; shift 2 ;;
@@ -352,6 +357,20 @@ if [[ ${#dataset_assets[@]} -gt 0 || ${#blob_urls[@]} -gt 0 ]]; then
   dataset_repo_id="${dataset_repo_id:-dataset}"
 elif [[ -z "$dataset_repo_id" ]]; then
   fatal "No dataset source specified. Use --dataset-repo-id for HuggingFace Hub, or provide one or more --blob-url / --dataset-asset sources."
+fi
+
+case "$dataset_trust" in
+  unverified|verified) ;;
+  *) fatal "--dataset-trust must be one of: unverified, verified (got '$dataset_trust')" ;;
+esac
+
+if [[ "$dataset_trust" == "verified" ]]; then
+  if [[ ${#blob_urls[@]} -eq 0 && ${#dataset_assets[@]} -ne 1 ]]; then
+    fatal "--dataset-trust verified requires one or more --blob-url releases or one version-pinned --dataset-asset; HuggingFace and multiple mounted assets are unverified."
+  fi
+  if [[ ${#blob_urls[@]} -gt 0 && ${#dataset_assets[@]} -gt 0 ]]; then
+    fatal "--dataset-trust verified does not allow mixed --blob-url and --dataset-asset sources."
+  fi
 fi
 
 case "$policy_type" in
@@ -433,6 +452,7 @@ fi
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Dataset" "$dataset_repo_id"
+  print_kv "Dataset Trust" "$dataset_trust"
   print_kv "Policy Type" "$policy_type"
   print_kv "Job Name" "$job_name"
   print_kv "Image" "$image"
@@ -572,6 +592,7 @@ az_args+=(
   --set "environment_variables.MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES=$mlflow_retries"
   --set "environment_variables.MLFLOW_HTTP_REQUEST_TIMEOUT=$mlflow_timeout"
   --set "environment_variables.DATASET_REPO_ID=$dataset_repo_id"
+  --set "environment_variables.DATASET_TRUST=$dataset_trust"
   --set "environment_variables.POLICY_TYPE=$policy_type"
   --set "environment_variables.JOB_NAME=$job_name"
   --set "environment_variables.OUTPUT_DIR=$output_dir"
@@ -610,6 +631,7 @@ az_args+=(--query "name" -o "tsv")
 
 info "Submitting AzureML LeRobot training job..."
 info "  Dataset: $dataset_repo_id"
+info "  Dataset Trust: $dataset_trust"
 info "  Policy: $policy_type"
 info "  Job Name: $job_name"
 info "  Image: $image"
@@ -647,6 +669,7 @@ fi
 section "Deployment Summary"
 print_kv "Job Name" "$job_result"
 print_kv "Dataset" "$dataset_repo_id"
+print_kv "Dataset Trust" "$dataset_trust"
 print_kv "Policy Type" "$policy_type"
 print_kv "Image" "$image"
 print_kv "Compute" "${compute:-<not set>}"

@@ -31,6 +31,7 @@ workflow:
         NVIDIA_DRIVER_CAPABILITIES: "all"
         DATASET_REPO_ID: "{{ dataset_repo_id }}"
         DATASET_ROOT: "{{ dataset_root }}"
+        DATASET_TRUST: "{{ dataset_trust }}"
         # Single-quoted: {{ blob_urls }} expands to a JSON array literal whose
         # double quotes would otherwise break the YAML string.
         BLOB_URLS: '{{ blob_urls }}'
@@ -72,6 +73,7 @@ default-values:
   payload_root: /workspace/lerobot_payload
   dataset_repo_id: ""
   dataset_root: /workspace/data
+  dataset_trust: unverified
   blob_urls: "[]"
   use_huggingface_credential: "true"
   policy_type: act

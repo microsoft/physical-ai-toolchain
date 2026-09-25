@@ -9,7 +9,7 @@
 
 BeforeDiscovery {
     $script:ToolsPresent = [bool](Get-Command bash -ErrorAction SilentlyContinue) -and
-        [bool](Get-Command unzip -ErrorAction SilentlyContinue)
+    [bool](Get-Command unzip -ErrorAction SilentlyContinue)
 }
 
 BeforeAll {
@@ -58,16 +58,16 @@ source() {
 
     function New-LerobotStubSet {
         return @{
-            'apt-get' = @'
+            'apt-get'   = @'
 exit 0
 '@
             'apt-cache' = @'
 exit 0
 '@
-            'pip' = @'
+            'pip'       = @'
 exit 0
 '@
-            'uv' = @'
+            'uv'        = @'
 if [[ "$1" == "python" && "$2" == "install" ]]; then
   exit 0
 fi
@@ -85,11 +85,14 @@ fi
 echo "unexpected uv invocation: $*" >&2
 exit 1
 '@
-            'python' = @'
+            'python'    = @'
 if [[ "$1" == "-c" && "$2" == *"has_blob_urls"* ]]; then
   exit "${PYTHON_HAS_BLOB_URLS_EXIT:-1}"
 fi
 if [[ "$1" == "-m" ]]; then
+    if [[ "$2" == "training.il.scripts.lerobot.train" && -n "${EXPECTED_VERIFIED_RELEASE_PATH:-}" ]]; then
+        [[ "${VERIFIED_RELEASE_PATH:-}" == "$EXPECTED_VERIFIED_RELEASE_PATH" ]] || exit 96
+    fi
   exit 0
 fi
 exit 0
@@ -115,15 +118,15 @@ Describe 'lerobot-train-osmo-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPres
             $bashEnvPath = New-StubBashEnv -Workspace $workspace
 
             $result = Invoke-BashEntryScript -ScriptPath $script:ScriptPath -WorkDir $workspace -EnvVars @{
-                BASH_ENV                   = $bashEnvPath
-                OSMO_INPUT_0               = $inputRoot
-                PAYLOAD_ROOT               = $payloadRoot
-                DATASET_REPO_ID            = 'org/dataset'
-                POLICY_TYPE                = 'act'
-                JOB_NAME                   = 'lerobot-job'
-                OUTPUT_DIR                 = $outputRoot
-                DATASET_ROOT               = (Join-Path $workspace 'datasets')
-                PYTHON_HAS_BLOB_URLS_EXIT  = '1'
+                BASH_ENV                  = $bashEnvPath
+                OSMO_INPUT_0              = $inputRoot
+                PAYLOAD_ROOT              = $payloadRoot
+                DATASET_REPO_ID           = 'org/dataset'
+                POLICY_TYPE               = 'act'
+                JOB_NAME                  = 'lerobot-job'
+                OUTPUT_DIR                = $outputRoot
+                DATASET_ROOT              = (Join-Path $workspace 'datasets')
+                PYTHON_HAS_BLOB_URLS_EXIT = '1'
             } -Stubs (New-LerobotStubSet)
 
             $result.ExitCode | Should -Not -Be 0
@@ -140,15 +143,15 @@ Describe 'lerobot-train-osmo-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPres
             $bashEnvPath = New-StubBashEnv -Workspace $workspace
 
             $result = Invoke-BashEntryScript -ScriptPath $script:ScriptPath -WorkDir $workspace -EnvVars @{
-                BASH_ENV                   = $bashEnvPath
-                OSMO_INPUT_0               = $inputRoot
-                PAYLOAD_ROOT               = $payloadRoot
-                DATASET_REPO_ID            = 'org/dataset'
-                POLICY_TYPE                = 'act'
-                JOB_NAME                   = 'lerobot-job'
-                OUTPUT_DIR                 = $outputRoot
-                DATASET_ROOT               = (Join-Path $workspace 'datasets')
-                PYTHON_HAS_BLOB_URLS_EXIT  = '1'
+                BASH_ENV                  = $bashEnvPath
+                OSMO_INPUT_0              = $inputRoot
+                PAYLOAD_ROOT              = $payloadRoot
+                DATASET_REPO_ID           = 'org/dataset'
+                POLICY_TYPE               = 'act'
+                JOB_NAME                  = 'lerobot-job'
+                OUTPUT_DIR                = $outputRoot
+                DATASET_ROOT              = (Join-Path $workspace 'datasets')
+                PYTHON_HAS_BLOB_URLS_EXIT = '1'
             } -Stubs (New-LerobotStubSet)
 
             $result.ExitCode | Should -Not -Be 0
@@ -168,15 +171,17 @@ Describe 'lerobot-train-osmo-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPres
             $bashEnvPath = New-StubBashEnv -Workspace $workspace
 
             $result = Invoke-BashEntryScript -ScriptPath $script:ScriptPath -WorkDir $workspace -EnvVars @{
-                BASH_ENV                   = $bashEnvPath
-                OSMO_INPUT_0               = $inputRoot
-                PAYLOAD_ROOT               = $payloadRoot
-                DATASET_REPO_ID            = 'org/dataset'
-                POLICY_TYPE                = 'act'
-                JOB_NAME                   = 'lerobot-job'
-                OUTPUT_DIR                 = $outputRoot
-                DATASET_ROOT               = $datasetRoot
-                PYTHON_HAS_BLOB_URLS_EXIT  = '0'
+                BASH_ENV                       = $bashEnvPath
+                OSMO_INPUT_0                   = $inputRoot
+                PAYLOAD_ROOT                   = $payloadRoot
+                DATASET_REPO_ID                = 'org/dataset'
+                POLICY_TYPE                    = 'act'
+                JOB_NAME                       = 'lerobot-job'
+                OUTPUT_DIR                     = $outputRoot
+                DATASET_ROOT                   = $datasetRoot
+                DATASET_TRUST                  = 'verified'
+                EXPECTED_VERIFIED_RELEASE_PATH = (Join-Path $datasetRoot 'org/dataset')
+                PYTHON_HAS_BLOB_URLS_EXIT      = '0'
             } -Stubs (New-LerobotStubSet)
 
             $trainCall = $result.Calls | Where-Object { $_ -like 'python -m training.il.scripts.lerobot.train*' } | Select-Object -First 1
@@ -205,15 +210,15 @@ Describe 'lerobot-train-osmo-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPres
             $bashEnvPath = New-StubBashEnv -Workspace $workspace
 
             $result = Invoke-BashEntryScript -ScriptPath $script:ScriptPath -WorkDir $workspace -EnvVars @{
-                BASH_ENV                   = $bashEnvPath
-                OSMO_INPUT_0               = $inputRoot
-                PAYLOAD_ROOT               = $payloadRoot
-                DATASET_REPO_ID            = 'org/dataset'
-                POLICY_TYPE                = 'diffusion'
-                JOB_NAME                   = 'lerobot-job'
-                OUTPUT_DIR                 = $outputRoot
-                DATASET_ROOT               = $datasetRoot
-                PYTHON_HAS_BLOB_URLS_EXIT  = '1'
+                BASH_ENV                  = $bashEnvPath
+                OSMO_INPUT_0              = $inputRoot
+                PAYLOAD_ROOT              = $payloadRoot
+                DATASET_REPO_ID           = 'org/dataset'
+                POLICY_TYPE               = 'diffusion'
+                JOB_NAME                  = 'lerobot-job'
+                OUTPUT_DIR                = $outputRoot
+                DATASET_ROOT              = $datasetRoot
+                PYTHON_HAS_BLOB_URLS_EXIT = '1'
             } -Stubs (New-LerobotStubSet)
 
             $trainCall = $result.Calls | Where-Object { $_ -like 'python -m training.il.scripts.lerobot.train*' } | Select-Object -First 1

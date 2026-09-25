@@ -309,6 +309,7 @@ class TestRegisterModelLineage:
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SUBMIT_SCRIPT = _REPO_ROOT / "training/il/scripts/submit-azureml-lerobot-training.sh"
+_OSMO_SUBMIT_SCRIPT = _REPO_ROOT / "training/il/scripts/submit-osmo-lerobot-training.sh"
 _ENTRY_SCRIPT = _REPO_ROOT / "training/il/scripts/lerobot/azureml-train-entry.sh"
 
 
@@ -333,6 +334,9 @@ def _stub_az_on_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
         encoding="utf-8",
     )
     az.chmod(0o755)
+    osmo = bin_dir / "osmo"
+    osmo.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    osmo.chmod(0o755)
     terraform = bin_dir / "terraform"
     terraform.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
     terraform.chmod(0o755)
@@ -390,6 +394,84 @@ def _run_submit_job(*args: str, env_extra: dict[str, str]) -> subprocess.Complet
     )
 
 
+def _run_osmo_submit(*args: str) -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    env.update(
+        {
+            "AZURE_SUBSCRIPTION_ID": "sub",
+            "AZURE_RESOURCE_GROUP": "rg",
+            "AZUREML_WORKSPACE_NAME": "ws",
+            "AZURE_STORAGE_ACCOUNT_NAME": "storage",
+        }
+    )
+    return subprocess.run(
+        ["bash", str(_OSMO_SUBMIT_SCRIPT), *args, "--config-preview"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("--dataset-repo-id", "user/dataset"),
+        ("--dataset-asset", "azureml:release:1", "--blob-url", "https://account.blob.core.windows.net/releases/one"),
+        ("--dataset-asset", "azureml:release:1", "--dataset-asset", "azureml:release:2"),
+    ],
+)
+def test_verified_dataset_trust_rejects_ambiguous_sources(args):
+    proc = _run_submit(*args, "--dataset-trust", "verified", "--compute", "c")
+
+    assert proc.returncode != 0
+    assert "--dataset-trust verified" in proc.stderr
+
+
+@pytest.mark.parametrize(
+    "source_args",
+    [
+        ("--blob-url", "https://account.blob.core.windows.net/releases/one"),
+        (
+            "--blob-url",
+            "https://account.blob.core.windows.net/releases/one",
+            "--blob-url",
+            "https://account.blob.core.windows.net/releases/two",
+        ),
+        ("--dataset-asset", "azureml:release:1"),
+    ],
+)
+def test_verified_dataset_trust_accepts_one_release_source(source_args):
+    proc = _run_submit(*source_args, "--dataset-trust", "verified", "--compute", "c")
+
+    assert proc.returncode == 0, proc.stderr
+    assert "Dataset Trust" in proc.stdout
+    assert "verified" in proc.stdout
+
+
+def test_osmo_verified_dataset_trust_accepts_blob_releases_and_rejects_huggingface():
+    verified = _run_osmo_submit(
+        "--blob-url",
+        "https://account.blob.core.windows.net/releases/one",
+        "--blob-url",
+        "https://account.blob.core.windows.net/releases/two",
+        "--dataset-trust",
+        "verified",
+    )
+    huggingface = _run_osmo_submit(
+        "--dataset-repo-id",
+        "user/dataset",
+        "--dataset-trust",
+        "verified",
+    )
+
+    assert verified.returncode == 0, verified.stderr
+    assert "Dataset Trust" in verified.stdout
+    assert "verified" in verified.stdout
+    assert huggingface.returncode != 0
+    assert "requires one or more --blob-url releases" in huggingface.stderr
+
+
 def _write_executable(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
     path.chmod(0o755)
@@ -435,6 +517,13 @@ if [[ "${1:-}" == "-c" ]]; then
   exec "$REAL_PYTHON" "$@"
 fi
 if [[ "${1:-}" == "-m" ]]; then
+    if [[ "${2:-}" == "training.il.scripts.lerobot.train" && -n "${CAPTURE_VERIFIED_RELEASE_PATH:-}" ]]; then
+        printf '%s' "${VERIFIED_RELEASE_PATH:-}" >"${CAPTURE_VERIFIED_RELEASE_PATH}"
+    fi
+    if [[ "${2:-}" == "training.il.scripts.lerobot.train" && -n "${CAPTURE_DERIVED_INPUT:-}" ]]; then
+        printf '%s|%s|' "${DATASET_TRUST:-}" "${DERIVED_INPUT_PATH:-}" >"${CAPTURE_DERIVED_INPUT}"
+        printf '%s' "${VERIFIED_RELEASE_PATH:-}" >>"${CAPTURE_DERIVED_INPUT}"
+    fi
   exit 0
 fi
 exec "$REAL_PYTHON" "$@"
@@ -632,6 +721,7 @@ def test_job_submission_declares_mounted_inputs_in_rendered_yaml(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     captured_job_file = tmp_path / "captured-job.yml"
+    captured_args_file = tmp_path / "captured-args.txt"
     az = fake_bin / "az"
     az.write_text(
         """#!/usr/bin/env bash
@@ -646,6 +736,7 @@ if [[ "$1" == "ml" && "$2" == "environment" && "$3" == "create" ]]; then
 fi
 
 if [[ "$1" == "ml" && "$2" == "job" && "$3" == "create" ]]; then
+    printf '%s\n' "$@" > "$CAPTURE_ARGS_FILE"
   job_file=""
   while [[ $# -gt 0 ]]; do
     if [[ "$1" == "--file" ]]; then
@@ -670,11 +761,14 @@ exit 2
     proc = _run_submit_job(
         "--dataset-asset",
         "azureml:ds:1",
+        "--dataset-trust",
+        "verified",
         "--init-from-policy-model",
         "azureml:model:2",
         "--compute",
         "c",
         env_extra={
+            "CAPTURE_ARGS_FILE": str(captured_args_file),
             "CAPTURE_JOB_FILE": str(captured_job_file),
             "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
         },
@@ -693,6 +787,7 @@ exit 2
         "mode": "download",
         "path": "azureml:model:2",
     }
+    assert "environment_variables.DATASET_TRUST=verified" in captured_args_file.read_text(encoding="utf-8")
 
 
 def test_entrypoint_combines_sources_without_empty_array_nounset_expansion(tmp_path):
@@ -719,6 +814,53 @@ def test_entrypoint_reports_missing_mounted_dataset_asset(tmp_path):
     assert proc.returncode == 1
     assert "Expected 2 AzureML data asset mount(s), but found 1" in proc.stderr
     assert "AZURE_ML_INPUT_dataset_asset_1=<UNSET>" in proc.stderr
+
+
+def test_entrypoint_marks_single_verified_data_asset_for_in_place_verification(tmp_path):
+    mounted = tmp_path / "release-asset"
+    mounted.mkdir()
+    captured_path = tmp_path / "verified-release-path.txt"
+
+    proc = _run_entrypoint(
+        tmp_path,
+        extra={
+            "DATASET_ASSET_COUNT": "1",
+            "AZURE_ML_INPUT_dataset_asset_0": str(mounted),
+            "DATASET_TRUST": "verified",
+            "CAPTURE_VERIFIED_RELEASE_PATH": str(captured_path),
+        },
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert captured_path.read_text(encoding="utf-8") == str(mounted)
+
+
+def test_entrypoint_rejects_verified_huggingface_source(tmp_path):
+    proc = _run_entrypoint(tmp_path, extra={"DATASET_TRUST": "verified"})
+
+    assert proc.returncode == 1
+    assert "requires exactly one mounted data asset or Blob release" in proc.stderr
+
+
+def test_entrypoint_routes_merged_verified_blob_releases_as_derived(tmp_path):
+    dataset_root = tmp_path / "data"
+    derived_path = dataset_root / "dataset"
+    (derived_path / "metadata").mkdir(parents=True)
+    (derived_path / "metadata/derived-input.json").write_text("{}", encoding="utf-8")
+    captured = tmp_path / "derived-input.txt"
+
+    proc = _run_entrypoint(
+        tmp_path,
+        extra={
+            "BLOB_URLS": '["https://account.blob.core.windows.net/releases/one"]',
+            "DATASET_ROOT": str(dataset_root),
+            "DATASET_TRUST": "verified",
+            "CAPTURE_DERIVED_INPUT": str(captured),
+        },
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert captured.read_text(encoding="utf-8") == f"derived|{derived_path}|"
 
 
 @pytest.mark.parametrize(

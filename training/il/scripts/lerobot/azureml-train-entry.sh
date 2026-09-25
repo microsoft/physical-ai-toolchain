@@ -150,7 +150,13 @@ if python3 -c 'from training.il.scripts.lerobot._env import has_blob_urls; raise
   FULL_DATASET_PATH="${DATASET_ROOT:-/workspace/data}/${DATASET_REPO_ID}"
   echo "Dataset materialized at: ${FULL_DATASET_PATH}"
   if [[ "${DATASET_TRUST:-unverified}" == "verified" ]]; then
-    export VERIFIED_RELEASE_PATH="${FULL_DATASET_PATH}"
+    if [[ -f "${FULL_DATASET_PATH}/metadata/derived-input.json" ]]; then
+      export DATASET_TRUST="derived"
+      export DERIVED_INPUT_PATH="${FULL_DATASET_PATH}"
+      unset VERIFIED_RELEASE_PATH
+    else
+      export VERIFIED_RELEASE_PATH="${FULL_DATASET_PATH}"
+    fi
   fi
   blob_paths+=("${FULL_DATASET_PATH}")
 fi
@@ -164,6 +170,21 @@ if [[ ${#blob_paths[@]} -gt 0 ]]; then
   all_sources+=("${blob_paths[@]}")
 fi
 total_sources=${#all_sources[@]}
+dataset_trust="${DATASET_TRUST:-unverified}"
+case "${dataset_trust}" in
+  derived|unverified|verified) ;;
+  *)
+    echo "ERROR: DATASET_TRUST must be derived, unverified, or verified, got '${dataset_trust}'" >&2
+    exit 1
+    ;;
+esac
+if [[ "${dataset_trust}" == "verified" && ${total_sources} -ne 1 ]]; then
+  echo "ERROR: DATASET_TRUST=verified requires exactly one mounted data asset or Blob release." >&2
+  exit 1
+fi
+if [[ "${dataset_trust}" == "verified" && ${#asset_paths[@]} -eq 1 ]]; then
+  export VERIFIED_RELEASE_PATH="${asset_paths[0]}"
+fi
 
 if [[ ${total_sources} -eq 0 ]]; then
   # No mounted assets or blobs — fall back to HuggingFace Hub. The wrapper at

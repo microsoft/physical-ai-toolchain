@@ -764,6 +764,58 @@ class TestMain:
         _mod.main()
         assert called["a"].policy_path == "/x"
 
+    def test_verified_release_is_checked_before_evaluation(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        called = {}
+        summary = object()
+        verify = MagicMock(return_value=summary)
+        monkeypatch.setattr(_mod, "verify_release", verify)
+        monkeypatch.setattr(_mod, "run_evaluation", lambda args: called.setdefault("args", args))
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "run-local-lerobot-eval",
+                "--policy-path",
+                "/x",
+                "--dataset-dir",
+                str(tmp_path),
+                "--dataset-trust",
+                "verified",
+            ],
+        )
+
+        _mod.main()
+
+        verify.assert_called_once_with(tmp_path.resolve(), expected_target_format=("lerobot", "3.0"))
+        assert called["args"].dataset_evidence is summary
+
+    def test_release_verification_failure_prevents_evaluation(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        run_evaluation = MagicMock()
+        monkeypatch.setattr(_mod, "verify_release", MagicMock(side_effect=ValueError("tampered")))
+        monkeypatch.setattr(_mod, "run_evaluation", run_evaluation)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "run-local-lerobot-eval",
+                "--policy-path",
+                "/x",
+                "--dataset-dir",
+                str(tmp_path),
+                "--dataset-trust",
+                "verified",
+            ],
+        )
+
+        with pytest.raises(ValueError, match="tampered"):
+            _mod.main()
+
+        run_evaluation.assert_not_called()
+
     def test_invokes_run_evaluation_aml(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         called = {}
         monkeypatch.setattr(_mod, "run_evaluation", lambda a: called.setdefault("a", a))

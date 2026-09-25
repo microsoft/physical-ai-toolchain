@@ -14,7 +14,11 @@ import torch
 _EVALUATION_ROOT = Path(__file__).resolve().parents[2]
 if str(_EVALUATION_ROOT) not in sys.path:
     sys.path.insert(0, str(_EVALUATION_ROOT))
+_VERIFIER_ROOT = Path(__file__).resolve().parents[3] / "training" / "il" / "scripts" / "lerobot"
+if str(_VERIFIER_ROOT) not in sys.path:
+    sys.path.insert(0, str(_VERIFIER_ROOT))
 
+from release_verifier import build_dataset_lineage_record, verify_derived_input, verify_release  # noqa: E402
 from sil.hf_revision import resolve_hf_revision  # noqa: E402
 
 JOINT_NAMES: list[str] = []
@@ -39,6 +43,7 @@ def _write_vla_schema_v1(
     per_episode: list[dict],
     dataset_repo_id: str,
     policy_repo_id: str,
+    dataset_lineage: dict,
 ) -> None:
     """Emit evaluation_schema_version=1 artifacts alongside eval_results.json.
 
@@ -53,6 +58,7 @@ def _write_vla_schema_v1(
         "evaluation_schema_version": _EVALUATION_SCHEMA_VERSION,
         "aggregate_verdict": _VERDICT_PASS,
         "baseline_model_version": _BASELINE_NONE,
+        "dataset_lineage": dataset_lineage,
         "metrics": [
             {
                 "name": _TOOLCHAIN_TO_VLA_METRIC.get(toolchain_name, toolchain_name),
@@ -81,7 +87,9 @@ def _write_vla_schema_v1(
                 "evaluation_schema_version": _EVALUATION_SCHEMA_VERSION,
                 "episode_id": str(episode.get("episode", "unknown")),
                 "dataset_id": dataset_repo_id,
-                "dataset_version": "unknown",
+                "dataset_version": _dataset_version(dataset_lineage),
+                "dataset_lineage": dataset_lineage,
+                "source_episode": episode.get("source_episode"),
                 "domain_category": None,
                 "model_version": policy_repo_id,
                 "artifact_refs": [],
@@ -91,6 +99,78 @@ def _write_vla_schema_v1(
             }
             f.write(json.dumps(record) + "\n")
     print(f"[INFO] VLA schema v1 failure cases: {failure_cases_path}")
+
+
+def _dataset_version(dataset_lineage: dict) -> str:
+    trust = dataset_lineage["trust"]
+    if trust == "verified":
+        return str(dataset_lineage["release"]["release_id"])
+    if trust == "derived":
+        return str(dataset_lineage["derived_input_digest"])
+    return "unverified"
+
+
+def _episode_source_mapping(dataset_lineage: dict) -> dict[int, dict]:
+    """Index canonical source mappings by runtime release episode index."""
+    if dataset_lineage["trust"] == "verified":
+        return {
+            int(item["release_episode_index"]): item for item in dataset_lineage["release"]["episode_source_mapping"]
+        }
+    if dataset_lineage["trust"] != "derived":
+        return {}
+    result: dict[int, dict] = {}
+    offset = 0
+    for parent in dataset_lineage["parent_releases"]:
+        for item in parent["episode_source_mapping"]:
+            mapped = dict(item)
+            mapped["release_episode_index"] = offset + int(item["release_episode_index"])
+            mapped["parent_release_id"] = parent["release_id"]
+            result[mapped["release_episode_index"]] = mapped
+        offset += int(parent["episode_count"])
+    return result
+
+
+def _bounded_lineage_summary(dataset_lineage: dict) -> dict:
+    """Reduce complete lineage to identity and count fields for MLflow."""
+    trust = dataset_lineage["trust"]
+    if trust == "verified":
+        release = dataset_lineage["release"]
+        return {
+            "schema_version": dataset_lineage["schema_version"],
+            "trust": trust,
+            "release_id": release["release_id"],
+            "manifest_evidence_digest": release["manifest_evidence_digest"],
+            "target_format": f"{release['target_format_name']}/{release['target_format_version']}",
+            "source_dataset_count": len(release["source_dataset_ids"]),
+            "episode_count": release["episode_count"],
+            "frame_count": release["frame_count"],
+            "quality_profile_count": len(release["quality_profile_versions"]),
+            "parent_release_count": len(release["parent_release_ids"]),
+        }
+    if trust == "derived":
+        return {
+            "schema_version": dataset_lineage["schema_version"],
+            "trust": trust,
+            "derived_input_digest": dataset_lineage["derived_input_digest"],
+            "parent_release_count": len(dataset_lineage["parent_releases"]),
+            "parent_release_ids": [parent["release_id"] for parent in dataset_lineage["parent_releases"]],
+        }
+    return dict(dataset_lineage)
+
+
+def _log_dataset_lineage(mlflow, dataset_path: Path, dataset_lineage: dict) -> None:
+    """Log bounded lineage tags and non-sensor evidence artifacts."""
+    lineage_tags = {"dataset.trust": dataset_lineage["trust"]}
+    if dataset_lineage["trust"] == "verified":
+        lineage_tags["dataset.release_id"] = _dataset_version(dataset_lineage)
+        lineage_tags["dataset.manifest_digest"] = dataset_lineage["release"]["manifest_evidence_digest"]
+    elif dataset_lineage["trust"] == "derived":
+        lineage_tags["dataset.derived_input_digest"] = _dataset_version(dataset_lineage)
+    mlflow.set_tags(lineage_tags)
+    mlflow.log_dict(_bounded_lineage_summary(dataset_lineage), "lineage/dataset-lineage-summary.json")
+    if dataset_lineage["trust"] == "verified":
+        for relative_path in ("metadata/release-manifest.json", "metadata/package-quality.json"):
+            mlflow.log_artifact(str(dataset_path / relative_path), artifact_path="lineage")
 
 
 def _setup_matplotlib():
@@ -347,6 +427,21 @@ def main() -> int:
         print("[ERROR] Dataset source required: set DATASET_REPO_ID or blob storage params")
         return 1
 
+    dataset_path = Path(dataset_dir).resolve()
+    dataset_trust = os.environ.get("DATASET_TRUST", "unverified").strip().lower()
+    if dataset_trust == "verified":
+        verified_summary = verify_release(dataset_path, expected_target_format=("lerobot", "3.0"))
+    elif dataset_trust == "derived":
+        verified_summary = verify_derived_input(dataset_path)
+    elif dataset_trust == "unverified":
+        verified_summary = None
+    else:
+        print(f"[ERROR] Unsupported DATASET_TRUST: {dataset_trust}")
+        return 1
+    unverified_source = "huggingface" if dataset_repo_id and dataset_repo_id != "none" else "azure-blob"
+    dataset_lineage = build_dataset_lineage_record(verified_summary, unverified_source=unverified_source)
+    source_mapping = _episode_source_mapping(dataset_lineage)
+
     # Load dataset info
     with open(os.path.join(dataset_dir, "meta", "info.json")) as f:
         info = json.load(f)
@@ -399,8 +494,11 @@ def main() -> int:
                 "eval_episodes": num_episodes,
                 "device": str(device),
                 "fps": fps,
+                "dataset_trust": dataset_lineage["trust"],
+                "dataset_version": _dataset_version(dataset_lineage),
             }
         )
+        _log_dataset_lineage(mlflow, dataset_path, dataset_lineage)
 
     all_episode_metrics = []
 
@@ -468,6 +566,8 @@ def main() -> int:
 
         ep_metrics = {
             "episode": ep,
+            "release_episode_index": ep,
+            "source_episode": source_mapping.get(ep),
             "steps": len(pred),
             "mse": mse,
             "mae": mae,
@@ -526,6 +626,7 @@ def main() -> int:
         "policy_repo_id": policy_repo_id,
         "policy_type": policy_type,
         "dataset_repo_id": dataset_repo_id,
+        "dataset_lineage": dataset_lineage,
         "device": str(device),
         "episodes_evaluated": len(all_episode_metrics),
         "aggregate_mse": agg_mse,
@@ -552,6 +653,7 @@ def main() -> int:
         per_episode=all_episode_metrics,
         dataset_repo_id=dataset_repo_id,
         policy_repo_id=policy_repo_id,
+        dataset_lineage=dataset_lineage,
     )
 
     if mlflow_enable:

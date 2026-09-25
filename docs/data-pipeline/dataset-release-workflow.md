@@ -108,6 +108,10 @@ A verified package contains the following application-owned artifacts alongside 
 ├── metadata/
 │   ├── accepted.json
 │   ├── rejected.json
+│   ├── excluded.json
+│   ├── package-quality.json
+│   ├── quality/
+│   │   └── <quality-run-id>.json
 │   └── release-manifest.json
 ├── checksums.sha256
 ├── .published.json
@@ -118,6 +122,9 @@ A verified package contains the following application-owned artifacts alongside 
 |----------|----------------------|
 | `metadata/accepted.json` | Canonical ledger of accepted decisions included in the package |
 | `metadata/rejected.json` | Canonical ledger of excluded rejected decisions recorded for the release |
+| `metadata/excluded.json` | Canonical ledger of other candidates excluded without a rejection decision |
+| `metadata/quality/<quality-run-id>.json` | Source-quality evidence bound to each accepted episode |
+| `metadata/package-quality.json` | Semantic read-back, feature, frame-count, visual sample, inventory, and checksum evidence for packaged bytes |
 | `metadata/release-manifest.json` | Source provenance, decision IDs, episode mapping, formats, versions, feature schema, counts, and file inventory |
 | `checksums.sha256` | SHA-256 digest for every inventoried package file |
 | `.published.json` | Final marker proving publication completed after verification |
@@ -125,6 +132,14 @@ A verified package contains the following application-owned artifacts alongside 
 The publisher verifies staged bytes, copies or uploads the complete candidate, verifies the destination, and creates `.published.json` last. Readers list only marker-complete releases. Existing release destinations are never overwritten.
 
 For local storage, published packages are beneath `<DATAVIEWER_RELEASE_ROOT>/releases/<dataset-id>/<release-id>/`. Azure packages are beneath `<AZURE_STORAGE_DATASET_EXPORT_PREFIX>/releases/<dataset-id>/<release-id>/`.
+
+## Consume a Verified Release
+
+Set `--dataset-trust verified` when a training or evaluation Blob source points to a marker-complete Viewer release. The runtime verifies the publication marker, manifest, quality evidence, exact inventory, file sizes, and SHA-256 values before use. Generic local folders, Hub datasets, and other raw sources remain `unverified` and cannot emit release identity.
+
+A single verified release remains immutable. Combining multiple verified releases creates a separate `derived` workspace with ordered parent summaries and its own digest. The derived workspace never inherits a parent release digest.
+
+Training runs, evaluation results, and registered models retain release identity and source episode mapping. The demonstrated simulation endpoint is `evaluation/sil`. Hardware-in-the-loop or physical robot execution is optional and outside this workflow's critical path.
 
 ## Recover and Cancel Jobs
 

@@ -882,12 +882,16 @@ class TestVerifiedReleasePreparation:
 
         assert (result / "payload.bin").read_bytes() == b"immutable"
         verify.assert_called_once_with(
-            result.with_name(f".{result.name}.new"),
+            source,
             expected_target_format=("lerobot", "3.0"),
         )
         postprocess.assert_not_called()
 
-    def test_multiple_verified_release_sources_are_rejected(self, monkeypatch, tmp_path):
+    def test_multiple_verified_release_sources_record_ordered_derived_lineage(self, monkeypatch, tmp_path):
+        first = tmp_path / "first"
+        second = tmp_path / "second"
+        first.mkdir()
+        second.mkdir()
         monkeypatch.setenv("DATASET_ROOT", str(tmp_path))
         monkeypatch.setenv("DATASET_REPO_ID", "release")
         monkeypatch.setenv(
@@ -896,11 +900,40 @@ class TestVerifiedReleasePreparation:
             '"https://account.blob.core.windows.net/releases/two"]',
         )
         monkeypatch.setenv("DATASET_TRUST", "verified")
+        monkeypatch.setattr(
+            _MOD,
+            "download_dataset_from_url",
+            MagicMock(side_effect=[first, second]),
+        )
 
-        with pytest.raises(SystemExit) as exc_info:
-            _MOD.prepare_dataset()
+        def fake_merge(sources, destination):
+            assert sources == [first, second]
+            destination.mkdir()
+            (destination / "data.bin").write_bytes(b"derived")
 
-        assert exc_info.value.code == _MOD.EXIT_FAILURE
+        monkeypatch.setattr(_MOD, "merge_datasets", fake_merge)
+        summaries = [
+            _MOD.VerifiedReleaseSummary(
+                release_id=release_id,
+                manifest_evidence_digest=digest,
+                target_format_name="lerobot",
+                target_format_version="3.0",
+                source_dataset_ids=(f"dataset-{index}",),
+                episode_count=1,
+                frame_count=2,
+                quality_profile_versions=("1.0.0",),
+                accepted_decision_ids=(f"decision-{index}",),
+                parent_release_ids=(),
+            )
+            for index, (release_id, digest) in enumerate((("one", "a" * 64), ("two", "b" * 64)))
+        ]
+        monkeypatch.setattr(_MOD, "verify_release", MagicMock(side_effect=summaries))
+
+        result = _MOD.prepare_dataset()
+
+        lineage = json.loads((result / "metadata" / "derived-input.json").read_text(encoding="utf-8"))
+        assert [parent["release_id"] for parent in lineage["parent_releases"]] == ["one", "two"]
+        assert len(lineage["derived_input_digest"]) == 64
 
 
 class TestParseEnvConfig:

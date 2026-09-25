@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import MagicMock
 
 import pytest
@@ -24,8 +25,10 @@ class TestDownloadBlobDataset:
 
         blob_a = MagicMock()
         blob_a.name = "myprefix/sub/file_a.bin"
+        blob_a.size = len(b"data-bytes")
         blob_b = MagicMock()
         blob_b.name = "myprefix/file_b.txt"
+        blob_b.size = len(b"data-bytes")
         # Empty rel-path entry should be skipped.
         blob_skip = MagicMock()
         blob_skip.name = "myprefix/"
@@ -33,7 +36,7 @@ class TestDownloadBlobDataset:
         self.client = MagicMock()
         self.client.list_blobs.return_value = [blob_a, blob_b, blob_skip]
         download_stream = MagicMock()
-        download_stream.readall.return_value = b"data-bytes"
+        download_stream.readinto.side_effect = lambda handle: handle.write(b"data-bytes")
         self.client.download_blob.return_value = download_stream
 
         mock_blob.ContainerClient.from_container_url.return_value = self.client
@@ -55,10 +58,15 @@ class TestDownloadBlobDataset:
         monkeypatch.setenv("DATA_ROOT", str(self.data_root))
         monkeypatch.setenv("DATASET_CONFIG_PATH", str(self.config_path))
 
-    def _run(self) -> None:
+    def _load(self) -> ModuleType:
         spec = importlib.util.spec_from_file_location("download_blob_dataset", _SCRIPT_PATH)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        return module
+
+    def _run(self) -> None:
+        module = self._load()
+        module.download_dataset()
 
     def test_default_container_used(self) -> None:
         self._run()
@@ -86,3 +94,53 @@ class TestDownloadBlobDataset:
     def test_uses_default_credential(self) -> None:
         self._run()
         self.mock_identity.DefaultAzureCredential.assert_called_once()
+
+    def test_verified_release_is_checked_before_publication(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DATASET_TRUST", "verified")
+        module = self._load()
+
+        def verify(staged: Path, *, expected_target_format: tuple[str, str]) -> None:
+            assert staged == self.local_root.with_name(f".{self.local_root.name}.new")
+            assert staged.is_dir()
+            assert not self.local_root.exists()
+            assert expected_target_format == ("lerobot", "3.0")
+
+        monkeypatch.setattr(module, "verify_release", verify)
+        module.download_dataset()
+
+        assert self.local_root.is_dir()
+
+    def test_verification_failure_leaves_no_published_dataset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DATASET_TRUST", "verified")
+        module = self._load()
+        monkeypatch.setattr(module, "verify_release", MagicMock(side_effect=ValueError("tampered")))
+
+        with pytest.raises(ValueError, match="tampered"):
+            module.download_dataset()
+
+        assert not self.local_root.exists()
+        assert not self.local_root.with_name(f".{self.local_root.name}.new").exists()
+
+    def test_rejects_blob_path_traversal(self) -> None:
+        blob = MagicMock(name="blob")
+        blob.name = "myprefix/../escape"
+        self.client.list_blobs.return_value = [blob]
+
+        with pytest.raises(ValueError, match="Unsafe blob path"):
+            self._run()
+
+        assert not self.local_root.exists()
+
+    def test_rejects_short_download(self) -> None:
+        self.client.list_blobs.return_value[0].size += 1
+
+        with pytest.raises(RuntimeError, match="Short read"):
+            self._run()
+
+        assert not self.local_root.exists()
+
+    def test_refuses_to_overwrite_existing_dataset(self) -> None:
+        self.local_root.mkdir(parents=True)
+
+        with pytest.raises(FileExistsError, match="refusing to overwrite"):
+            self._run()

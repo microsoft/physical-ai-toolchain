@@ -1,9 +1,12 @@
 """Behavior tests for the shared Viewer release verifier."""
 
+# cspell:ignore nonincluded unreviewed
+
 from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -320,3 +323,46 @@ def test_given_incomplete_visual_readback_when_verified_then_release_is_rejected
     # Act and assert
     with pytest.raises(release_verifier.ReleaseVerificationError, match="visual sample coverage"):
         release_verifier.verify_release(tmp_path)
+
+
+def test_given_derived_merge_when_verified_then_parent_order_and_bytes_are_bound(tmp_path: Path) -> None:
+    # Arrange
+    (tmp_path / "data").mkdir()
+    payload = tmp_path / "data/episodes.parquet"
+    payload.write_bytes(b"derived")
+    parents = tuple(
+        release_verifier.VerifiedReleaseSummary(
+            release_id=release_id,
+            manifest_evidence_digest=character * 64,
+            target_format_name="lerobot",
+            target_format_version="3.0",
+            source_dataset_ids=(f"dataset-{index}",),
+            episode_count=1,
+            frame_count=2,
+            quality_profile_versions=("1.0.0",),
+            accepted_decision_ids=(f"decision-{index}",),
+            parent_release_ids=(),
+        )
+        for index, (release_id, character) in enumerate((("release-b", "b"), ("release-a", "a")))
+    )
+    digest = release_verifier.compute_derived_input_digest(tmp_path, parents)
+    _write_json(
+        tmp_path / "metadata/derived-input.json",
+        {
+            "schema_version": "1.0.0",
+            "derivation": "merge",
+            "derived_input_digest": digest,
+            "parent_releases": [asdict(parent) for parent in parents],
+        },
+    )
+
+    # Act
+    summary = release_verifier.verify_derived_input(tmp_path)
+
+    # Assert
+    assert [parent.release_id for parent in summary.parent_releases] == ["release-b", "release-a"]
+    assert summary.derived_input_digest == digest
+
+    payload.write_bytes(b"tampered")
+    with pytest.raises(release_verifier.ReleaseVerificationError, match="does not match"):
+        release_verifier.verify_derived_input(tmp_path)

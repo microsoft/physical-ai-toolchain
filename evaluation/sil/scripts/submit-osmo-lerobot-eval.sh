@@ -87,6 +87,7 @@ policy_revision="${POLICY_REVISION:-}"
 policy_type="${POLICY_TYPE:-act}"
 dataset_repo_id="${DATASET_REPO_ID:-}"
 dataset_revision="${DATASET_REVISION:-}"
+dataset_trust="${DATASET_TRUST:-unverified}"
 job_name="${JOB_NAME:-lerobot-eval}"
 output_dir="${OUTPUT_DIR:-/workspace/outputs/eval}"
 image="${IMAGE:-$DEFAULT_LEROBOT_EVAL_IMAGE}"
@@ -133,6 +134,7 @@ while [[ $# -gt 0 ]]; do
     -p|--policy-type)             policy_type="$2"; shift 2 ;;
     -d|--dataset-repo-id)         dataset_repo_id="$2"; shift 2 ;;
     --dataset-revision)           dataset_revision="$2"; shift 2 ;;
+    --dataset-trust)              dataset_trust="$2"; shift 2 ;;
     -j|--job-name)                job_name="$2"; shift 2 ;;
     -o|--output-dir)              output_dir="$2"; shift 2 ;;
     -i|--image)                   image="$2"; shift 2 ;;
@@ -203,6 +205,15 @@ else
   [[ -z "$dataset_revision" ]] && fatal "--dataset-revision is required with --dataset-repo-id"
 fi
 
+case "$dataset_trust" in
+  unverified) ;;
+  verified)
+    [[ "$from_blob_dataset" == "true" ]] || fatal "--dataset-trust verified requires --from-blob-dataset"
+    [[ -z "$dataset_repo_id" ]] || fatal "--dataset-trust verified cannot be combined with --dataset-repo-id"
+    ;;
+  *) fatal "Unsupported dataset trust: $dataset_trust (use: unverified, verified)" ;;
+esac
+
 if [[ "$from_blob_dataset" == "true" && ( "$from_aml_model" == "true" || "$builtin_policy" == "true" ) ]]; then
   use_huggingface_credential="false"
 fi
@@ -233,6 +244,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Record Video" "$record_video"
   print_kv "MLflow" "$mlflow_enable"
   [[ -n "$dataset_repo_id" ]] && print_kv "Dataset" "$dataset_repo_id"
+  print_kv "Dataset Trust" "$dataset_trust"
   [[ "$from_blob_dataset" == "true" ]] && print_kv "Blob Source" "$storage_account/$storage_container/$blob_prefix"
   [[ "$from_aml_model" == "true" ]] && print_kv "Model Source" "AzureML (${model_name}:${model_version})"
   print_kv "Register Model" "${register_model:-<none>}"
@@ -283,6 +295,7 @@ submit_args=(
   "eval_episodes=$eval_episodes"
   "eval_batch_size=$eval_batch_size"
   "record_video=$record_video"
+  "dataset_trust=$dataset_trust"
   "use_huggingface_credential=$use_huggingface_credential"
 )
 
@@ -343,6 +356,7 @@ print_kv "Job Name" "$job_name"
 print_kv "Image" "$image"
 print_kv "Eval Episodes" "$eval_episodes"
 print_kv "MLflow" "$mlflow_enable"
+print_kv "Dataset Trust" "$dataset_trust"
 [[ -n "$dataset_repo_id" ]] && print_kv "Dataset" "$dataset_repo_id"
 [[ "$from_aml_model" == "true" ]] && print_kv "Model Source" "AzureML (${model_name}:${model_version})"
 print_kv "Register Model" "${register_model:-<none>}"

@@ -8,6 +8,20 @@ echo "=== LeRobot AzureML Evaluation ==="
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../../.." && pwd))"
 
+case "${DATASET_TRUST:-unverified}" in
+  unverified) ;;
+  verified)
+    [[ -n "${BLOB_STORAGE_ACCOUNT:-}" && "${BLOB_STORAGE_ACCOUNT}" != "none" && -n "${BLOB_PREFIX:-}" && "${BLOB_PREFIX}" != "none" ]] || {
+      echo "Error: DATASET_TRUST=verified requires an Azure Blob dataset source" >&2
+      exit 1
+    }
+    ;;
+  *)
+    echo "Error: unsupported DATASET_TRUST=${DATASET_TRUST}" >&2
+    exit 1
+    ;;
+esac
+
 # shellcheck source=training/il/scripts/lerobot/lerobot-azureml.sh
 source "${REPO_ROOT}/training/il/scripts/lerobot/lerobot-azureml.sh"
 
@@ -30,7 +44,7 @@ if [[ -n "${AML_MODEL_NAME:-}" && "${AML_MODEL_NAME}" != "none" && -n "${AML_MOD
 
   if [[ -f /tmp/aml_model_path.env ]]; then
     # shellcheck disable=SC2046
-    export $(cat /tmp/aml_model_path.env | xargs)
+    export $(xargs < /tmp/aml_model_path.env)
     export POLICY_REPO_ID="${AML_MODEL_PATH}"
     echo "Using AzureML model at: ${POLICY_REPO_ID}"
   else
@@ -47,7 +61,10 @@ if [[ -n "${BLOB_STORAGE_ACCOUNT:-}" && "${BLOB_STORAGE_ACCOUNT}" != "none" && -
 
   if [[ -f /tmp/dataset_path.env ]]; then
     # shellcheck disable=SC2046
-    export $(cat /tmp/dataset_path.env | xargs)
+    export $(xargs < /tmp/dataset_path.env)
+    if [[ "${DATASET_TRUST:-unverified}" == "verified" ]]; then
+      export VERIFIED_RELEASE_PATH="${DATASET_DIR}"
+    fi
     echo "Dataset ready at: ${DATASET_DIR}"
   fi
 fi
@@ -60,7 +77,7 @@ if [[ "${MLFLOW_ENABLE:-false}" == "true" ]]; then
 
   if [[ -f /tmp/mlflow_config.env ]]; then
     # shellcheck disable=SC2046
-    export $(cat /tmp/mlflow_config.env | xargs)
+    export $(xargs < /tmp/mlflow_config.env)
   fi
 fi
 

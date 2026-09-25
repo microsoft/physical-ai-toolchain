@@ -43,7 +43,12 @@ import torch
 _EVALUATION_ROOT = Path(__file__).resolve().parents[2]
 if str(_EVALUATION_ROOT) not in sys.path:
     sys.path.insert(0, str(_EVALUATION_ROOT))
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_VERIFIER_ROOT = _REPO_ROOT / "training" / "il" / "scripts" / "lerobot"
+if str(_VERIFIER_ROOT) not in sys.path:
+    sys.path.insert(0, str(_VERIFIER_ROOT))
 
+from release_verifier import verify_derived_input, verify_release  # noqa: E402
 from sil.hf_revision import resolve_hf_revision  # noqa: E402
 
 
@@ -556,6 +561,12 @@ def main() -> None:
     )
 
     parser.add_argument("--dataset-dir", required=True, help="Path to LeRobot dataset root")
+    parser.add_argument(
+        "--dataset-trust",
+        choices=("derived", "unverified", "verified"),
+        default="unverified",
+        help="Dataset trust mode (default: unverified)",
+    )
     parser.add_argument("--episodes", type=int, default=5, help="Number of episodes to evaluate (default: 5)")
     parser.add_argument(
         "--output-dir", default="outputs/local-eval", help="Output directory (default: outputs/local-eval)"
@@ -572,6 +583,14 @@ def main() -> None:
     if not os.path.isdir(args.dataset_dir):
         print(f"Dataset directory not found: {args.dataset_dir}")
         sys.exit(1)
+
+    dataset_path = Path(args.dataset_dir).resolve()
+    if args.dataset_trust == "verified":
+        args.dataset_evidence = verify_release(dataset_path, expected_target_format=("lerobot", "3.0"))
+    elif args.dataset_trust == "derived":
+        args.dataset_evidence = verify_derived_input(dataset_path)
+    else:
+        args.dataset_evidence = None
 
     run_evaluation(args)
 

@@ -33,6 +33,7 @@ def fake_mlflow(monkeypatch):
     mlflow.log_metrics = MagicMock()
     mlflow.log_metric = MagicMock()
     mlflow.log_param = MagicMock()
+    mlflow.log_dict = MagicMock()
     mlflow.set_tag = MagicMock()
     mlflow.set_tags = MagicMock()
     monkeypatch.setitem(sys.modules, "mlflow", mlflow)
@@ -395,6 +396,75 @@ class TestRunTraining:
         assert _MOD.run_training(["lerobot-train"], source="osmo-azure-blob-training") == 0
         tags = fake_mlflow.set_tags.call_args.args[0]
         assert tags["dataset.source"] == "azure-blob"
+        lineage = fake_mlflow.log_dict.call_args.args[0]
+        assert lineage == {"schema_version": "1.0.0", "trust": "unverified", "source": "azure-blob"}
+
+    def test_verified_release_logs_complete_lineage_and_bounded_tags(
+        self, monkeypatch, fake_mlflow, fake_checkpoints, tmp_path
+    ):
+        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+        monkeypatch.setenv("SYSTEM_METRICS", "false")
+        summary = _MOD.VerifiedReleaseSummary(
+            release_id="release-1",
+            manifest_evidence_digest="a" * 64,
+            target_format_name="lerobot",
+            target_format_version="3.0",
+            source_dataset_ids=("dataset-a", "dataset-b"),
+            episode_count=2,
+            frame_count=20,
+            quality_profile_versions=("quality-v1",),
+            accepted_decision_ids=("decision-a", "decision-b"),
+            parent_release_ids=(),
+            quality_artifact_paths=("metadata/quality/run-a.json", "metadata/package-quality.json"),
+        )
+        _FakePopen.lines = []
+        monkeypatch.setattr(_MOD.subprocess, "Popen", _FakePopen)
+        monkeypatch.setattr(_MOD.signal, "signal", lambda *args, **kwargs: None)
+
+        assert _MOD.run_training(["lerobot-train"], verified_release=summary) == 0
+
+        lineage = fake_mlflow.log_dict.call_args.args[0]
+        assert lineage["trust"] == "verified"
+        assert lineage["release"]["accepted_decision_ids"] == ["decision-a", "decision-b"]
+        assert lineage["release"]["quality_artifact_paths"] == [
+            "metadata/quality/run-a.json",
+            "metadata/package-quality.json",
+        ]
+        tags = fake_mlflow.set_tags.call_args.args[0]
+        assert tags["dataset.source_datasets"] == "dataset-a,dataset-b"
+        assert tags["dataset.quality_profiles"] == "quality-v1"
+        assert tags["dataset.parent_release_count"] == "0"
+        assert json.loads((tmp_path / "dataset-lineage.json").read_text()) == lineage
+
+    def test_derived_input_summarizes_parent_lineage(self, monkeypatch, fake_mlflow, fake_checkpoints, tmp_path):
+        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+        monkeypatch.setenv("SYSTEM_METRICS", "false")
+        parent = _MOD.VerifiedReleaseSummary(
+            release_id="release-1",
+            manifest_evidence_digest="a" * 64,
+            target_format_name="lerobot",
+            target_format_version="3.0",
+            source_dataset_ids=("dataset-a",),
+            episode_count=2,
+            frame_count=20,
+            quality_profile_versions=("quality-v1",),
+            accepted_decision_ids=("decision-a",),
+            parent_release_ids=(),
+            quality_artifact_paths=("metadata/quality/run-a.json",),
+        )
+        summary = _MOD.DerivedInputSummary(derived_input_digest="d" * 64, parent_releases=(parent,))
+        _FakePopen.lines = []
+        monkeypatch.setattr(_MOD.subprocess, "Popen", _FakePopen)
+        monkeypatch.setattr(_MOD.signal, "signal", lambda *args, **kwargs: None)
+
+        assert _MOD.run_training(["lerobot-train"], verified_release=summary) == 0
+
+        tags = fake_mlflow.set_tags.call_args.args[0]
+        assert tags["dataset.parent_releases"] == "release-1"
+        assert tags["dataset.parent_manifest_digests"] == "a" * 64
+        assert tags["dataset.target_format"] == "lerobot/3.0"
+        assert tags["dataset.source_datasets"] == "dataset-a"
+        assert tags["dataset.quality_profiles"] == "quality-v1"
 
 
 class TestMain:
@@ -404,6 +474,7 @@ class TestMain:
         monkeypatch.delenv("REGISTER_CHECKPOINT", raising=False)
         monkeypatch.delenv("DATASET_TRUST", raising=False)
         monkeypatch.delenv("VERIFIED_RELEASE_PATH", raising=False)
+        monkeypatch.delenv("DERIVED_INPUT_PATH", raising=False)
         _FakePopen.lines = []
         monkeypatch.setattr(_MOD.subprocess, "Popen", _FakePopen)
         monkeypatch.setattr(_MOD.signal, "signal", lambda *a, **k: None)
@@ -449,6 +520,30 @@ class TestMain:
             _MOD.main()
 
         fake_bootstrap.authenticate_huggingface.assert_not_called()
+
+    def test_derived_input_is_checked_before_training(
+        self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap
+    ):
+        self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
+        monkeypatch.setattr(_MOD.sys, "argv", ["train.py"])
+        monkeypatch.setenv("DATASET_TRUST", "derived")
+        monkeypatch.setenv("DERIVED_INPUT_PATH", str(tmp_path / "derived"))
+        summary = _MOD.DerivedInputSummary(derived_input_digest="c" * 64, parent_releases=())
+        verify = MagicMock(return_value=summary)
+        monkeypatch.setattr(_MOD, "verify_derived_input", verify)
+        captured = {}
+
+        def fake_run(cmd, source="x", num_gpus=1, verified_release=None):
+            captured["cmd"] = cmd
+            captured["summary"] = verified_release
+            return 0
+
+        monkeypatch.setattr(_MOD, "run_training", fake_run)
+
+        assert _MOD.main() == 0
+        verify.assert_called_once_with((tmp_path / "derived").resolve())
+        assert f"--dataset.root={(tmp_path / 'derived').resolve()}" in captured["cmd"]
+        assert captured["summary"] is summary
 
     def test_verified_release_path_requires_verified_mode(
         self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap

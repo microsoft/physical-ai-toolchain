@@ -27,6 +27,7 @@ from tests.e2e._aml import (
     archive_all_model_versions,
     assert_job_has_checkpoint,
     assert_job_snapshot_contains_only_training,
+    assert_registered_model_has_release_lineage,
     cancel_aml_job,
     resolve_aml_lerobot_eval_policy_override,
     resolve_registered_model,
@@ -36,7 +37,11 @@ from tests.e2e._aml import (
     wait_until_aml_started,
 )
 from tests.e2e._common import e2e_name, log_e2e
-from tests.e2e._lerobot_dataset import stage_synthetic_lerobot_dataset
+from tests.e2e._lerobot_dataset import (
+    SYNTHETIC_RELEASE_ID,
+    SYNTHETIC_SOURCE_EPISODE_INDEX,
+    stage_synthetic_lerobot_dataset,
+)
 from tests.e2e._mlflow import (
     assert_aml_lerobot_eval_has_mlflow_tracking,
     assert_aml_lerobot_job_has_mlflow_tracking,
@@ -116,9 +121,21 @@ def test_aml_il_lifecycle_e2e(
         log_e2e("Validating AzureML LeRobot uploaded code snapshot")
         assert_job_snapshot_contains_only_training(job, repo_root)
         log_e2e("Validating AzureML LeRobot training MLflow tracking")
-        assert_aml_lerobot_job_has_mlflow_tracking(job, aml_workspace)
+        assert_aml_lerobot_job_has_mlflow_tracking(
+            job,
+            aml_workspace,
+            expected_release_id=SYNTHETIC_RELEASE_ID,
+            expected_source_episode_index=SYNTHETIC_SOURCE_EPISODE_INDEX,
+        )
         log_e2e("Validating AzureML LeRobot checkpoint output")
         assert_job_has_checkpoint(job)
+        assert_registered_model_has_release_lineage(
+            repo_root,
+            aml_workspace,
+            model,
+            expected_release_id=SYNTHETIC_RELEASE_ID,
+            expected_source_episode_index=SYNTHETIC_SOURCE_EPISODE_INDEX,
+        )
     else:
         log_e2e(f"Using pre-configured eval policy {policy_source.description} (training skipped)")
 
@@ -140,5 +157,10 @@ def test_aml_il_lifecycle_e2e(
     log_e2e(f"Waiting for AzureML LeRobot eval job {eval_job.name} to complete")
     wait_until_aml_completed(eval_job, repo_root, timeout_minutes=30, poll_interval_seconds=30)
     log_e2e("Validating AzureML LeRobot eval MLflow tracking")
-    assert_aml_lerobot_eval_has_mlflow_tracking(eval_job, aml_workspace)
+    assert_aml_lerobot_eval_has_mlflow_tracking(
+        eval_job,
+        aml_workspace,
+        expected_release_id=SYNTHETIC_RELEASE_ID,
+        expected_source_episode_index=SYNTHETIC_SOURCE_EPISODE_INDEX,
+    )
     log_e2e("AzureML LeRobot lifecycle e2e test finished successfully")

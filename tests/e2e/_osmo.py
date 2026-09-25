@@ -725,6 +725,8 @@ def submit_osmo_lerobot_training(
             str(repo_root / "training/il/scripts/submit-osmo-lerobot-training.sh"),
             "--blob-url",
             blob_url,
+            "--dataset-trust",
+            "verified",
             "--policy-type",
             policy_type,
             "--training-steps",
@@ -833,6 +835,8 @@ def submit_osmo_lerobot_eval(
         blob_container,
         "--blob-prefix",
         blob_prefix,
+        "--dataset-trust",
+        "verified",
     ]
     dataset_description = f"Azure Blob dataset {blob_storage_account}/{blob_container}/{blob_prefix}"
     experiment_name = e2e_name("lerobot-eval-e2e-osmo")

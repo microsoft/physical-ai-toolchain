@@ -95,7 +95,13 @@ if [[ "${BLOB_DATASOURCE}" == "1" ]]; then
   FULL_DATASET_PATH="${DATASET_ROOT}/${DATASET_REPO_ID}"
   echo "Dataset downloaded to: ${FULL_DATASET_PATH}"
   if [[ "${DATASET_TRUST:-unverified}" == "verified" ]]; then
-    export VERIFIED_RELEASE_PATH="${FULL_DATASET_PATH}"
+    if [[ -f "${FULL_DATASET_PATH}/metadata/derived-input.json" ]]; then
+      export DATASET_TRUST="derived"
+      export DERIVED_INPUT_PATH="${FULL_DATASET_PATH}"
+      unset VERIFIED_RELEASE_PATH
+    else
+      export VERIFIED_RELEASE_PATH="${FULL_DATASET_PATH}"
+    fi
   fi
   TRAIN_ARGS+=(
     "--dataset.root=${FULL_DATASET_PATH}"

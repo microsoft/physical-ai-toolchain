@@ -32,6 +32,8 @@ that is driven by the ``InstanceType``'s ``nvidia.com/gpu`` request; on managed
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -43,7 +45,13 @@ from pathlib import Path
 from typing import Any
 
 from training.il.scripts.lerobot._env import has_blob_urls
-from training.il.scripts.lerobot.release_verifier import VerifiedReleaseSummary, verify_release
+from training.il.scripts.lerobot.release_verifier import (
+    DerivedInputSummary,
+    VerifiedReleaseSummary,
+    build_dataset_lineage_record,
+    verify_derived_input,
+    verify_release,
+)
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
@@ -73,20 +81,38 @@ SYSTEM_METRICS_INTERVAL = 30
 _PROCESS_GROUP_KILL_GRACE_S = 15
 
 _VALID_MIXED_PRECISION = {"no", "fp16", "bf16"}
-_VALID_DATASET_TRUST = {"unverified", "verified"}
+_VALID_DATASET_TRUST = {"derived", "unverified", "verified"}
+_DATASET_LINEAGE_FILENAME = "dataset-lineage.json"
 
 
-def _verify_dataset_release() -> tuple[Path | None, VerifiedReleaseSummary | None]:
+def _summarize_values(values: tuple[str, ...]) -> str:
+    """Return a bounded searchable summary for a high-cardinality field."""
+    joined = ",".join(values)
+    if len(joined) <= 256:
+        return joined
+    digest = hashlib.sha256(joined.encode()).hexdigest()[:16]
+    return f"{len(values)} values; sha256:{digest}"
+
+
+def _verify_dataset_release() -> tuple[Path | None, VerifiedReleaseSummary | DerivedInputSummary | None]:
     """Resolve dataset trust mode and verify an immutable release before use."""
     trust = os.environ.get("DATASET_TRUST", "unverified").strip().lower()
     if trust not in _VALID_DATASET_TRUST:
         raise RuntimeError(f"DATASET_TRUST must be one of {sorted(_VALID_DATASET_TRUST)} (got {trust!r})")
     raw_path = os.environ.get("VERIFIED_RELEASE_PATH", "").strip()
+    raw_derived_path = os.environ.get("DERIVED_INPUT_PATH", "").strip()
     if trust == "unverified":
         if raw_path:
             raise RuntimeError("VERIFIED_RELEASE_PATH requires DATASET_TRUST=verified")
+        if raw_derived_path:
+            raise RuntimeError("DERIVED_INPUT_PATH requires DATASET_TRUST=derived")
         return None, None
-    if not raw_path:
+    if trust == "derived":
+        if raw_path or not raw_derived_path:
+            raise RuntimeError("DATASET_TRUST=derived requires only DERIVED_INPUT_PATH")
+        derived_path = Path(raw_derived_path).resolve()
+        return derived_path, verify_derived_input(derived_path)
+    if raw_derived_path or not raw_path:
         raise RuntimeError("DATASET_TRUST=verified requires VERIFIED_RELEASE_PATH")
     release_path = Path(raw_path).resolve()
     return release_path, verify_release(release_path, expected_target_format=("lerobot", "3.0"))
@@ -337,7 +363,7 @@ def run_training(
     cmd: list[str],
     source: str = "osmo-lerobot-training",
     num_gpus: int = 1,
-    verified_release: VerifiedReleaseSummary | None = None,
+    verified_release: VerifiedReleaseSummary | DerivedInputSummary | None = None,
 ) -> int:
     """Execute lerobot-train and log metrics to MLflow.
 
@@ -354,6 +380,14 @@ def run_training(
 
     system_collector = _init_system_collector()
     output_dir = Path(os.environ.get("OUTPUT_DIR", "/workspace/outputs/train"))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    unverified_source = (
+        "azure-blob" if has_blob_urls() else "huggingface" if os.environ.get("DATASET_REPO_ID") else "local"
+    )
+    dataset_lineage = build_dataset_lineage_record(verified_release, unverified_source=unverified_source)
+    dataset_lineage_path = output_dir / _DATASET_LINEAGE_FILENAME
+    dataset_lineage_path.write_text(json.dumps(dataset_lineage, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.environ["DATASET_LINEAGE_PATH"] = str(dataset_lineage_path)
     uploaded_checkpoints: set[str] = set()
     last_checkpoint_check = 0.0
     last_system_check = 0.0
@@ -370,6 +404,7 @@ def run_training(
 
         params = _build_train_params(num_gpus)
         mlflow.log_params(params)
+        mlflow.log_dict(dataset_lineage, f"lineage/{_DATASET_LINEAGE_FILENAME}")
 
         # Lineage tags: dataset -> run -> registered model. These are visible
         # in the MLflow Run UI under "Tags" and are queryable via the SDK.
@@ -388,7 +423,7 @@ def run_training(
             lineage_tags["dataset.source"] = "azure-blob"
         elif os.environ.get("DATASET_REPO_ID"):
             lineage_tags["dataset.source"] = "huggingface"
-        if verified_release is not None:
+        if isinstance(verified_release, VerifiedReleaseSummary):
             lineage_tags.update(
                 {
                     "dataset.source": "viewer-release",
@@ -398,6 +433,57 @@ def run_training(
                     "dataset.target_format": (
                         f"{verified_release.target_format_name}/{verified_release.target_format_version}"
                     ),
+                    "dataset.source_dataset_count": str(len(verified_release.source_dataset_ids)),
+                    "dataset.source_datasets": _summarize_values(verified_release.source_dataset_ids),
+                    "dataset.quality_profile_count": str(len(verified_release.quality_profile_versions)),
+                    "dataset.quality_profiles": _summarize_values(verified_release.quality_profile_versions),
+                    "dataset.parent_release_count": str(len(verified_release.parent_release_ids)),
+                }
+            )
+        elif isinstance(verified_release, DerivedInputSummary):
+            parent_release_ids = tuple(parent.release_id for parent in verified_release.parent_releases)
+            parent_manifest_digests = tuple(
+                parent.manifest_evidence_digest for parent in verified_release.parent_releases
+            )
+            target_formats = tuple(
+                sorted(
+                    {
+                        f"{parent.target_format_name}/{parent.target_format_version}"
+                        for parent in verified_release.parent_releases
+                    }
+                )
+            )
+            source_dataset_ids = tuple(
+                sorted(
+                    {
+                        dataset_id
+                        for parent in verified_release.parent_releases
+                        for dataset_id in parent.source_dataset_ids
+                    }
+                )
+            )
+            quality_profiles = tuple(
+                sorted(
+                    {
+                        profile
+                        for parent in verified_release.parent_releases
+                        for profile in parent.quality_profile_versions
+                    }
+                )
+            )
+            lineage_tags.update(
+                {
+                    "dataset.source": "viewer-derived",
+                    "dataset.trust": "derived",
+                    "dataset.derived_input_digest": verified_release.derived_input_digest,
+                    "dataset.parent_release_count": str(len(verified_release.parent_releases)),
+                    "dataset.parent_releases": _summarize_values(parent_release_ids),
+                    "dataset.parent_manifest_digests": _summarize_values(parent_manifest_digests),
+                    "dataset.target_format": _summarize_values(target_formats),
+                    "dataset.source_dataset_count": str(len(source_dataset_ids)),
+                    "dataset.source_datasets": _summarize_values(source_dataset_ids),
+                    "dataset.quality_profile_count": str(len(quality_profiles)),
+                    "dataset.quality_profiles": _summarize_values(quality_profiles),
                 }
             )
         else:

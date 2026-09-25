@@ -13,11 +13,17 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
 
-from training.il.scripts.lerobot.release_verifier import verify_release
+from training.il.scripts.lerobot.release_verifier import (
+    VerifiedReleaseSummary,
+    compute_derived_input_digest,
+    verify_release,
+)
 
 _DOWNLOAD_MAX_CONCURRENCY = 4
+_DERIVED_LINEAGE_PATH = Path("metadata/derived-input.json")
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
@@ -212,6 +218,25 @@ def merge_datasets(sources: list[Path], destination: Path) -> None:
         raise RuntimeError(f"Dataset merge failed with exit code {result.returncode}")
     if not destination.exists():
         raise RuntimeError(f"lerobot-edit-dataset did not create {destination}")
+
+
+def _write_derived_lineage(destination: Path, parents: list[VerifiedReleaseSummary]) -> Path:
+    """Bind ordered verified parents to the bytes of a derived merged dataset."""
+    parent_records = [asdict(parent) for parent in parents]
+
+    lineage_path = destination / _DERIVED_LINEAGE_PATH
+    lineage_path.parent.mkdir(parents=True, exist_ok=True)
+    lineage = {
+        "schema_version": "1.0.0",
+        "derivation": "merge",
+        "derived_input_digest": compute_derived_input_digest(destination, parents),
+        "parent_releases": parent_records,
+    }
+    lineage_path.write_text(
+        json.dumps(lineage, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    return lineage_path
 
 
 def verify_dataset(dataset_dir: Path) -> dict | None:
@@ -814,8 +839,6 @@ def prepare_dataset() -> Path:
     try:
         dataset_root, repo_id, urls = _parse_env_config()
         verified_release = os.environ.get("DATASET_TRUST", "unverified").strip().lower() == "verified"
-        if verified_release and len(urls) != 1:
-            raise ValueError("Verified release mode requires exactly one Blob source")
         final = dataset_root / repo_id
         if final.exists():
             raise FileExistsError(
@@ -832,9 +855,13 @@ def prepare_dataset() -> Path:
             print(f"\n--- Downloading dataset {idx + 1}/{len(urls)} ---")
             sources.append(download_dataset_from_url(url, str(dataset_root), idx))
 
+        verified_parents = []
+        if verified_release:
+            verified_parents = [verify_release(source, expected_target_format=("lerobot", "3.0")) for source in sources]
         _populate_staged(sources, staged)
         if verified_release:
-            verify_release(staged, expected_target_format=("lerobot", "3.0"))
+            if len(verified_parents) > 1:
+                _write_derived_lineage(staged, verified_parents)
         else:
             _postprocess_dataset(staged)
         staged.rename(final)

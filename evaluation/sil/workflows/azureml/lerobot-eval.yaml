@@ -41,6 +41,7 @@ inputs:
   policy_repo_id: none
   policy_type: act
   dataset_repo_id: none
+  dataset_trust: unverified
   job_name: lerobot-eval
   output_dir: /workspace/outputs/eval
   eval_episodes: "10"

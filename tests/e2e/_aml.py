@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -172,6 +173,48 @@ def assert_registered_model_has_artifacts(
     log_e2e(f"AzureML model artifacts passed: model={model.name}:{model.version}, artifacts={len(artifact_files)}")
 
 
+def assert_registered_model_has_release_lineage(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    model: AmlModelRef,
+    *,
+    expected_release_id: str,
+    expected_source_episode_index: int,
+) -> None:
+    """Download a registered model and verify its canonical dataset lineage artifact."""
+    with tempfile.TemporaryDirectory(prefix="e2e-model-lineage-") as download_root:
+        result = run_command(
+            [
+                "az",
+                "ml",
+                "model",
+                "download",
+                "--name",
+                model.name,
+                "--version",
+                model.version,
+                "--download-path",
+                download_root,
+                *aml_workspace_args(aml_workspace),
+                "--output",
+                "none",
+            ],
+            cwd=repo_root,
+        )
+        if result.returncode != 0:
+            raise AssertionError(f"Failed to download AzureML model lineage\n\n{format_command_failure(result)}")
+        lineage_paths = list(Path(download_root).rglob("azureml_lineage.json"))
+        if len(lineage_paths) != 1:
+            raise AssertionError(f"Expected one azureml_lineage.json, found {len(lineage_paths)}")
+        lineage = json.loads(lineage_paths[0].read_text(encoding="utf-8"))
+        release = lineage["dataset"]["release"]
+        if release["release_id"] != expected_release_id:
+            raise AssertionError("Registered-model lineage did not retain the verified release ID")
+        source_indices = {item["source_episode_index"] for item in release["episode_source_mapping"]}
+        if expected_source_episode_index not in source_indices:
+            raise AssertionError("Registered-model lineage did not retain the expected source episode index")
+
+
 def archive_all_model_versions(repo_root: Path, aml_workspace: AzureMLWorkspace, model_name: str) -> None:
     """Archive every registered version of an AzureML model (best-effort cleanup)."""
     for version in _list_model_versions(repo_root, aml_workspace, model_name):
@@ -275,6 +318,8 @@ def submit_aml_lerobot_training(
             str(repo_root / "training/il/scripts/submit-azureml-lerobot-training.sh"),
             "--blob-url",
             blob_url,
+            "--dataset-trust",
+            "verified",
             "--policy-type",
             policy_type,
             "--training-steps",
@@ -434,6 +479,8 @@ def submit_aml_lerobot_eval(
             blob_container,
             "--blob-prefix",
             blob_prefix,
+            "--dataset-trust",
+            "verified",
             "--eval-episodes",
             str(eval_episodes),
             "--eval-batch-size",

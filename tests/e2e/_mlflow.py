@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import time
 from dataclasses import dataclass
@@ -200,7 +201,14 @@ def assert_aml_job_has_mlflow_tracking(job: AzureMLJob, aml_workspace: AzureMLWo
     log_e2e(f"AzureML MLflow tracking passed: metrics=[{rendered_metrics}] params=[{rendered_params}]")
 
 
-def assert_aml_lerobot_job_has_mlflow_tracking(job: AzureMLJob, aml_workspace: AzureMLWorkspace) -> None:
+def assert_aml_lerobot_job_has_mlflow_tracking(
+    job: AzureMLJob,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    expected_release_id: str | None = None,
+    expected_source_episode_index: int | None = None,
+) -> None:
+    client = _mlflow_client(aml_workspace)
     tracking = _assert_run_has_expected_tracking(
         aml_workspace,
         run_id=job.name,
@@ -208,6 +216,13 @@ def assert_aml_lerobot_job_has_mlflow_tracking(job: AzureMLJob, aml_workspace: A
         required_metrics=_LEROBOT_REQUIRED_METRICS,
         required_params=_LEROBOT_REQUIRED_PARAMS,
     )
+    if expected_release_id is not None:
+        if tracking.tags.get("dataset.release_id") != expected_release_id:
+            raise AssertionError("Training MLflow tags did not retain the verified release ID")
+        lineage = _download_run_json(client, job.name, "lineage/dataset-lineage.json")
+        mappings = lineage["release"]["episode_source_mapping"]
+        if expected_source_episode_index not in {item["source_episode_index"] for item in mappings}:
+            raise AssertionError("Training lineage did not retain the expected source episode index")
     rendered_metrics = ", ".join(f"{name}={value}" for name, value in tracking.metrics.items())
     rendered_params = ", ".join(f"{name}={value}" for name, value in tracking.params.items())
     log_e2e(f"AzureML LeRobot MLflow tracking passed: metrics=[{rendered_metrics}] params=[{rendered_params}]")
@@ -317,7 +332,20 @@ def _resolve_latest_mlflow_run_id_by_experiment(aml_workspace: AzureMLWorkspace,
     return run_id
 
 
-def assert_osmo_lerobot_training_has_mlflow_tracking(workflow: OSMOWorkflow, aml_workspace: AzureMLWorkspace) -> None:
+def _download_run_json(client: MlflowClient, run_id: str, artifact_path: str) -> dict:
+    with tempfile.TemporaryDirectory(prefix="e2e-mlflow-artifact-") as download_root:
+        local_path = client.download_artifacts(run_id, artifact_path, download_root)
+        return json.loads(Path(local_path).read_text(encoding="utf-8"))
+
+
+def assert_osmo_lerobot_training_has_mlflow_tracking(
+    workflow: OSMOWorkflow,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    expected_release_id: str | None = None,
+    expected_source_episode_index: int | None = None,
+) -> None:
+    client = _mlflow_client(aml_workspace)
     run_id = _resolve_latest_mlflow_run_id_by_experiment(aml_workspace, workflow.experiment_name)
     tracking = _assert_run_has_expected_tracking(
         aml_workspace,
@@ -328,13 +356,27 @@ def assert_osmo_lerobot_training_has_mlflow_tracking(workflow: OSMOWorkflow, aml
     )
     rendered_metrics = ", ".join(f"{name}={value}" for name, value in tracking.metrics.items())
     rendered_params = ", ".join(f"{name}={value}" for name, value in tracking.params.items())
+    if expected_release_id is not None:
+        if tracking.tags.get("dataset.release_id") != expected_release_id:
+            raise AssertionError("Training MLflow tags did not retain the verified release ID")
+        lineage = _download_run_json(client, run_id, "lineage/dataset-lineage.json")
+        mappings = lineage["release"]["episode_source_mapping"]
+        if expected_source_episode_index not in {item["source_episode_index"] for item in mappings}:
+            raise AssertionError("Training lineage did not retain the expected source episode index")
     log_e2e(
         f"OSMO LeRobot training MLflow tracking passed: run_id={run_id} "
         f"metrics=[{rendered_metrics}] params=[{rendered_params}]"
     )
 
 
-def assert_osmo_lerobot_eval_has_mlflow_tracking(workflow: OSMOWorkflow, aml_workspace: AzureMLWorkspace) -> None:
+def assert_osmo_lerobot_eval_has_mlflow_tracking(
+    workflow: OSMOWorkflow,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    expected_release_id: str | None = None,
+    expected_source_episode_index: int | None = None,
+) -> None:
+    client = _mlflow_client(aml_workspace)
     run_id = _resolve_latest_mlflow_run_id_by_experiment(aml_workspace, workflow.experiment_name)
     tracking = _assert_run_has_expected_tracking(
         aml_workspace,
@@ -345,19 +387,37 @@ def assert_osmo_lerobot_eval_has_mlflow_tracking(workflow: OSMOWorkflow, aml_wor
     )
     rendered_metrics = ", ".join(f"{name}={value}" for name, value in tracking.metrics.items())
     rendered_params = ", ".join(f"{name}={value}" for name, value in tracking.params.items())
+    if expected_release_id is not None:
+        if tracking.tags.get("dataset.release_id") != expected_release_id:
+            raise AssertionError("Evaluation MLflow tags did not retain the verified release ID")
+        results = _download_run_json(client, run_id, "eval_results.json")
+        source_indices = {
+            item["source_episode"]["source_episode_index"]
+            for item in results["per_episode"]
+            if item.get("source_episode") is not None
+        }
+        if expected_source_episode_index not in source_indices:
+            raise AssertionError("Evaluation results did not retain the expected source episode index")
     log_e2e(
         f"OSMO LeRobot eval MLflow tracking passed: run_id={run_id} "
         f"metrics=[{rendered_metrics}] params=[{rendered_params}]"
     )
 
 
-def assert_aml_lerobot_eval_has_mlflow_tracking(job: AzureMLJob, aml_workspace: AzureMLWorkspace) -> None:
+def assert_aml_lerobot_eval_has_mlflow_tracking(
+    job: AzureMLJob,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    expected_release_id: str | None = None,
+    expected_source_episode_index: int | None = None,
+) -> None:
     """Validate the AzureML LeRobot eval MLflow run.
 
     The eval entrypoint (``run_evaluation.py``) creates its own MLflow run inside the
     job, so the run id does not equal the AzureML job name. Resolution is by the
     per-run-unique experiment name the submission sets, mirroring the OSMO eval path.
     """
+    client = _mlflow_client(aml_workspace)
     run_id = _resolve_latest_mlflow_run_id_by_experiment(aml_workspace, job.experiment_name)
     tracking = _assert_run_has_expected_tracking(
         aml_workspace,
@@ -366,6 +426,17 @@ def assert_aml_lerobot_eval_has_mlflow_tracking(job: AzureMLJob, aml_workspace: 
         required_metrics=_LEROBOT_EVAL_REQUIRED_METRICS,
         required_params=_LEROBOT_EVAL_REQUIRED_PARAMS,
     )
+    if expected_release_id is not None:
+        if tracking.tags.get("dataset.release_id") != expected_release_id:
+            raise AssertionError("Evaluation MLflow tags did not retain the verified release ID")
+        results = _download_run_json(client, run_id, "eval_results.json")
+        source_indices = {
+            item["source_episode"]["source_episode_index"]
+            for item in results["per_episode"]
+            if item.get("source_episode") is not None
+        }
+        if expected_source_episode_index not in source_indices:
+            raise AssertionError("Evaluation results did not retain the expected source episode index")
     rendered_metrics = ", ".join(f"{name}={value}" for name, value in tracking.metrics.items())
     rendered_params = ", ".join(f"{name}={value}" for name, value in tracking.params.items())
     log_e2e(

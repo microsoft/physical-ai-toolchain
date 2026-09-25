@@ -87,7 +87,7 @@ if [[ -n "${AML_MODEL_NAME:-}" && "${AML_MODEL_NAME}" != "none" && -n "${AML_MOD
 
   if [[ -f /tmp/aml_model_path.env ]]; then
     # shellcheck disable=SC2046
-    export $(cat /tmp/aml_model_path.env | xargs)
+    export $(xargs < /tmp/aml_model_path.env)
     export POLICY_REPO_ID="${AML_MODEL_PATH}"
     echo "Using AzureML model at: ${POLICY_REPO_ID}"
   else
@@ -97,13 +97,30 @@ if [[ -n "${AML_MODEL_NAME:-}" && "${AML_MODEL_NAME}" != "none" && -n "${AML_MOD
 fi
 
 # Download dataset from Azure Blob Storage if configured.
+case "${DATASET_TRUST:-unverified}" in
+  unverified) ;;
+  verified)
+    [[ -n "${BLOB_STORAGE_ACCOUNT:-}" && "${BLOB_STORAGE_ACCOUNT}" != "none" && -n "${BLOB_PREFIX:-}" && "${BLOB_PREFIX}" != "none" ]] || {
+      echo "ERROR: DATASET_TRUST=verified requires an Azure Blob dataset source" >&2
+      exit 1
+    }
+    ;;
+  *)
+    echo "ERROR: unsupported DATASET_TRUST=${DATASET_TRUST}" >&2
+    exit 1
+    ;;
+esac
+
 if [[ -n "${BLOB_STORAGE_ACCOUNT:-}" && "${BLOB_STORAGE_ACCOUNT}" != "none" && -n "${BLOB_PREFIX:-}" && "${BLOB_PREFIX}" != "none" ]]; then
   echo "Downloading dataset from Azure Blob: ${BLOB_STORAGE_ACCOUNT}/${BLOB_STORAGE_CONTAINER}/${BLOB_PREFIX}..."
   python3 "${EVAL_SCRIPTS}/download_blob_dataset.py"
 
   if [[ -f /tmp/dataset_path.env ]]; then
     # shellcheck disable=SC2046
-    export $(cat /tmp/dataset_path.env | xargs)
+    export $(xargs < /tmp/dataset_path.env)
+    if [[ "${DATASET_TRUST:-unverified}" == "verified" ]]; then
+      export VERIFIED_RELEASE_PATH="${DATASET_DIR}"
+    fi
     echo "Dataset ready at: ${DATASET_DIR}"
   fi
 fi
@@ -178,7 +195,7 @@ if [[ "${MLFLOW_ENABLE:-false}" == "true" ]]; then
 
   if [[ -f /tmp/mlflow_config.env ]]; then
     # shellcheck disable=SC2046
-    export $(cat /tmp/mlflow_config.env | xargs)
+    export $(xargs < /tmp/mlflow_config.env)
   fi
 fi
 

@@ -21,8 +21,11 @@ columns on load (``load_episodes``) and reads normalization stats from
 ``meta/stats.json``.
 """
 
+# cspell:ignore nonincluded unreviewed
+
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import tempfile
@@ -62,6 +65,8 @@ _ACTION_DIM = 2
 _VIDEO_KEY = "observation.image"
 _TASK_TEXT = "push the T block to the target"
 _ROBOT_TYPE = "synthetic-pusht"
+SYNTHETIC_RELEASE_ID = "synthetic-release-1"
+SYNTHETIC_SOURCE_EPISODE_INDEX = 17
 
 _CHUNK = 0
 _FILE = 0
@@ -338,6 +343,186 @@ def build_synthetic_dataset(root: Path) -> Path:
     return root
 
 
+def _write_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, separators=(",", ":"), sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _source(episode_index: int) -> dict[str, object]:
+    return {
+        "dataset_id": "synthetic-dataset",
+        "episode_index": episode_index,
+        "source_format": "lerobot",
+        "format_version": "3.0",
+        "source_digest": f"{episode_index + 1:064x}",
+        "files": [],
+    }
+
+
+def _decision(decision_id: str, disposition: str, episode_index: int) -> dict[str, object]:
+    return {
+        "schema_version": "1.0.0",
+        "decision_id": decision_id,
+        "decision": disposition,
+        "reason_codes": ["reviewed"],
+        "notes": None,
+        "actor_id": "e2e-reviewer",
+        "created_at": "2026-09-24T00:00:00Z",
+        "source": _source(episode_index),
+        "annotation_revision_id": f"annotation-{episode_index}",
+        "edit_revision_id": f"edit-{episode_index}",
+        "quality_run_id": f"quality-{episode_index}",
+    }
+
+
+def build_synthetic_release(root: Path) -> Path:
+    """Write a valid mixed-disposition Viewer release around the synthetic dataset."""
+    build_synthetic_dataset(root)
+    accepted = _decision("decision-accepted", "accept", SYNTHETIC_SOURCE_EPISODE_INDEX)
+    rejected = _decision("decision-rejected", "reject", SYNTHETIC_SOURCE_EPISODE_INDEX + 1)
+    quality_run_id = f"quality-{SYNTHETIC_SOURCE_EPISODE_INDEX}"
+    _write_json(
+        root / "metadata/accepted.json",
+        {
+            "schema_version": "1.0.0",
+            "disposition": "accept",
+            "decisions": [accepted],
+            "episode_index_mapping": {str(SYNTHETIC_SOURCE_EPISODE_INDEX): 0},
+        },
+    )
+    _write_json(
+        root / "metadata/rejected.json",
+        {"schema_version": "1.0.0", "disposition": "reject", "decisions": [rejected], "episode_index_mapping": {}},
+    )
+    _write_json(
+        root / "metadata/excluded.json",
+        {
+            "schema_version": "1.0.0",
+            "dataset_id": "synthetic-dataset",
+            "candidates": [
+                {
+                    "episode_index": SYNTHETIC_SOURCE_EPISODE_INDEX + 2,
+                    "disposition": "excluded",
+                    "reason_codes": ["unreviewed"],
+                    "review_reason_codes": [],
+                    "decision_id": None,
+                    "quality_run_id": None,
+                    "failed_check_ids": [],
+                    "source": None,
+                }
+            ],
+        },
+    )
+    _write_json(
+        root / f"metadata/quality/{quality_run_id}.json",
+        {
+            "schema_version": "1.0.0",
+            "run_id": quality_run_id,
+            "check_set_version": "1.0.0",
+            "source": _source(SYNTHETIC_SOURCE_EPISODE_INDEX),
+            "actor_id": "e2e-reviewer",
+            "created_at": "2026-09-24T00:00:00Z",
+            "episode_checks": [
+                {"check_id": "source.identity", "required": True, "outcome": "pass", "reason_codes": []}
+            ],
+            "package_checks": [],
+        },
+    )
+    feature_schema = _info_json()["features"]
+    _write_json(
+        root / "metadata/package-quality.json",
+        {
+            "schema_version": "1.0.0",
+            "target_format": {"name": "lerobot", "version": "3.0"},
+            "episode_count": 1,
+            "frame_count": _NUM_FRAMES,
+            "episode_frame_counts": {"0": _NUM_FRAMES},
+            "features": list(feature_schema),
+            "nonvisual_rows_read_back": _NUM_FRAMES,
+            "visual_samples": [
+                {
+                    "release_episode_index": 0,
+                    "feature_name": _VIDEO_KEY,
+                    "frame_index": frame_index,
+                    "outcome": "pass",
+                }
+                for frame_index in (0, _NUM_FRAMES // 2, _NUM_FRAMES - 1)
+            ],
+            "inventory_verified": True,
+            "checksums_verified": True,
+        },
+    )
+    inventory_paths = sorted(
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and path.name not in {"release-manifest.json", "checksums.sha256", ".published.json"}
+    )
+    files = [
+        {
+            "path": relative_path,
+            "size_bytes": (root / relative_path).stat().st_size,
+            "sha256": _digest(root / relative_path),
+        }
+        for relative_path in inventory_paths
+    ]
+    manifest = {
+        "schema_version": "2.0.0",
+        "release_id": SYNTHETIC_RELEASE_ID,
+        "created_at": "2026-09-24T00:00:00Z",
+        "actor_id": "e2e-publisher",
+        "source_provenance": [_source(SYNTHETIC_SOURCE_EPISODE_INDEX)],
+        "accepted_decision_ids": ["decision-accepted"],
+        "rejected_decision_ids": ["decision-rejected"],
+        "excluded_episode_indices": [SYNTHETIC_SOURCE_EPISODE_INDEX + 2],
+        "episode_index_mapping": {str(SYNTHETIC_SOURCE_EPISODE_INDEX): 0},
+        "source_formats": [{"name": "lerobot", "version": "3.0"}],
+        "target_format": {"name": "lerobot", "version": "3.0"},
+        "adapter_versions": {"lerobot": "0.6.1"},
+        "tool_versions": {"dataviewer": "e2e"},
+        "feature_schema": feature_schema,
+        "candidate_count": 3,
+        "accepted_count": 1,
+        "rejected_count": 1,
+        "excluded_count": 1,
+        "nonincluded_count": 2,
+        "episode_count": 1,
+        "frame_count": _NUM_FRAMES,
+        "quality_evidence": [
+            {
+                "source_episode_index": SYNTHETIC_SOURCE_EPISODE_INDEX,
+                "release_episode_index": 0,
+                "decision_id": "decision-accepted",
+                "quality_run_id": quality_run_id,
+                "quality_report_path": f"metadata/quality/{quality_run_id}.json",
+                "check_set_version": "1.0.0",
+                "required_outcome": "pass",
+            }
+        ],
+        "package_quality_path": "metadata/package-quality.json",
+        "files": files,
+    }
+    _write_json(root / "metadata/release-manifest.json", manifest)
+    covered = ["metadata/release-manifest.json", *inventory_paths]
+    (root / "checksums.sha256").write_text(
+        "".join(f"{_digest(root / relative_path)}  {relative_path}\n" for relative_path in covered),
+        encoding="utf-8",
+    )
+    _write_json(
+        root / ".published.json",
+        {
+            "schema_version": "1.0.0",
+            "dataset_id": "synthetic-dataset",
+            "release_id": SYNTHETIC_RELEASE_ID,
+            "owner": "e2e-job",
+        },
+    )
+    return root
+
+
 def validate_synthetic_dataset(root: Path) -> None:
     """Cheap structural self-check; raises AssertionError on the first mismatch.
 
@@ -411,7 +596,7 @@ def _materialize_synthetic_dataset(request: pytest.FixtureRequest, *, prefix: st
 
     dataset_dir = work_dir / "dataset"
     log_e2e(log_message)
-    build_synthetic_dataset(dataset_dir)
+    build_synthetic_release(dataset_dir)
     validate_synthetic_dataset(dataset_dir)
     return dataset_dir
 

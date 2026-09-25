@@ -33,6 +33,7 @@ workflow:
         POLICY_TYPE: "{{ policy_type }}"
         DATASET_REPO_ID: "{{ dataset_repo_id }}"
         DATASET_REVISION: "{{ dataset_revision }}"
+        DATASET_TRUST: "{{ dataset_trust }}"
         EVAL_EPISODES: "{{ eval_episodes }}"
         EVAL_BATCH_SIZE: "{{ eval_batch_size }}"
         OUTPUT_DIR: "{{ output_dir }}"
@@ -69,6 +70,7 @@ default-values:
   policy_type: act
   dataset_repo_id: ""
   dataset_revision: ""
+  dataset_trust: unverified
   eval_episodes: "10"
   eval_batch_size: "10"
   output_dir: /workspace/outputs/eval

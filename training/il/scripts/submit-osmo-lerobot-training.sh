@@ -34,6 +34,9 @@ Supports ACT and Diffusion policy architectures with Azure ML MLflow logging.
 DATA SOURCE (mutually exclusive — provide exactly one):
     -d, --dataset-repo-id ID      HuggingFace dataset repository.
         --blob-url URL            Azure Blob dataset URL (repeatable). Uses OSMO workload identity for authentication.
+    --dataset-trust MODE      Dataset trust mode: unverified or verified
+                                  (default: unverified). Verified mode requires
+                                  one or more Blob releases.
 
 TRAINING OPTIONS:
     -w, --workflow PATH           Workflow template (default: training/il/workflows/osmo/lerobot-train.yaml)
@@ -150,6 +153,7 @@ image="${IMAGE:-$DEFAULT_LEROBOT_TRAIN_IMAGE}"
 policy_repo_id="${POLICY_REPO_ID:-}"
 lerobot_version="${LEROBOT_VERSION:-}"
 dataset_root="${DATASET_ROOT:-/workspace/data}"
+dataset_trust="${DATASET_TRUST:-unverified}"
 blob_urls=()
 blob_urls_json="[]"
 blob_source_count=0
@@ -198,6 +202,7 @@ while [[ $# -gt 0 ]]; do
     -w|--workflow)                workflow="$2"; shift 2 ;;
     -d|--dataset|--dataset-repo-id) dataset_repo_id="$2"; shift 2 ;;
     --blob-url)                   blob_urls+=("$2"); shift 2 ;;
+    --dataset-trust)              dataset_trust="$2"; shift 2 ;;
     -p|--policy|--policy-type)    policy_type="$2"; shift 2 ;;
     -j|--job-name)                job_name="$2"; shift 2 ;;
     -o|--output-dir)              output_dir="$2"; shift 2 ;;
@@ -246,6 +251,15 @@ if [[ ${#blob_urls[@]} -gt 0 && -n "$dataset_repo_id" ]]; then
   fatal "--dataset-repo-id and --blob-url are mutually exclusive."
 fi
 
+case "$dataset_trust" in
+  unverified|verified) ;;
+  *) fatal "--dataset-trust must be one of: unverified, verified (got '$dataset_trust')" ;;
+esac
+
+if [[ "$dataset_trust" == "verified" && ${#blob_urls[@]} -eq 0 ]]; then
+  fatal "--dataset-trust verified requires one or more --blob-url releases; HuggingFace inputs are unverified."
+fi
+
 if [[ "$dataset_repo_id" == azureml:* || "$dataset_repo_id" == azureml://* ]]; then
   fatal "--dataset-repo-id is for HuggingFace repositories, not AzureML data assets. Resolve the asset to a direct --blob-url for OSMO."
 fi
@@ -284,6 +298,7 @@ esac
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Source Mode" "$([[ $blob_source_count -gt 0 ]] && echo 'azure-blob' || echo 'huggingface')"
+  print_kv "Dataset Trust" "$dataset_trust"
   print_kv "Dataset" "$dataset_repo_id"
   print_kv "Policy Type" "$policy_type"
   print_kv "Job Name" "$job_name"
@@ -333,6 +348,7 @@ submit_args=(
   "payload_root=$payload_root"
   "dataset_repo_id=$dataset_repo_id"
   "dataset_root=$dataset_root"
+  "dataset_trust=$dataset_trust"
   "blob_urls=$blob_urls_json"
   "use_huggingface_credential=$use_huggingface_credential"
   "policy_type=$policy_type"
@@ -372,6 +388,7 @@ submit_args=(
 
 info "Submitting LeRobot training workflow to OSMO..."
 info "  Dataset: $dataset_repo_id"
+info "  Dataset Trust: $dataset_trust"
 info "  Policy: $policy_type"
 info "  Job Name: $job_name"
 info "  Image: $image"
@@ -398,6 +415,7 @@ osmo "${submit_args[@]}" || fatal "Failed to submit workflow"
 section "Deployment Summary"
 print_kv "Dataset" "$dataset_repo_id"
 print_kv "Source Mode" "$([[ $blob_source_count -gt 0 ]] && echo 'azure-blob' || echo 'huggingface')"
+print_kv "Dataset Trust" "$dataset_trust"
 print_kv "Blob URLs" "$blob_source_count"
 print_kv "Policy Type" "$policy_type"
 print_kv "Job Name" "$job_name"

@@ -58,6 +58,19 @@ def _parse_with_diagnostic(raw: str, var_name: str) -> list[str]:
     return [item.strip() for item in parsed if isinstance(item, str) and item.strip()]
 
 
+def _load_dataset_lineage() -> dict[str, Any] | None:
+    """Load the verified training lineage record for model registration."""
+    raw_path = os.environ.get("DATASET_LINEAGE_PATH", "").strip()
+    if not raw_path:
+        return None
+    value = json.loads(Path(raw_path).read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or value.get("schema_version") != "1.0.0":
+        raise ValueError("Dataset lineage must use schema_version 1.0.0")
+    if value.get("trust") not in {"derived", "unverified", "verified"}:
+        raise ValueError("Dataset lineage has an unsupported trust value")
+    return value
+
+
 def _get_aml_client() -> Any | None:
     """Create an Azure ML client from environment variables.
 
@@ -162,6 +175,7 @@ def _register_model_via_aml(
         azureml_run_id = os.environ.get("AZUREML_RUN_ID", "") or os.environ.get("MLFLOW_RUN_ID", "")
         mlflow_run_id = os.environ.get("MLFLOW_RUN_ID", "")
         experiment_id = os.environ.get("MLFLOW_EXPERIMENT_ID", "")
+        dataset_lineage = _load_dataset_lineage()
 
         dataset_uri = ""
         dataset_source_kind = ""
@@ -210,6 +224,7 @@ def _register_model_via_aml(
             "azureml_run_id": azureml_run_id or None,
             "mlflow_run_id": mlflow_run_id or None,
             "mlflow_experiment_id": experiment_id or None,
+            "dataset": dataset_lineage,
         }
         lineage_path = checkpoint_path / "azureml_lineage.json"
         lineage_path.write_text(json.dumps(lineage, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -253,6 +268,32 @@ def _register_model_via_aml(
             tags["mlflow_run_id"] = _bounded_tag_value(mlflow_run_id)
         if experiment_id:
             tags["mlflow_experiment_id"] = _bounded_tag_value(experiment_id)
+        if dataset_lineage:
+            trust = str(dataset_lineage["trust"])
+            tags["dataset_trust"] = trust
+            if trust == "verified":
+                release = dataset_lineage["release"]
+                tags.update(
+                    {
+                        "dataset_source": "viewer-release",
+                        "dataset_release_id": str(release["release_id"]),
+                        "dataset_manifest_digest": str(release["manifest_evidence_digest"]),
+                        "dataset_target_format": (
+                            f"{release['target_format_name']}/{release['target_format_version']}"
+                        ),
+                        "dataset_source_count": str(len(release["source_dataset_ids"])),
+                        "dataset_quality_profile_count": str(len(release["quality_profile_versions"])),
+                        "dataset_parent_release_count": str(len(release["parent_release_ids"])),
+                    }
+                )
+            elif trust == "derived":
+                tags.update(
+                    {
+                        "dataset_source": "viewer-derived",
+                        "dataset_derived_input_digest": str(dataset_lineage["derived_input_digest"]),
+                        "dataset_parent_release_count": str(len(dataset_lineage["parent_releases"])),
+                    }
+                )
         tags = {key: _bounded_tag_value(str(value)) for key, value in tags.items()}
 
         model = Model(

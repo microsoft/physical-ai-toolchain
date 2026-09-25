@@ -21,9 +21,19 @@ from pathlib import Path
 
 import pytest
 
-from tests.e2e._aml import AzureMLWorkspace, archive_all_model_versions, resolve_registered_model
+from tests.e2e._aml import (
+    AzureMLWorkspace,
+    archive_all_model_versions,
+    assert_registered_model_has_release_lineage,
+    resolve_registered_model,
+)
 from tests.e2e._common import e2e_name, log_e2e
-from tests.e2e._lerobot_dataset import stage_synthetic_lerobot_dataset
+from tests.e2e._lerobot_dataset import (
+    SYNTHETIC_RELEASE_ID,
+    SYNTHETIC_SOURCE_EPISODE_INDEX,
+    build_synthetic_release,
+    stage_synthetic_lerobot_dataset,
+)
 from tests.e2e._mlflow import (
     assert_osmo_lerobot_eval_has_mlflow_tracking,
     assert_osmo_lerobot_training_has_mlflow_tracking,
@@ -42,6 +52,18 @@ from tests.e2e._osmo import (
 
 _LEROBOT_TRAIN_TASK_NAME = "lerobot-train"
 _LEROBOT_EVAL_TASK_NAME = "lerobot-eval"
+
+
+def test_synthetic_release_preserves_source_episode_identity(tmp_path: Path) -> None:
+    from training.il.scripts.lerobot.release_verifier import verify_release
+
+    release_root = build_synthetic_release(tmp_path / "release")
+
+    summary = verify_release(release_root, expected_target_format=("lerobot", "3.0"))
+
+    assert summary.release_id == SYNTHETIC_RELEASE_ID
+    assert summary.episode_source_mapping[0].release_episode_index == 0
+    assert summary.episode_source_mapping[0].source_episode_index == SYNTHETIC_SOURCE_EPISODE_INDEX
 
 
 def test_resolve_osmo_lerobot_eval_policy_override_repo_forwards_revision(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,10 +153,22 @@ def test_osmo_il_lifecycle_e2e(
         )
         monitor_osmo_workflow(request, workflow, repo_root, _LEROBOT_TRAIN_TASK_NAME, phase="LeRobot training")
         log_e2e("Validating OSMO LeRobot training MLflow tracking")
-        assert_osmo_lerobot_training_has_mlflow_tracking(workflow, aml_workspace)
+        assert_osmo_lerobot_training_has_mlflow_tracking(
+            workflow,
+            aml_workspace,
+            expected_release_id=SYNTHETIC_RELEASE_ID,
+            expected_source_episode_index=SYNTHETIC_SOURCE_EPISODE_INDEX,
+        )
         log_e2e("Validating OSMO LeRobot training workflow task success")
         assert_workflow_task_succeeded(workflow, repo_root, _LEROBOT_TRAIN_TASK_NAME)
         model = resolve_registered_model(repo_root, aml_workspace, model_name=register_model_name)
+        assert_registered_model_has_release_lineage(
+            repo_root,
+            aml_workspace,
+            model,
+            expected_release_id=SYNTHETIC_RELEASE_ID,
+            expected_source_episode_index=SYNTHETIC_SOURCE_EPISODE_INDEX,
+        )
         policy_source = osmo_lerobot_policy_source_from_model(model)
     else:
         log_e2e(f"Using pre-configured eval policy {policy_source.description} (training skipped)")
@@ -152,7 +186,12 @@ def test_osmo_il_lifecycle_e2e(
     )
     monitor_osmo_workflow(request, eval_workflow, repo_root, _LEROBOT_EVAL_TASK_NAME, phase="LeRobot eval")
     log_e2e("Validating OSMO LeRobot eval MLflow tracking")
-    assert_osmo_lerobot_eval_has_mlflow_tracking(eval_workflow, aml_workspace)
+    assert_osmo_lerobot_eval_has_mlflow_tracking(
+        eval_workflow,
+        aml_workspace,
+        expected_release_id=SYNTHETIC_RELEASE_ID,
+        expected_source_episode_index=SYNTHETIC_SOURCE_EPISODE_INDEX,
+    )
     log_e2e("Validating OSMO LeRobot eval workflow task success")
     assert_workflow_task_succeeded(eval_workflow, repo_root, _LEROBOT_EVAL_TASK_NAME)
     log_e2e("OSMO LeRobot lifecycle e2e test finished successfully")

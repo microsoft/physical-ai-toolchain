@@ -40,6 +40,7 @@ POLICY SOURCE (one required):
 
 DATASET SOURCE:
     -d, --dataset-repo-id ID     HuggingFace dataset for replay evaluation
+    --dataset-trust MODE      Dataset trust: unverified or verified (default: unverified)
         --from-blob               Download dataset from Azure Blob Storage
         --storage-account NAME    Azure storage account (default: from Terraform)
         --storage-container NAME  Blob container name (default: datasets)
@@ -134,6 +135,7 @@ job_file="$REPO_ROOT/evaluation/sil/workflows/azureml/lerobot-eval.yaml"
 policy_repo_id="${POLICY_REPO_ID:-}"
 policy_type="${POLICY_TYPE:-act}"
 dataset_repo_id="${DATASET_REPO_ID:-}"
+dataset_trust="${DATASET_TRUST:-unverified}"
 job_name="${JOB_NAME:-lerobot-eval}"
 output_dir="${OUTPUT_DIR:-/workspace/outputs/eval}"
 lerobot_version="${LEROBOT_VERSION:-}"
@@ -181,6 +183,7 @@ while [[ $# -gt 0 ]]; do
     --policy-repo-id)             policy_repo_id="$2"; shift 2 ;;
     -p|--policy-type)             policy_type="$2"; shift 2 ;;
     -d|--dataset-repo-id)         dataset_repo_id="$2"; shift 2 ;;
+    --dataset-trust)              dataset_trust="$2"; shift 2 ;;
     -j|--job-name)                job_name="$2"; shift 2 ;;
     -o|--output-dir)              output_dir="$2"; shift 2 ;;
     --lerobot-version)            lerobot_version="$2"; shift 2 ;;
@@ -243,6 +246,15 @@ if [[ "$from_blob" == "true" ]]; then
   [[ -z "$storage_account" ]] && fatal "--storage-account is required with --from-blob"
 fi
 
+case "$dataset_trust" in
+  unverified) ;;
+  verified)
+    [[ "$from_blob" == "true" ]] || fatal "--dataset-trust verified requires --from-blob"
+    [[ -z "$dataset_repo_id" ]] || fatal "--dataset-trust verified cannot be combined with --dataset-repo-id"
+    ;;
+  *) fatal "Unsupported dataset trust: $dataset_trust (use: unverified, verified)" ;;
+esac
+
 [[ -n "$subscription_id" ]] || fatal "AZURE_SUBSCRIPTION_ID required"
 [[ -n "$resource_group" ]] || fatal "AZURE_RESOURCE_GROUP required"
 [[ -n "$workspace_name" ]] || fatal "AZUREML_WORKSPACE_NAME required"
@@ -267,6 +279,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Record Video" "$record_video"
   print_kv "MLflow" "$mlflow_enable"
   print_kv "Dataset" "${dataset_repo_id:-<not set>}"
+  print_kv "Dataset Trust" "$dataset_trust"
   [[ "$from_blob" == "true" ]] && print_kv "Blob Source" "$storage_account/$storage_container/$blob_prefix"
   [[ "$from_aml_model" == "true" ]] && print_kv "Model Source" "AzureML (${model_name}:${model_version})"
   print_kv "Register Model" "${register_model:-<none>}"
@@ -367,6 +380,7 @@ az_args+=(
   --set "environment_variables.AZUREML_WORKSPACE_NAME=$workspace_name"
   --set "environment_variables.MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES=$mlflow_retries"
   --set "environment_variables.MLFLOW_HTTP_REQUEST_TIMEOUT=$mlflow_timeout"
+  --set "environment_variables.DATASET_TRUST=$dataset_trust"
 )
 
 [[ -n "$dataset_repo_id" ]] && az_args+=(--set "environment_variables.DATASET_REPO_ID=$dataset_repo_id")

@@ -1,10 +1,12 @@
 """Verify immutable Viewer dataset releases without runtime framework dependencies."""
 
+# cspell:ignore nonincluded
+
 from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -15,12 +17,24 @@ _REJECTED_PATH = "metadata/rejected.json"
 _EXCLUDED_PATH = "metadata/excluded.json"
 _CHECKSUMS_PATH = "checksums.sha256"
 _MARKER_PATH = ".published.json"
+_DERIVED_LINEAGE_PATH = "metadata/derived-input.json"
 _MANIFEST_SCHEMA = "2.0.0"
 _EVIDENCE_SCHEMA = "1.0.0"
 
 
 class ReleaseVerificationError(ValueError):
     """Raised when a release package cannot establish trusted identity."""
+
+
+@dataclass(frozen=True)
+class EpisodeSourceMapping:
+    """Trace one release episode to its accepted source and review evidence."""
+
+    release_episode_index: int
+    source_dataset_id: str
+    source_episode_index: int
+    decision_id: str
+    quality_run_id: str
 
 
 @dataclass(frozen=True)
@@ -37,6 +51,76 @@ class VerifiedReleaseSummary:
     quality_profile_versions: tuple[str, ...]
     accepted_decision_ids: tuple[str, ...]
     parent_release_ids: tuple[str, ...]
+    quality_artifact_paths: tuple[str, ...] = ()
+    episode_source_mapping: tuple[EpisodeSourceMapping, ...] = ()
+
+
+@dataclass(frozen=True)
+class DerivedInputSummary:
+    """Identity summary for transformed bytes derived from verified releases."""
+
+    derived_input_digest: str
+    parent_releases: tuple[VerifiedReleaseSummary, ...]
+
+
+def build_dataset_lineage_record(
+    summary: VerifiedReleaseSummary | DerivedInputSummary | None,
+    *,
+    unverified_source: str,
+) -> dict[str, Any]:
+    """Build the canonical JSON-native lineage record for downstream artifacts."""
+    if isinstance(summary, VerifiedReleaseSummary):
+        release = json.loads(json.dumps(asdict(summary)))
+        return {"schema_version": _EVIDENCE_SCHEMA, "trust": "verified", "release": release}
+    if isinstance(summary, DerivedInputSummary):
+        parents = json.loads(json.dumps([asdict(parent) for parent in summary.parent_releases]))
+        return {
+            "schema_version": _EVIDENCE_SCHEMA,
+            "trust": "derived",
+            "derived_input_digest": summary.derived_input_digest,
+            "parent_releases": parents,
+        }
+    return {"schema_version": _EVIDENCE_SCHEMA, "trust": "unverified", "source": unverified_source}
+
+
+def compute_derived_input_digest(
+    dataset_root: Path,
+    parents: tuple[VerifiedReleaseSummary, ...] | list[VerifiedReleaseSummary],
+) -> str:
+    """Bind ordered parent summaries to all derived workspace bytes."""
+    root = dataset_root.resolve()
+    parent_records = [asdict(parent) for parent in parents]
+    digest = hashlib.sha256()
+    digest.update(json.dumps(parent_records, sort_keys=True, separators=(",", ":")).encode())
+    for path in sorted(root.rglob("*")):
+        if path == root / _DERIVED_LINEAGE_PATH:
+            continue
+        if path.is_symlink():
+            raise ReleaseVerificationError(f"Derived dataset contains a symlink: {path.relative_to(root).as_posix()}")
+        if not path.is_file():
+            continue
+        relative_path = path.relative_to(root).as_posix()
+        digest.update(f"\n{relative_path}\0{path.stat().st_size}\0{_sha256(path)}".encode())
+    return digest.hexdigest()
+
+
+def verify_derived_input(dataset_root: Path) -> DerivedInputSummary:
+    """Verify a derived dataset digest and its ordered parent release summaries."""
+    root = dataset_root.resolve()
+    lineage = _read_json(root, _DERIVED_LINEAGE_PATH, missing_label="derived input lineage")
+    _require_schema(lineage, _EVIDENCE_SCHEMA, "derived input lineage")
+    if lineage.get("derivation") != "merge":
+        raise ReleaseVerificationError("Derived input lineage must describe a merge derivation")
+    digest = _string(lineage, "derived_input_digest", "derived input lineage")
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        raise ReleaseVerificationError("Derived input digest must be lowercase SHA-256")
+    raw_parents = lineage.get("parent_releases")
+    if not isinstance(raw_parents, list) or len(raw_parents) < 2:
+        raise ReleaseVerificationError("Derived input lineage requires at least two parent releases")
+    parents = tuple(_parse_release_summary(parent) for parent in raw_parents)
+    if compute_derived_input_digest(root, parents) != digest:
+        raise ReleaseVerificationError("Derived input digest does not match workspace bytes or parent releases")
+    return DerivedInputSummary(derived_input_digest=digest, parent_releases=parents)
 
 
 def verify_release(
@@ -70,12 +154,12 @@ def verify_release(
     _require_schema(accepted, _EVIDENCE_SCHEMA, "accepted ledger")
     _require_schema(rejected, _EVIDENCE_SCHEMA, "rejected ledger")
     _require_schema(excluded, _EVIDENCE_SCHEMA, "excluded ledger")
-    source_dataset_ids = _validate_dispositions(manifest, accepted, rejected, excluded)
+    source_dataset_ids, episode_source_mapping = _validate_dispositions(manifest, accepted, rejected, excluded)
     marker_dataset_id = _string(marker, "dataset_id", "publication marker")
     if source_dataset_ids != (marker_dataset_id,):
         raise ReleaseVerificationError("Publication marker dataset identity does not match release evidence")
 
-    profile_versions = _validate_quality(root, manifest)
+    profile_versions, quality_paths = _validate_quality(root, manifest)
     package_quality = _read_json(root, _PACKAGE_QUALITY_PATH)
     _require_schema(package_quality, _EVIDENCE_SCHEMA, "package quality report")
     _validate_package_quality(manifest, package_quality)
@@ -97,6 +181,44 @@ def verify_release(
         quality_profile_versions=profile_versions,
         accepted_decision_ids=tuple(sorted(_string_list(manifest, "accepted_decision_ids"))),
         parent_release_ids=parent_ids,
+        quality_artifact_paths=tuple(sorted((*quality_paths, _PACKAGE_QUALITY_PATH))),
+        episode_source_mapping=episode_source_mapping,
+    )
+
+
+def _parse_release_summary(value: Any) -> VerifiedReleaseSummary:
+    """Parse one bounded release summary from derived lineage."""
+    if not isinstance(value, dict):
+        raise ReleaseVerificationError("Derived parent release summary must be an object")
+    raw_episode_mapping = value.get("episode_source_mapping", [])
+    if not isinstance(raw_episode_mapping, list):
+        raise ReleaseVerificationError("Derived parent episode source mapping must be a list")
+    episode_mapping = tuple(
+        EpisodeSourceMapping(
+            release_episode_index=_integer(item, "release_episode_index", "derived episode mapping"),
+            source_dataset_id=_string(item, "source_dataset_id", "derived episode mapping"),
+            source_episode_index=_integer(item, "source_episode_index", "derived episode mapping"),
+            decision_id=_string(item, "decision_id", "derived episode mapping"),
+            quality_run_id=_string(item, "quality_run_id", "derived episode mapping"),
+        )
+        for item in raw_episode_mapping
+        if isinstance(item, dict)
+    )
+    if len(episode_mapping) != len(raw_episode_mapping):
+        raise ReleaseVerificationError("Derived parent episode source mapping contains a non-object")
+    return VerifiedReleaseSummary(
+        release_id=_string(value, "release_id", "derived parent release"),
+        manifest_evidence_digest=_string(value, "manifest_evidence_digest", "derived parent release"),
+        target_format_name=_string(value, "target_format_name", "derived parent release"),
+        target_format_version=_string(value, "target_format_version", "derived parent release"),
+        source_dataset_ids=tuple(_string_list(value, "source_dataset_ids")),
+        episode_count=_integer(value, "episode_count", "derived parent release"),
+        frame_count=_integer(value, "frame_count", "derived parent release"),
+        quality_profile_versions=tuple(_string_list(value, "quality_profile_versions")),
+        accepted_decision_ids=tuple(_string_list(value, "accepted_decision_ids")),
+        parent_release_ids=tuple(_string_list(value, "parent_release_ids")),
+        quality_artifact_paths=tuple(_string_list(value, "quality_artifact_paths")),
+        episode_source_mapping=episode_mapping,
     )
 
 
@@ -144,7 +266,7 @@ def _validate_dispositions(
     accepted: dict[str, Any],
     rejected: dict[str, Any],
     excluded: dict[str, Any],
-) -> tuple[str, ...]:
+) -> tuple[tuple[str, ...], tuple[EpisodeSourceMapping, ...]]:
     if accepted.get("disposition") != "accept" or rejected.get("disposition") != "reject":
         raise ReleaseVerificationError("Decision ledger disposition is invalid")
     accepted_decisions = _mapping_list(accepted, "decisions", "accepted ledger")
@@ -210,10 +332,23 @@ def _validate_dispositions(
     dataset_ids = tuple(sorted({key[0] for key in all_keys}))
     if dataset_ids != (dataset_id,):
         raise ReleaseVerificationError("Release dispositions must reference one source dataset")
-    return dataset_ids
+    accepted_by_episode = {_decision_key(decision): decision for decision in accepted_decisions}
+    episode_source_mapping = tuple(
+        EpisodeSourceMapping(
+            release_episode_index=release_index,
+            source_dataset_id=dataset_id,
+            source_episode_index=source_index,
+            decision_id=_string(accepted_by_episode[(dataset_id, source_index)], "decision_id", "accepted decision"),
+            quality_run_id=_string(
+                accepted_by_episode[(dataset_id, source_index)], "quality_run_id", "accepted decision"
+            ),
+        )
+        for source_index, release_index in sorted(mapping.items(), key=lambda item: item[1])
+    )
+    return dataset_ids, episode_source_mapping
 
 
-def _validate_quality(root: Path, manifest: dict[str, Any]) -> tuple[str, ...]:
+def _validate_quality(root: Path, manifest: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]]:
     references = _mapping_list(manifest, "quality_evidence", "release manifest")
     if len(references) != _integer(manifest, "episode_count", "release manifest"):
         raise ReleaseVerificationError("Quality evidence must contain one reference per accepted episode")
@@ -224,6 +359,7 @@ def _validate_quality(root: Path, manifest: dict[str, Any]) -> tuple[str, ...]:
     }
     run_ids: set[str] = set()
     profile_versions: set[str] = set()
+    artifact_paths: set[str] = set()
     for reference in references:
         decision_id = _string(reference, "decision_id", "quality reference")
         run_id = _string(reference, "quality_run_id", "quality reference")
@@ -231,6 +367,7 @@ def _validate_quality(root: Path, manifest: dict[str, Any]) -> tuple[str, ...]:
         if path != f"metadata/quality/{run_id}.json" or run_id in run_ids:
             raise ReleaseVerificationError("Quality evidence path or run identity is invalid")
         run_ids.add(run_id)
+        artifact_paths.add(path)
         decision = decisions.get(decision_id)
         if decision is None or decision.get("quality_run_id") != run_id:
             raise ReleaseVerificationError("Quality evidence does not match the accepted decision")
@@ -245,7 +382,7 @@ def _validate_quality(root: Path, manifest: dict[str, Any]) -> tuple[str, ...]:
         checks = _mapping_list(report, "episode_checks", "quality report")
         if any(check.get("required") is True and check.get("outcome") != "pass" for check in checks):
             raise ReleaseVerificationError("Release contains a failed required quality check")
-    return tuple(sorted(profile_versions))
+    return tuple(sorted(profile_versions)), tuple(sorted(artifact_paths))
 
 
 def _validate_package_quality(manifest: dict[str, Any], report: dict[str, Any]) -> None:
