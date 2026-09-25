@@ -1,0 +1,44 @@
+{
+  "$schema": "https://microsoft.github.io/hve-core/accessibility/a11y-runtime-config.schema.json",
+  "schemaVersion": "1.0.0",
+  "baseUrl": "http://127.0.0.1:3001/physical-ai-toolchain/",
+  "serveMode": "served",
+  "allowlist": ["127.0.0.1:3001/*"],
+  "caseCatalog": "a11y-screen-reader-cases.json",
+  "bindingProfile": "a11y-screen-reader.bindings.json",
+  "calibration": {
+    "mode": "nvdaOnly",
+    "maxExecutionsPerJourney": 1,
+    "profileVersion": "1.0.0",
+    "calibrationProfile": "guidepup-nvda-isolated-v1",
+    "manualBoundary": [
+      {
+        "id": "jaws",
+        "reason": "The HVE runtime supports automated Windows NVDA; JAWS remains human-led."
+      }
+    ],
+    "visualStates": ["desktop"]
+  },
+  "visualReview": {
+    "enabled": true,
+    "evidenceRoot": "artifacts/accessibility/docusaurus/nvda",
+    "publicLoopbackOnly": true,
+    "rejectPersonalData": true,
+    "operatorConfirmedNoPersonalData": true,
+    "fullPage": true,
+    "traceSnapshots": true,
+    "routes": [
+      {
+        "path": "/physical-ai-toolchain/",
+        "state": "desktop",
+        "surfaceId": "home"
+      },
+      {
+        "path": "/physical-ai-toolchain/search/",
+        "state": "desktop",
+        "surfaceId": "search-results"
+      }
+    ],
+    "states": ["desktop"]
+  }
+}
