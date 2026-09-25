@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import childProcess from 'node:child_process';
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
+import fs, { appendFileSync, existsSync, lstatSync, mkdirSync, unlinkSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -46,15 +46,41 @@ function prepareReport(cwd, reportPath, env) {
   mkdirSync(dirname(reportPath), { recursive: true });
 }
 
-function reportFindingCount(reportPath) {
-  if (!existsSync(reportPath)) throw new ScanError('Gitleaks did not produce a SARIF report');
-  const stat = lstatSync(reportPath);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maxReportBytes) {
-    throw new ScanError('Gitleaks report is unsafe or exceeds the 64 MiB limit');
+function readReport(reportPath) {
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0);
+  const fd = fs.openSync(reportPath, flags);
+  try {
+    const before = fs.fstatSync(fd);
+    if (!before.isFile() || before.size > maxReportBytes) {
+      throw new ScanError('Gitleaks report is unsafe or exceeds the 64 MiB limit');
+    }
+    const entry = fs.lstatSync(reportPath);
+    if (entry.isSymbolicLink() || entry.dev !== before.dev || entry.ino !== before.ino) {
+      throw new ScanError('Gitleaks report path does not identify the opened regular file');
+    }
+    // Read one extra byte to detect growth without exceeding the report-size budget.
+    const buffer = Buffer.alloc(before.size + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const count = fs.readSync(fd, buffer, length, buffer.length - length, length);
+      if (count === 0) break;
+      length += count;
+    }
+    const after = fs.fstatSync(fd);
+    if (length !== before.size || after.size !== before.size
+      || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) {
+      throw new ScanError('Gitleaks report changed while being read');
+    }
+    return buffer.subarray(0, length).toString('utf8');
+  } finally {
+    fs.closeSync(fd);
   }
+}
+
+function reportFindingCount(reportPath) {
   let report;
   try {
-    report = JSON.parse(readFileSync(reportPath, 'utf8'));
+    report = JSON.parse(readReport(reportPath));
   } catch (error) {
     if (error instanceof SyntaxError) throw new ScanError('Gitleaks report is not valid JSON');
     throw error;

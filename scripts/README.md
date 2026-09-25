@@ -134,6 +134,11 @@ In CI the expected revision comes from `GITHUB_SHA`; the helper rejects mismatch
 or shallow checkouts. Reports use `logs/gitleaks-results.sarif`, redact detected
 values, and retain the existing 90-day artifact policy. Each scan removes its old
 untracked report first so stale output cannot validate a failed run.
+Report type and size checks apply to one opened file descriptor, and reads use
+that descriptor rather than reopening the pathname. Reads are bounded to 64 MiB;
+observed size or metadata changes fail closed. The descriptor is closed on every
+outcome. This avoids pathname-replacement races without claiming an immutable
+filesystem snapshot.
 
 | Result     | Meaning                                                                   | Exit behavior                                                 |
 |------------|---------------------------------------------------------------------------|---------------------------------------------------------------|

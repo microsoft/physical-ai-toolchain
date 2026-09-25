@@ -4,7 +4,8 @@
 import assert from 'node:assert/strict';
 import childProcess, { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -150,6 +151,130 @@ test('missing scanner and stale report cannot produce a clean scan', t => {
   assert.notEqual(result.exitCode, 0);
   assert.ok(!existsSync(repo.reportPath));
 });
+
+function scannerReport(t, repo, report = cleanReport) {
+  const originalSpawn = childProcess.spawnSync;
+  t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
+    if (command !== binary) return originalSpawn(command, args, options);
+    repo.write('logs/scan.sarif', typeof report === 'string' ? report : JSON.stringify(report));
+    return { status: 0, stdout: '', stderr: '' };
+  });
+}
+
+test('report replacement after validation cannot redirect the read to a different file', t => {
+  const repo = repository(t);
+  scannerReport(t, repo);
+  const originalLstat = fs.lstatSync;
+  const originalRead = fs.readSync;
+  const reads = [];
+  let replaced = false;
+  t.mock.method(fs, 'lstatSync', (path, options) => {
+    const stat = originalLstat(path, options);
+    if (path === repo.reportPath && stat?.isFile() && !replaced) {
+      replaced = true;
+      renameSync(repo.reportPath, `${repo.reportPath}.original`);
+      repo.write('logs/scan.sarif', JSON.stringify(findingReport));
+    }
+    return stat;
+  });
+  t.mock.method(fs, 'readSync', (fd, buffer, offset, length, position) => {
+    const count = originalRead(fd, buffer, offset, length, position);
+    reads.push(Buffer.from(buffer.subarray(offset, offset + count)));
+    return count;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const result = runScan(repo);
+  assert.equal(replaced, true, 'Exercise the actual report-check interleaving');
+  assert.ok(['clean', 'error'].includes(result.status));
+  assert.equal(Buffer.concat(reads).toString('utf8'), JSON.stringify(cleanReport),
+    'Consume the validated original handle, not the replacement path');
+});
+
+test('report data is read only through a validated descriptor and every descriptor closes', t => {
+  const repo = repository(t);
+  scannerReport(t, repo);
+  const originalReadFile = fs.readFileSync;
+  const originalRead = fs.readSync;
+  const originalClose = fs.closeSync;
+  const consumed = new Set();
+  const closed = new Set();
+  t.mock.method(fs, 'readFileSync', (path, ...args) => {
+    assert.notEqual(path, repo.reportPath, 'Do not reopen the checked report pathname');
+    return originalReadFile(path, ...args);
+  });
+  t.mock.method(fs, 'readSync', (fd, ...args) => {
+    assert.equal(typeof fd, 'number');
+    consumed.add(fd);
+    return originalRead(fd, ...args);
+  });
+  t.mock.method(fs, 'closeSync', fd => { closed.add(fd); return originalClose(fd); });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  assert.equal(runScan(repo).status, 'clean');
+  assert.equal(consumed.size, 1);
+  assert.deepEqual(closed, consumed);
+});
+
+for (const mutation of ['growth', 'truncation', 'parse-error', 'read-error', 'stat-error', 'oversize', 'non-regular']) {
+  test(`report descriptor rejects ${mutation} and closes on failure`, t => {
+    const repo = repository(t);
+    scannerReport(t, repo, mutation === 'parse-error' ? '{' : cleanReport);
+    const originalFstat = fs.fstatSync;
+    const originalRead = fs.readSync;
+    const originalClose = fs.closeSync;
+    const inspected = new Set();
+    const closed = new Set();
+    let changed = false;
+    t.mock.method(fs, 'fstatSync', fd => {
+      const stat = originalFstat(fd);
+      inspected.add(fd);
+      if (mutation === 'stat-error') throw Object.assign(new Error('synthetic private detail'), { code: 'EIO' });
+      if (!changed) {
+        changed = true;
+        if (mutation === 'growth') fs.appendFileSync(repo.reportPath, 'extra');
+        if (mutation === 'truncation') fs.truncateSync(repo.reportPath, 1);
+        if (mutation === 'oversize') return { ...stat, isFile: () => true, size: 64 * 1024 * 1024 + 1 };
+        if (mutation === 'non-regular') return { ...stat, isFile: () => false };
+      }
+      return stat;
+    });
+    t.mock.method(fs, 'readSync', (fd, ...args) => {
+      if (mutation === 'read-error') throw Object.assign(new Error('synthetic private detail'), { code: 'EIO' });
+      return originalRead(fd, ...args);
+    });
+    t.mock.method(fs, 'closeSync', fd => { closed.add(fd); return originalClose(fd); });
+    const result = runScan(repo);
+    assert.equal(changed || mutation === 'stat-error', true, 'Descriptor metadata must be inspected');
+    assert.equal(result.status, 'error');
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(inspected.size, 1);
+    for (const fd of inspected) assert.ok(closed.has(fd), 'Close the inspected report descriptor');
+    assert.ok(!JSON.stringify(result).includes('private detail'));
+  });
+}
+
+for (const mismatch of ['symlink', 'identity']) {
+  test(`report rejects ${mismatch} after opening without reading its contents`, t => {
+    const repo = repository(t);
+    scannerReport(t, repo);
+    const originalLstat = fs.lstatSync;
+    const originalClose = fs.closeSync;
+    let closed = false;
+    t.mock.method(fs, 'lstatSync', (path, options) => {
+      const stat = originalLstat(path, options);
+      if (path !== repo.reportPath || !stat?.isFile()) return stat;
+      return { ...stat, isSymbolicLink: () => mismatch === 'symlink',
+        ino: mismatch === 'identity' ? stat.ino + 1 : stat.ino };
+    });
+    t.mock.method(fs, 'readSync', () => assert.fail('Unsafe report must not be read'));
+    t.mock.method(fs, 'closeSync', fd => { closed = true; return originalClose(fd); });
+    const result = runScan(repo);
+    assert.equal(result.status, 'error');
+    assert.match(result.error, /opened regular file/);
+    assert.equal(closed, true);
+  });
+}
 
 test('report safety rejects tracked files and escaping destinations', t => {
   const repo = repository(t);
