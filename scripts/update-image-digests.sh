@@ -107,7 +107,6 @@ azureml_pin_specs=(
   'DEFAULT_LEROBOT_EVAL_IMAGE|lerobot-inference-env|evaluation/sil/workflows/azureml/lerobot-eval.yaml'
   'DEFAULT_LEROBOT_EVAL_IMAGE|lerobot-inference-env|evaluation/sil/workflows/azureml/vla-pi0-eval.yaml'
   'DEFAULT_LEROBOT_TRAIN_IMAGE|vla-pi0-training-env|training/vla/workflows/azureml/vla-pi0-train.yaml'
-  'DEFAULT_LEROBOT_EVAL_IMAGE|lerobot-inference-env|evaluation/sil/workflows/azureml/vla-pi0-eval.yaml'
 )
 azureml_environment_line_re="^[[:space:]]*(-[[:space:]]*)?[\"']?environment[\"']?[[:space:]]*:[[:space:]]*[\"']?azureml:"
 
