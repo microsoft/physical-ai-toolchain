@@ -180,3 +180,7 @@ Move up a tier when any of these become true:
 - [Architecture: T0 — Dev](../../contributing/architecture.md#t0--dev): contributor-facing tier detail.
 - [Recipe index](../README.md): all recipes organized by tier.
 - [T1 — Lab](../tier-1-lab/README.md): the next tier, add cloud storage.
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

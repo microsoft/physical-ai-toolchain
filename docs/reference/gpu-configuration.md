@@ -174,3 +174,7 @@ After `env.close()`, training scripts call `os._exit(0)` instead of `simulation_
 * [NVIDIA GPU Operator vGPU support](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/install-gpu-operator-vgpu.html)
 * [GPU Operator Helm values](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/setup/values/nvidia-gpu-operator.yaml)
 * [GRID driver installer DaemonSet](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/setup/manifests/gpu-grid-driver-installer.yaml)
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

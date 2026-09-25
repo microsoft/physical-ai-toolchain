@@ -50,3 +50,7 @@ fleet of robots, not Kubernetes clusters. This is the cognition layer that sits 
 | [Dashboard Specification](https://github.com/microsoft/physical-ai-toolchain/blob/main/fleet-intelligence/specifications/dashboards.specification.md)            | Fleet dashboard and alerting design   |
 | [Drift Detection Specification](https://github.com/microsoft/physical-ai-toolchain/blob/main/fleet-intelligence/specifications/drift-detection.specification.md) | Detection algorithms and thresholds   |
 | [Retraining Specification](https://github.com/microsoft/physical-ai-toolchain/blob/main/fleet-intelligence/specifications/retraining.specification.md)           | Automated retraining trigger pipeline |
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

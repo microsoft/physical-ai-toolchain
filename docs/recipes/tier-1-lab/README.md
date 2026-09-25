@@ -88,3 +88,7 @@ with `docker pull` across 2–3 robots) are unchanged from T0.
 - [Architecture: T1 — Lab](../../contributing/architecture.md#t1--lab)
 - [Blob storage structure](../../cloud/blob-storage-structure.md)
 - [T0 — Dev](../tier-0-dev/README.md) · [T2 — Pilot](../tier-2-pilot/README.md)
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

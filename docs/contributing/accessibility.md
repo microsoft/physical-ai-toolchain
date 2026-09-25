@@ -141,3 +141,7 @@ This page, combined with markdownlint enforcement (MD045, MD001) and NO_COLOR su
 
 * [Pull Request Process](pull-request-process.md)
 * [Security Review](security-review.md)
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

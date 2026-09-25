@@ -119,3 +119,7 @@ For comprehensive security documentation including threat models and deployment 
 
 - [Azure security documentation](https://learn.microsoft.com/azure/security/) - authoritative security guidance for Azure services
 - [AKS baseline architecture](https://learn.microsoft.com/azure/architecture/reference-architectures/containers/aks/baseline-aks) - production-ready AKS security patterns
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

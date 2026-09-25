@@ -16,3 +16,7 @@ vocabulary, see [tier-model.md](../design/tier-model.md).
 
 - [GitOps architecture](https://github.com/microsoft/physical-ai-toolchain/blob/main/fleet-deployment/specifications/gitops.specification.md)
 - [Deployment gating](https://github.com/microsoft/physical-ai-toolchain/blob/main/fleet-deployment/specifications/gating-service.specification.md)
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

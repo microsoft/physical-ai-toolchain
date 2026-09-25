@@ -220,3 +220,7 @@ kubectl get sa -n osmo-control-plane osmo-control-plane -o yaml | grep azure.wor
 
 - [Cluster Operations](cluster-setup-advanced.md) — accessing OSMO, troubleshooting, optional scripts
 - [Cleanup and Destroy](cleanup.md) — resource teardown procedures
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

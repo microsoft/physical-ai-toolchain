@@ -16,3 +16,7 @@ Guides for capturing, processing, and managing robotic training datasets.
 
 - [Data Pipeline Reference](../../data-pipeline/README.md) — edge recording configuration reference
 - [Training Recipes](../training/README.md) — train a model with your prepared dataset
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

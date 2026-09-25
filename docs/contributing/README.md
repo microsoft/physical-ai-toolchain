@@ -275,3 +275,7 @@ See [Accessibility](accessibility.md) for full guidelines.
 This contributing guide is adapted for reference architecture contributions and Azure + NVIDIA robotics infrastructure.
 
 Copyright (c) Microsoft Corporation. Licensed under the MIT License.
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

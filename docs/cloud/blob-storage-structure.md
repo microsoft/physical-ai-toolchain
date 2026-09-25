@@ -317,3 +317,7 @@ az storage account management-policy show \
 - [Terraform azurerm_storage_management_policy](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_management_policy)
 - [LeRobot Dataset Format v0.3.x](https://github.com/huggingface/lerobot/tree/main/src/lerobot/datasets)
 - [ROS 2 MCAP Format](https://mcap.dev/)
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.
