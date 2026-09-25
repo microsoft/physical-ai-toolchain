@@ -31,9 +31,8 @@ FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:592b23aa79a6e6c08ba4b20f1fff
 
 USER root
 
-RUN apk add --no-cache ca-certificates \
-    && update-ca-certificates \
-    && rm -rf /usr/share/nginx/html/*
+# Remove default nginx page
+RUN rm -rf /usr/share/nginx/html/*
 
 # Copy built static assets
 COPY --from=build /app/data-management/viewer/frontend/dist /usr/share/nginx/html
