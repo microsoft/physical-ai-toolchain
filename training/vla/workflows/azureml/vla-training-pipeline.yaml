@@ -1,7 +1,7 @@
 $schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
 type: pipeline
-display_name: VLA Calibrate and Train
-experiment_name: vla-calibrate-train
+display_name: VLA Training Pipeline
+experiment_name: vla-training-pipeline
 description: Calibrate VLA micro-batch capacity and train from the validated recommendation.
 
 settings:
@@ -9,17 +9,14 @@ settings:
   continue_on_step_failure: false
 
 inputs:
-  workload_config:
-    type: uri_file
   dataset_repo_id: placeholder/dataset
   dataset_revision: 0000000000000000000000000000000000000000
   policy_type: placeholder
   init_from_policy_hf_repo_id: placeholder/model
   init_from_policy_hf_revision: 0000000000000000000000000000000000000000
   adapter_name: placeholder
-  adapter_version: "1"
-  adapter_config_sha256: 0000000000000000000000000000000000000000000000000000000000000000
-  dependency_extra: placeholder
+  code_repository: placeholder/repository
+  code_revision: 0000000000000000000000000000000000000000
   train_expert_only: "false"
   gradient_checkpointing: "false"
   use_imagenet_stats: "false"
@@ -47,6 +44,9 @@ inputs:
   compute_train: azureml:placeholder
 
 outputs:
+  workload_contract:
+    type: uri_folder
+    mode: upload
   calibration_report:
     type: uri_folder
     mode: upload
@@ -62,10 +62,12 @@ jobs:
     resources:
       instance_type: gpu
     inputs:
-      workload_config: ${{parent.inputs.workload_config}}
+      adapter_name: ${{parent.inputs.adapter_name}}
       dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
       dataset_revision: ${{parent.inputs.dataset_revision}}
       policy_type: ${{parent.inputs.policy_type}}
+      mixed_precision: ${{parent.inputs.mixed_precision}}
+      policy_dtype: ${{parent.inputs.policy_dtype}}
       init_from_policy_hf_repo_id: ${{parent.inputs.init_from_policy_hf_repo_id}}
       init_from_policy_hf_revision: ${{parent.inputs.init_from_policy_hf_revision}}
       train_expert_only: ${{parent.inputs.train_expert_only}}
@@ -75,7 +77,11 @@ jobs:
       candidate_batch_sizes: ${{parent.inputs.candidate_batch_sizes}}
       headroom_fraction: ${{parent.inputs.headroom_fraction}}
       probe_timeout_seconds: ${{parent.inputs.probe_timeout_seconds}}
+      code_repository: ${{parent.inputs.code_repository}}
+      code_revision: ${{parent.inputs.code_revision}}
+      compute_target: ${{parent.inputs.compute_calibrate}}
     outputs:
+      workload_contract: ${{parent.outputs.workload_contract}}
       calibration_report: ${{parent.outputs.calibration_report}}
     identity:
       type: managed_identity
@@ -88,11 +94,8 @@ jobs:
       instance_type: gpu
     inputs:
       calibration_report: ${{parent.jobs.calibration_step.outputs.calibration_report}}
-      workload_config: ${{parent.inputs.workload_config}}
+      workload_contract: ${{parent.jobs.calibration_step.outputs.workload_contract}}
       adapter_name: ${{parent.inputs.adapter_name}}
-      adapter_version: ${{parent.inputs.adapter_version}}
-      adapter_config_sha256: ${{parent.inputs.adapter_config_sha256}}
-      dependency_extra: ${{parent.inputs.dependency_extra}}
       dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
       dataset_revision: ${{parent.inputs.dataset_revision}}
       policy_type: ${{parent.inputs.policy_type}}
@@ -118,6 +121,9 @@ jobs:
       hf_key_vault_url: ${{parent.inputs.hf_key_vault_url}}
       hf_token_secret_name: ${{parent.inputs.hf_token_secret_name}}
       register_checkpoint: ${{parent.inputs.register_checkpoint}}
+      code_repository: ${{parent.inputs.code_repository}}
+      code_revision: ${{parent.inputs.code_revision}}
+      compute_target: ${{parent.inputs.compute_train}}
     outputs:
       checkpoints: ${{parent.outputs.checkpoints}}
     identity:
@@ -125,4 +131,4 @@ jobs:
 
 tags:
   framework: lerobot
-  lifecycle_stage: calibrate-train
+  lifecycle_stage: training-pipeline

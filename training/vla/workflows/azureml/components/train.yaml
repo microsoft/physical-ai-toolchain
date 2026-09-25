@@ -11,16 +11,10 @@ inputs:
   calibration_report:
     type: uri_folder
     description: Calibration report containing the recommended micro-batch size.
-  workload_config:
-    type: uri_file
-    description: Immutable workload JSON used to validate calibration lineage.
+  workload_contract:
+    type: uri_folder
+    description: Generated workload JSON used to validate calibration lineage.
   adapter_name:
-    type: string
-  adapter_version:
-    type: string
-  adapter_config_sha256:
-    type: string
-  dependency_extra:
     type: string
   dataset_repo_id:
     type: string
@@ -86,6 +80,15 @@ inputs:
   register_checkpoint:
     type: string
     default: none
+  code_repository:
+    type: string
+  code_revision:
+    type: string
+  compute_target:
+    type: string
+  runtime_image:
+    type: string
+    default: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
 
 outputs:
   checkpoints:
@@ -96,56 +99,4 @@ outputs:
 environment:
   image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
 
-command: >-
-  bash -c '
-  set -euo pipefail;
-  report="$AZURE_ML_INPUT_calibration_report/calibration-report.json";
-  batch_size=$(python3 training/vla/scripts/vla_contracts.py
-  --recommended-batch-size "$report"
-  --workload-config "$AZURE_ML_INPUT_workload_config");
-  export BATCH_SIZE="$batch_size";
-  export AZURE_SUBSCRIPTION_ID="${{inputs.subscription_id}}";
-  export AZURE_RESOURCE_GROUP="${{inputs.resource_group}}";
-  export AZUREML_WORKSPACE_NAME="${{inputs.workspace_name}}";
-  export MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES="${{inputs.mlflow_token_refresh_retries}}";
-  export MLFLOW_HTTP_REQUEST_TIMEOUT="${{inputs.mlflow_http_request_timeout}}";
-  export DATASET_REPO_ID="${{inputs.dataset_repo_id}}";
-  export DATASET_REVISION="${{inputs.dataset_revision}}";
-  export VLA_MODEL_ADAPTER="${{inputs.adapter_name}}";
-  export VLA_ADAPTER_VERSION="${{inputs.adapter_version}}";
-  export VLA_ADAPTER_CONFIG_SHA256="${{inputs.adapter_config_sha256}}";
-  export LEROBOT_POLICY_EXTRA="${{inputs.dependency_extra}}";
-  export POLICY_TYPE="${{inputs.policy_type}}";
-  export INIT_FROM_POLICY_HF_REPO_ID="${{inputs.init_from_policy_hf_repo_id}}";
-  export INIT_FROM_POLICY_HF_REVISION="${{inputs.init_from_policy_hf_revision}}";
-  export TRAIN_EXPERT_ONLY="${{inputs.train_expert_only}}";
-  export GRADIENT_CHECKPOINTING="${{inputs.gradient_checkpointing}}";
-  export USE_IMAGENET_STATS="${{inputs.use_imagenet_stats}}";
-  export TRAINING_STEPS="${{inputs.training_steps}}";
-  export SAVE_FREQ="${{inputs.save_freq}}";
-  export LOG_FREQ="${{inputs.log_freq}}";
-  export JOB_NAME="${{inputs.job_name}}";
-  export OUTPUT_DIR="${{inputs.output_dir}}";
-  export MIXED_PRECISION="${{inputs.mixed_precision}}";
-  export LEROBOT_PROJECT=training/vla/lerobot;
-  export TRAINING_CHECKPOINT_OUTPUT="$AZURE_ML_OUTPUT_checkpoints";
-  if [[ "${{inputs.rename_map_b64}}" != "none" ]]; then
-    export RENAME_MAP_B64="${{inputs.rename_map_b64}}";
-  fi;
-  if [[ "${{inputs.policy_dtype}}" != "none" ]]; then
-    export POLICY_DTYPE="${{inputs.policy_dtype}}";
-  fi;
-  if [[ "${{inputs.azure_client_id}}" != "none" ]]; then
-    export AZURE_CLIENT_ID="${{inputs.azure_client_id}}";
-  fi;
-  if [[ "${{inputs.hf_key_vault_url}}" != "none" ]]; then
-    export HF_KEY_VAULT_URL="${{inputs.hf_key_vault_url}}";
-  fi;
-  if [[ "${{inputs.hf_token_secret_name}}" != "none" ]]; then
-    export HF_TOKEN_SECRET_NAME="${{inputs.hf_token_secret_name}}";
-  fi;
-  if [[ "${{inputs.register_checkpoint}}" != "none" ]]; then
-    export REGISTER_CHECKPOINT="${{inputs.register_checkpoint}}";
-  fi;
-  echo "[CALIBRATION] Validated recommended micro-batch size: $BATCH_SIZE";
-  bash training/il/scripts/lerobot/azureml-train-entry.sh'
+command: bash training/vla/scripts/azureml-component-entry.sh train

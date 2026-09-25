@@ -16,11 +16,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from model_adapters import AdapterError, AdapterRequest, get_adapter
 from vla_contracts import (
     SCHEMA_VERSION,
     ContractError,
     RecordKind,
     calibration_workload_fingerprint,
+    canonical_json,
+    resolve_recommended_batch_size,
+    sha256_bytes,
+    sha256_file,
     validate_calibration_workload,
     validate_record,
     write_record,
@@ -55,17 +60,6 @@ def _write_json(path: Path, value: Mapping[str, Any]) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _load_workload(path: Path) -> dict[str, Any]:
-    try:
-        workload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise CalibrationError(f"Unable to load calibration workload {path}: {exc}") from exc
-    if not isinstance(workload, dict):
-        raise CalibrationError("Calibration workload must be a JSON object")
-    validate_calibration_workload(workload)
-    return workload
-
-
 def _parse_candidate_batch_sizes(value: str) -> list[int]:
     try:
         candidates = [int(item.strip()) for item in value.split(",") if item.strip()]
@@ -89,6 +83,202 @@ def _training_arguments(arguments: Sequence[str]) -> list[str]:
     if normalized and normalized[0] == "--":
         normalized.pop(0)
     return normalized
+
+
+def _argument_value(arguments: Sequence[str], name: str) -> str | None:
+    for index, argument in enumerate(arguments):
+        if argument.startswith(f"{name}="):
+            return argument.split("=", 1)[1]
+        if argument == name and index + 1 < len(arguments):
+            return arguments[index + 1]
+    return None
+
+
+def _parse_boolean(value: str, name: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized not in {"true", "false"}:
+        raise CalibrationError(f"{name} must be true or false")
+    return normalized == "true"
+
+
+def _load_dataset_info(training_arguments: Sequence[str]) -> dict[str, Any]:
+    dataset_root = _argument_value(training_arguments, "--dataset.root")
+    if dataset_root:
+        root = Path(dataset_root)
+        candidates = (root / "meta" / "info.json", root / "info.json")
+        info_path = next((candidate for candidate in candidates if candidate.is_file()), None)
+        if info_path is None:
+            raise CalibrationError(f"Prepared dataset is missing info.json under {root}")
+    else:
+        from huggingface_hub import hf_hub_download
+
+        repository = os.environ.get("DATASET_REPO_ID", "")
+        revision = os.environ.get("DATASET_REVISION", "")
+        if not repository or not revision:
+            raise CalibrationError("DATASET_REPO_ID and DATASET_REVISION are required")
+        info_path = Path(
+            hf_hub_download(
+                repo_id=repository,
+                revision=revision,
+                repo_type="dataset",
+                filename="meta/info.json",
+            )
+        )
+    try:
+        info = json.loads(info_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CalibrationError(f"Unable to read dataset metadata {info_path}: {exc}") from exc
+    if not isinstance(info, dict):
+        raise CalibrationError(f"Dataset metadata must be a JSON object: {info_path}")
+    return info
+
+
+def _parse_rename_map(training_arguments: Sequence[str]) -> dict[str, str]:
+    raw_value = _argument_value(training_arguments, "--rename_map") or "{}"
+    try:
+        rename_map = json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        raise CalibrationError(f"Training rename map is invalid JSON: {exc}") from exc
+    if not isinstance(rename_map, dict) or any(
+        not isinstance(source, str)
+        or not source
+        or not isinstance(target, str)
+        or not target
+        for source, target in rename_map.items()
+    ):
+        raise CalibrationError("Training rename map must contain non-empty string keys and values")
+    return rename_map
+
+
+def _dataset_contract(
+    info: Mapping[str, Any],
+    repository: str,
+    revision: str,
+    rename_map: Mapping[str, str],
+) -> tuple[dict[str, str], dict[str, list[int]]]:
+    features = info.get("features")
+    if not isinstance(features, Mapping) or not features:
+        raise CalibrationError("Dataset metadata must contain a non-empty features object")
+    input_shapes: dict[str, list[int]] = {}
+    for source_name, feature in features.items():
+        if not isinstance(source_name, str) or not source_name.startswith("observation.images."):
+            continue
+        if not isinstance(feature, Mapping):
+            raise CalibrationError(f"Dataset feature {source_name} must be an object")
+        shape = feature.get("shape")
+        if (
+            not isinstance(shape, Sequence)
+            or isinstance(shape, (str, bytes, bytearray))
+            or len(shape) != 3
+            or any(not isinstance(size, int) or isinstance(size, bool) or size < 1 for size in shape)
+        ):
+            raise CalibrationError(f"Dataset image feature {source_name} must have a positive HWC shape")
+        target_name = rename_map.get(source_name, source_name)
+        if target_name in input_shapes:
+            raise CalibrationError(f"Dataset rename map produces duplicate feature {target_name}")
+        input_shapes[target_name] = [shape[2], shape[0], shape[1]]
+    if not input_shapes:
+        raise CalibrationError("Dataset metadata does not contain image observation features")
+    dataset = {
+        "uri": f"hf://{repository}",
+        "version": revision,
+        "features_sha256": sha256_bytes(canonical_json(features).encode("utf-8")),
+    }
+    return dataset, dict(sorted(input_shapes.items()))
+
+
+def _build_workload(training_arguments: Sequence[str]) -> dict[str, Any]:
+    import torch
+
+    if not torch.cuda.is_available():
+        raise CalibrationError("CUDA is unavailable while generating the calibration workload")
+    gpu_count = torch.cuda.device_count()
+    if gpu_count != 1:
+        raise CalibrationError(f"Calibration requires exactly one visible GPU, found {gpu_count}")
+
+    repository = os.environ.get("DATASET_REPO_ID", "")
+    revision = os.environ.get("DATASET_REVISION", "")
+    source_repository = os.environ.get("INIT_FROM_POLICY_HF_REPO_ID", "")
+    source_revision = os.environ.get("INIT_FROM_POLICY_HF_REVISION", "")
+    code_repository = os.environ.get("CODE_REPOSITORY", "")
+    code_revision = os.environ.get("CODE_REVISION", "")
+    runtime_image = os.environ.get("RUNTIME_IMAGE", "")
+    compute_target = os.environ.get("COMPUTE_TARGET", "")
+    adapter_name = os.environ.get("VLA_MODEL_ADAPTER", "")
+    required_values = {
+        "DATASET_REPO_ID": repository,
+        "DATASET_REVISION": revision,
+        "INIT_FROM_POLICY_HF_REPO_ID": source_repository,
+        "INIT_FROM_POLICY_HF_REVISION": source_revision,
+        "CODE_REPOSITORY": code_repository,
+        "CODE_REVISION": code_revision,
+        "RUNTIME_IMAGE": runtime_image,
+        "COMPUTE_TARGET": compute_target,
+        "VLA_MODEL_ADAPTER": adapter_name,
+        "POLICY_TYPE": os.environ.get("POLICY_TYPE", ""),
+    }
+    missing = [name for name, value in required_values.items() if not value]
+    if missing:
+        raise CalibrationError(f"Missing workload inputs: {', '.join(missing)}")
+
+    rename_map = _parse_rename_map(training_arguments)
+    train_expert_value = os.environ.get("TRAIN_EXPERT_ONLY", "")
+    adapter = get_adapter(adapter_name)
+    resolution = adapter.resolve(
+        AdapterRequest(
+            policy_type=required_values["POLICY_TYPE"],
+            mixed_precision=os.environ.get("MIXED_PRECISION", "no"),
+            policy_dtype=os.environ.get("POLICY_DTYPE") or None,
+            train_expert_only=(
+                _parse_boolean(train_expert_value, "TRAIN_EXPERT_ONLY") if train_expert_value else None
+            ),
+            gradient_checkpointing=_parse_boolean(
+                os.environ.get("GRADIENT_CHECKPOINTING", "false"),
+                "GRADIENT_CHECKPOINTING",
+            ),
+            rename_map=rename_map,
+        )
+    )
+    expected_imagenet_stats = resolution.use_imagenet_stats
+    actual_imagenet_stats = _parse_boolean(
+        os.environ.get("USE_IMAGENET_STATS", str(expected_imagenet_stats).lower()),
+        "USE_IMAGENET_STATS",
+    )
+    if actual_imagenet_stats != expected_imagenet_stats:
+        raise CalibrationError("USE_IMAGENET_STATS does not match the registered adapter")
+
+    dataset, input_shapes = _dataset_contract(
+        _load_dataset_info(training_arguments), repository, revision, rename_map
+    )
+    lock_path = Path(os.environ.get("LEROBOT_PROJECT", "training/vla/lerobot")) / "uv.lock"
+    if not lock_path.is_file():
+        raise CalibrationError(f"LeRobot lockfile is missing: {lock_path}")
+    train_expert_only = resolution.environment.get("TRAIN_EXPERT_ONLY") == "true"
+    gradient_checkpointing = resolution.environment.get("GRADIENT_CHECKPOINTING") == "true"
+    workload = {
+        "schema_version": 1,
+        "source_model": {"repository": source_repository, "revision": source_revision},
+        "dataset": dataset,
+        "code": {"repository": code_repository, "revision": code_revision},
+        "runtime": {"image": runtime_image, "lock_sha256": sha256_file(lock_path)},
+        "adapter": {
+            "name": resolution.adapter_name,
+            "version": resolution.adapter_version,
+            "config_sha256": resolution.config_sha256,
+        },
+        "compute": {
+            "target": compute_target,
+            "gpu_type": torch.cuda.get_device_name(),
+            "gpu_count": gpu_count,
+        },
+        "precision": resolution.environment["MIXED_PRECISION"],
+        "trainable_scope": "expert-only" if train_expert_only else "all",
+        "gradient_checkpointing": gradient_checkpointing,
+        "world_size": gpu_count,
+        "input_shapes": input_shapes,
+    }
+    validate_calibration_workload(workload)
+    return workload
 
 
 def _build_probe_arguments(training_arguments: Sequence[str], batch_size: int, output_dir: Path) -> list[str]:
@@ -321,11 +511,13 @@ def _build_report(
 
 
 def _run_calibration(args: argparse.Namespace) -> int:
-    workload = _load_workload(args.workload_config)
+    training_arguments = _training_arguments(args.training_arguments)
+    workload = _build_workload(training_arguments)
     if workload["world_size"] != 1:
         raise CalibrationError("Calibration currently supports workloads with world_size equal to 1")
+    workload_path = args.workload_output_dir / "workload.json"
+    _write_json(workload_path, workload)
     candidates = _parse_candidate_batch_sizes(args.candidate_batch_sizes)
-    training_arguments = _training_arguments(args.training_arguments)
 
     with tempfile.TemporaryDirectory(prefix="vla-calibration-") as temporary_directory:
         probe_dir = Path(temporary_directory)
@@ -343,7 +535,28 @@ def _run_calibration(args: argparse.Namespace) -> int:
     report = _build_report(workload, results, args.headroom_fraction)
     report_path = args.output_dir / "calibration-report.json"
     digest = write_record(report_path, report)
-    print(json.dumps({"calibration_report": str(report_path), "sha256": digest}, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "calibration_report": str(report_path),
+                "sha256": digest,
+                "workload_contract": str(workload_path),
+            },
+            sort_keys=True,
+        )
+    )
+    return EXIT_SUCCESS
+
+
+def _resolve_training_batch_size(args: argparse.Namespace) -> int:
+    training_arguments = _training_arguments(args.training_arguments)
+    expected_workload = _build_workload(training_arguments)
+    batch_size = resolve_recommended_batch_size(
+        args.calibration_report,
+        args.workload_contract,
+        expected_workload,
+    )
+    print(batch_size)
     return EXIT_SUCCESS
 
 
@@ -373,6 +586,20 @@ def _run_self_check() -> None:
         raise CalibrationError("Candidate batch-size parsing changed")
     if _training_arguments(("--", "--wandb.enable=false")) != ["--wandb.enable=false"]:
         raise CalibrationError("Training argument separator normalization changed")
+    features = {
+        "observation.images.camera1": {"dtype": "video", "shape": [480, 640, 3]},
+        "observation.state": {"dtype": "float32", "shape": [6]},
+    }
+    dataset, input_shapes = _dataset_contract(
+        {"features": features},
+        "org/dataset",
+        "b" * 40,
+        {"observation.images.camera1": "observation.images.base_0_rgb"},
+    )
+    if dataset["features_sha256"] != sha256_bytes(canonical_json(features).encode("utf-8")):
+        raise CalibrationError("Dataset feature hashing changed")
+    if input_shapes != {"observation.images.base_0_rgb": [3, 480, 640]}:
+        raise CalibrationError("Dataset image shape normalization changed")
     previous_dataset_revision = os.environ.get("DATASET_REVISION")
     os.environ["DATASET_REVISION"] = "b" * 40
     try:
@@ -431,8 +658,11 @@ def create_parser() -> argparse.ArgumentParser:
     """Create the calibration command-line parser."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--self-check", action="store_true", help="Run deterministic contract checks")
-    parser.add_argument("--workload-config", type=Path, help="Immutable calibration workload JSON")
+    parser.add_argument("--workload-contract", type=Path, help="Generated calibration workload JSON")
+    parser.add_argument("--workload-output-dir", type=Path, help="Directory for workload.json")
     parser.add_argument("--output-dir", type=Path, help="Directory for calibration-report.json")
+    parser.add_argument("--calibration-report", type=Path, help="Calibration report used by training")
+    parser.add_argument("--resolve-training-batch-size", action="store_true")
     parser.add_argument("--candidate-batch-sizes", default="1", help="Ascending comma-separated batch sizes")
     parser.add_argument("--headroom-fraction", type=float, default=0.1)
     parser.add_argument("--probe-timeout-seconds", type=int, default=3600)
@@ -454,8 +684,14 @@ def run(args: argparse.Namespace) -> int:
         if args.probe_output is None or args.probe_batch_size is None:
             raise CalibrationError("Probe mode requires --probe-output and --probe-batch-size")
         return _run_probe(args)
-    if args.workload_config is None or args.output_dir is None:
-        raise CalibrationError("Calibration requires --workload-config and --output-dir")
+    if args.resolve_training_batch_size:
+        if args.workload_contract is None or args.calibration_report is None:
+            raise CalibrationError(
+                "Training batch-size resolution requires --workload-contract and --calibration-report"
+            )
+        return _resolve_training_batch_size(args)
+    if args.workload_output_dir is None or args.output_dir is None:
+        raise CalibrationError("Calibration requires --workload-output-dir and --output-dir")
     if not 0 <= args.headroom_fraction < 1:
         raise CalibrationError("--headroom-fraction must be in the range [0, 1)")
     if args.probe_timeout_seconds < 1:
@@ -467,7 +703,7 @@ def main() -> int:
     """Run the VLA calibration CLI."""
     try:
         return run(create_parser().parse_args())
-    except (CalibrationError, ContractError) as exc:
+    except (AdapterError, CalibrationError, ContractError) as exc:
         print(f"Calibration failed: {exc}", file=sys.stderr)
         return EXIT_ERROR
     except KeyboardInterrupt:

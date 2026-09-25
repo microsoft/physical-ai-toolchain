@@ -272,7 +272,10 @@ if [[ ${total_sources} -eq 0 ]]; then
   # video_backend=pyav avoids torchcodec's dynamic-link dependency on
   # libnvrtc.so (shipped as a pip wheel whose lib/ is not on LD_LIBRARY_PATH
   # in a fresh venv). Consistent with the local-data paths below.
-  train_args+=(--dataset.video_backend=pyav)
+  train_args+=(
+    --dataset.use_imagenet_stats="${use_imagenet_stats}"
+    --dataset.video_backend=pyav
+  )
 elif [[ ${total_sources} -eq 1 ]]; then
   # Single source — use directly, no merge needed.
   # video_backend=pyav is the most reliable decoder for the AzureML container.
@@ -352,20 +355,20 @@ EOF
 fi
 
 if [[ "${CALIBRATION_MODE:-false}" == "true" ]]; then
-  calibration_workload_config="${CALIBRATION_WORKLOAD_CONFIG:-}"
   calibration_output_dir="${CALIBRATION_OUTPUT_DIR:-${AZURE_ML_OUTPUT_calibration_report:-}}"
-  [[ -f "${calibration_workload_config}" ]] || {
-    echo "ERROR: CALIBRATION_WORKLOAD_CONFIG must identify a readable JSON file" >&2
-    exit 1
-  }
+  calibration_workload_output_dir="${CALIBRATION_WORKLOAD_OUTPUT_DIR:-${AZURE_ML_OUTPUT_workload_contract:-}}"
   [[ -n "${calibration_output_dir}" ]] || {
     echo "ERROR: CALIBRATION_OUTPUT_DIR or AZURE_ML_OUTPUT_calibration_report is required" >&2
+    exit 1
+  }
+  [[ -n "${calibration_workload_output_dir}" ]] || {
+    echo "ERROR: CALIBRATION_WORKLOAD_OUTPUT_DIR or AZURE_ML_OUTPUT_workload_contract is required" >&2
     exit 1
   }
 
   calibration_args=(
     python3 training/vla/scripts/calibrate_vla.py
-    --workload-config "${calibration_workload_config}"
+    --workload-output-dir "${calibration_workload_output_dir}"
     --output-dir "${calibration_output_dir}"
     --candidate-batch-sizes "${CALIBRATION_BATCH_SIZES:-1}"
     --headroom-fraction "${CALIBRATION_HEADROOM_FRACTION:-0.1}"
@@ -377,6 +380,25 @@ if [[ "${CALIBRATION_MODE:-false}" == "true" ]]; then
   "${calibration_args[@]}"
   echo "=== Calibration Complete ==="
   exit 0
+fi
+
+if [[ -n "${CALIBRATION_REPORT_DIR:-}" || -n "${CALIBRATION_WORKLOAD_CONTRACT:-}" ]]; then
+  [[ -n "${CALIBRATION_REPORT_DIR:-}" && -f "${CALIBRATION_REPORT_DIR}/calibration-report.json" ]] || {
+    echo "ERROR: CALIBRATION_REPORT_DIR must contain calibration-report.json" >&2
+    exit 1
+  }
+  [[ -f "${CALIBRATION_WORKLOAD_CONTRACT:-}" ]] || {
+    echo "ERROR: CALIBRATION_WORKLOAD_CONTRACT must identify workload.json" >&2
+    exit 1
+  }
+  batch_size=$(python3 training/vla/scripts/calibrate_vla.py \
+    --resolve-training-batch-size \
+    --calibration-report "${CALIBRATION_REPORT_DIR}/calibration-report.json" \
+    --workload-contract "${CALIBRATION_WORKLOAD_CONTRACT}" \
+    -- \
+    "${train_args[@]}")
+  export BATCH_SIZE="${batch_size}"
+  echo "[CALIBRATION] Validated recommended micro-batch size: ${BATCH_SIZE}"
 fi
 
 echo "Running: python -m training.il.scripts.lerobot.train ${train_args[*]}"

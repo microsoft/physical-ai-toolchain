@@ -195,15 +195,35 @@ def load_calibration_workload(path: Path) -> dict[str, Any]:
     return workload
 
 
-def resolve_recommended_batch_size(calibration_report: Path, workload_config: Path) -> int:
+def verify_workload_expectations(
+    workload: Mapping[str, Any],
+    expected_workload: Mapping[str, Any],
+) -> None:
+    """Verify that a workload matches independently generated expectations."""
+    validate_calibration_workload(workload)
+    validate_calibration_workload(expected_workload)
+    normalized_workload = json.loads(canonical_json(workload))
+    normalized_expected = json.loads(canonical_json(expected_workload))
+    normalized_expected["compute"]["target"] = normalized_workload["compute"]["target"]
+    if normalized_workload != normalized_expected:
+        raise ContractError("Calibration workload does not match effective training inputs")
+
+
+def resolve_recommended_batch_size(
+    calibration_report: Path,
+    workload_contract: Path,
+    expected_workload: Mapping[str, Any] | None = None,
+) -> int:
     """Return the recommended batch size after verifying exact workload lineage."""
     report = load_record(calibration_report, RecordKind.CALIBRATION)
-    workload = load_calibration_workload(workload_config)
+    workload = load_calibration_workload(workload_contract)
     expected_fingerprint = calibration_workload_fingerprint(workload)
     if report["workload_fingerprint"] != expected_fingerprint:
-        raise ContractError("Calibration report workload fingerprint does not match the workload config")
+        raise ContractError("Calibration report workload fingerprint does not match the workload contract")
     if report.get("workload") != workload:
-        raise ContractError("Calibration report workload does not match the workload config")
+        raise ContractError("Calibration report workload does not match the workload contract")
+    if expected_workload is not None:
+        verify_workload_expectations(workload, expected_workload)
     recommendation = _require_mapping(report, "recommendation")
     if recommendation.get("status") != "recommended":
         raise ContractError("Calibration report does not contain a feasible recommendation")
@@ -599,6 +619,16 @@ def _run_self_check() -> None:
         report_digest = write_record(report_path, calibration)
         if resolve_recommended_batch_size(report_path, workload_path) != 1:
             raise ContractError("Calibration recommendation did not resolve to the expected batch size")
+        changed_target = json.loads(canonical_json(workload))
+        changed_target["compute"]["target"] = "different-azure-target"
+        verify_workload_expectations(workload, changed_target)
+        changed_workload = dict(workload, precision="fp16")
+        try:
+            resolve_recommended_batch_size(report_path, workload_path, changed_workload)
+        except ContractError:
+            pass
+        else:
+            raise ContractError("Changed effective inputs matched the calibration workload")
         approval = dict(records[7], calibration_report_sha256=report_digest)
         verify_approval(report_path, approval)
         report_path.write_text(report_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
@@ -627,7 +657,7 @@ def create_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Calibration report from which to resolve a workload-bound recommendation",
     )
-    parser.add_argument("--workload-config", type=Path, help="Workload config bound to the calibration report")
+    parser.add_argument("--workload-contract", type=Path, help="Generated workload bound to the calibration report")
     return parser
 
 
@@ -637,10 +667,10 @@ def run(args: argparse.Namespace) -> int:
         _run_self_check()
         print("VLA lifecycle contract self-check passed")
         return EXIT_SUCCESS
-    if args.recommended_batch_size or args.workload_config:
-        if not args.recommended_batch_size or not args.workload_config:
-            raise ContractError("--recommended-batch-size and --workload-config must be provided together")
-        print(resolve_recommended_batch_size(args.recommended_batch_size, args.workload_config))
+    if args.recommended_batch_size or args.workload_contract:
+        if not args.recommended_batch_size or not args.workload_contract:
+            raise ContractError("--recommended-batch-size and --workload-contract must be provided together")
+        print(resolve_recommended_batch_size(args.recommended_batch_size, args.workload_contract))
         return EXIT_SUCCESS
     if args.calibration_report or args.approval:
         if not args.calibration_report or not args.approval:
