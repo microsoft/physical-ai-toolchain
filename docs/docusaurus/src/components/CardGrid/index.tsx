@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import React from 'react';
-import type { ReactNode } from 'react';
+import { Children, type ReactNode } from 'react';
 import styles from '../styles.module.css';
 
 export interface CardGridProps {
@@ -17,5 +17,11 @@ export default function CardGrid({ children, columns = 3 }: CardGridProps): Reac
     4: styles.cardGridFour,
   };
 
-  return <div className={columnClass[columns]}>{children}</div>;
+  return (
+    <ul className={columnClass[columns]}>
+      {Children.map(children, (child) => (
+        <li className={styles.cardGridItem}>{child}</li>
+      ))}
+    </ul>
+  );
 }

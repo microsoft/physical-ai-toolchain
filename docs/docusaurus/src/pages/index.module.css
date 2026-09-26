@@ -1,0 +1,16 @@
+/* Copyright (c) Microsoft Corporation.
+   SPDX-License-Identifier: MIT */
+
+.section {
+  padding: 2rem 1.5rem;
+}
+
+.secondarySection {
+  background: var(--ms-learn-section-bg);
+}
+
+@media (max-width: 576px) {
+  .section {
+    padding: 1.5rem 1rem;
+  }
+}
