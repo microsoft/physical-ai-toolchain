@@ -11,7 +11,7 @@ supported-markers = [
 [manifest]
 overrides = [
     { name = "cryptography", specifier = "==50.0.1" },
-    { name = "mlflow-skinny", specifier = "==3.16.0" },
+    { name = "mlflow-skinny", specifier = "==3.16.1" },
 ]
 
 [[package]]
@@ -601,7 +601,7 @@ wheels = [
 
 [[package]]
 name = "mlflow-skinny"
-version = "3.16.0"
+version = "3.16.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -626,9 +626,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c5/8e/5e0b5c9ee0e545b5b70b2060c1f721c4f73a53c3cae9acc050b467d5388e/mlflow_skinny-3.16.0.tar.gz", hash = "sha256:f02330c33f231fc19312bc35c64206e1504a63838fbabdac4b1882d6416bd2b8", size = 3124824, upload-time = "2026-09-04T04:57:45.914Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f6/21/5b8e556d3fc3030affe5d6b3ecf58d9dcc972c644ebf941d77bf8b4a5769/mlflow_skinny-3.16.1.tar.gz", hash = "sha256:7298b47942b1b0e826e02191653b8c203c3bb242fb699f8beec98e928dbec115", size = 3193879, upload-time = "2026-09-16T22:08:20.298Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c0/97/047bfd7004596a6a509030c5520a13f8a31be8c51926c577702026902367/mlflow_skinny-3.16.0-py3-none-any.whl", hash = "sha256:ff4e676eb469d769efc27036f9cb804e0709c125a2645a3902743d917b3771ae", size = 3712165, upload-time = "2026-09-04T04:57:43.483Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/f1/89f8a4386ddde208806b57f6dc8e89138e0b92ae667c0dfc5fc2d8a4d418/mlflow_skinny-3.16.1-py3-none-any.whl", hash = "sha256:41ec1697710b91d001f8951bdc2d00391a277065ed82268c81706238fa2b918e", size = 3797284, upload-time = "2026-09-16T22:08:18.176Z" },
 ]
 
 [[package]]
@@ -970,7 +970,7 @@ requires-dist = [
     { name = "azure-ai-ml", specifier = "==1.35.0" },
     { name = "azure-identity", specifier = "==1.25.3" },
     { name = "azureml-mlflow", specifier = "==1.62.0.post6" },
-    { name = "mlflow-skinny", specifier = "==3.16.0" },
+    { name = "mlflow-skinny", specifier = "==3.16.1" },
     { name = "tbparse", specifier = "==0.0.9" },
 ]
 
