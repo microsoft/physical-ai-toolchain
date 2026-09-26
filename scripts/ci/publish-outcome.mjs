@@ -128,16 +128,19 @@ function parseXmlTests(text, kind) {
   requireValue((kind === 'junit' ? ['testsuites', 'testsuite'] : ['test-run', 'test-results', 'test-suite'])
     .includes(root.name), `Invalid ${kind} report root`);
   const seen = new Set();
-  function walk(node, ancestry) {
+  function walk(node) {
     if (node.name === (kind === 'junit' ? 'testcase' : 'test-case')) {
       const { attrs } = node;
       requireValue(typeof attrs.name === 'string' && attrs.name.length > 0, 'Missing testcase identity');
       requireValue(!node.children.some(child => ['testcase', 'test-case', 'testsuite', 'test-suite'].includes(child.name)),
         'Nested testcase evidence');
       if (kind === 'nunit') {
-        const identity = attrs.id || attrs.fullname || JSON.stringify([...ancestry, attrs.classname ?? '', attrs.name]);
-        requireValue(!seen.has(identity), 'Duplicate testcase identity');
-        seen.add(identity);
+        // Pester parameterized cases can share a display name without an explicit identity.
+        const identity = attrs.id || attrs.fullname;
+        if (identity) {
+          requireValue(!seen.has(identity), 'Duplicate testcase identity');
+          seen.add(identity);
+        }
       }
       let skipped;
       let failed;
@@ -160,9 +163,7 @@ function parseXmlTests(text, kind) {
       return { total: 1, executed: Number(!skipped), skipped: Number(skipped),
         failed: Number(failed || errors), errors: Number(errors) };
     }
-    const path = node.name === 'testsuite' || node.name === 'test-suite' ?
-      [...ancestry, node.attrs.name ?? ''] : ancestry;
-    const counts = node.children.reduce((sum, child) => addCounts(sum, walk(child, path)), testCounts());
+    const counts = node.children.reduce((sum, child) => addCounts(sum, walk(child)), testCounts());
     if (kind === 'junit' && ['testsuite', 'testsuites'].includes(node.name)) {
       checkDeclared(node.attrs, 'tests', counts.total);
       checkDeclared(node.attrs, 'failures', counts.failed - counts.errors);
@@ -199,7 +200,7 @@ function parseXmlTests(text, kind) {
     }
     return counts;
   }
-  return walk(root, []);
+  return walk(root);
 }
 
 function parseJest(data) {

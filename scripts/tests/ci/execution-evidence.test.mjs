@@ -139,6 +139,32 @@ test('NUnit: version 2 excludes ignored and not-run cases', () => {
   assert.equal(parseTestReport(xml, 'nunit').executed, 2);
 });
 
+test('NUnit: repeated parameterized display names preserve every outcome and declared total', t => {
+  const workspace = fixture(t);
+  const reports = [{ path: 'results/linux.xml', kind: 'nunit' }];
+  const nunitContract = structuredClone(contract);
+  nunitContract.execution.checks.jobs.test.reports = reports;
+  const input = options(workspace, { reports });
+  const passed = '<test-case name="suite.check()" executed="True" result="Success"/>';
+  const skipped = '<test-case name="suite.check()" executed="False" result="Ignored"/>';
+  const failed = '<test-case name="suite.check()" executed="True" result="Failure"><failure/></test-case>';
+  const report = (cases, failures = 0) => `<test-results total="4" failures="${failures}" errors="0" skipped="1">` +
+    `<test-suite type="ParameterizedTest" name="suite.check"><results>${cases}</results></test-suite></test-results>`;
+  const xml = report(passed.repeat(3) + skipped);
+  assert.deepEqual(parseTestReport(xml, 'nunit'), { total: 4, executed: 3, skipped: 1, failed: 0, errors: 0 });
+  write(workspace, reports[0].path, xml);
+  const receipt = recordOutcome(input, nunitContract);
+  assert.equal(receipt['work-status'], 'success');
+  assert.equal(outcomeOutputs(receipt)['test-count'], '3');
+  assert.equal(outcomeOutputs(receipt)['skipped-count'], '1');
+  const mixed = report(passed.repeat(2) + failed + skipped, 1);
+  assert.deepEqual(parseTestReport(mixed, 'nunit'), { total: 4, executed: 3, skipped: 1, failed: 1, errors: 0 });
+  write(workspace, reports[0].path, mixed);
+  assert.equal(recordOutcome(input, nunitContract)['work-status'], 'failure');
+  assert.throws(() => parseTestReport(xml.replace('total="4"', 'total="5"'), 'nunit'), /Contradictory/);
+  assert.throws(() => parseTestReport(mixed.replace('failures="1"', 'failures="0"'), 'nunit'), /Contradictory/);
+});
+
 test('NUnit: native Pester report excludes filtered cases without double-counting explicit skips', t => {
   const available = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command',
     "if (-not (Get-Module -ListAvailable Pester | Where-Object { $_.Version.Major -ge 5 })) { exit 2 }"],
@@ -154,6 +180,7 @@ test('NUnit: native Pester report excludes filtered cases without double-countin
     $config.Run.Container = @(New-PesterContainer -ScriptBlock {
       Describe 'Evidence' {
         It 'passes' { 1 | Should -Be 1 }
+        It 'parameterized' -ForEach @('one', 'two', 'three', 'four') { $_ | Should -Not -BeNullOrEmpty }
         It 'skips' -Skip { 1 | Should -Be 2 }
         It 'excluded' -Tag 'Integration' { 1 | Should -Be 2 }
         It 'also excluded' -Tag 'Integration' { 1 | Should -Be 2 }
@@ -172,19 +199,27 @@ test('NUnit: native Pester report excludes filtered cases without double-countin
   const xml = readFileSync(join(workspace, 'results.xml'), 'utf8').replace(/^\uFEFF/, '');
   let counts;
   assert.doesNotThrow(() => { counts = parseTestReport(xml, 'nunit'); }, xml);
-  assert.equal(counts.total, 2);
-  assert.equal(counts.executed, 1);
+  assert.equal(counts.total, 6);
+  assert.equal(counts.executed, 5);
   assert.equal(counts.skipped, 1);
   assert.match(xml, /not-run="2"/);
-  assert.match(xml, /<test-results\b[^>]*total="2"[^>]*skipped="1"/);
-  assert.equal((xml.match(/<test-case\b/g) ?? []).length, 2);
+  assert.match(xml, /<test-results\b[^>]*total="6"[^>]*skipped="1"/);
+  assert.equal((xml.match(/<test-case\b/g) ?? []).length, 6);
+  assert.equal((xml.match(/name="Evidence\.parameterized\(\)"/g) ?? []).length, 4);
   const nunitContract = structuredClone(contract);
   const reports = [{ path: 'results.xml', kind: 'nunit' }];
   nunitContract.execution.checks.jobs.test.reports = reports;
-  const receipt = recordOutcome(options(workspace, { reports }), nunitContract);
+  const input = options(workspace, { reports });
+  const receipt = recordOutcome(input, nunitContract);
   assert.equal(receipt['work-status'], 'success');
-  assert.equal(outcomeOutputs(receipt)['test-count'], '1');
+  assert.equal(outcomeOutputs(receipt)['test-count'], '5');
   assert.equal(outcomeOutputs(receipt)['skipped-count'], '1');
+  publishOutcome(receipt, { workspace, outputDirectory: `.ci-outcome-downloads/${receipt['artifact-name']}` });
+  const { children, artifactRoots } = readReceipts(join(workspace, '.ci-outcome-downloads'));
+  const aggregate = aggregateOutcomes({ ...input, job: 'aggregate', shard: 'aggregate', target: 'aggregate',
+    expectedShards: { test: ['linux'] }, needs: { test: { result: 'success' } }, artifactRoots }, nunitContract, children);
+  assert.equal(aggregate['work-status'], 'success');
+  assert.deepEqual(aggregate.counts, receipt.counts);
 });
 
 test('NUnit: invalid results, inconsistent totals and duplicate identities fail', () => {
@@ -194,6 +229,7 @@ test('NUnit: invalid results, inconsistent totals and duplicate identities fail'
     '<test-run><test-case name="test" executed="False" result="Failed"/></test-run>',
     '<test-run total="2"><test-case name="test" result="Passed"/></test-run>',
     '<test-run><test-case id="same" name="test" result="Passed"/><test-case id="same" name="other" result="Passed"/></test-run>',
+    '<test-run><test-case fullname="suite.test" name="test" result="Passed"/><test-case fullname="suite.test" name="other" result="Passed"/></test-run>',
     '<test-results total="1" failures="1" errors="0"><test-case name="test" result="Success"/></test-results>',
   ]) assert.throws(() => parseTestReport(xml, 'nunit'));
 });
