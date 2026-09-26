@@ -163,6 +163,19 @@ def test_install_ansi_stripping_preserves_existing_tqdm_interval(monkeypatch) ->
     assert stream_module.os.environ["TQDM_MININTERVAL"] == "5"
 
 
+def test_redirected_progress_is_line_oriented_and_rate_limited(monkeypatch) -> None:
+    """Redirected progress remains readable without flooding log consumers."""
+    stdout = CaptureStream()
+    monkeypatch.setattr(stream_module.sys, "stdout", stdout)
+    monkeypatch.delenv("TQDM_MININTERVAL", raising=False)
+
+    stream_module.install_ansi_stripping()
+    stream_module.sys.stdout.write("\x1b[32mstep 1\x1b[0m\rstep 2\r")
+
+    assert stdout.value == "step 1\nstep 2\n"
+    assert stream_module.os.environ["TQDM_MININTERVAL"] == "30"
+
+
 def test_install_ansi_stripping_does_not_double_wrap_stdout(monkeypatch) -> None:
     """install_ansi_stripping keeps an existing AnsiStrippingStream instance."""
     existing = AnsiStrippingStream(CaptureStream())
