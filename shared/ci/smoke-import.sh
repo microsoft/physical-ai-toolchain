@@ -9,6 +9,7 @@
 #               PR's committed lock exactly as production does and imports the
 #               domain on the real interpreter. Catches the interpreter/ABI-at-
 #               import class. Expects the repository mounted at the CWD.
+# cspell:ignore redir
 set -o errexit -o nounset -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -128,12 +129,51 @@ ensure_uv() {
     # Bootstrap a pinned uv inside a container that lacks it (image mode).
     command -v uv &> /dev/null && return 0
     info "Installing uv ${UV_VERSION}"
-    curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/uv.tar.gz
-    echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum -c --quiet -
-    tar -xzf /tmp/uv.tar.gz -C /tmp
-    mkdir -p "${HOME}/.local/bin"
-    install -m 0755 /tmp/uv-x86_64-unknown-linux-gnu/uv "${HOME}/.local/bin/uv"
-    rm -rf /tmp/uv.tar.gz /tmp/uv-x86_64-unknown-linux-gnu
+    local temp_dir archive http_code curl_exit attempt retryable
+    temp_dir="$(mktemp -d)"
+    archive="${temp_dir}/uv.tar.gz"
+    for attempt in 1 2 3; do
+        if http_code="$(curl -LsSf --proto '=https' --proto-redir '=https' \
+            --connect-timeout 10 --max-time 35 -w '%{http_code}' \
+            "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
+            -o "$archive")"; then
+            curl_exit=0
+        else
+            curl_exit=$?
+        fi
+        if (( curl_exit == 0 )) && [[ "$http_code" == "200" ]]; then
+            break
+        fi
+        retryable=false
+        if (( curl_exit == 22 )) && { [[ "$http_code" == "408" || "$http_code" == "429" ]] ||
+            [[ "$http_code" =~ ^5[0-9][0-9]$ ]]; }; then
+            retryable=true
+        elif [[ "$http_code" == "000" ]] && [[ "$curl_exit" =~ ^(5|6|7|28|52|55|56)$ ]]; then
+            retryable=true
+        fi
+        rm -f -- "$archive"
+        if [[ "$retryable" != true || "$attempt" -eq 3 ]]; then
+            rmdir -- "$temp_dir"
+            fatal "uv download failed (curl exit ${curl_exit}, HTTP ${http_code}, attempt ${attempt}/3)"
+        fi
+        sleep 2
+    done
+    if ! echo "${UV_SHA256}  ${archive}" | sha256sum -c --quiet -; then
+        rm -f -- "$archive"
+        rmdir -- "$temp_dir"
+        fatal "uv archive checksum mismatch"
+    fi
+    if ! tar -tzf "$archive" > /dev/null || ! tar -xzf "$archive" -C "$temp_dir" ||
+        [[ ! -f "${temp_dir}/uv-x86_64-unknown-linux-gnu/uv" ]]; then
+        rm -rf -- "$temp_dir"
+        fatal "uv archive is invalid: ${archive}"
+    fi
+    if ! mkdir -p "${HOME}/.local/bin" ||
+        ! install -m 0755 "${temp_dir}/uv-x86_64-unknown-linux-gnu/uv" "${HOME}/.local/bin/uv"; then
+        rm -rf -- "$temp_dir"
+        fatal "uv installation failed"
+    fi
+    rm -rf -- "$temp_dir"
     export PATH="${HOME}/.local/bin:${PATH}"
 }
 
@@ -210,21 +250,23 @@ run_probe() {
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
-cd "$REPO_ROOT"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    cd "$REPO_ROOT"
 
-# Bootstrap uv when absent (in-container image mode); no-op when setup-uv
-# already provided it (CPU mode on the runner).
-ensure_uv
+    # Bootstrap uv when absent (in-container image mode); no-op when setup-uv
+    # already provided it (CPU mode on the runner).
+    ensure_uv
 
-if [[ "$mode" == "cpu" ]]; then
-    smoke_cpu
-else
-    smoke_image
+    if [[ "$mode" == "cpu" ]]; then
+        smoke_cpu
+    else
+        smoke_image
+    fi
+
+    section "Smoke Summary"
+    print_kv "Domain" "$domain"
+    print_kv "Mode" "$mode"
+    print_kv "Project" "$project"
+    print_kv "Python" "$py_version"
+    info "Import smoke passed"
 fi
-
-section "Smoke Summary"
-print_kv "Domain" "$domain"
-print_kv "Mode" "$mode"
-print_kv "Project" "$project"
-print_kv "Python" "$py_version"
-info "Import smoke passed"

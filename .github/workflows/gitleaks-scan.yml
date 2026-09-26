@@ -23,12 +23,19 @@ jobs:
     permissions:
       contents: read
       security-events: write
+    env:
+      NODE_DISABLE_COMPILE_CACHE: '1'
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.14.1'
 
       - name: Download and verify gitleaks
         shell: bash
@@ -53,48 +60,21 @@ jobs:
           echo "Gitleaks version:"
           ./gitleaks version
 
+      - name: Test Gitleaks scan contracts
+        env:
+          GITLEAKS_BIN: ${{ github.workspace }}/gitleaks
+        run: node --test scripts/tests/security/gitleaks-scan.test.mjs
+
       - name: Run gitleaks scan
         id: gitleaks
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mkdir -p logs
-
-          SCAN_ARGS=(
-            "git"
-            "--report-format" "sarif"
-            "--report-path" "logs/gitleaks-results.sarif"
-            "--redact"
-            "--log-level" "info"
-          )
-
-          if [ -f ".gitleaksignore" ]; then
-            echo "Found .gitleaksignore — known secrets will be suppressed."
-          fi
-
-          echo "Running gitleaks scan..."
-          EXIT_CODE=0
-          ./gitleaks "${SCAN_ARGS[@]}" || EXIT_CODE=$?
-
-          if [ "$EXIT_CODE" -eq 0 ]; then
-            echo "No secrets detected."
-            echo "leaks-found=false" >> "$GITHUB_OUTPUT"
-          elif [ "$EXIT_CODE" -eq 1 ]; then
-            echo "::warning::Gitleaks detected secrets in the repository."
-            echo "leaks-found=true" >> "$GITHUB_OUTPUT"
-            if [ "${{ inputs.soft-fail }}" != "true" ]; then
-              echo "::error::Secret scanning failed. Review detected secrets in logs/gitleaks-results.sarif"
-              exit 1
-            fi
-          else
-            echo "::error::Gitleaks encountered an unexpected error (exit code: $EXIT_CODE)"
-            exit "$EXIT_CODE"
-          fi
+        env:
+          GITLEAKS_BIN: ${{ github.workspace }}/gitleaks
+          SOFT_FAIL: ${{ inputs.soft-fail == true }}
+        run: node scripts/security/gitleaks-scan.mjs scan
 
       - name: Upload SARIF to Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           sarif_file: logs/gitleaks-results.sarif
           category: gitleaks
@@ -110,20 +90,9 @@ jobs:
 
       - name: Add job summary
         if: always()
-        shell: bash
-        run: |
-          LEAKS_FOUND="${{ steps.gitleaks.outputs.leaks-found }}"
-          if [ "$LEAKS_FOUND" = "true" ]; then
-            STATUS="⚠️ Secrets Detected"
-          else
-            STATUS="✅ No Secrets Found"
-          fi
-
-          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
-          ## Gitleaks Secret Scan Results
-
-          | Metric | Value |
-          |--------|-------|
-          | Status | $STATUS |
-
-          EOF
+        env:
+          SCAN_STATUS: ${{ steps.gitleaks.outputs.scan-status }}
+          SCAN_REVISION: ${{ steps.gitleaks.outputs.scan-revision }}
+          SCAN_EXIT_CODE: ${{ steps.gitleaks.outputs.scan-exit-code }}
+          SCAN_OUTCOME: ${{ steps.gitleaks.outcome }}
+        run: node scripts/security/gitleaks-scan.mjs summary
