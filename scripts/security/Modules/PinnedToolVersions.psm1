@@ -57,7 +57,7 @@ function Get-PinCandidateFiles {
         )
     )
 
-    $gitOutput = @(git -c core.quotePath=false -C $RepoRoot ls-files -- '*.sh' '*.ps1' '*.json' '*.jsonc' 2>&1)
+    $gitOutput = @(git -c core.quotePath=false -C $RepoRoot ls-files -- '*.sh' '*.ps1' '*.json' '*.jsonc' '*.yml' '*.yaml' 'Dockerfile*' 2>&1)
     $gitExitCode = $LASTEXITCODE
     if ($gitExitCode -ne 0) {
         throw "Could not enumerate tracked source files (git exit code $gitExitCode): $($gitOutput -join "`n")"
@@ -531,6 +531,73 @@ function New-PinShellAssignmentPatterns {
     }
 }
 
+function Get-PythonVersionAssignments {
+    <#
+    .SYNOPSIS
+        Extracts literal Python package version pins from executable command segments.
+    .OUTPUTS
+        PSCustomObject records with File and Version properties.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Content,
+
+        [Parameter(Mandatory)]
+        [string]$SemanticVersionPattern,
+
+        [Parameter(Mandatory)]
+        [string]$PythonPackage,
+
+        [Parameter(Mandatory)]
+        [string]$File
+    )
+
+    $PythonCommandPatterns = '\b' + [regex]::Escape($PythonPackage) + '==' + $SemanticVersionPattern + '\b'
+
+    $extension = [System.IO.Path]::GetExtension($File)
+
+    $segments = @(Get-ShellCommandSegments -Content $Content)
+
+    $assignments = foreach ($segment in $segments) {
+        # Check if it is a pip install command.
+        if ($segment -notmatch '^\s*pip\s+install\b') {
+            continue
+        }
+
+        # Check if the configured Python package is present.
+        if ($segment -notmatch ('\b' + [regex]::Escape($PythonPackage) + '\b')) {
+            continue
+        }
+
+        try {
+            # Check for an exact package==version pin.
+            $match = [regex]::Match(
+                $segment,
+                $PythonCommandPatterns,
+                [System.Text.RegularExpressions.RegexOptions]::None,
+                $script:PinRegexTimeout
+            )
+        }
+        catch [System.Text.RegularExpressions.RegexMatchTimeoutException] {
+            throw "Timed out parsing '$PythonPackage' package pin in '$File'"
+        }
+
+        if ($match.Success) {
+            [pscustomobject][ordered]@{
+                File    = $File
+                Version = $match.Groups['Version'].Value
+            }
+            continue
+        }
+
+        throw "Found '$PythonPackage' in '$File' but the package is not pinned to a supported literal version"
+    }
+
+    @($assignments)
+}
+
 function Get-PinShellVersionAssignments {
     <#
     .SYNOPSIS
@@ -675,6 +742,8 @@ function Get-PinnedToolVersionAssignments {
         Repository root used to resolve and contain candidate paths.
     .PARAMETER PowerShellVariable
         Optional PowerShell variable name used in assignment statements.
+    .PARAMETER PythonPackage
+        Optional Python package name used in pip install commands.
     .OUTPUTS
         PSCustomObject records with File and Version properties.
     #>
@@ -691,7 +760,10 @@ function Get-PinnedToolVersionAssignments {
         [string]$RepoRoot,
 
         [Parameter()]
-        [string]$PowerShellVariable
+        [string]$PowerShellVariable,
+
+        [Parameter()]
+        [string]$PythonPackage
     )
 
     $semanticVersion = '(?<Version>[0-9]+(?:\.[0-9]+)+(?:[-+][0-9A-Za-z.-]+)?)'
@@ -714,6 +786,15 @@ function Get-PinnedToolVersionAssignments {
         }
 
         $extension = [System.IO.Path]::GetExtension($canonicalPath)
+
+        if ($PythonPackage -and $extension -in @('.sh', '.yml', '.yaml', '.json', '.jsonc')) {
+            Get-PythonVersionAssignments `
+                -Content $content `
+                -File $file `
+                -SemanticVersionPattern $semanticVersion `
+                -PythonPackage $PythonPackage
+        }
+
         if ($extension -eq '.ps1') {
             if (
                 $PowerShellVariable -and
@@ -736,16 +817,15 @@ function Get-PinnedToolVersionAssignments {
             }
             continue
         }
-        if ($content -notmatch ('\b' + $shellVariablePattern + '\b')) {
-            continue
-        }
 
         if ($extension -eq '.sh') {
-            Get-PinShellVersionAssignments `
-                -Content $content `
-                -ShellVariable $ShellVariable `
-                -ShellPatterns $shellPatterns `
-                -File $file
+            if ($content -match ('\b' + $shellVariablePattern + '\b')) {
+                Get-PinShellVersionAssignments `
+                    -Content $content `
+                    -ShellVariable $ShellVariable `
+                    -ShellPatterns $shellPatterns `
+                    -File $file
+            }
             continue
         }
 
@@ -793,5 +873,6 @@ Export-ModuleMember -Function @(
     'Get-PinCandidateFiles',
     'Get-PinnedToolVersionAssignments',
     'Get-PowerShellAssignments',
+    'Get-PythonVersionAssignments',
     'Get-PinnedToolFreshness'
 )
