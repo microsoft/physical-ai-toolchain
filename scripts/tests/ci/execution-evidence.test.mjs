@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { parseDocument } from 'yaml';
 import {
   aggregateOutcomes, inspectReport, outcomeOutputs, parseTestReport,
   probeTools, publishOutcome, readReceipts, recordOutcome,
@@ -915,6 +916,87 @@ function runCli(workspace, extra = {}) {
     encoding: 'utf8', timeout: 30_000 });
 }
 
+function resolveDownloadPath(workspace, expectedShards, extra = {}) {
+  const action = parseDocument(readFileSync(join(root, '.github/actions/ci-outcome/action.yml'), 'utf8')).toJS();
+  const step = action.runs.steps.find(item => item.id === 'download-path');
+  assert.ok(step, 'Missing expected-inventory download path resolver');
+  const script = /^node --input-type=module <<'NODE'\r?\n([\s\S]*?)\r?\nNODE\s*$/.exec(step.run);
+  assert.ok(script, 'Download resolver must execute the tested Node program');
+  const output = join(workspace, 'download-output');
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script[1]], {
+    cwd: root, encoding: 'utf8', timeout: 30_000,
+    env: { ...process.env, GITHUB_JOB: 'aggregate', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_SHA: sha, GITHUB_OUTPUT: output, INPUT_WORKFLOW: 'checks',
+      INPUT_EXPECTED_SHARDS: JSON.stringify(expectedShards), ...extra },
+  });
+  const path = existsSync(output) ? /^path=(.+)$/m.exec(readFileSync(output, 'utf8'))?.[1] : undefined;
+  return { result, path };
+}
+
+test('composite download: destination follows the complete expected shard inventory', t => {
+  for (const [expected, path] of [
+    [{ test: ['linux'] }, '.ci-outcome-downloads/ci-outcome-checks-test-linux-123-1'],
+    [{ test: [], other: ['linux'] }, '.ci-outcome-downloads/ci-outcome-checks-other-linux-123-1'],
+    [{ test: ['linux', 'windows'] }, '.ci-outcome-downloads'],
+    [{ test: ['linux'], other: ['linux'] }, '.ci-outcome-downloads'],
+    [{ test: [] }, '.ci-outcome-downloads'],
+  ]) {
+    const resolved = resolveDownloadPath(fixture(t), expected);
+    assert.equal(resolved.result.status, 0, resolved.result.stderr);
+    assert.equal(resolved.path, path);
+  }
+});
+
+test('composite download: unsafe identity and malformed inventory fail before exposing a path', t => {
+  for (const extra of [
+    { INPUT_WORKFLOW: '../checks' }, { GITHUB_RUN_ID: '0' }, { GITHUB_RUN_ATTEMPT: '1\npath=other' },
+    { GITHUB_SHA: 'main' }, { INPUT_EXPECTED_SHARDS: '{bad' }, { INPUT_EXPECTED_SHARDS: 'null' },
+    { INPUT_EXPECTED_SHARDS: '[]' }, { INPUT_EXPECTED_SHARDS: '{"../job":["linux"]}' },
+    { INPUT_EXPECTED_SHARDS: '{"test":["../linux"]}' }, { INPUT_EXPECTED_SHARDS: '{"test":"linux"}' },
+    { INPUT_EXPECTED_SHARDS: '{"test":["linux","linux"]}' },
+  ]) {
+    const resolved = resolveDownloadPath(fixture(t), { test: ['linux'] }, extra);
+    assert.notEqual(resolved.result.status, 0);
+    assert.equal(resolved.path, undefined);
+  }
+});
+
+test('composite download: singleton extraction aggregates without weakening artifact validation', t => {
+  for (const { expected, actual, success, stale = false } of [
+    { expected: ['linux'], actual: ['linux'], success: true },
+    { expected: ['linux', 'windows'], actual: ['linux', 'windows'], success: true },
+    { expected: [], actual: [], success: true },
+    { expected: ['linux'], actual: [], success: false },
+    { expected: ['linux', 'windows'], actual: ['linux'], success: false },
+    { expected: ['linux'], actual: ['linux', 'windows'], success: false },
+    { expected: ['linux'], actual: ['windows'], success: false },
+    { expected: [], actual: ['linux'], success: false },
+    { expected: ['linux'], actual: ['linux'], success: false, stale: true },
+  ]) {
+    const workspace = fixture(t);
+    const expectedShards = { test: expected };
+    const resolved = resolveDownloadPath(workspace, expectedShards);
+    assert.equal(resolved.result.status, 0, resolved.result.stderr);
+    for (const shard of actual) {
+      const path = `results/${shard}.xml`;
+      write(workspace, path, junit);
+      const child = recordOutcome(options(workspace, { shard, target: shard, runAttempt: stale ? '2' : '1',
+        reports: [{ path, kind: 'junit' }] }), contract);
+      assert.equal(child['work-status'], 'success');
+      // The pinned download action flattens one match, even with merge-multiple=false.
+      const outputDirectory = actual.length === 1 ? resolved.path : `${resolved.path}/${child['artifact-name']}`;
+      publishOutcome(child, { workspace, outputDirectory });
+    }
+    const result = runCli(workspace, { GITHUB_JOB: 'aggregate', INPUT_SHARD: 'aggregate',
+      INPUT_EXPECTED_SHARDS: JSON.stringify(expectedShards), INPUT_SELECTED: String(expected.length > 0),
+      INPUT_NEEDS_JSON: JSON.stringify({ test: { result: expected.length ? 'success' : 'skipped' } }) });
+    assert.equal(result.status, success ? 0 : 1, JSON.stringify({ expected, actual, stale }) + result.stderr);
+    if (success) {
+      assert.match(readFileSync(join(workspace, 'outputs'), 'utf8'), new RegExp(`^test-count=${actual.length}$`, 'm'));
+    }
+  }
+});
+
 test('CLI subprocess: success publishes all evidence outputs and named raw reports', t => {
   const workspace = fixture(t);
   write(workspace, 'results/linux.xml', junit);
@@ -1108,6 +1190,18 @@ test('actual process: persistent failure is not automatically retried or rewritt
 
 test('composite: receipt always publishes before explicit failure and exposes artifact transport outputs', () => {
   const action = readFileSync(join(root, '.github', 'actions', 'ci-outcome', 'action.yml'), 'utf8');
+  const steps = parseDocument(action).toJS().runs.steps;
+  const resolver = steps.find(step => step.id === 'download-path');
+  const download = steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
+  assert.ok(steps.indexOf(resolver) < steps.indexOf(download));
+  assert.ok(steps.indexOf(download) < steps.findIndex(step => step.id === 'receipt'));
+  assert.equal(resolver.if, "${{ always() && inputs.expected-shards != '' }}");
+  assert.equal(resolver.env.INPUT_WORKFLOW, '${{ inputs.workflow }}');
+  assert.equal(resolver.env.INPUT_EXPECTED_SHARDS, '${{ inputs.expected-shards }}');
+  assert.equal(resolver['working-directory'], '${{ github.workspace }}');
+  assert.equal(download.with.path, '${{ steps.download-path.outputs.path }}');
+  assert.equal(download.with['merge-multiple'], false);
+  assert.equal(download.if, "${{ always() && inputs.expected-shards != '' && steps.download-path.outcome == 'success' }}");
   assert.ok(action.indexOf('id: receipt') < action.indexOf('id: upload'));
   assert.ok(action.indexOf('id: upload') < action.indexOf('name: Enforce'));
   assert.match(action, /continue-on-error: true/);

@@ -773,6 +773,16 @@ export function publishOutcome(receipt, options = {}) {
   return outputs;
 }
 
+export function receiptDownloadPath(options) {
+  const context = identity(options);
+  requireValue(object(options.expectedShards), 'Missing expected shard mapping');
+  const names = ids(Object.keys(options.expectedShards), 'expected jobs').flatMap(job =>
+    ids(options.expectedShards[job], 'expected shards').map(shard =>
+      `ci-outcome-${context.workflow}-${job}-${shard}-${context['run-id']}-${context['run-attempt']}`));
+  // Single downloads extract directly into the destination rather than a named subdirectory.
+  return names.length === 1 ? `.ci-outcome-downloads/${names[0]}` : '.ci-outcome-downloads';
+}
+
 export function readReceipts(directory) {
   const children = [];
   const artifactRoots = new Map();

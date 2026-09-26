@@ -74,12 +74,30 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Download shard execution evidence
+    - name: Resolve shard download directory
+      id: download-path
       if: ${{ always() && inputs.expected-shards != '' }}
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        INPUT_WORKFLOW: ${{ inputs.workflow }}
+        INPUT_EXPECTED_SHARDS: ${{ inputs.expected-shards }}
+      run: |
+        node --input-type=module <<'NODE'
+        import { appendFileSync } from 'node:fs';
+        import { receiptDownloadPath } from './scripts/ci/publish-outcome.mjs';
+        const path = receiptDownloadPath({ workflow: process.env.INPUT_WORKFLOW, job: process.env.GITHUB_JOB,
+          runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, sha: process.env.GITHUB_SHA,
+          expectedShards: JSON.parse(process.env.INPUT_EXPECTED_SHARDS) });
+        appendFileSync(process.env.GITHUB_OUTPUT, `path=${path}\n`);
+        NODE
+
+    - name: Download shard execution evidence
+      if: ${{ always() && inputs.expected-shards != '' && steps.download-path.outcome == 'success' }}
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         pattern: ci-outcome-${{ inputs.workflow }}-*-${{ github.run_id }}-${{ github.run_attempt }}
-        path: .ci-outcome-downloads
+        path: ${{ steps.download-path.outputs.path }}
         merge-multiple: false
 
     - name: Measure actual execution and required reports
