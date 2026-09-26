@@ -4,6 +4,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 
 class TestHealthCheck:
     def test_health_check_returns_200(self, client):
@@ -22,6 +24,8 @@ class TestHealthCheck:
 
 
 class TestHealthCheckAzureBranch:
+    pytestmark = pytest.mark.asyncio
+
     """The azure-mode health branch reports based on blob_provider presence."""
 
     async def test_azure_with_blob_provider_returns_healthy(self, monkeypatch):

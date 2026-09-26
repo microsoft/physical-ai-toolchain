@@ -1,12 +1,11 @@
-"""Pytest configuration and shared fixtures for integration tests."""
+"""Shared pytest configuration and fixtures for backend tests."""
 
 from __future__ import annotations
 
-import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -32,18 +31,6 @@ def make_asgi_request(
         "server": ("testserver", 80),
     }
     return Request(scope)
-
-
-# Load .env from the backend directory so TEST_DATASET_ID and other
-# settings can be configured without hardcoding.
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
-
-TEST_DATASET_PATH = os.environ.get(
-    "TEST_DATASET_PATH",
-    os.path.join(os.path.dirname(__file__), "..", "..", "datasets"),
-)
-
-TEST_DATASET_ID = os.environ.get("TEST_DATASET_ID", "lerobot")
 
 
 def _write_accessibility_episode(path: Path, *, length: int, phase: float) -> None:
@@ -87,48 +74,47 @@ def accessibility_dataset_path(tmp_path_factory: pytest.TempPathFactory) -> Path
 
 
 @pytest.fixture(autouse=True, scope="session")
-def disable_auth_for_tests():
+def disable_auth_for_tests() -> Iterator[None]:
     """Disable authentication and CSRF checks for all tests."""
-    os.environ["DATAVIEWER_AUTH_DISABLED"] = "true"
-    yield
-    os.environ.pop("DATAVIEWER_AUTH_DISABLED", None)
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "true")
+        yield
 
 
 @pytest.fixture(scope="session")
-def test_dataset_path():
-    """Absolute path to the directory containing the test LeRobot dataset."""
-    if not os.path.isdir(TEST_DATASET_PATH):
-        pytest.skip(f"Dataset base path not found: {TEST_DATASET_PATH}")
-    if not os.path.isdir(os.path.join(TEST_DATASET_PATH, TEST_DATASET_ID)):
-        pytest.skip(f"LeRobot dataset not found at {TEST_DATASET_PATH}/{TEST_DATASET_ID}")
-    return TEST_DATASET_PATH
+def test_dataset_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Return an isolated dataset root for tests that need session scope."""
+    return tmp_path_factory.mktemp("datasets")
 
 
 @pytest.fixture(scope="session")
-def test_dataset_id():
-    return TEST_DATASET_ID
+def test_dataset_id() -> str:
+    return "test-dataset"
 
 
-@pytest.fixture
-def client(test_dataset_path):
-    """Create a FastAPI test client with DATA_DIR pointing to the real dataset."""
-    os.environ["DATA_DIR"] = test_dataset_path
-
+def _reset_singletons() -> None:
     import src.api.config as config_mod
+    import src.api.routers.labels as labels_mod
     import src.api.services.annotation_service as ann_mod
     import src.api.services.dataset_service.service as ds_mod
 
-    # Reset all singletons so each test gets a fresh service instance that
-    # re-reads the current DATA_DIR from the environment.
     config_mod._app_config = None
     ds_mod._dataset_service = None
     ann_mod._annotation_service = None
+    labels_mod._label_storage = None
+
+
+@pytest.fixture
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """Create an isolated FastAPI client backed by a temporary data directory."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    _reset_singletons()
 
     from src.api.main import app
 
     with TestClient(app) as c:
         yield c
 
-    config_mod._app_config = None
-    ds_mod._dataset_service = None
-    ann_mod._annotation_service = None
+    app.dependency_overrides.clear()
+    _reset_singletons()

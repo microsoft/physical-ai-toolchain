@@ -85,23 +85,6 @@ def test_build_user_prompt_injects_scene_context(mod: ModuleType) -> None:
     assert "Two bins: one in front, one to the right." in prompt
 
 
-def test_row_from_label_coerces_and_normalizes(mod: ModuleType) -> None:
-    row = mod._row_from_label(
-        {
-            "pick_from": "FRONT",
-            "object": "black cloth",
-            "grasp_success": "true",
-            "place_success": False,
-            "movement_quality": "Smooth.",
-        }
-    )
-    assert row["pick_from"] == "front"
-    assert row["grasp_success"] is True
-    assert row["place_success"] is False
-    assert row["notes"] == ""
-    assert row["error"] is None
-
-
 def test_summarize_counts_outcomes(mod: ModuleType) -> None:
     rows = [
         {"grasp_success": True, "place_success": True, "error": None},
@@ -138,19 +121,19 @@ def test_resolve_views_rejects_unknown(mod: ModuleType, tmp_path: Path) -> None:
         mod.resolve_views(tmp_path, ["obs.missing"])
 
 
-def test_label_dataset_writes_success_error_and_analysis_records(
+def test_label_dataset_normalizes_rows_and_preserves_nested_dataset_id(
     mod: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    dataset_root = tmp_path / "dataset"
+    dataset_root = tmp_path / "owner" / "dataset"
     output_dir = tmp_path / "output"
     _write_min_dataset(dataset_root, ["obs.front"])
     labels_path = dataset_root / "meta" / "episode_labels.json"
     labels_path.write_text(
         json.dumps(
             {
-                "dataset_id": "dataset",
+                "dataset_id": "owner--dataset",
                 "available_labels": ["SUCCESS"],
                 "episodes": {"9": ["SUCCESS"]},
                 "analysis": {
@@ -185,12 +168,11 @@ def test_label_dataset_writes_success_error_and_analysis_records(
                 raise RuntimeError("inference failed")
             return json.dumps(
                 {
-                    "pick_from": "front",
+                    "pick_from": "FRONT",
                     "object": "red cube",
-                    "grasp_success": True,
+                    "grasp_success": "true",
                     "place_success": False,
                     "movement_quality": "Smooth approach.",
-                    "notes": "Placement missed.",
                 }
             )
 
@@ -210,6 +192,7 @@ def test_label_dataset_writes_success_error_and_analysis_records(
         dtype="float32",
         limit=None,
         write_analysis=True,
+        dataset_id=None,
     )
 
     rows = [json.loads(line) for line in (output_dir / "labels.jsonl").read_text().splitlines()]
@@ -218,10 +201,24 @@ def test_label_dataset_writes_success_error_and_analysis_records(
     labels = json.loads(labels_path.read_text())
 
     assert summary == {"labeled": 1, "total": 2, "errors": 1, "grasp_success": 1, "place_success": 0}
-    assert rows[0]["object"] == "red cube"
+    assert rows[0] == {
+        "episode_index": 0,
+        "episode_id": "episode_000000",
+        "instruction": "Pick the cube",
+        "duration_s": 1.25,
+        "source": "fake/model",
+        "pick_from": "front",
+        "object": "red cube",
+        "grasp_success": True,
+        "place_success": False,
+        "movement_quality": "Smooth approach.",
+        "notes": "",
+        "error": None,
+    }
     assert rows[1]["error"] == "RuntimeError: inference failed"
     assert len(csv_rows) == 2
     assert labels["episodes"] == {"9": ["SUCCESS"]}
+    assert labels["dataset_id"] == "owner--dataset"
     assert labels["analysis"]["9"] == {"object": "existing"}
     assert labels["analysis"]["0"]["motion_score"] == 4
     assert labels["analysis"]["0"]["motion_flags"] == ["hesitant"]
@@ -231,7 +228,7 @@ def test_label_dataset_writes_success_error_and_analysis_records(
         "grasp_success": True,
         "place_success": False,
         "movement_quality": "Smooth approach.",
-        "notes": "Placement missed.",
+        "notes": "",
         "instruction": "Pick the cube",
         "duration_s": 1.25,
         "source": "fake/model",
@@ -239,65 +236,6 @@ def test_label_dataset_writes_success_error_and_analysis_records(
         "motion_flags": ["hesitant"],
     }
     assert "1" not in labels["analysis"]
-
-
-def test_write_analysis_records_uses_explicit_nested_dataset_id(mod: ModuleType, tmp_path: Path) -> None:
-    dataset_root = tmp_path / "owner" / "dataset"
-    (dataset_root / "meta").mkdir(parents=True)
-    rows = [
-        {
-            "episode_index": 0,
-            "instruction": "Pick the cube",
-            "duration_s": 1.0,
-            "pick_from": "front",
-            "object": "cube",
-            "grasp_success": True,
-            "place_success": True,
-            "movement_quality": "Smooth.",
-            "notes": "",
-            "error": None,
-        }
-    ]
-
-    mod._write_analysis_records(dataset_root, rows, "fake/model", "owner--dataset")
-
-    labels = json.loads((dataset_root / "meta" / "episode_labels.json").read_text())
-    assert labels["dataset_id"] == "owner--dataset"
-
-
-def test_write_analysis_records_preserves_existing_nested_dataset_id(mod: ModuleType, tmp_path: Path) -> None:
-    dataset_root = tmp_path / "owner" / "dataset"
-    labels_path = dataset_root / "meta" / "episode_labels.json"
-    labels_path.parent.mkdir(parents=True)
-    labels_path.write_text(
-        json.dumps(
-            {
-                "dataset_id": "owner--dataset",
-                "available_labels": ["SUCCESS"],
-                "episodes": {},
-                "analysis": {},
-            }
-        )
-    )
-    rows = [
-        {
-            "episode_index": 0,
-            "instruction": "Pick the cube",
-            "duration_s": 1.0,
-            "pick_from": "front",
-            "object": "cube",
-            "grasp_success": True,
-            "place_success": True,
-            "movement_quality": "Smooth.",
-            "notes": "",
-            "error": None,
-        }
-    ]
-
-    mod._write_analysis_records(dataset_root, rows, "fake/model")
-
-    labels = json.loads(labels_path.read_text())
-    assert labels["dataset_id"] == "owner--dataset"
 
 
 def test_label_dataset_resumes_completed_episode_without_duplication(
