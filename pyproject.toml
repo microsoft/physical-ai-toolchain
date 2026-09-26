@@ -16,7 +16,7 @@ packages = ["training/rl"]
 dev = [
     "hypothesis==6.168.0",
     "numpy==2.5.3",
-    "ruff==0.16.7",
+    "ruff==0.16.8",
     "pyarrow==25.0.1",
     "imageio==2.37.4",
     "imageio-ffmpeg==0.6.0",
