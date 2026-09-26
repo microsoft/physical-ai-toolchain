@@ -39,6 +39,51 @@ const weeklyPath = '.github/workflows/weekly-validation.yml';
 const summaryId = 'pr-validation-summary';
 const unknownSha = '0'.repeat(40);
 
+test('gitleaks: tested-revision helper and native regressions own scan and summary policy', () => {
+  const workflow = graph['.github/workflows/gitleaks-scan.yml'];
+  assert.deepEqual(Object.keys(workflow.on).sort(), ['pull_request', 'push', 'workflow_call']);
+  assert.deepEqual(workflow.on.push.branches, ['main']);
+  assert.equal(workflow.on.workflow_call.inputs['soft-fail'].default, false);
+  const job = workflow.jobs.scan;
+  assert.equal(job.name, 'Gitleaks Secret Scan');
+  assert.deepEqual(job.permissions, { contents: 'read', 'security-events': 'write' });
+  const steps = job.steps;
+  const checkout = steps.find(step => step.uses?.startsWith('actions/checkout@'));
+  assert.equal(checkout.with['fetch-depth'], 0);
+  assert.equal(checkout.with['persist-credentials'], false);
+  const download = steps.findIndex(step => step.name === 'Download and verify gitleaks');
+  const nativeTests = steps.findIndex(step => step.name === 'Test Gitleaks scan contracts');
+  const scanIndex = steps.findIndex(step => step.id === 'gitleaks');
+  assert.ok(nativeTests > download && nativeTests < scanIndex);
+  assert.equal(steps[nativeTests].run, 'node --test scripts/tests/security/gitleaks-scan.test.mjs');
+  assert.equal(steps[nativeTests].env.GITLEAKS_BIN, '${{ github.workspace }}/gitleaks');
+  assert.equal(steps[nativeTests].if, undefined);
+  assert.equal(steps[nativeTests]['continue-on-error'], undefined);
+  assert.equal(steps[scanIndex].run, 'node scripts/security/gitleaks-scan.mjs scan');
+  assert.equal(steps[scanIndex].env.GITLEAKS_BIN, '${{ github.workspace }}/gitleaks');
+  assert.equal(steps[scanIndex].env.SOFT_FAIL, '${{ inputs.soft-fail == true }}');
+  assert.equal(steps[scanIndex]['continue-on-error'], undefined);
+  const summary = steps.find(step => step.name === 'Add job summary');
+  assert.equal(summary.if, 'always()');
+  assert.equal(summary.run, 'node scripts/security/gitleaks-scan.mjs summary');
+  assert.deepEqual(summary.env, {
+    SCAN_STATUS: '${{ steps.gitleaks.outputs.scan-status }}',
+    SCAN_REVISION: '${{ steps.gitleaks.outputs.scan-revision }}',
+    SCAN_EXIT_CODE: '${{ steps.gitleaks.outputs.scan-exit-code }}',
+    SCAN_OUTCOME: '${{ steps.gitleaks.outcome }}',
+  });
+  const setup = steps.findIndex(step => step.uses?.startsWith('actions/setup-node@'));
+  assert.ok(setup >= 0 && setup < nativeTests);
+  assert.equal(steps[setup].with['node-version'], '24.14.1');
+  const report = steps.find(step => step.name === 'Upload scan results');
+  assert.equal(report.if, 'always()');
+  assert.equal(report.with.name, 'gitleaks-results');
+  assert.equal(report.with.path, 'logs/gitleaks-results.sarif');
+  assert.equal(report.with['retention-days'], 90);
+  assert.ok(steps[download].run.includes('GITLEAKS_VERSION="8.30.0"'));
+  assert.ok(steps[download].run.includes('sha256sum -c -'));
+});
+
 function expectedSelection(selected, strings = false) {
   return Object.fromEntries(allSelectors.map(key => [key, strings ? String(selected.includes(key)) : selected.includes(key)]));
 }
