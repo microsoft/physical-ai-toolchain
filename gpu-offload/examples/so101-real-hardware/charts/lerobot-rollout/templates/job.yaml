@@ -52,7 +52,24 @@ spec:
         - name: rollout
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- if .Values.validation.enabled }}
+          {{- if .Values.benchmark.enabled }}
+          command:
+            - python
+            - /opt/xavier/lerobot/diagnostics/synthetic_inference_benchmark.py
+          args:
+            - --policy
+            - {{ .Values.rollout.policyPath | quote }}
+            - --calls
+            - {{ .Values.benchmark.calls | quote }}
+            - --warmup-calls
+            - {{ .Values.benchmark.warmupCalls | quote }}
+            - --seed
+            - {{ .Values.benchmark.seed | quote }}
+            - --task
+            - {{ .Values.rollout.task | quote }}
+            - --robot-type
+            - {{ .Values.rollout.robotType | quote }}
+          {{- else if .Values.validation.enabled }}
           command:
             - python
             - -c
@@ -100,8 +117,11 @@ spec:
             {{- if .Values.offload.enabled }}
             - --offload
             {{- end }}
-            {{- range .Values.rollout.extraArgs }}
+            {{- with .Values.rollout.extraArgs }}
+            - --
+            {{- range . }}
             - {{ . | quote }}
+            {{- end }}
             {{- end }}
           {{- end }}
           envFrom:
@@ -128,7 +148,7 @@ spec:
             - name: policy
               mountPath: {{ .Values.rollout.policyPath }}
               readOnly: true
-            {{- if not .Values.validation.enabled }}
+            {{- if and (not .Values.validation.enabled) (not .Values.benchmark.enabled) }}
             - name: calibration
               mountPath: {{ .Values.rollout.calibrationMountPath }}
             {{- range .Values.devices }}
@@ -138,10 +158,16 @@ spec:
             {{- end }}
       volumes:
         - name: policy
+          {{- if .Values.policyVolume.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.policyVolume.existingClaim }}
+            readOnly: true
+          {{- else }}
           hostPath:
             path: {{ .Values.hostPaths.policy }}
             type: Directory
-        {{- if not .Values.validation.enabled }}
+          {{- end }}
+        {{- if and (not .Values.validation.enabled) (not .Values.benchmark.enabled) }}
         - name: calibration
           hostPath:
             path: {{ .Values.hostPaths.calibration }}

@@ -41,7 +41,8 @@ jobs:
           persist-credentials: false
 
       - name: Dependency Review
-        id: review
+        id: dependency-review
+        continue-on-error: true
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: moderate
@@ -54,7 +55,6 @@ jobs:
           # GHSA-46r5-x6jq-v8g6: mlflow — AJAX artifact download authorization bypass; no upstream fix; server-side only, repo uses client only (CVE-2026-33866)
           # GHSA-fh64-r2vc-xvhr: mlflow — stored XSS via YAML MLmodel artifacts; fixed in 3.11.1; blocked by azureml-mlflow<=3.9.0 ceiling; server-side only (CVE-2026-33865)
           # GHSA-h35f-9h28-mq5c: setuptools — macOS Unicode normalization bypass when publishing sdists; runtime lock installs wheels on Linux and never publishes packages
-          # GHSA-xrqw-3rrv-vx5w: transformers — save_pretrained() path traversal via attacker-controlled chat_template keys; fixed in 5.10.0; lerobot==0.6.1 constrains transformers<5.6.0 so no fix is installable yet; the SO-101 example never calls save_pretrained() on a Hub-downloaded tokenizer/processor, only load()s its own pinned checkpoint (CVE-2026-9856)
           allow-ghsas: >-
             GHSA-wf7f-8fxf-xfxc,
             GHSA-pgqp-8h46-6x4j,
@@ -63,8 +63,33 @@ jobs:
             GHSA-7qhf-v65m-g5f3,
             GHSA-46r5-x6jq-v8g6,
             GHSA-fh64-r2vc-xvhr,
-            GHSA-h35f-9h28-mq5c,
-            GHSA-xrqw-3rrv-vx5w
+            GHSA-h35f-9h28-mq5c
+
+      # GHSA-xrqw-3rrv-vx5w affects transformers<5.10.0, while LeRobot 0.6.1
+      # constrains the SO-101 lock below 5.6.0. The example does not save
+      # attacker-supplied tokenizers or processors.
+      # Exception owner: @microsoft/edge-ai-core-dev.
+      # Remove after adopting a LeRobot release compatible with transformers>=5.10.0
+      # and regenerating the SO-101 uv.lock with the patched transformers release.
+      - name: Enforce path-scoped vulnerability exceptions
+        id: review
+        if: always()
+        env:
+          DEPENDENCY_REVIEW_OUTCOME: ${{ steps.dependency-review.outcome }}
+          VULNERABLE_CHANGES: ${{ steps.dependency-review.outputs.vulnerable-changes }}
+          INVALID_LICENSE_CHANGES: ${{ steps.dependency-review.outputs.invalid-license-changes }}
+          DENIED_CHANGES: ${{ steps.dependency-review.outputs.denied-changes }}
+          SCOPED_GHSA: GHSA-xrqw-3rrv-vx5w
+          SCOPED_MANIFEST: gpu-offload/examples/so101-real-hardware/uv.lock
+          SCOPED_PACKAGE: transformers
+        shell: bash
+        run: |
+          set -o errexit -o nounset -o pipefail
+          case "$DEPENDENCY_REVIEW_OUTCOME" in
+            success|failure) ;;
+            *) echo "::error::Dependency review did not complete"; exit 1 ;;
+          esac
+          python3 scripts/security/check_dependency_review_exception.py
 
       - name: Publish execution evidence
         id: outcome
