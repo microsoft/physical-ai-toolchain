@@ -1,10 +1,6 @@
 {
   "enableTraining": "true",
-  "enableInference": "true",
-  "inferenceRouterServiceType": "LoadBalancer",
-  "inferenceRouterHA": "${INFERENCE_ROUTER_HA}",
-  "allowInsecureConnections": "${ALLOW_INSECURE_CONNECTIONS}",
-  "internalLoadBalancerProvider": "azure",
+  "enableInference": "false",
   "clusterPurpose": "${CLUSTER_PURPOSE}",
   "amloperator.skipResourceValidation": "${SKIP_RESOURCE_VALIDATION}",
   "installNvidiaDevicePlugin": "false",
