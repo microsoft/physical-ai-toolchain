@@ -9,6 +9,8 @@ const backend = spawn(
     "backend",
     "uvicorn",
     "src.api.main:app",
+    "--log-config",
+    "logging.json",
     "--reload",
     "--host",
     process.env.BACKEND_HOST ?? "127.0.0.1",

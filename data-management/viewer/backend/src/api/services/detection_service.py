@@ -219,8 +219,6 @@ class DetectionService:
         When ``labels`` is provided, an open-vocabulary YOLO-World model is used and class
         names are resolved against the supplied label list rather than the COCO vocabulary.
         """
-        import sys
-
         model = self._get_model(model_name, labels=labels)
         # Resolve class-name lookup: the loaded model's `names` is authoritative for both
         # closed- and open-vocabulary models (YOLO-World updates it via ``set_classes``).
@@ -233,10 +231,12 @@ class DetectionService:
 
         # Load image
         image = Image.open(BytesIO(image_bytes))
-        print(
-            f"[DETECT] Frame {frame_idx}: size={image.size}, mode={image.mode}, bytes={len(image_bytes)}",
-            file=sys.stderr,
-            flush=True,
+        logger.debug(
+            "Frame %d: size=%s, mode=%s, bytes=%d",
+            int(frame_idx),
+            image.size,
+            image.mode,
+            len(image_bytes),
         )
 
         # Run inference
@@ -244,11 +244,11 @@ class DetectionService:
         results = model(image, conf=confidence, verbose=False)
         elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-        print(
-            f"[DETECT] Frame {frame_idx}: model returned "
-            f"{len(results) if results else 0} result(s) in {elapsed_ms:.1f}ms",
-            file=sys.stderr,
-            flush=True,
+        logger.debug(
+            "Frame %d: model returned %d result(s) in %.1fms",
+            int(frame_idx),
+            len(results) if results else 0,
+            elapsed_ms,
         )
 
         # Parse results
@@ -256,20 +256,21 @@ class DetectionService:
         if results and len(results) > 0:
             result = results[0]
             boxes = result.boxes
-            print(
-                f"[DETECT] Frame {frame_idx}: boxes={boxes is not None}, "
-                f"num_boxes={len(boxes) if boxes is not None else 0}",
-                file=sys.stderr,
-                flush=True,
+            logger.debug(
+                "Frame %d: boxes=%s, num_boxes=%d",
+                int(frame_idx),
+                boxes is not None,
+                len(boxes) if boxes is not None else 0,
             )
 
             if boxes is not None and len(boxes) > 0:
                 classes = [int(c.item()) for c in boxes.cls]
                 confs = [float(c.item()) for c in boxes.conf]
-                print(
-                    f"[DETECT] Frame {frame_idx}: classes={classes}, confidences={[f'{c:.3f}' for c in confs]}",
-                    file=sys.stderr,
-                    flush=True,
+                logger.debug(
+                    "Frame %d: classes=%s, confidences=%s",
+                    int(frame_idx),
+                    classes,
+                    confs,
                 )
 
                 for i in range(len(boxes)):
@@ -291,12 +292,12 @@ class DetectionService:
                         )
                     )
         else:
-            print(f"[DETECT] Frame {frame_idx}: no results from model", file=sys.stderr, flush=True)
+            logger.debug("Frame %d: no results from model", int(frame_idx))
 
-        print(
-            f"[DETECT] Frame {frame_idx}: returning {len(detections)} detections",
-            file=sys.stderr,
-            flush=True,
+        logger.debug(
+            "Frame %d: returning %d detections",
+            int(frame_idx),
+            len(detections),
         )
         return DetectionResult(
             frame=frame_idx,
@@ -313,12 +314,11 @@ class DetectionService:
         total_frames: int,
     ) -> EpisodeDetectionSummary:
         """Run detection on episode frames."""
-        import sys
-
-        print(
-            f"[DETECT] Starting: dataset={dataset_id}, episode={episode_idx}, frames={total_frames}",
-            file=sys.stderr,
-            flush=True,
+        logger.info(
+            "Starting detection: dataset=%s, episode=%d, frames=%d",
+            dataset_id.replace("\r", "").replace("\n", ""),
+            int(episode_idx),
+            int(total_frames),
         )
 
         # Determine frames to process
@@ -327,7 +327,7 @@ class DetectionService:
         labels = request.labels
         self._resolve_model_path(model_name)
         frames_to_process = request.frames if request.frames else list(range(total_frames))
-        print(f"[DETECT] Will process {len(frames_to_process)} frames", file=sys.stderr, flush=True)
+        logger.debug("Will process %d frames", len(frames_to_process))
 
         results_by_frame: list[DetectionResult] = []
         class_counts: dict[str, list[float]] = {}
@@ -339,19 +339,11 @@ class DetectionService:
                 if image_bytes is None:
                     skipped_frames += 1
                     if skipped_frames <= 3:
-                        print(
-                            f"[DETECT] Frame {frame_idx}: image_bytes is None",
-                            file=sys.stderr,
-                            flush=True,
-                        )
+                        logger.warning("Frame %d: image is unavailable", int(frame_idx))
                     continue
 
                 if frame_idx == 0:
-                    print(
-                        f"[DETECT] Frame 0: got {len(image_bytes)} bytes",
-                        file=sys.stderr,
-                        flush=True,
-                    )
+                    logger.debug("Frame 0: loaded %d bytes", len(image_bytes))
 
                 result = await self.detect_frame(
                     image_bytes,
@@ -362,11 +354,7 @@ class DetectionService:
                 )
 
                 if frame_idx == 0:
-                    print(
-                        f"[DETECT] Frame 0: found {len(result.detections)} detections",
-                        file=sys.stderr,
-                        flush=True,
-                    )
+                    logger.debug("Frame 0: found %d detections", len(result.detections))
 
                 results_by_frame.append(result)
 
@@ -379,19 +367,19 @@ class DetectionService:
             except (DetectionModelError, ImportError):
                 raise
             except Exception as e:
-                print(f"[DETECT] Frame {frame_idx}: ERROR {e}", file=sys.stderr, flush=True)
                 logger.warning(
                     "Failed to process frame %d: %s",
                     int(frame_idx),
-                    type(e).__name__,
+                    e,
                 )
                 continue
 
         total_dets = sum(len(r.detections) for r in results_by_frame)
-        print(
-            f"[DETECT] Complete: processed={len(results_by_frame)}, skipped={skipped_frames}, detections={total_dets}",
-            file=sys.stderr,
-            flush=True,
+        logger.info(
+            "Detection complete: processed=%d, skipped=%d, detections=%d",
+            len(results_by_frame),
+            skipped_frames,
+            total_dets,
         )
 
         # Build class summary
