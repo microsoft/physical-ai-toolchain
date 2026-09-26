@@ -21,11 +21,19 @@ FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-30}"
 
 # Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+if [[ -n "${NO_COLOR+x}" ]]; then
+    RED=''
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    NC=''
+else
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    NC='\033[0m'
+fi
 
 # PIDs for cleanup
 BACKEND_PID=""
@@ -57,6 +65,7 @@ Options:
     --backend             Start backend only
     --frontend            Start frontend only
     --data-dir <path>     Local datasets directory (overrides DATA_DIR env var)
+    --config-preview      Print configuration and exit without changes
     --help, -h            Show this help message
 
 Environment Variables:
@@ -91,10 +100,14 @@ cleanup() {
     fi
 
     log_success "All services stopped"
+}
+
+handle_shutdown() {
+    cleanup
     exit 0
 }
 
-trap cleanup SIGINT SIGTERM
+trap handle_shutdown SIGINT SIGTERM
 
 check_prerequisites() {
     local missing=()
@@ -206,8 +219,10 @@ start_backend() {
 
         if command -v uv &>/dev/null; then
             (cd "${BACKEND_DIR}" && uv venv --python 3.12)
+            # shellcheck source=/dev/null
             (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${backend_install_extras}")
             if [[ "${should_install_vlm_judge}" == "true" ]]; then
+                # shellcheck source=/dev/null
                 (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${vlm_judge_package_spec}")
             fi
         else
@@ -216,7 +231,9 @@ start_backend() {
         fi
     elif [[ "${should_install_vlm_judge}" == "true" ]]; then
         log_info "Ensuring VLM judge package dependencies are installed..."
+        # shellcheck source=/dev/null
         (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${backend_install_extras}")
+        # shellcheck source=/dev/null
         (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${vlm_judge_package_spec}")
     fi
 
@@ -234,10 +251,10 @@ start_backend() {
 start_frontend() {
     log_info "Starting frontend on port ${FRONTEND_PORT}..."
 
-    if [[ ! -d "${FRONTEND_DIR}/node_modules" ]]; then
+    if [[ ! -d "${REPO_ROOT}/node_modules" ]]; then
         log_warn "node_modules not found"
         log_info "Installing dependencies..."
-        (cd "${FRONTEND_DIR}" && npm ci)
+        (cd "${REPO_ROOT}" && npm ci)
     fi
 
     (
@@ -252,6 +269,7 @@ start_frontend() {
 main() {
     local backend_only=false
     local frontend_only=false
+    local config_preview=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -277,6 +295,10 @@ main() {
                 export DATA_DIR
                 shift
                 ;;
+            --config-preview)
+                config_preview=true
+                shift
+                ;;
             --help|-h)
                 show_help
                 exit 0
@@ -288,6 +310,16 @@ main() {
                 ;;
         esac
     done
+
+    if [[ "${config_preview}" == "true" ]]; then
+        log_info "Configuration Preview"
+        printf 'Backend Port: %s\n' "${BACKEND_PORT}"
+        printf 'Frontend Port: %s\n' "${FRONTEND_PORT}"
+        printf 'Data Directory: %s\n' "${DATA_DIR:-${REPO_ROOT}/datasets}"
+        printf 'Mode: %s\n' "$([[ "${backend_only}" == "true" ]] && echo backend || ([[ "${frontend_only}" == "true" ]] && echo frontend || echo both))"
+        printf 'Mutation: None\n'
+        return 0
+    fi
 
     check_prerequisites
 
@@ -324,8 +356,10 @@ main() {
             log_info "Press Ctrl+C to stop all services"
             echo ""
 
-            # Wait for either process to exit
-            wait -n "${BACKEND_PID}" "${FRONTEND_PID}" 2>/dev/null || true
+            # Bash 3.2 on macOS does not support wait -n.
+            while kill -0 "${BACKEND_PID}" 2>/dev/null && kill -0 "${FRONTEND_PID}" 2>/dev/null; do
+                sleep 1
+            done
             cleanup
         else
             cleanup

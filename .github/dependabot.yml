@@ -19,6 +19,14 @@ updates:
       update-types:
       - minor
       - patch
+  # Remove when eslint-plugin-jsx-a11y and eslint-plugin-react support ESLint 10.
+  ignore:
+  - dependency-name: "@eslint/js"
+    versions:
+    - ">=10"
+  - dependency-name: eslint
+    versions:
+    - ">=10"
   open-pull-requests-limit: 5
   labels:
   - dependencies
@@ -209,6 +217,28 @@ updates:
     prefix: chore
     include: scope
 - package-ecosystem: uv
+  directory: /evaluation/vlm_judge
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    vlm-judge-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - python
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /workflows/azureml/scripts
   schedule:
     interval: weekly
@@ -231,6 +261,28 @@ updates:
     prefix: chore
     include: scope
 - package-ecosystem: uv
+  directory: /workflows/azureml/osmo-proxy
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    azureml-osmo-proxy-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - python
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /workflows/osmo
   schedule:
     interval: weekly
@@ -240,6 +292,72 @@ updates:
     semver-major-days: 14
   groups:
     osmo-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - python
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: uv
+  directory: /gpu-offload/controller
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    gpu-offload-controller-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - python
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: uv
+  directory: /gpu-offload/runtime
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    gpu-offload-runtime-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - python
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: uv
+  directory: /gpu-offload/examples/so101-real-hardware
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    gpu-offload-so101-dependencies:
       patterns:
       - "*"
       update-types:
@@ -386,29 +504,6 @@ updates:
   labels:
   - dependencies
   - python
-  - dataviewer
-  commit-message:
-    prefix: chore
-    include: scope
-- package-ecosystem: npm
-  directory: /data-management/viewer/frontend
-  schedule:
-    interval: weekly
-    day: monday
-  cooldown:
-    default-days: 7
-    semver-major-days: 14
-  groups:
-    dataviewer-frontend-patch-minor:
-      patterns:
-      - "*"
-      update-types:
-      - minor
-      - patch
-  open-pull-requests-limit: 10
-  labels:
-  - dependencies
-  - npm
   - dataviewer
   commit-message:
     prefix: chore

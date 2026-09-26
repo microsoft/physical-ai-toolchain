@@ -3,7 +3,7 @@ sidebar_position: 5
 title: Cluster Setup
 description: Kubernetes service deployment, AzureML extension, and OSMO platform configuration
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-19
+ms.date: 2026-09-21
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -156,7 +156,7 @@ cd ../002-setup
 
 ### Scenario Comparison
 
-|              | Workload Identity | Workload Identity + ACR |
+| Setting      | Workload Identity | Workload Identity + ACR |
 |--------------|:-----------------:|:-----------------------:|
 | Storage Auth | Workload Identity |    Workload Identity    |
 | Registry     |      nvcr.io      |       Private ACR       |

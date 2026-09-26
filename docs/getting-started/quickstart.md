@@ -3,7 +3,7 @@ sidebar_position: 2
 title: "Quickstart: Clone to First Training Job"
 description: Deploy infrastructure and submit your first robotics training job in 9 steps
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-31
+ms.date: 2026-09-11
 ms.topic: tutorial
 keywords:
   - quickstart
@@ -200,7 +200,7 @@ osmo profile set pool default
 osmo version
 ```
 
-See [OSMO Training — Connection Methods](../training/osmo-training.md#-connection-methods) for alternative access options (internal load balancer, ingress).
+See [Accessing OSMO](../training/osmo-training.md#-accessing-osmo) for alternative access options (internal load balancer, ingress).
 
 ## Step 9: Submit First Training Job
 

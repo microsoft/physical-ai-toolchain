@@ -1,7 +1,7 @@
 ---
 title: GPU Offload Specification
 description: Opt-in contract and behavior specification
-ms.date: 2026-08-10
+ms.date: 2026-09-22
 ms.topic: specification
 ---
 
@@ -21,6 +21,32 @@ offloading for that workload.
 
 The annotation value points to a ConfigMap containing the `remote.yaml` offload
 specification. See [remote-spec-schema.md](./remote-spec-schema.md) for schema.
+
+## Namespace Trust Model
+
+GPU offload treats a namespace as a single administrative trust boundary.
+Principals that can create or modify the referenced `remote.yaml` ConfigMap must
+already be authorized to create arbitrary Deployments in that namespace.
+
+ConfigMap write access is privileged because `remote.yaml` can select the server
+image, environment, scheduling, resources, and transferable workload data. The
+generated server can also use the client workload's service account, image pull
+secrets, runtime class, and permitted mounts. Treat modification of an offload
+ConfigMap as equivalent to deploying code with that execution context.
+
+This trust model requires:
+
+- No less-trusted principal or automation has write access to offload ConfigMaps
+- ConfigMap writers may create arbitrary Deployments and select container images
+- ConfigMap writers may use the referenced service accounts, identities, and data
+- Workloads with different trust levels run in separate namespaces
+- Service accounts and workload identities follow least privilege
+- Admission policy restricts images and pod capabilities where required
+
+The controller does not provide privilege separation between ConfigMap editors
+and workload deployment operators. A shared or multi-tenant namespace requires an
+administrator-owned profile system or an equivalent admission control boundary;
+that model is not implemented.
 
 ## Controller Behavior
 
@@ -58,6 +84,27 @@ default. Only offload-protocol variables the controller itself injects (e.g.
 `valueFrom` references such as `secretKeyRef` -- is left behind so a client's
 credentials aren't exposed to a separately specified server image or node.
 
+## Controller Health
+
+The controller exposes separate process-liveness and reconciliation-readiness
+endpoints:
+
+| Endpoint   | Success condition                                                        |
+|------------|--------------------------------------------------------------------------|
+| `/healthz` | The admission HTTP server is running                                     |
+| `/readyz`  | Initial cluster reconciliation completed and all watch workers are alive |
+
+Initial reconciliation retries with bounded exponential backoff when a
+cluster-wide list operation fails. Pod, Deployment, Job, and StatefulSet watch
+workers start only after the initial synchronization succeeds. Watch failures
+also retry with bounded backoff.
+
+`/readyz` returns HTTP 503 while initial synchronization is pending, a required
+watch worker is stopped or reconnecting after an API failure, or reconciliation
+is stopping. The Helm readiness probe uses this endpoint so Kubernetes does not
+route admission traffic to a controller that cannot create the corresponding
+server resources.
+
 ## Configuration Fields
 
 The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:
@@ -70,6 +117,8 @@ The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:
 | `securityContext`    | object                | Implemented | Validated server container security context           |
 | `env`                | list of name/value    | Implemented | Environment merged into server container              |
 | `remoteableenv`      | list of strings       | Implemented | Client env var names allowed onto the server          |
+| `encryption`         | boolean               | Implemented | AES-GCM with a controller-managed key; defaults to `true` |
+| `networkPolicy`      | boolean               | Implemented | Same-namespace RPC ingress; defaults to `true`        |
 | `noserverdeployment` | boolean               | Implemented | Skips server Deployment creation                      |
 | `serverstages`       | list of stage objects | Implemented | Shared and per-client server stages                   |
 | `remoteablecm`       | string                | Implemented | ConfigMap name (required by controller)               |
@@ -79,9 +128,13 @@ The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:
 
 1. Mutation is opt-in: controller only acts on workloads with all three signals
 2. Immutable remote.yaml: ConfigMap mounted read-only
-3. No privilege escalation: controller never adds privileged contexts
+3. No container privilege escalation: controller never adds privileged contexts
 4. Atomic per-workload: all containers in a workload see consistent mutation
 5. Idempotent: re-applying the same workload manifest produces same result
+6. Peer authentication: AES-GCM is enabled by default with an explicit plaintext opt-out
+7. Callable authorization: exact identities are checked against an immutable policy before import or argument rehydration
+8. Secret isolation: encryption keys are generated in-cluster and mounted as files
+9. Server isolation: generated server pods accept RPC traffic only from their namespace by default
 
 ## Validation
 

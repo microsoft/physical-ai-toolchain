@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import importlib
 import inspect
 import logging
 import os
 import re
 import sys
+from typing import Any
 
 # use by sitecustomize.py
 import yaml
 
-from . import remoter, rmtclass, rmtconfigkube
+from . import msgsock, remoter, rmtclass, rmtconfigkube
 from .simplelog import initlog
 
 
@@ -65,14 +65,16 @@ def get_main_script_dir():
 
 def importmodule(mod):
     try:
-        return importlib.import_module(mod)
+        return remoter.import_allowed_module(mod)
+    except remoter.ModuleNotAllowedError:
+        raise
     except Exception as e:
         # if module not found, try to import from main script directory
         main_script_dir = get_main_script_dir()
         if main_script_dir is not None:
             sys.path.insert(0, main_script_dir)
             try:
-                return importlib.import_module(mod)
+                return remoter.import_allowed_module(mod)
             except Exception as e2:
                 logger.error(f"Failed to import module {mod} from main script directory {main_script_dir}: {e2}")
                 raise e2
@@ -81,9 +83,73 @@ def importmodule(mod):
             raise e
 
 
+def allow_configured_modules(cfg: dict[str, Any]) -> None:
+    raw_module_names = cfg.get("allowedmodules", [])
+    if not isinstance(raw_module_names, list):
+        raise ValueError("allowedmodules must be a list of module names")
+    module_names: list[str] = []
+    for index, module_name in enumerate(raw_module_names):
+        if not isinstance(module_name, str) or not module_name:
+            raise ValueError(f"allowedmodules[{index}] must be a non-empty string")
+        module_names.append(module_name)
+
+    target_paths: list[str] = []
+    for config_key in ("remotefuncs", "remoteclasses"):
+        entries = cfg.get(config_key, [])
+        if not isinstance(entries, list):
+            raise ValueError(f"{config_key} must be a list")
+        for index, item in enumerate(entries):
+            if not isinstance(item, dict):
+                raise ValueError(f"{config_key}[{index}] must be a mapping")
+            for target_path in item:
+                if not isinstance(target_path, str) or not target_path:
+                    raise ValueError(f"{config_key}[{index}] target must be a non-empty string")
+                target_paths.append(target_path)
+
+    stubs = cfg.get("stubs", {})
+    if not isinstance(stubs, dict):
+        raise ValueError("stubs must be a mapping")
+    for stub_path, target_path in stubs.items():
+        if not isinstance(stub_path, str) or not stub_path:
+            raise ValueError("stub source targets must be non-empty strings")
+        if not isinstance(target_path, str) or not target_path:
+            raise ValueError(f"stub target for {stub_path!r} must be a non-empty string")
+        target_paths.extend((stub_path, target_path))
+
+    modules_to_allow = set(module_names)
+    for target_path in target_paths:
+        module_name, separator, _ = target_path.partition("/")
+        if not separator or not module_name:
+            raise ValueError(f"Remote target must include a module path: {target_path!r}")
+        modules_to_allow.add(module_name)
+
+    for module_name in modules_to_allow:
+        remoter.allow_module(module_name)
+
+
+def configure_message_encryption(cfg: dict[str, Any]) -> None:
+    encryption_enabled = cfg.get("encryption", True)
+    if not isinstance(encryption_enabled, bool):
+        raise ValueError("encryption must be a boolean")
+    if not encryption_enabled:
+        msgsock.msgkey = None
+        return
+
+    key_file = os.environ.get("REMOTER_KEY_FILE")
+    if not key_file:
+        raise RuntimeError("REMOTER_KEY_FILE is required when encryption is enabled")
+    with open(key_file, "rb") as file:
+        key = file.read()
+    if len(key) != 32:
+        raise ValueError(f"REMOTER_KEY_FILE must contain exactly 32 bytes: {key_file}")
+    msgsock.msgkey = key
+    logger.info("Enabled AES-GCM message encryption")
+
+
 def apply_decorators_from_config(configpath) -> bool:
     logger.info(f"Applying remoter decorators from config file: {configpath}", color="cyan")
     cfg = load_config(configpath)
+    allow_configured_modules(cfg)
     isserver = remoter.remoterparams["server"]
 
     # print(f"Command line exe: {sys.argv[0]}\n{sys.argv}")
@@ -138,7 +204,13 @@ def apply_decorators_from_config(configpath) -> bool:
             timeout = params.get("timeout", None)
 
             if inspect.isfunction(target):
-                new_target = remoter.createRemotedTask(target, taskkey, functype, timeout=timeout)
+                new_target = remoter.createRemotedTask(
+                    target,
+                    taskkey,
+                    functype,
+                    timeout=timeout,
+                    callable_key=target_path,
+                )
                 if class_name:
                     setattr(cls, attr_name, new_target)
                 else:
@@ -147,8 +219,9 @@ def apply_decorators_from_config(configpath) -> bool:
                     f"Decorated function {target_path} with remotetask (taskkey={taskkey}, functype={functype}, module={mod})",  # noqa: E501 vendored from microsoft/xavier, not refactored
                     color="cyan",
                 )
-                rmtclass.setfixedloc(target_path, funcparams)
-                if funcparams[target_path].get("singleinstance", False):
+                if "remoteloc" in params:
+                    remoter.setfixedlocs({target_path: params["remoteloc"]})
+                if params.get("singleinstance", False):
                     remoter.addsingleinstancefunc(target_path)
             else:
                 logger.info(f"Skipped {target_path}: not a function")
@@ -162,6 +235,7 @@ def apply_decorators_from_config(configpath) -> bool:
                         color="cyan",
                     )
                     target_path = cfg["stubs"][target_path]  # use actual class path instead of stub
+                    remoter.remoterclassparams[target_path] = params
 
             # module_path, _, attr_name = target_path.rpartition(".")
             module_path, attr_name = target_path.split("/", 1)
@@ -234,7 +308,9 @@ def start(serveronly=True):
     else:
         newremoteconfig = remoteconfig
 
-    remoter.setparams(load_config(newremoteconfig))
+    runtime_config = load_config(newremoteconfig)
+    configure_message_encryption(runtime_config)
+    remoter.setparams(runtime_config)
     remoted = apply_decorators_from_config(newremoteconfig)
     if remoted:
         remoter.initRemoter(

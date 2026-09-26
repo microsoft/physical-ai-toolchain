@@ -1,5 +1,6 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import { axe } from 'jest-axe';
 import IconCard from '../src/components/IconCard';
 
 describe('IconCard', () => {
@@ -17,13 +18,16 @@ describe('IconCard', () => {
 
   it('renders the title as a link', () => {
     render(<IconCard {...defaultProps} />);
-    const link = screen.getByText('Card Title');
-    expect(link.closest('a')?.getAttribute('href')).toBe('/docs/page');
+    const article = screen.getByRole('article', { name: 'Card Title' });
+    const heading = within(article).getByRole('heading', { level: 3, name: 'Card Title' });
+    expect(within(heading).getByRole('link')).toHaveAttribute('href', '/docs/page');
+    expect(within(article).getAllByRole('link')).toHaveLength(1);
+    expect(within(article).queryByRole('button')).not.toBeInTheDocument();
   });
 
   it('renders the icon', () => {
     render(<IconCard {...defaultProps} />);
-    expect(screen.getByTestId('icon')).toBeDefined();
+    expect(screen.getByTestId('icon').parentElement).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('renders description when provided', () => {
@@ -34,5 +38,10 @@ describe('IconCard', () => {
   it('does not render description when omitted', () => {
     const { container } = render(<IconCard {...defaultProps} />);
     expect(container.querySelector('p')).toBeNull();
+  });
+
+  it('has no detectable accessibility violations', async () => {
+    const { container } = render(<IconCard {...defaultProps} description="Details here" />);
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

@@ -113,3 +113,164 @@ cross-machine offload of control-loop functions requires explicit review.
 > [!NOTE]
 > When the chart generates the TLS Secret, Helm reuses it on upgrade through
 > `lookup`. Delete the Secret to force certificate rotation.
+
+## 🚦 Production rollout and recovery
+
+The webhook uses `failurePolicy: Fail` and intercepts only CREATE requests for
+workloads labeled `xavier: "true"`. Keep the fail-closed policy so a workload is
+not admitted without the client mutation and matching server reconciliation.
+Pause new GPU-offload workload creation during controller upgrades and recovery.
+
+### Validate admission
+
+Run a server-side dry-run after every install, upgrade, or rollback. The ConfigMap
+exists only for the duration of the probe, and the Pod is never persisted.
+
+```bash
+NAMESPACE=gpu-offload
+CONTEXT=<kube-context>
+PROBE="gpu-offload-webhook-probe-$$"
+
+cleanup_probe() {
+  kubectl --context "$CONTEXT" delete configmap "$PROBE" \
+    --namespace "$NAMESPACE" --ignore-not-found
+}
+trap cleanup_probe EXIT
+
+kubectl --context "$CONTEXT" create configmap "$PROBE" \
+  --namespace "$NAMESPACE" \
+  --from-literal=remote.yaml=$'encryption: false\nserverstages:\n  - name: ""\n    noserverdeployment: true\n' \
+  --dry-run=client -o yaml |
+  kubectl --context "$CONTEXT" apply -f -
+
+MUTATION_MARKER="$(
+  cat <<EOF | kubectl --context "$CONTEXT" apply --dry-run=server -f - \
+    -o jsonpath='{.spec.containers[0].env[?(@.name=="XAVIER_CONTAINER")].value}'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $PROBE
+  namespace: $NAMESPACE
+  annotations:
+    xavierconfig: |
+      remoteablecm: $PROBE
+  labels:
+    xavier: "true"
+spec:
+  containers:
+    - name: probe
+      image: probe
+      command: ["true"]
+      env:
+        - name: REMOTERPORT
+          value: "30000"
+EOF
+)"
+test "$MUTATION_MARKER" = "true"
+```
+
+The final command must exit successfully. A timeout, admission rejection, or
+missing `true` marker means the controller is not safe for offload workload
+creation.
+
+### Roll back a failed upgrade
+
+Select a previously validated revision, wait for the controller Deployment, and
+rerun the admission probe before resuming workload creation.
+
+```bash
+RELEASE=gpu-offload
+NAMESPACE=gpu-offload
+CONTEXT=<kube-context>
+REVISION=<known-good-revision>
+
+helm --kube-context "$CONTEXT" history "$RELEASE" --namespace "$NAMESPACE"
+helm --kube-context "$CONTEXT" rollback "$RELEASE" "$REVISION" \
+  --namespace "$NAMESPACE" \
+  --wait \
+  --cleanup-on-fail \
+  --timeout 5m
+
+CONTROLLER="$(
+  kubectl --context "$CONTEXT" get deployment \
+    --namespace "$NAMESPACE" \
+    --selector "app.kubernetes.io/name=gpu-offload,app.kubernetes.io/instance=$RELEASE" \
+    -o jsonpath='{.items[0].metadata.name}'
+)"
+kubectl --context "$CONTEXT" rollout status "deployment/$CONTROLLER" \
+  --namespace "$NAMESPACE" \
+  --timeout 5m
+```
+
+Helm rollback remains available during a webhook outage. The chart resources are
+not labeled `xavier: "true"`, and the webhook rules do not intercept UPDATE or
+DELETE operations.
+
+### Remove an unavailable webhook
+
+Delete the webhook configuration only when rollback cannot restore admission.
+This immediately allows labeled workloads to be created without mutation, so
+keep GPU-offload workload creation paused until the controller is restored.
+
+```bash
+RELEASE=gpu-offload
+CONTEXT=<kube-context>
+
+kubectl --context "$CONTEXT" delete mutatingwebhookconfiguration \
+  --selector "app.kubernetes.io/name=gpu-offload,app.kubernetes.io/instance=$RELEASE"
+```
+
+Restore the release with `helm upgrade --install`, wait for the controller
+Deployment, and run the admission probe before resuming workload creation.
+
+### Uninstall and clean generated resources
+
+Delete or scale down GPU-offload client workloads before removing their remote
+servers. Helm removes the controller and webhook resources, but generated server
+Deployments, NetworkPolicies, and encryption Secrets are owned by client
+workloads rather than by the Helm release.
+
+Run cleanup separately in every workload namespace managed by the controller:
+
+```bash
+RELEASE=gpu-offload
+CONTROLLER_NAMESPACE=gpu-offload
+WORKLOAD_NAMESPACE=<workload-namespace>
+CONTEXT=<kube-context>
+
+helm --kube-context "$CONTEXT" uninstall "$RELEASE" \
+  --namespace "$CONTROLLER_NAMESPACE" \
+  --ignore-not-found
+
+kubectl --context "$CONTEXT" delete deployment,networkpolicy \
+  --namespace "$WORKLOAD_NAMESPACE" \
+  --selector xavierdeployment=true \
+  --ignore-not-found
+kubectl --context "$CONTEXT" delete secret \
+  --namespace "$WORKLOAD_NAMESPACE" \
+  --selector xavier-encryption-secret=true \
+  --ignore-not-found
+```
+
+Do not delete the generated resources while active clients still depend on the
+remote servers or encryption keys.
+
+### Verify recovery
+
+After rollback or reinstall, confirm that the controller is Available and run
+the admission probe. After permanent uninstall or emergency removal, confirm
+that no webhook remains for the release:
+
+```bash
+RELEASE=gpu-offload
+CONTEXT=<kube-context>
+
+test -z "$(
+  kubectl --context "$CONTEXT" get mutatingwebhookconfiguration \
+    --selector "app.kubernetes.io/name=gpu-offload,app.kubernetes.io/instance=$RELEASE" \
+    -o name
+)"
+```
+
+Remove `xavier` labels and `xavierconfig` annotations from workload manifests
+before recreating them without GPU offload.

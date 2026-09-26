@@ -31,7 +31,10 @@ dependencies = [
     # The SIL evaluation reads LeRobot dataset videos/parquet (av, pyarrow)
     # and loads ACT checkpoints, so the [dataset] extra is required to
     # restore av, pyarrow, pandas, datasets, and torchcodec.
-    "lerobot[dataset]==0.6.1",
+    "lerobot[dataset,diffusion]==0.6.1",
+    # lerobot==0.6.1 permits diffusers releases affected by
+    # GHSA-98h9-4798-4q5v; keep the runtime on the patched release.
+    "diffusers==0.40.0",
     "torchcodec==0.16.0",
 ]
 
@@ -46,6 +49,8 @@ environments = [
 # `override-dependencies` forces uv to ignore upstream upper bounds. Each entry
 # repeats a direct pin above and must be removed when the upstream cap is lifted.
 override-dependencies = [
+    # lerobot==0.6.1 caps diffusers below 0.40.0; use the patched release.
+    "diffusers==0.40.0",
     # lerobot==0.6.1 caps torch below 2.12.0; use the validated patched release.
     "torch==2.14.0",
     # lerobot==0.6.1 caps torchvision below 0.27.0; Torch 2.14 requires 0.29.0.
