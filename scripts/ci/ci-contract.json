@@ -32,6 +32,7 @@
   "dependencyGroups": {
     "python": ["^(pyproject\\.toml|uv\\.lock)$", "^tests/(conftest\\.py|__init__\\.py|fixtures/)"],
     "images": ["^shared/ci/", "^scripts/lib/common\\.sh$", "(^|/)defaults\\.conf$"],
+    "container-scan": ["Dockerfile|Containerfile", "^scripts/security/(discover-base-images|image-slug)\\.sh$", "^scripts/security/container-scan-lanes\\.json$"],
     "viewer": ["^data-management/viewer/(pyproject\\.toml|uv\\.lock|package(-lock)?\\.json|docker-compose[^/]*|Dockerfile[^/]*)$"],
     "gpu": ["^gpu-offload/(pyproject\\.toml|uv\\.lock|mise\\.toml|\\.env\\.example)$"]
   },
@@ -52,8 +53,8 @@
     "dv_frontend": { "patterns": ["^data-management/viewer/frontend/", "^data-management/viewer/specifications/language-tag-corpus\\.json$"], "groups": ["viewer"] },
     "fuzz": { "patterns": ["^tests/", "^data-management/viewer/backend/", "^training/"], "groups": ["python"] },
     "docusaurus": { "patterns": ["^docs/", "^[^/]+\\.md$"], "groups": [] },
-    "pester": { "patterns": ["\\.(ps1|psm1|psd1)$"], "groups": [] },
-    "containers": { "patterns": ["(^|/)(Dockerfile|Containerfile)[^/]*$", "^scripts/security/(discover-base-images|image-slug)\\.sh$"], "groups": ["images"] }
+    "pester": { "patterns": ["\\.(ps1|psm1|psd1)$"], "groups": ["container-scan"] },
+    "containers": { "patterns": [], "groups": ["images", "container-scan"] }
   },
   "cpuSmoke": { "workflow": ".github/workflows/smoke-cpu.yml", "job": "import-smoke", "domains": ["rl", "il", "vla", "evaluation", "vlm-judge", "osmo-replay"] },
   "smokeInputs": { "rl": ["rl"], "il": ["il"], "vla": ["vla"], "evaluation": ["evaluation"], "osmo_replay": ["osmo_replay"], "dataviewer": ["dv_backend", "dv_frontend"] },
