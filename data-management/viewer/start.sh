@@ -85,6 +85,8 @@ EOF
 }
 
 cleanup() {
+    local exit_code="${1:-0}"
+
     log_info "Shutting down services..."
 
     if [[ -n "${BACKEND_PID}" ]] && kill -0 "${BACKEND_PID}" 2>/dev/null; then
@@ -100,11 +102,11 @@ cleanup() {
     fi
 
     log_success "All services stopped"
+    exit "${exit_code}"
 }
 
 handle_shutdown() {
-    cleanup
-    exit 0
+    cleanup 0
 }
 
 trap handle_shutdown SIGINT SIGTERM
@@ -130,6 +132,28 @@ check_prerequisites() {
     fi
 }
 
+require_port_available() {
+    local port="$1"
+    local service="$2"
+    local python_command
+
+    python_command="$(command -v python3 || command -v python)"
+    if ! "${python_command}" - "${port}" <<'PY'
+import socket
+import sys
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+    try:
+        listener.bind(("0.0.0.0", int(sys.argv[1])))
+    except OSError:
+        raise SystemExit(1) from None
+PY
+    then
+        log_error "${service} port ${port} is already in use"
+        return 1
+    fi
+}
+
 wait_for_backend() {
     # Use IPv4 loopback explicitly because uvicorn binds to 127.0.0.1 by default.
     # On systems where localhost resolves to ::1 first, curl localhost can fail
@@ -140,6 +164,10 @@ wait_for_backend() {
     log_info "Waiting for backend to be ready..."
 
     while [[ ${elapsed} -lt ${HEALTH_TIMEOUT} ]]; do
+        if ! kill -0 "${BACKEND_PID}" 2>/dev/null; then
+            log_error "Backend process exited before becoming healthy"
+            return 1
+        fi
         if curl -sf "${url}" >/dev/null 2>&1; then
             log_success "Backend is healthy"
             return 0
@@ -152,7 +180,43 @@ wait_for_backend() {
     return 1
 }
 
+wait_for_frontend() {
+    local url="http://127.0.0.1:${FRONTEND_PORT}"
+    local elapsed=0
+
+    log_info "Waiting for frontend to be ready..."
+
+    while [[ ${elapsed} -lt ${HEALTH_TIMEOUT} ]]; do
+        if ! kill -0 "${FRONTEND_PID}" 2>/dev/null; then
+            log_error "Frontend process exited before becoming healthy"
+            return 1
+        fi
+        if curl -sf "${url}" >/dev/null 2>&1; then
+            log_success "Frontend is healthy"
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    log_error "Frontend failed to start within ${HEALTH_TIMEOUT} seconds"
+    return 1
+}
+
+wait_for_either_service() {
+    while kill -0 "${BACKEND_PID}" 2>/dev/null && kill -0 "${FRONTEND_PID}" 2>/dev/null; do
+        sleep 1
+    done
+
+    if ! kill -0 "${BACKEND_PID}" 2>/dev/null; then
+        wait "${BACKEND_PID}"
+    else
+        wait "${FRONTEND_PID}"
+    fi
+}
+
 start_backend() {
+    require_port_available "${BACKEND_PORT}" "Backend"
     log_info "Starting backend on port ${BACKEND_PORT}..."
     local backend_install_extras=".[dev,analysis,export]"
     local vlm_judge_package_spec="${REPO_ROOT}/evaluation/vlm_judge"
@@ -249,6 +313,7 @@ start_backend() {
 }
 
 start_frontend() {
+    require_port_available "${FRONTEND_PORT}" "Frontend"
     log_info "Starting frontend on port ${FRONTEND_PORT}..."
 
     if [[ ! -d "${REPO_ROOT}/node_modules" ]]; then
@@ -259,7 +324,7 @@ start_frontend() {
 
     (
         cd "${FRONTEND_DIR}"
-        npm run dev -- --port "${FRONTEND_PORT}" 2>&1
+        npm run dev -- --port "${FRONTEND_PORT}" --strictPort 2>&1
     ) &
     FRONTEND_PID=$!
 
@@ -312,11 +377,17 @@ main() {
     done
 
     if [[ "${config_preview}" == "true" ]]; then
+        local mode="both"
+        if [[ "${backend_only}" == "true" ]]; then
+            mode="backend"
+        elif [[ "${frontend_only}" == "true" ]]; then
+            mode="frontend"
+        fi
         log_info "Configuration Preview"
         printf 'Backend Port: %s\n' "${BACKEND_PORT}"
         printf 'Frontend Port: %s\n' "${FRONTEND_PORT}"
         printf 'Data Directory: %s\n' "${DATA_DIR:-${REPO_ROOT}/datasets}"
-        printf 'Mode: %s\n' "$([[ "${backend_only}" == "true" ]] && echo backend || ([[ "${frontend_only}" == "true" ]] && echo frontend || echo both))"
+        printf 'Mode: %s\n' "${mode}"
         printf 'Mutation: None\n'
         return 0
     fi
@@ -331,21 +402,36 @@ main() {
 
     if [[ "${frontend_only}" == "true" ]]; then
         start_frontend
+        if ! wait_for_frontend; then
+            cleanup 1
+        fi
         log_success "Frontend available at http://localhost:${FRONTEND_PORT}"
-        wait "${FRONTEND_PID}"
+        if wait "${FRONTEND_PID}"; then
+            cleanup
+        else
+            cleanup $?
+        fi
     elif [[ "${backend_only}" == "true" ]]; then
         start_backend
-        if wait_for_backend; then
-            log_success "Backend available at http://localhost:${BACKEND_PORT}"
-            log_info "API docs: http://localhost:${BACKEND_PORT}/docs"
+        if ! wait_for_backend; then
+            cleanup 1
         fi
-        wait "${BACKEND_PID}"
+        log_success "Backend available at http://localhost:${BACKEND_PORT}"
+        log_info "API docs: http://localhost:${BACKEND_PORT}/docs"
+        if wait "${BACKEND_PID}"; then
+            cleanup
+        else
+            cleanup $?
+        fi
     else
         # Start both services
         start_backend
 
         if wait_for_backend; then
             start_frontend
+            if ! wait_for_frontend; then
+                cleanup 1
+            fi
 
             echo ""
             log_success "Both services are running:"
@@ -356,14 +442,13 @@ main() {
             log_info "Press Ctrl+C to stop all services"
             echo ""
 
-            # Bash 3.2 on macOS does not support wait -n.
-            while kill -0 "${BACKEND_PID}" 2>/dev/null && kill -0 "${FRONTEND_PID}" 2>/dev/null; do
-                sleep 1
-            done
-            cleanup
+            if wait_for_either_service; then
+                cleanup
+            else
+                cleanup $?
+            fi
         else
-            cleanup
-            exit 1
+            cleanup 1
         fi
     fi
 }

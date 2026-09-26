@@ -275,12 +275,45 @@ describe('fetchEpisode', () => {
 })
 
 describe('fetchAnnotations', () => {
-  it('calls GET annotations endpoint', async () => {
-    const data = { schemaVersion: '1.0', annotations: [] }
-    mockFetch.mockResolvedValueOnce(jsonResponse(data, { headers: { ETag: '"revision-one"' } }))
+  it('returns the camelCased annotation response with its revision', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          schema_version: '1.0',
+          episode_index: 0,
+          dataset_id: 'ds-1',
+          annotations: [
+            {
+              annotator_id: 'u1',
+              language_instruction: {
+                instruction: 'Pick up the cube',
+                subtask_instructions: ['Reach', 'Grasp'],
+              },
+            },
+          ],
+        },
+        { headers: { ETag: '"revision-one"' } },
+      ),
+    )
 
     const result = await fetchAnnotations('ds-1', 0)
-    expect(result).toEqual({ data, etag: '"revision-one"' })
+    expect(result).toEqual({
+      data: {
+        schemaVersion: '1.0',
+        episodeIndex: 0,
+        datasetId: 'ds-1',
+        annotations: [
+          {
+            annotatorId: 'u1',
+            languageInstruction: {
+              instruction: 'Pick up the cube',
+              subtaskInstructions: ['Reach', 'Grasp'],
+            },
+          },
+        ],
+      },
+      etag: '"revision-one"',
+    })
     expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/0/annotations', {
       headers: {},
     })
@@ -288,9 +321,33 @@ describe('fetchAnnotations', () => {
 })
 
 describe('saveAnnotation', () => {
-  it('calls PUT with a create-only precondition', async () => {
-    const annotation = { annotatorId: 'u1' }
-    mockMutationFetch(jsonResponse({ success: true }, { headers: { ETag: '"created"' } }))
+  it('calls PUT with a create-only precondition and converts the response', async () => {
+    const annotation = {
+      annotatorId: 'u1',
+      languageInstruction: {
+        instruction: 'Pick up the cube',
+        subtaskInstructions: ['Reach', 'Grasp'],
+      },
+    }
+    mockMutationFetch(
+      jsonResponse(
+        {
+          schema_version: '1.0',
+          episode_index: 0,
+          dataset_id: 'ds-1',
+          annotations: [
+            {
+              annotator_id: 'u1',
+              language_instruction: {
+                instruction: 'Pick up the cube',
+                subtask_instructions: ['Reach', 'Grasp'],
+              },
+            },
+          ],
+        },
+        { headers: { ETag: '"created"' } },
+      ),
+    )
 
     const result = await saveAnnotation('ds-1', 0, annotation as never, { createOnly: true })
 
@@ -298,10 +355,17 @@ describe('saveAnnotation', () => {
     expect(apiCall[0]).toBe('/api/datasets/ds-1/episodes/0/annotations')
     expect(apiCall[1]).toMatchObject({
       method: 'PUT',
-      body: JSON.stringify(annotation),
+      body: JSON.stringify({
+        annotator_id: 'u1',
+        language_instruction: {
+          instruction: 'Pick up the cube',
+          subtask_instructions: ['Reach', 'Grasp'],
+        },
+      }),
     })
     expect(apiCall[1].headers).toHaveProperty('If-None-Match', '*')
     expect(result.etag).toBe('"created"')
+    expect(result.data.annotations[0]?.languageInstruction?.instruction).toBe('Pick up the cube')
   })
 
   it('sends If-Match for an existing annotation resource', async () => {
