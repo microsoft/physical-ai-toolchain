@@ -186,6 +186,19 @@ Describe 'Invoke-HashCheck' -Tag 'Unit' {
         $script:FakeBytes = [System.Text.Encoding]::UTF8.GetBytes('hello world')
         # SHA-256 of 'hello world'
         $script:KnownHash = 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9'
+        $output = [System.IO.MemoryStream]::new()
+        try {
+            $gzip = [System.IO.Compression.GZipStream]::new(
+                $output, [System.IO.Compression.CompressionMode]::Compress, $true
+            )
+            try { $gzip.Write($script:FakeBytes, 0, $script:FakeBytes.Length) }
+            finally { $gzip.Dispose() }
+            $script:GzipBytes = $output.ToArray()
+            $script:GzipHash = [Convert]::ToHexString(
+                [System.Security.Cryptography.SHA256]::HashData($script:GzipBytes)
+            ).ToLowerInvariant()
+        }
+        finally { $output.Dispose() }
     }
 
     It 'Returns Match when expected hash equals computed hash' {
@@ -230,6 +243,146 @@ Describe 'Invoke-HashCheck' -Tag 'Unit' {
             -Expected $upper -File 'some.sh'
         $result.Status | Should -Be 'Match'
     }
+
+    It 'Treats a JSON response from a ZIP URL as a download failure, not a hash mismatch' {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            [System.IO.File]::WriteAllText($OutFile, '{"requestStatus":{"statusCode":"SUCCESS"}}')
+        }
+        $result = Invoke-HashCheck -Name 'NGC CLI' -Url 'https://example/ngccli_linux.zip' `
+            -Expected $script:KnownHash -File 'devcontainer.json'
+        $result.Status | Should -Be 'DownloadFailed'
+        $result.Message | Should -Match 'Unexpected content'
+    }
+
+    It 'Treats JSON from an extensionless key URL as a download failure' {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            [System.IO.File]::WriteAllText($OutFile, '{"error":"temporarily unavailable"}')
+        }
+        $result = Invoke-HashCheck -Name 'GPG Key' -Url 'https://example/gpgkey' `
+            -Expected $script:KnownHash -File 'install.sh'
+        $result.Status | Should -Be 'DownloadFailed'
+    }
+
+    It 'Treats HTML from a script URL as a download failure' {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            [System.IO.File]::WriteAllText($OutFile, '<html><body>Unavailable</body></html>')
+        }
+        $result = Invoke-HashCheck -Name 'Installer' -Url 'https://example/install.ps1' `
+            -Expected $script:KnownHash -File 'setup.ps1'
+        $result.Status | Should -Be 'DownloadFailed'
+    }
+
+    It 'Preserves a genuine ZIP hash mismatch as an integrity failure' {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            $stream = [System.IO.File]::Open($OutFile, [System.IO.FileMode]::Create)
+            $archive = [System.IO.Compression.ZipArchive]::new(
+                $stream, [System.IO.Compression.ZipArchiveMode]::Create, $false
+            )
+            try {
+                $entry = $archive.CreateEntry('test.txt')
+                $writer = [System.IO.StreamWriter]::new($entry.Open())
+                try { $writer.Write('artifact') }
+                finally { $writer.Dispose() }
+            }
+            finally { $archive.Dispose() }
+        }
+        $result = Invoke-HashCheck -Name 'Archive' -Url 'https://example/download.zip' `
+            -Expected $script:KnownHash -File 'devcontainer.json'
+        $result.Status | Should -Be 'Mismatch'
+    }
+
+    It 'Treats a truncated ZIP as an unavailable download' {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            [System.IO.File]::WriteAllBytes($OutFile, [byte[]]@(0x50, 0x4b, 0x03, 0x04, 0x01))
+        }
+        $result = Invoke-HashCheck -Name 'Archive' -Url 'https://example/download.zip' `
+            -Expected $script:KnownHash -File 'devcontainer.json'
+        $result.Status | Should -Be 'DownloadFailed'
+    }
+
+    It 'Rejects a non-GZIP payload from a tar.gz URL' {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            [System.IO.File]::WriteAllBytes($OutFile, $script:FakeBytes)
+        }
+        $result = Invoke-HashCheck -Name 'Archive' -Url 'https://example/download.tar.gz' `
+            -Expected $script:KnownHash -File 'install.sh'
+        $result.Status | Should -Be 'DownloadFailed'
+    }
+
+    It 'Preserves a genuine GZIP hash mismatch as an integrity failure' {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            [System.IO.File]::WriteAllBytes($OutFile, $script:GzipBytes)
+        }
+        $result = Invoke-HashCheck -Name 'Archive' -Url 'https://example/download.tar.gz' `
+            -Expected $script:KnownHash -File 'install.sh'
+        $result.Status | Should -Be 'Mismatch'
+    }
+
+    It 'Matches a complete GZIP archive with its pinned hash' {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            [System.IO.File]::WriteAllBytes($OutFile, $script:GzipBytes)
+        }
+        $result = Invoke-HashCheck -Name 'Archive' -Url 'https://example/download.tar.gz' `
+            -Expected $script:GzipHash -File 'install.sh'
+        $result.Status | Should -Be 'Match'
+    }
+
+    It 'Treats a header-only GZIP response as unavailable' {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            [System.IO.File]::WriteAllBytes($OutFile, [byte[]]@(0x1f, 0x8b, 0x08, 0x00))
+        }
+        $result = Invoke-HashCheck -Name 'Archive' -Url 'https://example/download.tar.gz' `
+            -Expected $script:GzipHash -File 'install.sh'
+        $result.Status | Should -Be 'DownloadFailed'
+    }
+
+    It 'Treats a GZIP missing <TruncatedBytes> trailer byte(s) as unavailable' -ForEach @(
+        @{ TruncatedBytes = 1 }
+        @{ TruncatedBytes = 4 }
+        @{ TruncatedBytes = 8 }
+    ) {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            $last = $script:GzipBytes.Length - $TruncatedBytes - 1
+            [System.IO.File]::WriteAllBytes($OutFile, [byte[]]$script:GzipBytes[0..$last])
+        }
+        $result = Invoke-HashCheck -Name 'Archive' -Url 'https://example/download.tar.gz' `
+            -Expected $script:GzipHash -File 'install.sh'
+        $result.Status | Should -Be 'DownloadFailed'
+        (ConvertTo-HashCheckSarifResult -Result $result -File 'install.sh').level | Should -Be 'warning'
+    }
+
+    It 'Treats a corrupt GZIP checksum as unavailable' {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            $bytes = [byte[]]$script:GzipBytes.Clone()
+            $bytes[$bytes.Length - 8] = $bytes[$bytes.Length - 8] -bxor 0x01
+            [System.IO.File]::WriteAllBytes($OutFile, $bytes)
+        }
+        $result = Invoke-HashCheck -Name 'Archive' -Url 'https://example/download.tar.gz' `
+            -Expected $script:GzipHash -File 'install.sh'
+        $result.Status | Should -Be 'DownloadFailed'
+    }
 }
 
 Describe 'Invoke-WithRetry' -Tag 'Unit' {
@@ -245,6 +398,18 @@ Describe 'Invoke-WithRetry' -Tag 'Unit' {
     It 'Returns null when every attempt yields empty output' {
         $result = Invoke-WithRetry -MaxAttempts 2 -Action { '' }
         $result | Should -BeNullOrEmpty
+    }
+
+    It 'Retries a failed registry request and returns its successful result' {
+        $script:retryCalls = 0
+        Mock Start-Sleep {}
+        $result = Invoke-WithRetry -MaxAttempts 3 -Action {
+            $script:retryCalls++
+            if ($script:retryCalls -eq 1) { throw 'temporary registry failure' }
+            'v0.20.1'
+        }
+        $result | Should -Be 'v0.20.1'
+        $script:retryCalls | Should -Be 2
     }
 }
 
@@ -395,12 +560,12 @@ Describe 'ConvertTo-HashCheckSarifResult' -Tag 'Unit' {
         ConvertTo-HashCheckSarifResult -Result $result -File 'test.sh' | Should -BeNullOrEmpty
     }
 
-    It 'Returns error-level result for DownloadFailed' {
+    It 'Returns warning-level result for DownloadFailed' {
         $result = @{ Status = 'DownloadFailed'; Message = 'connection refused' }
         $sarif = ConvertTo-HashCheckSarifResult -Result $result -File 'test.sh'
         $sarif | Should -Not -BeNullOrEmpty
         $sarif.ruleId | Should -Be 'binary-freshness/download-failure'
-        $sarif.level | Should -Be 'error'
+        $sarif.level | Should -Be 'warning'
     }
 
     It 'Returns warning-level result for Mismatch' {
@@ -411,9 +576,10 @@ Describe 'ConvertTo-HashCheckSarifResult' -Tag 'Unit' {
         $sarif.level | Should -Be 'warning'
     }
 
-    It 'Returns null for an unrecognized status' {
+    It 'Rejects an unrecognized status' {
         $result = @{ Status = 'Unknown'; Message = 'mystery' }
-        ConvertTo-HashCheckSarifResult -Result $result -File 'test.sh' | Should -BeNullOrEmpty
+        { ConvertTo-HashCheckSarifResult -Result $result -File 'test.sh' } |
+            Should -Throw 'Unknown binary check status: Unknown'
     }
 }
 
@@ -468,22 +634,164 @@ Describe 'Get-HelmRepoLatestVersion' -Tag 'Unit' {
 }
 
 Describe 'Get-HelmOciLatestVersion' -Tag 'Unit' {
-    It 'Parses version from helm show chart output' {
+    It 'Returns the highest stable semver tag across GHCR pages' {
         $invoker = {
-            @('apiVersion: v2', 'name: test-chart', 'version: 4.5.6', 'description: test')
+            param($Uri, $Headers)
+            if ($Uri -like 'https://ghcr.io/token?*') {
+                return @{ token = 'test-token' }
+            }
+            if ($Uri -notmatch '&last=') {
+                $tags = @('v0.20.1', 'v0.9.0', 'v0.21.0-rc1') + @(1..97 | ForEach-Object { "0.0.0-$($_)" })
+                return @{ tags = $tags }
+            }
+            if ($Headers.Authorization -ne 'Bearer test-token') { throw 'Missing pull token' }
+            return @{ tags = @('v0.19.0', 'v0.18.0') }
         }
-        Get-HelmOciLatestVersion -Chart 'oci://registry/chart' -HelmInvoker $invoker | Should -Be '4.5.6'
+        Get-HelmOciLatestVersion -Chart 'oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler' `
+            -RequestInvoker $invoker | Should -Be 'v0.20.1'
     }
 
-    It 'Returns null when helm produces no output' {
-        $invoker = { }
-        Get-HelmOciLatestVersion -Chart 'oci://registry/chart' -HelmInvoker $invoker | Should -BeNullOrEmpty
+    It 'Throws when the anonymous pull token is unavailable' {
+        $invoker = { @{ token = $null } }
+        {
+            Get-HelmOciLatestVersion -Chart 'oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler' -RequestInvoker $invoker
+        } | Should -Throw '*did not provide a pull token*'
     }
 
-    It 'Returns null when output contains no version line' {
+    It 'Rejects registry responses without a tag list' {
         $invoker = {
-            @('apiVersion: v2', 'name: test-chart', 'description: test')
+            param($Uri)
+            if ($Uri -like 'https://ghcr.io/token?*') { return @{ token = 'test-token' } }
+            return @{ status = 'unavailable' }
         }
-        Get-HelmOciLatestVersion -Chart 'oci://registry/chart' -HelmInvoker $invoker | Should -BeNullOrEmpty
+        {
+            Get-HelmOciLatestVersion -Chart 'oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler' -RequestInvoker $invoker
+        } | Should -Throw '*did not return a tag list*'
+    }
+
+    It 'Rejects a chart source outside the supported public registry' {
+        { Get-HelmOciLatestVersion -Chart 'oci://example/chart' } |
+            Should -Throw 'Unsupported OCI chart source*'
+    }
+}
+
+Describe 'Get-BinaryCheckExitCode' -Tag 'Unit' {
+    It 'Exits successfully without a confirmed hash mismatch' {
+        Get-BinaryCheckExitCode -IntegrityFailures 0 | Should -Be 0
+    }
+
+    It 'Exits with integrity failure when a hash mismatch is confirmed' {
+        Get-BinaryCheckExitCode -IntegrityFailures 1 | Should -Be 1
+    }
+
+    It 'Exits with a distinct code for fatal setup or reporting errors' {
+        Get-BinaryCheckExitCode -IntegrityFailures 1 -Fatal | Should -Be 2
+    }
+}
+
+Describe 'Invoke-BinaryFreshnessCheck' -Tag 'Unit' {
+    BeforeAll {
+        $defaultsDir = Join-Path $script:FixturesRoot 'infrastructure/setup'
+        New-Item -ItemType Directory -Path $defaultsDir -Force | Out-Null
+        @'
+GPU_OPERATOR_VERSION="${GPU_OPERATOR_VERSION:-v1.0.0}"
+KAI_SCHEDULER_VERSION="${KAI_SCHEDULER_VERSION:-v0.20.1}"
+OSMO_CHART_VERSION="${OSMO_CHART_VERSION:-1.0.0}"
+HELM_REPO_GPU_OPERATOR="${HELM_REPO_GPU_OPERATOR:-https://example.com/gpu}"
+HELM_REPO_KAI="${HELM_REPO_KAI:-oci://ghcr.io/nvidia/kai-scheduler}"
+HELM_REPO_OSMO="${HELM_REPO_OSMO:-https://example.com/osmo}"
+'@ | Set-Content -Path (Join-Path $defaultsDir 'defaults.conf')
+    }
+
+    BeforeEach {
+        $script:HashStatuses = @('Match', 'Match')
+        $script:GpuLatest = 'v1.0.0'
+        $script:KaiLatest = 'v0.20.1'
+        $script:OsmoLatest = '1.0.0'
+        $script:SarifOutput = Join-Path $TestDrive 'check.sarif'
+
+        Mock Get-BinaryCheckDefinitions {
+            @(
+                @{ Name = 'Binary A'; Expected = ('a' * 64); Url = 'https://example/a.zip'; File = 'a.sh' }
+                @{ Name = 'Binary B'; Expected = ('b' * 64); Url = 'https://example/b.zip'; File = 'b.sh' }
+            )
+        }
+        Mock Invoke-HashCheck {
+            param($Name)
+            $status = if ($Name -eq 'Binary A') { $script:HashStatuses[0] } else { $script:HashStatuses[1] }
+            return @{ Status = $status; Message = "$Name $status" }
+        }
+        Mock Get-HelmRepoLatestVersion {
+            param($Chart)
+            if ($Chart -eq 'nvidia/gpu-operator') { return $script:GpuLatest }
+            return $script:OsmoLatest
+        }
+        Mock Get-HelmOciLatestVersion { $script:KaiLatest }
+        Mock Start-Sleep {}
+    }
+
+    It 'Produces clean SARIF with exit 0 when all checks match' {
+        $outcome = Invoke-BinaryFreshnessCheck -RepoRoot $script:FixturesRoot -SarifFile $script:SarifOutput -Repository 'owner/repo'
+        $outcome.IntegrityFailures | Should -Be 0
+        $outcome.VersionDrift | Should -Be 0
+        $outcome.LookupFailures | Should -Be 0
+        $outcome.Findings | Should -Be 0
+        $outcome.ExitCode | Should -Be 0
+        (Get-Content $script:SarifOutput -Raw | ConvertFrom-Json).runs[0].results.Count | Should -Be 0
+    }
+
+    It 'Fails only for a confirmed hash mismatch while retaining its SARIF warning' {
+        $script:HashStatuses = @('Mismatch', 'Match')
+        $outcome = Invoke-BinaryFreshnessCheck -RepoRoot $script:FixturesRoot -SarifFile $script:SarifOutput -Repository 'owner/repo'
+        $outcome.IntegrityFailures | Should -Be 1
+        $outcome.ExitCode | Should -Be 1
+        $sarif = Get-Content $script:SarifOutput -Raw | ConvertFrom-Json
+        $sarif.runs[0].results[0].ruleId | Should -Be 'binary-freshness/hash-mismatch'
+        $sarif.runs[0].results[0].level | Should -Be 'warning'
+    }
+
+    It 'Keeps chart version drift advisory with exit 0' {
+        $script:GpuLatest = 'v1.1.0'
+        $outcome = Invoke-BinaryFreshnessCheck -RepoRoot $script:FixturesRoot -SarifFile $script:SarifOutput -Repository 'owner/repo'
+        $outcome.VersionDrift | Should -Be 1
+        $outcome.ExitCode | Should -Be 0
+        (Get-Content $script:SarifOutput -Raw | ConvertFrom-Json).runs[0].results[0].ruleId |
+            Should -Be 'binary-freshness/version-drift'
+    }
+
+    It 'Reports failed binary and OCI lookups without a false integrity exit' {
+        $script:HashStatuses = @('DownloadFailed', 'Match')
+        $script:KaiLatest = $null
+        $outcome = Invoke-BinaryFreshnessCheck -RepoRoot $script:FixturesRoot -SarifFile $script:SarifOutput -Repository 'owner/repo'
+        $outcome.LookupFailures | Should -Be 2
+        $outcome.IntegrityFailures | Should -Be 0
+        $outcome.ExitCode | Should -Be 0
+        $results = (Get-Content $script:SarifOutput -Raw | ConvertFrom-Json).runs[0].results
+        @($results | Where-Object level -eq 'warning').Count | Should -Be 2
+        $results.ruleId | Should -Contain 'binary-freshness/download-failure'
+        $results.ruleId | Should -Contain 'binary-freshness/lookup-failure'
+    }
+
+    It 'Gates mixed findings on the confirmed integrity mismatch only' {
+        $script:HashStatuses = @('Mismatch', 'DownloadFailed')
+        $script:GpuLatest = 'v1.1.0'
+        $script:KaiLatest = $null
+        $script:OsmoLatest = '1.1.0'
+        $outcome = Invoke-BinaryFreshnessCheck -RepoRoot $script:FixturesRoot -SarifFile $script:SarifOutput -Repository 'owner/repo'
+        $outcome.IntegrityFailures | Should -Be 1
+        $outcome.VersionDrift | Should -Be 2
+        $outcome.LookupFailures | Should -Be 2
+        $outcome.Findings | Should -Be 5
+        $outcome.ExitCode | Should -Be 1
+        (Get-Content $script:SarifOutput -Raw | ConvertFrom-Json).runs[0].results.Count | Should -Be 5
+    }
+
+    It 'Rejects a missing pin instead of reporting a hash mismatch' {
+        Mock Get-BinaryCheckDefinitions {
+            @(@{ Name = 'Binary A'; Expected = ''; Url = 'https://example/a.zip'; File = 'a.sh' })
+        }
+        {
+            Invoke-BinaryFreshnessCheck -RepoRoot $script:FixturesRoot -SarifFile $script:SarifOutput -Repository 'owner/repo'
+        } | Should -Throw 'Invalid SHA-256 pin*'
     }
 }
