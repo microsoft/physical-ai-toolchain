@@ -54,7 +54,7 @@ environment:
 command: >-
   bash -c '
   set -euo pipefail;
-  pip install --quiet --break-system-packages uv==0.7.12;
+  pip install --quiet --break-system-packages uv==0.12.8;
   uv python install 3.12;
   uv venv --python 3.12 /opt/register-venv;
   source /opt/register-venv/bin/activate;

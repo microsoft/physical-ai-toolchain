@@ -16,6 +16,7 @@ Describe 'Get-PinnedToolVersionAssignments' -Tag 'Unit' {
             ShellVariable      = 'UV_VERSION'
             PowerShellVariable = 'UvVersion'
             RepoRoot           = $script:RepoRoot
+            PythonPackage      = 'uv'
         }
     }
 
@@ -47,6 +48,84 @@ $UvVersion = '0.12.8'
         $pins.Count | Should -Be 1
         $pins[0].Version | Should -Be '0.12.8'
     }
+
+    It 'Extracts version assignments from pip install command in .sh file' {
+    @'
+pip install --quiet uv==0.12.8
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'python.sh')
+
+    $pins = Get-PinnedToolVersionAssignments @script:Parameters -Files @('python.sh')
+
+    $pins.Count | Should -Be 1
+    $pins[0].Version | Should -Be '0.12.8'
+    $pins[0].File | Should -Be 'python.sh'
+}
+
+    It 'Extracts version assignments from pip install command when multiple packages exist in .sh file' {
+        @'
+pip install requests uv==0.12.8 flask
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'python.sh')
+        $pins = Get-PinnedToolVersionAssignments @script:Parameters -Files @('python.sh')
+
+        $pins.Count | Should -Be 1
+        $pins[0].Version | Should -Be '0.12.8'
+        $pins[0].File | Should -Be 'python.sh'
+    }
+
+    It 'Ignores unrelated packages in .sh file' {
+        @'
+pip install requests flask
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'python.sh')
+        $pins = Get-PinnedToolVersionAssignments @script:Parameters -Files @('python.sh')
+
+        $pins.Count | Should -Be 0
+    }
+
+    It 'Throws when pip install uv is unpinned in .sh file' {
+    @'
+pip install uv
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'python.sh')
+
+    {
+        Get-PinnedToolVersionAssignments @script:Parameters -Files @('python.sh')
+    } | Should -Throw "*uv*"
+}
+
+    It 'Throws when pip install uv is dynamically assigned in .sh file' {
+    @'
+pip install uv==$UV_VERSION
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'python.sh')
+
+    {
+        Get-PinnedToolVersionAssignments @script:Parameters -Files @('python.sh')
+    } | Should -Throw "*uv*"
+}
+
+    It 'Extracts version assignments from pip install command in a .yml file' {
+    @'
+command: >-
+  pip install --quiet uv==0.12.8
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'python.yml')
+
+    $pins = Get-PinnedToolVersionAssignments @script:Parameters -Files @('python.yml')
+
+    $pins.Count | Should -Be 1
+    $pins[0].Version | Should -Be '0.12.8'
+    $pins[0].File | Should -Be 'python.yml'
+}
+
+    It 'Extracts version assignments from pip install command in a .yaml file' {
+    @'
+command: >-
+  pip install --quiet uv==0.12.8
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'python.yaml')
+
+    $pins = Get-PinnedToolVersionAssignments @script:Parameters -Files @('python.yaml')
+
+    $pins.Count | Should -Be 1
+    $pins[0].Version | Should -Be '0.12.8'
+    $pins[0].File | Should -Be 'python.yaml'
+}
 
     It 'Extracts assignments after JSON command separators' {
         @'
@@ -516,7 +595,7 @@ Describe 'Get-PinCandidateFiles' -Tag 'Unit' {
     It 'Returns every supported tracked source extension' {
         $repoRoot = Join-Path $TestDrive 'extensions'
         New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null
-        foreach ($file in @('pin.sh', 'pin.ps1', 'pin.json', 'pin.jsonc', 'ignored.yml')) {
+        foreach ($file in @('Dockerfile', 'pin.sh', 'pin.ps1', 'pin.json', 'pin.jsonc', 'pin.yaml', 'pin.yml')) {
             'content' | Set-Content -LiteralPath (Join-Path $repoRoot $file)
         }
         git -C $repoRoot init --quiet
@@ -524,7 +603,16 @@ Describe 'Get-PinCandidateFiles' -Tag 'Unit' {
 
         $files = Get-PinCandidateFiles -RepoRoot $repoRoot
 
-        @($files | Sort-Object) | Should -Be @('pin.json', 'pin.jsonc', 'pin.ps1', 'pin.sh')
+        @($files | Sort-Object) | Should -Be @(
+            'Dockerfile'
+            'pin.json'
+            'pin.jsonc'
+            'pin.ps1'
+            'pin.sh'
+            'pin.yaml'
+            'pin.yml'
+        )
+
     }
 
     It 'Throws when no candidate files are tracked' {
@@ -557,7 +645,8 @@ Describe 'Repository pin discovery' -Tag 'Integration' {
             -ShellVariable 'UV_VERSION' `
             -PowerShellVariable 'UvVersion' `
             -Files $files `
-            -RepoRoot $repoRoot
+            -RepoRoot $repoRoot `
+            -PythonPackage 'uv'
 
         @($pins.File) | Should -Contain 'setup-dev.ps1'
         @($pins.File) | Should -Contain 'shared/ci/smoke-import.sh'

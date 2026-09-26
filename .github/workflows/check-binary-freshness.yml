@@ -47,6 +47,7 @@ jobs:
                   Repo               = 'astral-sh/uv'
                   ShellVariable      = 'UV_VERSION'
                   PowerShellVariable = 'UvVersion'
+                  PythonPackage      = 'uv'
               }
               @{
                   Name               = 'terraform-docs'
@@ -82,6 +83,7 @@ jobs:
                       -ShellVariable $tool.ShellVariable `
                       -PowerShellVariable $tool.PowerShellVariable `
                       -Files $candidateFiles `
+                      -PythonPackage $tool.PythonPackage `
                       -RepoRoot $PWD
               )
               if ($assignments.Count -eq 0) {

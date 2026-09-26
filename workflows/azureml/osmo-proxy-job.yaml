@@ -37,7 +37,7 @@ resources:
   shm_size: 512m
 
 command: >-
-  pip install --quiet uv &&
+  pip install --quiet uv==0.12.8 &&
   uv --directory workflows/azureml/osmo-proxy export --frozen --no-hashes --no-emit-project |
   uv pip install --no-deps --quiet --system -r /dev/stdin &&
   python workflows/azureml/osmo-proxy/osmo_proxy.py
