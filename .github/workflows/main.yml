@@ -266,6 +266,7 @@ jobs:
     uses: ./.github/workflows/terraform-validation.yml
     with:
       soft-fail: false
+      changed-files-only: false
     permissions:
       contents: read
 
@@ -276,6 +277,7 @@ jobs:
     with:
       soft-fail: true
       code-coverage: true
+      changed-files-only: false
     permissions:
       contents: read
       id-token: write
@@ -286,6 +288,7 @@ jobs:
     uses: ./.github/workflows/go-lint.yml
     with:
       soft-fail: false
+      changed-files-only: false
     permissions:
       contents: read
 
@@ -296,6 +299,7 @@ jobs:
     with:
       soft-fail: false
       code-coverage: true
+      changed-files-only: false
     permissions:
       contents: read
       id-token: write
@@ -306,6 +310,7 @@ jobs:
     uses: ./.github/workflows/shellcheck.yml
     with:
       soft-fail: false
+      changed-files-only: false
     permissions:
       contents: read
 
@@ -315,6 +320,7 @@ jobs:
     uses: ./.github/workflows/terraform-docs-check.yml
     with:
       soft-fail: true
+      changed-files-only: false
     permissions:
       contents: read
   # CodeQL security analysis
@@ -340,8 +346,11 @@ jobs:
     permissions:
       contents: read
 
-  # Automated release PR management via release-please
-  release-please:
+  main-validation-summary:
+    name: main-validation-summary
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs:
       - workflow-refs-check
       - spell-check
@@ -379,6 +388,50 @@ jobs:
       - terraform-docs-check
       - codeql-analysis
       - smoke
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.14.1'
+      - name: Download execution receipts
+        if: always()
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          pattern: ci-outcome-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .ci-validation-receipts
+          merge-multiple: false
+      - name: Record workflow cancellation
+        id: cancellation
+        if: cancelled()
+        shell: bash
+        run: printf 'cancelled=true\n' >> "$GITHUB_OUTPUT"
+      - name: Evaluate needed job results
+        if: always()
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          CI_OWNER: main
+          CI_CANCELLED: ${{ steps.cancellation.outputs.cancelled || 'false' }}
+          BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          CI_RECEIPTS_DIRECTORY: .ci-validation-receipts
+        run: node scripts/ci/evaluate-checks.mjs
+      - name: Upload validation summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: main-validation-summary-${{ github.run_attempt }}
+          path: logs/ci-validation-summary.*
+          if-no-files-found: error
+
+  # Automated release PR management follows verified main execution.
+  release-please:
+    needs: main-validation-summary
     name: Release Please
     runs-on: ubuntu-latest
     concurrency:

@@ -8,6 +8,23 @@ on:
         required: false
         default: false
         type: boolean
+    outputs:
+      work-status:
+        value: ${{ jobs.pytest.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.pytest.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.pytest.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.pytest.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.pytest.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.pytest.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.pytest.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.pytest.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -16,6 +33,16 @@ jobs:
   pytest:
     name: Evaluation Pytest
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     defaults:
       run:
         working-directory: evaluation
@@ -39,10 +66,12 @@ jobs:
           version: '0.12.8'
 
       - name: Install dependencies
+        id: install
         run: uv sync --frozen --only-group dev
 
       - name: Run pytest
-        run: uv run --frozen --only-group dev pytest -v
+        id: test
+        run: uv run --frozen --only-group dev pytest -v --junitxml=logs/evaluation-pytest-results.xml
 
       - name: Upload coverage.xml artifact
         if: ${{ inputs.code-coverage && !cancelled() }}
@@ -64,3 +93,13 @@ jobs:
           verbose: true
           flags: pytest-evaluation
           name: evaluation-pytest-coverage
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: evaluation-pytests
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["install","test"]'
+          reports: '[{"path":"evaluation/logs/evaluation-pytest-results.xml","kind":"junit"}]'

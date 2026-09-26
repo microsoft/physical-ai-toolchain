@@ -377,7 +377,7 @@ function Get-PyprojectSpecViolation {
         }
 
         # Pinned means exactly ==version (may include extras like [extra])
-        if ($versionSpec -notmatch '^(\[[\w,]+\])?\s*==\s*\S+') {
+        if ($versionSpec -notmatch '^(\[[\w.,-]+\])?\s*==\s*\S+') {
             $violation.Version = $versionSpec
             $violation.Description = "Unpinned pip dependency in $SectionName"
             $violations += $violation
@@ -515,7 +515,7 @@ function Get-PipDependencyViolations {
                 }
 
                 # Pinned means ==version
-                $isPinned = $versionSpec -match '^(\[[\w,]+\])?\s*==\s*\S+'
+                $isPinned = $versionSpec -match '^(\[[\w.,-]+\])?\s*==\s*\S+'
 
                 if (-not $isPinned) {
                     $violation = [DependencyViolation]::new()
@@ -1467,12 +1467,12 @@ function Get-NpmDependencyViolations {
 
     # overrides / resolutions may nest arbitrarily; walk them recursively
     foreach ($section in @('overrides', 'resolutions')) {
-        $node = $packageJson.$section
-        if ($null -eq $node) {
+        $sectionProperty = $packageJson.PSObject.Properties[$section]
+        if ($null -eq $sectionProperty) {
             continue
         }
 
-        $violations += Get-NpmOverrideViolation -Node $node -Section $section -Type $type -RelativePath $relativePath
+        $violations += Get-NpmOverrideViolation -Node $sectionProperty.Value -Section $section -Type $type -RelativePath $relativePath
     }
 
     return $violations

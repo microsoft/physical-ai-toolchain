@@ -56,6 +56,7 @@ fi
 
 [[ ${#images[@]} -gt 0 ]] || fatal "No images given; see --help"
 
+# pinning-ignore: registry health probe; no downloaded artifact
 curl --silent --fail "http://$REGISTRY_HOST/v2/" > /dev/null \
   || fatal "No registry on http://$REGISTRY_HOST/v2/; run registry/registry-up.sh first"
 

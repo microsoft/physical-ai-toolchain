@@ -9,6 +9,23 @@ name: Pytest Data Management Tools
         required: false
         default: false
         type: boolean
+    outputs:
+      work-status:
+        value: ${{ jobs.pytest-dm-tools.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.pytest-dm-tools.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.pytest-dm-tools.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.pytest-dm-tools.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.pytest-dm-tools.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.pytest-dm-tools.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.pytest-dm-tools.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.pytest-dm-tools.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -17,6 +34,16 @@ jobs:
   pytest-dm-tools:
     name: Pytest Data Management Tools
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
       id-token: write
@@ -37,11 +64,14 @@ jobs:
           version: '0.12.8'
 
       - name: Install dependencies
+        id: install
         run: uv sync --frozen --group dev
 
       - name: Run pytest
+        id: test
         run: >-
           uv run --frozen pytest -o addopts="" data-management/tools/tests -v
+          --junitxml=logs/pytest-dm-tools-results.xml
           --cov=data-management/tools
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-dm-tools.xml
@@ -67,3 +97,13 @@ jobs:
           verbose: true
           flags: pytest-dm-tools
           name: pytest-dm-tools-coverage
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: pytest-dm-tools
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["install","test"]'
+          reports: '[{"path":"logs/pytest-dm-tools-results.xml","kind":"junit"}]'

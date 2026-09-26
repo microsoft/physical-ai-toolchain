@@ -8,6 +8,31 @@ on:
         required: false
         default: false
         type: boolean
+    outputs:
+      work-status:
+        description: Execution status
+        value: ${{ jobs.fuzz-regression.outputs.work-status }}
+      expected-count:
+        description: Selected operation count
+        value: ${{ jobs.fuzz-regression.outputs.expected-count }}
+      executed-count:
+        description: Executed operation count
+        value: ${{ jobs.fuzz-regression.outputs.executed-count }}
+      artifact-id:
+        description: Execution evidence artifact ID
+        value: ${{ jobs.fuzz-regression.outputs.artifact-id }}
+      artifact-url:
+        description: Execution evidence artifact URL
+        value: ${{ jobs.fuzz-regression.outputs.artifact-url }}
+      test-count:
+        description: Executed test case count
+        value: ${{ jobs.fuzz-regression.outputs.test-count }}
+      skipped-count:
+        description: Skipped operation and test case count
+        value: ${{ jobs.fuzz-regression.outputs.skipped-count }}
+      first-failure:
+        description: First failing operation
+        value: ${{ jobs.fuzz-regression.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -16,9 +41,19 @@ jobs:
   fuzz-regression:
     name: Fuzz Regression
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
+    outputs:
+      work-status: ${{ steps.evidence.outputs.work-status }}
+      expected-count: ${{ steps.evidence.outputs.expected-count }}
+      executed-count: ${{ steps.evidence.outputs.executed-count }}
+      artifact-id: ${{ steps.evidence.outputs.artifact-id }}
+      artifact-url: ${{ steps.evidence.outputs.artifact-url }}
+      test-count: ${{ steps.evidence.outputs.test-count }}
+      skipped-count: ${{ steps.evidence.outputs.skipped-count }}
+      first-failure: ${{ steps.evidence.outputs.first-failure }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,7 +74,8 @@ jobs:
         run: uv sync --frozen --group dev
 
       - name: Run fuzz regression tests
-        run: uv run --frozen pytest -o addopts="" tests/fuzz_harness.py -v --cov=tests --cov=data-management/viewer/backend/src --cov=training --cov-report=xml:logs/coverage-fuzz.xml --cov-report=term-missing
+        id: test
+        run: uv run --frozen pytest -o addopts="" tests/fuzz_harness.py -v --junitxml=logs/pytest-fuzz-results.xml --cov=tests --cov=data-management/viewer/backend/src --cov=training --cov-report=xml:logs/coverage-fuzz.xml --cov-report=term-missing
 
       - name: Upload coverage.xml artifact
         if: ${{ inputs.code-coverage && always() }}
@@ -61,3 +97,15 @@ jobs:
           verbose: true
           flags: pytest-fuzz
           name: pytest-fuzz-coverage
+
+      - name: Publish execution evidence
+        id: evidence
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: fuzz-regression-tests
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["test"]'
+          reports: '[{"path":"logs/pytest-fuzz-results.xml","kind":"junit"}]'
+          selection-reason: Caller selected fuzz regression
+          tools: '["node", "git", "python", "uv"]'

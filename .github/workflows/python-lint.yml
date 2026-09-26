@@ -8,6 +8,15 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.ruff.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.ruff.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.ruff.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.ruff.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.ruff.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.ruff.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.ruff.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.ruff.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -20,6 +29,16 @@ jobs:
   ruff:
     name: Ruff Lint and Format Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -83,3 +102,14 @@ jobs:
         run: |
           Write-Output "::error::Python lint violations detected. Run 'uvx --with ruff==0.15.21 ruff check --fix .', 'uvx --with ruff==0.15.21 ruff format .', and 'npm run lint:hfpins' locally."
           exit 1
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: python-lint
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["ruff-check","ruff-format","hf-pins"]'
+          reports: '[{"path":"ruff-check-results.txt","kind":"file"},{"path":"ruff-format-results.txt","kind":"file"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

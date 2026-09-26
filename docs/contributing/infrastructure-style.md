@@ -364,3 +364,7 @@ Variable descriptions serve as the primary documentation source. Write descripti
 * [Security Review](security-review.md) - Security checklist and patterns
 * [Shell Scripts Instructions](https://github.com/microsoft/physical-ai-toolchain/blob/main/.github/instructions/shell-scripts.instructions.md) - Detailed shell script guidance
 * [Terraform Test Reference](https://developer.hashicorp.com/terraform/language/tests) - HashiCorp `terraform test` documentation
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

@@ -9,6 +9,23 @@ name: Pytest Inference
         required: false
         default: false
         type: boolean
+    outputs:
+      work-status:
+        value: ${{ jobs.pytest-inference.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.pytest-inference.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.pytest-inference.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.pytest-inference.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.pytest-inference.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.pytest-inference.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.pytest-inference.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.pytest-inference.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -17,6 +34,16 @@ jobs:
   pytest-inference:
     name: Pytest Inference
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
       id-token: write
@@ -37,11 +64,14 @@ jobs:
           version: '0.12.8'
 
       - name: Install dependencies
+        id: install
         run: uv sync --frozen --group dev
 
       - name: Run pytest
+        id: test
         run: >-
           uv run --frozen pytest -o addopts="" fleet-deployment/inference/tests -v
+          --junitxml=logs/pytest-inference-results.xml
           --cov=fleet-deployment/inference
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-inference.xml
@@ -67,3 +97,13 @@ jobs:
           verbose: true
           flags: pytest-inference
           name: pytest-inference-coverage
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: pytest-inference
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["install","test"]'
+          reports: '[{"path":"logs/pytest-inference-results.xml","kind":"junit"}]'

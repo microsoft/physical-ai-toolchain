@@ -78,3 +78,7 @@ The pipeline submitter selects the three-step template by default. `--with-regis
 | Azure context     | Set `subscription_id`, `resource_group`, and `workspace_name` through script options or environment variables.                                                                                                                                                                                             |
 | Direct submission | Register the referenced environment asset first. An `Environment asset not found` error means the pinned version has not been registered; run the submission script to register and verify it. The digest-derived version correlates the asset with an image but does not make Azure ML verify that image. |
 | Related reference | See [Reference index](README.md) for adjacent script and artifact guides.                                                                                                                                                                                                                                  |
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

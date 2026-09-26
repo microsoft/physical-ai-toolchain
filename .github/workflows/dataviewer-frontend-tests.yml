@@ -8,6 +8,23 @@ on:
         required: false
         default: false
         type: boolean
+    outputs:
+      work-status:
+        value: ${{ jobs.frontend-checks.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.frontend-checks.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.frontend-checks.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.frontend-checks.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.frontend-checks.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.frontend-checks.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.frontend-checks.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.frontend-checks.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -16,6 +33,16 @@ jobs:
   frontend-checks:
     name: Lint, Type-check, Test and Build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     defaults:
       run:
         working-directory: data-management/viewer/frontend
@@ -36,27 +63,35 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
+        id: install
         working-directory: .
         run: npm ci
 
       - name: ESLint
+        id: lint
         run: npm run lint
 
       - name: Type check
+        id: type-check
         run: npm run type-check
 
       - name: Format check
+        id: format
         run: npm run format
 
       - name: Unit tests
-        if: ${{ !inputs.code-coverage }}
-        run: npm run test
-
-      - name: Unit tests with coverage
-        if: ${{ inputs.code-coverage }}
-        run: npm run test:coverage
+        id: test
+        env:
+          CODE_COVERAGE: ${{ inputs.code-coverage }}
+        run: |
+          if [[ "$CODE_COVERAGE" == "true" ]]; then
+            npm run test:coverage -- --outputFile.junit=../../../logs/dataviewer-frontend-results.xml
+          else
+            npm run test -- --outputFile.junit=../../../logs/dataviewer-frontend-results.xml
+          fi
 
       - name: Build
+        id: build
         run: npm run build
 
       - name: Upload coverage artifact
@@ -77,3 +112,13 @@ jobs:
           verbose: true
           flags: vitest,vitest-components,vitest-features,vitest-lib,vitest-state,vitest-app
           name: vitest-coverage
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: dataviewer-frontend-tests
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["install","lint","type-check","format","test","build"]'
+          reports: '[{"path":"logs/dataviewer-frontend-results.xml","kind":"junit"}]'

@@ -2,6 +2,15 @@ name: Workflow Refs Check
 
 on:
   workflow_call:
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.workflow-refs-check.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.workflow-refs-check.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.workflow-refs-check.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.workflow-refs-check.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.workflow-refs-check.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.workflow-refs-check.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.workflow-refs-check.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.workflow-refs-check.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -10,6 +19,16 @@ jobs:
   workflow-refs-check:
     name: Workflow Refs Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -22,7 +41,18 @@ jobs:
         uses: ./.github/actions/setup-node-deps
 
       - name: Validate CI workflow contracts
+        id: workflow-contract
         run: npm run lint:ci
 
       - name: Test CI workflow contracts
+        id: contract-tests
         run: npm run test:ci
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: workflow-refs-check
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["workflow-contract","contract-tests"]'

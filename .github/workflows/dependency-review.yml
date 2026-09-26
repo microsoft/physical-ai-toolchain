@@ -2,6 +2,15 @@ name: Dependency Review
 
 on:
   workflow_call:
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.dependency-review.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.dependency-review.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.dependency-review.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.dependency-review.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.dependency-review.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.dependency-review.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.dependency-review.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.dependency-review.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -11,6 +20,16 @@ jobs:
   dependency-review:
     name: Review Dependencies
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
       pull-requests: write
@@ -53,6 +72,7 @@ jobs:
       # Remove after adopting a LeRobot release compatible with transformers>=5.10.0
       # and regenerating the SO-101 uv.lock with the patched transformers release.
       - name: Enforce path-scoped vulnerability exceptions
+        id: review
         if: always()
         env:
           DEPENDENCY_REVIEW_OUTCOME: ${{ steps.dependency-review.outcome }}
@@ -65,4 +85,17 @@ jobs:
         shell: bash
         run: |
           set -o errexit -o nounset -o pipefail
+          case "$DEPENDENCY_REVIEW_OUTCOME" in
+            success|failure) ;;
+            *) echo "::error::Dependency review did not complete"; exit 1 ;;
+          esac
           python3 scripts/security/check_dependency_review_exception.py
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: dependency-review
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["review"]'

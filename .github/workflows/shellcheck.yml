@@ -13,6 +13,15 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.shellcheck.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.shellcheck.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.shellcheck.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.shellcheck.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.shellcheck.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.shellcheck.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.shellcheck.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.shellcheck.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -25,6 +34,16 @@ jobs:
   shellcheck:
     name: ShellCheck
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -57,4 +76,15 @@ jobs:
         with:
           name: shellcheck-results
           path: logs/shellcheck-results.json
-          if-no-files-found: ignore
+          if-no-files-found: error
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: shellcheck
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["shellcheck"]'
+          reports: '[{"path":"logs/shellcheck-results.json","kind":"json"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

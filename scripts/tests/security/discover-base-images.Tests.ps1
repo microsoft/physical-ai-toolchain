@@ -16,6 +16,21 @@ BeforeDiscovery {
 
 BeforeAll {
     $script:DiscoverScript = (Resolve-Path (Join-Path $PSScriptRoot '../../security/discover-base-images.sh')).Path
+    $script:BashPath = (Get-Command bash -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    if ($IsWindows) {
+        # Git for Windows Bash accepts the native paths used to create fixture repositories.
+        $gitDirectory = Split-Path (Get-Command git -CommandType Application -ErrorAction Stop).Source -Parent
+        $gitRoot = Split-Path $gitDirectory -Parent
+        $candidates = @(
+            (Join-Path $gitRoot 'bin/bash.exe'),
+            (Join-Path (Split-Path $gitRoot -Parent) 'bin/bash.exe')
+        )
+        $nativeBash = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+        if (-not $nativeBash) {
+            throw 'Discovery tests require Bash from the Git for Windows installation.'
+        }
+        $script:BashPath = $nativeBash
+    }
 
     $script:DigestA = 'a' * 64
     $script:DigestB = 'b' * 64
@@ -24,9 +39,12 @@ BeforeAll {
 
     # Create a git work tree seeded with Dockerfiles and return the extracted refs.
     function Invoke-Discover {
-        param([Parameter(Mandatory)][hashtable]$Files)
+        param(
+            [Parameter(Mandatory)][hashtable]$Files,
+            [string]$RemoveTrackedFile
+        )
 
-        $repo = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString('N'))
+        $repo = Join-Path $TestDrive "discovery fixture $([System.Guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $repo -Force | Out-Null
         try {
             foreach ($relative in $Files.Keys) {
@@ -36,7 +54,10 @@ BeforeAll {
             }
             & git -C $repo init -q
             & git -C $repo add -A
-            $out = & bash -c "cd '$repo' && bash '$script:DiscoverScript'" 2>$null
+            if ($RemoveTrackedFile) {
+                Remove-Item (Join-Path $repo $RemoveTrackedFile) -Force
+            }
+            $out = & $script:BashPath -c 'cd "$1" && bash "$2"' -- $repo $script:DiscoverScript 2>$null
             $script:LastDiscoverExit = $LASTEXITCODE
             @($out | Where-Object { $_ -ne '' })
         }
@@ -108,6 +129,20 @@ from busybox@sha256:$script:DigestD
             $refs = Invoke-Discover -Files @{ 'README.md' = '# no dockerfiles here' }
             $script:LastDiscoverExit | Should -Be 0
             $refs.Count | Should -Be 0
+        }
+    }
+
+    Context 'discovery failures' {
+        It 'Fails rather than returning partial results when a tracked Dockerfile cannot be read' {
+            $line = "FROM python:3.12-slim@sha256:$script:DigestA`n"
+            Invoke-Discover -Files @{ 'Dockerfile' = $line; 'other.Dockerfile' = $line } `
+                -RemoveTrackedFile 'other.Dockerfile' | Out-Null
+            $script:LastDiscoverExit | Should -Not -Be 0
+        }
+
+        It 'Fails when Git cannot enumerate tracked files' {
+            & $script:BashPath -c 'GIT_DIR="$1" bash "$2"' -- (Join-Path $TestDrive 'missing.git') $script:DiscoverScript 2>$null | Out-Null
+            $LASTEXITCODE | Should -Not -Be 0
         }
     }
 }

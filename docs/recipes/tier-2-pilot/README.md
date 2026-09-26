@@ -1,4 +1,7 @@
-# T2 — Pilot: Cloud Training, Registry, and Shared Catalogs (Recommended)
+---
+title: "T2 — Pilot: Cloud Training, Registry, and Shared Catalogs (Recommended)"
+description: Adopt AzureML cloud training, a model registry, and shared MLflow for a single-site robotics team with manual deployment.
+---
 
 The **recommended production** path. This is the tier where cloud training genuinely becomes the
 *default* rather than an option: one site, several robots, real training scale, and a team
@@ -90,3 +93,7 @@ tractable at one site with several robots. Declarative GitOps deployment is the
 - [Architecture: T2 — Pilot](../../contributing/architecture.md#t2--pilot)
 - [Getting Started](../../getting-started/README.md) · [Training docs](../../training/README.md)
 - [T1 — Lab](../tier-1-lab/README.md) · [T3 — Production](../tier-3-production/README.md)
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

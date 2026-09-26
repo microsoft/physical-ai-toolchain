@@ -89,6 +89,10 @@ function Invoke-PSScriptAnalyzerCore {
     }
 
     Write-Host "Found $(@($filesToAnalyze).Count) file(s) to analyze"
+    if (-not $ChangedFilesOnly -and @($filesToAnalyze).Count -eq 0) {
+        Write-CIAnnotation -Level Error -Message 'Full PowerShell validation has no files to analyze.'
+        return 1
+    }
     if (@($filesToAnalyze).Count -gt 0) {
         $filesToAnalyze | ForEach-Object { Write-Host "  - $_" }
     }
@@ -150,7 +154,7 @@ function Invoke-PSScriptAnalyzerCore {
             totalFiles   = @($filesToAnalyze).Count
             errorCount   = $errorCount
             warningCount = $warningCount
-            results      = $allResults | ForEach-Object {
+            results      = @($allResults | ForEach-Object {
                 @{
                     file     = $_.ScriptPath
                     line     = $_.Line
@@ -159,7 +163,7 @@ function Invoke-PSScriptAnalyzerCore {
                     rule     = $_.RuleName
                     message  = $_.Message
                 }
-            }
+            })
         }
 
         $exportData | ConvertTo-Json -Depth 10 | Set-Content -Path $OutputPath -Encoding UTF8

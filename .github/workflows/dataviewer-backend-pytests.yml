@@ -8,6 +8,23 @@ on:
         required: false
         default: false
         type: boolean
+    outputs:
+      work-status:
+        value: ${{ jobs.pytest-dataviewer.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.pytest-dataviewer.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.pytest-dataviewer.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.pytest-dataviewer.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.pytest-dataviewer.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.pytest-dataviewer.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.pytest-dataviewer.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.pytest-dataviewer.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -16,6 +33,16 @@ jobs:
   pytest-dataviewer:
     name: Pytest Dataviewer Backend
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     defaults:
       run:
         working-directory: data-management/viewer/backend
@@ -39,14 +66,20 @@ jobs:
           version: '0.12.8'
 
       - name: Install system dependencies
+        id: system-dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Install dependencies
+        id: install
         run: uv sync --frozen --extra dev --extra analysis --extra hdf5 --extra export --extra auth
 
       - name: Run pytest with coverage
-        id: pytest
-        run: uv run --no-sync pytest -v --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml --cov-report=term-missing --cov-fail-under=90
+        id: test
+        run: >-
+          uv run --no-sync pytest -v
+          --junitxml=../../../logs/pytest-dataviewer-results.xml
+          --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml
+          --cov-report=term-missing --cov-fail-under=90
 
       - name: Validate coverage report
         id: coverage_report
@@ -56,7 +89,7 @@ jobs:
       - name: Upload coverage.xml artifact
         id: coverage_upload
         if: ${{ inputs.code-coverage && always() }}
-        continue-on-error: ${{ job.status == 'failure' || steps.pytest.outcome != 'success' || steps.coverage_report.outcome == 'failure' }}
+        continue-on-error: ${{ job.status == 'failure' || steps.test.outcome != 'success' || steps.coverage_report.outcome == 'failure' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pytest-dataviewer-coverage-xml
@@ -65,7 +98,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: ${{ inputs.code-coverage && always() }}
-        continue-on-error: ${{ job.status == 'failure' || steps.pytest.outcome != 'success' || steps.coverage_report.outcome == 'failure' || steps.coverage_upload.outcome == 'failure' }}
+        continue-on-error: ${{ job.status == 'failure' || steps.test.outcome != 'success' || steps.coverage_report.outcome == 'failure' || steps.coverage_upload.outcome == 'failure' }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: logs/coverage-dataviewer.xml
@@ -74,3 +107,13 @@ jobs:
           verbose: true
           flags: pytest-dataviewer
           name: pytest-dataviewer-coverage
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: dataviewer-backend-pytests
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["system-dependencies","install","test"]'
+          reports: '[{"path":"logs/pytest-dataviewer-results.xml","kind":"junit"}]'

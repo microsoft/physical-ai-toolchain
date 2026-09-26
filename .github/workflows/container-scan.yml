@@ -6,8 +6,7 @@ name: Container Scan
 # Dockerfiles and scans each one. Results upload to the Security tab as SARIF.
 #
 # soft-fail=false (PR gate): fail on fixable vulnerabilities at `severity`.
-# soft-fail=true  (scheduled re-scan): never fail; surface newly-disclosed CVEs
-# in already-merged base images via the Security tab.
+# soft-fail=true: findings are advisory; scanner and evidence failures still fail.
 
 on:
   workflow_call:
@@ -20,6 +19,15 @@ on:
         description: Comma-separated Trivy severities that gate the job.
         type: string
         default: 'CRITICAL,HIGH'
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.aggregate.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.aggregate.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.aggregate.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.aggregate.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.aggregate.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.aggregate.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.aggregate.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.aggregate.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -30,11 +38,14 @@ jobs:
   discover:
     name: Discover Base Images
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     outputs:
       images: ${{ steps.extract.outputs.images }}
       count: ${{ steps.extract.outputs.count }}
+      shards: ${{ steps.extract.outputs.shards }}
+      targets: ${{ steps.extract.outputs.targets }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -51,49 +62,70 @@ jobs:
           fi
           echo "Discovered base images:"
           echo "$images"
-          count=$(printf '%s' "$images" | grep -c . || true)
-          if [[ -n "$images" ]]; then
-            matrix=$(printf '%s\n' "$images" | jq -R . | jq -sc .)
-          else
-            matrix='[]'
+          if [[ -z "$images" ]]; then
+            echo "::error::Selected container scan has no digest-pinned images"
+            exit 1
           fi
+          matrix='[]'
+          while IFS= read -r image; do
+            shard=$(bash scripts/security/image-slug.sh "$image")
+            matrix=$(jq -c --arg image "$image" --arg shard "$shard" '. + [{image:$image,shard:$shard}]' <<< "$matrix")
+          done <<< "$images"
+          count=$(jq 'length' <<< "$matrix")
+          shards=$(jq -c '[.[].shard]' <<< "$matrix")
+          targets=$(jq -c 'map({key:.shard,value:.image}) | from_entries' <<< "$matrix")
+          if [[ "$(jq 'length' <<< "$targets")" != "$count" ]]; then
+            echo "::error::Container shard identities are not unique"
+            exit 1
+          fi
+          mkdir -p logs/container
+          jq --argjson images "$matrix" '{summary:{overall_passed:true,images_count:($images|length)},results:$images}' \
+            <<< '{}' > logs/container/manifest.json
           {
             echo "images=$matrix"
             echo "count=$count"
+            echo "shards=$shards"
+            echo "targets=$targets"
           } >> "$GITHUB_OUTPUT"
         shell: bash
+
+      - name: Publish discovery execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: container-scan
+          shard: discovery
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["extract"]'
+          reports: '[{"path":"logs/container/manifest.json","kind":"json"}]'
 
   scan:
     name: Scan
     needs: discover
-    if: needs.discover.outputs.count != '0'
+    if: needs.discover.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       security-events: write  # Required for SARIF upload to Security tab
     strategy:
       fail-fast: false
       matrix:
-        image: ${{ fromJSON(needs.discover.outputs.images) }}
+        include: ${{ fromJSON(needs.discover.outputs.images) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Compute image slug
-        id: slug
-        env:
-          IMAGE: ${{ matrix.image }}
-        run: |
-          set -euo pipefail
-          slug=$(bash scripts/security/image-slug.sh "$IMAGE")
-          echo "slug=$slug" >> "$GITHUB_OUTPUT"
-        shell: bash
+      - name: Create report directory
+        run: mkdir -p logs/container
 
       # Trivy writes the SARIF report before applying exit-code, so a gating
       # failure here still leaves the file for the always() upload below.
       - name: Trivy vulnerability scan
+        id: scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
           scan-type: image
@@ -101,7 +133,7 @@ jobs:
           # Pin the scanner build for reproducible scan results.
           version: v0.72.0
           format: sarif
-          output: trivy-${{ steps.slug.outputs.slug }}.sarif
+          output: logs/container/${{ matrix.shard }}.sarif
           severity: ${{ inputs.severity }}
           # Scope the scan to the vuln scanner only (no secret / misconfig) over
           # os+library packages. `vuln-type` is this action version's input name
@@ -117,5 +149,51 @@ jobs:
         uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd  # v4.38.1
         continue-on-error: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
         with:
-          sarif_file: trivy-${{ steps.slug.outputs.slug }}.sarif
-          category: trivy-image-${{ steps.slug.outputs.slug }}
+          sarif_file: logs/container/${{ matrix.shard }}.sarif
+          category: trivy-image-${{ matrix.shard }}
+
+      - name: Publish image execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: container-scan
+          shard: ${{ matrix.shard }}
+          target: ${{ matrix.image }}
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["scan"]'
+          reports: '[{"path":"logs/container/${{ matrix.shard }}.sarif","kind":"sarif","tool":"Trivy"}]'
+
+  aggregate:
+    name: Container Scan Execution Summary
+    needs: [discover, scan]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Aggregate image execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: container-scan
+          shard: aggregate
+          needs-json: ${{ toJSON(needs) }}
+          expected-shards: '{"discover":["discovery"],"scan":${{ needs.discover.outputs.shards || ''[]'' }}}'
+          expected-targets: '{"scan":${{ needs.discover.outputs.targets || ''{}'' }}}'

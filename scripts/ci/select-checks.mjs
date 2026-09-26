@@ -64,8 +64,13 @@ export function selectChecks(paths, contract = loadContract(), full = false) {
 
 export function selectionOutputs({ base, head, full = false, cwd, contract = loadContract() }) {
   const paths = full ? [] : comparePaths(base, head, cwd);
+  const selected = selectChecks(paths, contract, full);
+  const sharedChange = paths.some(path => contract.sharedPatterns.some(pattern => new RegExp(pattern).test(path)));
   return {
-    ...Object.fromEntries(Object.entries(selectChecks(paths, contract, full)).map(([key, value]) => [key, String(value)])),
+    ...Object.fromEntries(Object.entries(selected).map(([key, value]) => [key, String(value)])),
+    selection_reasons: JSON.stringify(Object.fromEntries(Object.entries(selected).map(([key, value]) => [
+      key, full ? 'full-run' : sharedChange ? 'shared-ci-change' : value ? 'path-or-dependency-match' : 'not-selected',
+    ]))),
     selection_status: full ? 'full' : paths.length ? 'verified' : 'verified-empty',
     base_sha: full ? '' : base,
     head_sha: full ? '' : head,

@@ -8,6 +8,15 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.spell-check.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.spell-check.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.spell-check.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.spell-check.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.spell-check.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.spell-check.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.spell-check.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.spell-check.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -20,6 +29,16 @@ jobs:
   spell-check:
     name: Spell Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -68,7 +87,7 @@ jobs:
         if: always()
         run: |
           Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
-          if ($env:SPELL_CHECK_FAILED -eq 'true') {
+          if ('${{ steps.spell-check.outcome }}' -ne 'success') {
             $rows = @()
             foreach ($line in (Get-Content logs/spell-check-results.txt -ErrorAction SilentlyContinue)) {
               if ($line -match '^(.+):(\d+):(\d+)\s-\s(.+)$') {
@@ -101,3 +120,14 @@ jobs:
           Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
           Write-CIAnnotation -Level Error -Message 'Spell check found errors — see step summary and spell-check-results artifact for details'
           exit 1
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: spell-check
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["spell-check"]'
+          reports: '[{"path":"logs/spell-check-results.txt","kind":"file"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}
