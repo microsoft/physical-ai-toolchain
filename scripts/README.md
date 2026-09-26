@@ -2,7 +2,7 @@
 title: Scripts
 description: CI/CD scripts, shared libraries, linting, security, and Pester tests for the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-23
+ms.date: 2026-09-26
 ms.topic: reference
 keywords:
   - scripts
@@ -60,21 +60,37 @@ CI bootstrap and release automation.
 
 PowerShell scripts for validating code quality and documentation.
 
-| Script                             | Purpose                                     |
-|------------------------------------|---------------------------------------------|
-| `Invoke-PSScriptAnalyzer.ps1`      | Static analysis for PowerShell files        |
-| `Invoke-FrontmatterValidation.ps1` | Validate YAML frontmatter in markdown files |
-| `Invoke-LinkLanguageCheck.ps1`     | Detect en-us language paths in URLs         |
-| `Link-Lang-Check.ps1`              | Link language checking entry point          |
-| `Markdown-Link-Check.ps1`          | Validate markdown links                     |
-| `Invoke-YamlLint.ps1`              | YAML file validation                        |
-| `Invoke-TFLint.ps1`                | Terraform linting                           |
-| `Invoke-TerraformValidation.ps1`   | Terraform format and validate               |
-| `Invoke-TerraformTest.ps1`         | Terraform test runner                       |
-| `Invoke-GoLint.ps1`                | Go linting via golangci-lint                |
-| `Invoke-GoTest.ps1`                | Go test runner                              |
-| `Invoke-MsDateFreshnessCheck.ps1`  | Check ms.date frontmatter freshness         |
-| `ConvertTo-JUnitXml.ps1`           | Convert test results to JUnit XML           |
+| Script                              | Purpose                                     |
+|-------------------------------------|---------------------------------------------|
+| `Invoke-PSScriptAnalyzer.ps1`       | Static analysis for PowerShell files        |
+| `Invoke-FrontmatterValidation.ps1`  | Validate YAML frontmatter in markdown files |
+| `Invoke-LinkLanguageCheck.ps1`      | Detect en-us language paths in URLs         |
+| `Link-Lang-Check.ps1`               | Link language checking entry point          |
+| `Markdown-Link-Check.ps1`           | Validate markdown links                     |
+| `Invoke-YamlLint.ps1`               | YAML file validation                        |
+| `Invoke-TFLint.ps1`                 | Terraform linting                           |
+| `Invoke-TerraformValidation.ps1`    | Terraform format and validate               |
+| `Invoke-UvLockConsistencyCheck.ps1` | Require current locks for Python projects   |
+| `Invoke-TerraformTest.ps1`          | Terraform test runner                       |
+| `Invoke-GoLint.ps1`                 | Go linting via golangci-lint                |
+| `Invoke-GoTest.ps1`                 | Go test runner                              |
+| `Invoke-MsDateFreshnessCheck.ps1`   | Check ms.date frontmatter freshness         |
+| `ConvertTo-JUnitXml.ps1`            | Convert test results to JUnit XML           |
+
+`Invoke-TerraformValidation.ps1` writes `logs/terraform-validation-results.json` after format and per-directory validation.
+Each directory records its native `exit_code` (or `null` when skipped), with initialization and parsing failures preserved as errors.
+The script returns the first nonzero Terraform exit code and prints native failure output; an invalid JSON response with a zero
+native exit returns `1`. The CI artifact upload reports a missing results file as an error when validation otherwise succeeds.
+
+`Invoke-UvLockConsistencyCheck.ps1` discovers every repository Python manifest, requires a neighboring `uv.lock`, and runs
+`uv lock --check` without updating the lock. The main workflow checks all projects; pull requests check changed projects.
+The hosted lock check installs the interpreter pinned in `.python-version` for the root project. An empty full-repository
+selection fails rather than reporting a successful no-op.
+The dataviewer backend includes the editable VLM judge package in its locked `dev` and `vlm-judge` extras. The CI job
+installs the `dev` extra from the backend lock without `--with-editable`, then runs tests with `uv run --no-sync` to
+preserve the selected extras. The judge's Qwen dependencies remain optional.
+Coverage artifacts from the Python validation jobs require a report after a successful test run. An upload error after a
+test failure does not replace the test failure.
 
 ## 🔒 Security Scripts
 
@@ -88,7 +104,62 @@ Security scanning and dependency management scripts.
 | `security/Modules/PinnedToolVersions.psm1` | Provide pin discovery functions for binary freshness checks                                   |
 | `security/Test-HveCoreFreshness.ps1`       | Check hve-core-derived files against their reviewed release or source-header baselines        |
 | `security/zap-to-sarif.py`                 | Convert ZAP results to SARIF format                                                           |
+| `security/gitleaks-scan.mjs`               | Scan tested-revision history and report explicit secret-scan outcomes                         |
 | `update-chart-hashes.sh`                   | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
+
+### Gitleaks Scan Scope
+
+The [Gitleaks workflow](../.github/workflows/gitleaks-scan.yml) scans the complete
+history reachable from the exact checked-out revision. PR checks scan the tested
+merge revision; main-push checks scan the pushed revision. Other fetched branches
+and tags are excluded unless their commits are reachable from that revision.
+Full checkout history remains required.
+
+The helper uses `--full-history --diff-merges=first-parent <revision>`: merge
+resolution changes are scanned without restricting ancestry traversal to the first
+parent. Secrets introduced and later removed remain detectable. This is not a
+repository-wide all-ref audit or a changed-lines-only scan.
+
+Run from the repository root with Node 24, Git, and the workflow-pinned Gitleaks
+8.30.0 binary:
+
+```powershell
+$env:GITLEAKS_BIN = (Get-Command gitleaks).Source
+$revision = git rev-parse HEAD
+node scripts/security/gitleaks-scan.mjs scan --expected-revision $revision
+node --test scripts/tests/security/gitleaks-scan.test.mjs
+```
+
+In CI the expected revision comes from `GITHUB_SHA`; the helper rejects mismatched
+or shallow checkouts. Reports use `logs/gitleaks-results.sarif`, redact detected
+values, and retain the existing 90-day artifact policy. Each scan removes its old
+untracked report first so stale output cannot validate a failed run.
+Report type and size checks apply to one opened file descriptor, and reads use
+that descriptor rather than reopening the pathname. Reads are bounded to 64 MiB;
+observed size or metadata changes fail closed. The descriptor is closed on every
+outcome. This avoids pathname-replacement races without claiming an immutable
+filesystem snapshot.
+
+| Result     | Meaning                                                                   | Exit behavior                                                 |
+|------------|---------------------------------------------------------------------------|---------------------------------------------------------------|
+| `clean`    | Scanner exits 0 with a valid empty SARIF report                           | Success                                                       |
+| `findings` | Scanner exits 1 with a valid nonempty report                              | Failure unless `--soft-fail true` is explicitly supplied      |
+| `error`    | Invalid identity, scanner failure, missing report, or inconsistent report | Failure even with soft-fail                                   |
+| `not-run`  | Summary has no scan outputs and the scan never ran                        | Never reported as clean; earlier job failures remain failures |
+
+The workflow emits `scan-status`, `scan-revision`, and `scan-exit-code`. Its
+always-run summary checks those outputs against the scan step outcome before
+claiming `No Secrets Found`. Findings remain visible when soft-fail is enabled.
+Operational failures do not become secret-free results.
+
+Native regressions run against isolated repositories and the checksum-verified
+scanner before the real scan. Missing test prerequisites fail rather than skip.
+Existing exact ignore-file behavior is preserved; this scope correction adds no
+suppression. Any intentional all-ref audit needs separate ownership and
+false-positive adjudication rather than attributing another branch's findings to
+a PR.
+
+### Binary and Derived-File Checks
 
 The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.yml` workflow on a weekly schedule. It downloads each pinned GPG key, installer, and CLI archive, compares SHA-256 hashes against the canonical pin files listed below, and queries upstream Helm repositories for chart version drift.
 

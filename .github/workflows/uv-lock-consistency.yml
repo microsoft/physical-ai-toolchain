@@ -34,13 +34,21 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Setup root Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+
       - name: Setup uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: '0.12.8'
 
       - name: Create logs directory
         run: New-Item -ItemType Directory -Force -Path logs | Out-Null
 
       - name: Run uv Lock Consistency Check
+        id: check
         env:
           CHANGED_FILES_ONLY: ${{ inputs.changed-files-only }}
         run: |
@@ -51,8 +59,25 @@ jobs:
           & scripts/linting/Invoke-UvLockConsistencyCheck.ps1 @params
         continue-on-error: ${{ inputs.soft-fail }}
 
+      - name: Validate lock consistency report
+        id: report
+        if: ${{ steps.check.outcome == 'success' }}
+        env:
+          CHANGED_FILES_ONLY: ${{ inputs.changed-files-only }}
+        run: |
+          $path = 'logs/uv-lock-consistency-results.json'
+          if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Lock consistency report is missing: $path"
+          }
+          $report = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+          if (-not $report.check_passed -or ($env:CHANGED_FILES_ONLY -ne 'true' -and $report.projects_count -lt 1)) {
+            throw "Lock consistency report has no successful selected work"
+          }
+
       - name: Upload lock consistency results
+        id: upload
         if: always()
+        continue-on-error: ${{ steps.check.outcome != 'success' || steps.report.outcome == 'failure' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: uv-lock-consistency-results
@@ -61,6 +86,7 @@ jobs:
 
       - name: Upload job summary
         if: always()
+        continue-on-error: ${{ steps.check.outcome != 'success' || steps.report.outcome == 'failure' || steps.upload.outcome == 'failure' }}
         run: |
           if (Test-Path logs/uv-lock-consistency-summary.md) {
             Get-Content logs/uv-lock-consistency-summary.md >> $env:GITHUB_STEP_SUMMARY

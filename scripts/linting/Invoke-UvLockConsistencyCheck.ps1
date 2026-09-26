@@ -8,15 +8,15 @@
 .SYNOPSIS
     Verifies committed uv.lock files stay consistent with their pyproject.toml manifests.
 .DESCRIPTION
-    Discovers every directory carrying a uv.lock (excluding .venv/, external/, node_modules/,
-    .git/, .copilot-tracking/, docs/docusaurus/), runs `uv lock --check` in each, and writes
-    results to logs/. Drift is surfaced as CI annotations and a GitHub step summary, and the
-    script exits non-zero when any lock drifts from its manifest.
+    Discovers every directory carrying a pyproject.toml (excluding .venv/, external/,
+    node_modules/, .git/, .copilot-tracking/, docs/docusaurus/), requires a matching
+    uv.lock, runs `uv lock --check` in each, and writes results to logs/. Missing or
+    stale locks are surfaced as CI annotations and a GitHub step summary.
 .PARAMETER OutputPath
     Path for the JSON results file. Defaults to logs/uv-lock-consistency-results.json.
 .PARAMETER Projects
     Explicit list of repository-relative project directories to check. When omitted, every
-    directory containing a uv.lock is discovered automatically.
+    directory containing a pyproject.toml is discovered automatically.
 .PARAMETER ChangedFilesOnly
     When set, only check projects whose uv.lock or pyproject.toml changed relative to BaseBranch.
 .PARAMETER BaseBranch
@@ -45,10 +45,10 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Modules/CIHelpers.psm1') -Force
 
 #region Helper Functions
 
-function Get-UvLockProject {
+function Get-UvProject {
     <#
     .SYNOPSIS
-        Discovers repository-relative directories that contain a uv.lock file.
+        Discovers repository-relative directories that contain a pyproject.toml file.
     .OUTPUTS
         [string[]] Sorted, unique directory paths (forward-slash, '.' for the root).
     #>
@@ -62,7 +62,7 @@ function Get-UvLockProject {
 
     $excludeDirs = @('.venv', 'external', 'node_modules', '.git', '.copilot-tracking', 'docs/docusaurus')
 
-    $lockFiles = @(Get-ChildItem -Path $RepoRoot -Filter 'uv.lock' -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
+    $manifests = @(Get-ChildItem -Path $RepoRoot -Filter 'pyproject.toml' -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
             $relativePath = $_.FullName.Substring($RepoRoot.Length + 1) -replace '\\', '/'
             $excluded = $false
             foreach ($dir in $excludeDirs) {
@@ -74,12 +74,101 @@ function Get-UvLockProject {
             -not $excluded
         })
 
-    $dirs = foreach ($lock in $lockFiles) {
-        $parent = (Split-Path $lock.FullName -Parent).Substring($RepoRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, '/', '\') -replace '\\', '/'
+    $dirs = foreach ($manifest in $manifests) {
+        $parent = (Split-Path $manifest.FullName -Parent).Substring($RepoRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, '/', '\') -replace '\\', '/'
         if ([string]::IsNullOrEmpty($parent)) { '.' } else { $parent }
     }
 
     return @($dirs | Sort-Object -Unique)
+}
+
+function Get-CommittedUvLockProject {
+    <#
+    .SYNOPSIS
+        Discovers repository-relative directories containing committed uv.lock files.
+    .OUTPUTS
+        [string[]] Sorted, unique directory paths (forward-slash, '.' for the root).
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$RepoRoot
+    )
+
+    $lockFiles = @(& git -C $RepoRoot ls-files -- 'uv.lock' ':(glob)**/uv.lock')
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to list committed uv.lock files'
+    }
+
+    $excludeDirs = @('.venv', 'external', 'node_modules', '.git', '.copilot-tracking', 'docs/docusaurus')
+    $projects = foreach ($lockFile in $lockFiles) {
+        $normalized = $lockFile -replace '\\', '/'
+        if ($excludeDirs | Where-Object { $normalized -like "$_/*" -or $normalized -like "*/$_/*" }) {
+            continue
+        }
+        $parent = Split-Path $normalized -Parent
+        if ([string]::IsNullOrEmpty($parent)) { '.' } else { $parent -replace '\\', '/' }
+    }
+
+    return @($projects | Sort-Object -Unique)
+}
+
+function Get-UvDependabotProject {
+    <#
+    .SYNOPSIS
+        Reads uv project directories from a Dependabot configuration.
+    .OUTPUTS
+        [string[]] Sorted, unique repository-relative directory paths.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Path
+    )
+
+    if (-not (Test-Path $Path -PathType Leaf)) {
+        throw "Dependabot configuration not found: $Path"
+    }
+
+    $projects = [System.Collections.Generic.List[string]]::new()
+    $ecosystem = ''
+    foreach ($line in Get-Content -Path $Path) {
+        if ($line -match '^\s*-\s+package-ecosystem:\s*["'']?([^"'']+)["'']?\s*$') {
+            $ecosystem = $matches[1].Trim()
+            continue
+        }
+        if ($ecosystem -eq 'uv' -and $line -match '^\s+directory:\s*["'']?([^"'']+)["'']?\s*$') {
+            $directory = $matches[1].Trim().Trim('/')
+            $projects.Add($(if ($directory) { $directory } else { '.' }))
+            $ecosystem = ''
+        }
+    }
+
+    return @($projects | Sort-Object -Unique)
+}
+
+function Get-MissingUvDependabotProject {
+    <#
+    .SYNOPSIS
+        Returns committed uv projects without a matching Dependabot uv entry.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$LockProjects,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$DependabotProjects
+    )
+
+    return @($LockProjects | Where-Object { $_ -notin $DependabotProjects } | Sort-Object -Unique)
 }
 
 function Invoke-UvLockCheck {
@@ -124,6 +213,14 @@ function Test-UvLockProject {
     )
 
     $absDir = if ($Project -eq '.') { $RepoRoot } else { Join-Path $RepoRoot $Project }
+    $manifestPath = Join-Path $absDir 'pyproject.toml'
+    $lockPath = Join-Path $absDir 'uv.lock'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        return [pscustomobject]@{ Project = $Project; Passed = $false; Detail = 'pyproject.toml is missing' }
+    }
+    if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) {
+        return [pscustomobject]@{ Project = $Project; Passed = $false; Detail = 'uv.lock is missing' }
+    }
     $check = Invoke-UvLockCheck -ProjectDirectory $absDir
 
     return [pscustomobject]@{
@@ -207,7 +304,7 @@ function New-UvLockReport {
     }
     $payload | ConvertTo-Json -Depth 10 | Out-File -FilePath $OutputPath -Encoding utf8
 
-    $status = if ($allPassed) { '✅ Passed' } else { "❌ Failed ($($driftResults.Count) drifted)" }
+    $status = if ($allPassed) { '✅ Passed' } else { "❌ Failed ($($driftResults.Count) failed checks)" }
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add('### uv Lock Consistency Results')
     $lines.Add('')
@@ -216,19 +313,19 @@ function New-UvLockReport {
     $lines.Add('| Metric | Count |')
     $lines.Add('|--------|-------|')
     $lines.Add("| Projects Checked | $totalProjects |")
-    $lines.Add("| Drifted | $($driftResults.Count) |")
+    $lines.Add("| Failed Checks | $($driftResults.Count) |")
 
     if ($driftResults.Count -gt 0) {
         $lines.Add('')
-        $lines.Add('## 🚨 Drifted Projects')
+        $lines.Add('## 🚨 Failed Projects')
         $lines.Add('')
-        $lines.Add('Run `uv lock` in each directory below to resync the lock with its manifest.')
+        $lines.Add('Review each failure below. Regenerate a lock only when its manifest has changed.')
         $lines.Add('')
         $lines.Add('| Project | Detail |')
         $lines.Add('|---------|--------|')
         foreach ($drift in ($driftResults | Sort-Object -Property Project)) {
             $detail = ($drift.Detail -replace '\r?\n', ' ').Trim()
-            if ([string]::IsNullOrEmpty($detail)) { $detail = 'lock is out of date with pyproject.toml' }
+            if ([string]::IsNullOrEmpty($detail)) { $detail = 'uv lock check failed without diagnostic output' }
             $lines.Add("| $($drift.Project) | $detail |")
         }
     }
@@ -269,13 +366,27 @@ function Invoke-UvLockConsistencyCheckCore {
         $OutputPath = Join-Path $repoRoot 'logs/uv-lock-consistency-results.json'
     }
 
+    $dependabotPath = Join-Path $repoRoot '.github/dependabot.yml'
+    $lockProjects = @(Get-CommittedUvLockProject -RepoRoot $repoRoot)
+    $dependabotProjects = @(Get-UvDependabotProject -Path $dependabotPath)
+    $missingDependabotProjects = @(
+        Get-MissingUvDependabotProject -LockProjects $lockProjects -DependabotProjects $dependabotProjects
+    )
+    if ($missingDependabotProjects.Count -gt 0) {
+        foreach ($project in $missingDependabotProjects) {
+            Write-CIAnnotation -Level Error -File '.github/dependabot.yml' `
+                -Message "Committed uv project '$project' requires a Dependabot uv entry."
+        }
+        return 1
+    }
+
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
         Write-CIAnnotation -Level Error -Message 'uv not found on PATH. Install from https://docs.astral.sh/uv/.'
         return 1
     }
 
     if ($Projects.Count -eq 0) {
-        $Projects = @(Get-UvLockProject -RepoRoot $repoRoot)
+        $Projects = @(Get-UvProject -RepoRoot $repoRoot)
     }
 
     if ($ChangedFilesOnly) {
@@ -288,9 +399,8 @@ function Invoke-UvLockConsistencyCheckCore {
     }
 
     if ($Projects.Count -eq 0) {
-        Write-Host 'No uv.lock files found to check'
-        New-UvLockReport -Results @() -OutputPath $OutputPath | Out-Null
-        return 0
+        Write-CIAnnotation -Level Error -Message 'No pyproject.toml files found to check'
+        return 1
     }
 
     Write-Host "Checking $($Projects.Count) uv.lock project(s)"
@@ -307,7 +417,7 @@ function Invoke-UvLockConsistencyCheckCore {
             Write-Host "  ❌ $project"
             $lockPath = if ($project -eq '.') { 'uv.lock' } else { "$project/uv.lock" }
             Write-CIAnnotation -Level Error -File $lockPath `
-                -Message "uv.lock is out of date with pyproject.toml. Run 'uv lock' in $project to resync."
+                -Message "uv.lock check failed in $project`: $($result.Detail)"
         }
     }
 
@@ -315,7 +425,7 @@ function Invoke-UvLockConsistencyCheckCore {
     Write-Host "Results written to $($report.JsonPath)"
 
     if ($report.DriftCount -gt 0) {
-        Write-Host "`n❌ $($report.DriftCount) project(s) have a drifted uv.lock"
+        Write-Host "`n❌ $($report.DriftCount) project(s) failed the uv lock check"
         return 1
     }
 

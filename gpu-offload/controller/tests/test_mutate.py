@@ -8,6 +8,8 @@ import json
 import os
 import threading
 import types
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 from kubernetes import client
@@ -28,14 +30,30 @@ class _FakeConfigMap:
 
 
 class _FakeCoreApi:
-    def __init__(self, configmaps=None):
+    def __init__(self, configmaps=None, secrets=None):
         self.configmaps = configmaps or {}
+        self.secrets = secrets or {}
+        self.actions = []
 
     def read_namespaced_config_map(self, name, namespace):
         key = (namespace, name)
         if key not in self.configmaps:
             raise client.exceptions.ApiException(status=404)
         return _FakeConfigMap(self.configmaps[key])
+
+    def read_namespaced_secret(self, name, namespace):
+        key = (namespace, name)
+        if key not in self.secrets:
+            raise client.exceptions.ApiException(status=404)
+        return copy.deepcopy(self.secrets[key])
+
+    def create_namespaced_secret(self, namespace, body):
+        self.secrets[(namespace, body["metadata"]["name"])] = copy.deepcopy(body)
+        self.actions.append(("create-secret", namespace, body["metadata"]["name"]))
+
+    def delete_namespaced_secret(self, name, namespace):
+        self.secrets.pop((namespace, name), None)
+        self.actions.append(("delete-secret", namespace, name))
 
 
 class _FakeAppsApi:
@@ -269,6 +287,55 @@ def test_admission_review_returns_patch_for_opted_workload():
     )
 
 
+def test_admission_review_injects_encryption_secret_by_default():
+    mod = _load_mutate_module()
+    core_api = _FakeCoreApi({("default", "client-cm"): {"remote.yaml": "serverstages:\n  - name: gpu\n"}})
+    controller = mod.XavierAdmissionController(core_api=core_api)
+    review = {
+        "apiVersion": "admission.k8s.io/v1",
+        "kind": "AdmissionReview",
+        "request": {
+            "uid": "encrypted",
+            "operation": "CREATE",
+            "object": _base_workload(),
+        },
+    }
+
+    status_code, response = controller.handle_admission_review(review)
+
+    assert status_code == 200
+    assert response["response"]["allowed"] is True
+    patch_json = json.dumps(_decode_patch(response))
+    assert "client-deployment-remoter-key" in patch_json
+    assert "REMOTER_KEY_FILE" in patch_json
+    assert mod.REMOTER_KEY_PATH in patch_json
+
+
+def test_admission_review_allows_explicit_encryption_opt_out():
+    mod = _load_mutate_module()
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": "encryption: false\nserverstages:\n  - name: gpu\n"}}
+    )
+    controller = mod.XavierAdmissionController(core_api=core_api)
+    review = {
+        "apiVersion": "admission.k8s.io/v1",
+        "kind": "AdmissionReview",
+        "request": {
+            "uid": "plaintext",
+            "operation": "CREATE",
+            "object": _base_workload(),
+        },
+    }
+
+    status_code, response = controller.handle_admission_review(review)
+
+    assert status_code == 200
+    assert response["response"]["allowed"] is True
+    patch_json = json.dumps(_decode_patch(response))
+    assert "client-deployment-remoter-key" not in patch_json
+    assert "REMOTER_KEY_FILE" not in patch_json
+
+
 def test_admission_review_passes_through_non_opted_workload():
     mod = _load_mutate_module()
     controller = mod.XavierAdmissionController()
@@ -334,6 +401,11 @@ def test_http_server_exposes_health_and_mutate_routes():
         assert response.status == 200
         assert json.loads(response.read()) == {"status": "ok"}
 
+        connection.request("GET", "/readyz")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == {"status": "ok"}
+
         review = {
             "apiVersion": "admission.k8s.io/v1",
             "kind": "AdmissionReview",
@@ -350,6 +422,239 @@ def test_http_server_exposes_health_and_mutate_routes():
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_http_readyz_reflects_reconciliation_status():
+    mod = _load_mutate_module()
+    readiness = {"ready": False}
+    controller = mod.XavierAdmissionController(
+        readiness_check=lambda: (readiness["ready"], "workers unavailable"),
+    )
+    server = mod.AdmissionHTTPServer(("127.0.0.1", 0), controller, ssl_context=None)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/healthz")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == {"status": "ok"}
+
+        connection.request("GET", "/readyz")
+        response = connection.getresponse()
+        assert response.status == 503
+        assert json.loads(response.read()) == {"status": "not ready", "reason": "workers unavailable"}
+
+        readiness["ready"] = True
+        connection.request("GET", "/readyz")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == {"status": "ok"}
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_controller_readiness_fails_closed_when_check_raises():
+    mod = _load_mutate_module()
+    controller = mod.XavierAdmissionController(
+        readiness_check=lambda: (_ for _ in ()).throw(RuntimeError("broken")),
+    )
+
+    assert controller.readiness_status() == (False, "readiness check failed")
+
+
+def _reconcile_controller(list_pods: Callable[[], Any]) -> types.SimpleNamespace:
+    def empty_list() -> types.SimpleNamespace:
+        return types.SimpleNamespace(items=[])
+
+    def reconcile_object(_obj: dict[str, Any]) -> None:
+        return None
+
+    return types.SimpleNamespace(
+        core_api=types.SimpleNamespace(list_pod_for_all_namespaces=list_pods),
+        apps_api=types.SimpleNamespace(
+            list_deployment_for_all_namespaces=empty_list,
+            list_stateful_set_for_all_namespaces=empty_list,
+        ),
+        batch_api=types.SimpleNamespace(list_job_for_all_namespaces=empty_list),
+        reconcile_object=reconcile_object,
+    )
+
+
+def test_reconcile_runtime_retries_initial_sync_before_starting_workers(monkeypatch):
+    mod = _load_mutate_module()
+    attempts = 0
+
+    def list_pods():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise client.exceptions.ApiException(status=503)
+        return types.SimpleNamespace(items=[])
+
+    runtime = mod.ReconcileRuntime(
+        _reconcile_controller(list_pods),
+        initial_sync_retry_delays=(0.0,),
+    )
+    monkeypatch.setattr(runtime, "_watch_kind", lambda _kind, _list_fn: runtime.stop_event.wait())
+
+    runtime.start()
+    try:
+        assert attempts == 2
+        assert runtime.initial_sync_complete.is_set()
+        assert runtime.readiness_status() == (True, "ready")
+        assert set(runtime.threads) == {"Pod", "Deployment", "Job", "StatefulSet"}
+    finally:
+        runtime.stop()
+        for thread in runtime.threads.values():
+            thread.join(timeout=5)
+
+
+def test_reconcile_runtime_remains_unready_during_initial_sync_failures():
+    mod = _load_mutate_module()
+    retried = threading.Event()
+    attempts = 0
+
+    def list_pods():
+        nonlocal attempts
+        attempts += 1
+        if attempts >= 2:
+            retried.set()
+        raise client.exceptions.ApiException(status=503)
+
+    runtime = mod.ReconcileRuntime(
+        _reconcile_controller(list_pods),
+        initial_sync_retry_delays=(0.01,),
+    )
+    thread = threading.Thread(target=runtime.start, daemon=True)
+    thread.start()
+    try:
+        assert retried.wait(timeout=2)
+        assert runtime.readiness_status() == (False, "initial reconciliation is pending")
+        assert runtime.threads == {}
+    finally:
+        runtime.stop()
+        thread.join(timeout=5)
+
+
+def test_readyz_remains_unready_until_existing_object_reconciliation_succeeds(monkeypatch):
+    mod = _load_mutate_module()
+    first_failure = threading.Event()
+    allow_success = threading.Event()
+    attempts = 0
+    controller = _reconcile_controller(
+        lambda: types.SimpleNamespace(items=[{"kind": "Pod", "metadata": {"name": "client", "namespace": "default"}}])
+    )
+
+    def reconcile_object(_obj: dict[str, Any]) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            first_failure.set()
+            raise client.exceptions.ApiException(status=503)
+        assert allow_success.wait(timeout=2)
+
+    controller.reconcile_object = reconcile_object
+    runtime = mod.ReconcileRuntime(controller, initial_sync_retry_delays=(0.0,))
+    monkeypatch.setattr(runtime, "_watch_kind", lambda _kind, _list_fn: runtime.stop_event.wait())
+    admission_controller = mod.XavierAdmissionController(readiness_check=runtime.readiness_status)
+    server = mod.AdmissionHTTPServer(("127.0.0.1", 0), admission_controller, ssl_context=None)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    runtime_thread = threading.Thread(target=runtime.start, daemon=True)
+    server_thread.start()
+    runtime_thread.start()
+    try:
+        assert first_failure.wait(timeout=2)
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/readyz")
+        response = connection.getresponse()
+        assert response.status == 503
+        assert json.loads(response.read()) == {
+            "status": "not ready",
+            "reason": "initial reconciliation is pending",
+        }
+
+        allow_success.set()
+        assert runtime.initial_sync_complete.wait(timeout=2)
+        for _ in range(100):
+            ready, _ = runtime.readiness_status()
+            if ready:
+                break
+            threading.Event().wait(0.01)
+        assert ready
+        connection.request("GET", "/readyz")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == {"status": "ok"}
+        assert attempts == 2
+    finally:
+        allow_success.set()
+        runtime.stop()
+        server.shutdown()
+        server.server_close()
+        runtime_thread.join(timeout=5)
+        server_thread.join(timeout=5)
+        for worker in runtime.threads.values():
+            worker.join(timeout=5)
+
+
+def test_reconcile_runtime_readiness_detects_dead_worker():
+    mod = _load_mutate_module()
+
+    class Worker:
+        def __init__(self, alive):
+            self.alive = alive
+
+        def is_alive(self):
+            return self.alive
+
+    runtime = mod.ReconcileRuntime(_reconcile_controller(lambda: types.SimpleNamespace(items=[])))
+    runtime.initial_sync_complete.set()
+    runtime.threads = {
+        "Pod": Worker(True),
+        "Deployment": Worker(False),
+        "Job": Worker(True),
+        "StatefulSet": Worker(True),
+    }
+    runtime.worker_available = {kind: True for kind in runtime.threads}
+
+    assert runtime.readiness_status() == (
+        False,
+        "reconciliation workers unavailable: Deployment",
+    )
+
+
+def test_reconcile_runtime_backs_off_after_watch_failure(monkeypatch):
+    mod = _load_mutate_module()
+    waits = []
+
+    class FailingWatch:
+        def stream(self, _list_fn, timeout_seconds):
+            assert timeout_seconds == 30
+            raise RuntimeError("watch failed")
+
+    class StopAfterWait:
+        def is_set(self):
+            return False
+
+        def wait(self, delay):
+            waits.append(delay)
+            return True
+
+    runtime = mod.ReconcileRuntime(
+        _reconcile_controller(lambda: types.SimpleNamespace(items=[])),
+        watch_retry_delays=(0.25, 0.5),
+    )
+    runtime.stop_event = StopAfterWait()
+    runtime.worker_available["Pod"] = True
+    monkeypatch.setattr(mod.watch, "Watch", FailingWatch)
+
+    runtime._watch_kind("Pod", lambda: None)
+
+    assert waits == [0.25]
+    assert runtime.worker_available["Pod"] is False
 
 
 def test_validate_xavier_config_rejects_privileged_root_settings():
@@ -406,6 +711,64 @@ def test_validate_xavier_config_rejects_escalation_capabilities_and_unconfined_s
     assert normalized["securityContext"]["capabilities"]["drop"] == ["ALL"]
 
 
+def test_validate_xavier_config_accepts_only_top_level_encryption():
+    mod = _load_mutate_module()
+
+    defaulted = mod.validate_xavier_config(
+        {"remoteablecm": "cm", "serverstages": [{"name": "gpu"}]},
+        source="annotation",
+        require_remoteablecm=True,
+    )
+    normalized = mod.validate_xavier_config(
+        {"remoteablecm": "cm", "encryption": "false", "serverstages": [{"name": "gpu"}]},
+        source="annotation",
+        require_remoteablecm=True,
+    )
+
+    assert defaulted["encryption"] is True
+    assert normalized["encryption"] is False
+    with pytest.raises(mod.XavierConfigError, match="top-level setting"):
+        mod.validate_xavier_config(
+            {"remoteablecm": "cm", "serverstages": [{"name": "gpu", "encryption": True}]},
+            source="annotation",
+            require_remoteablecm=True,
+        )
+
+
+@pytest.mark.parametrize("section", ["serverstages", "remoteclasses", "remotefuncs"])
+def test_validate_xavier_config_accepts_each_non_empty_execution_section(section: str):
+    mod = _load_mutate_module()
+
+    normalized = mod.validate_xavier_config(
+        {"remoteablecm": "cm", section: [{"name": "gpu"}]},
+        source="annotation",
+        require_remoteablecm=True,
+        require_execution_section=True,
+    )
+
+    assert normalized[section] == [{"name": "gpu"}]
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"remoteablecm": "cm"},
+        {"remoteablecm": "cm", "serverstages": []},
+        {"remoteablecm": "cm", "remoteclasses": [], "remotefuncs": []},
+    ],
+)
+def test_validate_xavier_config_rejects_missing_or_empty_execution_sections(config: dict[str, object]):
+    mod = _load_mutate_module()
+
+    with pytest.raises(mod.XavierConfigError, match="non-empty serverstages, remoteclasses, or remotefuncs"):
+        mod.validate_xavier_config(
+            config,
+            source="annotation",
+            require_remoteablecm=True,
+            require_execution_section=True,
+        )
+
+
 def test_build_desired_server_deployments_merges_supported_schema_fields():
     mod = _load_mutate_module()
     pod = _base_workload(kind="Pod")
@@ -437,6 +800,7 @@ def test_build_desired_server_deployments_merges_supported_schema_fields():
                 "remote.yaml": (
                     "serverimage: registry/default:1\n"
                     "serverreplicas: 2\n"
+                    "encryption: false\n"
                     "remoteableenv:\n"
                     "  - KEEP_ME\n"
                     "  - FROM_FIELD\n"
@@ -567,7 +931,11 @@ def test_build_desired_server_deployments_uses_parent_config_for_perclient_pods(
     parent["metadata"]["annotations"]["xavierconfig"] = "remoteablecm: client-cm\n"
     parent["spec"]["template"]["spec"]["containers"][0]["env"] = [{"name": "XAVIER_CONTAINER", "value": "true"}]
     core_api = _FakeCoreApi(
-        {("default", "client-cm"): {"remote.yaml": "serverstages:\n  - name: perclient\n    perclient: true\n"}}
+        {
+            ("default", "client-cm"): {
+                "remote.yaml": "encryption: false\nserverstages:\n  - name: perclient\n    perclient: true\n"
+            }
+        }
     )
     apps_api = _FakeAppsApi(parent_deployments={("default", "owner"): parent})
     batch_api = _FakeBatchApi()
@@ -670,6 +1038,156 @@ def test_reconcile_named_server_deployment_ignores_kubernetes_defaulted_fields()
     assert apps_api.actions == []
 
 
+def test_reconcile_object_creates_stable_encryption_secret_and_mounts_it():
+    mod = _load_mutate_module()
+    deploy = _base_workload()
+    deploy["metadata"]["labels"] = {"xavier": "true"}
+    mod.DoMutate(
+        deploy,
+        strict=True,
+        resolved_config={"remoteablecm": "client-cm"},
+    )
+    deploy["spec"]["template"]["spec"]["containers"][0]["env"].append({"name": "REMOTERPORT", "value": "30001"})
+    core_api = _FakeCoreApi({("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}})
+    apps_api = _FakeAppsApi()
+    batch_api = _FakeBatchApi()
+
+    first = mod.reconcile_object(deploy, core_api=core_api, apps_api=apps_api, batch_api=batch_api)
+    secret = core_api.secrets[("default", "client-deployment-remoter-key")]
+    first_key = base64.b64decode(secret["data"]["key"])
+    server = apps_api.deployments[("default", "client-remote-server")]
+    server_spec = server["spec"]["template"]["spec"]
+    server_container = server_spec["containers"][0]
+
+    assert first["client-deployment-remoter-key"] == "created"
+    assert len(first_key) == 32
+    assert secret["metadata"]["ownerReferences"] == [
+        {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "name": "client",
+            "uid": "workload-uid",
+            "blockOwnerDeletion": True,
+        }
+    ]
+    assert server_spec["volumes"][-1]["secret"]["secretName"] == "client-deployment-remoter-key"
+    assert server_container["volumeMounts"][-1]["mountPath"] == mod.REMOTER_KEY_MOUNT_PATH
+    assert mod.get_env_var(server_container, "REMOTER_KEY_FILE") == mod.REMOTER_KEY_PATH
+
+    second = mod.reconcile_object(deploy, core_api=core_api, apps_api=apps_api, batch_api=batch_api)
+
+    assert second["client-deployment-remoter-key"] == "unchanged"
+    assert base64.b64decode(core_api.secrets[("default", "client-deployment-remoter-key")]["data"]["key"]) == first_key
+
+
+def test_reconcile_object_deletes_managed_secret_when_encryption_is_disabled():
+    mod = _load_mutate_module()
+    deploy = _base_workload()
+    deploy["metadata"]["labels"] = {"xavier": "true"}
+    deploy["spec"]["template"]["spec"]["containers"][0]["env"] = [
+        {"name": "XAVIER_CONTAINER", "value": "true"},
+        {"name": "REMOTERPORT", "value": "30001"},
+    ]
+    secret = mod._create_encryption_secret_spec("client-deployment-remoter-key", "default", deploy)
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": 'encryption: false\nserverstages:\n  - name: ""\n'}},
+        {("default", "client-deployment-remoter-key"): secret},
+    )
+
+    outcomes = mod.reconcile_object(
+        deploy,
+        core_api=core_api,
+        apps_api=_FakeAppsApi(),
+        batch_api=_FakeBatchApi(),
+    )
+
+    assert outcomes["client-deployment-remoter-key"] == "deleted"
+    assert ("default", "client-deployment-remoter-key") not in core_api.secrets
+
+
+def test_reconcile_object_rejects_managed_encryption_secret_owned_by_another_workload():
+    mod = _load_mutate_module()
+    deploy = _base_workload()
+    deploy["metadata"]["labels"] = {"xavier": "true"}
+    mod.DoMutate(
+        deploy,
+        strict=True,
+        resolved_config={"remoteablecm": "client-cm"},
+    )
+    deploy["spec"]["template"]["spec"]["containers"][0]["env"].append({"name": "REMOTERPORT", "value": "30001"})
+    secret = mod._create_encryption_secret_spec("client-deployment-remoter-key", "default", deploy)
+    secret["metadata"]["ownerReferences"][0]["uid"] = "stale-workload-uid"
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}},
+        {("default", "client-deployment-remoter-key"): secret},
+    )
+
+    with pytest.raises(mod.XavierConfigError, match="is not owned by Deployment 'client'"):
+        mod.reconcile_object(
+            deploy,
+            core_api=core_api,
+            apps_api=_FakeAppsApi(),
+            batch_api=_FakeBatchApi(),
+        )
+
+    assert core_api.actions == []
+
+
+def test_reconcile_object_does_not_delete_managed_encryption_secret_owned_by_another_workload():
+    mod = _load_mutate_module()
+    deploy = _base_workload()
+    deploy["metadata"]["labels"] = {"xavier": "true"}
+    deploy["spec"]["template"]["spec"]["containers"][0]["env"] = [
+        {"name": "XAVIER_CONTAINER", "value": "true"},
+        {"name": "REMOTERPORT", "value": "30001"},
+    ]
+    secret = mod._create_encryption_secret_spec("client-deployment-remoter-key", "default", deploy)
+    secret["metadata"]["ownerReferences"][0]["name"] = "other-client"
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": 'encryption: false\nserverstages:\n  - name: ""\n'}},
+        {("default", "client-deployment-remoter-key"): secret},
+    )
+
+    with pytest.raises(mod.XavierConfigError, match="is not owned by Deployment 'client'"):
+        mod.reconcile_object(
+            deploy,
+            core_api=core_api,
+            apps_api=_FakeAppsApi(),
+            batch_api=_FakeBatchApi(),
+        )
+
+    assert ("default", "client-deployment-remoter-key") in core_api.secrets
+    assert core_api.actions == []
+
+
+def test_reconcile_object_rejects_pre_created_unmanaged_encryption_secret():
+    mod = _load_mutate_module()
+    deploy = _base_workload()
+    deploy["metadata"]["labels"] = {"xavier": "true"}
+    mod.DoMutate(
+        deploy,
+        strict=True,
+        resolved_config={"remoteablecm": "client-cm"},
+    )
+    deploy["spec"]["template"]["spec"]["containers"][0]["env"].append({"name": "REMOTERPORT", "value": "30001"})
+    secret = mod._create_encryption_secret_spec("client-deployment-remoter-key", "default", deploy)
+    secret["metadata"]["labels"] = {}
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}},
+        {("default", "client-deployment-remoter-key"): secret},
+    )
+
+    with pytest.raises(mod.XavierConfigError, match="is not managed by the GPU offload controller"):
+        mod.reconcile_object(
+            deploy,
+            core_api=core_api,
+            apps_api=_FakeAppsApi(),
+            batch_api=_FakeBatchApi(),
+        )
+
+    assert core_api.actions == []
+
+
 def test_reconcile_object_deletes_server_deployment_for_removed_stage():
     mod = _load_mutate_module()
     deploy = _base_workload()
@@ -694,7 +1212,9 @@ def test_reconcile_object_deletes_server_deployment_for_removed_stage():
             }
         }
     )
-    core_api = _FakeCoreApi({("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}})
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": 'encryption: false\nserverstages:\n  - name: ""\n'}}
+    )
     batch_api = _FakeBatchApi()
 
     outcomes = mod.reconcile_object(deploy, core_api=core_api, apps_api=apps_api, batch_api=batch_api)
@@ -758,7 +1278,9 @@ def test_create_server_deployment_spec_excludes_secret_bearing_volumes():
         },
         {"name": "config", "configMap": {"name": "app-config"}},
     ]
-    core_api = _FakeCoreApi({("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}})
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": 'encryption: false\nserverstages:\n  - name: ""\n'}}
+    )
     apps_api = _FakeAppsApi()
     batch_api = _FakeBatchApi()
 
@@ -785,7 +1307,9 @@ def test_create_server_deployment_spec_only_forwards_allow_listed_env():
     core_api = _FakeCoreApi(
         {
             ("default", "client-cm"): {
-                "remote.yaml": "\n".join(["serverstages:", '  - name: ""', "remoteableenv:", "  - SAFE_VALUE", ""])
+                "remote.yaml": "\n".join(
+                    ["encryption: false", "serverstages:", '  - name: ""', "remoteableenv:", "  - SAFE_VALUE", ""]
+                )
             }
         }
     )

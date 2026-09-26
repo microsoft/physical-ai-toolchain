@@ -217,6 +217,28 @@ updates:
     prefix: chore
     include: scope
 - package-ecosystem: uv
+  directory: /evaluation/vlm_judge
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    vlm-judge-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - python
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /workflows/azureml/scripts
   schedule:
     interval: weekly
@@ -239,6 +261,28 @@ updates:
     prefix: chore
     include: scope
 - package-ecosystem: uv
+  directory: /workflows/azureml/osmo-proxy
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    azureml-osmo-proxy-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - python
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /workflows/osmo
   schedule:
     interval: weekly
@@ -248,6 +292,72 @@ updates:
     semver-major-days: 14
   groups:
     osmo-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - python
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: uv
+  directory: /gpu-offload/controller
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    gpu-offload-controller-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - python
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: uv
+  directory: /gpu-offload/runtime
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    gpu-offload-runtime-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - python
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: uv
+  directory: /gpu-offload/examples/so101-real-hardware
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    gpu-offload-so101-dependencies:
       patterns:
       - "*"
       update-types:
