@@ -11,7 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy==2.5.2",
     "azure-core==1.41.0",
-    "azure-storage-blob==12.30.1",
+    "azure-storage-blob==12.30.2",
     "azure-identity==1.25.3",
     "azure-ai-ml==1.35.0",
     "azureml-mlflow==1.62.0.post6",
@@ -23,20 +23,20 @@ dependencies = [
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Track azure-ai-ml release notes; bump together when 4.x support lands.
     "marshmallow==3.26.2",
-    "mlflow-skinny==3.16.0",
+    "mlflow-skinny==3.16.1",
     "packaging==26.3",
     # Global prerelease resolution would otherwise select pydantic and sentry-sdk
     # alpha releases; pin stable versions unless a direct dependency requires them.
     "pydantic==2.13.5",
-    "sentry-sdk==2.69.1",
+    "sentry-sdk==2.69.2",
     "hf-xet==1.6.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
     "datasets==5.0.1",
     "pyarrow==25.0.1",
-    "matplotlib==3.11.1",
-    "huggingface-hub==1.30.0",
+    "matplotlib==3.11.2",
+    "huggingface-hub==1.32.0",
     # `av-dep` rather than `dataset`: the dataset extra requires TorchCodec, which
     # publishes no SBSA CUDA 13 wheel. PyAV also keeps the decoder identical on
     # every target — lerobot.utils.import_utils.get_safe_default_video_backend()
@@ -61,7 +61,7 @@ dependencies = [
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
     "gitpython==3.1.62",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
-    "urllib3==2.7.0",
+    "urllib3==2.8.0",
     # Pin cryptography to 50.0.1 (Dependabot-tracked in the lerobot-dependencies
     # group). 48.0.1 is the security floor: wheels below it bundle a vulnerable
     # OpenSSL (GHSA-537c-gmf6-5ccf, high severity). Transitive via azure-identity,
@@ -70,7 +70,7 @@ dependencies = [
     "cryptography==50.0.1",
     # Pin wrapt explicitly to a stable 2.x release. The explicit pin prevents
     # prerelease resolution from selecting a release candidate.
-    "wrapt==2.4.0",
+    "wrapt==2.4.1",
 ]
 
 [build-system]
@@ -101,13 +101,13 @@ override-dependencies = [
     "diffusers==0.40.0",
     # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps at <=12.27.1; mirror
     # the direct 12.30.1 pin.
-    "azure-storage-blob==12.30.1",
+    "azure-storage-blob==12.30.2",
     # cryptography: the direct 50.0.1 pin exceeds
     # azureml-mlflow==1.62.0.post5's cryptography<49.0.0 cap; mirror it here.
     "cryptography==50.0.1",
     # mlflow-skinny: azureml-mlflow==1.62.0.post5 caps at <=3.13.0; mirror the
     # direct pin to take 3.16.0.
-    "mlflow-skinny==3.16.0",
+    "mlflow-skinny==3.16.1",
     # packaging: lerobot==0.6.1 caps below 26.0 and azureml-mlflow caps below
     # 26.x; mirror the direct pin.
     "packaging==26.3",
