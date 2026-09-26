@@ -9,6 +9,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .simplelog import initlog
@@ -23,6 +24,43 @@ class MsgType(enum.Enum):
 
 msgkey: bytes | None = None
 noncelen = 12  # length of nonce for AESGCM
+_FRAME_VERSION = 1
+_TIMESTAMP_BYTES = 8
+_FRAME_HEADER_BYTES = 1 + _TIMESTAMP_BYTES
+_AES_GCM_TAG_BYTES = 16
+ENCRYPTED_MESSAGE_OVERHEAD = _FRAME_HEADER_BYTES + noncelen + _AES_GCM_TAG_BYTES
+_MAX_MESSAGE_AGE_SECONDS = 300
+_MAX_FUTURE_SKEW_SECONDS = 30
+_MAX_REPLAY_NONCES = 250_000
+_REPLAY_CLEANUP_INTERVAL_SECONDS = 10
+
+
+class _ReplayWindow:
+    def __init__(self, *, max_age_seconds: int, max_entries: int) -> None:
+        self.max_age_seconds = max_age_seconds
+        self.max_entries = max_entries
+        self._seen: dict[bytes, float] = {}
+        self._next_cleanup = 0.0
+        self._lock = threading.Lock()
+
+    def register(self, nonce: bytes, now: float) -> bool:
+        with self._lock:
+            if now >= self._next_cleanup or len(self._seen) >= self.max_entries:
+                self._seen = {seen_nonce: expiry for seen_nonce, expiry in self._seen.items() if expiry > now}
+                self._next_cleanup = now + _REPLAY_CLEANUP_INTERVAL_SECONDS
+            if nonce in self._seen:
+                return False
+            if len(self._seen) >= self.max_entries:
+                logger.error("Authenticated replay cache is full; rejecting message")
+                return False
+            self._seen[nonce] = now + self.max_age_seconds
+            return True
+
+
+_replay_window = _ReplayWindow(
+    max_age_seconds=_MAX_MESSAGE_AGE_SECONDS,
+    max_entries=_MAX_REPLAY_NONCES,
+)
 
 if not hasattr(socket, "AF_UNIX"):
 
@@ -64,20 +102,41 @@ def sendallmsg(sock: socket.socket, buffers: list[bytes | memoryview]) -> int:
 
 
 def encryptMessage(msg: bytes, msgkey: bytes) -> bytes:
-    # Encrypt the message using AESGCM
+    issued_at_ms = int(time.time() * 1000)
+    header = bytes([_FRAME_VERSION]) + issued_at_ms.to_bytes(_TIMESTAMP_BYTES, "big")
     nonce = secrets.token_bytes(noncelen)  # GCM mode needs 12 fresh bytes every time
-    msg = nonce + AESGCM(msgkey).encrypt(nonce, msg, b"")
-    return msg
+    return header + nonce + AESGCM(msgkey).encrypt(nonce, msg, header)
 
 
 def decryptMessage(msg: bytes, decryptkey: bytes) -> bytes | None:
-    # Decrypt the message using AESGCM
-    nonce = msg[:noncelen]
+    if len(msg) < ENCRYPTED_MESSAGE_OVERHEAD:
+        logger.error("Encrypted message is too short")
+        return None
+    header = msg[:_FRAME_HEADER_BYTES]
+    if header[0] != _FRAME_VERSION:
+        logger.error("Unsupported encrypted message frame version: %d", header[0])
+        return None
+    issued_at_ms = int.from_bytes(header[1:], "big")
+    nonce_start = _FRAME_HEADER_BYTES
+    nonce_end = nonce_start + noncelen
+    nonce = msg[nonce_start:nonce_end]
     try:
-        return AESGCM(decryptkey).decrypt(nonce, msg[noncelen:], b"")
-    except Exception as e:
-        logger.error(f"Decryption failed for message: {e}")
-        return None  # decryption failed, return None to indicate failure, will close connection on caller side
+        plaintext = AESGCM(decryptkey).decrypt(nonce, msg[nonce_end:], header)
+    except InvalidTag:
+        logger.error("Encrypted message authentication failed")
+        return None
+
+    now_ms = int(time.time() * 1000)
+    if issued_at_ms < now_ms - (_MAX_MESSAGE_AGE_SECONDS * 1000):
+        logger.error("Encrypted message is stale")
+        return None
+    if issued_at_ms > now_ms + (_MAX_FUTURE_SKEW_SECONDS * 1000):
+        logger.error("Encrypted message timestamp is too far in the future")
+        return None
+    if not _replay_window.register(nonce, time.monotonic()):
+        logger.error("Encrypted message nonce was already received")
+        return None
+    return plaintext
 
 
 initheartbeat = False  # whether heartbeat has been started or not

@@ -4,9 +4,9 @@ import logging
 import os
 import traceback
 import types
+from fnmatch import fnmatchcase
 
 from . import remoter
-from .msgsock import isselfip
 from .simplelog import initlog
 
 logger = initlog("rmtclass.log", logging.DEBUG, logging.INFO)
@@ -164,21 +164,57 @@ def getallmethods(bases: tuple, attrs: dict):
     return methodsKV
 
 
-def isremoteable(isserver: bool, key: str, actclasskey: str) -> bool:
-    if not isserver:
-        return True  # server classes always remoteable
-    if remoter.getparam("remoteableserver", key, actclasskey, False):
-        return True
-    remoteableon = remoter.getdictparam("remoteableon", key, actclasskey)
-    for loc, val in remoteableon.items():  # noqa: B007 vendored from microsoft/xavier, not refactored
-        if ":" in loc:
-            host, port = loc.split(":")
-            if isselfip(host, port, remoter.remoterparams["port"]):
-                return True
-        else:  # unixpaath
-            if loc == remoter.remoterparams["socketpath"]:
-                return True
-    return False
+def _method_patterns(field: str, actclasskey: str) -> list[str]:
+    patterns = remoter.getparam(field, actclasskey + "/", actclasskey, [])
+    if not isinstance(patterns, list) or any(not isinstance(pattern, str) or not pattern for pattern in patterns):
+        raise ValueError(f"{field} for {actclasskey} must be a list of non-empty strings")
+    return patterns
+
+
+def _expand_method_patterns(
+    patterns: list[str],
+    method_names: set[str],
+    *,
+    field: str,
+    actclasskey: str,
+) -> set[str]:
+    expanded: set[str] = set()
+    for pattern in patterns:
+        matches = {method_name for method_name in method_names if fnmatchcase(method_name, pattern)}
+        if not matches:
+            raise ValueError(f"{field} pattern {pattern!r} for {actclasskey} matches no methods")
+        if any(character in pattern for character in "*?["):
+            logger.warning(
+                f"{field} wildcard {pattern!r} for {actclasskey} expands to {sorted(matches)}",
+                color="yellow",
+            )
+        expanded.update(matches)
+    return expanded
+
+
+def _server_callable_methods(methodsKV: dict, actclasskey: str) -> set[str]:
+    class_params = remoter.remoterclassparams.get(actclasskey, {})
+    legacy_fields = sorted({"remoteableserver", "remoteableon"} & class_params.keys())
+    if legacy_fields:
+        raise ValueError(f"{', '.join(legacy_fields)} for {actclasskey} is not supported; use servercallablemethods")
+    method_names = {
+        attr_name for attr_name, attr_value in methodsKV.items() if isinstance(attr_value, types.FunctionType)
+    }
+    allowed = _expand_method_patterns(
+        _method_patterns("servercallablemethods", actclasskey),
+        method_names,
+        field="servercallablemethods",
+        actclasskey=actclasskey,
+    )
+    denied = _expand_method_patterns(
+        _method_patterns("serverdeniedmethods", actclasskey),
+        method_names,
+        field="serverdeniedmethods",
+        actclasskey=actclasskey,
+    )
+    effective = allowed - denied
+    logger.info(f"Server-callable methods for {actclasskey}: {sorted(effective)}", color="green")
+    return effective
 
 
 def allowallfunctions(cls, isserver):
@@ -189,6 +225,7 @@ def allowallfunctions(cls, isserver):
     # print(remoter.remoterclassparams)
     initfound = False
     actclasskey = f"{cls.__module__}/{cls.__name__}"
+    server_callable_methods = _server_callable_methods(methodsKV, actclasskey) if isserver else set()
     noremotefuncs = remoter.getparam("noremotefuncs", actclasskey + "/", actclasskey, [])
     for attr_name, attr_value in methodsKV.items():
         if isinstance(attr_value, types.FunctionType):
@@ -197,42 +234,39 @@ def allowallfunctions(cls, isserver):
             # if function is defined in this class, then qualname uses this class, and module
             # in this case actclasskey is mod.thisclass, and funcname is func, so key is mod.thisclass.func
             key, module_name, func_name, class_name = remoter.getfuncname(attr_value)  # noqa: RUF059 vendored from microsoft/xavier, not refactored
+            callable_key = f"{actclasskey}/{attr_name}"
             # assert func_name == attr_name, "Function name mismatch" -- this fails sometimes
             if func_name != attr_name:
                 logger.warning(f"Function name mismatch: {func_name} != {attr_name}", color="yellow")
             if attr_name == "__init__":
                 initfound = True
-            logger.info(f"Adding function {key} to allowed functions")
-            remoter.allowed_functions.add(key)
-            # now check if func is remotable task - client is always remotable by default, server not
-            remoteable = isremoteable(isserver, key, actclasskey)
-            singleinstance = remoter.getparam("singleinstance", key, actclasskey, False)
             taskname = remoter.getparam("taskname", key, actclasskey, actclasskey)
             functype = remoter.getparam("functype", key, actclasskey, "threadpooltask")
             remoteloc = remoter.getparam("remoteloc", key, actclasskey, None)
             timeout = remoter.getparam("timeout", key, actclasskey, None)
-            if not remoteable and singleinstance and attr_name == "__init__":
-                assert not hasattr(attr_value, "__isremoted__"), "Function __init__ already decorated"
-                cls.__new__ = remoter.singleton_new
-                cls.__orig_init__ = attr_value
-                setattr(cls, attr_name, remoter.singleton_init)
-                remoter.allowed_functions.add("remoter.remoter//singleton_init")
-                # remoter.allowed_functions.add(f"remoter.remoter//singleton_new")
-                logger.info(f"Single instance non-remoteable class {actclasskey} __init__ decorated", color="green")
-            elif remoteable and (attr_name not in noremotefuncs):
-                # if already has "__isremoted__" attribute, skip
-                if hasattr(attr_value, "__isremoted__"):
-                    logger.info(f"Function {key} already decorated, skipping", color="yellow")
-                    continue
+            if isserver:
+                if attr_name in server_callable_methods:
+                    remoter.allow_function(callable_key)
+                    logger.info(f"Allowed server method {callable_key} without RPC wrapping", color="green")
+                else:
+                    remoter.disallow_function(callable_key)
+            elif attr_name not in noremotefuncs:
+                logger.info(f"Adding function {callable_key} to allowed functions")
                 remotefunc = remoter.createRemotedTask(
-                    attr_value, taskname, functype, timeout=timeout
+                    attr_value,
+                    taskname,
+                    functype,
+                    timeout=timeout,
+                    callable_key=callable_key,
                 )  # overwrite functions
                 setattr(cls, attr_name, remotefunc)
-                logger.info(f"Function {key} remoteable={remoteable} remoteloc={remoteloc}", color="green")
-            if remoteloc is not None:
-                remoter.setfixedlocs({key: remoteloc})
+                logger.info(f"Function {callable_key} remoteloc={remoteloc}", color="green")
+                if remoteloc is not None:
+                    remoter.setfixedlocs({callable_key: remoteloc})
+            else:
+                remoter.disallow_function(callable_key)
     assert initfound, "No __init__ method found in remoted class"
-    remoteableclass = isremoteable(isserver, actclasskey + "/", actclasskey)
+    remoteableclass = not isserver
     singleinstanceclass = remoter.getparam("singleinstance", actclasskey + "/", actclasskey, False)
     remotelocclass = remoter.getparam("remoteloc", actclasskey + "/", actclasskey, None)
     if remotelocclass is not None:
@@ -253,9 +287,9 @@ def allowallfunctions(cls, isserver):
     if remoteableclass:
         cls.__getattribute__ = getattribute
         cls.__setattr__ = setattribute
-    remoter.allowed_functions.add("remoter.rmtclass//_getfromremote")
-    remoter.allowed_functions.add("remoter.rmtclass//objgetattr")
-    remoter.allowed_functions.add("remoter.rmtclass//objsetattr")
+    remoter.allow_function("remoter.rmtclass//_getfromremote")
+    remoter.allow_function("remoter.rmtclass//objgetattr")
+    remoter.allow_function("remoter.rmtclass//objsetattr")
 
 
 def addsingleinstance(cls, classparams):
