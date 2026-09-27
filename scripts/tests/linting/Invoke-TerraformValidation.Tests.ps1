@@ -435,6 +435,85 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
         }
     }
 
+    Context 'native failure propagation' {
+        It 'Preserves an initialization exit code and output while validating other directories' {
+            Mock terraform {
+                if ((Split-Path (Get-Location).Path -Leaf) -eq 'vpn') {
+                    $global:LASTEXITCODE = 23
+                    return 'Provider registry unavailable'
+                }
+                $global:LASTEXITCODE = 0
+                return ''
+            } -ParameterFilter { $args[0] -eq 'init' }
+            Mock Write-Host {}
+
+            $result = Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir
+
+            $result | Should -Be 23
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $failed = @($json.validation | Where-Object { -not $_.passed })
+            $failed | Should -HaveCount 1
+            $failed[0].exit_code | Should -Be 23
+            $failed[0].errors[0].detail | Should -Be 'Provider registry unavailable'
+            Should -Invoke Write-Host -Times 1 -ParameterFilter { $Object -eq 'Provider registry unavailable' }
+            Should -Invoke terraform -Times 3 -Exactly -ParameterFilter { $args[0] -eq 'validate' }
+        }
+
+        It 'Reports failed validation with valid JSON but no diagnostics and preserves its exit code' {
+            Mock terraform {
+                $global:LASTEXITCODE = 17
+                return '{"valid":false,"diagnostics":[]}'
+            } -ParameterFilter { $args[0] -eq 'validate' }
+
+            $result = Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir
+
+            $result | Should -Be 17
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.validation | ForEach-Object {
+                $_.exit_code | Should -Be 17
+                $_.errors[0].summary | Should -Match 'exit 17'
+                $_.errors[0].detail | Should -Be '{"valid":false,"diagnostics":[]}'
+            }
+        }
+
+        It 'Preserves the format exit code and prints a format failure without file paths' {
+            Mock terraform {
+                $global:LASTEXITCODE = 4
+                return 'Unable to read configuration'
+            } -ParameterFilter { $args[0] -eq 'fmt' }
+            Mock Write-Host {}
+
+            $result = Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir
+
+            $result | Should -Be 4
+            Should -Invoke Write-Host -Times 1 -ParameterFilter { $Object -eq 'Unable to read configuration' }
+            Should -Invoke Write-CIAnnotation -Times 1 -ParameterFilter {
+                $Level -eq 'Error' -and $Message -match 'format check failed \(exit 4\)'
+            }
+        }
+
+        It 'Fails with an explicit annotation when version output is malformed' {
+            Mock terraform {
+                $global:LASTEXITCODE = 0
+                return 'invalid version JSON'
+            } -ParameterFilter { $args[0] -eq 'version' }
+            Mock Write-Host {}
+
+            $result = Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir
+
+            $result | Should -Be 1
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.summary.overall_passed | Should -BeFalse
+            Should -Invoke Write-CIAnnotation -Times 1 -ParameterFilter {
+                $Level -eq 'Error' -and $Message -match 'invalid version JSON'
+            }
+        }
+    }
+
     Context 'change detection (ChangedFilesOnly)' {
         BeforeEach {
             Mock Get-ChangedFilesFromGit { return @() }

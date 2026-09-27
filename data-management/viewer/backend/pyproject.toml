@@ -20,6 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "physical-ai-vlm-judge==0.1.0",
     "ruff==0.16.7",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
@@ -54,6 +55,7 @@ yolo = [
     "ultralytics==8.4.152",
 ]
 vlm-judge = [
+    "physical-ai-vlm-judge==0.1.0",
     "accelerate==1.15.0",
     "torch==2.14.0",
     "transformers==5.17.0",
@@ -90,6 +92,9 @@ constraint-dependencies = [
     "starlette==1.6.0",
     "pygments==2.21.0",
 ]
+
+[tool.uv.sources]
+physical-ai-vlm-judge = { path = "../../../evaluation/vlm_judge", editable = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

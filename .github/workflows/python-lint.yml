@@ -30,6 +30,8 @@ jobs:
 
       - name: Setup uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+        with:
+          version: '0.12.8'
 
       # Ruff version is pinned to match the `ruff` dev-dependency pin in the root
       # pyproject.toml. Keep these in sync; bump both together (via Dependabot).

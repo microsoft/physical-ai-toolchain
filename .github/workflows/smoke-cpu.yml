@@ -66,6 +66,12 @@ jobs:
 
       - name: Setup uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+        with:
+          version: '0.12.8'
+
+      - name: Verify uv bootstrap recovery
+        if: matrix.domain == 'rl'
+        run: bash shared/ci/tests/smoke-import-bootstrap.sh
 
       - name: CPU import smoke
         run: shared/ci/smoke-import.sh ${{ matrix.domain }} --mode cpu

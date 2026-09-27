@@ -1,13 +1,15 @@
-"""Compare pickle and remoter codec performance for get_action arguments.
+"""Compare pickle, remoter codec, and AES-GCM performance.
 
 By default, this script builds a lightweight Checkpoint, three
 MetaRemotedUUID collaborators, and an observation containing a 7 MiB tensor.
 Use ``--factory module:function`` to supply the five real get_action arguments.
+Use ``--payload-kind bytes`` to benchmark without PyTorch.
 
 Examples:
     python benchmark_serialization.py
     python benchmark_serialization.py --device cuda --iterations 50
     python benchmark_serialization.py --factory benchmark_inputs:create_args
+    python benchmark_serialization.py --payload-kind bytes --aes-gcm --iterations 100
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import gc
 import importlib
 import math
 import pickle
+import secrets
 import statistics
 import sys
 import time
@@ -25,7 +28,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from remoter import remoter
+from remoter import msgsock, remoter
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
@@ -65,6 +68,13 @@ def create_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--factory", help="Optional module:function returning the five get_action arguments")
+    parser.add_argument(
+        "--payload-kind",
+        choices=("get-action", "bytes"),
+        default="get-action",
+        help="Payload shape to benchmark; bytes does not require PyTorch",
+    )
+    parser.add_argument("--aes-gcm", action="store_true", help="Measure AES-GCM and secured codec operations")
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--pickle-protocol", type=int, default=pickle.HIGHEST_PROTOCOL)
     parser.add_argument("--tensor-mib", type=float, default=7.0)
@@ -109,6 +119,14 @@ def _create_synthetic_args(device: str, tensor_mib: float) -> tuple[Any, Any, An
 
 
 def _build_payload(args: argparse.Namespace) -> tuple[Any, Callable[[], None]]:
+    if args.payload_kind == "bytes":
+        if args.factory:
+            raise ValueError("--factory cannot be combined with --payload-kind bytes")
+        if args.tensor_mib <= 0:
+            raise ValueError("--tensor-mib must be greater than zero")
+        payload_bytes = math.ceil(args.tensor_mib * _MIB)
+        return {"payload": bytes(payload_bytes)}, lambda: None
+
     if args.factory:
         checkpoint, preprocessor, policy, postprocessor, obs_dict = _load_factory(args.factory)()
     else:
@@ -195,12 +213,24 @@ def _print_measurement(measurement: Measurement) -> None:
     median = statistics.median(samples)
     throughput = measurement.payload_bytes / median / _MIB
     print(
-        f"{measurement.codec:<11} {measurement.operation:<11} "
+        f"{measurement.codec:<16} {measurement.operation:<11} "
         f"median={median * 1000:9.3f} ms  "
         f"p95={_percentile(samples, 0.95) * 1000:9.3f} ms  "
         f"mean={statistics.fmean(samples) * 1000:9.3f} ms  "
         f"throughput={throughput:9.2f} MiB/s"
     )
+
+
+def _decrypt_aes_gcm(payload: bytes, key: bytes) -> bytes:
+    decrypted = msgsock.decryptMessage(payload, key)
+    if decrypted is None:
+        raise RuntimeError("AES-GCM decryption failed")
+    return decrypted
+
+
+def _median_for(measurements: list[Measurement], codec: str, operation: str) -> float:
+    measurement = next(item for item in measurements if item.codec == codec and item.operation == operation)
+    return statistics.median(measurement.samples_seconds)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -262,20 +292,96 @@ def run(args: argparse.Namespace) -> int:
         ),
     ]
 
+    encrypted_payload = None
+    if args.aes_gcm:
+        key = secrets.token_bytes(32)
+        encrypted_payload = msgsock.encryptMessage(messagepack_payload, key)
+        if _decrypt_aes_gcm(encrypted_payload, key) != messagepack_payload:
+            raise RuntimeError("AES-GCM round-trip validation failed")
+
+        def secured_serialize() -> bytes:
+            return msgsock.encryptMessage(remoter.serialize_payload(payload), key)
+
+        def secured_deserialize() -> Any:
+            return remoter.deserialize_payload(_decrypt_aes_gcm(encrypted_payload, key))
+
+        measurements.extend(
+            [
+                Measurement(
+                    codec="aes-gcm",
+                    operation="encrypt",
+                    payload_bytes=len(messagepack_payload),
+                    samples_seconds=_measure(
+                        lambda: msgsock.encryptMessage(messagepack_payload, key),
+                        iterations=args.iterations,
+                        synchronize=synchronize,
+                        warmups=args.warmups,
+                    ),
+                ),
+                Measurement(
+                    codec="aes-gcm",
+                    operation="decrypt",
+                    payload_bytes=len(messagepack_payload),
+                    samples_seconds=_measure(
+                        lambda: _decrypt_aes_gcm(encrypted_payload, key),
+                        iterations=args.iterations,
+                        synchronize=synchronize,
+                        warmups=args.warmups,
+                    ),
+                ),
+                Measurement(
+                    codec="messagepack+aes",
+                    operation="serialize",
+                    payload_bytes=len(encrypted_payload),
+                    samples_seconds=_measure(
+                        secured_serialize,
+                        iterations=args.iterations,
+                        synchronize=synchronize,
+                        warmups=args.warmups,
+                    ),
+                ),
+                Measurement(
+                    codec="messagepack+aes",
+                    operation="deserialize",
+                    payload_bytes=len(encrypted_payload),
+                    samples_seconds=_measure(
+                        secured_deserialize,
+                        iterations=args.iterations,
+                        synchronize=synchronize,
+                        warmups=args.warmups,
+                    ),
+                ),
+            ]
+        )
+
     print(f"iterations: {args.iterations} (warmups: {args.warmups})")
     print(f"pickle payload:      {len(pickle_payload) / _MIB:.3f} MiB")
     print(f"messagepack payload: {len(messagepack_payload) / _MIB:.3f} MiB")
+    if encrypted_payload is not None:
+        print(
+            f"encrypted payload:   {len(encrypted_payload) / _MIB:.3f} MiB "
+            f"(+{len(encrypted_payload) - len(messagepack_payload)} bytes)"
+        )
     print()
     for measurement in measurements:
         _print_measurement(measurement)
 
-    pickle_serialize = statistics.median(measurements[0].samples_seconds)
-    pickle_deserialize = statistics.median(measurements[1].samples_seconds)
-    messagepack_serialize = statistics.median(measurements[2].samples_seconds)
-    messagepack_deserialize = statistics.median(measurements[3].samples_seconds)
+    pickle_serialize = _median_for(measurements, "pickle", "serialize")
+    pickle_deserialize = _median_for(measurements, "pickle", "deserialize")
+    messagepack_serialize = _median_for(measurements, "messagepack", "serialize")
+    messagepack_deserialize = _median_for(measurements, "messagepack", "deserialize")
     print()
     print(f"serialize slowdown:   {messagepack_serialize / pickle_serialize:.2f}x")
     print(f"deserialize slowdown: {messagepack_deserialize / pickle_deserialize:.2f}x")
+    if encrypted_payload is not None:
+        aes_encrypt = _median_for(measurements, "aes-gcm", "encrypt")
+        aes_decrypt = _median_for(measurements, "aes-gcm", "decrypt")
+        secured_serialize = _median_for(measurements, "messagepack+aes", "serialize")
+        secured_deserialize = _median_for(measurements, "messagepack+aes", "deserialize")
+        print(f"encrypt overhead:     {aes_encrypt * 1000:.3f} ms")
+        print(f"decrypt overhead:     {aes_decrypt * 1000:.3f} ms")
+        print(f"secured serialize:    {secured_serialize / messagepack_serialize:.2f}x messagepack")
+        print(f"secured deserialize:  {secured_deserialize / messagepack_deserialize:.2f}x messagepack")
     return EXIT_SUCCESS
 
 
