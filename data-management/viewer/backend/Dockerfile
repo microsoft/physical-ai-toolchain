@@ -18,13 +18,20 @@ COPY pyproject.toml uv.lock ./
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PATH=/app/.venv/bin:$PATH
-RUN uv sync --frozen --no-dev --extra azure --extra analysis --extra export --extra auth --extra yolo
+ARG AZURE_ONLY=false
+RUN if [ "${AZURE_ONLY}" = "true" ]; then \
+        uv sync --frozen --no-dev --extra azure; \
+    else \
+        uv sync --frozen --no-dev --extra azure --extra analysis --extra export --extra auth --extra yolo; \
+    fi
 
 # Copy application source
 COPY src/ ./src/
 
 # Run as an unprivileged user
-RUN useradd --system --no-create-home appuser && chown -R appuser /app
+RUN useradd --system --no-create-home appuser \
+    && mkdir -p /data /models \
+    && chown -R appuser /app /data /models
 USER appuser
 
 # Expose the API port (override with BACKEND_PORT env var at runtime)
