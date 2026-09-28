@@ -102,6 +102,17 @@ npm --prefix docs/docusaurus run ci:test:e2e
 
 The pull-request scope covers deterministic Docusaurus journeys DCS01-DCS12. Release scope adds DCS13 and every required qualified-human cell. Missing manual evidence remains `NOT_ASSESSED`; it does not block deterministic bundle production, but it prevents release completeness.
 
+The CI runner (`ubuntu-latest` with system Google Chrome) is the authoritative rendering environment for Docusaurus browser evidence. The site renders with the operating system `system-ui` font stack, so reviewed adaptive exceptions and the contrast baseline in `docs/docusaurus/e2e/contrast-baseline.json` reflect CI geometry, and local runs on other operating systems can report different findings.
+
+Contrast baseline entries use these gates:
+
+| Assessment                                                                             | Pull request and `main` (`automated`) | Reviewer or release completeness and promotion |
+|----------------------------------------------------------------------------------------|---------------------------------------|------------------------------------------------|
+| Unknown, increased, unreconciled, measured failure, unowned, stale, or decreased entry | Blocks                                | Blocks                                         |
+| `unresolved` entry awaiting qualified review                                           | Reported, does not block              | Blocks                                         |
+
+Promotion rejects a collection whose contrast baseline contains any entry that is not `reviewed` or whose `reviewBy` date has passed.
+
 ## Qualified Accessibility Review
 
 Use Windows NVDA with Microsoft Edge and a human-led JAWS pass for the supported screen-reader baseline. VoiceOver and mobile assistive technology are unsupported until an explicit scope change adds them.

@@ -511,6 +511,18 @@ def _validate_collection(root: Path, harness_root: Path, source_sha: str) -> dic
     return prior
 
 
+def require_reviewed_contrast(root: Path, *, now: datetime) -> None:
+    """Reject a collection whose contrast baseline still awaits or has lapsed qualified review."""
+    baseline = read_json(root / "docs/docusaurus/e2e/contrast-baseline.json")
+    entries = baseline.get("entries")
+    _require(isinstance(entries, list), "Contrast baseline entries are unavailable")
+    today = now.astimezone(UTC).date().isoformat()
+    unreviewed = [entry for entry in entries if entry.get("classification") != "reviewed"]
+    _require(not unreviewed, f"Contrast baseline has {len(unreviewed)} signature(s) awaiting qualified review")
+    expired = [entry for entry in entries if not isinstance(entry.get("reviewBy"), str) or entry["reviewBy"] < today]
+    _require(not expired, f"Contrast baseline has {len(expired)} expired or undated review(s)")
+
+
 def _compose(
     collection: Path,
     review: Path,
@@ -620,6 +632,7 @@ def promote(
     _sha(reviewer_revision)
     verify_harness(harness_root)
     prior = _validate_collection(collection, harness_root, source_sha)
+    require_reviewed_contrast(collection, now=now)
     registry, _ = verify_review_package(review, source_sha)
     validate_anchors(prior, registry, prior_digest, registry_digest)
     _require(not output.exists(), "Promotion requires a fresh output directory")
@@ -763,6 +776,7 @@ def verify_promoted(
         _require(path.parts[0] in {"collection", "review", "promotion"}, "Unexpected promoted package path")
     validation = read_json(root / "promotion/validation-manifest.json")
     prior = _validate_collection(root / "collection", harness_root, source_sha)
+    require_reviewed_contrast(root / "collection", now=now)
     registry, _ = verify_review_package(root / "review", source_sha)
     validate_anchors(prior, registry, validation["priorBundleDigest"], validation["reviewRegistryDigest"])
     bundle = read_json(root / "promotion/evidence-bundle.json")

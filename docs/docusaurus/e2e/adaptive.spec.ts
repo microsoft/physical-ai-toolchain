@@ -1469,39 +1469,13 @@ interface ReviewedAdaptiveException {
   readonly reentryTrigger: string;
 }
 
-const desktopTemplateStateIds = [
-  'home',
-  'documentation-hub',
-  'article',
-  'search',
-  'not-found',
-  'table-and-alert',
-  'task-list',
-  'mermaid-chunking',
-  'mermaid-osmo-proxy',
-  'desktop-navigation-open',
-  'search-results-open',
-];
-
 const reviewedAdaptiveExceptions: readonly ReviewedAdaptiveException[] = [
-  {
-    id: 'navbar-title-truncated-under-text-only-resize',
-    producer: 'layout',
-    signature: /^clipped: b\.navbar__title\.text--truncate/,
-    states: desktopTemplateStateIds,
-    conditionIds: ['text-resize-200'],
-    rationale:
-      'Text-only 200 percent scaling keeps the desktop navbar breakpoint, so the Infima text--truncate site title collapses to an ellipsis. The accessible name and document title keep the full text.',
-    owner: 'accessibility owner',
-    reentryTrigger:
-      'Qualified real browser zoom evidence for SC 1.4.4, or any navbar, breakpoint, or title styling change.',
-  },
   {
     id: 'search-hit-preview-truncated-in-reflow',
     producer: 'layout',
     signature: /^clipped: span\.hit(Title|Path)_/,
     states: ['search-results-open'],
-    conditionIds: ['reflow-320', 'text-spacing-at-320'],
+    conditionIds: ['reflow-320', 'text-spacing-at-320', 'orientation-portrait'],
     rationale:
       'The local search plugin renders fixed-width single-line result previews. The complete title and path remain in the accessible name and on the destination route.',
     owner: 'accessibility owner',

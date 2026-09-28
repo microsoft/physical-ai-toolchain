@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 
-_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*(?:-[A-Za-z0-9._:-]+)*$")
+_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 _DIGEST_PATTERN = re.compile(r"^[a-fA-F0-9]{64}$")
 _GIT_COMMIT_PATTERN = re.compile(r"^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$")
 _CREDENTIAL_PATTERN = re.compile(
@@ -2650,7 +2650,7 @@ def _docusaurus_package_inventory(root: Path) -> tuple[dict[str, dict[str, Any]]
     documents = {}
     missing = set()
 
-    def retain(relative: str, expected: dict[str, Any] | None = None) -> None:
+    def retain(relative: str, expected: dict[str, Any] | None = None, *, parse: bool = True) -> None:
         if relative in records:
             if expected is not None and any(
                 field in expected and expected[field] != records[relative][field] for field in ("sha256", "sizeBytes")
@@ -2668,7 +2668,7 @@ def _docusaurus_package_inventory(root: Path) -> tuple[dict[str, dict[str, Any]]
                 if field in expected and expected[field] != record[field]:
                     missing.add(f"{relative}:{field}-mismatch")
         records[relative] = record
-        if path.suffix == ".json" and relative not in documents:
+        if parse and path.suffix == ".json" and relative not in documents:
             try:
                 documents[relative] = json.loads(content)
             except (ValueError, UnicodeDecodeError):
@@ -2676,6 +2676,7 @@ def _docusaurus_package_inventory(root: Path) -> tuple[dict[str, dict[str, Any]]
 
     for relative in sorted(required):
         retain(relative)
+    # Published site files and report assets are retained as opaque bytes; downloads may be JSONC.
     for directory in ("docs/docusaurus/build", "docs/docusaurus/playwright-report"):
         base = _package_path(root, directory)
         if base.exists():
@@ -2683,7 +2684,7 @@ def _docusaurus_package_inventory(root: Path) -> tuple[dict[str, dict[str, Any]]
                 relative = path.relative_to(root).as_posix()
                 _package_path(root, relative)
                 if path.is_file():
-                    retain(relative)
+                    retain(relative, parse=False)
     bundle_path = f"{_DOCUSAURUS_EVIDENCE_ROOT}/evidence-bundle.json"
     bundle = documents.get(bundle_path, {})
     scope = documents.get(f"{_DOCUSAURUS_EVIDENCE_ROOT}/inputs/evidence-scope.json", {})
