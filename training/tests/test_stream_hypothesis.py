@@ -169,8 +169,10 @@ def test_redirected_progress_is_line_oriented_and_rate_limited(monkeypatch) -> N
     monkeypatch.setattr(stream_module.sys, "stdout", stdout)
     monkeypatch.delenv("TQDM_MININTERVAL", raising=False)
 
+    green, reset = "\x1b[32m", "\x1b[0m"
+
     stream_module.install_ansi_stripping()
-    stream_module.sys.stdout.write("\x1b[32mstep 1\x1b[0m\rstep 2\r")
+    stream_module.sys.stdout.write(f"{green}step 1{reset}\rstep 2\r")
 
     assert stdout.value == "step 1\nstep 2\n"
     assert stream_module.os.environ["TQDM_MININTERVAL"] == "30"
