@@ -1,15 +1,65 @@
 ---
-title: SO-101 raw observation offload results
-description: Real-hardware ACT rollout measurements for float32 and uint8 observation transport
-ms.date: 2026-08-26
+title: SO-101 inference benchmark results
+description: Synthetic ACT and Pi0.5 inference benchmarks plus real-hardware ACT rollout measurements
+ms.date: 2026-09-21
 ---
 
-Real-hardware measurements compare the original client-prepared `float32`
-observation path with server-prepared `uint8` observations. Moving image
-conversion and policy processing to the GPU server reaches the configured
-30 Hz control target.
+Synthetic benchmarks compare direct, plaintext-offload, and AES-GCM-offload
+inference for ACT and Pi0.5. Real-hardware measurements compare the original
+client-prepared `float32` observation path with server-prepared `uint8`
+observations.
 
-## 🧪 Measurement setup
+## 🧪 Synthetic benchmark setup
+
+The synthetic benchmark ran on September 21, 2026, on the ARM64 Kubernetes GPU
+node. Each mode used the same deterministic 1,843,224-byte observation payload,
+10 warm-up calls, and 100 measured calls.
+
+| Parameter           | Value                                      |
+|---------------------|--------------------------------------------|
+| Policies            | ACT and Pi0.5                              |
+| Inference modes     | Direct, plaintext offload, AES-GCM offload |
+| Observation payload | 1,843,224 bytes                            |
+| Warm-up calls       | 10                                         |
+| Measured calls      | 100                                        |
+| ACT action chunk    | 100 actions                                |
+| Pi0.5 action chunk  | 10 actions                                 |
+
+These measurements are single benchmark runs. Use them as reference values for
+comparing modes on the tested node, not as cross-platform performance targets.
+
+## 📈 Synthetic benchmark results
+
+Overall latency includes action-chunk refills and actions returned from the
+existing queue.
+
+| Policy | Mode              | Mean ms | p50 ms |  p95 ms |  p99 ms |  Max ms | Throughput Hz |
+|--------|-------------------|--------:|-------:|--------:|--------:|--------:|--------------:|
+| ACT    | Direct            |   3.336 |  2.723 |   5.910 |  10.008 |  23.068 |       299.776 |
+| ACT    | Plaintext offload |  11.103 | 10.099 |  17.468 |  18.670 |  33.165 |        90.067 |
+| ACT    | AES-GCM offload   |  13.047 | 12.727 |  15.749 |  17.191 |  34.232 |        76.646 |
+| Pi0.5  | Direct            |  45.481 |  5.004 | 408.625 | 421.180 | 421.199 |        21.987 |
+| Pi0.5  | Plaintext offload |  53.258 | 11.603 | 426.043 | 440.674 | 441.082 |        18.776 |
+| Pi0.5  | AES-GCM offload   |  59.186 | 16.320 | 441.252 | 456.492 | 462.538 |        16.896 |
+
+Action-chunk timing separates model forward passes from queued action
+retrieval.
+
+| Policy | Mode              | Refill calls | Refill mean ms | Queued calls | Queued mean ms |
+|--------|-------------------|-------------:|---------------:|-------------:|---------------:|
+| ACT    | Direct            |            1 |         23.068 |           99 |          3.137 |
+| ACT    | Plaintext offload |            1 |         33.165 |           99 |         10.880 |
+| ACT    | AES-GCM offload   |            1 |         34.232 |           99 |         12.833 |
+| Pi0.5  | Direct            |           10 |        409.786 |           90 |          5.003 |
+| Pi0.5  | Plaintext offload |           10 |        428.327 |           90 |         11.584 |
+| Pi0.5  | AES-GCM offload   |           10 |        445.819 |           90 |         16.227 |
+
+For the 1.84 MB request, AES-GCM adds 1.944 ms to ACT mean latency and
+5.928 ms to Pi0.5 mean latency relative to plaintext offload. Pi0.5 percentile
+values reflect its ten model-forward chunk refills; the remaining 90 calls
+return queued actions.
+
+## 🧪 Real-hardware measurement setup
 
 | Parameter           | Value                                                 |
 |---------------------|-------------------------------------------------------|
