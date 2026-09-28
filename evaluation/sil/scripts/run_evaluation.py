@@ -617,8 +617,7 @@ def main() -> int:
         n_frames = len(data["timestamp"])
 
         video_files = {
-            image_key: _find_video_file(dataset_dir, image_key, ep, episode_record)
-            for image_key in image_keys
+            image_key: _find_video_file(dataset_dir, image_key, ep, episode_record) for image_key in image_keys
         }
         missing_video_keys = [image_key for image_key, video_file in video_files.items() if not video_file]
         if missing_video_keys:

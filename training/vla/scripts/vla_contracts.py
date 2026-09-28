@@ -109,9 +109,7 @@ def validate_calibration_workload(workload: Mapping[str, Any]) -> None:
     _reject_secret_fields(workload, "workload")
     _reject_non_finite_numbers(workload, "workload")
     if workload.get("schema_version") != CALIBRATION_WORKLOAD_SCHEMA_VERSION:
-        raise ContractError(
-            f"workload.schema_version must equal {CALIBRATION_WORKLOAD_SCHEMA_VERSION}"
-        )
+        raise ContractError(f"workload.schema_version must equal {CALIBRATION_WORKLOAD_SCHEMA_VERSION}")
 
     source_model = _require_mapping(workload, "source_model")
     _require_string(source_model, "repository")
@@ -467,9 +465,7 @@ def _validate_run(record: Mapping[str, Any]) -> None:
         if not isinstance(value, int) or value < 1:
             raise ContractError(f"effective_batch.{field} must be a positive integer")
     expected = (
-        effective_batch["micro_batch_per_rank"]
-        * effective_batch["world_size"]
-        * effective_batch["accumulation_steps"]
+        effective_batch["micro_batch_per_rank"] * effective_batch["world_size"] * effective_batch["accumulation_steps"]
     )
     if effective_batch["total"] != expected:
         raise ContractError("effective_batch.total does not match its factors")

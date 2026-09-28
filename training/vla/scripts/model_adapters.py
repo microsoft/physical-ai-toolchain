@@ -274,9 +274,7 @@ def _run_self_check() -> None:
     smolvla.contract_record("2026-09-22T00:00:00Z")
 
     try:
-        get_adapter("lerobot-smolvla").resolve(
-            AdapterRequest(policy_type="smolvla", gradient_checkpointing=True)
-        )
+        get_adapter("lerobot-smolvla").resolve(AdapterRequest(policy_type="smolvla", gradient_checkpointing=True))
     except AdapterError:
         pass
     else:

@@ -140,10 +140,7 @@ def _parse_rename_map(training_arguments: Sequence[str]) -> dict[str, str]:
     except json.JSONDecodeError as exc:
         raise CalibrationError(f"Training rename map is invalid JSON: {exc}") from exc
     if not isinstance(rename_map, dict) or any(
-        not isinstance(source, str)
-        or not source
-        or not isinstance(target, str)
-        or not target
+        not isinstance(source, str) or not source or not isinstance(target, str) or not target
         for source, target in rename_map.items()
     ):
         raise CalibrationError("Training rename map must contain non-empty string keys and values")
@@ -229,9 +226,7 @@ def _build_workload(training_arguments: Sequence[str]) -> dict[str, Any]:
             policy_type=required_values["POLICY_TYPE"],
             mixed_precision=os.environ.get("MIXED_PRECISION", "no"),
             policy_dtype=os.environ.get("POLICY_DTYPE") or None,
-            train_expert_only=(
-                _parse_boolean(train_expert_value, "TRAIN_EXPERT_ONLY") if train_expert_value else None
-            ),
+            train_expert_only=(_parse_boolean(train_expert_value, "TRAIN_EXPERT_ONLY") if train_expert_value else None),
             gradient_checkpointing=_parse_boolean(
                 os.environ.get("GRADIENT_CHECKPOINTING", "false"),
                 "GRADIENT_CHECKPOINTING",
@@ -247,9 +242,7 @@ def _build_workload(training_arguments: Sequence[str]) -> dict[str, Any]:
     if actual_imagenet_stats != expected_imagenet_stats:
         raise CalibrationError("USE_IMAGENET_STATS does not match the registered adapter")
 
-    dataset, input_shapes = _dataset_contract(
-        _load_dataset_info(training_arguments), repository, revision, rename_map
-    )
+    dataset, input_shapes = _dataset_contract(_load_dataset_info(training_arguments), repository, revision, rename_map)
     lock_path = Path(os.environ.get("LEROBOT_PROJECT", "training/vla/lerobot")) / "uv.lock"
     if not lock_path.is_file():
         raise CalibrationError(f"LeRobot lockfile is missing: {lock_path}")
@@ -351,9 +344,7 @@ def _run_probe(args: argparse.Namespace) -> int:
         raise CalibrationError("CUDA is unavailable in the calibration probe")
     visible_gpus = torch.cuda.device_count()
     if visible_gpus != args.expected_world_size:
-        raise CalibrationError(
-            f"Expected {args.expected_world_size} visible GPU(s), found {visible_gpus}"
-        )
+        raise CalibrationError(f"Expected {args.expected_world_size} visible GPU(s), found {visible_gpus}")
     if visible_gpus != 1:
         raise CalibrationError("The calibration probe currently supports exactly one GPU")
 
