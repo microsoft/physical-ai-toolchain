@@ -50,7 +50,7 @@
     "@types/jest-axe": "3.5.9",
     "@types/react": "19.3.0",
     "@typescript-eslint/parser": "8.70.0",
-    "eslint": "9.39.5",
+    "eslint": "10.10.0",
     "eslint-plugin-jsx-a11y-x": "0.2.0",
     "express": "4.22.1",
     "express-rate-limit": "8.7.0",
