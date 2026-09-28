@@ -2,7 +2,7 @@
 title: Scripts
 description: CI/CD scripts, shared libraries, linting, security, and Pester tests for the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-26
+ms.date: 2026-09-28
 ms.topic: reference
 keywords:
   - scripts
@@ -211,7 +211,7 @@ All other references to these pins are read-only consumers:
 
 Run `scripts/update-chart-hashes.sh` locally after bumping any pinned Helm chart version. The script runs `helm pull` for each chart, computes the SHA-256, and rewrites the matching `VAR="${VAR:-...}"` line in `infrastructure/setup/defaults.conf` so the runtime default stays in sync with the upstream digest. Commit the resulting `defaults.conf` diff alongside the chart-version bump.
 
-GPU Operator `v26.3.2` and OSMO charts `1.3.0` remain pinned despite published `v26.7.0` and `1.3.1` releases. Freshness alone does not establish chart digest, paired OSMO image, or deployed GPU compatibility. Keep those defaults until a coordinated chart-and-hash update passes deployment compatibility validation. KAI Scheduler `v0.20.1` was the newest stable tag in the configured public GHCR chart registry at the time of review.
+Freshness alone does not establish chart digest, paired OSMO image, or deployed GPU compatibility. Keep the GPU Operator and OSMO chart defaults until a coordinated chart-and-hash update passes deployment compatibility validation.
 
 Binary pins in `.devcontainer/devcontainer.json` require the actual artifact and an independently verified SHA-256 before a manual update. The validator's SARIF output identifies the file and pin to investigate; a download-failure alert does not justify a hash change.
 
