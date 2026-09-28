@@ -1,0 +1,146 @@
+name: Docusaurus Accessibility Promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      collection-run-id:
+        description: Successful current-main CI collection run ID
+        required: true
+        type: string
+      collection-artifact-id:
+        description: Immutable release-scope collection artifact ID
+        required: true
+        type: string
+      review-evidence-revision:
+        description: Exact protected reviewer-evidence commit SHA
+        required: true
+        type: string
+      prior-bundle-digest:
+        description: Independently retained HVE prior-bundle digest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: docusaurus-accessibility-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Promote qualified accessibility evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: accessibility-release
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      COLLECTION_RUN_ID: ${{ inputs.collection-run-id }}
+      COLLECTION_ARTIFACT_ID: ${{ inputs.collection-artifact-id }}
+      REVIEWER_REVISION: ${{ inputs.review-evidence-revision }}
+      PRIOR_BUNDLE_DIGEST: ${{ inputs.prior-bundle-digest }}
+      ACCESSIBILITY_REVIEWER_EVIDENCE_BRANCH: ${{ vars.ACCESSIBILITY_REVIEWER_EVIDENCE_BRANCH }}
+      ACCESSIBILITY_REVIEW_REGISTRY_DIGEST: ${{ secrets.ACCESSIBILITY_REVIEW_REGISTRY_DIGEST }}
+      HVE_SKILL_ROOT: artifacts/accessibility/promotion-hve/.github/skills/accessibility/accessibility
+    steps:
+      - name: Reject dispatch outside current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          current_main=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          test "$GITHUB_SHA" = "$current_main"
+          test -n "$ACCESSIBILITY_REVIEWER_EVIDENCE_BRANCH"
+          test -n "$ACCESSIBILITY_REVIEW_REGISTRY_DIGEST"
+
+      - name: Checkout trusted main implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: '3.12'
+
+      - name: Validate collection run and immutable artifact
+        id: collection
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          uv run --no-project --with pydantic==2.13.5 python -m scripts.accessibility.promotion \
+            check-collection --run-id "$COLLECTION_RUN_ID" --artifact-id "$COLLECTION_ARTIFACT_ID"
+
+      - name: Download exact collection artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ inputs.collection-artifact-id }}
+          run-id: ${{ inputs.collection-run-id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          merge-multiple: true
+          path: artifacts/accessibility/promotion-input
+
+      - name: Acquire protected reviewer evidence as inert data
+        env:
+          SOURCE_SHA: ${{ steps.collection.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --no-project --with pydantic==2.13.5 python -m scripts.accessibility.promotion \
+            acquire-review --reviewer-revision "$REVIEWER_REVISION" --source-sha "$SOURCE_SHA" \
+            --output artifacts/accessibility/promotion-review
+
+      - name: Acquire the collection-pinned HVE composer
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --no-project --with pydantic==2.13.5 python -m scripts.accessibility.promotion \
+            acquire-harness --output artifacts/accessibility/promotion-hve
+          uv sync --project "$HVE_SKILL_ROOT" --frozen
+
+      - name: Recompose with independent anchors and release completeness
+        env:
+          SOURCE_SHA: ${{ steps.collection.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --project "$HVE_SKILL_ROOT" --frozen --with pydantic==2.13.5 python \
+            -m scripts.accessibility.promotion promote \
+            --run-id "$COLLECTION_RUN_ID" --artifact-id "$COLLECTION_ARTIFACT_ID" \
+            --reviewer-revision "$REVIEWER_REVISION" --source-sha "$SOURCE_SHA" \
+            --prior-bundle-digest "$PRIOR_BUNDLE_DIGEST" \
+            --harness-root "$HVE_SKILL_ROOT" --require-completeness release \
+            --collection artifacts/accessibility/promotion-input \
+            --review artifacts/accessibility/promotion-review \
+            --output artifacts/accessibility/promoted
+
+      - name: Verify promoted package from a fresh directory
+        env:
+          SOURCE_SHA: ${{ steps.collection.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -R artifacts/accessibility/promoted artifacts/accessibility/promotion-verified
+          uv run --project "$HVE_SKILL_ROOT" --frozen --with pydantic==2.13.5 python \
+            -m scripts.accessibility.promotion verify-promoted \
+            --output artifacts/accessibility/promotion-verified --source-sha "$SOURCE_SHA" \
+            --promotion-run-id "$GITHUB_RUN_ID" --harness-root "$HVE_SKILL_ROOT" \
+            --scratch artifacts/accessibility/promotion-expiry-check
+          uv run --no-project --with pydantic==2.13.5 python -m scripts.accessibility.promotion \
+            check-current --source-sha "$SOURCE_SHA"
+
+      - name: Upload release-complete retained build and evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docusaurus-accessibility-promoted-${{ github.run_id }}
+          path: artifacts/accessibility/promoted/
+          retention-days: 90
+          if-no-files-found: error
+          include-hidden-files: true

@@ -72,6 +72,10 @@ coverage:
         flags:
           - pytest-evaluation
         target: 80%
+      docusaurus:
+        flags:
+          - docusaurus
+        target: 80%
       # pytest-fuzz, vitest-*, terraform, and go intentionally omitted from project status gating:
       # fuzzing coverage is always low by design, vitest improvements are tracked in a separate
       # workstream, terraform reports test results without a coverage XML, and go e2e tests do
@@ -156,6 +160,10 @@ flags:
   pester:
     paths:
       - scripts/
+    carryforward: true
+  docusaurus:
+    paths:
+      - docs/docusaurus/src/
     carryforward: true
 
 component_management:
@@ -270,6 +278,10 @@ component_management:
       paths:
         - tests/fuzz_harness.py
         - tests/fuzz-corpus/**
+    - component_id: docusaurus
+      name: Docusaurus
+      paths:
+        - docs/docusaurus/src/**
 
 comment:
   layout: "header, diff, flags, files"
@@ -294,7 +306,8 @@ ignore:
   - "**/*.test.ts"
   - "**/*.test.tsx"
   - "external/**"
-  - "docs/**"
+  - "docs/**/*.md"
+  - "docs/**/*.mdx"
   - "workflows/**"
   - "config/**"
   - "logs/**"
