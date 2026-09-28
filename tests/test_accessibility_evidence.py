@@ -26,7 +26,9 @@ from scripts.accessibility.evidence_gate import (
     RequirementEvidenceLedger,
     _docusaurus_catalogs,
     _docusaurus_exact_results,
+    _limit_playwright_results,
     _load_yaml,
+    _playwright_run_limitation,
     canonical_model_digest,
     format_human_summary,
     main,
@@ -985,6 +987,72 @@ class TestDocusaurusCompositionAdapter:
                 and item["methods"][0]["probe"] == "qualified-human"
             }
             assert actual == expected
+
+
+class TestPlaywrightRunLimitation:
+    @staticmethod
+    def _report(tmp_path: Path, content: Any) -> Path:
+        path = tmp_path / "playwright-results.json"
+        path.write_text(content if isinstance(content, str) else json.dumps(content), encoding="utf-8")
+        return path
+
+    def test_given_clean_run_when_checked_then_no_limitation(self, tmp_path: Path) -> None:
+        # Arrange
+        report = self._report(tmp_path, {"stats": {"expected": 160, "unexpected": 0, "flaky": 1}, "errors": []})
+
+        # Act
+        limitation = _playwright_run_limitation(report)
+
+        # Assert
+        assert limitation is None
+
+    @pytest.mark.parametrize(
+        ("content", "expected"),
+        [
+            ({"stats": {"unexpected": 13}, "errors": []}, "13 unexpected test results and 0 run errors"),
+            ({"stats": {"unexpected": 0}, "errors": [{"message": "globalSetup failed"}]}, "0 unexpected"),
+            ({"stats": {"unexpected": True}, "errors": []}, "lacks run statistics"),
+            ({"stats": {"unexpected": -1}, "errors": []}, "lacks run statistics"),
+            ({"stats": {}, "errors": []}, "lacks run statistics"),
+            ({"stats": {"unexpected": 0}}, "lacks run statistics"),
+            ([], "lacks run statistics"),
+            ("{not json", "unreadable"),
+        ],
+    )
+    def test_given_unclean_or_malformed_run_when_checked_then_fails_closed(
+        self, tmp_path: Path, content: Any, expected: str
+    ) -> None:
+        # Arrange
+        report = self._report(tmp_path, content)
+
+        # Act
+        limitation = _playwright_run_limitation(report)
+
+        # Assert
+        assert limitation is not None
+        assert expected in limitation
+
+    def test_given_missing_report_when_checked_then_fails_closed(self, tmp_path: Path) -> None:
+        assert _playwright_run_limitation(tmp_path / "absent.json") == "Playwright run report is unreadable"
+
+    def test_given_limitation_when_applied_then_only_passing_cells_downgrade(self) -> None:
+        # Arrange
+        results = {
+            "pass": {"status": "PASS", "observed": "Exact cell reported PASS"},
+            "fail": {"status": "FAIL", "observed": "Exact cell reported FAIL"},
+            "unknown": {"status": "CANT_TELL", "observed": "Required exact cell was absent"},
+        }
+
+        # Act
+        limited = _limit_playwright_results(results, "Playwright run reported 13 unexpected test results")
+
+        # Assert
+        assert limited["pass"] == {
+            "status": "CANT_TELL",
+            "observed": "Exact cell reported PASS; Playwright run reported 13 unexpected test results",
+        }
+        assert limited["fail"] == results["fail"]
+        assert limited["unknown"] == results["unknown"]
 
 
 @pytest.fixture()

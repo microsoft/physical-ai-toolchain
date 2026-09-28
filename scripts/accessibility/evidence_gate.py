@@ -1454,6 +1454,18 @@ def _playwright_run_limitation(report_path: Path) -> str | None:
     return None
 
 
+def _limit_playwright_results(results: dict[str, dict[str, Any]], limitation: str) -> dict[str, dict[str, Any]]:
+    """Downgrade passing exact-cell results to CANT_TELL while preserving FAIL and CANT_TELL results."""
+    return {
+        requirement_id: (
+            {"status": "CANT_TELL", "observed": f"{result['observed']}; {limitation}"}
+            if result["status"] == "PASS"
+            else result
+        )
+        for requirement_id, result in results.items()
+    }
+
+
 def _docusaurus_exact_results(
     manifest: dict[str, Any],
     requirement_catalog: list[dict[str, Any]],
@@ -1670,14 +1682,7 @@ def prepare_docusaurus_composition(
     exact_results = _docusaurus_exact_results(method_manifest, requirement_catalog["requirements"])
     run_limitation = _playwright_run_limitation(report_path)
     if run_limitation:
-        exact_results = {
-            requirement_id: (
-                {"status": "CANT_TELL", "observed": f"{result['observed']}; {run_limitation}"}
-                if result["status"] == "PASS"
-                else result
-            )
-            for requirement_id, result in exact_results.items()
-        }
+        exact_results = _limit_playwright_results(exact_results, run_limitation)
     browser = json.loads(playwright_artifact_paths["docusaurus-browser"].read_text(encoding="utf-8"))
 
     harness_files = [
