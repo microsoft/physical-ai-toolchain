@@ -1,0 +1,62 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+name: vla_evaluate_candidate
+display_name: VLA Candidate Evaluation
+version: "1"
+description: Evaluate one finalized VLA candidate and emit lineage-bound replay evidence.
+
+code: ../../../../..
+
+inputs:
+  candidate:
+    type: uri_folder
+    mode: ro_mount
+  candidate_manifest:
+    type: uri_folder
+    mode: download
+  training_record:
+    type: uri_folder
+    mode: download
+  dataset:
+    type: uri_folder
+    mode: ro_mount
+  dataset_manifest:
+    type: uri_folder
+    mode: download
+  dataset_asset_id:
+    type: string
+  dataset_repo_id:
+    type: string
+  policy_type:
+    type: string
+  eval_episodes:
+    type: integer
+    default: 10
+  job_name:
+    type: string
+    default: vla-candidate-evaluation
+
+outputs:
+  evaluation:
+    type: uri_folder
+    mode: upload
+
+environment:
+  image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
+
+command: >-
+  bash -c '
+  export POLICY_REPO_ID="${{inputs.candidate}}";
+  export POLICY_TYPE="${{inputs.policy_type}}";
+  export DATASET_DIR="${{inputs.dataset}}";
+  export DATASET_REPO_ID="${{inputs.dataset_repo_id}}";
+  export DATASET_ASSET_ID="${{inputs.dataset_asset_id}}";
+  export CANDIDATE_MANIFEST_PATH="${{inputs.candidate_manifest}}/candidate-manifest.json";
+  export TRAINING_RECORD_PATH="${{inputs.training_record}}/training-record.json";
+  export DATASET_MANIFEST_PATH="${{inputs.dataset_manifest}}/dataset.json";
+  export EVAL_EPISODES="${{inputs.eval_episodes}}";
+  export JOB_NAME="${{inputs.job_name}}";
+  export OUTPUT_DIR="${{outputs.evaluation}}";
+  export LEROBOT_PROJECT="training/vla/lerobot";
+  export REGISTER_MODEL="none";
+  bash evaluation/sil/workflows/azureml/lerobot-eval-entry.sh'

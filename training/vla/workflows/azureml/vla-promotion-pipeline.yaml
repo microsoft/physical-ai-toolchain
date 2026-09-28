@@ -1,0 +1,56 @@
+$schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
+type: pipeline
+display_name: VLA Guarded Promotion Pipeline
+experiment_name: vla-promotion-pipeline
+description: Register one candidate from a completed trusted VLA evidence pipeline job.
+
+settings:
+  default_datastore: azureml:workspaceblobstore
+  continue_on_step_failure: false
+
+inputs:
+  candidate:
+    type: uri_folder
+  candidate_manifest:
+    type: uri_folder
+  evaluation:
+    type: uri_folder
+  policy:
+    type: uri_folder
+  decision:
+    type: uri_folder
+  model_name: placeholder-model
+  evidence_job: placeholder-evidence-job
+  producer_identity: placeholder-managed-identity
+  pipeline_contract_fingerprint: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  code_revision: 0000000000000000000000000000000000000000
+  subscription_id: 00000000-0000-0000-0000-000000000000
+  resource_group: placeholder
+  workspace_name: placeholder
+  compute_register: azureml:placeholder
+
+jobs:
+  register_step:
+    type: command
+    component: ./components/register.yaml
+    compute: ${{parent.inputs.compute_register}}
+    inputs:
+      candidate: ${{parent.inputs.candidate}}
+      candidate_manifest: ${{parent.inputs.candidate_manifest}}
+      evaluation: ${{parent.inputs.evaluation}}
+      policy: ${{parent.inputs.policy}}
+      decision: ${{parent.inputs.decision}}
+      model_name: ${{parent.inputs.model_name}}
+      evidence_job: ${{parent.inputs.evidence_job}}
+      producer_identity: ${{parent.inputs.producer_identity}}
+      pipeline_contract_fingerprint: ${{parent.inputs.pipeline_contract_fingerprint}}
+      code_revision: ${{parent.inputs.code_revision}}
+      subscription_id: ${{parent.inputs.subscription_id}}
+      resource_group: ${{parent.inputs.resource_group}}
+      workspace_name: ${{parent.inputs.workspace_name}}
+    identity:
+      type: managed_identity
+
+tags:
+  framework: lerobot
+  lifecycle_stage: guarded-promotion

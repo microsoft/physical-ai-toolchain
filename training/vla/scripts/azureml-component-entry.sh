@@ -9,6 +9,8 @@ if [[ -z "${mode}" ]]; then
 fi
 shift
 
+shared_train_entry="${VLA_SHARED_TRAIN_ENTRY:-training/il/scripts/lerobot/azureml-train-entry.sh}"
+
 require_environment_variables() {
   local name
   for name in "$@"; do
@@ -40,7 +42,7 @@ case "${mode}" in
   calibrate)
     export_parameter ADAPTER_NAME adapter_name
     export_parameter DATASET_REPO_ID dataset_repo_id
-    export_parameter DATASET_REVISION dataset_revision
+    export_parameter DATASET_ASSET_ID dataset_asset_id
     export_parameter POLICY_TYPE policy_type
     export_parameter MIXED_PRECISION mixed_precision
     export_parameter POLICY_DTYPE policy_dtype
@@ -59,17 +61,24 @@ case "${mode}" in
     export_parameter RUNTIME_IMAGE runtime_image
 
     require_environment_variables \
-      ADAPTER_NAME DATASET_REPO_ID DATASET_REVISION POLICY_TYPE MIXED_PRECISION \
+      ADAPTER_NAME DATASET_REPO_ID DATASET_ASSET_ID POLICY_TYPE MIXED_PRECISION \
       INIT_FROM_POLICY_HF_REPO_ID INIT_FROM_POLICY_HF_REVISION TRAIN_EXPERT_ONLY \
       GRADIENT_CHECKPOINTING USE_IMAGENET_STATS CODE_REPOSITORY CODE_REVISION \
       COMPUTE_TARGET RUNTIME_IMAGE CALIBRATION_BATCH_SIZES \
       CALIBRATION_HEADROOM_FRACTION CALIBRATION_PROBE_TIMEOUT_SECONDS \
       AZURE_ML_OUTPUT_workload_contract AZURE_ML_OUTPUT_calibration_report
 
-    if [[ -n "${AZURE_ML_INPUT_prepared_dataset:-}" ]]; then
-      export AZURE_ML_INPUT_dataset_asset_0="${AZURE_ML_INPUT_prepared_dataset}"
-      export DATASET_ASSET_COUNT=1
-    fi
+    dataset_mount=$(environment_value AZURE_ML_INPUT_dataset)
+    dataset_manifest_dir=$(environment_value AZURE_ML_INPUT_dataset_manifest)
+    DATASET_MANIFEST="${dataset_manifest_dir}/dataset.json"
+    export AZURE_ML_INPUT_dataset_asset_0="${dataset_mount}"
+    export DATASET_ASSET_COUNT=1
+    export DATASET_MANIFEST
+    python3 training/vla/scripts/preflight_dataset.py \
+      --dataset "${dataset_mount}" \
+      --asset-id "${DATASET_ASSET_ID}" \
+      --dataset-repo-id "${DATASET_REPO_ID}" \
+      --verify-manifest "${DATASET_MANIFEST}"
     export CALIBRATION_MODE=true
     CALIBRATION_WORKLOAD_OUTPUT_DIR=$(environment_value AZURE_ML_OUTPUT_workload_contract)
     CALIBRATION_OUTPUT_DIR=$(environment_value AZURE_ML_OUTPUT_calibration_report)
@@ -83,7 +92,7 @@ case "${mode}" in
     export_parameter MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES mlflow_token_refresh_retries
     export_parameter MLFLOW_HTTP_REQUEST_TIMEOUT mlflow_http_request_timeout
     export_parameter DATASET_REPO_ID dataset_repo_id
-    export_parameter DATASET_REVISION dataset_revision
+    export_parameter DATASET_ASSET_ID dataset_asset_id
     export_parameter POLICY_TYPE policy_type
     export_parameter INIT_FROM_POLICY_HF_REPO_ID init_from_policy_hf_repo_id
     export_parameter INIT_FROM_POLICY_HF_REVISION init_from_policy_hf_revision
@@ -100,7 +109,6 @@ case "${mode}" in
     export_parameter AZURE_CLIENT_ID azure_client_id
     export_parameter HF_KEY_VAULT_URL hf_key_vault_url
     export_parameter HF_TOKEN_SECRET_NAME hf_token_secret_name
-    export_parameter REGISTER_CHECKPOINT register_checkpoint
     export_parameter RENAME_MAP_B64 rename_map_b64
     export_parameter CODE_REPOSITORY code_repository
     export_parameter CODE_REVISION code_revision
@@ -109,17 +117,30 @@ case "${mode}" in
 
     require_environment_variables \
       ADAPTER_NAME AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP AZUREML_WORKSPACE_NAME \
-      DATASET_REPO_ID DATASET_REVISION POLICY_TYPE INIT_FROM_POLICY_HF_REPO_ID \
+      DATASET_REPO_ID DATASET_ASSET_ID POLICY_TYPE INIT_FROM_POLICY_HF_REPO_ID \
       INIT_FROM_POLICY_HF_REVISION TRAIN_EXPERT_ONLY GRADIENT_CHECKPOINTING \
       USE_IMAGENET_STATS TRAINING_STEPS SAVE_FREQ LOG_FREQ JOB_NAME OUTPUT_DIR \
       MIXED_PRECISION CODE_REPOSITORY CODE_REVISION COMPUTE_TARGET RUNTIME_IMAGE \
-      AZURE_ML_OUTPUT_checkpoints AZURE_ML_INPUT_calibration_report \
-      AZURE_ML_INPUT_workload_contract
+      AZURE_ML_OUTPUT_checkpoints AZURE_ML_OUTPUT_training_record \
+      AZURE_ML_INPUT_dataset AZURE_ML_INPUT_dataset_manifest \
+      AZURE_ML_INPUT_calibration_report AZURE_ML_INPUT_workload_contract
 
     TRAINING_CHECKPOINT_OUTPUT=$(environment_value AZURE_ML_OUTPUT_checkpoints)
+    AZURE_ML_OUTPUT_CHECKPOINTS="${TRAINING_CHECKPOINT_OUTPUT}"
+    TRAINING_RECORD_OUTPUT=$(environment_value AZURE_ML_OUTPUT_training_record)
     CALIBRATION_REPORT_DIR=$(environment_value AZURE_ML_INPUT_calibration_report)
     CALIBRATION_WORKLOAD_CONTRACT="$(environment_value AZURE_ML_INPUT_workload_contract)/workload.json"
-    export TRAINING_CHECKPOINT_OUTPUT CALIBRATION_REPORT_DIR CALIBRATION_WORKLOAD_CONTRACT
+    dataset_mount=$(environment_value AZURE_ML_INPUT_dataset)
+    DATASET_MANIFEST="$(environment_value AZURE_ML_INPUT_dataset_manifest)/dataset.json"
+    export AZURE_ML_INPUT_dataset_asset_0="${dataset_mount}"
+    export DATASET_ASSET_COUNT=1
+    export AZURE_ML_OUTPUT_CHECKPOINTS TRAINING_CHECKPOINT_OUTPUT TRAINING_RECORD_OUTPUT
+    export CALIBRATION_REPORT_DIR CALIBRATION_WORKLOAD_CONTRACT DATASET_MANIFEST
+    python3 training/vla/scripts/preflight_dataset.py \
+      --dataset "${dataset_mount}" \
+      --asset-id "${DATASET_ASSET_ID}" \
+      --dataset-repo-id "${DATASET_REPO_ID}" \
+      --verify-manifest "${DATASET_MANIFEST}"
     ;;
   *)
     echo "ERROR: unsupported component mode '${mode}'" >&2
@@ -127,5 +148,13 @@ case "${mode}" in
     ;;
 esac
 
-  export VLA_MODEL_ADAPTER="${ADAPTER_NAME}"
-exec bash training/il/scripts/lerobot/azureml-train-entry.sh
+export VLA_MODEL_ADAPTER="${ADAPTER_NAME}"
+bash "${shared_train_entry}"
+
+if [[ "${mode}" == "train" ]]; then
+  python3 training/vla/scripts/write_training_record.py \
+    --checkpoints "${TRAINING_CHECKPOINT_OUTPUT}" \
+    --workload-contract "${CALIBRATION_WORKLOAD_CONTRACT}" \
+    --dataset-manifest "${DATASET_MANIFEST}" \
+    --output "${TRAINING_RECORD_OUTPUT}"
+fi

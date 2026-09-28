@@ -1,22 +1,31 @@
 $schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
 type: pipeline
-display_name: VLA Training Pipeline
+display_name: VLA Evidence Pipeline
 experiment_name: vla-training-pipeline
-description: Calibrate VLA micro-batch capacity and train from the validated recommendation.
+description: Validate data, calibrate, train, finalize, evaluate, and decide VLA promotion readiness.
 
 settings:
   default_datastore: azureml:workspaceblobstore
   continue_on_step_failure: false
 
+identity:
+  type: managed_identity
+
 inputs:
+  dataset:
+    type: uri_folder
+  dataset_asset_id: azureml:placeholder-dataset:1
   dataset_repo_id: placeholder/dataset
-  dataset_revision: 0000000000000000000000000000000000000000
+  promotion_policy:
+    type: uri_file
+  model_name: placeholder-model
   policy_type: placeholder
   init_from_policy_hf_repo_id: placeholder/model
   init_from_policy_hf_revision: 0000000000000000000000000000000000000000
   adapter_name: placeholder
   code_repository: placeholder/repository
   code_revision: 0000000000000000000000000000000000000000
+  pipeline_contract_fingerprint: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   train_expert_only: "false"
   gradient_checkpointing: "false"
   use_imagenet_stats: "false"
@@ -27,7 +36,8 @@ inputs:
   training_steps: 2
   save_freq: 1
   log_freq: 1
-  job_name: vla-calibrated-training
+  eval_episodes: 10
+  job_name: vla-evidence-pipeline
   output_dir: /workspace/outputs/train
   mixed_precision: bf16
   policy_dtype: none
@@ -39,11 +49,17 @@ inputs:
   azure_client_id: none
   hf_key_vault_url: none
   hf_token_secret_name: none
-  register_checkpoint: none
+  compute_preflight: azureml:placeholder
   compute_calibrate: azureml:placeholder
   compute_train: azureml:placeholder
+  compute_finalize: azureml:placeholder
+  compute_evaluate: azureml:placeholder
+  compute_decide: azureml:placeholder
 
 outputs:
+  dataset_manifest:
+    type: uri_folder
+    mode: upload
   workload_contract:
     type: uri_folder
     mode: upload
@@ -53,8 +69,37 @@ outputs:
   checkpoints:
     type: uri_folder
     mode: upload
+  training_record:
+    type: uri_folder
+    mode: upload
+  candidate:
+    type: uri_folder
+    mode: upload
+  candidate_manifest:
+    type: uri_folder
+    mode: upload
+  evaluation:
+    type: uri_folder
+    mode: upload
+  policy:
+    type: uri_folder
+    mode: upload
+  decision:
+    type: uri_folder
+    mode: upload
 
 jobs:
+  preflight_step:
+    type: command
+    component: ./components/preflight.yaml
+    compute: ${{parent.inputs.compute_preflight}}
+    inputs:
+      dataset: ${{parent.inputs.dataset}}
+      dataset_asset_id: ${{parent.inputs.dataset_asset_id}}
+      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
+    outputs:
+      dataset_manifest: ${{parent.outputs.dataset_manifest}}
+
   calibration_step:
     type: command
     component: ./components/calibrate.yaml
@@ -62,9 +107,11 @@ jobs:
     resources:
       instance_type: gpu
     inputs:
+      dataset: ${{parent.inputs.dataset}}
+      dataset_manifest: ${{parent.jobs.preflight_step.outputs.dataset_manifest}}
+      dataset_asset_id: ${{parent.inputs.dataset_asset_id}}
       adapter_name: ${{parent.inputs.adapter_name}}
       dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
-      dataset_revision: ${{parent.inputs.dataset_revision}}
       policy_type: ${{parent.inputs.policy_type}}
       mixed_precision: ${{parent.inputs.mixed_precision}}
       policy_dtype: ${{parent.inputs.policy_dtype}}
@@ -83,8 +130,6 @@ jobs:
     outputs:
       workload_contract: ${{parent.outputs.workload_contract}}
       calibration_report: ${{parent.outputs.calibration_report}}
-    identity:
-      type: managed_identity
 
   training_step:
     type: command
@@ -93,11 +138,13 @@ jobs:
     resources:
       instance_type: gpu
     inputs:
+      dataset: ${{parent.inputs.dataset}}
+      dataset_manifest: ${{parent.jobs.preflight_step.outputs.dataset_manifest}}
+      dataset_asset_id: ${{parent.inputs.dataset_asset_id}}
       calibration_report: ${{parent.jobs.calibration_step.outputs.calibration_report}}
       workload_contract: ${{parent.jobs.calibration_step.outputs.workload_contract}}
       adapter_name: ${{parent.inputs.adapter_name}}
       dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
-      dataset_revision: ${{parent.inputs.dataset_revision}}
       policy_type: ${{parent.inputs.policy_type}}
       init_from_policy_hf_repo_id: ${{parent.inputs.init_from_policy_hf_repo_id}}
       init_from_policy_hf_revision: ${{parent.inputs.init_from_policy_hf_revision}}
@@ -120,15 +167,67 @@ jobs:
       azure_client_id: ${{parent.inputs.azure_client_id}}
       hf_key_vault_url: ${{parent.inputs.hf_key_vault_url}}
       hf_token_secret_name: ${{parent.inputs.hf_token_secret_name}}
-      register_checkpoint: ${{parent.inputs.register_checkpoint}}
       code_repository: ${{parent.inputs.code_repository}}
       code_revision: ${{parent.inputs.code_revision}}
       compute_target: ${{parent.inputs.compute_train}}
     outputs:
       checkpoints: ${{parent.outputs.checkpoints}}
+      training_record: ${{parent.outputs.training_record}}
     identity:
       type: managed_identity
 
+  finalize_step:
+    type: command
+    component: ./components/finalize.yaml
+    compute: ${{parent.inputs.compute_finalize}}
+    inputs:
+      checkpoints: ${{parent.jobs.training_step.outputs.checkpoints}}
+      training_record: ${{parent.jobs.training_step.outputs.training_record}}
+      dataset_manifest: ${{parent.jobs.preflight_step.outputs.dataset_manifest}}
+      adapter_name: ${{parent.inputs.adapter_name}}
+      policy_type: ${{parent.inputs.policy_type}}
+    outputs:
+      candidate: ${{parent.outputs.candidate}}
+      candidate_manifest: ${{parent.outputs.candidate_manifest}}
+
+  evaluate_step:
+    type: command
+    component: ./components/evaluate.yaml
+    compute: ${{parent.inputs.compute_evaluate}}
+    resources:
+      instance_type: gpu
+    inputs:
+      candidate: ${{parent.jobs.finalize_step.outputs.candidate}}
+      candidate_manifest: ${{parent.jobs.finalize_step.outputs.candidate_manifest}}
+      training_record: ${{parent.jobs.training_step.outputs.training_record}}
+      dataset: ${{parent.inputs.dataset}}
+      dataset_manifest: ${{parent.jobs.preflight_step.outputs.dataset_manifest}}
+      dataset_asset_id: ${{parent.inputs.dataset_asset_id}}
+      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
+      policy_type: ${{parent.inputs.policy_type}}
+      eval_episodes: ${{parent.inputs.eval_episodes}}
+      job_name: ${{parent.inputs.job_name}}
+    outputs:
+      evaluation: ${{parent.outputs.evaluation}}
+    identity:
+      type: managed_identity
+
+  decide_step:
+    type: command
+    component: ./components/decide.yaml
+    compute: ${{parent.inputs.compute_decide}}
+    inputs:
+      candidate_manifest: ${{parent.jobs.finalize_step.outputs.candidate_manifest}}
+      training_record: ${{parent.jobs.training_step.outputs.training_record}}
+      evaluation: ${{parent.jobs.evaluate_step.outputs.evaluation}}
+      promotion_policy: ${{parent.inputs.promotion_policy}}
+      model_name: ${{parent.inputs.model_name}}
+    outputs:
+      decision: ${{parent.outputs.decision}}
+      policy: ${{parent.outputs.policy}}
+
 tags:
   framework: lerobot
-  lifecycle_stage: training-pipeline
+  lifecycle_stage: evidence-pipeline
+  pipeline_contract_fingerprint: ${{parent.inputs.pipeline_contract_fingerprint}}
+  code_revision: ${{parent.inputs.code_revision}}

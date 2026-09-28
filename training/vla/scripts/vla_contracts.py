@@ -23,6 +23,10 @@ EXIT_ERROR = 2
 
 _FULL_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_AZUREML_ASSET_PATTERN = re.compile(r"^azureml:[A-Za-z0-9][A-Za-z0-9_.-]*:[1-9][0-9]*$")
+_AZUREML_JOB_OUTPUT_PATTERN = re.compile(
+    r"^azureml://jobs/[A-Za-z0-9][A-Za-z0-9_.-]*/outputs/[A-Za-z0-9][A-Za-z0-9_.-]*$"
+)
 _SECRET_KEY_PATTERN = re.compile(r"(?:authorization|password|secret|token)", re.IGNORECASE)
 
 
@@ -42,6 +46,7 @@ class RecordKind(StrEnum):
     CALIBRATION = "calibration"
     APPROVAL = "approval"
     RUN = "run"
+    CANDIDATE = "candidate"
     EVALUATION = "evaluation"
     INCIDENT = "incident"
     PROMOTION = "promotion"
@@ -49,7 +54,13 @@ class RecordKind(StrEnum):
 
 _REQUIRED_FIELDS: dict[RecordKind, tuple[str, ...]] = {
     RecordKind.SOURCE_MODEL: ("repository", "revision", "manifest_sha256"),
-    RecordKind.DATASET: ("uri", "version", "features_sha256"),
+    RecordKind.DATASET: (
+        "asset_id",
+        "dataset_repo_id",
+        "features_sha256",
+        "metadata_sha256",
+        "total_episodes",
+    ),
     RecordKind.CODE: ("repository", "revision"),
     RecordKind.RUNTIME: ("image", "lock_sha256"),
     RecordKind.ADAPTER: ("name", "version", "config_sha256"),
@@ -67,9 +78,42 @@ _REQUIRED_FIELDS: dict[RecordKind, tuple[str, ...]] = {
         "approved_at",
     ),
     RecordKind.RUN: ("run_id", "identities", "effective_batch"),
-    RecordKind.EVALUATION: ("evaluation_id", "run_fingerprint", "status", "outputs_complete"),
+    RecordKind.CANDIDATE: (
+        "policy_type",
+        "training_fingerprint",
+        "dataset_fingerprint",
+        "artifact_manifest_sha256",
+        "evidence_job",
+        "candidate_output",
+        "manifest_output",
+    ),
+    RecordKind.EVALUATION: (
+        "evaluation_id",
+        "run_fingerprint",
+        "candidate_fingerprint",
+        "dataset_fingerprint",
+        "status",
+        "outputs_complete",
+        "episodes_requested",
+        "episodes_evaluated",
+        "reasons",
+        "evaluation_output",
+    ),
     RecordKind.INCIDENT: ("stage", "category", "terminal_state", "retry_count"),
-    RecordKind.PROMOTION: ("model_name", "training_fingerprint", "evaluation_fingerprint"),
+    RecordKind.PROMOTION: (
+        "model_name",
+        "training_fingerprint",
+        "candidate_fingerprint",
+        "evaluation_fingerprint",
+        "policy_fingerprint",
+        "status",
+        "reasons",
+        "evidence_job",
+        "producer_identity",
+        "pipeline_contract_fingerprint",
+        "code_revision",
+        "immutable_inputs",
+    ),
 }
 
 
@@ -104,6 +148,58 @@ def calibration_workload_fingerprint(workload: Mapping[str, Any]) -> str:
     return sha256_bytes(canonical_json(workload).encode("utf-8"))
 
 
+def promotion_policy_fingerprint(policy: Mapping[str, Any]) -> str:
+    """Validate and fingerprint a promotion threshold policy."""
+    validate_promotion_policy(policy)
+    return sha256_bytes(canonical_json(policy).encode("utf-8"))
+
+
+def dataset_identity_fingerprint(record: Mapping[str, Any]) -> str:
+    """Fingerprint immutable dataset identity fields independently of record creation time."""
+    validate_record(record, RecordKind.DATASET)
+    identity = {key: value for key, value in record.items() if key != "created_at"}
+    return sha256_bytes(canonical_json(identity).encode("utf-8"))
+
+
+def validate_promotion_policy(policy: Mapping[str, Any]) -> None:
+    """Validate promotion thresholds and trusted evidence-producer constraints."""
+    _reject_secret_fields(policy, "policy")
+    _reject_non_finite_numbers(policy, "policy")
+    if policy.get("schema_version") != SCHEMA_VERSION:
+        raise ContractError(f"policy.schema_version must equal {SCHEMA_VERSION}")
+
+    minimum_episodes = policy.get("minimum_episodes")
+    if not isinstance(minimum_episodes, int) or isinstance(minimum_episodes, bool) or minimum_episodes < 1:
+        raise ContractError("policy.minimum_episodes must be a positive integer")
+
+    metric_rules = policy.get("metric_rules")
+    if not isinstance(metric_rules, Mapping) or not metric_rules:
+        raise ContractError("policy.metric_rules must be a non-empty object")
+    for metric_name, rule in metric_rules.items():
+        if not isinstance(metric_name, str) or not metric_name.strip():
+            raise ContractError("policy.metric_rules keys must be non-empty strings")
+        if not isinstance(rule, Mapping):
+            raise ContractError(f"policy.metric_rules.{metric_name} must be an object")
+        if rule.get("operator") not in {"lte", "gte"}:
+            raise ContractError(f"policy.metric_rules.{metric_name}.operator must be lte or gte")
+        limit = rule.get("limit")
+        if not isinstance(limit, (int, float)) or isinstance(limit, bool) or not math.isfinite(limit):
+            raise ContractError(f"policy.metric_rules.{metric_name}.limit must be finite")
+
+    baseline = policy.get("baseline")
+    if baseline is not None:
+        if not isinstance(baseline, Mapping):
+            raise ContractError("policy.baseline must be an object")
+        _require_string(baseline, "asset_id")
+        _require_sha256(baseline, "fingerprint")
+
+    _require_string(policy, "allowed_producer_identity")
+    _require_sha256(policy, "pipeline_contract_fingerprint")
+    revision = _require_string(policy, "code_revision")
+    if not _FULL_COMMIT_PATTERN.fullmatch(revision):
+        raise ContractError("policy.code_revision must be a full lowercase 40-character Git commit")
+
+
 def validate_calibration_workload(workload: Mapping[str, Any]) -> None:
     """Validate the immutable inputs that determine calibration compatibility."""
     _reject_secret_fields(workload, "workload")
@@ -118,9 +214,13 @@ def validate_calibration_workload(workload: Mapping[str, Any]) -> None:
         raise ContractError("workload.source_model.revision must be a full lowercase 40-character Git commit")
 
     dataset = _require_mapping(workload, "dataset")
-    _require_string(dataset, "uri")
-    _require_string(dataset, "version")
+    _require_azureml_asset_id(dataset, "asset_id")
+    _require_sha256(dataset, "dataset_fingerprint")
     _require_sha256(dataset, "features_sha256")
+    _require_sha256(dataset, "metadata_sha256")
+    total_episodes = dataset.get("total_episodes")
+    if not isinstance(total_episodes, int) or isinstance(total_episodes, bool) or total_episodes < 1:
+        raise ContractError("workload.dataset.total_episodes must be a positive integer")
 
     code = _require_mapping(workload, "code")
     _require_string(code, "repository")
@@ -261,6 +361,7 @@ def validate_record(record: Mapping[str, Any], expected_kind: RecordKind | None 
         RecordKind.CALIBRATION: _validate_calibration,
         RecordKind.APPROVAL: _validate_approval,
         RecordKind.RUN: _validate_run,
+        RecordKind.CANDIDATE: _validate_candidate,
         RecordKind.EVALUATION: _validate_evaluation,
         RecordKind.INCIDENT: _validate_incident,
         RecordKind.PROMOTION: _validate_promotion,
@@ -356,9 +457,15 @@ def _validate_source_model(record: Mapping[str, Any]) -> None:
 
 
 def _validate_dataset(record: Mapping[str, Any]) -> None:
-    _require_string(record, "uri")
-    _require_string(record, "version")
+    _require_azureml_asset_id(record, "asset_id")
+    dataset_repo_id = _require_string(record, "dataset_repo_id")
+    if Path(dataset_repo_id).is_absolute() or ".." in Path(dataset_repo_id).parts:
+        raise ContractError("dataset_repo_id must be a safe relative identifier")
     _require_sha256(record, "features_sha256")
+    _require_sha256(record, "metadata_sha256")
+    total_episodes = record.get("total_episodes")
+    if not isinstance(total_episodes, int) or isinstance(total_episodes, bool) or total_episodes < 1:
+        raise ContractError("total_episodes must be a positive integer")
 
 
 def _validate_code(record: Mapping[str, Any]) -> None:
@@ -471,13 +578,40 @@ def _validate_run(record: Mapping[str, Any]) -> None:
         raise ContractError("effective_batch.total does not match its factors")
 
 
+def _validate_candidate(record: Mapping[str, Any]) -> None:
+    _require_string(record, "policy_type")
+    _require_sha256(record, "training_fingerprint")
+    _require_sha256(record, "dataset_fingerprint")
+    _require_sha256(record, "artifact_manifest_sha256")
+    _require_string(record, "evidence_job")
+    _require_azureml_job_output(record, "candidate_output")
+    _require_azureml_job_output(record, "manifest_output")
+
+
 def _validate_evaluation(record: Mapping[str, Any]) -> None:
     _require_string(record, "evaluation_id")
     _require_sha256(record, "run_fingerprint")
-    if record.get("status") not in {"passed", "failed", "inconclusive"}:
-        raise ContractError("evaluation status must be passed, failed, or inconclusive")
+    _require_sha256(record, "candidate_fingerprint")
+    _require_sha256(record, "dataset_fingerprint")
+    if record.get("status") not in {"complete", "inconclusive"}:
+        raise ContractError("evaluation status must be complete or inconclusive")
     if not isinstance(record.get("outputs_complete"), bool):
         raise ContractError("outputs_complete must be a boolean")
+    episodes_requested = record.get("episodes_requested")
+    episodes_evaluated = record.get("episodes_evaluated")
+    if not isinstance(episodes_requested, int) or isinstance(episodes_requested, bool) or episodes_requested < 1:
+        raise ContractError("episodes_requested must be a positive integer")
+    if not isinstance(episodes_evaluated, int) or isinstance(episodes_evaluated, bool) or episodes_evaluated < 0:
+        raise ContractError("episodes_evaluated must be a non-negative integer")
+    if episodes_evaluated > episodes_requested:
+        raise ContractError("episodes_evaluated cannot exceed episodes_requested")
+    reasons = _require_string_sequence(record, "reasons")
+    if record["status"] == "complete":
+        if not record["outputs_complete"] or episodes_evaluated != episodes_requested or reasons:
+            raise ContractError("complete evaluation requires usable complete outputs and no reasons")
+    elif not reasons:
+        raise ContractError("inconclusive evaluation requires at least one reason")
+    _require_azureml_job_output(record, "evaluation_output")
 
 
 def _validate_incident(record: Mapping[str, Any]) -> None:
@@ -491,7 +625,51 @@ def _validate_incident(record: Mapping[str, Any]) -> None:
 def _validate_promotion(record: Mapping[str, Any]) -> None:
     _require_string(record, "model_name")
     _require_sha256(record, "training_fingerprint")
+    _require_sha256(record, "candidate_fingerprint")
     _require_sha256(record, "evaluation_fingerprint")
+    _require_sha256(record, "policy_fingerprint")
+    if record.get("status") not in {"passed", "failed", "inconclusive"}:
+        raise ContractError("promotion status must be passed, failed, or inconclusive")
+    reasons = _require_string_sequence(record, "reasons")
+    if record["status"] == "passed" and reasons:
+        raise ContractError("passed promotion must not contain reasons")
+    if record["status"] != "passed" and not reasons:
+        raise ContractError("non-passed promotion requires at least one reason")
+    _require_string(record, "evidence_job")
+    _require_string(record, "producer_identity")
+    _require_sha256(record, "pipeline_contract_fingerprint")
+    revision = _require_string(record, "code_revision")
+    if not _FULL_COMMIT_PATTERN.fullmatch(revision):
+        raise ContractError("code_revision must be a full lowercase 40-character Git commit")
+    immutable_inputs = _require_mapping(record, "immutable_inputs")
+    expected_inputs = {"candidate", "candidate_manifest", "evaluation", "policy", "decision"}
+    if set(immutable_inputs) != expected_inputs:
+        raise ContractError(
+            "immutable_inputs must contain candidate, candidate_manifest, evaluation, policy, and decision"
+        )
+    for name in sorted(expected_inputs):
+        _require_azureml_job_output(immutable_inputs, name)
+
+
+def _require_azureml_asset_id(record: Mapping[str, Any], field: str) -> str:
+    value = _require_string(record, field)
+    if not _AZUREML_ASSET_PATTERN.fullmatch(value):
+        raise ContractError(f"{field} must use immutable azureml:name:version syntax")
+    return value
+
+
+def _require_azureml_job_output(record: Mapping[str, Any], field: str) -> str:
+    value = _require_string(record, field)
+    if not _AZUREML_JOB_OUTPUT_PATTERN.fullmatch(value):
+        raise ContractError(f"{field} must be an immutable Azure ML job output reference")
+    return value
+
+
+def _require_string_sequence(record: Mapping[str, Any], field: str) -> list[str]:
+    value = record.get(field)
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        raise ContractError(f"{field} must be an array of non-empty strings")
+    return value
 
 
 def _base_record(kind: RecordKind) -> dict[str, Any]:
@@ -504,7 +682,13 @@ def _run_self_check() -> None:
     workload = {
         "schema_version": CALIBRATION_WORKLOAD_SCHEMA_VERSION,
         "source_model": {"repository": "org/model", "revision": commit},
-        "dataset": {"uri": "azureml:data:1", "version": "1", "features_sha256": digest},
+        "dataset": {
+            "asset_id": "azureml:data:1",
+            "dataset_fingerprint": digest,
+            "features_sha256": digest,
+            "metadata_sha256": digest,
+            "total_episodes": 1,
+        },
         "code": {"repository": "org/repo", "revision": commit},
         "runtime": {"image": f"image@sha256:{digest}", "lock_sha256": digest},
         "adapter": {"name": "lerobot-pi", "version": "1", "config_sha256": digest},
@@ -516,6 +700,7 @@ def _run_self_check() -> None:
         "input_shapes": {"observation.images.base_0_rgb": [3, 224, 224]},
     }
     workload_fingerprint = calibration_workload_fingerprint(workload)
+    output_prefix = "azureml://jobs/run-1/outputs"
     records: list[dict[str, Any]] = [
         {
             **_base_record(RecordKind.SOURCE_MODEL),
@@ -523,7 +708,14 @@ def _run_self_check() -> None:
             "revision": commit,
             "manifest_sha256": digest,
         },
-        {**_base_record(RecordKind.DATASET), "uri": "azureml:data:1", "version": "1", "features_sha256": digest},
+        {
+            **_base_record(RecordKind.DATASET),
+            "asset_id": "azureml:data:1",
+            "dataset_repo_id": "org/data",
+            "features_sha256": digest,
+            "metadata_sha256": digest,
+            "total_episodes": 1,
+        },
         {**_base_record(RecordKind.CODE), "repository": "org/repo", "revision": commit},
         {**_base_record(RecordKind.RUNTIME), "image": f"image@sha256:{digest}", "lock_sha256": digest},
         {**_base_record(RecordKind.ADAPTER), "name": "lerobot-pi", "version": "1", "config_sha256": digest},
@@ -566,11 +758,27 @@ def _run_self_check() -> None:
             },
         },
         {
+            **_base_record(RecordKind.CANDIDATE),
+            "policy_type": "pi0",
+            "training_fingerprint": digest,
+            "dataset_fingerprint": digest,
+            "artifact_manifest_sha256": digest,
+            "evidence_job": "run-1",
+            "candidate_output": f"{output_prefix}/candidate",
+            "manifest_output": f"{output_prefix}/candidate_manifest",
+        },
+        {
             **_base_record(RecordKind.EVALUATION),
             "evaluation_id": "eval-1",
             "run_fingerprint": digest,
-            "status": "passed",
+            "candidate_fingerprint": digest,
+            "dataset_fingerprint": digest,
+            "status": "complete",
             "outputs_complete": True,
+            "episodes_requested": 1,
+            "episodes_evaluated": 1,
+            "reasons": [],
+            "evaluation_output": f"{output_prefix}/evaluation",
         },
         {
             **_base_record(RecordKind.INCIDENT),
@@ -583,7 +791,22 @@ def _run_self_check() -> None:
             **_base_record(RecordKind.PROMOTION),
             "model_name": "pi05-candidate",
             "training_fingerprint": digest,
+            "candidate_fingerprint": digest,
             "evaluation_fingerprint": digest,
+            "policy_fingerprint": digest,
+            "status": "passed",
+            "reasons": [],
+            "evidence_job": "run-1",
+            "producer_identity": "trusted-identity",
+            "pipeline_contract_fingerprint": digest,
+            "code_revision": commit,
+            "immutable_inputs": {
+                "candidate": f"{output_prefix}/candidate",
+                "candidate_manifest": f"{output_prefix}/candidate_manifest",
+                "evaluation": f"{output_prefix}/evaluation",
+                "policy": f"{output_prefix}/policy",
+                "decision": f"{output_prefix}/decision",
+            },
         },
     ]
     for record in records:

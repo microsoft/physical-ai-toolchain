@@ -8,6 +8,16 @@ description: Train a VLA policy using a workload-bound calibration recommendatio
 code: ../../../../..
 
 inputs:
+  dataset:
+    type: uri_folder
+    mode: ro_mount
+    description: Preflight-validated LeRobot dataset mounted read-only.
+  dataset_manifest:
+    type: uri_folder
+    mode: download
+    description: Dataset identity emitted by preflight.
+  dataset_asset_id:
+    type: string
   calibration_report:
     type: uri_folder
     description: Calibration report containing the recommended micro-batch size.
@@ -17,8 +27,6 @@ inputs:
   adapter_name:
     type: string
   dataset_repo_id:
-    type: string
-  dataset_revision:
     type: string
   policy_type:
     type: string
@@ -77,9 +85,6 @@ inputs:
   hf_token_secret_name:
     type: string
     default: none
-  register_checkpoint:
-    type: string
-    default: none
   code_repository:
     type: string
   code_revision:
@@ -95,6 +100,10 @@ outputs:
     type: uri_folder
     mode: upload
     description: Training checkpoints produced with the calibrated micro-batch size.
+  training_record:
+    type: uri_folder
+    mode: upload
+    description: Post-success training lineage bound to checkpoints and dataset evidence.
 
 environment:
   image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407

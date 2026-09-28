@@ -23,6 +23,8 @@ from vla_contracts import (
     RecordKind,
     calibration_workload_fingerprint,
     canonical_json,
+    dataset_identity_fingerprint,
+    load_record,
     resolve_recommended_batch_size,
     sha256_bytes,
     sha256_file,
@@ -149,10 +151,9 @@ def _parse_rename_map(training_arguments: Sequence[str]) -> dict[str, str]:
 
 def _dataset_contract(
     info: Mapping[str, Any],
-    repository: str,
-    revision: str,
+    dataset_manifest: Mapping[str, Any],
     rename_map: Mapping[str, str],
-) -> tuple[dict[str, str], dict[str, list[int]]]:
+) -> tuple[dict[str, Any], dict[str, list[int]]]:
     features = info.get("features")
     if not isinstance(features, Mapping) or not features:
         raise CalibrationError("Dataset metadata must contain a non-empty features object")
@@ -177,10 +178,14 @@ def _dataset_contract(
     if not input_shapes:
         raise CalibrationError("Dataset metadata does not contain image observation features")
     dataset = {
-        "uri": f"hf://{repository}",
-        "version": revision,
-        "features_sha256": sha256_bytes(canonical_json(features).encode("utf-8")),
+        "asset_id": dataset_manifest["asset_id"],
+        "dataset_fingerprint": dataset_identity_fingerprint(dataset_manifest),
+        "features_sha256": dataset_manifest["features_sha256"],
+        "metadata_sha256": dataset_manifest["metadata_sha256"],
+        "total_episodes": dataset_manifest["total_episodes"],
     }
+    if dataset["features_sha256"] != sha256_bytes(canonical_json(features).encode("utf-8")):
+        raise CalibrationError("Dataset manifest feature fingerprint does not match the mounted dataset")
     return dataset, dict(sorted(input_shapes.items()))
 
 
@@ -194,7 +199,7 @@ def _build_workload(training_arguments: Sequence[str]) -> dict[str, Any]:
         raise CalibrationError(f"Calibration requires exactly one visible GPU, found {gpu_count}")
 
     repository = os.environ.get("DATASET_REPO_ID", "")
-    revision = os.environ.get("DATASET_REVISION", "")
+    dataset_manifest_path = os.environ.get("DATASET_MANIFEST", "")
     source_repository = os.environ.get("INIT_FROM_POLICY_HF_REPO_ID", "")
     source_revision = os.environ.get("INIT_FROM_POLICY_HF_REVISION", "")
     code_repository = os.environ.get("CODE_REPOSITORY", "")
@@ -204,7 +209,7 @@ def _build_workload(training_arguments: Sequence[str]) -> dict[str, Any]:
     adapter_name = os.environ.get("VLA_MODEL_ADAPTER", "")
     required_values = {
         "DATASET_REPO_ID": repository,
-        "DATASET_REVISION": revision,
+        "DATASET_MANIFEST": dataset_manifest_path,
         "INIT_FROM_POLICY_HF_REPO_ID": source_repository,
         "INIT_FROM_POLICY_HF_REVISION": source_revision,
         "CODE_REPOSITORY": code_repository,
@@ -242,7 +247,10 @@ def _build_workload(training_arguments: Sequence[str]) -> dict[str, Any]:
     if actual_imagenet_stats != expected_imagenet_stats:
         raise CalibrationError("USE_IMAGENET_STATS does not match the registered adapter")
 
-    dataset, input_shapes = _dataset_contract(_load_dataset_info(training_arguments), repository, revision, rename_map)
+    dataset_manifest = load_record(Path(dataset_manifest_path), RecordKind.DATASET)
+    if dataset_manifest["dataset_repo_id"] != repository:
+        raise CalibrationError("Dataset manifest repository ID does not match DATASET_REPO_ID")
+    dataset, input_shapes = _dataset_contract(_load_dataset_info(training_arguments), dataset_manifest, rename_map)
     lock_path = Path(os.environ.get("LEROBOT_PROJECT", "training/vla/lerobot")) / "uv.lock"
     if not lock_path.is_file():
         raise CalibrationError(f"LeRobot lockfile is missing: {lock_path}")

@@ -1,0 +1,36 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+name: vla_dataset_preflight
+display_name: VLA Dataset Preflight
+version: "1"
+description: Validate a versioned mounted LeRobot dataset without copying payload data.
+
+code: ../../../../..
+
+inputs:
+  dataset:
+    type: uri_folder
+    mode: ro_mount
+    description: Versioned Azure ML LeRobot dataset mounted read-only.
+  dataset_asset_id:
+    type: string
+    description: Canonical azureml:name:version identity for the mounted dataset.
+  dataset_repo_id:
+    type: string
+    description: Safe LeRobot dataset repository identifier.
+
+outputs:
+  dataset_manifest:
+    type: uri_folder
+    mode: upload
+    description: Validated dataset identity and bounded metadata fingerprint.
+
+environment:
+  image: mcr.microsoft.com/azureml/openmpi5.0-ubuntu24.04:latest
+
+command: >-
+  python training/vla/scripts/preflight_dataset.py
+  --dataset ${{inputs.dataset}}
+  --asset-id ${{inputs.dataset_asset_id}}
+  --dataset-repo-id ${{inputs.dataset_repo_id}}
+  --manifest-output ${{outputs.dataset_manifest}}

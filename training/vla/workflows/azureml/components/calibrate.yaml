@@ -8,15 +8,19 @@ description: Measure VLA CUDA memory through isolated one-step optimizer probes.
 code: ../../../../..
 
 inputs:
-  prepared_dataset:
+  dataset:
     type: uri_folder
-    optional: true
-    description: Prepared LeRobot dataset mounted read-only.
+    mode: ro_mount
+    description: Preflight-validated LeRobot dataset mounted read-only.
+  dataset_manifest:
+    type: uri_folder
+    mode: download
+    description: Dataset identity emitted by preflight.
+  dataset_asset_id:
+    type: string
   adapter_name:
     type: string
   dataset_repo_id:
-    type: string
-  dataset_revision:
     type: string
   policy_type:
     type: string

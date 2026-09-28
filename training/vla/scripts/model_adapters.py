@@ -9,7 +9,10 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Protocol
 
-from vla_contracts import SCHEMA_VERSION, ContractError, RecordKind, canonical_json, sha256_bytes, validate_record
+try:
+    from .vla_contracts import SCHEMA_VERSION, ContractError, RecordKind, canonical_json, sha256_bytes, validate_record
+except ImportError:
+    from vla_contracts import SCHEMA_VERSION, ContractError, RecordKind, canonical_json, sha256_bytes, validate_record
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
@@ -26,6 +29,7 @@ COMMON_LIFECYCLE_FIELDS = frozenset(
         "calibration",
         "approval",
         "run",
+        "candidate",
         "evaluation",
         "incident",
         "promotion",
