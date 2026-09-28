@@ -172,6 +172,7 @@
 		".vscode",
 		"megalinter",
 		"package-lock.json",
+		"docs/docusaurus/e2e/contrast-baseline.json",
 		"report",
 		"**/.gitignore",
 		".vscodeignore",
