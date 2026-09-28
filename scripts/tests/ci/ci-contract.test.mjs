@@ -185,12 +185,12 @@ const selectionCases = [
   ['VLM judge selects evaluation, the viewer backend, and accessibility', 'evaluation/vlm_judge/judge.py', ['evaluation', 'dv_backend', 'accessibility']],
   ['data-pipeline config selects its Python and accessibility tests', 'data-pipeline/pyproject.toml', ['data_pipeline', 'accessibility']],
   ['Terraform provider locks retain unconditional validation and accessibility', 'infrastructure/terraform/.terraform.lock.hcl', ['accessibility']],
-  ['accessibility contracts select evidence', '.github/accessibility/surfaces.yaml', ['accessibility']],
+  ['accessibility contracts select evidence and docs', '.github/accessibility/surfaces.yaml', ['accessibility', 'docusaurus']],
   ['issue templates select evidence', '.github/ISSUE_TEMPLATE/bug_report.yml', ['accessibility']],
   ['code ownership selects evidence', '.github/CODEOWNERS', ['accessibility']],
   ['viewer agent changes select evidence', '.github/agents/dataviewer-developer.agent.md', ['accessibility']],
-  ['evidence adapter changes select evidence', 'scripts/accessibility/evidence_gate.py', ['accessibility']],
-  ['evidence tests select evidence and fuzz', 'tests/test_accessibility_evidence.py', ['accessibility', 'fuzz']],
+  ['evidence adapter changes select evidence and docs', 'scripts/accessibility/evidence_gate.py', ['accessibility', 'docusaurus']],
+  ['evidence tests select evidence, docs, and fuzz', 'tests/test_accessibility_evidence.py', ['accessibility', 'docusaurus', 'fuzz']],
   ['viewer frontend changes select evidence and frontend tests', 'data-management/viewer/frontend/src/App.tsx', ['accessibility', 'dv_frontend']],
   ['viewer backend changes select evidence, backend, and fuzz tests', 'data-management/viewer/backend/src/main.py', ['accessibility', 'dv_backend', 'fuzz']],
   ['fleet deployment selects evidence', 'fleet-deployment/README.md', ['accessibility']],
@@ -220,8 +220,8 @@ const gitCases = [
   { name: 'reverse rename between consumers', initial: { 'data-pipeline/config.txt': fileContent }, path: 'data-pipeline/config.txt', to: 'docs/guide.md', expected: ['docusaurus', 'data_pipeline', 'accessibility'] },
   { name: 'rename where only the old path matches', initial: { 'docs/guide.md': fileContent }, path: 'docs/guide.md', to: 'archives/guide.txt', expected: ['docusaurus'] },
   { name: 'rename where only the new path matches', initial: { 'archives/guide.txt': fileContent }, path: 'archives/guide.txt', to: 'docs/guide.md', expected: ['docusaurus'] },
-  { name: 'rename away from accessibility input', initial: { 'scripts/accessibility/evidence.py': fileContent }, path: 'scripts/accessibility/evidence.py', to: 'archives/evidence.py', expected: ['accessibility'] },
-  { name: 'deleted accessibility input', initial: { '.github/accessibility/surfaces.yaml': fileContent }, path: '.github/accessibility/surfaces.yaml', operation: 'delete', expected: ['accessibility'] },
+  { name: 'rename away from accessibility input', initial: { 'scripts/accessibility/evidence.py': fileContent },   path: 'scripts/accessibility/evidence.py', to: 'archives/evidence.py', expected: ['accessibility', 'docusaurus'] },
+    { name: 'deleted accessibility input', initial: { '.github/accessibility/surfaces.yaml': fileContent }, path: '.github/accessibility/surfaces.yaml', operation: 'delete', expected: ['accessibility', 'docusaurus'] },
 ];
 
 for (const fixture of gitCases) {

@@ -56,9 +56,9 @@
     "shared_ci": { "patterns": ["^shared/ci/"], "groups": ["python"] },
     "dv_backend": { "patterns": ["^data-management/viewer/backend/", "^data-management/viewer/specifications/language-tag-corpus\\.json$", "^evaluation/vlm_judge/"], "groups": ["python", "images", "viewer"] },
     "dv_frontend": { "patterns": ["^data-management/viewer/frontend/", "^data-management/viewer/specifications/language-tag-corpus\\.json$"], "groups": ["viewer"] },
-    "accessibility": { "patterns": ["^\\.github/(accessibility/|ISSUE_TEMPLATE/|CODEOWNERS$|agents/dataviewer-developer\\.agent\\.md$)", "^scripts/accessibility/", "^tests/test_accessibility_evidence\\.py$", "^(data-management/viewer|data-pipeline|evaluation|training|infrastructure|fleet-deployment|fleet-intelligence)/", "^(setup-dev\\.sh|README\\.md|SUPPORT\\.md|docs/contributing/accessibility\\.md)$"], "groups": [] },
+    "accessibility": { "patterns": ["^\\.github/(accessibility/|ISSUE_TEMPLATE/|CODEOWNERS$|agents/dataviewer-developer\\.agent\\.md$)", "^scripts/accessibility/", "^tests/test_accessibility_(evidence|promotion)\\.py$", "^(data-management/viewer|data-pipeline|evaluation|training|infrastructure|fleet-deployment|fleet-intelligence)/", "^(setup-dev\\.sh|README\\.md|SUPPORT\\.md|docs/contributing/accessibility\\.md)$"], "groups": [] },
     "fuzz": { "patterns": ["^tests/", "^data-management/viewer/backend/", "^training/"], "groups": ["python"] },
-    "docusaurus": { "patterns": ["^docs/", "^[^/]+\\.md$"], "groups": [] },
+    "docusaurus": { "patterns": ["^docs/", "^[^/]+\\.md$", "^\\.github/accessibility/", "^scripts/accessibility/", "^tests/test_accessibility_(evidence|promotion)\\.py$"], "groups": [] },
     "pester": { "patterns": ["\\.(ps1|psm1|psd1)$"], "groups": [] },
     "containers": { "patterns": ["(^|/)(Dockerfile|Containerfile)[^/]*$", "^scripts/security/(discover-base-images|image-slug)\\.sh$"], "groups": ["images"] }
   },
