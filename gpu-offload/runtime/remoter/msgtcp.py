@@ -13,7 +13,7 @@ from .safe_codec import CodecLimits
 _RECEIVE_CHUNK_BYTES = 256 * 1024
 # reject an oversized declared frame length before buffering it, rather than
 # accumulating unbounded data in curmsg only for safe_codec to reject it later
-_MAX_FRAME_BYTES = CodecLimits().max_encoded_bytes
+_MAX_FRAME_BYTES = CodecLimits().max_encoded_bytes + 1 + msgsock.ENCRYPTED_MESSAGE_OVERHEAD
 
 
 class MessengerTCP(Messenger):

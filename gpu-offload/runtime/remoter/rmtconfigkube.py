@@ -166,29 +166,6 @@ def getparam(key, config, localconfig, default):
     return ret
 
 
-def getdictparam(key, config, localconfig):
-    ret = {}
-    # print(key, localconfig)
-    if key in config:
-        ret = config[key]
-    if localconfig and key in localconfig:
-        ret.update(localconfig[key])
-    return ret
-
-
-def isremotable(config, localconfig) -> bool:
-    if getparam("remoteableserver", config, localconfig, False):
-        return True
-    remoteableon = getdictparam("remoteableon", config, localconfig)
-    # print(remoteableon)
-    stage_name = os.environ.get("STAGE_NAME", "")
-    print("Stage name:", stage_name)
-    for loc, val in remoteableon.items():
-        if loc == stage_name:
-            return val
-    return False
-
-
 # loc specifies stagename of remotelocation
 # SERVERLABEL and PERCLIENTSERVERLABEL of form "apprmt=<name>-remote-server"
 # if loc is client, then remove -remote-server-client suffix
@@ -220,10 +197,9 @@ def rewrite_taskconfig(taskconfig: str):
     with open(taskconfig) as f:
         cfg = yaml.safe_load(f)
 
-    # rewrite following fields: remoteableserver, remoteoableon, remoteloc
+    # Rewrite stage locations and strip server-only authorization from clients.
     cfgnew = copy.deepcopy(cfg)
     cfgnew.pop("remoteloc", None)
-    cfgnew.pop("remoteableserver", None)
     cfgnew.pop("remoteableon", None)
     for func in cfgnew.get("remotefuncs", []):
         for target_path, params in func.items():  # noqa: B007 vendored from microsoft/xavier, not refactored
@@ -232,21 +208,22 @@ def rewrite_taskconfig(taskconfig: str):
                 serverlabel = getserverlabel(cfg, params["remoteloc"])
                 params["serverlabel"] = serverlabel
                 params.pop("remoteloc", None)
-            params.pop("remoteableserver", None)
             params.pop("remoteableon", None)
     for cls in cfgnew.get("remoteclasses", []):
-        for target_path, params in cls.items():  # noqa: B007 vendored from microsoft/xavier, not refactored
-            # classes are remoteable based on config
+        for target_path, params in cls.items():
+            if "remoteableserver" in params or "remoteableon" in params:
+                raise ValueError(
+                    f"remote class {target_path} uses unsupported server remoteability fields; "
+                    "use servercallablemethods"
+                )
             if "remoteloc" in params:
                 serverlabel = getserverlabel(cfg, params["remoteloc"])
                 params["serverlabel"] = serverlabel
                 params.pop("remoteloc", None)
-            if isserver:
-                remoteable = isremotable(cfg, params)
-                params["remoteableserver"] = remoteable
-            else:
-                params.pop("remoteableserver", None)
             params.pop("remoteableon", None)
+            if not isserver:
+                params.pop("servercallablemethods", None)
+                params.pop("serverdeniedmethods", None)
 
     # Generated state must be outside the read-only ConfigMap mount.
     newtaskconfig = "/tmp/remoter_rewritten.yaml"
