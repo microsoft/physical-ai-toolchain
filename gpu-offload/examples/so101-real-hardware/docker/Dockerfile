@@ -56,6 +56,7 @@ COPY --from=runtime / /opt/xavier/offload/runtime/
 COPY docker/sitecustomize.py /opt/xavier/sitecustomize.py
 COPY docker/raw_observation_inference.py /opt/xavier/lerobot/diagnostics/raw_observation_inference.py
 COPY docker/rollout_timing.py /opt/xavier/lerobot/diagnostics/rollout_timing.py
+COPY docker/synthetic_inference_benchmark.py /opt/xavier/lerobot/diagnostics/synthetic_inference_benchmark.py
 COPY --chown=lerobot:lerobot scripts/ /opt/xavier/lerobot/scripts/
 COPY docker/entrypoint.sh /usr/local/bin/lerobot-entrypoint
 
