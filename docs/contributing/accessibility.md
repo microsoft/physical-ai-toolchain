@@ -140,6 +140,8 @@ The composed bundle always retains `attestation: false`. A qualified result cont
 
 Documentation publication is asynchronous. A push to `main` collects release-scope automated evidence, including the DCS13 qualified-review obligations, but requires only automated completeness. Collection does not publish the site or imply reviewer approval.
 
+Playwright evidence cells pass only when the complete Playwright run reports no unexpected test results and no run errors. An unclean or unreadable run report changes every otherwise passing Playwright cell to `CANT_TELL`, so the composed verdict cannot pass.
+
 The collection artifact is named `docusaurus-accessibility-evidence-release-<run-id>`.
 It retains the exact tested production build and a repository-relative mirror of source envelopes, composition inputs,
 the original bundle, contrast crops, diagnostics, validation results, and reviewer handoff.

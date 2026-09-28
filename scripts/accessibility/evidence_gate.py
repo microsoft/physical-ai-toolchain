@@ -1433,6 +1433,27 @@ def prepare_docusaurus_source_manifest(
     return payload
 
 
+def _playwright_run_limitation(report_path: Path) -> str | None:
+    """Return why a Playwright JSON report cannot support passing cells, or None for a clean run."""
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return "Playwright run report is unreadable"
+    stats = report.get("stats") if isinstance(report, dict) else None
+    errors = report.get("errors") if isinstance(report, dict) else None
+    unexpected = stats.get("unexpected") if isinstance(stats, dict) else None
+    if (
+        not isinstance(unexpected, int)
+        or isinstance(unexpected, bool)
+        or unexpected < 0
+        or not isinstance(errors, list)
+    ):
+        return "Playwright run report lacks run statistics"
+    if unexpected or errors:
+        return f"Playwright run reported {unexpected} unexpected test results and {len(errors)} run errors"
+    return None
+
+
 def _docusaurus_exact_results(
     manifest: dict[str, Any],
     requirement_catalog: list[dict[str, Any]],
@@ -1647,6 +1668,16 @@ def prepare_docusaurus_composition(
     source_artifact_ids = [item["artifactId"] for item in source_artifacts]
     method_manifest = json.loads(playwright_artifact_paths["docusaurus-method-results"].read_text(encoding="utf-8"))
     exact_results = _docusaurus_exact_results(method_manifest, requirement_catalog["requirements"])
+    run_limitation = _playwright_run_limitation(report_path)
+    if run_limitation:
+        exact_results = {
+            requirement_id: (
+                {"status": "CANT_TELL", "observed": f"{result['observed']}; {run_limitation}"}
+                if result["status"] == "PASS"
+                else result
+            )
+            for requirement_id, result in exact_results.items()
+        }
     browser = json.loads(playwright_artifact_paths["docusaurus-browser"].read_text(encoding="utf-8"))
 
     harness_files = [
@@ -1711,6 +1742,8 @@ def prepare_docusaurus_composition(
         else:
             status = "CANT_TELL"
         observed = f"Exact Playwright cells for {journey_id} reported {status}"
+        if run_limitation and status == "CANT_TELL":
+            observed = f"{observed}; {run_limitation}"
         state_proofs.append(
             {
                 "schemaVersion": "1.0.0",
