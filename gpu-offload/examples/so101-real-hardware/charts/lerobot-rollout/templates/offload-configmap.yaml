@@ -9,6 +9,7 @@ metadata:
     app.kubernetes.io/component: offload-config
 data:
   remote.yaml: |
+    encryption: {{ .Values.offload.encryption }}
     serverstages:
       - name: {{ .Values.offload.stageName | quote }}
         perclient: true
@@ -24,14 +25,20 @@ data:
     remoteclasses:
       - {{ .Values.offload.remoteClass | quote }}:
           remoteloc: {{ .Values.offload.stageName | quote }}
-      {{- if .Values.offload.rawObservation.enabled }}
+      {{- if or .Values.offload.rawObservation.enabled .Values.benchmark.enabled }}
       - {{ .Values.offload.rawObservation.remoteClass | quote }}:
           remoteloc: {{ .Values.offload.stageName | quote }}
+          servercallablemethods:
+            - __init__
+            - start
+            - reset
+            - get_action
+            - stop
           noremotefuncs:
             - notify_observation
       {{- end }}
     remotefuncs:
-      - {{ .Values.offload.loadFunction | quote }}:
+      - {{ ternary .Values.offload.benchmarkLoadFunction .Values.offload.loadFunction .Values.benchmark.enabled | quote }}:
           singleinstance: true
           remoteloc: {{ .Values.offload.stageName | quote }}
 {{- end }}
