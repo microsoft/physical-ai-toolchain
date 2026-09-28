@@ -1,6 +1,0 @@
-node_modules
-dist
-.git
-.env
-.env.*
-*.log

@@ -19,6 +19,7 @@ FRONTEND_DIR="${SCRIPT_DIR}/frontend"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-30}"
+LOG_LEVEL="${LOG_LEVEL:-info}"
 
 # Colors for output
 if [[ -n "${NO_COLOR+x}" ]]; then
@@ -73,12 +74,14 @@ Environment Variables:
     BACKEND_PORT    Backend port (default: 8000)
     FRONTEND_PORT   Frontend port (default: 5173)
     HEALTH_TIMEOUT  Seconds to wait for backend health (default: 30)
+    LOG_LEVEL       Uvicorn log level (default: info)
 
 Examples:
     ./start.sh                                    # Start both services
     ./start.sh --data-dir /path/to/datasets       # Use a specific datasets directory
     DATA_DIR=/path/to/datasets ./start.sh         # Same, via env var
     BACKEND_PORT=9000 ./start.sh                  # Use custom backend port
+    LOG_LEVEL=debug ./start.sh --backend           # Show debug logs
     ./start.sh --backend                          # Start backend only
 
 EOF
@@ -100,10 +103,14 @@ cleanup() {
     fi
 
     log_success "All services stopped"
+}
+
+handle_shutdown() {
+    cleanup
     exit 0
 }
 
-trap cleanup SIGINT SIGTERM
+trap handle_shutdown SIGINT SIGTERM
 
 check_prerequisites() {
     local missing=()
@@ -215,8 +222,10 @@ start_backend() {
 
         if command -v uv &>/dev/null; then
             (cd "${BACKEND_DIR}" && uv venv --python 3.12)
+            # shellcheck source=/dev/null
             (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${backend_install_extras}")
             if [[ "${should_install_vlm_judge}" == "true" ]]; then
+                # shellcheck source=/dev/null
                 (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${vlm_judge_package_spec}")
             fi
         else
@@ -225,7 +234,9 @@ start_backend() {
         fi
     elif [[ "${should_install_vlm_judge}" == "true" ]]; then
         log_info "Ensuring VLM judge package dependencies are installed..."
+        # shellcheck source=/dev/null
         (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${backend_install_extras}")
+        # shellcheck source=/dev/null
         (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${vlm_judge_package_spec}")
     fi
 
@@ -233,7 +244,7 @@ start_backend() {
         cd "${BACKEND_DIR}"
         # shellcheck source=/dev/null
         source .venv/bin/activate
-        uvicorn src.api.main:app --reload --port "${BACKEND_PORT}" 2>&1
+        uvicorn src.api.main:app --log-config logging.json --log-level "${LOG_LEVEL}" --reload --port "${BACKEND_PORT}" 2>&1
     ) &
     BACKEND_PID=$!
 
@@ -243,10 +254,10 @@ start_backend() {
 start_frontend() {
     log_info "Starting frontend on port ${FRONTEND_PORT}..."
 
-    if [[ ! -d "${FRONTEND_DIR}/node_modules" ]]; then
+    if [[ ! -d "${REPO_ROOT}/node_modules" ]]; then
         log_warn "node_modules not found"
         log_info "Installing dependencies..."
-        (cd "${FRONTEND_DIR}" && npm ci)
+        (cd "${REPO_ROOT}" && npm ci)
     fi
 
     (
@@ -308,6 +319,7 @@ main() {
         printf 'Backend Port: %s\n' "${BACKEND_PORT}"
         printf 'Frontend Port: %s\n' "${FRONTEND_PORT}"
         printf 'Data Directory: %s\n' "${DATA_DIR:-${REPO_ROOT}/datasets}"
+        printf 'Log Level: %s\n' "${LOG_LEVEL}"
         printf 'Mode: %s\n' "$([[ "${backend_only}" == "true" ]] && echo backend || ([[ "${frontend_only}" == "true" ]] && echo frontend || echo both))"
         printf 'Mutation: None\n'
         return 0
@@ -348,8 +360,10 @@ main() {
             log_info "Press Ctrl+C to stop all services"
             echo ""
 
-            # Wait for either process to exit
-            wait -n "${BACKEND_PID}" "${FRONTEND_PID}" 2>/dev/null || true
+            # Bash 3.2 on macOS does not support wait -n.
+            while kill -0 "${BACKEND_PID}" 2>/dev/null && kill -0 "${FRONTEND_PID}" 2>/dev/null; do
+                sleep 1
+            done
             cleanup
         else
             cleanup

@@ -25,5 +25,8 @@
 # CI/CD workflows
 /.github/workflows/         @microsoft/edge-ai-core-dev
 
+# OpenVEX dispositions can suppress vulnerability findings
+/security/vex/              @microsoft/edge-ai-core-dev
+
 # Protect ownership file itself
 /.github/CODEOWNERS         @microsoft/edge-ai-core-dev

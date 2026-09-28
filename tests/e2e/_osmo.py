@@ -5,9 +5,10 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -15,12 +16,15 @@ import pytest
 
 from tests.e2e._aml import AmlModelRef, AzureMLWorkspace
 from tests.e2e._common import (
+    E2EHandle,
+    command_tuple,
     delete_blob_prefix,
     e2e_name,
     env_value,
     format_command_failure,
     log_e2e,
     parse_json_from_output,
+    register_cleanup,
     run_command,
     upload_blob_directory,
     wait_for_status,
@@ -64,6 +68,8 @@ OSMO_POLL_INTERVAL_SECONDS = 30
 
 OSMO_WORKFLOWS_NAMESPACE = "osmo-workflows"
 _POD_LOG_POLL_INTERVAL_SECONDS = 5
+_OSMO_READ_ATTEMPTS = 12
+_OSMO_READ_RETRY_SECONDS = 5
 
 
 @dataclass
@@ -72,8 +78,25 @@ class OSMOWorkflow:
     workflow_name: str
     experiment_name: str
     correlation_id: str
+    handle: E2EHandle = field(default_factory=E2EHandle)
     is_terminal: bool = False
     terminal_status: str | None = None
+
+
+def _run_osmo_read_command(
+    args: list[str],
+    *,
+    cwd: Path,
+    description: str,
+) -> subprocess.CompletedProcess[str]:
+    result = run_command(args, cwd=cwd)
+    for attempt in range(1, _OSMO_READ_ATTEMPTS):
+        if result.returncode == 0:
+            return result
+        log_e2e(f"{description} failed ({attempt}/{_OSMO_READ_ATTEMPTS}); retrying")
+        time.sleep(_OSMO_READ_RETRY_SECONDS)
+        result = run_command(args, cwd=cwd)
+    return result
 
 
 def _find_first_string(payload: Any, keys: tuple[str, ...]) -> str | None:
@@ -127,9 +150,11 @@ def submit_osmo_training(
     max_iterations: int,
     num_envs: int,
     register_model_name: str | None = None,
+    correlation_id: str | None = None,
+    handle: E2EHandle | None = None,
 ) -> OSMOWorkflow:
     experiment_name = f"isaaclab-{task}" if task else "isaaclab-training"
-    correlation_id = _e2e_correlation_id()
+    correlation_id = correlation_id or _e2e_correlation_id()
     register_args = (
         ["--register-checkpoint", register_model_name] if register_model_name else ["--skip-register-checkpoint"]
     )
@@ -154,7 +179,13 @@ def submit_osmo_training(
     if result.returncode != 0:
         raise AssertionError(f"OSMO e2e submission failed\n\n{format_command_failure(result)}")
 
-    return _osmo_workflow_from_submission(result, experiment_name, "OSMO", correlation_id=correlation_id)
+    return _osmo_workflow_from_submission(
+        result,
+        experiment_name,
+        "OSMO",
+        correlation_id=correlation_id,
+        handle=handle,
+    )
 
 
 def submit_osmo_dataset_training(
@@ -195,9 +226,10 @@ def submit_osmo_dataset_training(
 
 
 def _fetch_osmo_workflow_payload(workflow: OSMOWorkflow, repo_root: Path) -> dict[str, Any]:
-    result = run_command(
+    result = _run_osmo_read_command(
         ["osmo", "workflow", "query", workflow.workflow_id, "--format-type", "json"],
         cwd=repo_root,
+        description=f"OSMO workflow query for {workflow.workflow_id}",
     )
     if result.returncode != 0:
         raise AssertionError(
@@ -340,11 +372,17 @@ def wait_until_osmo_completed(
 def _mark_workflow_terminal(workflow: OSMOWorkflow, terminal_status: str) -> None:
     workflow.is_terminal = True
     workflow.terminal_status = terminal_status
+    workflow.handle.terminal_states["osmo_workflow"] = terminal_status
 
 
 def _restart_osmo_workflow(workflow: OSMOWorkflow, repo_root: Path) -> None:
     log_e2e(f"Restarting OSMO workflow {workflow.workflow_id} after node disruption")
-    result = run_command(["osmo", "workflow", "restart", workflow.workflow_id], cwd=repo_root)
+    command = ["osmo", "workflow", "restart", workflow.workflow_id]
+    workflow.handle.submission_commands.append(tuple(command))
+    attempts = workflow.handle.attempts.setdefault("osmo_workflow", ["initial"])
+    attempts.append(f"node-disruption-restart-{len(attempts)}")
+    workflow.handle.retry_classifications["osmo_workflow"] = "node-disruption"
+    result = run_command(command, cwd=repo_root)
     if result.returncode != 0:
         raise AssertionError(
             f"Failed to restart OSMO workflow {workflow.workflow_id!r}\n\n{format_command_failure(result)}"
@@ -409,6 +447,59 @@ def assert_workflow_task_succeeded(workflow: OSMOWorkflow, repo_root: Path, task
     raise AssertionError(f"OSMO workflow {workflow.workflow_id!r} did not contain task {task_name!r}")
 
 
+def fetch_workflow_task_logs(
+    workflow: OSMOWorkflow,
+    repo_root: Path,
+    task_name: str,
+    *,
+    namespace: str = OSMO_WORKFLOWS_NAMESPACE,
+) -> str:
+    cached_logs = workflow.handle.logs.get(task_name, "")
+    if cached_logs:
+        return cached_logs
+
+    result = run_command(
+        [
+            "kubectl",
+            "logs",
+            "-n",
+            namespace,
+            "-l",
+            f"osmo.workflow_id={workflow.workflow_id},osmo.task_name={task_name}",
+            "-c",
+            task_name,
+            "--tail=-1",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode == 0 and result.stdout:
+        workflow.handle.logs[task_name] = result.stdout
+        return result.stdout
+
+    persisted_result = _run_osmo_read_command(
+        [
+            "osmo",
+            "workflow",
+            "logs",
+            workflow.workflow_id,
+            "--task",
+            task_name,
+            "-n",
+            "10000",
+        ],
+        cwd=repo_root,
+        description=f"OSMO persisted log read for {workflow.workflow_id}/{task_name}",
+    )
+    if persisted_result.returncode != 0 or f"[{task_name}]" not in persisted_result.stdout:
+        raise AssertionError(
+            f"Unable to fetch logs for OSMO workflow {workflow.workflow_id!r} task {task_name!r}\n\n"
+            f"Kubernetes logs:\n{format_command_failure(result)}\n\n"
+            f"OSMO persisted logs:\n{format_command_failure(persisted_result)}"
+        )
+    workflow.handle.logs[task_name] = persisted_result.stdout
+    return persisted_result.stdout
+
+
 def cancel_osmo_workflow(workflow: OSMOWorkflow, repo_root: Path) -> None:
     if workflow.is_terminal:
         log_e2e(f"Skipping cancel for OSMO workflow {workflow.workflow_id}; terminal status={workflow.terminal_status}")
@@ -421,6 +512,64 @@ def cancel_osmo_workflow(workflow: OSMOWorkflow, repo_root: Path) -> None:
         raise AssertionError(
             f"Failed to cancel OSMO workflow {workflow.workflow_id!r}\n\n{format_command_failure(result)}"
         )
+
+
+def cancel_osmo_workflows_by_identifier(identifier: str, repo_root: Path) -> None:
+    """Cancel non-terminal workflows matching a pre-submission name or correlation identifier."""
+    page_size = 100
+    offset = 0
+    matches: dict[str, str] = {}
+    while True:
+        result = _run_osmo_read_command(
+            [
+                "osmo",
+                "workflow",
+                "list",
+                "--name",
+                identifier,
+                "--count",
+                str(page_size),
+                "--offset",
+                str(offset),
+                "--format-type",
+                "json",
+            ],
+            cwd=repo_root,
+            description=f"OSMO cleanup discovery for {identifier}",
+        )
+        if result.returncode != 0:
+            raise AssertionError(f"Unable to list OSMO workflows for cleanup\n\n{format_command_failure(result)}")
+
+        records = _workflow_list_records(parse_json_from_output(result.stdout))
+        for record in records:
+            workflow_id = _find_first_string(record, ("workflow_id", "workflowId", "id", "name"))
+            if workflow_id is not None:
+                matches[workflow_id] = _find_first_string(record, ("status", "state")) or "UNKNOWN"
+        if len(records) < page_size:
+            break
+        offset += page_size
+
+    for workflow_id, status in matches.items():
+        if status in OSMO_SUCCESS_STATES or status in OSMO_FAILURE_STATES or status.startswith(OSMO_FAILURE_PREFIXES):
+            log_e2e(f"Skipping recovery cancel for OSMO workflow {workflow_id}; terminal status={status}")
+            continue
+        log_e2e(f"Recovery cancelling OSMO workflow {workflow_id} matched by {identifier}")
+        cancel_result = run_command(["osmo", "workflow", "cancel", workflow_id], cwd=repo_root)
+        if cancel_result.returncode != 0:
+            raise AssertionError(
+                f"Failed to recovery cancel OSMO workflow {workflow_id!r}\n\n{format_command_failure(cancel_result)}"
+            )
+
+
+def _workflow_list_records(payload: Any) -> list[Mapping[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, Mapping)]
+    if isinstance(payload, Mapping):
+        for key in ("workflows", "items", "results", "data"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, Mapping)]
+    raise AssertionError("OSMO workflow list output did not contain a workflow record list")
 
 
 @dataclass(frozen=True)
@@ -516,6 +665,7 @@ class TaskPodLogStream:
         self._stop = threading.Event()
         self._proc_lock = threading.Lock()
         self._proc: subprocess.Popen[str] | None = None
+        self._captured_lines: list[str] = []
         self._thread = threading.Thread(target=self._run, name=f"osmo-logs-{task_name}", daemon=True)
 
     def start(self) -> TaskPodLogStream:
@@ -555,11 +705,13 @@ class TaskPodLogStream:
                 )
                 reported[pod.name] = signature
 
-            if pod.started and pod.name not in streamed:
+            if pod.name not in streamed:
                 if self._stop.is_set():
                     return
-                streamed.add(pod.name)
-                self._follow(pod.name)
+                if self._follow(pod.name):
+                    streamed.add(pod.name)
+                elif self._stop.wait(self._poll_interval_seconds):
+                    return
                 continue
 
             if pod.terminated and pod.name in streamed:
@@ -589,14 +741,24 @@ class TaskPodLogStream:
         newest = max(items, key=_pod_created_at)
         return _task_pod_from_item(newest, self._task_name)
 
-    def _follow(self, pod_name: str) -> None:
+    def _follow(self, pod_name: str) -> bool:
         if self._stop.is_set():
-            return
+            return False
 
         log_e2e(f"Streaming logs for OSMO task {self._task_name} (pod {pod_name})")
         try:
             proc = subprocess.Popen(
-                ["kubectl", "logs", "-f", "-n", self._namespace, pod_name, "-c", self._task_name],
+                [
+                    "kubectl",
+                    "logs",
+                    "-f",
+                    "--pod-running-timeout=10s",
+                    "-n",
+                    self._namespace,
+                    pod_name,
+                    "-c",
+                    self._task_name,
+                ],
                 cwd=str(self._repo_root),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -605,8 +767,9 @@ class TaskPodLogStream:
             )
         except OSError as error:
             log_e2e(f"Failed to stream logs for pod {pod_name}: {error}")
-            return
+            return False
 
+        captured_lines: list[str] = []
         with self._proc_lock:
             self._proc = proc
             should_stop = self._stop.is_set()
@@ -615,7 +778,9 @@ class TaskPodLogStream:
         try:
             assert proc.stdout is not None
             for line in proc.stdout:
-                print(f"[pod {pod_name}] {line.rstrip()}", flush=True)
+                rendered_line = line.rstrip()
+                captured_lines.append(rendered_line)
+                print(f"[pod {pod_name}] {rendered_line}", flush=True)
                 if self._stop.is_set():
                     break
         finally:
@@ -627,6 +792,11 @@ class TaskPodLogStream:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+        if proc.returncode != 0 or not captured_lines:
+            return False
+        self._captured_lines.extend(captured_lines)
+        self._workflow.handle.logs[self._task_name] = "\n".join(self._captured_lines)
+        return True
 
 
 def start_task_pod_log_stream(
@@ -661,9 +831,14 @@ def monitor_osmo_workflow(
     to start and reach a terminal success state. ``phase`` labels the workflow in progress logs
     (e.g. ``"LeRobot training"``); when ``None`` the label omits the phase noun.
     """
-    request.addfinalizer(lambda: cancel_osmo_workflow(workflow, repo_root))
+    register_cleanup(
+        request,
+        workflow.handle,
+        "cancel_osmo_workflow",
+        lambda: cancel_osmo_workflow(workflow, repo_root),
+    )
     log_stream = start_task_pod_log_stream(workflow, repo_root, task_name)
-    request.addfinalizer(log_stream.stop)
+    register_cleanup(request, workflow.handle, "stop_task_log_stream", log_stream.stop)
 
     label = f"OSMO {phase} workflow" if phase else "OSMO workflow"
     log_e2e(f"Waiting for {label} {workflow.workflow_id} to start")
@@ -671,6 +846,8 @@ def monitor_osmo_workflow(
     log_e2e(f"Waiting for {label} {workflow.workflow_id} to complete")
     wait_until_osmo_completed(workflow, repo_root, timeout_minutes=timeout_minutes)
     log_stream.stop()
+    if not workflow.handle.logs.get(task_name):
+        fetch_workflow_task_logs(workflow, repo_root, task_name)
 
 
 def _osmo_workflow_from_submission(
@@ -679,6 +856,7 @@ def _osmo_workflow_from_submission(
     description: str,
     *,
     correlation_id: str = "",
+    handle: E2EHandle | None = None,
 ) -> OSMOWorkflow:
     payload = parse_json_from_output("\n".join(part for part in (result.stdout, result.stderr) if part))
     workflow_id = _find_first_string(payload, ("workflow_id", "workflowId", "id", "name"))
@@ -689,12 +867,18 @@ def _osmo_workflow_from_submission(
         workflow_name = workflow_id
 
     log_e2e(f"Submitted {description} workflow id={workflow_id}, name={workflow_name}")
+    active_handle = handle or E2EHandle()
+    active_handle.submission_commands.append(command_tuple(result.args))
+    active_handle.resource_identifiers["osmo_workflow"] = workflow_id
+    active_handle.attempts["osmo_workflow"] = ["initial"]
+    active_handle.retry_classifications["osmo_workflow"] = "none"
 
     return OSMOWorkflow(
         workflow_id=workflow_id,
         workflow_name=workflow_name,
         experiment_name=experiment_name,
         correlation_id=correlation_id,
+        handle=active_handle,
     )
 
 
@@ -1025,11 +1209,8 @@ def _vla_base_model_args() -> list[str]:
     args = []
     if base_model is not None:
         args.extend(["--base-model", base_model])
-        if base_model_revision is None and not Path(base_model).is_absolute():
-            pytest.skip(
-                f"{_VLA_BASE_MODEL_REVISION_ENV} is required when {_VLA_BASE_MODEL_ENV} points at a remote "
-                "HuggingFace model"
-            )
+        if base_model_revision is None:
+            pytest.skip(f"{_VLA_BASE_MODEL_REVISION_ENV} is required when {_VLA_BASE_MODEL_ENV} is configured")
         if base_model_revision is not None:
             args.extend(["--base-model-revision", base_model_revision])
     elif base_model_revision is not None:
@@ -1046,12 +1227,15 @@ def submit_osmo_vla_finetune(
     save_steps: int,
     batch_size: int,
     dataloader_workers: int,
+    register_model_name: str,
+    job_name: str | None = None,
+    handle: E2EHandle | None = None,
 ) -> OSMOWorkflow:
     dataset = _resolve_vla_dataset(request, repo_root)
     vla_version = env_value(_VLA_VERSION_ENV, _DEFAULT_VLA_VERSION)
     embodiment_tag = env_value(_VLA_EMBODIMENT_TAG_ENV, _DEFAULT_VLA_EMBODIMENT_TAG)
     platform = env_value(_VLA_PLATFORM_ENV, _DEFAULT_VLA_PLATFORM)
-    job_name = e2e_name("vla-finetune-e2e-osmo")
+    job_name = job_name or e2e_name("vla-finetune-e2e-osmo")
     log_e2e(
         "Submitting OSMO VLA fine-tuning workflow "
         f"for blob_url={dataset.blob_url}, vla_version={vla_version}, data_config={dataset.data_config}, "
@@ -1077,6 +1261,8 @@ def submit_osmo_vla_finetune(
         str(dataloader_workers),
         "--job-name",
         job_name,
+        "--run-id-override",
+        job_name,
         "--platform",
         platform,
         "--azure-subscription-id",
@@ -1085,6 +1271,9 @@ def submit_osmo_vla_finetune(
         aml_workspace.resource_group,
         "--azure-workspace-name",
         aml_workspace.workspace_name,
+        "--azure-upload",
+        "--azureml-model-name",
+        register_model_name,
     ]
     args.extend(_vla_base_model_args())
     if dataset.data_config_file is not None:
@@ -1095,7 +1284,13 @@ def submit_osmo_vla_finetune(
     if result.returncode != 0:
         raise AssertionError(f"OSMO VLA fine-tuning e2e submission failed\n\n{format_command_failure(result)}")
 
-    return _osmo_workflow_from_submission(result, job_name, "OSMO VLA fine-tuning")
+    return _osmo_workflow_from_submission(
+        result,
+        register_model_name,
+        "OSMO VLA fine-tuning",
+        correlation_id=job_name,
+        handle=handle,
+    )
 
 
 def submit_osmo_azureml_replay(

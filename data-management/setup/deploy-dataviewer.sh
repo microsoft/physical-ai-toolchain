@@ -196,8 +196,8 @@ if [[ "$skip_build" == "false" ]]; then
       --registry "$acr_name" \
       --image "${DATAVIEWER_FRONTEND_IMAGE}:${image_tag}" \
       ${build_args[@]+"${build_args[@]}"} \
-      --file "$SRC_DIR/frontend/Dockerfile" \
-      "$SRC_DIR/frontend/"
+      --file "data-management/viewer/frontend/Dockerfile" \
+      "$REPO_ROOT"
   fi
 fi
 

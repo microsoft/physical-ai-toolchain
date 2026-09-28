@@ -23,13 +23,18 @@ async function reservePort(): Promise<number> {
   return address.port;
 }
 
-async function startFixtureServer(buildDirectory: string, port: number): Promise<ChildProcess> {
+async function startFixtureServer(
+  buildDirectory: string,
+  port: number,
+  environment: NodeJS.ProcessEnv = {},
+): Promise<ChildProcess> {
   const child = spawn(process.execPath, ['e2e/static-server.mjs'], {
     cwd: process.cwd(),
     env: {
       ...process.env,
       DOCS_BUILD_DIRECTORY: buildDirectory,
       DOCS_E2E_PORT: String(port),
+      ...environment,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -84,6 +89,27 @@ test('static server rejects invalid ports and missing build output', async () =>
     expect(missingBuild.stderr).toContain('Build output is missing index.html');
   } finally {
     fs.rmSync(emptyBuild, { recursive: true, force: true });
+  }
+});
+
+test('static server rate limits repeated file-system requests', async () => {
+  const buildDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'docs-server-rate-limit-'));
+  fs.writeFileSync(path.join(buildDirectory, 'index.html'), '<h1>Fixture home</h1>');
+  fs.writeFileSync(path.join(buildDirectory, '404.html'), '<h1>Missing</h1>');
+
+  const port = await reservePort();
+  const child = await startFixtureServer(buildDirectory, port, {
+    DOCS_E2E_RATE_LIMIT_MAX_REQUESTS: '2',
+    DOCS_E2E_RATE_LIMIT_WINDOW_MS: '60000',
+  });
+  const origin = `http://127.0.0.1:${port}`;
+  try {
+    expect((await fetch(origin, { redirect: 'manual' })).status).toBe(302);
+    expect((await fetch(origin, { redirect: 'manual' })).status).toBe(302);
+    expect((await fetch(origin, { redirect: 'manual' })).status).toBe(429);
+  } finally {
+    await stopFixtureServer(child);
+    fs.rmSync(buildDirectory, { recursive: true, force: true });
   }
 });
 

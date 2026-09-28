@@ -80,6 +80,7 @@ echo "   data config: ${DATA_CONFIG}"
 echo "   batch_size:  ${BATCH_SIZE}"
 echo "   max_steps:   ${MAX_STEPS}"
 echo "========================================================"
+BASE_MODEL_SOURCE="${BASE_MODEL}"
 
 nvidia-smi
 df -h /dev/shm /outputs || true
@@ -114,6 +115,8 @@ if ! git checkout "${ISAAC_GROOT_REF}"; then
   git fetch origin "${ISAAC_GROOT_REF}" --depth 1 || true
   git checkout "${ISAAC_GROOT_REF}"
 fi
+RESOLVED_GROOT_REF="$(git rev-parse HEAD)"
+export RESOLVED_GROOT_REF
 
 # GR00T N1.7+ pins python==3.10.*; the default pytorch image ships
 # python 3.11. Create a conda env when the active interpreter is
@@ -130,6 +133,10 @@ if [ -f "gr00t/experiment/launch_finetune.py" ]; then
     pip install azure-identity==1.25.3 azure-storage-blob==12.27.1
   fi
 fi
+
+ACCELERATE_VER="1.14.0"
+NUMPY_VER="1.26.4"
+OPENCV_VER="4.8.0.74"
 
 pip install --upgrade setuptools wheel
 pip install gpustat==1.1.1 wandb==0.19.0 packaging==25.0 ninja==1.13.0
@@ -164,6 +171,7 @@ else
 fi
 
 # Keep flash-attn builds bounded when a wheel is unavailable.
+export ACCELERATE_VER NUMPY_VER OPENCV_VER TORCH_VER TV_VER TA_VER FLASH_ATTN_VER BASE_MODEL_SOURCE
 export MAX_JOBS="${MAX_JOBS:-2}"
 export NVCC_THREADS="${NVCC_THREADS:-1}"
 
@@ -177,12 +185,12 @@ cat > /tmp/torch-constraints.txt <<EOF
 torch==${TORCH_VER}
 torchvision==${TV_VER}
 torchaudio==${TA_VER}
-numpy==1.26.4
+numpy==${NUMPY_VER}
 EOF
 
 pip install --force-reinstall --timeout 600 --retries 5 "${TORCH_INDEX_ARGS[@]}" \
   -c /tmp/torch-constraints.txt \
-  torch=="${TORCH_VER}" torchvision=="${TV_VER}" torchaudio=="${TA_VER}" numpy==1.26.4
+  torch=="${TORCH_VER}" torchvision=="${TV_VER}" torchaudio=="${TA_VER}" numpy=="${NUMPY_VER}"
 
 pip install --force-reinstall --timeout 600 --retries 5 --prefer-binary --no-deps --no-build-isolation \
   flash_attn=="${FLASH_ATTN_VER}"
@@ -197,11 +205,11 @@ pip install -c /tmp/torch-constraints.txt -e ".[base]"
 pip uninstall -y transformer-engine || true
 pip uninstall -y opencv-python opencv-python-headless || true
 rm -rf /usr/local/lib/python3.10/dist-packages/cv2 /usr/local/lib/python3.11/dist-packages/cv2 || true
-pip install opencv-python==4.8.0.74
+pip install opencv-python=="${OPENCV_VER}"
 
 python -c "import torch, torchvision, flash_attn; print('torch=', torch.__version__, 'tv=', torchvision.__version__, 'cuda=', torch.version.cuda, 'flash_attn=', flash_attn.__version__)"
 
-pip install "accelerate==1.14.0"
+pip install "accelerate==${ACCELERATE_VER}"
 pip install torchcodec==0.4.0 || true
 
 if [ -n "${DATA_CONFIG_B64:-}" ]; then
@@ -235,6 +243,34 @@ elif [ -z "${BASE_MODEL_REVISION:-}" ] && [ ! -d "${BASE_MODEL}" ]; then
   echo "ERROR: BASE_MODEL ${BASE_MODEL} is a remote repo but base_model_revision is empty; refusing to train against a mutable HEAD" >&2
   exit 1
 fi
+
+python - "${OUTPUT_DIR}/runtime-provenance.json" <<'PY'
+import importlib.metadata
+import json
+import os
+import pathlib
+import sys
+
+packages = ("accelerate", "flash-attn", "numpy", "opencv-python", "torch", "torchaudio", "torchvision")
+payload = {
+    "base_model": os.environ["BASE_MODEL_SOURCE"],
+    "base_model_revision": os.environ.get("BASE_MODEL_REVISION", ""),
+    "expected_runtime_versions": {
+        "accelerate": os.environ["ACCELERATE_VER"],
+        "flash-attn": os.environ["FLASH_ATTN_VER"],
+        "numpy": os.environ["NUMPY_VER"],
+        "opencv-python": os.environ["OPENCV_VER"],
+        "torch": os.environ["TORCH_VER"],
+        "torchaudio": os.environ["TA_VER"],
+        "torchvision": os.environ["TV_VER"],
+    },
+    "isaac_groot_ref": os.environ["RESOLVED_GROOT_REF"],
+    "runtime_versions": {name: importlib.metadata.version(name) for name in packages},
+}
+path = pathlib.Path(sys.argv[1])
+path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+print("VLA_RUNTIME_PROVENANCE=" + json.dumps(payload, sort_keys=True))
+PY
 
 echo "--- starting training ---"
 if [ -f "scripts/gr00t_finetune.py" ]; then
@@ -300,8 +336,9 @@ if [ "${AZURE_UPLOAD:-false}" = "true" ]; then
       'azure-ai-ml==1.34.0'
     RUN_ID="${RUN_ID}" OUTPUT_DIR="${OUTPUT_DIR}" \
     TRAINING_FRAMEWORK=groot AML_SOURCE=osmo-train \
-      python /tmp/aml_mirror.py || \
-      echo "WARN: Azure ML mirror failed; local run at ${OUTPUT_DIR} is unaffected." >&2
+      BASE_MODEL="${BASE_MODEL_SOURCE}" \
+      BASE_MODEL_REVISION="${BASE_MODEL_REVISION:-}" \
+      python /tmp/aml_mirror.py
   fi
 fi
 

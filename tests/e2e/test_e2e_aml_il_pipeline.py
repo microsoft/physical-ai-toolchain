@@ -46,15 +46,23 @@ def pipeline_dataset_asset(
 
 @pytest.mark.e2e
 @pytest.mark.usefixtures("aml_compute_target")
-@pytest.mark.parametrize("should_register", [False, True], ids=["without-register", "with-register"])
+@pytest.mark.parametrize(
+    ("policy_type", "should_register"),
+    [
+        pytest.param("diffusion", False, id="diffusion-without-register"),
+        pytest.param("act", True, id="act-with-register"),
+    ],
+)
 def test_aml_il_pipeline_e2e(
     request: pytest.FixtureRequest,
     aml_workspace: AzureMLWorkspace,
     repo_root: Path,
     pipeline_dataset_asset: str,
+    policy_type: str,
     should_register: bool,
 ) -> None:
-    variant = "with register" if should_register else "without register"
+    registration = "with register" if should_register else "without register"
+    variant = f"{policy_type} {registration}"
     log_e2e(f"Starting AzureML IL (LeRobot) pipeline e2e test {variant}")
     register_model_name = e2e_name("il-pipeline-e2e-aml-model") if should_register else None
     registered_jobs: list[AzureMLJob] = []
@@ -78,7 +86,7 @@ def test_aml_il_pipeline_e2e(
         aml_workspace,
         dataset_asset=pipeline_dataset_asset,
         dataset_repo_id="e2e/synthetic-pusht",
-        policy_type="act",
+        policy_type=policy_type,
         training_steps=10,
         save_freq=5,
         batch_size=8,

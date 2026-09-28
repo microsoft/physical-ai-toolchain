@@ -6,12 +6,89 @@ import subprocess
 import time
 import uuid
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 _MAX_CONSECUTIVE_STATUS_ERRORS = 5
 _STATUS_HEARTBEAT_INTERVAL_SECONDS = 300
+
+
+@dataclass
+class E2EHandle:
+    submission_commands: list[tuple[str, ...]] = field(default_factory=list)
+    resource_identifiers: dict[str, str] = field(default_factory=dict)
+    attempts: dict[str, list[str]] = field(default_factory=dict)
+    logs: dict[str, str] = field(default_factory=dict)
+    cleanup_registrations: list[str] = field(default_factory=list)
+    retry_classifications: dict[str, str] = field(default_factory=dict)
+    terminal_states: dict[str, str] = field(default_factory=dict)
+
+
+class FinalizerRegistrar(Protocol):
+    def addfinalizer(self, finalizer: Callable[[], object]) -> None:
+        pass
+
+
+def register_cleanup(
+    request: FinalizerRegistrar,
+    handle: E2EHandle,
+    name: str,
+    finalizer: Callable[[], object],
+) -> None:
+    request.addfinalizer(finalizer)
+    handle.cleanup_registrations.append(name)
+
+
+def assert_e2e_handle_complete(
+    handle: E2EHandle,
+    *,
+    required_resources: Iterable[str],
+    required_logs: Iterable[str],
+    required_cleanups: Iterable[str],
+    required_executions: Iterable[str],
+) -> None:
+    assert handle.submission_commands and all(handle.submission_commands), "Missing submission command evidence"
+
+    missing_resources = [name for name in required_resources if not handle.resource_identifiers.get(name)]
+    assert not missing_resources, f"Missing resource identifier evidence: {missing_resources}"
+
+    missing_logs = [name for name in required_logs if not handle.logs.get(name)]
+    assert not missing_logs, f"Missing log evidence: {missing_logs}"
+
+    missing_cleanups = [name for name in required_cleanups if name not in handle.cleanup_registrations]
+    assert not missing_cleanups, f"Missing cleanup registration evidence: {missing_cleanups}"
+
+    missing_attempts = [name for name in required_executions if not handle.attempts.get(name)]
+    assert not missing_attempts, f"Missing attempt evidence: {missing_attempts}"
+
+    missing_retry_classifications = [name for name in required_executions if not handle.retry_classifications.get(name)]
+    assert not missing_retry_classifications, f"Missing retry classification evidence: {missing_retry_classifications}"
+
+    missing_terminal_states = [name for name in required_executions if not handle.terminal_states.get(name)]
+    assert not missing_terminal_states, f"Missing terminal state evidence: {missing_terminal_states}"
+
+
+def parse_provenance_marker(logs: str, marker: str) -> dict[str, object]:
+    for line in logs.splitlines():
+        if marker not in line:
+            continue
+        raw_payload = line.partition(marker)[2]
+        try:
+            payload = json.loads(raw_payload)
+        except json.JSONDecodeError as error:
+            raise AssertionError(f"Task logs contained malformed {marker} JSON") from error
+        if not isinstance(payload, dict):
+            raise AssertionError(f"Task logs contained non-object {marker} payload")
+        return payload
+    raise AssertionError(f"Task logs did not contain {marker}")
+
+
+def command_tuple(args: Any) -> tuple[str, ...]:
+    if isinstance(args, (list, tuple)):
+        return tuple(str(arg) for arg in args)
+    return (str(args),)
 
 
 def e2e_name(prefix: str) -> str:

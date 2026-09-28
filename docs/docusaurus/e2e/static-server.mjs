@@ -6,10 +6,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import express from 'express';
+import { rateLimit } from 'express-rate-limit';
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const defaultBuildDirectory = path.resolve(currentDirectory, '..', 'build');
 const scriptPath = fileURLToPath(import.meta.url);
+
+function positiveInteger(value, name) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${name} must be a positive integer; received ${value}`);
+  }
+  return parsed;
+}
 
 export function resolveServerConfig(environment = process.env) {
   const rawPort = environment.DOCS_E2E_PORT ?? environment.PORT ?? '3001';
@@ -26,10 +35,23 @@ export function resolveServerConfig(environment = process.env) {
     buildDirectory: path.resolve(environment.DOCS_BUILD_DIRECTORY ?? defaultBuildDirectory),
     host,
     port,
+    rateLimitMaxRequests: positiveInteger(
+      environment.DOCS_E2E_RATE_LIMIT_MAX_REQUESTS ?? '10000',
+      'DOCS_E2E_RATE_LIMIT_MAX_REQUESTS',
+    ),
+    rateLimitWindowMs: positiveInteger(
+      environment.DOCS_E2E_RATE_LIMIT_WINDOW_MS ?? '60000',
+      'DOCS_E2E_RATE_LIMIT_WINDOW_MS',
+    ),
   };
 }
 
-export function createStaticApp({ basePath, buildDirectory }) {
+export function createStaticApp({
+  basePath,
+  buildDirectory,
+  rateLimitMaxRequests,
+  rateLimitWindowMs,
+}) {
   for (const requiredFile of ['index.html', '404.html']) {
     if (!fs.existsSync(path.join(buildDirectory, requiredFile))) {
       throw new Error(`Build output is missing ${requiredFile} at ${buildDirectory}`);
@@ -37,6 +59,12 @@ export function createStaticApp({ basePath, buildDirectory }) {
   }
 
   const app = express();
+  app.use(rateLimit({
+    windowMs: rateLimitWindowMs,
+    limit: rateLimitMaxRequests,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }));
   app.use(basePath, express.static(buildDirectory, { extensions: ['html'], index: 'index.html' }));
   app.get('/', (_request, response) => response.redirect(basePath));
   app.use((_request, response) => response.status(404).sendFile(path.join(buildDirectory, '404.html')));

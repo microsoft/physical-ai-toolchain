@@ -26,6 +26,7 @@ dev = [
     "pydantic==2.13.5",
     "ipykernel==7.3.0",
     "ipywidgets==8.1.9",
+    "jsonschema[format]==4.26.0",
     "tqdm==4.70.1",
     "matplotlib==3.11.2",
     "torch==2.14.0",
@@ -39,7 +40,7 @@ constraint-dependencies = [
     "pygments==2.21.0",
 ]
 override-dependencies = [
-    # cryptography: azureml-mlflow==1.62.0.post5 caps cryptography<49.0.0;
+    # cryptography: azureml-mlflow==1.62.0.post6 caps cryptography<49.0.0;
     # 50.0.1 remains above the 48.0.1 security floor for GHSA-537c-gmf6-5ccf.
     "cryptography==50.0.1",
 ]

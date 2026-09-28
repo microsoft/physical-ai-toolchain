@@ -39,13 +39,16 @@ command: >-
 
 inputs:
   policy_repo_id: none
+  policy_revision: none
   policy_type: act
   dataset_repo_id: none
+  dataset_revision: none
   job_name: lerobot-eval
   output_dir: /workspace/outputs/eval
   eval_episodes: "10"
   eval_batch_size: "10"
   lerobot_version: none
+  lerobot_project: training/il/lerobot
   record_video: "false"
   mlflow_enable: "false"
   experiment_name: none

@@ -13,16 +13,23 @@ on:
         required: false
         type: string
         default: pull-request
+      required-completeness:
+        description: 'Evidence completeness gate, independent of collection cadence'
+        required: false
+        type: string
+        default: automated
 
 permissions:
   contents: read
 
 env:
+  EVIDENCE_CADENCE: ${{ inputs.evidence-cadence }}
+  REQUIRED_COMPLETENESS: ${{ inputs.required-completeness }}
   HVE_ACCESSIBILITY_REF: 56c30bcbbba1a8235970c44f5e79a9d83e296f54
   HVE_ACCESSIBILITY_TREE: c6875ad36ceeca2acec665195c385792f4b1f32f
-  HVE_CRITERION_MAP_SHA256: 4297ee41d235f2d66697a669d81c1612e5cf21fbb368268fed57d89aa462684f
-  HVE_NODE_LOCK_SHA256: c7b069b44e7f4e3db6008bad8a0d956e88fd5966e70432781935c6cf081960d3
-  HVE_UV_LOCK_SHA256: 0930c70adfa8a4e86fff9e326f13e3dd710cde447c3674036aa25898deba665d
+  HVE_CRITERION_MAP_SHA256: ef1de7239be999bb271184337e9edc15eb48fb66a69ca5dcb9628182350893a4
+  HVE_NODE_LOCK_SHA256: dd7689d6b058e42facba4539f8414d6090d95ea82853c665e05026857a09026f
+  HVE_UV_LOCK_SHA256: f0265e2d836fb9765be0a6f15e4c21fefc72a46651e97490dea27535172b6377
 
 jobs:
   docusaurus:
@@ -37,6 +44,23 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Validate evidence policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$EVIDENCE_CADENCE" in
+            pull-request|scheduled|release) ;;
+            *) echo "::error::Unsupported evidence cadence"; exit 1 ;;
+          esac
+          case "$REQUIRED_COMPLETENESS" in
+            automated|reviewer|release) ;;
+            *) echo "::error::Unsupported evidence completeness"; exit 1 ;;
+          esac
+          if [ "$REQUIRED_COMPLETENESS" = release ] && [ "$EVIDENCE_CADENCE" != release ]; then
+            echo "::error::Release completeness requires release scope"
+            exit 1
+          fi
+
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -50,6 +74,7 @@ jobs:
           python-version: '3.12'
 
       - name: Acquire reviewed HVE accessibility composer
+        id: hve-acquire
         shell: bash
         run: |
           set -euo pipefail
@@ -57,7 +82,7 @@ jobs:
           git init --quiet "$hve_root"
           git -C "$hve_root" remote add origin https://github.com/microsoft/hve-core.git
           git -C "$hve_root" fetch --depth 1 origin "$HVE_ACCESSIBILITY_REF"
-          git -C "$hve_root" checkout --quiet --detach FETCH_HEAD
+          git -c core.autocrlf=false -C "$hve_root" checkout --quiet --detach FETCH_HEAD
 
           actual_ref=$(git -C "$hve_root" rev-parse HEAD)
           test "$actual_ref" = "$HVE_ACCESSIBILITY_REF"
@@ -67,11 +92,11 @@ jobs:
 
           skill_root="$hve_root/$skill_path"
           printf '%s  %s\n' "$HVE_CRITERION_MAP_SHA256" \
-            "$skill_root/scripts/runtime_a11y/probe-criteria-map.json" | sha256sum --check --status
+            "$skill_root/scripts/runtime_a11y/probe-criteria-map.json" | sha256sum --check
           printf '%s  %s\n' "$HVE_NODE_LOCK_SHA256" \
-            "$skill_root/scripts/runtime_a11y/package-lock.json" | sha256sum --check --status
+            "$skill_root/scripts/runtime_a11y/package-lock.json" | sha256sum --check
           printf '%s  %s\n' "$HVE_UV_LOCK_SHA256" \
-            "$skill_root/uv.lock" | sha256sum --check --status
+            "$skill_root/uv.lock" | sha256sum --check
           uv sync --project "$skill_root" --frozen
 
       - name: Run pinned HVE accessibility self-tests
@@ -144,16 +169,17 @@ jobs:
       - name: Validate project accessibility evidence contracts
         id: evidence-contracts
         shell: bash
+        env:
+          HVE_SKILL_ROOT: ${{ runner.temp }}/hve-core/.github/skills/accessibility/accessibility
         run: |
           set -euo pipefail
-          uv run --no-project \
-            --with pydantic==2.13.5 \
-            --with pytest==9.1.1 \
-            --with pyyaml==6.0.3 \
-            pytest -c /dev/null -q tests/test_accessibility_evidence.py
+          uv run --project "$HVE_SKILL_ROOT" --frozen --with pydantic==2.13.5 \
+            pytest -c /dev/null -q \
+            tests/test_accessibility_evidence.py tests/test_accessibility_promotion.py
           uvx --from ruff==0.16.5 ruff check \
             scripts/accessibility/evidence_gate.py \
-            tests/test_accessibility_evidence.py
+            scripts/accessibility/promotion.py \
+            tests/test_accessibility_evidence.py tests/test_accessibility_promotion.py
 
       - name: Validate presentation taxonomy activation
         id: presentation-taxonomy
@@ -174,7 +200,7 @@ jobs:
             scripts/accessibility/evidence_gate.py \
             --prepare-docusaurus-source-manifest \
             artifacts/accessibility/docusaurus/source-input-manifest.json \
-            --cadence '${{ inputs.evidence-cadence }}' \
+            --cadence "$EVIDENCE_CADENCE" \
             --repository-root .
 
       - name: Install dependencies
@@ -285,7 +311,7 @@ jobs:
             --source-revision "$GITHUB_SHA" \
             --observed-at "$observed_at" \
             --source-check-status "$source_check_status" \
-            --cadence '${{ inputs.evidence-cadence }}' \
+            --cadence "$EVIDENCE_CADENCE" \
             --repository-root . \
             > artifacts/accessibility/docusaurus/preparation-summary.json
 
@@ -296,10 +322,6 @@ jobs:
         run: |
           set -euo pipefail
           skill_root="$RUNNER_TEMP/hve-core/.github/skills/accessibility/accessibility"
-          completeness=automated
-          if [ '${{ inputs.evidence-cadence }}' = 'release' ]; then
-            completeness=release
-          fi
           uv run --project "$skill_root" --frozen \
             "$skill_root/scripts/runtime_a11y/__main__.py" compose-evidence \
             --asset-catalog "$GITHUB_WORKSPACE/artifacts/accessibility/docusaurus/inputs/asset-journeys.json" \
@@ -311,7 +333,7 @@ jobs:
             --state-proofs "$GITHUB_WORKSPACE/artifacts/accessibility/docusaurus/inputs/state-proofs.json" \
             --artifact-root "$GITHUB_WORKSPACE" \
             --out "$GITHUB_WORKSPACE/artifacts/accessibility/docusaurus/evidence-bundle.json" \
-            --require-completeness "$completeness"
+            --require-completeness "$REQUIRED_COMPLETENESS"
 
       - name: Validate Docusaurus accessibility evidence
         id: validate-evidence
@@ -319,10 +341,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          uv run --no-project --with pydantic==2.13.5 \
+          skill_root="$RUNNER_TEMP/hve-core/.github/skills/accessibility/accessibility"
+          uv run --project "$skill_root" --frozen --with pydantic==2.13.5 python \
             scripts/accessibility/evidence_gate.py \
             --validate-composed-docusaurus-bundle \
             artifacts/accessibility/docusaurus/evidence-bundle.json \
+            --harness-root "$skill_root" \
+            --require-completeness "$REQUIRED_COMPLETENESS" \
             --repository-root . \
             > artifacts/accessibility/docusaurus/evidence-summary.json
 
@@ -379,29 +404,40 @@ jobs:
             --out "$GITHUB_WORKSPACE/artifacts/accessibility/docusaurus/accessibility-validation-manifest.json" \
             --schema-report "$GITHUB_WORKSPACE/artifacts/accessibility/docusaurus/schema-validation-report.json"
 
+      - name: Stage portable Docusaurus evidence
+        id: stage-evidence
+        if: always()
+        shell: bash
+        env:
+          HVE_ACQUISITION_OUTCOME: ${{ steps.hve-acquire.outcome }}
+        run: |
+          set -euo pipefail
+          skill_root="$RUNNER_TEMP/hve-core/.github/skills/accessibility/accessibility"
+          runner=(uv run --no-project --with pydantic==2.13.5)
+          if [ "$HVE_ACQUISITION_OUTCOME" = success ]; then
+            runner=(uv run --project "$skill_root" --frozen --with pydantic==2.13.5)
+          fi
+          "${runner[@]}" python \
+            scripts/accessibility/evidence_gate.py \
+            --stage-docusaurus-package "$RUNNER_TEMP/docusaurus-retained" \
+            --harness-root "$skill_root" \
+            --repository-root .
+          "${runner[@]}" python \
+            scripts/accessibility/evidence_gate.py \
+            --verify-docusaurus-package "$RUNNER_TEMP/docusaurus-retained" \
+            --harness-root "$skill_root" \
+            --repository-root .
+
       - name: Upload Docusaurus accessibility evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         continue-on-error: ${{ inputs.soft-fail }}
         with:
           name: docusaurus-accessibility-evidence-${{ inputs.evidence-cadence }}-${{ github.run_id }}
-          path: artifacts/accessibility/docusaurus/
+          path: ${{ runner.temp }}/docusaurus-retained/
+          include-hidden-files: true
           retention-days: ${{ inputs.evidence-cadence == 'release' && 90 || 30 }}
           if-no-files-found: warn
-
-      - name: Upload browser diagnostics
-        if: ${{ always() && (steps.browser.outcome == 'failure' || cancelled()) }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        continue-on-error: ${{ inputs.soft-fail }}
-        with:
-          name: docusaurus-browser-diagnostics
-          path: |
-            docs/docusaurus/playwright-report/
-            docs/docusaurus/test-results/
-            docs/docusaurus/build/deployed-routes.json
-            docs/docusaurus/build/mermaid-routes.json
-          retention-days: 30
-          if-no-files-found: ignore
 
   docusaurus-codecov:
     name: Docusaurus Codecov Upload

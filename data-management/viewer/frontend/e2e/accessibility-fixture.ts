@@ -279,7 +279,7 @@ export async function installApiFixture(page: Page, options: ApiFixtureOptions =
           'data: {"percentage":50,"status":"Exporting episode","currentEpisode":1,"totalEpisodes":1,"currentFrame":6,"totalFrames":12}',
           '',
           'event: complete',
-          'data: {"success":true,"outputFiles":["synthetic.hdf5"],"stats":{"totalEpisodes":1}}',
+          'data: {"success":true,"outputFiles":["synthetic.hdf5"],"error":null,"stats":{"total_episodes":1,"total_frames":12,"removed_frames":0,"duration_ms":5}}',
           '',
         ].join('\n'),
       })

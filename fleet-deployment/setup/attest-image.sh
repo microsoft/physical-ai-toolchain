@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Attach SBOM and OpenVEX attestations to an already-built, signed image in ACR.
+# Attach SBOM and an optional OpenVEX attestation to an already-built, signed image in ACR.
 # Decoupled from build-aml-model-image.sh so security/compliance can refresh
 # VEX dispositions without rebuilding.
 set -o errexit -o nounset
@@ -10,14 +10,16 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../..
 source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=defaults.conf
 source "$SCRIPT_DIR/defaults.conf"
+OPENVEX_SCHEMA="$REPO_ROOT/scripts/security/openvex-0.2.0.schema.json"
+OPENVEX_VALIDATOR="$REPO_ROOT/scripts/security/validate_openvex.py"
 
 show_help() {
   cat << EOF
 Usage: $(basename "$0") --image <digest-ref> [OPTIONS]
 
-Attach SBOM and OpenVEX attestations to a previously built image. Does NOT
-rebuild, re-push, or re-sign. Safe to re-run; each invocation publishes a new
-attestation as an OCI referrer of the supplied digest.
+Attach an SBOM and, when configured, an OpenVEX document to a previously built
+image. Does NOT rebuild, re-push, or re-sign. Safe to re-run; each invocation
+publishes a new attestation as an OCI referrer of the supplied digest.
 
 OPTIONS:
     -h, --help                Show this help
@@ -27,8 +29,8 @@ OPTIONS:
                               or 'sigstore')
     --acr-name NAME           ACR name for 'az acr login' (default: parsed from
                               the image ref)
-    --vex-file PATH           OpenVEX statement (sigstore only)
-                              (default: $DEFAULT_VEX_FILE)
+    --vex-file PATH           OpenVEX document (sigstore only; default:
+                              ${DEFAULT_VEX_FILE:-<unset>})
     --sbom-file PATH          Reuse an existing SPDX-JSON SBOM instead of
                               generating one via syft
     --skip-sbom               Skip SBOM attestation
@@ -39,20 +41,23 @@ NOTES:
   * sigstore mode emits two cosign attestations: --type spdxjson (SBOM) and
     --type openvex (VEX).
   * notation mode emits the SBOM as an 'oras attach' referrer; OpenVEX has no
-    notation equivalent in this repo and is silently skipped.
+    notation equivalent in this repo and is skipped with a warning.
   * The caller is expected to be logged in to the correct Entra tenant
     (\`az login --tenant <id>\`). 'az acr login' runs automatically when --acr-name
     is supplied or parseable from the image ref.
 
 EXAMPLES:
-    # Attach the committed VEX to a previously built image
-    $(basename "$0") --image acrfleetprod001.azurecr.io/act-pickplace@sha256:abc...
+    # Attach an explicit VEX document to a previously built image
+    $(basename "$0") --image acrfleetprod001.azurecr.io/act-pickplace@sha256:abc... \
+      --vex-file <path/to/document.openvex.json>
 
     # Refresh just the VEX (skip SBOM regeneration)
-    $(basename "$0") --image <ref> --skip-sbom
+    $(basename "$0") --image <ref> --skip-sbom \
+      --vex-file <path/to/document.openvex.json>
 
     # Reuse an existing SBOM and attach the VEX
-    $(basename "$0") --image <ref> --sbom-file ./sbom.spdx.json
+    $(basename "$0") --image <ref> --sbom-file ./sbom.spdx.json \
+      --vex-file <path/to/document.openvex.json>
 
     # Notation mode (SBOM only; VEX skipped)
     $(basename "$0") --image <ref> --mode notation
@@ -68,14 +73,18 @@ skip_sbom=false
 skip_vex=false
 config_preview=false
 
+require_option_value() {
+  [[ $# -ge 2 ]] || fatal "Option $1 requires a value"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)         show_help; exit 0 ;;
-    --image)           image="$2"; shift 2 ;;
-    --mode)            mode="$2"; shift 2 ;;
-    --acr-name)        acr_name="$2"; shift 2 ;;
-    --vex-file)        vex_file="$2"; shift 2 ;;
-    --sbom-file)       sbom_file="$2"; shift 2 ;;
+    --image)           require_option_value "$@"; image="$2"; shift 2 ;;
+    --mode)            require_option_value "$@"; mode="$2"; shift 2 ;;
+    --acr-name)        require_option_value "$@"; acr_name="$2"; shift 2 ;;
+    --vex-file)        require_option_value "$@"; vex_file="$2"; shift 2 ;;
+    --sbom-file)       require_option_value "$@"; sbom_file="$2"; shift 2 ;;
     --skip-sbom)       skip_sbom=true; shift ;;
     --skip-vex)        skip_vex=true; shift ;;
     --config-preview)  config_preview=true; shift ;;
@@ -84,7 +93,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$image" ]] || fatal "--image is required"
-[[ "$image" == *@sha256:* ]] || fatal "--image must be digest-pinned: <acr>.azurecr.io/<repo>@sha256:<hex>"
+[[ "$image" =~ ^.+@sha256:[0-9a-f]{64}$ ]] ||
+  fatal "--image must be digest-pinned: <acr>.azurecr.io/<repo>@sha256:<64 lowercase hex characters>"
 
 mode="${mode:-${DEFAULT_VERIFY_MODE:-sigstore}}"
 case "$mode" in
@@ -107,6 +117,9 @@ vex_path="${vex_file:-${DEFAULT_VEX_FILE:-}}"
 if [[ -n "$vex_path" && "$vex_path" != /* ]]; then
   vex_path="$(realpath -m "$SCRIPT_DIR/$vex_path")"
 fi
+if [[ -z "$vex_path" ]]; then
+  skip_vex=true
+fi
 
 section "Configuration"
 print_kv "Image"      "$image"
@@ -120,14 +133,36 @@ print_kv "Skip VEX"   "$skip_vex"
 if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
+if [[ "$skip_sbom" == "true" && ( "$skip_vex" == "true" || "$mode" == "notation" ) ]]; then
+  fatal "Nothing to attest: SBOM is skipped and OpenVEX is unavailable or skipped in $mode mode"
+fi
+if [[ "$skip_vex" == "true" && -z "$vex_path" ]]; then
+  warn "No VEX document configured; skipping OpenVEX attestation"
+elif [[ "$mode" == "sigstore" && "$skip_vex" != "true" && ! -f "$vex_path" ]]; then
+  fatal "VEX file not found: $vex_path"
+fi
 
 # Tool requirements depend on mode and skip flags.
 case "$mode" in
-  sigstore) require_tools cosign ;;
+  sigstore)
+    require_tools cosign
+    if [[ "$skip_vex" != "true" ]]; then
+      require_tools uv
+    fi
+    ;;
   notation) require_tools oras ;;
 esac
 if [[ "$skip_sbom" != "true" && -z "$sbom_file" ]]; then
   require_tools syft
+fi
+
+if [[ "$mode" == "sigstore" && "$skip_vex" != "true" ]]; then
+  image_digest="${image##*@}"
+  uv run --frozen --no-sync python "$OPENVEX_VALIDATOR" \
+    --schema "$OPENVEX_SCHEMA" \
+    --image-digest "$image_digest" \
+    "$vex_path" ||
+    fatal "OpenVEX document is invalid or does not identify image digest $image_digest: $vex_path"
 fi
 
 # Authenticate to ACR when we can identify the registry.
@@ -155,12 +190,8 @@ case "$mode" in
       cosign attest --yes --predicate "$sbom_file" --type spdxjson "$image"
     fi
     if [[ "$skip_vex" != "true" ]]; then
-      if [[ -f "$vex_path" ]]; then
-        section "Attest OpenVEX (cosign, openvex)"
-        cosign attest --yes --predicate "$vex_path" --type openvex "$image"
-      else
-        warn "VEX file not present at '$vex_path' — skipping OpenVEX attestation."
-      fi
+      section "Attest OpenVEX (cosign, openvex)"
+      cosign attest --yes --predicate "$vex_path" --type openvex "$image"
     fi
     ;;
 
@@ -183,6 +214,6 @@ section "Attestation Summary"
 print_kv "Image" "$image"
 print_kv "Mode"  "$mode"
 [[ "$skip_sbom" == "true" ]] || print_kv "SBOM attached" "yes"
-[[ "$skip_vex"  == "true" || "$mode" == "notation" || ! -f "$vex_path" ]] \
+[[ "$skip_vex" == "true" || "$mode" == "notation" ]] \
   || print_kv "VEX attached"  "yes"
 info "Done."

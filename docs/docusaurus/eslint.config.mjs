@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 import tsParser from '@typescript-eslint/parser';
-import jsxA11y from 'eslint-plugin-jsx-a11y';
+import jsxA11yX from 'eslint-plugin-jsx-a11y-x';
 
 export default [
   {
@@ -22,11 +22,11 @@ export default [
       },
     },
     plugins: {
-      'jsx-a11y': jsxA11y,
+      'jsx-a11y-x': jsxA11yX,
     },
     rules: {
-      ...jsxA11y.flatConfigs.recommended.rules,
-      'jsx-a11y/no-noninteractive-tabindex': ['error', { roles: ['group'] }],
+      ...jsxA11yX.configs.recommended.rules,
+      'jsx-a11y-x/no-noninteractive-tabindex': ['error', { roles: ['group'] }],
     },
   },
   {

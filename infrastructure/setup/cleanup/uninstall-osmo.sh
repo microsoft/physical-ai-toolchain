@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Uninstall OSMO control plane and backend operator, clean up resources
-# cspell:ignore REDISCLI
 #
 # Prerequisites:
 #   - AKS cluster accessible (kubectl configured)
@@ -70,7 +69,8 @@ db_name="osmo"
 use_local_osmo=false
 config_preview=false
 postgres_image="postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94"
-redis_image="redis:7@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7"
+python_image="python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea"
+redis_tls_client=$(<"$SCRIPT_DIR/redis_tls_client.py")
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -211,7 +211,8 @@ if [[ "$purge_redis" == "true" ]]; then
         --from-file=password=<(printf '%s' "$redis_key") \
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
         kubectl delete pod osmo-purge-redis -n default --ignore-not-found >/dev/null 2>&1
-        jq -n --arg image "$redis_image" --arg host "$redis_hostname" --arg port "$redis_port" '
+        jq -n --arg image "$python_image" --arg client "$redis_tls_client" \
+                --arg host "$redis_hostname" --arg port "$redis_port" '
                 {
                     apiVersion: "v1",
                     kind: "Pod",
@@ -219,14 +220,18 @@ if [[ "$purge_redis" == "true" ]]; then
                     spec: {
                         restartPolicy: "Never",
                         containers: [{
-                            name: "redis-cli",
+                            name: "redis",
                             image: $image,
-                            env: [{
-                                name: "REDISCLI_AUTH",
-                                valueFrom: {secretKeyRef: {name: "osmo-purge-redis", key: "password"}}
-                            }],
-                            command: ["redis-cli"],
-                            args: ["-h", $host, "-p", $port, "--tls", "--insecure", "--no-auth-warning", "PING"]
+                            env: [
+                                {name: "REDIS_HOST", value: $host},
+                                {name: "REDIS_PORT", value: $port},
+                                {
+                                    name: "REDIS_PASSWORD",
+                                    valueFrom: {secretKeyRef: {name: "osmo-purge-redis", key: "password"}}
+                                },
+                                {name: "REDIS_OPERATION", value: "PING"}
+                            ],
+                            command: ["python", "-c", $client]
                         }]
                     }
                 }
@@ -406,8 +411,8 @@ if [[ "$purge_redis" == "true" ]]; then
     kubectl create secret generic osmo-purge-redis -n default \
         --from-file=password=<(printf '%s' "$redis_key") \
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-        jq -n --arg image "$redis_image" --arg host "$redis_hostname" --arg port "$redis_port" \
-                --arg script "$flush_script" '
+        jq -n --arg image "$python_image" --arg client "$redis_tls_client" \
+                --arg host "$redis_hostname" --arg port "$redis_port" --arg script "$flush_script" '
                 {
                     apiVersion: "v1",
                     kind: "Pod",
@@ -415,14 +420,19 @@ if [[ "$purge_redis" == "true" ]]; then
                     spec: {
                         restartPolicy: "Never",
                         containers: [{
-                            name: "redis-cli",
+                            name: "redis",
                             image: $image,
-                            env: [{
-                                name: "REDISCLI_AUTH",
-                                valueFrom: {secretKeyRef: {name: "osmo-purge-redis", key: "password"}}
-                            }],
-                            command: ["redis-cli"],
-                            args: ["-h", $host, "-p", $port, "--tls", "--insecure", "--no-auth-warning", "EVAL", $script, "0"]
+                            env: [
+                                {name: "REDIS_HOST", value: $host},
+                                {name: "REDIS_PORT", value: $port},
+                                {
+                                    name: "REDIS_PASSWORD",
+                                    valueFrom: {secretKeyRef: {name: "osmo-purge-redis", key: "password"}}
+                                },
+                                {name: "REDIS_OPERATION", value: "EVAL"},
+                                {name: "REDIS_SCRIPT", value: $script}
+                            ],
+                            command: ["python", "-c", $client]
                         }]
                     }
                 }

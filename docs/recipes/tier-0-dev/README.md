@@ -2,7 +2,7 @@
 title: "T0 — Dev: The Local Training Lifecycle Loop"
 description: Run the full capture, curate, train, validate, and run loop on one laptop and one robot with zero cloud
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-15
+ms.date: 2026-09-22
 ms.topic: tutorial
 ---
 
@@ -36,7 +36,7 @@ Everything below runs on the single machine in front of you. The only thing that
 data you copy off the robot with `cp` or `rsync`.
 
 The default instructions use plain processes. The optional
-[GPU Offload T0 plan](../../../gpu-offload/docs/05-T0-plan.md) permits a local kind
+[GPU Offload T0 plan](pathname://../../../gpu-offload/docs/05-T0-plan.md) permits a local kind
 cluster on the same laptop when process isolation, GPU allocation, or the Kubernetes
 offload controller is useful. T0 still excludes remote clusters and cloud dependencies.
 

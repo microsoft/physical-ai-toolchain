@@ -1,5 +1,5 @@
 """
-End-to-end lifecycle test for the Azure ML IL (LeRobot/ACT) train -> eval path.
+End-to-end lifecycle test for the Azure ML IL (LeRobot/Diffusion) train -> eval path.
 
 Stages a synthetic dataset, submits a real training job that registers its checkpoint
 under a unique model name, validates the training outputs, resolves the concrete
@@ -25,6 +25,7 @@ from tests.e2e._aml import (
     AzureMLWorkspace,
     aml_lerobot_policy_source_from_model,
     archive_all_model_versions,
+    assert_aml_lerobot_eval_artifact_contract,
     assert_job_has_checkpoint,
     assert_job_snapshot_contains_only_training,
     cancel_aml_job,
@@ -41,6 +42,8 @@ from tests.e2e._mlflow import (
     assert_aml_lerobot_eval_has_mlflow_tracking,
     assert_aml_lerobot_job_has_mlflow_tracking,
 )
+
+_POLICY_TYPE = "diffusion"
 
 
 def test_resolve_aml_lerobot_eval_policy_override_model(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,7 +86,7 @@ def test_aml_il_lifecycle_e2e(
     repo_root: Path,
     storage_account: str,
 ) -> None:
-    log_e2e("Starting AzureML IL (LeRobot) lifecycle e2e test")
+    log_e2e(f"Starting AzureML IL (LeRobot/{_POLICY_TYPE}) lifecycle e2e test")
     policy_source = resolve_aml_lerobot_eval_policy_override()
     dataset = stage_synthetic_lerobot_dataset(
         request,
@@ -92,12 +95,12 @@ def test_aml_il_lifecycle_e2e(
         container="ml-workspace",
     )
     if policy_source is None:
-        register_model_name = e2e_name("il-e2e-aml-model")
+        register_model_name = e2e_name("il-diffusion-e2e-aml-model")
         job = submit_aml_lerobot_training(
             repo_root,
             aml_workspace,
             blob_url=dataset.blob_url,
-            policy_type="act",
+            policy_type=_POLICY_TYPE,
             training_steps=10,
             save_freq=5,
             batch_size=8,
@@ -126,7 +129,7 @@ def test_aml_il_lifecycle_e2e(
         repo_root,
         aml_workspace,
         policy_source=policy_source,
-        policy_type="act",
+        policy_type=_POLICY_TYPE,
         eval_episodes=1,
         eval_batch_size=1,
         blob_storage_account=dataset.storage_account,
@@ -139,6 +142,8 @@ def test_aml_il_lifecycle_e2e(
     wait_until_aml_started(eval_job, repo_root, timeout_minutes=15, poll_interval_seconds=30)
     log_e2e(f"Waiting for AzureML LeRobot eval job {eval_job.name} to complete")
     wait_until_aml_completed(eval_job, repo_root, timeout_minutes=30, poll_interval_seconds=30)
+    log_e2e("Validating AzureML LeRobot eval artifact contract")
+    assert_aml_lerobot_eval_artifact_contract(eval_job, eval_episodes=1)
     log_e2e("Validating AzureML LeRobot eval MLflow tracking")
     assert_aml_lerobot_eval_has_mlflow_tracking(eval_job, aml_workspace)
-    log_e2e("AzureML LeRobot lifecycle e2e test finished successfully")
+    log_e2e(f"AzureML LeRobot/{_POLICY_TYPE} lifecycle e2e test finished successfully")

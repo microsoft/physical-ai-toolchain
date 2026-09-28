@@ -18,7 +18,6 @@ import {
 } from '../e2e/route-inventory'
 
 const siteRoot = path.resolve(__dirname, '..')
-const repositoryRoot = path.resolve(siteRoot, '..', '..')
 const checkerPath = path.join(siteRoot, 'scripts', 'check-label-registry.mjs')
 const contentDiscoveryCases = JSON.parse(
   fs.readFileSync(path.join(siteRoot, 'scripts', 'content-discovery-cases.json'), 'utf8'),

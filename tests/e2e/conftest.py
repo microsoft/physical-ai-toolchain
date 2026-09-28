@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -321,10 +322,13 @@ def ensure_osmo_cli_available(repo_root: Path) -> None:
     if shutil.which("osmo") is None:
         pytest.skip("OSMO CLI is not installed")
 
-    result = run_command(
-        ["osmo", "workflow", "list", "--count", "1", "--format-type", "json"],
-        cwd=repo_root,
-    )
+    args = ["osmo", "workflow", "list", "--count", "1", "--format-type", "json"]
+    result = run_command(args, cwd=repo_root)
+    for _ in range(11):
+        if result.returncode == 0:
+            break
+        time.sleep(5)
+        result = run_command(args, cwd=repo_root)
     if result.returncode != 0:
         pytest.skip("OSMO CLI is unavailable or not authenticated")
 

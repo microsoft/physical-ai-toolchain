@@ -3,6 +3,8 @@ import { expect, test } from '@playwright/test'
 
 import { attachJson, openViewer } from './accessibility-fixture'
 
+// cspell:words opblock
+
 test('V02 and V03 support keyboard dataset and episode selection', async ({ page }, testInfo) => {
   const errors = await openViewer(page, testInfo)
   const datasetButton = page.getByRole('button', { name: 'Dataset' })

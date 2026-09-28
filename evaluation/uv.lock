@@ -15,6 +15,7 @@ supported-markers = [
 
 [manifest]
 overrides = [
+    { name = "diffusers", specifier = "==0.40.0" },
     { name = "torch", marker = "platform_machine != 'AMD64' and platform_machine != 'aarch64' and platform_machine != 'arm64' and platform_machine != 'x86_64'", specifier = "==2.14.0" },
     { name = "torch", marker = "platform_machine == 'AMD64' or platform_machine == 'x86_64'", specifier = "==2.14.0", index = "https://download.pytorch.org/whl/cu130" },
     { name = "torch", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'", specifier = "==2.14.0", index = "https://download.pytorch.org/whl/cu130" },
@@ -753,6 +754,26 @@ wheels = [
 ]
 
 [[package]]
+name = "diffusers"
+version = "0.40.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "filelock" },
+    { name = "httpx" },
+    { name = "huggingface-hub" },
+    { name = "importlib-metadata" },
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "regex" },
+    { name = "requests" },
+    { name = "safetensors" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/59/32/b9c6a198812e2a7d2c2828a850dba384306f9af285eac23e35e89d5b008a/diffusers-0.40.0.tar.gz", hash = "sha256:49f112ce52ff6d332ab68afec01f79a53e6489b42cb69104444c98b4a2f64af8", size = 4886420, upload-time = "2026-08-20T14:30:40.923Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/db/df/ffb593ebed2a068d2d6be44261283f39a6b809c0fcdfdcafbd448cbeec77/diffusers-0.40.0-py3-none-any.whl", hash = "sha256:5b5da7c3ddb62152fa4afc577f02e050af688c797375c34fb2d01006da3f3541", size = 5911654, upload-time = "2026-08-20T14:30:38.422Z" },
+]
+
+[[package]]
 name = "dill"
 version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1231,6 +1252,9 @@ dataset = [
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "torchcodec" },
+]
+diffusion = [
+    { name = "diffusers" },
 ]
 
 [[package]]
@@ -2528,8 +2552,9 @@ dependencies = [
     { name = "azure-core" },
     { name = "azure-identity" },
     { name = "azure-storage-blob" },
+    { name = "diffusers" },
     { name = "gymnasium" },
-    { name = "lerobot", extra = ["dataset"] },
+    { name = "lerobot", extra = ["dataset", "diffusion"] },
     { name = "marshmallow" },
     { name = "matplotlib" },
     { name = "mlflow-skinny" },
@@ -2569,8 +2594,9 @@ requires-dist = [
     { name = "azure-core", specifier = "==1.41.0" },
     { name = "azure-identity", specifier = "==1.25.3" },
     { name = "azure-storage-blob", specifier = "==12.30.1" },
+    { name = "diffusers", specifier = "==0.40.0" },
     { name = "gymnasium", specifier = "==1.3.0" },
-    { name = "lerobot", extras = ["dataset"], specifier = "==0.6.1" },
+    { name = "lerobot", extras = ["dataset", "diffusion"], specifier = "==0.6.1" },
     { name = "marshmallow", specifier = "==3.26.2" },
     { name = "matplotlib", specifier = "==3.11.2" },
     { name = "mlflow-skinny", specifier = "==3.16.0" },
