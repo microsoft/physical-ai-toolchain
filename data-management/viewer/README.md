@@ -113,7 +113,7 @@ Expected blob structure:
 | `AZURE_STORAGE_SAS_TOKEN`            | —               | SAS token (omit to use DefaultAzureCredential / MSI)           |
 | `BACKEND_HOST`                       | `127.0.0.1`     | Bind address (`0.0.0.0` for containers)                        |
 | `BACKEND_PORT`                       | `8000`          | API server port                                                |
-| `LOG_LEVEL`                          | `info`          | Uvicorn log level for container deployments                    |
+| `LOG_LEVEL`                          | `info`          | Uvicorn log level                                              |
 | `FRONTEND_PORT`                      | `5173`          | Dev server port                                                |
 | `CORS_ORIGINS`                       | localhost ports | Comma-separated allowed CORS origins                           |
 
@@ -427,7 +427,7 @@ Available options:
 ```bash
 cd backend
 source .venv/bin/activate
-uvicorn src.api.main:app --log-config logging.json --reload --port 8000
+uvicorn src.api.main:app --log-config logging.json --log-level "${LOG_LEVEL:-info}" --reload --port 8000
 ```
 
 #### Start Frontend

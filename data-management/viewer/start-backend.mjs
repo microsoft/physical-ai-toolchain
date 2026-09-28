@@ -11,6 +11,8 @@ const backend = spawn(
     "src.api.main:app",
     "--log-config",
     "logging.json",
+    "--log-level",
+    process.env.LOG_LEVEL ?? "info",
     "--reload",
     "--host",
     process.env.BACKEND_HOST ?? "127.0.0.1",
