@@ -534,6 +534,7 @@ Terraform validation is per-directory — each deployment directory has its own 
 | `docs/gpu-configuration.md` | Detailed GPU driver and operator configuration |
 | `docs/mlflow-integration.md` | MLflow tracking and experiment management |
 | `.github/instructions/dataviewer.instructions.md` | Frontend coding patterns, component design, testing philosophy |
+| `.github/instructions/dependency-feeds.instructions.md` | Canonical public registry and lockfile source policy |
 | `.github/instructions/shell-scripts.instructions.md` | Shell script template, section order, library function reference |
 | `.github/instructions/vex-standards.instructions.md` | OpenVEX status, justification, product identity, and document mutation rules |
 | `.github/instructions/commit-message.instructions.md` | Conventional commit format, types, scopes, footer requirements |

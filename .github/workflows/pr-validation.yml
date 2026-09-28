@@ -182,6 +182,15 @@ jobs:
       upload-sarif: true
       exclude-paths: 'scripts/tests/Fixtures/**,shared/ci/tests/Fixtures/**'
 
+  # Canonical public dependency source enforcement
+  public-dependency-feeds:
+    name: Public Dependency Feeds
+    uses: ./.github/workflows/public-dependency-feeds.yml
+    with:
+      soft-fail: false
+    permissions:
+      contents: read
+
   # OSV-Scanner: advisory-only vulnerability scan across manifests using
   # osv-scanner.toml. The scan step uses continue-on-error so the job always
   # reports success (green) even when vulnerabilities are found; findings still
@@ -508,6 +517,7 @@ jobs:
       - markdown-link-check
       - dependency-review
       - dependency-pinning
+      - public-dependency-feeds
       - pester-tests
       - dataviewer-frontend-tests
       - docusaurus-tests
