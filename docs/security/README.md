@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Security Documentation
 description: Index of security documentation including threat model and deployment security guide
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-02
+ms.date: 2026-09-17
 ms.topic: overview
 keywords:
   - security
@@ -44,18 +44,30 @@ The [security guide](../operations/security-guide.md) documents:
 - Deployment team responsibilities before, during, and after provisioning
 - Security considerations checklist with Azure documentation references
 
+## 🏅 OpenSSF Best Practices
+
+OpenSSF Best Practices project [12195](https://www.bestpractices.dev/projects/12195) holds the Silver badge. The status was verified on 2026-09-17 against the public project data.
+
+| Level   | Progress |
+|---------|---------:|
+| Passing |     100% |
+| Silver  |     100% |
+| Gold    |      43% |
+
+The root `.bestpractices.json` stores evidence-backed proposed questionnaire answers. Run the `openssf-badge-audit` skill to compare that proposal with the live project before a maintainer submits changes through the authenticated OpenSSF interface.
+
 ## 🛠️ Operational Scripts
 
 Automated security and freshness checks that run on GitHub Actions schedules and publish findings to the Security tab.
 
-| Script                                                                                                                                                 | Workflow                                                            | Purpose                                                                                                                                                                                         |
-|--------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [`scripts/security/Modules/PinnedToolVersions.psm1`](../../scripts/security/Modules/PinnedToolVersions.psm1)                                            | `check-binary-freshness.yml`, `check-binary-integrity.yml`          | Provide literal tool version discovery across tracked shell, PowerShell, JSON, and JSONC files                                                                                                  |
-| [`scripts/security/Test-BinaryFreshness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-BinaryFreshness.ps1)   | `check-binary-integrity.yml`                                        | Verify pinned binary SHA-256 hashes and detect Helm chart version drift (SARIF output)                                                                                                          |
-| [`scripts/security/Test-DependencyPinning.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-DependencyPinning.ps1) | `dependency-pinning-scan.yml`                                       | Validate exact pins for GitHub Actions, packages, inline pip/uv installs, workflow container images, and AzureML environment assets (Dockerfile base images: OpenSSF Scorecard)                  |
-| [`scripts/security/Test-SHAStaleness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-SHAStaleness.ps1)         | `sha-staleness-check.yml`                                           | Detect SHA pins that have drifted behind upstream release tags                                                                                                                                  |
-| [`scripts/update-chart-hashes.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-chart-hashes.sh)                         | Run manually after chart bumps                                      | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf`                                                                                                   |
-| [`scripts/update-image-digests.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-image-digests.sh)                       | `check-image-digest-freshness.yml` (weekly); manual after tag bumps | Detect registry digest drift and refresh `@sha256` pins and derived AzureML environment versions across tracked non-Dockerfile surfaces; excludes gh-aw lock files and test artifacts          |
+| Script                                                                                                                                                    | Workflow                                                            | Purpose                                                                                                                                                                               |
+|-----------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`scripts/security/Modules/PinnedToolVersions.psm1`](../../scripts/security/Modules/PinnedToolVersions.psm1)                                              | `check-binary-freshness.yml`, `check-binary-integrity.yml`          | Provide literal tool version discovery across tracked shell, PowerShell, JSON, and JSONC files                                                                                        |
+| [`scripts/security/Test-BinaryFreshness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-BinaryFreshness.ps1)     | `check-binary-integrity.yml`                                        | Verify pinned binary SHA-256 hashes and detect Helm chart version drift (SARIF output)                                                                                                |
+| [`scripts/security/Test-DependencyPinning.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-DependencyPinning.ps1) | `dependency-pinning-scan.yml`                                       | Validate exact pins for GitHub Actions, packages, inline pip/uv installs, workflow container images, and AzureML environment assets (Dockerfile base images: OpenSSF Scorecard)       |
+| [`scripts/security/Test-SHAStaleness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-SHAStaleness.ps1)           | `sha-staleness-check.yml`                                           | Detect SHA pins that have drifted behind upstream release tags                                                                                                                        |
+| [`scripts/update-chart-hashes.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-chart-hashes.sh)                           | Run manually after chart bumps                                      | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf`                                                                                         |
+| [`scripts/update-image-digests.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-image-digests.sh)                         | `check-image-digest-freshness.yml` (weekly); manual after tag bumps | Detect registry digest drift and refresh `@sha256` pins and derived AzureML environment versions across tracked non-Dockerfile surfaces; excludes gh-aw lock files and test artifacts |
 
 Script parameters vary by check: `Test-BinaryFreshness.ps1` uses `-SarifFile` and `-ConfigPreview`, `Test-DependencyPinning.ps1` uses `-Format sarif -OutputPath <path>`, `Test-SHAStaleness.ps1` uses `-OutputFormat` and `-OutputPath`, and `update-image-digests.sh` uses `--check --sarif-output <path>`.
 
