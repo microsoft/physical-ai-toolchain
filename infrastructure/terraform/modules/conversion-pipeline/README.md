@@ -15,7 +15,7 @@ The module is opt-in. The root composition gates it behind `should_deploy_conver
 | Requirement                 | Notes                                                                                                                                                                  |
 |-----------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Terraform                   | `>= 1.9.8, < 2.0`                                                                                                                                                      |
-| `azurerm` provider          | `>= 5.1.0, < 5.4.0`                                                                                                                                                    |
+| `azurerm` provider          | `>= 5.1.0, < 5.5.1`                                                                                                                                                    |
 | `microsoft/fabric` provider | `1.3.0`                                                                                                                                                                |
 | Operator identity           | Member of a security group allow-listed under the Fabric tenant admin setting "Service principals can use Fabric APIs" (or the equivalent user/CLI-context allow-list) |
 | Authentication              | `az login` against the target tenant. The Fabric provider falls back to Azure CLI auth when no provider block is declared                                              |

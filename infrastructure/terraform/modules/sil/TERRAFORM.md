@@ -2,7 +2,7 @@
 title: SiL Module (Software-in-the-Loop)
 description: "Deploys AKS-specific infrastructure for robotics ML workloads with GPU node pools, AzureML integration, and observability."
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-31
+ms.date: 2026-09-19
 ms.topic: reference
 ---
 
@@ -25,7 +25,7 @@ are created in the platform module and passed as dependencies.
 | terraform | >= 1.9.8, < 2.0   |
 | azapi     | >= 2.3.0          |
 | azuread   | >= 3.0.2          |
-| azurerm   | >= 5.1.0, < 5.4.0 |
+| azurerm   | >= 5.1.0, < 5.5.1 |
 | random    | >= 3.6.0          |
 | tls       | >= 4.0.6          |
 
@@ -33,7 +33,7 @@ are created in the platform module and passed as dependencies.
 
 | Name    | Version           |
 |---------|-------------------|
-| azurerm | >= 5.1.0, < 5.4.0 |
+| azurerm | >= 5.1.0, < 5.5.1 |
 
 ## Resources
 
