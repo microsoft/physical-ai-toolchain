@@ -53,7 +53,7 @@
     "inference": { "patterns": ["^fleet-deployment/inference/", "^training/il/lerobot/"], "groups": ["python"] },
     "gpu_offload": { "patterns": ["^gpu-offload/(controller|runtime)/"], "groups": ["python", "gpu"] },
     "gpu_offload_e2e": { "patterns": ["^gpu-offload/(controller|runtime|helm|scripts|registry|examples)/"], "groups": ["python", "gpu"] },
-    "shared_ci": { "patterns": ["^shared/ci/"], "groups": ["python"] },
+    "shared_ci": { "patterns": ["^shared/ci/", "^scripts/security/zap-to-sarif\\.py$"], "groups": ["python"] },
     "dv_backend": { "patterns": ["^data-management/viewer/backend/", "^data-management/viewer/specifications/language-tag-corpus\\.json$", "^evaluation/vlm_judge/"], "groups": ["python", "images", "viewer"] },
     "dv_frontend": { "patterns": ["^data-management/viewer/frontend/", "^data-management/viewer/specifications/language-tag-corpus\\.json$"], "groups": ["viewer"] },
     "accessibility": { "patterns": ["^\\.github/(accessibility/|ISSUE_TEMPLATE/|CODEOWNERS$|agents/dataviewer-developer\\.agent\\.md$)", "^scripts/accessibility/", "^tests/test_accessibility_(evidence|promotion)\\.py$", "^(data-management/viewer|data-pipeline|evaluation|training|infrastructure|fleet-deployment|fleet-intelligence)/", "^(setup-dev\\.sh|README\\.md|SUPPORT\\.md|docs/contributing/accessibility\\.md)$"], "groups": [] },
