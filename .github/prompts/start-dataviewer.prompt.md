@@ -8,7 +8,7 @@ argument-hint: "[datasetPath=...] [backendPort=8000] [frontendPort=5173] [runVlm
 
 ## Inputs
 
-* ${input:datasetPath}: (Optional) Absolute path to the datasets directory. Each subdirectory is a dataset. When provided, updates `backend/.env` before launch.
+* ${input:datasetPath}: (Optional) Absolute path to the datasets directory. Each subdirectory is a dataset. Pass it through `--data-dir` without changing persistent defaults.
 * ${input:backendPort:8000}: (Optional, defaults to 8000) Backend API port.
 * ${input:frontendPort:5173}: (Optional, defaults to 5173) Frontend dev server port.
 * ${input:runVlmJudge:false}: (Optional) When `true`, enable the VLM-as-judge router and run a smoke pass after launch.
@@ -19,14 +19,14 @@ argument-hint: "[datasetPath=...] [backendPort=8000] [frontendPort=5173] [runVlm
 
 ## Requirements
 
-1. If `datasetPath` is provided, update `DATA_DIR` in `data-management/viewer/backend/.env` to the absolute path.
-2. If `runVlmJudge=true`, also update `backend/.env` with `VLM_JUDGE_ENABLED=true`, `VLM_JUDGE_BACKEND=${vlmBackend}`, and (when set) `VLM_JUDGE_MODEL_ID=${vlmModelId}`. Restart any running backend so env changes take effect.
-3. Start the dataviewer app using `data-management/viewer/start.sh` with configured ports.
-4. Wait for the backend health check to pass.
+1. If `datasetPath` is provided, verify it and pass it to `data-management/viewer/start.sh` through `--data-dir`. Follow the dataviewer skill's accepted-dataset checks when a descriptor is present.
+2. If `runVlmJudge=true`, pass `VLM_JUDGE_ENABLED=true`, `VLM_JUDGE_BACKEND=${vlmBackend}`, and any specified `VLM_JUDGE_MODEL_ID` to the launcher process. Persist settings in `backend/.env` only when the user explicitly requests defaults across restarts.
+3. Start the app with the configured ports. Reuse an existing instance only when its dataset and launch settings match; do not stop a process this workflow does not own.
+4. Wait for both backend and frontend readiness checks to pass.
 5. Open `http://localhost:${frontendPort}` using `open_browser_page`. If Playwright MCP tools are available, take a snapshot instead.
 6. Report the loaded datasets and episode counts.
 7. When `runVlmJudge=true`, follow Phase 5 of the Dataviewer Developer agent:
-    * Probe `GET /api/datasets/{id}/episodes/0/judge` for each dataset in `vlmDatasets` (or all loaded datasets when omitted) to confirm the router is mounted.
+    * Probe `GET /api/datasets/{id}/capabilities` for each selected dataset and require `vlm_judge_enabled: true` before requesting judgments.
     * For each `(dataset, episode)` pair in the cross-product of `vlmDatasets` and `vlmEpisodes`, run the judge via the CLI (`python -m evaluation.vlm_judge.run --dataset datasets/{id} --indices {idx} --backend ${vlmBackend} --output outputs/vlm-judge/{id}.jsonl`).
     * Verify one representative episode in the UI by navigating Playwright to the Trajectory tab and waiting for the outcome badge.
     * Summarize: success rate, mean VOC, any 4xx/5xx responses, and the JSONL output paths.

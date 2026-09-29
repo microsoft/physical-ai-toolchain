@@ -1,6 +1,7 @@
 {
     "recommendations": [
         "charliermarsh.ruff",
+        "DavidAnson.vscode-markdownlint",
         "streetsidesoftware.code-spell-checker",
         "streetsidesoftware.code-spell-checker-cspell-bundled-dictionaries",
         "ms-python.vscode-pylance",
