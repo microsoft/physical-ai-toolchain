@@ -4,6 +4,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${SCRIPT_DIR}/.venv"
 DISABLE_VENV=false
+CONFIG_PREVIEW=false
+
+show_help() {
+  cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Prepare the local Physical AI Toolchain development environment.
+
+Options:
+    --disable-venv        Install packages without creating .venv
+    --config-preview      Print local configuration and exit without changes
+    --help, -h            Show this help message
+EOF
+}
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -11,8 +25,17 @@ while [[ $# -gt 0 ]]; do
       DISABLE_VENV=true
       shift
       ;;
+    --config-preview)
+      CONFIG_PREVIEW=true
+      shift
+      ;;
+    --help|-h)
+      show_help
+      exit 0
+      ;;
     *)
       echo "Unknown option: $1" >&2
+      show_help >&2
       exit 1
       ;;
   esac
@@ -20,6 +43,15 @@ done
 
 # shellcheck source=scripts/lib/common.sh
 source "${SCRIPT_DIR}/scripts/lib/common.sh"
+
+if [[ "${CONFIG_PREVIEW}" == "true" ]]; then
+  section "Configuration Preview"
+  print_kv "Repository" "${SCRIPT_DIR}"
+  print_kv "Python" "$(cat "${SCRIPT_DIR}/.python-version")"
+  print_kv "Virtual Environment" "$([[ "${DISABLE_VENV}" == "true" ]] && echo disabled || echo "${VENV_DIR}")"
+  print_kv "Mutation" "None"
+  exit 0
+fi
 
 # Preamble: Recommend devcontainer for easier setup
 echo

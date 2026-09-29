@@ -1,0 +1,14 @@
+[
+  {
+    "change_type": "added",
+    "ecosystem": "pip",
+    "manifest": "./gpu-offload/examples/so101-real-hardware/uv.lock",
+    "name": "transformers",
+    "vulnerabilities": [
+      {
+        "advisory_ghsa_id": "GHSA-xrqw-3rrv-vx5w",
+        "severity": "high"
+      }
+    ]
+  }
+]
