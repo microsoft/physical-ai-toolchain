@@ -13,6 +13,14 @@ source "$REPO_ROOT/scripts/lib/hil.sh"
 # shellcheck source=../../defaults.conf
 source "$SCRIPT_DIR/../../defaults.conf"
 
+validate_vpn_dns_zones() {
+  jq -e '
+    length > 0 and length == (unique | length) and
+    all(.[]; type == "string" and test("^[A-Za-z0-9.-]+$") and (endswith(".") | not)) and
+    index("vault.azure.net") != null
+  ' <<< "$1" >/dev/null
+}
+
 # Describe the explicit private-access checkpoint and the protected local inputs used for connection.
 show_help() {
   cat << EOF
@@ -137,11 +145,7 @@ vpn_dns_zones=$(jq -ec '(.private_dns.zones // []) | if type == "array" then . e
   "$vpn_config") || fatal "VPN configuration contains invalid private DNS zones"
 mapfile -t dns_zones < <(jq -r '.[]' <<< "$vpn_dns_zones")
 [[ -n "$dns_server" ]] || fatal "VPN configuration does not contain a private DNS server"
-jq -e '
-  length > 0 and length == (unique | length) and
-  all(.[]; type == "string" and test("^[A-Za-z0-9.-]+$") and endswith(".") | not) and
-  index("vault.azure.net") != null
-' <<< "$vpn_dns_zones" >/dev/null || \
+validate_vpn_dns_zones "$vpn_dns_zones" || \
   fatal "VPN configuration must route vault.azure.net through the private DNS server"
 
 # Install strongSwan and create or replace the local connection files.

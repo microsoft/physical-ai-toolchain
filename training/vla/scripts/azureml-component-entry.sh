@@ -58,6 +58,9 @@ case "${mode}" in
     export_parameter CODE_REPOSITORY code_repository
     export_parameter CODE_REVISION code_revision
     export_parameter COMPUTE_TARGET compute_target
+    export_parameter AZURE_CLIENT_ID azure_client_id
+    export_parameter HF_KEY_VAULT_URL hf_key_vault_url
+    export_parameter HF_TOKEN_SECRET_NAME hf_token_secret_name
     export_parameter RUNTIME_IMAGE runtime_image
 
     require_environment_variables \

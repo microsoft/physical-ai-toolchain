@@ -16,22 +16,40 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from model_adapters import AdapterError, AdapterRequest, get_adapter
-from vla_contracts import (
-    SCHEMA_VERSION,
-    ContractError,
-    RecordKind,
-    calibration_workload_fingerprint,
-    canonical_json,
-    dataset_identity_fingerprint,
-    load_record,
-    resolve_recommended_batch_size,
-    sha256_bytes,
-    sha256_file,
-    validate_calibration_workload,
-    validate_record,
-    write_record,
-)
+try:
+    from .model_adapters import AdapterError, AdapterRequest, get_adapter
+    from .vla_contracts import (
+        SCHEMA_VERSION,
+        ContractError,
+        RecordKind,
+        calibration_workload_fingerprint,
+        canonical_json,
+        dataset_identity_fingerprint,
+        load_record,
+        resolve_recommended_batch_size,
+        sha256_bytes,
+        sha256_file,
+        validate_calibration_workload,
+        validate_record,
+        write_record,
+    )
+except ImportError:
+    from model_adapters import AdapterError, AdapterRequest, get_adapter
+    from vla_contracts import (
+        SCHEMA_VERSION,
+        ContractError,
+        RecordKind,
+        calibration_workload_fingerprint,
+        canonical_json,
+        dataset_identity_fingerprint,
+        load_record,
+        resolve_recommended_batch_size,
+        sha256_bytes,
+        sha256_file,
+        validate_calibration_workload,
+        validate_record,
+        write_record,
+    )
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
@@ -282,7 +300,12 @@ def _build_workload(training_arguments: Sequence[str]) -> dict[str, Any]:
     return workload
 
 
-def _build_probe_arguments(training_arguments: Sequence[str], batch_size: int, output_dir: Path) -> list[str]:
+def _build_probe_arguments(
+    training_arguments: Sequence[str],
+    batch_size: int,
+    output_dir: Path,
+    train_expert_only: bool,
+) -> list[str]:
     for argument in training_arguments:
         if any(argument == owned or argument.startswith(f"{owned}=") for owned in _OWNED_TRAINING_ARGUMENTS):
             raise CalibrationError(f"Calibration owns the LeRobot argument {argument.split('=', 1)[0]}")
@@ -317,10 +340,8 @@ def _build_probe_arguments(training_arguments: Sequence[str], batch_size: int, o
     policy_dtype = os.environ.get("POLICY_DTYPE", "")
     if policy_dtype and not _has_argument(arguments, "--policy.dtype"):
         arguments.append(f"--policy.dtype={policy_dtype}")
-    if os.environ.get("TRAIN_EXPERT_ONLY", "").lower() == "true" and not _has_argument(
-        arguments, "--policy.train_expert_only"
-    ):
-        arguments.append("--policy.train_expert_only=true")
+    if not _has_argument(arguments, "--policy.train_expert_only"):
+        arguments.append(f"--policy.train_expert_only={str(train_expert_only).lower()}")
     if os.environ.get("GRADIENT_CHECKPOINTING", "").lower() == "true" and not _has_argument(
         arguments, "--policy.gradient_checkpointing"
     ):
@@ -427,11 +448,17 @@ def _run_candidate(
     probe_dir: Path,
     timeout_seconds: int,
     expected_world_size: int,
+    mixed_precision: str,
+    train_expert_only: bool,
 ) -> dict[str, Any]:
     result_path = probe_dir / f"batch-{batch_size}.json"
     training_output = probe_dir / f"training-batch-{batch_size}"
-    probe_arguments = _build_probe_arguments(training_arguments, batch_size, training_output)
+    probe_arguments = _build_probe_arguments(training_arguments, batch_size, training_output, train_expert_only)
     command = [
+        "accelerate",
+        "launch",
+        f"--num_processes={expected_world_size}",
+        f"--mixed_precision={mixed_precision}",
         sys.executable,
         str(Path(__file__).resolve()),
         "--probe",
@@ -466,7 +493,7 @@ def _run_candidate(
             return result
     if return_code in {-signal.SIGKILL, 128 + signal.SIGKILL}:
         return {"micro_batch_size": batch_size, "outcome": "oom", "error_type": "SIGKILL"}
-    return {"micro_batch_size": batch_size, "outcome": "failed", "return_code": return_code}
+    raise CalibrationError(f"Calibration probe failed for batch size {batch_size} with return code {return_code}")
 
 
 def _build_report(
@@ -527,6 +554,8 @@ def _run_calibration(args: argparse.Namespace) -> int:
                 probe_dir,
                 args.probe_timeout_seconds,
                 workload["world_size"],
+                workload["precision"],
+                workload["trainable_scope"] == "expert-only",
             )
             for batch_size in candidates
         ]
@@ -606,6 +635,7 @@ def _run_self_check() -> None:
             ("--dataset.repo_id=org/dataset", "--dataset.root=/tmp/data", "--policy.type=pi0"),
             2,
             Path("/tmp/probe"),
+            False,
         )
     finally:
         if previous_dataset_revision is None:
@@ -617,6 +647,7 @@ def _run_self_check() -> None:
         f"--dataset.revision={'b' * 40}",
         "--steps=1",
         "--save_checkpoint=false",
+        "--policy.train_expert_only=false",
     }
     if not required_arguments.issubset(arguments):
         raise CalibrationError("Probe arguments do not enforce a bounded optimizer step")

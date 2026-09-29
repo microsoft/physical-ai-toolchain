@@ -58,6 +58,15 @@ inputs:
     type: string
   compute_target:
     type: string
+  azure_client_id:
+    type: string
+    default: none
+  hf_key_vault_url:
+    type: string
+    default: none
+  hf_token_secret_name:
+    type: string
+    default: none
   runtime_image:
     type: string
     default: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407

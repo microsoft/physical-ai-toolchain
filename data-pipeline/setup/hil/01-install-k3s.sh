@@ -8,6 +8,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../.." && pwd))"
 # shellcheck source=../../../scripts/lib/common.sh
 source "$REPO_ROOT/scripts/lib/common.sh"
+
+install_kubectl_wrapper() {
+  local source_path="$1"
+  local target_path="$2"
+
+  if ! sudo test -e "$target_path"; then
+    sudo install -m 0755 "$source_path" "$target_path"
+  elif sudo cmp --silent "$source_path" "$target_path"; then
+    return 0
+  else
+    warn "Preserving existing kubectl at $target_path because it is not the K3s wrapper"
+  fi
+}
 # shellcheck source=../defaults.conf
 source "$SCRIPT_DIR/../defaults.conf"
 
@@ -173,9 +186,7 @@ cat > "$tmp_dir/kubectl" <<'EOF'
 export K3S_CONFIG_FILE=/dev/null
 exec /usr/local/bin/k3s kubectl "$@"
 EOF
-if ! sudo cmp --silent "$tmp_dir/kubectl" /usr/local/bin/kubectl 2>/dev/null; then
-  sudo install -m 0755 "$tmp_dir/kubectl" /usr/local/bin/kubectl
-fi
+install_kubectl_wrapper "$tmp_dir/kubectl" /usr/local/bin/kubectl
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now k3s

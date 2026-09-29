@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Azure ML Arc VLA Setup and Operations
 description: Prepare an Ubuntu K3s GPU host, connect it through Azure Arc, attach it to Azure ML, and run PI 0.5 VLA training
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-25
+ms.date: 2026-09-29
 ms.topic: how-to
 keywords:
   - vla
@@ -354,12 +354,18 @@ az ml job create \
   --file training/vla/workflows/azureml/vla-training-pipeline.yaml \
   --resource-group "<workspace-resource-group>" \
   --workspace-name "<workspace-name>" \
+  --set inputs.dataset.path="azureml:<dataset-data-asset>:<version>" \
+  --set inputs.dataset_asset_id="azureml:<dataset-data-asset>:<version>" \
   --set inputs.dataset_repo_id="<hugging-face-dataset>" \
   --set inputs.dataset_revision="<dataset-commit-sha>" \
+  --set inputs.promotion_policy.path="azureml:<promotion-policy-data-asset>:<version>" \
+  --set inputs.model_name=pi05-ur10e \
+  --set inputs.pipeline_contract_fingerprint="<pipeline-contract-sha256>" \
   --set inputs.policy_type=pi05 \
   --set inputs.init_from_policy_hf_repo_id=lerobot/pi05_base \
   --set inputs.init_from_policy_hf_revision=b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba \
   --set inputs.adapter_name=lerobot-pi \
+  --set inputs.policy_dtype=bfloat16 \
   --set inputs.code_repository=https://github.com/microsoft/physical-ai-toolchain.git \
   --set inputs.code_revision="$CODE_REVISION" \
   --set inputs.train_expert_only=true \

@@ -10,7 +10,7 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 source "$SCRIPT_DIR/../defaults.conf"
 
 CONFIG_TEMPLATE="$SCRIPT_DIR/config/azureml-arc-config.template.json"
-DEFAULT_INSTANCE_TYPES_MANIFEST="$REPO_ROOT/infrastructure/setup/manifests/azureml-instance-types.yaml"
+DEFAULT_INSTANCE_TYPES_MANIFEST="$SCRIPT_DIR/config/azureml-k3s-instance-types.yaml"
 GENERATED_ROOT="$REPO_ROOT/infrastructure/setup/generated"
 
 show_help() {
@@ -39,8 +39,8 @@ OPTIONS:
     --bundle-dir DIR                   Generated environment bundle (required)
     --instance-types-manifest PATH     InstanceType manifest
     --install-nvidia-device-plugin BOOL
-                       Install the NVIDIA device plugin (default: true)
-    --install-dcgm-exporter BOOL       Install DCGM exporter (default: true)
+                       Install the NVIDIA device plugin (default: false)
+    --install-dcgm-exporter BOOL       Install DCGM exporter (default: false)
     --skip-instance-types              Skip applying InstanceTypes
     --config-preview                   Print configuration and exit
 
@@ -150,8 +150,8 @@ namespace="${AZUREML_NAMESPACE:-azureml}"
 enable_training="true"
 enable_inference="false"
 cluster_purpose="DevTest"
-install_nvidia_device_plugin="${AZUREML_INSTALL_NVIDIA_DEVICE_PLUGIN:-true}"
-install_dcgm_exporter="${AZUREML_INSTALL_DCGM_EXPORTER:-true}"
+install_nvidia_device_plugin="${AZUREML_INSTALL_NVIDIA_DEVICE_PLUGIN:-false}"
+install_dcgm_exporter="${AZUREML_INSTALL_DCGM_EXPORTER:-false}"
 relay_server_enabled="true"
 skip_instance_types=false
 config_preview=false
@@ -310,17 +310,27 @@ if [[ -n "$extension_json" ]]; then
   current_enable_training=$(jq -r '.configurationSettings.enableTraining // empty' <<< "$extension_json")
   current_enable_inference=$(jq -r '.configurationSettings.enableInference // empty' <<< "$extension_json")
   current_cluster_purpose=$(jq -r '.configurationSettings.clusterPurpose // empty' <<< "$extension_json")
+  current_install_nvidia_device_plugin=$(
+    jq -r '.configurationSettings.installNvidiaDevicePlugin // empty' <<< "$extension_json"
+  )
+  current_install_dcgm_exporter=$(
+    jq -r '.configurationSettings.installDcgmExporter // empty' <<< "$extension_json"
+  )
   if [[ "${current_enable_training,,}" == "$enable_training" && \
         "${current_enable_inference,,}" == "$enable_inference" && \
-        "$current_cluster_purpose" == "$cluster_purpose" ]]; then
-    info "Azure ML extension $extension_name already has the required training settings"
+        "$current_cluster_purpose" == "$cluster_purpose" && \
+        "${current_install_nvidia_device_plugin,,}" == "$install_nvidia_device_plugin" && \
+        "${current_install_dcgm_exporter,,}" == "$install_dcgm_exporter" ]]; then
+    info "Azure ML extension $extension_name already has the required settings"
   else
-    info "Updating Azure ML extension $extension_name training settings..."
+    info "Updating Azure ML extension $extension_name settings..."
     az k8s-extension update "${extension_args[@]}" \
       --configuration-settings \
         "enableTraining=$enable_training" \
         "enableInference=$enable_inference" \
         "clusterPurpose=$cluster_purpose" \
+        "installNvidiaDevicePlugin=$install_nvidia_device_plugin" \
+        "installDcgmExporter=$install_dcgm_exporter" \
       --yes \
       --output none
   fi

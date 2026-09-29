@@ -3,7 +3,7 @@ sidebar_position: 7
 title: VLA Full-Run Troubleshooting
 description: Failure chronology and recovery guidance for scaling PI 0.5 from an Azure ML smoke test to a full training run
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-17
+ms.date: 2026-09-29
 ms.topic: troubleshooting
 keywords:
   - vla
@@ -170,7 +170,7 @@ Passing the JSON directly through Azure CLI `--set` removed embedded quotes. LeR
 ValueError: All image features are missing from the batch
 ```
 
-The submission script now:
+The pipeline entrypoint now:
 
 1. Validates a string-to-string JSON object.
 2. Encodes the object as base64.
@@ -192,7 +192,7 @@ google/paligemma-3b-pt-224
 
 The tokenizer repository is gated. An anonymous run downloaded and validated the PI 0.5 policy, then failed during processor construction with HTTP 401.
 
-Accept the PaliGemma access conditions and supply a read token authorized for the repository. Keep the token in an ignored local environment file or a secret store. The current Azure ML submission path forwards it as `HF_TOKEN`; principals with job-read permissions may be able to inspect job environment metadata. Use a short-lived token and rotate it after the experiment.
+Accept the PaliGemma access conditions and store an authorized read token in Key Vault. Configure `inputs.hf_key_vault_url` and `inputs.hf_token_secret_name`; calibration and training retrieve the token through managed identity without placing it in job inputs or command-line arguments.
 
 ### Pretrained-weight fallback required a fail-fast guard
 
@@ -247,12 +247,12 @@ Accelerate mixed precision controls runtime operations. PI 0.5 separately contro
 
 The submission path now exposes:
 
-| Option                     | Effect                                                       |
-|----------------------------|--------------------------------------------------------------|
-| `--mixed-precision bf16`   | Enables Accelerate BF16 operations                           |
-| `--policy-dtype bfloat16`  | Instantiates PI policy storage in BF16                       |
-| `--gradient-checkpointing` | Recomputes activations during backward to reduce memory      |
-| `--train-expert-only`      | Freezes the VLM and trains the action expert and projections |
+| Option                               | Effect                                                       |
+|--------------------------------------|--------------------------------------------------------------|
+| `inputs.mixed_precision=bf16`        | Enables Accelerate BF16 operations                           |
+| `inputs.policy_dtype=bfloat16`       | Instantiates PI policy storage in BF16                       |
+| `inputs.gradient_checkpointing=true` | Recomputes activations during backward to reduce memory      |
+| `inputs.train_expert_only=true`      | Freezes the VLM and trains the action expert and projections |
 
 ### Conservative configuration validated
 
@@ -293,7 +293,7 @@ For an affected active run with `--log-freq 1`, use the number of `train/loss` m
 
 Use this order to avoid repeating expensive downloads:
 
-1. Run the submission script with `--config-preview`.
+1. Validate `vla-training-pipeline.yaml` with `az ml job validate`.
 2. Confirm the workstation can reach the workspace Blob private endpoint.
 3. Confirm the code asset uploads from committed source.
 4. Confirm the policy repository and revision are immutable.
@@ -307,21 +307,8 @@ Use this order to avoid repeating expensive downloads:
 12. Observe at least five steps for stable memory, finite gradients, and consistent update time.
 13. Confirm a checkpoint is uploaded at the configured save interval.
 
-## Implementation Checkpoints
-
-| Commit     | Change                                                                    |
-|------------|---------------------------------------------------------------------------|
-| `97e7223b` | Added datastore-backed pinned Hugging Face model import                   |
-| `3879cf74` | Hardened model transport and enabled single-GPU BF16 launch               |
-| `ebd62cbd` | Corrected single-GPU Accelerate behavior and added camera feature mapping |
-| `4098ebd8` | Added direct pinned Hugging Face policy bootstrap and load validation     |
-| `a990c20e` | Required authentication for gated PI policy processors                    |
-| `c57cb620` | Added explicit PI policy dtype and gradient-checkpointing controls        |
-| `8a0f366c` | Preserved exact MLflow optimizer-step numbers                             |
-
 ## Remaining Work
 
-- Replace plain job-environment token forwarding with a secret-backed runtime mechanism.
 - Add a reusable one-step preflight mode that validates model loading, camera mapping, one forward pass, backward, and optimizer update.
 - Add revision-scoped durable model caching to avoid downloading 14.5 GB for every failed pod.
 - Record exact peak GPU memory from the container or MLflow system metrics instead of relying only on LeRobot's reported metric.

@@ -104,6 +104,8 @@ jobs:
     type: command
     component: ./components/calibrate.yaml
     compute: ${{parent.inputs.compute_calibrate}}
+    identity:
+      type: managed_identity
     resources:
       instance_type: gpu
     inputs:
@@ -127,6 +129,9 @@ jobs:
       code_repository: ${{parent.inputs.code_repository}}
       code_revision: ${{parent.inputs.code_revision}}
       compute_target: ${{parent.inputs.compute_calibrate}}
+      azure_client_id: ${{parent.inputs.azure_client_id}}
+      hf_key_vault_url: ${{parent.inputs.hf_key_vault_url}}
+      hf_token_secret_name: ${{parent.inputs.hf_token_secret_name}}
     outputs:
       workload_contract: ${{parent.outputs.workload_contract}}
       calibration_report: ${{parent.outputs.calibration_report}}
