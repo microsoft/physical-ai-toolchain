@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Security Documentation
 description: Index of security documentation including threat model and deployment security guide
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-23
+ms.date: 2026-09-28
 ms.topic: overview
 keywords:
   - security
@@ -85,19 +85,17 @@ Under the `workflow-npm-commands` type, the scanner flags `npm install`, `npm i`
 
 The [container scan workflow](../../.github/workflows/container-scan.yml) scans digest-pinned external `FROM` references from tracked `Dockerfile` and `Containerfile` sources. [The lane map](../../scripts/security/container-scan-lanes.json) binds each logical scan role to source slots. The `trivy-image-<lane-id>` category remains stable when its image tag or digest changes; the SARIF filename still uses a full-reference hash to distinguish concrete images.
 
+SARIF fingerprints also affect alert continuity, so a stable category does not guarantee unchanged alert IDs.
+
 Each map entry has an `id` and a nonempty `sources` array of `{ "path": "...", "from": 0 }` objects. `path` is a tracked repository-relative file path, and `from` is the zero-based ordinal of **every** case-insensitive `FROM` statement in that file, including internal stages and ARG-templated stages. The map does not copy tags or digests.
 
-Run `bash scripts/security/discover-base-images.sh --matrix` after adding, moving, or reordering a base-image source. The helper rejects unmapped, stale, duplicate, or ambiguous bindings rather than omitting a scan. Retain the lane ID when a source moves without changing its role. If two sources assigned to one lane diverge, review the roles and give a distinct role a new ID; do not select one reference arbitrarily.
+### Add or Update a Lane
 
-Changing from full-reference categories to lane categories creates a **one-time category-set transition**. GitHub does not rename or merge historical analyses when new results arrive. Retain old analyses by default; the historical category total can increase before the new set stabilizes. A stable category does not guarantee unchanged alert IDs because SARIF fingerprints also affect alert continuity.
+1. Add the digest-pinned external base-image reference to a tracked source file and identify its `path` and `from` ordinal.
+2. Add a map entry with a unique lowercase kebab-case `id` for a new scan role. If the exact image reference already belongs to a lane, add the source slot to that lane instead; one exact reference cannot belong to multiple lanes.
+3. Run `bash scripts/security/discover-base-images.sh --matrix` from the repository root. Check the returned `lane`, `image`, and `category` entries against the intended scan roles.
 
-After the change merges, inventory existing Trivy analyses and categories with paginated, read-only GitHub API requests. Record retrieval time, ref, workflow run and attempt, commit, SARIF ID, and the expected lane map. Inspect one default-branch scan and a second comparable default-branch scan.
-
-For each expected lane, correlate its upload SARIF ID to a completed analysis with no errors, the matching default ref and commit, and exactly the expected category. Compare **sets** of returned categories for the two runs, not only counts: the second run must introduce zero categories for unchanged lanes. A green workflow alone does not prove SARIF processing completed. Do not mark runtime acceptance complete if a lane is missing, duplicated, or timed out.
-
-Historical cleanup is optional and requires separate authorization. First verify new default-branch coverage and save an old-to-new category inventory. Review an exact allowlist of obsolete Trivy analyses by ref, tool, and category; GitHub deletes each category's analysis set newest-first, and deletion of its last analysis can remove historical alert evidence.
-
-Obtain separate consent before any deletion, especially the final analysis in a set. Never delete all Trivy history to achieve a lower category count. Roll back by reviewing a code revert, not by deleting analyses; reverting can resume the old category churn.
+Repeat validation after moving or reordering a base-image source and update its bindings. The helper rejects unmapped, stale, duplicate, or ambiguous bindings rather than omitting a scan. Retain the lane ID when a source moves without changing its role. If two sources assigned to one lane diverge, review the roles and give a distinct role a new ID; do not select one reference arbitrarily.
 
 ## 🔗 Related Resources
 
