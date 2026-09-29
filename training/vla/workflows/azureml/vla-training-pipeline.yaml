@@ -180,6 +180,8 @@ jobs:
     type: command
     component: ./components/finalize.yaml
     compute: ${{parent.inputs.compute_finalize}}
+    identity:
+      type: managed_identity
     inputs:
       checkpoints: ${{parent.jobs.training_step.outputs.checkpoints}}
       training_record: ${{parent.jobs.training_step.outputs.training_record}}
@@ -216,6 +218,8 @@ jobs:
     type: command
     component: ./components/decide.yaml
     compute: ${{parent.inputs.compute_decide}}
+    identity:
+      type: managed_identity
     inputs:
       candidate_manifest: ${{parent.jobs.finalize_step.outputs.candidate_manifest}}
       training_record: ${{parent.jobs.training_step.outputs.training_record}}
