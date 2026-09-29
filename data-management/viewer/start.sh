@@ -176,6 +176,18 @@ PY
     fi
 }
 
+is_running_job() {
+    local pid="$1"
+    local running_pid
+
+    while IFS= read -r running_pid; do
+        if [[ "${running_pid}" == "${pid}" ]]; then
+            return 0
+        fi
+    done < <(jobs -pr)
+    return 1
+}
+
 wait_for_service() {
     local url="$1"
     local pid="$2"
@@ -185,9 +197,15 @@ wait_for_service() {
     log_info "Waiting for ${label} to be ready..."
 
     while [[ ${elapsed} -lt ${HEALTH_TIMEOUT} ]]; do
-        if ! kill -0 "${pid}" 2>/dev/null; then
+        if ! is_running_job "${pid}"; then
+            local status=1
+            if wait "${pid}"; then
+                status=1
+            else
+                status=$?
+            fi
             log_error "${label} exited before readiness"
-            return 1
+            return "${status}"
         fi
         if curl --max-time 2 -sf "${url}" >/dev/null 2>&1; then
             log_success "${label} is healthy"
