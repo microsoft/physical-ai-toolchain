@@ -190,6 +190,15 @@ html[data-theme='dark'] .navbar {
   background-color: var(--ms-learn-section-bg);
 }
 
+/* The theme clamps sidebar labels to two lines with boosted specificity, which hides text under text resize and spacing. */
+.menu__link [class*='linkLabel_'],
+.menu__link [class*='categoryLinkLabel_'] {
+  display: block !important;
+  overflow: visible !important;
+  line-clamp: none !important;
+  -webkit-line-clamp: unset !important;
+}
+
 /* ================================================================
    Footer
    ================================================================ */

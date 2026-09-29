@@ -335,11 +335,16 @@ if (Test-Path $IsaacLabDir) {
 else {
     Write-Info 'Cloning Isaac Lab for intellisense/Pylance support...'
     New-Item -ItemType Directory -Path (Join-Path $ScriptDir 'external') -Force | Out-Null
+    $IsaacLabCommit = 'ffff603eafc6b74264a5261cc0183d6a65390d78'
     git clone 'https://github.com/isaac-sim/IsaacLab.git' $IsaacLabDir
     if ($LASTEXITCODE -ne 0) {
         Write-Error "git clone failed (exit code $LASTEXITCODE)"
     }
-    Write-Info 'Isaac Lab cloned successfully'
+    git -C $IsaacLabDir checkout --quiet $IsaacLabCommit
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Isaac Lab checkout failed (exit code $LASTEXITCODE)"
+    }
+    Write-Info "Isaac Lab cloned successfully (pinned to $IsaacLabCommit)"
 }
 
 Write-Section 'hve-core Check'

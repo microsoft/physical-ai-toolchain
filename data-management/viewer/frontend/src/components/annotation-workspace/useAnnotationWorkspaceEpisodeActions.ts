@@ -185,7 +185,7 @@ export function useAnnotationWorkspaceEpisodeActions({
   ])
 
   const handleSaveAndNextEpisode = useCallback(async () => {
-    if (!canGoNextEpisode || !onAdvanceToNextEpisode || currentEpisodeIndex === null) {
+    if (currentEpisodeIndex === null) {
       return
     }
 
@@ -214,14 +214,17 @@ export function useAnnotationWorkspaceEpisodeActions({
       announceSave()
     }
 
-    onRecordEvent('workspace', 'save-next-episode', {
+    const shouldAdvance = canGoNextEpisode && Boolean(onAdvanceToNextEpisode)
+    onRecordEvent('workspace', shouldAdvance ? 'save-next-episode' : 'save-episode', {
       episodeIndex: currentEpisodeIndex,
       hasPendingEpisodeChanges,
       hasEdits,
       hasLabelChanges,
     })
 
-    onAdvanceToNextEpisode()
+    if (shouldAdvance) {
+      onAdvanceToNextEpisode?.()
+    }
   }, [
     announceSave,
     canGoNextEpisode,

@@ -166,6 +166,7 @@ chatagent
 chatbot
 chatbots
 chatlog
+chatlogs
 chatmode
 chatmodes
 cheatham
@@ -226,6 +227,7 @@ codecommit
 codefresh
 codegen
 codeless
+codemods
 codeowners
 codeql
 codespace
@@ -789,6 +791,7 @@ mkdir
 mklink
 mlflow
 mlops
+mmdd
 moby
 modbus
 Modelica
@@ -1190,6 +1193,7 @@ saas
 salesforce
 sampling
 sandboxed
+sandboxing
 Sankey
 sap
 Sarbanes
@@ -1685,7 +1689,6 @@ savez
 secretproviderclass
 smpl
 sslmode
-stosmorbt
 tensordict
 testuser
 ueks
