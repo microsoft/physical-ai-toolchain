@@ -3,7 +3,7 @@ sidebar_position: 5
 title: Cluster Setup
 description: Kubernetes service deployment, AzureML extension, and OSMO platform configuration
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-21
+ms.date: 2026-09-25
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -168,30 +168,27 @@ When deploying with `should_enable_private_endpoint = false`, cluster endpoints 
 
 ### AzureML Extension
 
-The AzureML inference router (`azureml-fe`) handles incoming requests. For public deployments:
+The AzureML extension is configured for training and batch scoring. `enableInference` is `false`, so the extension does not deploy the `azureml-fe` real-time inference router or expose an inference service.
 
-- Enable HTTPS with TLS certificates (`allowInsecureConnections=False`)
-- Configure `sslSecret` or provide certificate files
-- Consider using `internalLoadBalancerProvider=azure` for internal-only access
-
-See [Secure Kubernetes online endpoints](https://learn.microsoft.com/azure/machine-learning/how-to-secure-kubernetes-online-endpoint) and [Inference routing configuration](https://learn.microsoft.com/azure/machine-learning/how-to-kubernetes-inference-routing-azureml-fe).
+Rerun `02-deploy-azureml-extension.sh` to reconcile an existing extension with the generated training-only configuration. The update disables extension-hosted real-time inference; migrate any separately created online endpoints before applying it.
 
 ## 📜 Scripts
 
 | Script                           | Purpose                                         |
 |----------------------------------|-------------------------------------------------|
 | `01-deploy-robotics-charts.sh`   | GPU Operator, KAI Scheduler                     |
-| `02-deploy-azureml-extension.sh` | AzureML K8s extension, compute attach           |
+| `02-deploy-azureml-extension.sh` | Training-only AzureML extension, compute attach |
 | `03-deploy-osmo.sh`              | OSMO service, backend operator, platform config |
 
 ### Script Flags
 
-| Flag               | Scripts             | Description                      |
-|--------------------|---------------------|----------------------------------|
-| `--use-acr`        | `03-deploy-osmo.sh` | Pull from Terraform-deployed ACR |
-| `--acr-name NAME`  | `03-deploy-osmo.sh` | Specify alternate ACR            |
-| `--skip-backend`   | `03-deploy-osmo.sh` | Skip backend operator deployment |
-| `--config-preview` | All                 | Print config and exit            |
+| Flag               | Scripts                          | Description                                   |
+|--------------------|----------------------------------|-----------------------------------------------|
+| `--fast-prod`      | `02-deploy-azureml-extension.sh` | Set the AzureML cluster purpose to `FastProd` |
+| `--use-acr`        | `03-deploy-osmo.sh`              | Pull from Terraform-deployed ACR              |
+| `--acr-name NAME`  | `03-deploy-osmo.sh`              | Specify alternate ACR                         |
+| `--skip-backend`   | `03-deploy-osmo.sh`              | Skip backend operator deployment              |
+| `--config-preview` | All                              | Print config and exit                         |
 
 ## ⚙️ Configuration
 

@@ -26,7 +26,7 @@ OPTIONS:
     --compute-name NAME       Compute target name (default: k8s-<suffix>)
     --instance-types-manifest PATH
                   InstanceType manifest (default: manifests/azureml-instance-types.yaml)
-    --fast-prod               Set cluster purpose to FastProd with HA inference router
+    --fast-prod               Set cluster purpose to FastProd
     --enforce-resource-validation
                               Enforce aml-operator resource validation (default: disabled).
                               Disabled is required for scale-to-zero GPU node pools; otherwise
@@ -60,8 +60,6 @@ context=""
 compute_name=""
 instance_types_manifest="$MANIFESTS_DIR/azureml-instance-types.yaml"
 cluster_purpose="DevTest"
-inference_ha="false"
-allow_insecure="true"
 install_volcano="true"
 install_prom_op="false"
 skip_resource_validation="true"
@@ -78,7 +76,7 @@ while [[ $# -gt 0 ]]; do
     --context)                       context="$2"; shift 2 ;;
     --compute-name)                  compute_name="$2"; shift 2 ;;
     --instance-types-manifest)       instance_types_manifest="$2"; shift 2 ;;
-    --fast-prod)                     cluster_purpose="FastProd"; inference_ha="true"; allow_insecure="false"; shift ;;
+    --fast-prod)                     cluster_purpose="FastProd"; shift ;;
     --enforce-resource-validation)   skip_resource_validation="false"; shift ;;
     --enforce-volcano-capacity-check) enforce_volcano_capacity_check=true; shift ;;
     --skip-attach)                   skip_attach=true; shift ;;
@@ -159,8 +157,6 @@ connect_aks "$rg" "$cluster" "$kubeconfig" "$context"
 #------------------------------------------------------------------------------
 section "Install AzureML Extension"
 
-export INFERENCE_ROUTER_HA="$inference_ha"
-export ALLOW_INSECURE_CONNECTIONS="$allow_insecure"
 export CLUSTER_PURPOSE="$cluster_purpose"
 export INSTALL_VOLCANO="$install_volcano"
 export INSTALL_PROM_OP="$install_prom_op"
@@ -170,7 +166,13 @@ envsubst < "$config_template" > "$CONFIG_DIR/out/azureml-aks-config.json"
 
 if az k8s-extension show --name "$extension_name" --cluster-type managedClusters \
     --cluster-name "$cluster" --resource-group "$rg" &>/dev/null; then
-  info "Extension '$extension_name' already installed"
+  info "Updating AzureML extension configuration..."
+  az k8s-extension update \
+    --name "$extension_name" \
+    --cluster-type managedClusters \
+    --cluster-name "$cluster" \
+    --resource-group "$rg" \
+    --config-file "$CONFIG_DIR/out/azureml-aks-config.json"
 else
   info "Installing AzureML extension..."
   az k8s-extension create \

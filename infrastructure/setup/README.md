@@ -2,7 +2,7 @@
 title: Cluster Setup
 description: AKS cluster configuration with NVIDIA GPU operator, KAI Scheduler, and AzureML extension
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-23
+ms.date: 2026-09-25
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -21,10 +21,12 @@ AKS cluster configuration for robotics workloads. Deploys NVIDIA GPU operator, K
 
 Each script writes AKS credentials to an isolated kubeconfig and requires an explicit context for Kubernetes and Helm operations.
 
+The AzureML extension enables training and batch scoring. Real-time inference support and the `azureml-fe` inference router are disabled. Rerunning the script updates an existing extension to match the generated configuration.
+
 Deployment order:
 
 1. `./01-deploy-robotics-charts.sh` — GPU Operator, KAI Scheduler
-2. `./02-deploy-azureml-extension.sh` — AzureML K8s extension, compute attach
+2. `./02-deploy-azureml-extension.sh` — training-only AzureML K8s extension, compute attach
 3. `./03-deploy-osmo.sh` — OSMO control plane and backend operator
 
 After an existing OSMO backend and pool are ready, a trusted environment owner uses `./04-prepare-osmo-hil-node.sh` to publish exact host-bound inputs. The Ubuntu path deploys only the local backend resources.
