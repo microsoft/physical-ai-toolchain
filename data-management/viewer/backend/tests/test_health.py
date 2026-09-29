@@ -65,14 +65,14 @@ class TestHealthCheckAzureBranch:
 
 class TestLocalStorageStartupValidation:
     def test_validate_local_storage_writable_cleans_up_probe_files(self, tmp_path):
-        from src.api.main import _validate_local_storage_writable
+        import src.api.main as main_mod
 
-        _validate_local_storage_writable(str(tmp_path))
+        main_mod._validate_local_storage_writable(str(tmp_path))
 
         assert list(tmp_path.iterdir()) == []
 
     def test_validate_local_storage_writable_reports_effective_identity(self, tmp_path):
-        from src.api.main import _validate_local_storage_writable
+        import src.api.main as main_mod
 
         invalid_path = tmp_path / "dataset-file"
         invalid_path.write_text("not a directory")
@@ -81,9 +81,9 @@ class TestLocalStorageStartupValidation:
             RuntimeError,
             match=rf"Local storage path '{invalid_path}'.*UID \d+ and GID \d+",
         ):
-            _validate_local_storage_writable(str(invalid_path))
+            main_mod._validate_local_storage_writable(str(invalid_path))
 
-    def test_lifespan_rejects_unwritable_local_storage(self, monkeypatch, tmp_path):
+    def test_lifespan_rejects_non_writable_local_storage(self, monkeypatch, tmp_path):
         import src.api.main as main_mod
 
         invalid_path = tmp_path / "dataset-file"
