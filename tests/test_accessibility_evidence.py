@@ -1533,6 +1533,68 @@ class TestDocusaurusRetainedPackage:
         build_files = list((moved / "docs" / "docusaurus" / "build").rglob("*"))
         assert gate._digest_paths([path for path in build_files if path.is_file()], moved) == manifest["buildDigest"]
 
+    def test_given_canonical_bundle_when_handoff_is_built_then_package_verifies(
+        self, package_source: Path, hve_runtime: tuple[Path, Any]
+    ) -> None:
+        # Arrange
+        evidence_root = package_source / gate._DOCUSAURUS_EVIDENCE_ROOT
+        bundle_path = evidence_root / "evidence-bundle.json"
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+        journeys = bundle["catalogs"]["assetJourney"]["journeys"]
+        source_catalog = json.loads((evidence_root / "inputs" / "asset-journeys.json").read_text(encoding="utf-8"))
+        source_methods = {item["journeyId"]: item["requiredMethods"] for item in source_catalog["journeys"]}
+        assert all(item["requiredMethods"] == sorted(item["requiredMethods"]) for item in journeys)
+        assert any(item["requiredMethods"] != source_methods[item["journeyId"]] for item in journeys)
+        scope = json.loads((evidence_root / "inputs" / "evidence-scope.json").read_text(encoding="utf-8"))
+        assert scope["cadenceClass"] == "release"
+
+        binding_path = package_source / "docs" / "docusaurus" / "a11y-screen-reader.bindings.json"
+        binding_path.write_bytes(_DOCUSAURUS_SCREEN_READER_BINDING_PATH.read_bytes())
+        contrast_path = evidence_root / "contrast-review.json"
+        contrast = json.loads(contrast_path.read_text(encoding="utf-8"))
+        contrast.update(
+            {
+                "schemaVersion": "1.0.0",
+                "totals": {"families": 1, "signatures": 1, "statuses": {"qualified-review-required": 1}},
+            }
+        )
+        gate._write_json(contrast_path, contrast)
+        input_bytes = {path: path.read_bytes() for path in (bundle_path, contrast_path, binding_path)}
+        handoff = evidence_root / "reviewer-handoff"
+        shutil.rmtree(handoff)
+        assert not (handoff / "reviewer-campaign.json").exists()
+
+        # Act
+        result = prepare_docusaurus_reviewer_handoff(package_source, bundle_path, contrast_path, handoff)
+        staged = package_source / "retained-output"
+        manifest = gate.stage_docusaurus_package(package_source, staged, harness_root=hve_runtime[0])
+        verified = gate.verify_docusaurus_package(staged, require_complete=True, harness_root=hve_runtime[0])
+
+        # Assert
+        assert json.loads((handoff / "reviewer-campaign.json").read_text(encoding="utf-8")) == result
+        assert result["totals"] == {"humanCells": 64, "templates": 64}
+        assert result["methodCounts"]["NVDA"] == result["methodCounts"]["JAWS"] == 4
+        assert len(result["assistiveTechnologyRunbook"]["executionRecipes"]) == 6
+        expected_digests = [hashlib.sha256(input_bytes[path]).hexdigest() for path in (bundle_path, contrast_path)]
+        for record in result["templates"]:
+            path = handoff / record["path"]
+            template = json.loads(path.read_text(encoding="utf-8"))
+            assert template["templateStatus"] == "awaiting-qualified-review"
+            assert set(template["requiredReviewerFields"].values()) == {None}
+            assert template["artifactDigests"] == expected_digests
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == record["sha256"]
+            assert (staged / path.relative_to(package_source)).read_bytes() == path.read_bytes()
+        assert {path: path.read_bytes() for path in input_bytes} == input_bytes
+        assert bundle["scopeCompleteness"]["reviewerEvidence"] == "pending"
+        assert bundle["scopeCompleteness"]["releaseEvidence"] == "incomplete"
+        assert manifest["complete"] is True
+        assert manifest["promotable"] is True
+        assert manifest["missing"] == []
+        assert manifest["bundleDigest"] == bundle["bundleDigest"]
+        assert manifest["buildDigest"] == bundle["runManifest"]["buildDigest"]
+        assert verified == manifest
+        assert (staged / handoff.relative_to(package_source) / "reviewer-campaign.json").is_file()
+
     def test_complete_verification_requires_pinned_harness(self, package_source: Path) -> None:
         staged = package_source / "retained-output"
         gate.stage_docusaurus_package(package_source, staged)
@@ -1936,14 +1998,33 @@ class TestDocusaurusReviewerHandoff:
         )
         return release_path, contrast_path
 
+    @pytest.mark.parametrize("ordering", ["source", "sorted", "reversed"])
     def test_given_release_cells_when_built_then_templates_bind_identity_without_claiming_review(
-        self, tmp_path: Path
+        self, tmp_path: Path, ordering: str
     ) -> None:
+        # Arrange
         release_path, contrast_path = self._write_inputs(tmp_path)
+        bundle = json.loads(release_path.read_text(encoding="utf-8"))
+        journeys = bundle["catalogs"]["assetJourney"]["journeys"]
+        original_methods = {item["journeyId"]: list(item["requiredMethods"]) for item in journeys}
+        if ordering == "sorted":
+            for journey in journeys:
+                journey["requiredMethods"].sort()
+        elif ordering == "reversed":
+            journeys.reverse()
+            for journey in journeys:
+                journey["requiredMethods"].reverse()
+        if ordering != "source":
+            assert any(item["requiredMethods"] != original_methods[item["journeyId"]] for item in journeys)
+        gate._write_json(release_path, bundle)
+        input_bytes = {path: path.read_bytes() for path in (release_path, contrast_path)}
+        input_digests = [hashlib.sha256(content).hexdigest() for content in input_bytes.values()]
 
+        # Act
         result = prepare_docusaurus_reviewer_handoff(tmp_path, release_path, contrast_path, tmp_path / "handoff")
         template = json.loads((tmp_path / "handoff" / result["templates"][0]["path"]).read_text(encoding="utf-8"))
 
+        # Assert
         assert result["totals"] == {"humanCells": 64, "templates": 64}
         assert result["methodCounts"]["JAWS"] == 4
         assert result["methodCounts"]["NVDA"] == 4
@@ -1958,6 +2039,43 @@ class TestDocusaurusReviewerHandoff:
         assert set(template["requiredReviewerFields"].values()) == {None}
         assert template["privacyBoundary"]["restrictedObservationsStoredInGit"] is False
         assert len(list((tmp_path / "handoff" / "supplement-templates").glob("*.json"))) == 64
+        assert result["artifacts"]["releaseBundle"]["sha256"] == input_digests[0]
+        assert result["artifacts"]["contrastReview"]["sha256"] == input_digests[1]
+        assert template["artifactDigests"] == input_digests
+        assert {path: path.read_bytes() for path in input_bytes} == input_bytes
+
+    @pytest.mark.parametrize(
+        "mutation", ["remove-method", "add-method", "repeat-method", "remove-journey", "add-journey", "change-role"]
+    )
+    def test_given_journey_content_drift_when_built_then_handoff_fails_closed(
+        self, tmp_path: Path, mutation: str
+    ) -> None:
+        # Arrange
+        release_path, contrast_path = self._write_inputs(tmp_path)
+        bundle = json.loads(release_path.read_text(encoding="utf-8"))
+        journeys = bundle["catalogs"]["assetJourney"]["journeys"]
+        for item in journeys:
+            item["requiredMethods"].sort()
+        journey = next(item for item in journeys if item["journeyId"] == "DCS01")
+        if mutation == "remove-method":
+            journey["requiredMethods"].pop()
+        elif mutation == "add-method":
+            journey["requiredMethods"].append("NVDA")
+        elif mutation == "repeat-method":
+            journey["requiredMethods"].append(journey["requiredMethods"][0])
+        elif mutation == "remove-journey":
+            journeys.remove(journey)
+        elif mutation == "add-journey":
+            journeys.append({**deepcopy(journey), "journeyId": "DCS99"})
+        else:
+            journey["role"] = "Unreviewed role"
+        gate._write_json(release_path, bundle)
+        output = tmp_path / "handoff"
+
+        # Act and assert
+        with pytest.raises(ValueError, match="canonical journey inventory drifted"):
+            prepare_docusaurus_reviewer_handoff(tmp_path, release_path, contrast_path, output)
+        assert not output.exists()
 
     def test_given_release_inventory_drift_when_built_then_handoff_fails_closed(self, tmp_path: Path) -> None:
         release_path, contrast_path = self._write_inputs(tmp_path, remove_cell=True)
