@@ -19,6 +19,7 @@ FRONTEND_DIR="${SCRIPT_DIR}/frontend"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-30}"
+LOG_LEVEL="${LOG_LEVEL:-info}"
 
 # Colors for output
 if [[ -n "${NO_COLOR+x}" ]]; then
@@ -74,12 +75,14 @@ Environment Variables:
     BACKEND_PORT    Backend port (default: 8000)
     FRONTEND_PORT   Frontend port (default: 5173)
     HEALTH_TIMEOUT  Seconds to wait for backend health (default: 30)
+    LOG_LEVEL       Uvicorn log level (default: info)
 
 Examples:
     ./start.sh                                    # Start both services
     ./start.sh --data-dir /path/to/datasets       # Use a specific datasets directory
     DATA_DIR=/path/to/datasets ./start.sh         # Same, via env var
     BACKEND_PORT=9000 ./start.sh                  # Use custom backend port
+    LOG_LEVEL=debug ./start.sh --backend           # Show debug logs
     ./start.sh --backend                          # Start backend only
 
 EOF
@@ -265,7 +268,7 @@ start_backend() {
         cd "${BACKEND_DIR}"
         # shellcheck source=/dev/null
         source .venv/bin/activate
-        exec uvicorn src.api.main:app --reload --host 127.0.0.1 --port "${BACKEND_PORT}" 2>&1
+        exec uvicorn src.api.main:app --log-config logging.json --log-level "${LOG_LEVEL}" --reload --host 127.0.0.1 --port "${BACKEND_PORT}" 2>&1
     ) &
     BACKEND_PID=$!
 
@@ -361,6 +364,7 @@ main() {
         printf 'Backend Port: %s\n' "${BACKEND_PORT}"
         printf 'Frontend Port: %s\n' "${FRONTEND_PORT}"
         printf 'Data Directory: %s\n' "${DATA_DIR:-${REPO_ROOT}/datasets}"
+        printf 'Log Level: %s\n' "${LOG_LEVEL}"
         printf 'Mode: %s\n' "${mode}"
         printf 'Mutation: None\n'
         return 0

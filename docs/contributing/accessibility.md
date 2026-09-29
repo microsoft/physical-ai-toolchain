@@ -3,7 +3,7 @@ sidebar_position: 13
 title: Accessibility Best Practices
 description: Standards for accessible documentation, CLI output, and project-owned web applications
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-09-24
 ms.topic: reference
 ---
 
@@ -102,6 +102,17 @@ npm --prefix docs/docusaurus run ci:test:e2e
 
 The pull-request scope covers deterministic Docusaurus journeys DCS01-DCS12. Release scope adds DCS13 and every required qualified-human cell. Missing manual evidence remains `NOT_ASSESSED`; it does not block deterministic bundle production, but it prevents release completeness.
 
+The CI runner (`ubuntu-latest` with system Google Chrome) is the authoritative rendering environment for Docusaurus browser evidence. The site renders with the operating system `system-ui` font stack, so reviewed adaptive exceptions and the contrast baseline in `docs/docusaurus/e2e/contrast-baseline.json` reflect CI geometry, and local runs on other operating systems can report different findings.
+
+Contrast baseline entries use these gates:
+
+| Assessment                                                                             | Pull request and `main` (`automated`) | Reviewer or release completeness and promotion |
+|----------------------------------------------------------------------------------------|---------------------------------------|------------------------------------------------|
+| Unknown, increased, unreconciled, measured failure, unowned, stale, or decreased entry | Blocks                                | Blocks                                         |
+| `unresolved` entry awaiting qualified review                                           | Reported, does not block              | Blocks                                         |
+
+Promotion rejects a collection whose contrast baseline contains any entry that is not `reviewed` or whose `reviewBy` date has passed.
+
 ## Qualified Accessibility Review
 
 Use Windows NVDA with Microsoft Edge and a human-led JAWS pass for the supported screen-reader baseline. VoiceOver and mobile assistive technology are unsupported until an explicit scope change adds them.
@@ -124,6 +135,98 @@ Qualified review uses two cadences:
 | Full reevaluation | Repeat after changes to build identity, navigation, search, rendering, evidence methods, or scope      |
 
 The composed bundle always retains `attestation: false`. A qualified result contributes evidence; it does not independently authorize a public conformance claim.
+
+## Documentation Collection and Promotion
+
+Documentation publication is asynchronous. A push to `main` collects release-scope automated evidence, including the DCS13 qualified-review obligations, but requires only automated completeness. Collection does not publish the site or imply reviewer approval.
+
+Playwright evidence cells pass only when the complete Playwright run reports no unexpected test results and no run errors. An unclean or unreadable run report changes every otherwise passing Playwright cell to `CANT_TELL`, so the composed verdict cannot pass.
+
+The collection artifact is named `docusaurus-accessibility-evidence-release-<run-id>`.
+It retains the exact tested production build and a repository-relative mirror of source envelopes, composition inputs,
+the original bundle, contrast crops, diagnostics, validation results, and reviewer handoff.
+Its package manifest verifies paths, sizes, digests, and closure from a fresh directory.
+Release artifacts have 90-day retention; other cadences have 30-day retention.
+Incomplete diagnostic packages cannot be promoted.
+
+### Protected Review Configuration
+
+Configure these controls before dispatching **Docusaurus Accessibility Promotion**:
+
+| Control                                                       | Required configuration                                                                                                                                                                                                          |
+|---------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `accessibility-release` environment                           | Require authorized reviewers, prevent self-approval, and restrict deployment branches to `main`.                                                                                                                                |
+| `ACCESSIBILITY_REVIEWER_EVIDENCE_BRANCH` environment variable | Name the same-repository protected branch containing approved, privacy-minimized reviewer evidence. No default is provided.                                                                                                     |
+| `ACCESSIBILITY_REVIEW_REGISTRY_DIGEST` environment secret     | Store the independently approved HVE canonical reviewer-registry digest. Do not derive it from the submitted package during promotion.                                                                                          |
+| Reviewer-evidence branch                                      | Restrict writes to the authorized review process, prohibit force pushes, and enable branch protection or an applicable active ruleset. The GitHub branch API must report `protected: true`; unreadable protection fails closed. |
+| `github-pages` environment                                    | Retain the Pages deployment approval and branch controls.                                                                                                                                                                       |
+
+The registry anchor uses the HVE domain `hve-a11y:review-registry:v1`, canonicalizing the registry without its `digest` field. It is not the raw file SHA-256. The separately supplied prior-bundle anchor uses `hve-a11y:evidence-bundle:v1`, excluding `bundleDigest`. Copy the prior anchor from the independently retained collection record, not from newly submitted reviewer data.
+
+Configure the reviewer-evidence branch variable and registry-digest secret in both protected environments:
+`accessibility-release` for promotion and `github-pages` for the final publication check.
+After Pages approval, deployment verifies that the original reviewer commit remains reachable from the protected
+branch and reads the current registry as inert Git data.
+Its canonical digest must still match both the promoted registry and the protected Pages trust anchor.
+A changed or revoked registry record invalidates the promotion and requires fresh authorized approval.
+
+### Reviewer-Evidence Package
+
+Commit only the approved JSON data under `reviewer-evidence/docusaurus/<source-sha>/` on the protected evidence branch:
+
+```text
+reviewer-evidence/docusaurus/<source-sha>/
+├── package-manifest.json
+├── review-registry.json
+└── supplements/
+    └── <supplement-id>.json
+```
+
+The package manifest contains `schemaVersion: "1.0.0"`, the exact `sourceRevision`, and a `files` array. Each entry records the relative `path`, raw-file `sha256`, and `sizeBytes` for the registry or a supplement. Do not include the manifest itself in that array. Include every completed supplement and preserve prior supplement history. Supplement filenames contain only letters, digits, hyphens, and underscores before `.json`.
+
+Promotion reads Git tree metadata and blobs without checking out the evidence revision.
+The exact 40-character commit must be an ancestor of the configured protected branch head.
+Extra paths inside the selected evidence directory, hidden entries, nested supplement directories, symlinks,
+executable files, duplicate JSON keys, missing files, and mismatched digests are rejected.
+Unrelated repository paths are never read as reviewer data.
+Raw speech, restricted transcripts, credentials, screenshots containing personal data, and private reviewer identities
+remain outside Git and CI artifacts.
+
+### Promotion and Publication Procedure
+
+1. Wait for a successful `push` run named **CI** from `.github/workflows/main.yml` on the still-current `main` revision. Record its run ID, immutable collection artifact ID, and independently retained prior-bundle digest. Promotion requires both the workflow path and name to match the artifact's producing run.
+2. Download and verify the complete retained package. Perform qualified review against its exact local production build, not a rebuilt or currently hosted site.
+3. Commit the approved registry, completed supplements, and closed package manifest to the protected reviewer-evidence branch. Record the exact commit SHA.
+4. Dispatch **Docusaurus Accessibility Promotion** from current `main` and obtain the `accessibility-release` environment approval.
+5. Supply all four inputs below. Promotion verifies the same-repository run, exact workflow, event, branch, current revision, artifact ownership, retention, protected evidence ancestry, and both independent digest anchors before recomposition.
+6. Promotion recomposes the retained source envelopes with the original prior bundle and every supplement. It preserves source, build, configuration, fixture, campaign, and observation identity while advancing only evaluation time so expired review records remain blocking. Both pinned HVE and project validation require release completeness.
+7. A successful promotion retains `docusaurus-accessibility-promoted-<promotion-run-id>` for 90 days. **Deploy Documentation Site** accepts only that successful same-repository promotion and verifies its closed manifest, original collection, release bundle, validation manifest, and build digest. It uploads the retained build directly to Pages without rebuilding.
+
+| Dispatch input             | Required value                                                                        |
+|----------------------------|---------------------------------------------------------------------------------------|
+| `collection-run-id`        | Positive immutable run ID of the successful current-main collection.                  |
+| `collection-artifact-id`   | Positive immutable artifact ID belonging to that exact run and release artifact name. |
+| `review-evidence-revision` | Exact lowercase 40-character reviewer-evidence commit SHA.                            |
+| `prior-bundle-digest`      | Independently retained lowercase 64-character HVE bundle digest.                      |
+
+Promotion retains every original run-context binding, including the collection's `harnessDigest`, tool and lock digests, environment, and run identifier. It does not recalculate those bindings from a fresh runtime or self-test outputs. The acquired HVE Git revision, skill tree, and pinned input hashes establish runtime provenance independently; a collection-time output hash is not proof of the runtime pin.
+
+Deployment executes only trusted `main` code, never code from an artifact or reviewer ref.
+The build job verifies the complete package before uploading the retained build to Pages.
+After Pages environment approval, the publish job repeats artifact, registry, evidence-validity, and current-main
+verification with read-only repository and Actions access. Pages and identity-token write permissions remain confined
+to the publishing jobs.
+An unavailable verification fails closed.
+Any intervening main revision invalidates the candidate: collect and review the new build.
+Missing, expired, stale, conflicting, quarantined, or incomplete evidence blocks publication; no successful results are manufactured.
+
+> [!WARNING]
+> Production promotion is externally blocked by the pinned HVE composer at `56c30bcbbba1a8235970c44f5e79a9d83e296f54`.
+> It reports release incompleteness when any informing result is `CANT_TELL`, even when deciding results pass.
+> This implementation preserves that failure and `--require-completeness release`; it does not patch HVE, discard
+> informing evidence, or claim a successful production release.
+> A reviewed upstream correction and pin update, followed by a real complete release validation, are required before
+> publication can succeed.
 
 ## Generated Artifacts
 

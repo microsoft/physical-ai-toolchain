@@ -17,7 +17,8 @@ CHUNK_SIZE = 1200
 HEADER_SIZE = HEADER_STRUCT.size
 # a peer-declared totalchunks above this would reassemble to more than the codec's
 # max frame size anyway, so reject it before allocating the [None] * totalchunks list
-_MAX_CHUNKS_PER_MESSAGE = (CodecLimits().max_encoded_bytes + CHUNK_SIZE - 1) // CHUNK_SIZE
+_MAX_WIRE_FRAME_BYTES = CodecLimits().max_encoded_bytes + 1 + msgsock.ENCRYPTED_MESSAGE_OVERHEAD
+_MAX_CHUNKS_PER_MESSAGE = (_MAX_WIRE_FRAME_BYTES + CHUNK_SIZE - 1) // CHUNK_SIZE
 
 usesingleudpsock = True  # set to True to use single socket for all client-side UDP messengers, set to False to create separate socket for each messenger (not needed since UDP is connectionless)  # noqa: E501 vendored from microsoft/xavier, not refactored
 udp_msgrs: dict[tuple, MessengerUDP] = {}  # (ip, port) to MessengerUDP (for server-side)
