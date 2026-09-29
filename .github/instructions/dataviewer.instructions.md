@@ -24,7 +24,9 @@ Validate changes using npm scripts from `data-management/viewer/`:
 * `npm run validate` — full validation for both backend and frontend
 * `npm run validate:fix` — auto-fix lint/format then validate
 * `npm run validate:frontend` — frontend only (type-check + lint + test)
-* `npm run validate:backend` — backend only (ruff + pytest)
+* `npm run validate:backend` — backend only (lint + pytest)
+
+Use the checked-in [backend configuration](../../data-management/viewer/backend/pyproject.toml) and its inherited settings for lint rules, formatting, exclusions, and fix safety. CI and review-only validation remain non-mutating.
 
 Check existing terminals to see if the backend and frontend are already running:
 

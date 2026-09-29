@@ -402,6 +402,7 @@ class TestMain:
         monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
         monkeypatch.setenv("SYSTEM_METRICS", "false")
         monkeypatch.delenv("REGISTER_CHECKPOINT", raising=False)
+        monkeypatch.setattr(_MOD, "_detect_num_gpus", lambda: 1)
         _FakePopen.lines = []
         monkeypatch.setattr(_MOD.subprocess, "Popen", _FakePopen)
         monkeypatch.setattr(_MOD.signal, "signal", lambda *a, **k: None)
