@@ -45,7 +45,7 @@ main() {
   while IFS= read -r -d '' file; do
     ordinal=0
     while IFS= read -r line || [[ -n "${line}" ]]; do
-      if [[ "${line^^}" =~ ^[[:space:]]*FROM[[:space:]] ]]; then
+      if [[ "${line}" =~ ^[[:space:]]*FROM[[:space:]] ]]; then
         if [[ "${line}" =~ ${image_pattern} ]]; then
           ref="${BASH_REMATCH[0]}"
           if [[ "${ref}" != *'$'* && "${ref}" != *'{'* && "${ref}" != *'}'* ]]; then
