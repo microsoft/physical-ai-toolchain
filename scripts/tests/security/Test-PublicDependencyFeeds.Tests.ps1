@@ -66,6 +66,14 @@ Describe 'Invoke-PublicDependencyFeedScan' -Tag 'Unit' {
         $result.filesScanned | Should -Be 0
     }
 
+    It 'Fails when dependency discovery cannot read the repository' {
+        $repoRoot = Join-Path $TestDrive 'not-a-repository'
+        New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null
+
+        { Invoke-PublicDependencyFeedScan -RepoRoot $repoRoot } |
+            Should -Throw 'git ls-files failed while discovering dependency metadata.'
+    }
+
     It 'Reports <Reason> for <FileName>' -ForEach @(
         @{
             FileName = 'package-lock.json'
@@ -160,6 +168,20 @@ Describe 'Test-PublicDependencyFeeds main execution' -Tag 'Unit' {
         & (Get-Process -Id $PID).Path -NoProfile -File $script:ScriptPath -RepoRoot $repoRoot -OutputPath $outputPath -FailOnViolation *> $null
 
         $LASTEXITCODE | Should -Be 1
+        Test-Path -LiteralPath $outputPath | Should -BeTrue
+        (Get-Content -LiteralPath $outputPath -Raw | ConvertFrom-Json).violationCount | Should -Be 1
+    }
+
+    It 'Reports violations without failing when enforcement is not requested' {
+        $repoRoot = Join-Path $TestDrive 'main-advisory'
+        $outputPath = Join-Path $TestDrive 'advisory-results.json'
+        New-PublicFeedTestRepository -Path $repoRoot -Files @{
+            '.npmrc' = 'registry=https://private-feed.example.com/packaging/'
+        }
+
+        & (Get-Process -Id $PID).Path -NoProfile -File $script:ScriptPath -RepoRoot $repoRoot -OutputPath $outputPath *> $null
+
+        $LASTEXITCODE | Should -Be 0
         Test-Path -LiteralPath $outputPath | Should -BeTrue
         (Get-Content -LiteralPath $outputPath -Raw | ConvertFrom-Json).violationCount | Should -Be 1
     }

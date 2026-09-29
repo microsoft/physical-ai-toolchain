@@ -30,7 +30,7 @@ When a network blocks public registries, route installs through the approved pro
 
 * Restrict proxied use to restore commands such as `npm ci`, `uv sync --frozen`, and `pip install -r`.
 * Do not resolve dependencies through a proxy. `npm install`, `npm update`, `npm audit fix`, `uv lock`, and `uv add` can write proxy URLs into lockfiles.
-* Use the `lock-registry-converter` skill to convert verified mirror metadata back to canonical public metadata without changing dependency resolution.
+* Convert mirror-generated lockfiles in an isolated environment with direct access to the canonical public registry. Preserve package versions, dependency metadata, ordering, artifact filenames, and hashes.
 * Do not hand-repair a proxy-generated lockfile. Public conversion must match package versions, filenames, and hashes against public registry metadata.
 * Keep proxy addresses out of tracked files, including `.npmrc`, workflows, and devcontainer configuration.
 
