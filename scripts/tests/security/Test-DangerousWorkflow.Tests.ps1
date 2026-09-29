@@ -315,6 +315,78 @@ jobs:
     }
 }
 
+Describe 'Test-DangerousWorkflow direct input interpolation' -Tag 'Unit' {
+    It 'flags a directly interpolated <Type> workflow input' -ForEach @(
+        @{ Type = 'string'; Reference = 'inputs.command' }
+        @{ Type = 'number'; Reference = "inputs['command']" }
+    ) {
+        $fixturePath = New-WorkflowFixture -Root $TestDrive -Name "direct-input-$Type" -Content @"
+name: test
+on:
+  workflow_call:
+    inputs:
+      command:
+        type: $Type
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "`${{ $Reference }}"
+"@
+
+        $outputPath = Join-Path $TestDrive "direct-input-$Type.json"
+        Invoke-DangerousWorkflowFixture -FixturePath $fixturePath -Format json -OutputPath $outputPath | Out-Null
+
+        $report = Get-JsonReport -Path $outputPath
+        $report.Violations | Should -HaveCount 1
+        $report.Violations[0].Metadata.RuleId | Should -Be 'dangerous-workflow/direct-input-interpolation'
+        $report.Violations[0].Description | Should -Match "type $Type"
+    }
+
+    It 'does not flag a directly interpolated boolean workflow input' {
+        $fixturePath = New-WorkflowFixture -Root $TestDrive -Name 'boolean-input' -Content @'
+name: test
+on:
+  workflow_dispatch:
+    inputs:
+      enabled:
+        type: boolean
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ inputs.enabled }}"
+'@
+
+        $outputPath = Join-Path $TestDrive 'boolean-input.json'
+        Invoke-DangerousWorkflowFixture -FixturePath $fixturePath -Format json -OutputPath $outputPath | Out-Null
+
+        (Get-JsonReport -Path $outputPath).Violations | Should -HaveCount 0
+    }
+
+    It 'flags an untyped composite action input in a run block' {
+        $fixturePath = New-WorkflowFixture -Root $TestDrive -Name 'composite-input' -Content @'
+name: test
+inputs:
+  command:
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: echo "${{ inputs.command }}"
+'@
+
+        $outputPath = Join-Path $TestDrive 'composite-input.json'
+        Invoke-DangerousWorkflowFixture -FixturePath $fixturePath -Format json -OutputPath $outputPath | Out-Null
+
+        $report = Get-JsonReport -Path $outputPath
+        $report.Violations | Should -HaveCount 1
+        $report.Violations[0].Metadata.RuleId | Should -Be 'dangerous-workflow/direct-input-interpolation'
+        $report.Violations[0].Description | Should -Match 'type untyped'
+    }
+}
+
 Describe 'Test-DangerousWorkflow untrusted checkout' -Tag 'Unit' {
     It 'flags a pull_request_target checkout of <Expr>' -ForEach @(
         @{Expr='github.event.pull_request.head.sha'}

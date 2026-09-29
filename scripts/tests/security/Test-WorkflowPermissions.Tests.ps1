@@ -24,10 +24,16 @@ AfterAll {
 }
 
 Describe 'Test-WorkflowPermissions' -Tag 'Unit' {
-    Context 'File with top-level permissions block' {
-        It 'Should return null for workflow with permissions' {
+    Context 'File with populated top-level permissions block' {
+        It 'Should report a job that inherits the workflow-level grant' {
             $filePath = Join-Path $script:FixturesPath 'workflow-with-permissions.yml'
-            Test-WorkflowPermissions -FilePath $filePath | Should -BeNullOrEmpty
+            $result = Test-WorkflowPermissions -FilePath $filePath
+            $result | Should -HaveCount 1
+            $result.ViolationType | Should -Be 'MissingJobPermissions'
+            $result.Type | Should -Be 'workflow-job-permissions'
+            $result.Name | Should -Be 'build'
+            $result.Line | Should -Be 7
+            $result.Metadata.Job | Should -Be 'build'
         }
     }
 
@@ -124,7 +130,9 @@ Describe 'Invoke-WorkflowPermissionsCheck' -Tag 'Unit' {
 
         $exitCode | Should -Be 0
         $report = Get-JsonReport -Path $outputPath
-        $report.Violations | Should -HaveCount 1
+        $report.Violations | Should -HaveCount 2
+        $report.Violations.ViolationType | Should -Contain 'MissingPermissions'
+        $report.Violations.ViolationType | Should -Contain 'MissingJobPermissions'
     }
 
     It 'Should fail with FailOnViolation when violations exist' {
@@ -139,7 +147,6 @@ Describe 'Invoke-WorkflowPermissionsCheck' -Tag 'Unit' {
     It 'Should return exit code 0 when all workflows have permissions' {
         $testPath = Join-Path $TestDrive 'pass-scan'
         New-Item -ItemType Directory -Path $testPath -Force | Out-Null
-        Copy-Item -Path (Join-Path $script:FixturesPath 'workflow-with-permissions.yml') -Destination $testPath
         Copy-Item -Path (Join-Path $script:FixturesPath 'workflow-empty-permissions.yml') -Destination $testPath
 
         $exitCode = Invoke-WorkflowPermissionsCheck -Path $testPath -OutputPath (Join-Path $TestDrive 'pass-results.json') -FailOnViolation
@@ -171,13 +178,13 @@ Describe 'Invoke-WorkflowPermissionsCheck' -Tag 'Unit' {
     It 'Should write a console summary when all workflows have permissions' {
         $testPath = Join-Path $TestDrive 'console-clean'
         New-Item -ItemType Directory -Path $testPath -Force | Out-Null
-        Copy-Item -Path (Join-Path $script:FixturesPath 'workflow-with-permissions.yml') -Destination $testPath
+        Copy-Item -Path (Join-Path $script:FixturesPath 'workflow-empty-permissions.yml') -Destination $testPath
 
         $outputPath = Join-Path $TestDrive 'console-clean/nested/results.txt'
         Invoke-WorkflowPermissionsCheck -Path $testPath -Format console -OutputPath $outputPath | Out-Null
 
         $consoleOutput = Get-Content -Path $outputPath -Raw
-        $consoleOutput | Should -Match 'workflow\(s\) have a top-level permissions block\.'
+        $consoleOutput | Should -Match 'workflow\(s\) and 1 job\(s\) passed the permissions check\.'
     }
 
     It 'Should write a console summary listing permissions violations' {
@@ -202,7 +209,7 @@ Describe 'Test-WorkflowPermissions entry point' -Tag 'Unit' {
     It 'exits 0 when invoked as a script against compliant workflows' {
         $testPath = Join-Path $TestDrive 'entry-clean'
         New-Item -ItemType Directory -Path $testPath -Force | Out-Null
-        Copy-Item -Path (Join-Path $script:FixturesPath 'workflow-with-permissions.yml') -Destination $testPath
+        Copy-Item -Path (Join-Path $script:FixturesPath 'workflow-empty-permissions.yml') -Destination $testPath
 
         $outputPath = Join-Path $TestDrive 'entry-clean.json'
         $exitCode = Invoke-SecurityLinterScript -ScriptPath $script:ScriptPath -ArgumentList @('-Path', $testPath, '-Format', 'json', '-OutputPath', $outputPath, '-FailOnViolation')
@@ -213,6 +220,16 @@ Describe 'Test-WorkflowPermissions entry point' -Tag 'Unit' {
         $missingPath = Join-Path $TestDrive 'does-not-exist'
         $outputPath = Join-Path $TestDrive 'entry-fatal.json'
         $exitCode = Invoke-SecurityLinterScript -ScriptPath $script:ScriptPath -ArgumentList @('-Path', $missingPath, '-Format', 'json', '-OutputPath', $outputPath)
+        $exitCode | Should -Be 1
+    }
+
+    It 'exits 1 when FailOnViolation finds a permissions violation' {
+        $testPath = Join-Path $TestDrive 'entry-violation'
+        New-Item -ItemType Directory -Path $testPath -Force | Out-Null
+        Copy-Item -Path (Join-Path $script:FixturesPath 'workflow-without-permissions.yml') -Destination $testPath
+
+        $outputPath = Join-Path $TestDrive 'entry-violation.json'
+        $exitCode = Invoke-SecurityLinterScript -ScriptPath $script:ScriptPath -ArgumentList @('-Path', $testPath, '-Format', 'json', '-OutputPath', $outputPath, '-FailOnViolation')
         $exitCode | Should -Be 1
     }
 }
