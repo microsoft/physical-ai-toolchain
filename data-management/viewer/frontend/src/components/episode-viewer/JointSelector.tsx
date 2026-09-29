@@ -7,12 +7,12 @@
  */
 
 import {
+  closestCenter,
   DndContext,
   type DragEndEvent,
   DragOverlay,
   type DragStartEvent,
   PointerSensor,
-  pointerWithin,
   useDroppable,
   useSensor,
   useSensors,
@@ -110,6 +110,7 @@ function SortableChip({
   onCommitEdit,
   onCancelEdit,
   onCreateGroup,
+  onKeyboardMove,
 }: {
   idx: number
   isSelected: boolean
@@ -122,6 +123,7 @@ function SortableChip({
   onCommitEdit: (val: string) => void
   onCancelEdit: () => void
   onCreateGroup?: (jointIdx: number) => void
+  onKeyboardMove?: (direction: -1 | 1) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: `joint-${idx}`,
@@ -159,6 +161,21 @@ function SortableChip({
       style={style}
       {...(editable ? attributes : {})}
       {...(editable ? listeners : {})}
+      aria-pressed={isSelected}
+      aria-keyshortcuts={onKeyboardMove ? 'Alt+ArrowLeft Alt+ArrowRight' : undefined}
+      onKeyDown={(event) => {
+        if (onKeyboardMove && event.altKey && event.key === 'ArrowLeft') {
+          event.preventDefault()
+          onKeyboardMove(-1)
+          return
+        }
+        if (onKeyboardMove && event.altKey && event.key === 'ArrowRight') {
+          event.preventDefault()
+          onKeyboardMove(1)
+          return
+        }
+        listeners?.onKeyDown?.(event)
+      }}
     >
       <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
       {label}
@@ -170,10 +187,7 @@ function SortableChip({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{chip}</ContextMenuTrigger>
-      <ContextMenuContent
-        className="min-w-[140px]"
-        onCloseAutoFocus={(event) => event.preventDefault()}
-      >
+      <ContextMenuContent className="min-w-[140px]">
         <ContextMenuItem className="text-xs" onSelect={onStartEdit}>
           Edit Name
         </ContextMenuItem>
@@ -181,6 +195,16 @@ function SortableChip({
           <ContextMenuItem className="text-xs" onSelect={() => onCreateGroup(idx)}>
             New Grouping
           </ContextMenuItem>
+        )}
+        {onKeyboardMove && (
+          <>
+            <ContextMenuItem className="text-xs" onSelect={() => onKeyboardMove(-1)}>
+              Move left
+            </ContextMenuItem>
+            <ContextMenuItem className="text-xs" onSelect={() => onKeyboardMove(1)}>
+              Move right
+            </ContextMenuItem>
+          </>
         )}
       </ContextMenuContent>
     </ContextMenu>
@@ -352,6 +376,7 @@ export function JointSelector({
     const labelButton = (
       <button
         onClick={() => toggleGroup(group.indices)}
+        aria-pressed={allActive}
         className={cn(
           'text-xs font-medium whitespace-nowrap transition-colors',
           allActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
@@ -366,10 +391,7 @@ export function JointSelector({
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>{labelButton}</ContextMenuTrigger>
-        <ContextMenuContent
-          className="min-w-[140px]"
-          onCloseAutoFocus={(event) => event.preventDefault()}
-        >
+        <ContextMenuContent className="min-w-[140px]">
           <ContextMenuItem className="text-xs" onSelect={() => setEditingGroup(group.id)}>
             Edit Name
           </ContextMenuItem>
@@ -384,6 +406,23 @@ export function JointSelector({
         </ContextMenuContent>
       </ContextMenu>
     )
+  }
+
+  const moveJointByOffset = (jointIdx: number, direction: -1 | 1) => {
+    if (!onMoveJoint) return
+
+    const orderedIndices = [...visibleGroups.flatMap((group) => group.indices), ...otherIndices]
+    const currentPosition = orderedIndices.indexOf(jointIdx)
+    const targetIdx = orderedIndices[currentPosition + direction]
+    if (targetIdx === undefined) return
+
+    const fromGroupId = findGroupForJoint(jointIdx)
+    const toGroupId = findGroupForJoint(targetIdx)
+    const targetGroup = groups.find((group) => group.id === toGroupId)
+    const targetPosition = targetGroup?.indices.indexOf(targetIdx) ?? 0
+    const toPosition =
+      fromGroupId === toGroupId && direction > 0 ? targetPosition + 1 : targetPosition
+    onMoveJoint(jointIdx, fromGroupId, toGroupId, toPosition)
   }
 
   const renderChips = (indices: number[]) =>
@@ -404,6 +443,9 @@ export function JointSelector({
         }}
         onCancelEdit={() => setEditingJoint(null)}
         onCreateGroup={onCreateGroup ? handleCreateGroup : undefined}
+        onKeyboardMove={
+          editable && onMoveJoint ? (direction) => moveJointByOffset(idx, direction) : undefined
+        }
       />
     ))
 
@@ -412,7 +454,7 @@ export function JointSelector({
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={pointerWithin}
+      collisionDetection={closestCenter}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
@@ -421,6 +463,7 @@ export function JointSelector({
         <div className="flex items-center gap-1">
           <button
             onClick={selectAll}
+            aria-pressed={selectedJoints.length === jointCount}
             className={cn(
               'rounded-sm border px-2 py-0.5 text-xs transition-colors',
               selectedJoints.length === jointCount
@@ -432,6 +475,7 @@ export function JointSelector({
           </button>
           <button
             onClick={clearAll}
+            aria-pressed={selectedJoints.length === 0}
             className={cn(
               'rounded-sm border px-2 py-0.5 text-xs transition-colors',
               selectedJoints.length === 0
@@ -471,6 +515,7 @@ export function JointSelector({
               <div data-testid="joint-group-other" className="flex items-center gap-1">
                 <button
                   onClick={() => toggleGroup(otherIndices)}
+                  aria-pressed={otherIndices.every((i) => selectedJoints.includes(i))}
                   className={cn(
                     'text-xs font-medium whitespace-nowrap transition-colors',
                     otherIndices.every((i) => selectedJoints.includes(i))

@@ -26,7 +26,7 @@ export function ExportProgress({ progress, result, error }: ExportProgressProps)
 
   if (result?.success) {
     return (
-      <Alert>
+      <Alert role="status">
         <CheckCircle2 className="h-4 w-4 text-green-500" />
         <AlertTitle>Export Complete</AlertTitle>
         <AlertDescription>
@@ -48,7 +48,7 @@ export function ExportProgress({ progress, result, error }: ExportProgressProps)
   }
 
   return (
-    <div className="space-y-4">
+    <div role="status" aria-live="polite" aria-busy="true" className="space-y-4">
       <div className="flex items-center gap-2">
         <Loader2 className="h-4 w-4 animate-spin" />
         <span className="text-muted-foreground text-sm">
@@ -65,7 +65,7 @@ export function ExportProgress({ progress, result, error }: ExportProgressProps)
               </span>
               <span>{Math.round(progress.percentage)}%</span>
             </div>
-            <Progress value={progress.percentage} className="h-2" />
+            <Progress aria-label="Export progress" value={progress.percentage} className="h-2" />
           </div>
 
           <div className="text-muted-foreground text-xs">

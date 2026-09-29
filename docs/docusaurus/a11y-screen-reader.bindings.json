@@ -1,0 +1,340 @@
+{
+    "$schema": "https://microsoft.github.io/hve-core/accessibility/screen-reader-binding.schema.json",
+    "schemaVersion": "1.0.0",
+    "bindingProfileId": "physical-ai-toolchain-docs",
+    "catalogId": "physical-ai-toolchain-screen-reader-cases",
+    "catalogDigest": "sha256:e2939c4ac2bd97e43f9801d1f59afd67174a7a8de818f6eb767f16cb4125ae37",
+    "product": {
+        "name": "Physical AI Toolchain documentation",
+        "surfaceProfiles": [
+            "document"
+        ]
+    },
+    "routes": {
+        "integrity": "/physical-ai-toolchain/accessibility/screen-reader-calibration",
+        "docs": "/physical-ai-toolchain/contributing/accessibility",
+        "search": "/physical-ai-toolchain/search/"
+    },
+    "targets": {
+        "positiveControl.checkbox": {
+            "routeRef": "integrity",
+            "selector": "[data-a11y-positive-control=checkbox]",
+            "role": "checkbox",
+            "name": "Accept terms"
+        },
+        "positiveControl.headings": {
+            "routeRef": "integrity",
+            "selector": "main h1, main h2"
+        },
+        "docs.table": {
+            "routeRef": "docs",
+            "selector": "main table[aria-labelledby=scope]"
+        },
+        "docs.heading": {
+            "routeRef": "docs",
+            "selector": "main h1, main h2, main h3"
+        },
+        "search.status": {
+            "routeRef": "search",
+            "selector": "[id^=search-results-status-][role=status]"
+        },
+        "search.pageInput": {
+            "routeRef": "search",
+            "selector": "input[name=q]"
+        },
+        "search.regionHeading": {
+            "routeRef": "search",
+            "selector": "[role=main] h1, main h1"
+        }
+    },
+    "caseBindings": {
+        "SR-INTEGRITY-001": {
+            "targetRefs": [
+                "positiveControl.checkbox",
+                "positiveControl.headings"
+            ],
+            "representativeAt": true,
+            "executions": [
+                {
+                    "id": "screen-reader-integrity",
+                    "title": "Named checkbox and heading integrity",
+                    "route": "/physical-ai-toolchain/accessibility/screen-reader-calibration",
+                    "surfaceId": "screen-reader-integrity",
+                    "state": "initial",
+                    "captureMode": "action",
+                    "triggerAfterDriverStart": true,
+                    "trigger": {
+                        "action": "click",
+                        "target": "[data-a11y-positive-control=checkbox]"
+                    },
+                    "commands": [
+                        {
+                            "kind": "pause",
+                            "durationMs": 500
+                        }
+                    ],
+                    "assertions": [
+                        {
+                            "type": "contains",
+                            "evidenceType": "actionSpeech",
+                            "value": "checked"
+                        },
+                        {
+                            "type": "nodeMatches",
+                            "evidenceType": "accessibilityTree",
+                            "expected": {
+                                "role": "checkbox",
+                                "name": "Accept terms"
+                            },
+                            "minCount": 1,
+                            "maxCount": 1
+                        },
+                        {
+                            "type": "nodeMatches",
+                            "evidenceType": "accessibilityTree",
+                            "expected": {
+                                "role": "heading"
+                            },
+                            "minCount": 2
+                        }
+                    ]
+                }
+            ]
+        },
+        "HVE-NVDA-006": {
+            "targetRefs": [
+                "docs.table"
+            ],
+            "representativeAt": true,
+            "executions": [
+                {
+                    "id": "documentation-table-navigation",
+                    "title": "Documentation table navigation",
+                    "route": "/physical-ai-toolchain/contributing/accessibility",
+                    "surfaceId": "documentation",
+                    "state": "initial",
+                    "captureMode": "action",
+                    "triggerAfterDriverStart": true,
+                    "trigger": {
+                        "action": "focus",
+                        "target": "main table[aria-labelledby=scope]"
+                    },
+                    "commands": [
+                        {
+                            "kind": "perform",
+                            "value": "moveToNextColumn"
+                        },
+                        {
+                            "kind": "pause",
+                            "durationMs": 500
+                        }
+                    ],
+                    "assertions": [
+                        {
+                            "type": "nodeMatches",
+                            "evidenceType": "accessibilityTree",
+                            "expected": {
+                                "role": "table"
+                            },
+                            "minCount": 1
+                        },
+                        {
+                            "type": "nodeMatches",
+                            "evidenceType": "accessibilityTree",
+                            "expected": {
+                                "role": "columnheader"
+                            },
+                            "minCount": 1
+                        },
+                        {
+                            "type": "nodeMatches",
+                            "evidenceType": "accessibilityTree",
+                            "expected": {
+                                "role": "cell"
+                            },
+                            "minCount": 1
+                        },
+                        {
+                            "type": "contains",
+                            "evidenceType": "actionSpeech",
+                            "value": "column"
+                        }
+                    ]
+                }
+            ]
+        },
+        "HVE-NVDA-010": {
+            "targetRefs": [
+                "search.status"
+            ],
+            "representativeAt": true,
+            "executions": [
+                {
+                    "id": "search-status-results",
+                    "title": "Search results status announcement",
+                    "route": "/physical-ai-toolchain/search/?q=training",
+                    "surfaceId": "search-results",
+                    "state": "results",
+                    "captureMode": "action",
+                    "triggerAfterDriverStart": true,
+                    "trigger": {
+                        "action": "type",
+                        "target": "input[name=q]",
+                        "value": "training"
+                    },
+                    "triggerSequence": [
+                        {
+                            "action": "click",
+                            "target": "input[name=q]"
+                        },
+                        {
+                            "action": "type",
+                            "target": "input[name=q]",
+                            "value": "training",
+                            "waitFor": "[id^=search-results-status-][role=status]"
+                        }
+                    ],
+                    "commands": [
+                        {
+                            "kind": "pause",
+                            "durationMs": 4000
+                        }
+                    ],
+                    "assertions": [
+                        {
+                            "type": "matches",
+                            "evidenceType": "actionSpeech",
+                            "value": "[0-9]+ documents? found"
+                        }
+                    ]
+                },
+                {
+                    "id": "search-status-no-results",
+                    "title": "Empty search result status announcement",
+                    "route": "/physical-ai-toolchain/search/?q=98765432101234567890",
+                    "surfaceId": "search-results",
+                    "state": "no-results",
+                    "captureMode": "action",
+                    "triggerAfterDriverStart": true,
+                    "trigger": {
+                        "action": "type",
+                        "target": "input[name=q]",
+                        "value": "98765432101234567890"
+                    },
+                    "triggerSequence": [
+                        {
+                            "action": "click",
+                            "target": "input[name=q]"
+                        },
+                        {
+                            "action": "type",
+                            "target": "input[name=q]",
+                            "value": "98765432101234567890",
+                            "waitFor": "[id^=search-results-status-][role=status]"
+                        }
+                    ],
+                    "commands": [
+                        {
+                            "kind": "pause",
+                            "durationMs": 4000
+                        }
+                    ],
+                    "assertions": [
+                        {
+                            "type": "contains",
+                            "evidenceType": "actionSpeech",
+                            "value": "No documents found"
+                        }
+                    ]
+                }
+            ]
+        },
+        "HVE-NVDA-011": {
+            "targetRefs": [
+                "docs.heading"
+            ],
+            "executions": [
+                {
+                    "id": "documentation-heading-navigation",
+                    "title": "Documentation heading navigation",
+                    "route": "/physical-ai-toolchain/contributing/accessibility",
+                    "surfaceId": "documentation",
+                    "state": "route-inventory",
+                    "trigger": {
+                        "action": "focus",
+                        "target": "main"
+                    },
+                    "commands": [
+                        {
+                            "kind": "navigate",
+                            "value": "nextHeading"
+                        },
+                        {
+                            "kind": "pause",
+                            "durationMs": 500
+                        }
+                    ],
+                    "assertions": [
+                        {
+                            "type": "nodeMatches",
+                            "evidenceType": "accessibilityTree",
+                            "expected": {
+                                "role": "heading"
+                            },
+                            "minCount": 1
+                        }
+                    ]
+                }
+            ]
+        },
+        "HVE-NVDA-014": {
+            "targetRefs": [
+                "search.pageInput",
+                "search.regionHeading"
+            ],
+            "executions": [
+                {
+                    "id": "search-page-context",
+                    "title": "Search page heading and field context",
+                    "route": "/physical-ai-toolchain/search/",
+                    "surfaceId": "search-results",
+                    "state": "refocus",
+                    "trigger": {
+                        "action": "focus",
+                        "target": "body"
+                    },
+                    "commands": [
+                        {
+                            "kind": "key",
+                            "value": "Tab"
+                        },
+                        {
+                            "kind": "pause",
+                            "durationMs": 500
+                        }
+                    ],
+                    "assertions": [
+                        {
+                            "type": "nodeMatches",
+                            "evidenceType": "accessibilityTree",
+                            "expected": {
+                                "role": "heading",
+                                "nameContains": "Search"
+                            },
+                            "minCount": 1,
+                            "maxCount": 1
+                        },
+                        {
+                            "type": "nodeMatches",
+                            "evidenceType": "accessibilityTree",
+                            "expected": {
+                                "nameContains": "Search"
+                            },
+                            "minCount": 1
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}

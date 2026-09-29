@@ -1,4 +1,4 @@
-"""Robot observation and command types for LeRobot ACT policy inference.
+"""Robot observation and command types for LeRobot policy inference.
 
 Defines the semantic interface between a robot control system (ROS2, RTDE,
 etc.) and the trained ACT policy. These types map directly to the LeRobot
@@ -54,11 +54,13 @@ class RobotObservation:
             frame is available yet (first-frame edge case).
         timestamp_s: Monotonic timestamp in seconds (from the robot or
             ROS clock).
+        task: Natural-language task description required by VLA policies.
     """
 
     joint_positions: np.ndarray
     color_image: np.ndarray | None = None
     timestamp_s: float = 0.0
+    task: str = ""
 
     def __post_init__(self) -> None:
         if self.joint_positions.shape != (NUM_JOINTS,):

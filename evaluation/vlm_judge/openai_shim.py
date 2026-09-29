@@ -27,7 +27,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .backend import GenerationConfig, JudgeBackend, Qwen3VLBackend
+from .backend import EchoBackend, GenerationConfig, JudgeBackend, Qwen3VLBackend
+from .swagger_ui import install_responsive_swagger_ui
 
 # Remote image fetching is OFF by default: the shim runs untrusted-input
 # inference and can bind beyond localhost, so fetching arbitrary URLs
@@ -68,7 +69,8 @@ def build_app(backend: JudgeBackend):
     """Build a FastAPI app that serves OpenAI-compatible chat completions."""
     from fastapi import FastAPI, HTTPException
 
-    app = FastAPI(title="Qwen3-VL OpenAI-compat shim", version="0.1.0")
+    app = FastAPI(title="Qwen3-VL OpenAI-compat shim", version="0.1.0", docs_url=None)
+    install_responsive_swagger_ui(app)
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -120,6 +122,11 @@ def build_app(backend: JudgeBackend):
         }
 
     return app
+
+
+def build_echo_app() -> Any:
+    """Build a deterministic loopback-safe app without loading a model."""
+    return build_app(EchoBackend())
 
 
 def _flatten_messages(messages: Sequence[Message]):

@@ -11,6 +11,7 @@ interface UseTrajectoryPlotSelectionOptions {
   onSelectedRangeChange?: (range: [number, number] | null) => void
   onSelectionStart?: () => void
   onSelectionComplete?: (range: [number, number]) => void
+  onSelectionCancel?: () => void
   onSeekFrame?: (frame: number) => void
   onSetCurrentFrame: (frame: number) => void
   onRecordEvent: (
@@ -28,6 +29,7 @@ export function useTrajectoryPlotSelection({
   onSelectedRangeChange,
   onSelectionStart,
   onSelectionComplete,
+  onSelectionCancel,
   onSeekFrame,
   onSetCurrentFrame,
   onRecordEvent,
@@ -35,9 +37,28 @@ export function useTrajectoryPlotSelection({
   const selectionAnchorFrameRef = useRef<number | null>(null)
   const selectionAnchorXRef = useRef<number | null>(null)
   const selectionDraggingRef = useRef(false)
+  const onSelectionCancelRef = useRef(onSelectionCancel)
   const [selectionDragging, setSelectionDragging] = useState(false)
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(
     null,
+  )
+
+  useEffect(() => {
+    onSelectionCancelRef.current = onSelectionCancel
+  }, [onSelectionCancel])
+
+  useEffect(
+    () => () => {
+      if (!selectionDraggingRef.current) {
+        return
+      }
+
+      selectionDraggingRef.current = false
+      selectionAnchorFrameRef.current = null
+      selectionAnchorXRef.current = null
+      onSelectionCancelRef.current?.()
+    },
+    [],
   )
 
   useEffect(() => {
@@ -95,11 +116,9 @@ export function useTrajectoryPlotSelection({
       setSelectionDragging(false)
       selectionAnchorXRef.current = event.clientX
       selectionAnchorFrameRef.current = anchorFrame
-      onSetCurrentFrame(anchorFrame)
       onRecordEvent('playback', 'selection-anchor', { anchorFrame })
-      onSeekFrame?.(anchorFrame)
     },
-    [frameFromClientX, onRecordEvent, onSeekFrame, onSetCurrentFrame],
+    [frameFromClientX, onRecordEvent],
   )
 
   const handleSelectionPointerMove = useCallback(
@@ -126,9 +145,8 @@ export function useTrajectoryPlotSelection({
         anchorFrame: selectionAnchorFrameRef.current,
         currentFrame: pointerFrame,
       })
-      updateSelectedRange(selectionAnchorFrameRef.current, pointerFrame)
     },
-    [frameFromClientX, onRecordEvent, onSelectionStart, updateSelectedRange],
+    [frameFromClientX, onRecordEvent, onSelectionStart],
   )
 
   const handleSelectionPointerUp = useCallback(
@@ -151,6 +169,10 @@ export function useTrajectoryPlotSelection({
           : Math.abs(event.clientX - selectionAnchorXRef.current)
 
       if (pointerDistance >= 4 || selectionDraggingRef.current) {
+        if (!selectionDraggingRef.current) {
+          onSelectionStart?.()
+        }
+
         const nextRange: [number, number] = [
           Math.min(selectionAnchorFrameRef.current, pointerFrame),
           Math.max(selectionAnchorFrameRef.current, pointerFrame),
@@ -162,6 +184,9 @@ export function useTrajectoryPlotSelection({
         })
         updateSelectedRange(nextRange[0], nextRange[1])
         onSelectionComplete?.(nextRange)
+      } else {
+        onSetCurrentFrame(pointerFrame)
+        onSeekFrame?.(pointerFrame)
       }
 
       selectionDraggingRef.current = false
@@ -169,9 +194,38 @@ export function useTrajectoryPlotSelection({
       selectionAnchorXRef.current = null
       setSelectionDragging(false)
     },
-    [frameFromClientX, onRecordEvent, onSelectionComplete, updateSelectedRange],
+    [
+      frameFromClientX,
+      onRecordEvent,
+      onSeekFrame,
+      onSelectionComplete,
+      onSelectionStart,
+      onSetCurrentFrame,
+      updateSelectedRange,
+    ],
   )
 
+  const handleSelectionPointerCancel = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (
+        'hasPointerCapture' in event.currentTarget &&
+        event.currentTarget.hasPointerCapture(event.pointerId)
+      ) {
+        event.currentTarget.releasePointerCapture(event.pointerId)
+      }
+
+      const wasDragging = selectionDraggingRef.current
+      selectionDraggingRef.current = false
+      selectionAnchorFrameRef.current = null
+      selectionAnchorXRef.current = null
+      setSelectionDragging(false)
+      onRecordEvent('playback', 'selection-clear', { source: 'pointer-cancel' })
+      if (wasDragging) {
+        onSelectionCancel?.()
+      }
+    },
+    [onRecordEvent, onSelectionCancel],
+  )
   const handleSelectionContextMenu = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       if (!selectedRange || currentEpisodeLength <= 1) {
@@ -201,6 +255,7 @@ export function useTrajectoryPlotSelection({
     handleSelectionPointerDown,
     handleSelectionPointerMove,
     handleSelectionPointerUp,
+    handleSelectionPointerCancel,
     handleSelectionContextMenu,
   }
 }

@@ -300,6 +300,11 @@ export const JudgePanel = memo(function JudgePanel({
         </div>
       )}
 
+      <p className="text-muted-foreground text-xs">
+        VLM (vision-language model) evaluates task outcomes. GVL uses shuffle-and-rank scoring; VOC
+        (value-order correlation) summarizes whether progress increases in the expected order.
+      </p>
+
       <div className="space-y-1.5 border-t pt-2">
         <label
           htmlFor="vlm-process-method"
@@ -409,7 +414,16 @@ export const JudgePanel = memo(function JudgePanel({
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => void batch.applyLabelsAll({ processMethod: effectiveMethod })}
+                onClick={() => {
+                  if (
+                    globalThis.confirm?.(
+                      `Replace the outcome label on ${totalEpisodes} episodes? Existing custom labels are preserved.`,
+                    ) ??
+                    true
+                  ) {
+                    void batch.applyLabelsAll({ processMethod: effectiveMethod })
+                  }
+                }}
                 disabled={busy}
               >
                 <Tags className="mr-1 size-3" />

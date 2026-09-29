@@ -28,7 +28,7 @@ function CommandInput({
       <CommandPrimitive.Input
         ref={ref}
         className={cn(
-          'placeholder:text-muted-foreground flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-hidden disabled:cursor-not-allowed disabled:opacity-50',
+          'placeholder:text-muted-foreground focus-visible:ring-ring flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-50',
           className,
         )}
         {...props}

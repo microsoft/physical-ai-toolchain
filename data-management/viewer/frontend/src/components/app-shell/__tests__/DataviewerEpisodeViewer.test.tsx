@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DataviewerEpisodeViewer } from '../DataviewerEpisodeViewer'
@@ -17,7 +18,11 @@ vi.mock('@/stores', () => ({
 
 vi.mock('@/components/annotation-workspace/AnnotationWorkspace', () => ({
   AnnotationWorkspace: (props: Record<string, unknown>) => (
-    <div data-testid="annotation-workspace" data-diagnostics={String(props.diagnosticsVisible)} />
+    <div data-testid="annotation-workspace" data-diagnostics={String(props.diagnosticsVisible)}>
+      <button type="button" onClick={() => (props.onSaveAndNextEpisode as () => void)()}>
+        Save and continue
+      </button>
+    </div>
   ),
 }))
 
@@ -52,6 +57,26 @@ describe('DataviewerEpisodeViewer', () => {
     expect(screen.getByTestId('annotation-workspace')).toBeInTheDocument()
   })
 
+  it('keeps an empty atomic save status region mounted before publishing an update', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useEpisode).mockReturnValue({
+      data: { meta: { index: 0 }, episode_index: 0, length: 10 },
+      isLoading: false,
+      error: null,
+    } as unknown as ReturnType<typeof useEpisode>)
+
+    render(<DataviewerEpisodeViewer {...baseProps} />)
+
+    const status = screen.getByTestId('episode-navigation-status')
+    expect(status).toHaveAttribute('role', 'status')
+    expect(status).toHaveAttribute('aria-atomic', 'true')
+    expect(status).toBeEmptyDOMElement()
+
+    await user.click(screen.getByRole('button', { name: 'Save and continue' }))
+
+    expect(status).toHaveTextContent('Episode changes saved.')
+  })
+
   it('shows the loading message while the episode is fetching', () => {
     vi.mocked(useEpisode).mockReturnValue({
       data: undefined,
@@ -61,7 +86,7 @@ describe('DataviewerEpisodeViewer', () => {
 
     render(<DataviewerEpisodeViewer {...baseProps} episodeIndex={3} />)
 
-    expect(screen.getByText('Loading episode 3...')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Loading episode 3...')
     expect(screen.queryByTestId('annotation-workspace')).not.toBeInTheDocument()
   })
 
@@ -74,7 +99,7 @@ describe('DataviewerEpisodeViewer', () => {
 
     render(<DataviewerEpisodeViewer {...baseProps} />)
 
-    expect(screen.getByText('Error loading episode: boom')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Error loading episode: boom')
     expect(screen.queryByTestId('annotation-workspace')).not.toBeInTheDocument()
   })
 
@@ -87,7 +112,7 @@ describe('DataviewerEpisodeViewer', () => {
 
     render(<DataviewerEpisodeViewer {...baseProps} />)
 
-    expect(screen.getByText('No episode data')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('No episode data')
     expect(screen.queryByTestId('annotation-workspace')).not.toBeInTheDocument()
   })
 

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // SPDX-License-Identifier: MIT
 
-import React from 'react';
+import React, { useId } from 'react';
 import styles from './styles.module.css';
 
 export interface HeroSectionProps {
@@ -10,13 +10,17 @@ export interface HeroSectionProps {
 }
 
 export default function HeroSection({ title, subtitle }: HeroSectionProps): React.ReactElement {
+  const titleId = useId();
+
   return (
-    <header className={styles.hero}>
-      <div className={styles.heroPattern} />
+    <section className={styles.hero} aria-labelledby={titleId}>
+      <div className={styles.heroPattern} aria-hidden="true" />
       <div className={styles.heroContent}>
-        <h1 className={styles.heroTitle}>{title}</h1>
+        <h1 className={styles.heroTitle} id={titleId}>
+          {title}
+        </h1>
         <p className={styles.heroSubtitle}>{subtitle}</p>
       </div>
-    </header>
+    </section>
   );
 }

@@ -24,7 +24,7 @@
 }
 
 .heroTitle {
-  color: var(--ms-learn-hero-text);
+  color: var(--ms-learn-hero-text) !important;
   font-size: 40px;
   font-weight: 600;
   line-height: 45px;

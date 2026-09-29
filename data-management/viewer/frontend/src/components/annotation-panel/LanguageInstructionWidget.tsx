@@ -26,7 +26,7 @@ import { cn } from '@/lib/utils'
 import { useAnnotationStore } from '@/stores'
 import { useDatasetStore } from '@/stores/dataset-store'
 import { useEpisodeStore } from '@/stores/episode-store'
-import type { InstructionSource } from '@/types'
+import { type InstructionSource, normalizeLanguageTag } from '@/types'
 
 import { FormSection } from './FormSection'
 
@@ -36,6 +36,8 @@ const SOURCE_OPTIONS: { value: InstructionSource; label: string }[] = [
   { value: 'llm-generated', label: 'LLM Generated' },
   { value: 'retroactive', label: 'Retroactive' },
 ]
+
+const LANGUAGE_GUIDANCE_ID = 'lang-language-guidance'
 
 export function LanguageInstructionWidget() {
   useEpisodeAnnotations()
@@ -159,6 +161,8 @@ export function LanguageInstructionWidget() {
   }
 
   const hasInstruction = langInst.instruction.trim().length > 0
+  const normalizedLanguage = normalizeLanguageTag(langInst.language)
+  const renderedLanguage = normalizedLanguage ?? 'en'
 
   return (
     <Card>
@@ -176,6 +180,7 @@ export function LanguageInstructionWidget() {
         <FormSection label="Task Instruction" htmlFor="lang-instruction">
           <Textarea
             id="lang-instruction"
+            lang={renderedLanguage}
             value={langInst.instruction}
             onChange={(e) => updateLanguageInstruction({ instruction: e.target.value })}
             placeholder="Describe the task, e.g. 'Hand the box from left arm to right arm'"
@@ -209,9 +214,21 @@ export function LanguageInstructionWidget() {
               id="lang-language"
               value={langInst.language}
               onChange={(e) => updateLanguageInstruction({ language: e.target.value })}
-              maxLength={10}
+              onBlur={() => {
+                if (normalizedLanguage && normalizedLanguage !== langInst.language) {
+                  updateLanguageInstruction({ language: normalizedLanguage })
+                }
+              }}
+              aria-invalid={!normalizedLanguage}
+              aria-describedby={!normalizedLanguage ? LANGUAGE_GUIDANCE_ID : undefined}
+              maxLength={35}
               className="font-mono"
             />
+            {!normalizedLanguage && (
+              <p id={LANGUAGE_GUIDANCE_ID} className="text-status-danger-foreground text-xs">
+                Use a BCP 47 language tag such as en, en-US, or zh-Hant.
+              </p>
+            )}
           </FormSection>
         </div>
 
@@ -222,7 +239,9 @@ export function LanguageInstructionWidget() {
                 key={i}
                 className={cn('bg-muted/30 flex items-start gap-2 rounded-md border px-2 py-1.5')}
               >
-                <span className="flex-1 text-xs">{p}</span>
+                <span lang={renderedLanguage} className="flex-1 text-xs">
+                  {p}
+                </span>
                 <button
                   type="button"
                   onClick={() => handleRemoveParaphrase(i)}
@@ -267,7 +286,9 @@ export function LanguageInstructionWidget() {
                 className="bg-muted/30 flex items-start gap-2 rounded-md border px-2 py-1.5"
               >
                 <span className="text-muted-foreground shrink-0 text-xs font-medium">{i + 1}.</span>
-                <span className="flex-1 text-xs">{s}</span>
+                <span lang={renderedLanguage} className="flex-1 text-xs">
+                  {s}
+                </span>
                 <button
                   type="button"
                   onClick={() => handleRemoveSubtask(i)}
@@ -310,7 +331,7 @@ export function LanguageInstructionWidget() {
             size="sm"
             className="flex-1 text-xs"
             onClick={saveAnnotation.save}
-            disabled={!isDirty || saveAnnotation.isPending}
+            disabled={!isDirty || !normalizedLanguage || saveAnnotation.isPending}
           >
             {saveAnnotation.isPending ? (
               <Loader2 className="mr-2 h-3 w-3 animate-spin" />
@@ -323,7 +344,16 @@ export function LanguageInstructionWidget() {
             variant="ghost"
             size="sm"
             className="text-destructive hover:text-destructive flex-1 text-xs"
-            onClick={clearLanguageInstruction}
+            onClick={() => {
+              if (
+                globalThis.confirm?.(
+                  'Remove this instruction, its paraphrases, and its subtasks?',
+                ) ??
+                true
+              ) {
+                clearLanguageInstruction()
+              }
+            }}
           >
             <Trash2 className="mr-2 h-3 w-3" />
             Remove Instruction

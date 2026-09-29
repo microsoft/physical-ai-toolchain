@@ -90,6 +90,22 @@ describe('JointConfigDefaultsEditor', () => {
     expect(screen.getByText('Custom Joint')).toBeInTheDocument()
   })
 
+  it('reveals joint actions when keyboard focus enters a chip', () => {
+    render(<JointConfigDefaultsEditor {...baseProps} />)
+
+    const editButton = screen.getAllByLabelText('Edit joint label')[0]
+    const chip = editButton.closest('.group\\/chip')
+
+    expect(chip).toHaveClass('focus-within:ring-2')
+    expect(editButton).toHaveClass('group-focus-within/chip:opacity-100')
+    expect(screen.getAllByLabelText('Move to group')[0]).toHaveClass(
+      'group-focus-within/chip:opacity-100',
+    )
+    expect(screen.getAllByLabelText('Remove joint from group')[0]).toHaveClass(
+      'group-focus-within/chip:opacity-100',
+    )
+  })
+
   it('allows editing a group label', async () => {
     const user = userEvent.setup()
     render(<JointConfigDefaultsEditor {...baseProps} />)
@@ -290,5 +306,12 @@ describe('JointConfigDefaultsEditor', () => {
       await user.click(screen.getByText('Save'))
       expect(onSave).not.toHaveBeenCalled()
     })
+  })
+  it('uses minimum target dimensions for compact joint actions', () => {
+    render(<JointConfigDefaultsEditor {...baseProps} />)
+
+    for (const name of ['Edit joint label', 'Move to group', 'Remove joint from group']) {
+      expect(screen.getAllByRole('button', { name })[0]).toHaveClass('h-6', 'w-6')
+    }
   })
 })

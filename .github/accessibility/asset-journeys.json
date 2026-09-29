@@ -1,0 +1,3349 @@
+{
+  "schema_version": "1.0.0",
+  "assets": [
+    {
+      "asset_id": "ASSET-VIEWER",
+      "name": "Dataset Viewer",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "ownership": "PROJECT",
+      "platform": "WEB",
+      "activation": "The local Viewer entry point is reachable",
+      "invalidation": "Viewer composition, behavior, authentication, media, or dependency changes",
+      "retest": "Run affected Viewer journeys and preserve unexecuted states",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts"
+      ],
+      "dependency_refs": [
+        "project-user-ui-surface-area-plan:P02-T02"
+      ]
+    },
+    {
+      "asset_id": "ASSET-DOCUSAURUS",
+      "name": "Physical AI Toolchain documentation site",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation and accessibility owners",
+      "ownership": "PROJECT",
+      "platform": "WEB",
+      "activation": "The immutable local Docusaurus production build is served by the project static server",
+      "invalidation": "Documentation content, Docusaurus configuration, theme, plugin, dependency, route, search index, or accessibility contract changes",
+      "retest": "Rebuild locally and run affected DCS journeys against the exact build digest",
+      "evidence_refs": [
+        "docs/docusaurus",
+        ".github/workflows/docusaurus-tests.yml"
+      ],
+      "dependency_refs": [
+        "GitHub Pages hosting and provider behavior remain excluded"
+      ]
+    },
+    {
+      "asset_id": "ASSET-FASTAPI-DOCS",
+      "name": "Generated FastAPI documentation",
+      "lifecycle": "CONDITIONAL",
+      "owner": "API owners and FastAPI provider",
+      "ownership": "SHARED",
+      "platform": "GENERATED_WEB",
+      "activation": "An application is launched and its docs route is intentionally exposed",
+      "invalidation": "FastAPI, renderer, schema, route, title, security, or exposure changes",
+      "retest": "Run both renderers against all three schemas",
+      "evidence_refs": [
+        "data-management/viewer/backend/src/api/main.py",
+        "evaluation/vlm_judge/api.py",
+        "evaluation/vlm_judge/openai_shim.py"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "asset_id": "ASSET-GITHUB-INTAKE",
+      "name": "GitHub issue intake",
+      "lifecycle": "ACTIVE",
+      "owner": "Repository owners and GitHub provider",
+      "ownership": "SHARED",
+      "platform": "GITHUB_HOSTED",
+      "activation": "GitHub issues are enabled for a representative account",
+      "invalidation": "Issue form, chooser, contact link, permission, or GitHub rendering changes",
+      "retest": "Validate authored source and repeat controlled provider tasks",
+      "evidence_refs": [
+        ".github/ISSUE_TEMPLATE"
+      ],
+      "dependency_refs": [
+        "Authorized controlled GitHub repository and representative roles"
+      ]
+    },
+    {
+      "asset_id": "ASSET-GITHUB-ACTIONS",
+      "name": "GitHub Actions dispatch and run surfaces",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Repository owners and GitHub provider",
+      "ownership": "SHARED",
+      "platform": "GITHUB_HOSTED",
+      "activation": "A representative account has approved workflow permissions",
+      "invalidation": "Dispatch input, workflow summary, artifact, permission, or GitHub rendering changes",
+      "retest": "Validate all authored inputs and repeat only non-destructive controlled runs",
+      "evidence_refs": [
+        ".github/workflows"
+      ],
+      "dependency_refs": [
+        "Authorized controlled GitHub repository and safe workflow"
+      ]
+    },
+    {
+      "asset_id": "ASSET-OSMO",
+      "name": "NVIDIA OSMO interface",
+      "lifecycle": "CONDITIONAL",
+      "owner": "Platform team and NVIDIA provider",
+      "ownership": "SHARED",
+      "platform": "PROVIDER",
+      "activation": "A versioned private deployment, route, role, and supported browser task exist",
+      "invalidation": "OSMO version, ingress, authentication, role, workflow, or provider behavior changes",
+      "retest": "Run a synthetic least-privilege critical task with denial and recovery",
+      "evidence_refs": [
+        "infrastructure/setup/values/osmo-control-plane.yaml"
+      ],
+      "dependency_refs": [
+        "Authorized non-production OSMO environment"
+      ]
+    },
+    {
+      "asset_id": "ASSET-GRAFANA",
+      "name": "Azure Managed Grafana shell and absent project dashboards",
+      "lifecycle": "CONDITIONAL",
+      "owner": "Observability team and Microsoft provider",
+      "ownership": "SHARED",
+      "platform": "PROVIDER",
+      "activation": "The managed instance is deployed and a representative role is approved",
+      "invalidation": "Provider version, network, role, data source, dashboard, panel, or alert changes",
+      "retest": "Test the managed shell separately from project dashboard content",
+      "evidence_refs": [
+        "infrastructure/terraform/modules/platform/observability.tf",
+        "fleet-intelligence/dashboards/grafana/fleet-overview.json"
+      ],
+      "dependency_refs": [
+        "Project dashboard content is absent"
+      ]
+    },
+    {
+      "asset_id": "ASSET-AZURE-ML",
+      "name": "Azure ML Studio",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Training team and Microsoft provider",
+      "ownership": "SHARED",
+      "platform": "PROVIDER",
+      "activation": "A private non-production workspace, representative role, and synthetic job exist",
+      "invalidation": "Workspace, role, network, provider, job, artifact, or deep-link changes",
+      "retest": "Run least-privilege job inspection and failure recovery without retaining identifiers",
+      "evidence_refs": [
+        "training",
+        "evaluation"
+      ],
+      "dependency_refs": [
+        "Authorized non-production Azure ML environment"
+      ]
+    },
+    {
+      "asset_id": "ASSET-ISAAC-GUI",
+      "name": "Isaac Sim and Isaac Lab graphical interface",
+      "lifecycle": "CONDITIONAL",
+      "owner": "Simulation team and NVIDIA provider",
+      "ownership": "SHARED",
+      "platform": "NATIVE",
+      "activation": "A supported workstation or remote display exposes the native interface",
+      "invalidation": "Isaac version, scene, launcher, display transport, or supported host changes",
+      "retest": "Run native keyboard, magnification, contrast, motion, and equivalent-output tasks",
+      "evidence_refs": [
+        "training/rl/scripts/launch.py"
+      ],
+      "dependency_refs": [
+        "Supported graphical host and qualified reviewer"
+      ]
+    },
+    {
+      "asset_id": "ASSET-THINLINC-NATIVE",
+      "name": "ThinLinc native client",
+      "lifecycle": "CONDITIONAL",
+      "owner": "Infrastructure team and ThinLinc provider",
+      "ownership": "SHARED",
+      "platform": "REMOTE",
+      "activation": "Bootstrap inputs are packaged and native-client deployment succeeds",
+      "invalidation": "Client, host, authentication, network, scaling, or remote application changes",
+      "retest": "Test native client, remote desktop, and remote application as separate subjects",
+      "evidence_refs": [
+        "infrastructure/setup/optional/isaac-sim-vm"
+      ],
+      "dependency_refs": [
+        "Successful private workstation deployment"
+      ]
+    },
+    {
+      "asset_id": "ASSET-THINLINC-WEB",
+      "name": "ThinLinc Web Access",
+      "lifecycle": "ABSENT",
+      "owner": "Infrastructure team and ThinLinc provider",
+      "ownership": "SHARED",
+      "platform": "REMOTE",
+      "activation": "A supported browser route, network, TLS, and launch contract is implemented",
+      "invalidation": "Web client, route, TLS, network, host, or remote application changes",
+      "retest": "Test Web Access independently after activation",
+      "evidence_refs": [
+        "infrastructure/setup/optional/isaac-sim-vm"
+      ],
+      "dependency_refs": [
+        "Current source does not prove a reachable Web Access route"
+      ]
+    },
+    {
+      "asset_id": "ASSET-TERMINAL",
+      "name": "Operator terminal workflows",
+      "lifecycle": "ACTIVE",
+      "owner": "Domain script owners",
+      "ownership": "PROJECT",
+      "platform": "CLI",
+      "activation": "A documented public command is executable in its supported environment",
+      "invalidation": "Command, path, prompt, output, consequence, timeout, or recovery changes",
+      "retest": "Run the affected terminal archetype in TTY and redirected modes",
+      "evidence_refs": [
+        "setup-dev.sh",
+        "data-management/viewer/start.sh",
+        "training/stream.py"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "asset_id": "ASSET-CONVERSATION",
+      "name": "VS Code and GitHub conversational workflows",
+      "lifecycle": "ACTIVE",
+      "owner": "Agent and workflow owners with host providers",
+      "ownership": "SHARED",
+      "platform": "CONVERSATION",
+      "activation": "The agent or workflow is installed in a supported host",
+      "invalidation": "Prompt, tool approval, progress, host, path, error, or handoff changes",
+      "retest": "Run representative safe conversations in each host",
+      "evidence_refs": [
+        ".github/agents/dataviewer-developer.agent.md",
+        ".github/workflows/aw-dependabot-pr-review.md"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "asset_id": "ASSET-DOCUMENTS",
+      "name": "GitHub-rendered documents and diagrams",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation and domain owners",
+      "ownership": "SHARED",
+      "platform": "DOCUMENT",
+      "activation": "A tracked document is intended for human use",
+      "invalidation": "Content, table, diagram, renderer, audience, or support role changes",
+      "retest": "Validate every authored document and sample each unique rendering family",
+      "evidence_refs": [
+        "README.md",
+        "SUPPORT.md",
+        "docs",
+        "infrastructure/terraform/modules/platform/TERRAFORM.md"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "asset_id": "ASSET-GENERATED",
+      "name": "Generated decision artifacts and downloads",
+      "lifecycle": "ACTIVE",
+      "owner": "Producer and consumer owners",
+      "ownership": "PROJECT",
+      "platform": "GENERATED_ARTIFACT",
+      "activation": "A person uses generated output to make or review a decision",
+      "invalidation": "Format, schema, renderer, consumer, units, threshold, encoding, media, or delivery changes",
+      "retest": "Compare each decision-bearing artifact with its bound accessible equivalent",
+      "evidence_refs": [
+        "evaluation/metrics",
+        "evaluation/vlm_judge",
+        "evaluation/hil/no_command_runner.py",
+        "data-management/viewer/backend/src/api/services/hdf5_exporter.py"
+      ],
+      "dependency_refs": [
+        "Qualified media or graphics review for semantic equivalence"
+      ]
+    },
+    {
+      "asset_id": "ASSET-DORMANT-VIEWER",
+      "name": "Dormant Viewer modules",
+      "lifecycle": "DORMANT",
+      "owner": "Viewer team",
+      "ownership": "PROJECT",
+      "platform": "WEB",
+      "activation": "A production import, route, composition, or feature flag makes a module reachable",
+      "invalidation": "Import closure or dormant module source changes",
+      "retest": "Add newly reachable tasks and states before transferring component evidence",
+      "evidence_refs": [
+        "data-management/viewer/frontend/src"
+      ],
+      "dependency_refs": [
+        "Forty-four source-only TSX modules remain outside the production import closure"
+      ]
+    },
+    {
+      "asset_id": "ASSET-ROBOT-CONTROLS",
+      "name": "Robot operation, alarms, stop, reset, and safe state",
+      "lifecycle": "ABSENT",
+      "owner": "Robot integrator and safety authority",
+      "ownership": "ORGANIZATIONAL",
+      "platform": "PHYSICAL",
+      "activation": "Exact hardware, command, fault, stop, reset, alarm, and protective-device paths exist",
+      "invalidation": "Any robot, controller, driver, pendant, safety, or operator workflow changes",
+      "retest": "Run only an authorized accessibility and safety protocol after activation",
+      "evidence_refs": [
+        "evaluation/hil/no_command_runner.py",
+        "fleet-deployment/inference"
+      ],
+      "dependency_refs": [
+        "No-command evidence cannot transfer to physical operation"
+      ]
+    },
+    {
+      "asset_id": "ASSET-FLEET",
+      "name": "Fleet rollout, monitoring, drift, and retraining",
+      "lifecycle": "PLANNED",
+      "owner": "Fleet deployment and intelligence owners",
+      "ownership": "PROJECT",
+      "platform": "PROVIDER",
+      "activation": "Desired-state resources, gates, rollout, rollback, dashboards, alerts, and robot mapping are executable",
+      "invalidation": "Any activated fleet workflow, provider, dashboard, alert, or role changes",
+      "retest": "Create exact tasks and evidence bindings for each activated decision and handoff",
+      "evidence_refs": [
+        "fleet-deployment",
+        "fleet-intelligence"
+      ],
+      "dependency_refs": [
+        "Current resources remain planned or placeholder"
+      ]
+    },
+    {
+      "asset_id": "ASSET-MACHINE-PAYLOADS",
+      "name": "Machine-only payloads",
+      "lifecycle": "MACHINE_ONLY",
+      "owner": "Producer and consumer owners",
+      "ownership": "PROJECT",
+      "platform": "MACHINE_ONLY",
+      "activation": "A named human decision requires direct interpretation of a payload",
+      "invalidation": "Payload schema, producer, consumer, or human decision role changes",
+      "retest": "Use integrity tests until activation, then require a human-readable equivalent",
+      "evidence_refs": [
+        "data-pipeline",
+        "training",
+        "evaluation"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "asset_id": "ASSET-CAPTURE-CONTROLS",
+      "name": "Capture triggers, warnings, alerts, pause, stop, and recovery",
+      "lifecycle": "ABSENT",
+      "owner": "Data capture owner",
+      "ownership": "PROJECT",
+      "platform": "CLI",
+      "activation": "An owning runtime implements a configured human control or status",
+      "invalidation": "Capture runtime, trigger, warning, alert, pause, stop, or recovery changes",
+      "retest": "Create exact human tasks and run source, terminal, and complete-process evidence after activation",
+      "evidence_refs": [
+        "data-pipeline/capture"
+      ],
+      "dependency_refs": [
+        "Configuration models exist without an owning runtime service"
+      ]
+    },
+    {
+      "asset_id": "ASSET-SUPPORT",
+      "name": "Accessibility help, accommodation, alternate format, escalation, and resolution",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Repository and organizational support owners",
+      "ownership": "ORGANIZATIONAL",
+      "platform": "CONVERSATION",
+      "activation": "A controlled support channel and accountable owner can complete a synthetic request",
+      "invalidation": "Support channel, owner, service level, privacy, alternate format, accommodation, or statement changes",
+      "retest": "Run intake through acknowledgment, response, escalation, correction, and closure",
+      "evidence_refs": [
+        "SUPPORT.md",
+        ".github/ISSUE_TEMPLATE"
+      ],
+      "dependency_refs": [
+        "Current links and forms do not establish support service outcomes"
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "fixture_id": "FIXTURE-VIEWER",
+      "version": "1.0.0",
+      "description": "Synthetic Viewer catalog, episode, media, annotations, errors, progress, and recovery states",
+      "environment_class": "LOCAL_CI",
+      "synthetic": true
+    },
+    {
+      "fixture_id": "FIXTURE-DOCUSAURUS",
+      "version": "1.0.0",
+      "description": "Immutable local Docusaurus build with route, Mermaid, search, source, configuration, dependency, viewport, and preference bindings",
+      "environment_class": "LOCAL_CI",
+      "synthetic": false
+    },
+    {
+      "fixture_id": "FIXTURE-API-DOCS",
+      "version": "1.0.0",
+      "description": "Loopback schemas with safe successes, authentication failures, validation errors, and long nested content",
+      "environment_class": "LOCAL_CI",
+      "synthetic": true
+    },
+    {
+      "fixture_id": "FIXTURE-GITHUB",
+      "version": "1.0.0",
+      "description": "Controlled repository content, representative roles, disposable issues, and non-destructive workflow results",
+      "environment_class": "NON_PRODUCTION_PROVIDER",
+      "synthetic": true
+    },
+    {
+      "fixture_id": "FIXTURE-OSMO",
+      "version": "1.0.0",
+      "description": "Synthetic workflow in an authorized private non-production deployment",
+      "environment_class": "NON_PRODUCTION_PROVIDER",
+      "synthetic": true
+    },
+    {
+      "fixture_id": "FIXTURE-AZURE",
+      "version": "1.0.0",
+      "description": "Synthetic telemetry and jobs in authorized non-production provider environments",
+      "environment_class": "NON_PRODUCTION_PROVIDER",
+      "synthetic": true
+    },
+    {
+      "fixture_id": "FIXTURE-NATIVE",
+      "version": "1.0.0",
+      "description": "Disposable workstation, remote session, and geometric robot scene without private content",
+      "environment_class": "LOCAL_CONTROLLED",
+      "synthetic": true
+    },
+    {
+      "fixture_id": "FIXTURE-TERMINAL",
+      "version": "1.0.0",
+      "description": "Safe temporary command inputs and deterministic success, failure, cancellation, and timeout states",
+      "environment_class": "LOCAL_CONTROLLED",
+      "synthetic": true
+    },
+    {
+      "fixture_id": "FIXTURE-CONVERSATION",
+      "version": "1.0.0",
+      "description": "Harmless tool approvals, rejections, stale paths, progress, interruption, and recovery prompts",
+      "environment_class": "LOCAL_CONTROLLED",
+      "synthetic": true
+    },
+    {
+      "fixture_id": "FIXTURE-DOCUMENT",
+      "version": "1.0.0",
+      "description": "Representative short, long, tabular, diagram, support, and generated-reference documents",
+      "environment_class": "LOCAL_CONTROLLED",
+      "synthetic": true
+    },
+    {
+      "fixture_id": "FIXTURE-GENERATED",
+      "version": "1.0.0",
+      "description": "Synthetic metrics, plots, previews, media, structured data, binary summaries, and delivery failures",
+      "environment_class": "LOCAL_CONTROLLED",
+      "synthetic": true
+    },
+    {
+      "fixture_id": "FIXTURE-ACTIVATION",
+      "version": "1.0.0",
+      "description": "Activation contract only; no unavailable runtime, provider, support, or physical outcome is fabricated",
+      "environment_class": "LOCAL_CONTROLLED",
+      "synthetic": true
+    }
+  ],
+  "journeys": [
+    {
+      "journey_id": "DCS01",
+      "asset_id": "ASSET-DOCUSAURUS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation team",
+      "role": "Documentation reader",
+      "platform": "WEB",
+      "state": "All built routes, direct loads, client navigation, generated not-found, and content-feature inventory",
+      "task": "Reach and identify every documentation route",
+      "expected_outcome": "Route, title, language, landmarks, headings, links, non-text content, controls, and activation triggers reconcile with the immutable build",
+      "fixture_id": "FIXTURE-DOCUSAURUS",
+      "predecessor_ids": [],
+      "successor_ids": [
+        "DCS02",
+        "DCS05",
+        "DCS12"
+      ],
+      "handoff": null,
+      "activation": "The local production build and manifests exist",
+      "invalidation": "Source, route, title, language, template, search, or feature inventory changes",
+      "retest": "Rebuild and crawl the complete route manifest",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "PLAYWRIGHT_TREE"
+      ],
+      "evidence_refs": [
+        "docs/docusaurus/e2e/site-crawl.spec.ts",
+        "docs/docusaurus/e2e/route-inventory.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "DCS02",
+      "asset_id": "ASSET-DOCUSAURUS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation team",
+      "role": "Documentation reader",
+      "platform": "WEB",
+      "state": "Home, documentation hub, tier, article, in-page heading, pagination, breadcrumb return, and footer handoff",
+      "task": "Browse and read documentation",
+      "expected_outcome": "The complete browse process preserves meaning, order, location, and focus",
+      "fixture_id": "FIXTURE-DOCUSAURUS",
+      "predecessor_ids": [
+        "DCS01"
+      ],
+      "successor_ids": [
+        "DCS03",
+        "DCS04",
+        "DCS07",
+        "DCS08",
+        "DCS09"
+      ],
+      "handoff": "External links end at a clearly named boundary",
+      "activation": "Representative routes are present",
+      "invalidation": "Navigation, article, pagination, breadcrumb, footer, or focus behavior changes",
+      "retest": "Run the complete browse and read process",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "COGNITIVE_REVIEW"
+      ],
+      "evidence_refs": [
+        "docs/docusaurus/e2e/navigation-search.spec.ts",
+        "docs/docusaurus/e2e/structure.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "DCS03",
+      "asset_id": "ASSET-DOCUSAURUS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation team",
+      "role": "Keyboard user",
+      "platform": "WEB",
+      "state": "Desktop skip link, global navigation, Tiers menu, sidebar categories, color mode, edit link, footer, and external handoffs",
+      "task": "Operate desktop navigation",
+      "expected_outcome": "Every control is reachable, role-correct, operable, escapable, and focus preserving",
+      "fixture_id": "FIXTURE-DOCUSAURUS",
+      "predecessor_ids": [
+        "DCS02"
+      ],
+      "successor_ids": [
+        "DCS10",
+        "DCS11"
+      ],
+      "handoff": "Edit and repository links transfer to external GitHub surfaces",
+      "activation": "Desktop navigation is rendered",
+      "invalidation": "Navbar, sidebar, theme, footer, or external-link behavior changes",
+      "retest": "Run forward, reverse, activation, close, and route tasks",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_POINTER"
+      ],
+      "evidence_refs": [
+        "docs/docusaurus/e2e/navigation-search.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "DCS04",
+      "asset_id": "ASSET-DOCUSAURUS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation team",
+      "role": "Mobile or narrow-viewport user",
+      "platform": "WEB",
+      "state": "Mobile navigation, sidebar categories, search, responsive table of contents, route activation, close, focus return, and orientation",
+      "task": "Navigate responsive documentation",
+      "expected_outcome": "Responsive controls remain available, ordered, unobscured, and operable",
+      "fixture_id": "FIXTURE-DOCUSAURUS",
+      "predecessor_ids": [
+        "DCS02"
+      ],
+      "successor_ids": [
+        "DCS10",
+        "DCS11"
+      ],
+      "handoff": null,
+      "activation": "A 320 or 390 CSS-pixel viewport is configured",
+      "invalidation": "Responsive navigation, search, TOC, orientation, or focus changes",
+      "retest": "Run portrait, landscape, narrow, and open-state tasks",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_VISUAL"
+      ],
+      "evidence_refs": [
+        "docs/docusaurus/e2e/adaptive.spec.ts",
+        "docs/docusaurus/e2e/structure.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "DCS05",
+      "asset_id": "ASSET-DOCUSAURUS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation team",
+      "role": "Search user",
+      "platform": "WEB",
+      "state": "Navbar search rest, focus, attach, open, results, first, last, footer, clear, empty, Escape, exit, route, reattach, and multiple instances",
+      "task": "Search and recover from the navbar",
+      "expected_outcome": "Computed semantics, selection, position, focus, and status changes match the exact state",
+      "fixture_id": "FIXTURE-DOCUSAURUS",
+      "predecessor_ids": [
+        "DCS01"
+      ],
+      "successor_ids": [
+        "DCS06",
+        "DCS09",
+        "DCS10"
+      ],
+      "handoff": "Result activation enters the selected documentation route",
+      "activation": "The generated search index is loaded",
+      "invalidation": "Search plugin, wrapper, index, result, status, or focus behavior changes",
+      "retest": "Run every navbar search state and branch",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION"
+      ],
+      "evidence_refs": [
+        "docs/docusaurus/e2e/navigation-search.spec.ts",
+        "docs/docusaurus/src/theme/SearchBar/index.tsx"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "DCS06",
+      "asset_id": "ASSET-DOCUSAURUS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation team",
+      "role": "Search user",
+      "platform": "WEB",
+      "state": "SearchPage direct query, query editing, settled count, no result, activation, browser return, bypass order, route focus, and status timing",
+      "task": "Search and recover on the dedicated page",
+      "expected_outcome": "Results settle and announce through programmatic status without stealing focus",
+      "fixture_id": "FIXTURE-DOCUSAURUS",
+      "predecessor_ids": [
+        "DCS05"
+      ],
+      "successor_ids": [
+        "DCS13"
+      ],
+      "handoff": "Result activation enters the selected documentation route",
+      "activation": "The generated SearchPage route and index exist",
+      "invalidation": "SearchPage query, result, status, bypass, or focus behavior changes",
+      "retest": "Run matching, empty, activation, return, and focus tasks",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION"
+      ],
+      "evidence_refs": [
+        "docs/docusaurus/src/theme/SearchPage/index.tsx"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "DCS07",
+      "asset_id": "ASSET-DOCUSAURUS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation team",
+      "role": "Technical documentation reader",
+      "platform": "WEB",
+      "state": "Tables, captions, keyboard scroll, alerts, code, lists, task checkboxes, hash links, and article labels",
+      "task": "Read and operate rich article content",
+      "expected_outcome": "Structure, controls, order, and labels remain available without visual-only interpretation",
+      "fixture_id": "FIXTURE-DOCUSAURUS",
+      "predecessor_ids": [
+        "DCS02"
+      ],
+      "successor_ids": [
+        "DCS13"
+      ],
+      "handoff": null,
+      "activation": "Representative rich-content routes exist",
+      "invalidation": "Markdown renderer, MDX component, table, alert, code, list, task, or hash behavior changes",
+      "retest": "Run rich-content semantics and keyboard tasks",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "COGNITIVE_REVIEW"
+      ],
+      "evidence_refs": [
+        "docs/docusaurus/e2e/structure.spec.ts",
+        "docs/docusaurus/src/theme/MDXComponents/index.tsx"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "DCS08",
+      "asset_id": "ASSET-DOCUSAURUS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation team",
+      "role": "Documentation reader",
+      "platform": "WEB",
+      "state": "Logo, decorative card icons, and Mermaid diagrams in light, dark, and forced colors",
+      "task": "Understand non-text content",
+      "expected_outcome": "Meaningful graphics have equivalent descriptions and decorative graphics stay unexposed",
+      "fixture_id": "FIXTURE-DOCUSAURUS",
+      "predecessor_ids": [
+        "DCS02"
+      ],
+      "successor_ids": [
+        "DCS13"
+      ],
+      "handoff": null,
+      "activation": "The logo, card icons, and Mermaid manifest are rendered",
+      "invalidation": "Graphic, description, Mermaid, theme, or forced-color rendering changes",
+      "retest": "Run graphic semantics, contrast, and equivalence review",
+      "required_methods": [
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_VISUAL",
+        "MEDIA_EQUIVALENCE_REVIEW"
+      ],
+      "evidence_refs": [
+        "docs/docusaurus/scripts/validate-mermaid-accessibility.mjs",
+        "docs/docusaurus/e2e/structure.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "DCS09",
+      "asset_id": "ASSET-DOCUSAURUS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation team",
+      "role": "Adaptive presentation user",
+      "platform": "WEB",
+      "state": "Text resize, 320 CSS-pixel reflow, text spacing, orientation, light, dark, forced colors, reduced motion, and open disclosures",
+      "task": "Complete representative tasks under adaptive conditions",
+      "expected_outcome": "No required content, control, focus, or function is clipped, overlapped, hidden, or motion dependent",
+      "fixture_id": "FIXTURE-DOCUSAURUS",
+      "predecessor_ids": [
+        "DCS02",
+        "DCS05"
+      ],
+      "successor_ids": [
+        "DCS10",
+        "DCS13"
+      ],
+      "handoff": null,
+      "activation": "Representative routes and open states are deterministic",
+      "invalidation": "Layout, typography, style, motion, theme, viewport, or component states change",
+      "retest": "Run the complete adaptive state matrix",
+      "required_methods": [
+        "PLAYWRIGHT_VISUAL",
+        "PLAYWRIGHT_KEYBOARD"
+      ],
+      "evidence_refs": [
+        "docs/docusaurus/e2e/adaptive.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "DCS10",
+      "asset_id": "ASSET-DOCUSAURUS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation team",
+      "role": "Keyboard and pointer user",
+      "platform": "WEB",
+      "state": "Every expected keyboard stop and pointer target across desktop, mobile, text resize, reflow, themes, and open overlays",
+      "task": "Reach focus and pointer controls",
+      "expected_outcome": "Controls are reachable, visible, unobscured, named, and meet size or spacing requirements",
+      "fixture_id": "FIXTURE-DOCUSAURUS",
+      "predecessor_ids": [
+        "DCS03",
+        "DCS04",
+        "DCS05",
+        "DCS09"
+      ],
+      "successor_ids": [
+        "DCS13"
+      ],
+      "handoff": null,
+      "activation": "The reviewed control inventory and runtime candidates are available",
+      "invalidation": "Control, focus, overlay, sticky, target geometry, spacing, or responsive behavior changes",
+      "retest": "Reconcile the full control inventory and rerun geometry tasks",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_VISUAL",
+        "PLAYWRIGHT_POINTER"
+      ],
+      "evidence_refs": [
+        "docs/docusaurus/e2e/adaptive.spec.ts",
+        "docs/docusaurus/e2e/navigation-search.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "DCS11",
+      "asset_id": "ASSET-DOCUSAURUS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation team",
+      "role": "Documentation reader",
+      "platform": "WEB",
+      "state": "Color preference, disclosures, hover or focus content, repeated names, ordering, and non-color state cues",
+      "task": "Change preferences and inspect repeated controls",
+      "expected_outcome": "Context changes are requested, naming and order remain consistent, and state does not depend on color",
+      "fixture_id": "FIXTURE-DOCUSAURUS",
+      "predecessor_ids": [
+        "DCS03",
+        "DCS04"
+      ],
+      "successor_ids": [
+        "DCS13"
+      ],
+      "handoff": null,
+      "activation": "Repeated controls and preference states are rendered",
+      "invalidation": "Theme, disclosure, hover, focus, naming, ordering, or state-cue behavior changes",
+      "retest": "Run preference, disclosure, consistency, and no-color tasks",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_VISUAL",
+        "COGNITIVE_REVIEW"
+      ],
+      "evidence_refs": [
+        "docs/docusaurus/e2e/navigation-search.spec.ts",
+        "docs/docusaurus/e2e/adaptive.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "DCS12",
+      "asset_id": "ASSET-DOCUSAURUS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation and accessibility owners",
+      "role": "Accessibility reviewer",
+      "platform": "WEB",
+      "state": "Media, personal data, audio, shortcuts, timers, updates, gestures, motion APIs, dragging, language changes, validation, consequential mutation, repeated entry, authentication, and zoomable-image triggers",
+      "task": "Detect criterion and plugin activation",
+      "expected_outcome": "Any new trigger makes the affected criterion or plugin journey explicit before release",
+      "fixture_id": "FIXTURE-DOCUSAURUS",
+      "predecessor_ids": [
+        "DCS01"
+      ],
+      "successor_ids": [
+        "DCS13"
+      ],
+      "handoff": null,
+      "activation": "Source and rendered feature inventories complete",
+      "invalidation": "Any source, content, plugin, dependency, or rendered feature changes",
+      "retest": "Run source and rendered activation guards",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "PLAYWRIGHT_TREE"
+      ],
+      "evidence_refs": [
+        "docs/docusaurus",
+        "docs/docusaurus/e2e/site-crawl.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "DCS13",
+      "asset_id": "ASSET-DOCUSAURUS",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Qualified accessibility reviewer",
+      "role": "Accessibility evaluator",
+      "platform": "WEB",
+      "state": "Exact local production candidate, approved Windows browser and AT baseline, supplemental browser zoom, all applicable human checks, and human-approved inapplicability",
+      "task": "Perform qualified WCAG and assistive-technology review",
+      "expected_outcome": "Spoken output, reading order, graphics, wording, exceptions, applicability, and accessibility support are reviewed without claiming attestation",
+      "fixture_id": "FIXTURE-DOCUSAURUS",
+      "predecessor_ids": [
+        "DCS06",
+        "DCS07",
+        "DCS08",
+        "DCS09",
+        "DCS10",
+        "DCS11",
+        "DCS12"
+      ],
+      "successor_ids": [],
+      "handoff": "Approved evidence enters release evaluation through the upstream qualified-human intake contract",
+      "activation": "A qualified reviewer and supported Windows AT environment are available",
+      "invalidation": "Build digest, browser, AT, relevant content, component, criterion, exception, support baseline, or zoom-specific behavior changes",
+      "retest": "Repeat affected manual tasks, including supplemental browser zoom when applicable, and approval",
+      "required_methods": [
+        "NVDA",
+        "JAWS",
+        "MANUAL_KEYBOARD",
+        "COGNITIVE_REVIEW",
+        "MEDIA_EQUIVALENCE_REVIEW"
+      ],
+      "evidence_refs": [
+        "docs/contributing/accessibility.md"
+      ],
+      "dependency_refs": [
+        "Reviewed HVE Core qualified-human intake contract required for P05 bundle integration"
+      ]
+    },
+    {
+      "journey_id": "V01",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Viewer team",
+      "role": "Local or hosted user",
+      "platform": "WEB",
+      "state": "Authentication disabled, resolving, admitted, redirected, denied, expired, and returned",
+      "task": "Reach the Viewer and recover from access failure",
+      "expected_outcome": "No blank or looping state and focus and context are preserved",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [],
+      "successor_ids": [
+        "V02"
+      ],
+      "handoff": "Provider sign-in remains separate evidence",
+      "activation": "Hosted identity is coherently deployed",
+      "invalidation": "Authentication or session behavior changes",
+      "retest": "Run local and activated hosted access states",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/src"
+      ],
+      "dependency_refs": [
+        "Hosted identity deployment remains incomplete"
+      ]
+    },
+    {
+      "journey_id": "V02",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Dataset catalog empty, warming, populated, filtered, focused, and selected",
+      "task": "Identify the product and choose a dataset",
+      "expected_outcome": "Open and selected state, result count, focus return, Help, and Report problem are available",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V01"
+      ],
+      "successor_ids": [
+        "V03"
+      ],
+      "handoff": "Dataset selection starts episode discovery",
+      "activation": "Synthetic catalog is loaded",
+      "invalidation": "Shell or dataset selection changes",
+      "retest": "Run keyboard and pointer selection states",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "V03",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Episode list loading, error, empty, populated, selected, filtered, and long",
+      "task": "Find, filter, and select an episode",
+      "expected_outcome": "List position, selection, count, and keyboard focus remain understandable",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V02"
+      ],
+      "successor_ids": [
+        "V04"
+      ],
+      "handoff": "Episode selection starts episode loading",
+      "activation": "Synthetic episodes are loaded",
+      "invalidation": "Episode list or filter changes",
+      "retest": "Run list, filter, empty, and error states",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-states.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "V04",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Episode loading, error, empty, unsynchronized, and loaded",
+      "task": "Distinguish episode load outcomes",
+      "expected_outcome": "Progress, failure, empty content, and successful load are visible and announced",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V03"
+      ],
+      "successor_ids": [
+        "V05"
+      ],
+      "handoff": "Successful loading enables the workspace",
+      "activation": "A synthetic episode is selected",
+      "invalidation": "Load gate or store synchronization changes",
+      "retest": "Run every load-gate state",
+      "required_methods": [
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-states.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "V05",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Episode boundary, clean, dirty, tab, save, reset, confirmation, success, and failure",
+      "task": "Navigate episodes, switch views, save, advance, or reset",
+      "expected_outcome": "Scope, focus, status, and cancellation remain clear",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V04"
+      ],
+      "successor_ids": [
+        "V06",
+        "V15"
+      ],
+      "handoff": "Workspace view selection exposes playback or analysis",
+      "activation": "A loaded episode is editable",
+      "invalidation": "Top bar, tabs, save, or reset behavior changes",
+      "retest": "Run navigation, tab, save, and confirmation states",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-states.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "V06",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Camera absent or selected, image or video loading, error, ended, edited, paused, playing, speed, loop, and seek bounds",
+      "task": "Select media and play, pause, step, or seek",
+      "expected_outcome": "Task-equivalent information does not depend only on motion or vision",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V05"
+      ],
+      "successor_ids": [
+        "V07",
+        "V08"
+      ],
+      "handoff": "Media inspection informs annotation and editing",
+      "activation": "Generated geometric media is available",
+      "invalidation": "Media, camera, playback, or edit behavior changes",
+      "retest": "Run representative image and video tasks",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_LIVE_REGION",
+        "MEDIA_EQUIVALENCE_REVIEW"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts"
+      ],
+      "dependency_refs": [
+        "project-user-ui-surface-area-plan:P02-T02"
+      ]
+    },
+    {
+      "journey_id": "V07",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Display controls collapsed, expanded, focused, default, adjusted, and reset",
+      "task": "Adjust and restore image display values",
+      "expected_outcome": "Control names, values, state, and reset result are understandable",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V06"
+      ],
+      "successor_ids": [],
+      "handoff": null,
+      "activation": "Visual media is displayed",
+      "invalidation": "Display controls or filters change",
+      "retest": "Run control, value, focus, and reset states",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "V08",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Trajectory empty, raw, normalized, multi-series, focused, ranged, cancelled, and context menu",
+      "task": "Read values, inspect a frame, and select or cancel a range",
+      "expected_outcome": "Exact values and selection do not depend on color, hover, or pointer drag",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V06"
+      ],
+      "successor_ids": [
+        "V09",
+        "V10"
+      ],
+      "handoff": "Selected ranges can create subtasks",
+      "activation": "Synthetic trajectory data is available",
+      "invalidation": "Chart, table, selection, or context menu changes",
+      "retest": "Run keyboard, pointer, cancellation, and equivalent-table states",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_VISUAL"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "V09",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Joint groups, selections, context menu, keyboard reorder, pointer cancel, defaults, validation, save, and error",
+      "task": "Select and reorder joints and edit defaults",
+      "expected_outcome": "Keyboard operation, positional announcements, validation, focus return, and recovery are equivalent",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V08"
+      ],
+      "successor_ids": [],
+      "handoff": null,
+      "activation": "Synthetic multi-joint trajectory is available",
+      "invalidation": "Joint selector or defaults behavior changes",
+      "retest": "Run selection, reorder, menu, validation, and save states",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "V10",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Subtask empty, draft, created, selected, ranged, renamed, reordered, deleted, invalid, and cleared",
+      "task": "Create, inspect, adjust, reorder, rename, or remove subtasks",
+      "expected_outcome": "Sequence, ranges, focus, validation, and reversible state remain clear",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V08"
+      ],
+      "successor_ids": [],
+      "handoff": null,
+      "activation": "A trajectory range is available",
+      "invalidation": "Subtask timeline or list changes",
+      "retest": "Run creation, editing, reordering, deletion, and clear states",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "V11",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Labels loading, empty, pressed, imported, overwritten, deleted, errored, and restored",
+      "task": "Classify an episode and manage labels",
+      "expected_outcome": "Required choices, confirmations, errors, and draft recovery are understandable",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V05"
+      ],
+      "successor_ids": [],
+      "handoff": null,
+      "activation": "A loaded episode and label catalog exist",
+      "invalidation": "Label state, import, deletion, or draft behavior changes",
+      "retest": "Run classification, import, delete, error, and recovery states",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
+        "data-management/viewer/frontend/e2e/accessibility-states.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "V12",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Instruction absent, templated, multilingual, focused, dirty, invalid, saved, errored, and removed",
+      "task": "Create, understand, save, and remove an instruction",
+      "expected_outcome": "Language metadata, validation, confirmation, errors, and recovery are programmatic",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V05"
+      ],
+      "successor_ids": [],
+      "handoff": null,
+      "activation": "A loaded episode is editable",
+      "invalidation": "Instruction, language, save, or removal behavior changes",
+      "retest": "Run multilingual editing and all consequence states",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "V13",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer and evaluation teams",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Judge unavailable, idle, pending, errored, passed, failed, inconclusive, cached, labelled, batch, partial, and complete",
+      "task": "Run, monitor, cancel, interpret, and apply judge outcomes",
+      "expected_outcome": "Terminology, progress, evidence, cancellation, and results do not depend on color",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V05"
+      ],
+      "successor_ids": [],
+      "handoff": "Viewer invokes the local judge service",
+      "activation": "The deterministic echo judge is available",
+      "invalidation": "Judge methods, results, service, or batch behavior changes",
+      "retest": "Run individual and batch success, failure, cancellation, and recovery",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "V14",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Detection unavailable, configured, running, errored, empty, populated, saved, updated, confirmed, and removed",
+      "task": "Configure, run, inspect, save, update, or remove detections",
+      "expected_outcome": "Class, confidence, coordinates, frame, and dimensions are available outside the canvas",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V05"
+      ],
+      "successor_ids": [],
+      "handoff": null,
+      "activation": "Synthetic cameras and fixed detections are available",
+      "invalidation": "Detection controls, canvas, list, or service changes",
+      "retest": "Run configuration, execution, equivalent-list, save, and removal states",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION",
+        "PLAYWRIGHT_VISUAL"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts"
+      ],
+      "dependency_refs": [
+        "Qualified graphics equivalence review"
+      ]
+    },
+    {
+      "journey_id": "V15",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Analyzer empty, loading, errored, measured, flagged, persisted, and absent",
+      "task": "Inspect trajectory analysis metrics and flags",
+      "expected_outcome": "Metrics, flags, errors, and empty meaning are available without chart-only interpretation",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V05"
+      ],
+      "successor_ids": [],
+      "handoff": null,
+      "activation": "Synthetic trajectory analysis is available",
+      "invalidation": "Analyzer metrics, flags, persistence, or rendering changes",
+      "retest": "Run empty, error, result, and persisted states",
+      "required_methods": [
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION",
+        "MEDIA_EQUIVALENCE_REVIEW"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts"
+      ],
+      "dependency_refs": [
+        "Qualified graphics equivalence review"
+      ]
+    },
+    {
+      "journey_id": "V16",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Edit sections, previews, restores, interpolation, resize, color, trajectory, validation, apply, reset, and clear confirmation",
+      "task": "Modify frames and trajectories and understand aggregate impact",
+      "expected_outcome": "Preview, invalid input, cancellation, application, and restoration are understandable",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V05"
+      ],
+      "successor_ids": [
+        "V18"
+      ],
+      "handoff": "Edits affect export configuration and output",
+      "activation": "A loaded episode is editable",
+      "invalidation": "Any edit tool or aggregate-impact behavior changes",
+      "retest": "Run every unique edit implementation and consequence state",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "V17",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Support user",
+      "platform": "WEB",
+      "state": "Diagnostics hidden, visible, filtered, empty, copied, errored, cleared, and downloaded",
+      "task": "Inspect, filter, copy, clear, and download diagnostics",
+      "expected_outcome": "Focus and privacy are preserved through all operations",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V05"
+      ],
+      "successor_ids": [],
+      "handoff": "Downloaded diagnostics may enter support",
+      "activation": "Synthetic diagnostic events exist",
+      "invalidation": "Diagnostic content, controls, privacy, or download changes",
+      "retest": "Run filter, copy, clear, download, and error states",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-states.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "V18",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Export closed, focused, configured, preparing, progressing, cancelled, successful, failed, blocked, and returned",
+      "task": "Configure, monitor, cancel, recover, and close an export",
+      "expected_outcome": "Impact, progress, errors, cancellation, and focus return remain clear",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V16"
+      ],
+      "successor_ids": [],
+      "handoff": "Exported files can enter training input",
+      "activation": "Synthetic export dependencies are available",
+      "invalidation": "Export configuration, progress, delivery, or dialog behavior changes",
+      "retest": "Run success, failure, cancellation, blocked close, and focus return",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-states.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "V19",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Text resize, narrow reflow, text spacing, forced colors, reduced motion, orientation, focus, hover, touch, and pointer cancellation",
+      "task": "Complete representative Viewer tasks under adaptive and input conditions",
+      "expected_outcome": "No loss, overlap, clipping, hidden focus, motion dependency, or two-dimensional page scrolling",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "V02",
+        "V03",
+        "V05",
+        "V06",
+        "V08",
+        "V13",
+        "V14",
+        "V18"
+      ],
+      "successor_ids": [],
+      "handoff": "Adaptive state applies to composed journeys rather than one page",
+      "activation": "Representative high-risk Viewer tasks are deterministic",
+      "invalidation": "Shared style, layout, primitive, input, or browser support changes",
+      "retest": "Run all adaptive dimensions across the representative task set",
+      "required_methods": [
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_VISUAL"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "F01",
+      "asset_id": "ASSET-FASTAPI-DOCS",
+      "lifecycle": "CONDITIONAL",
+      "owner": "Viewer API owner",
+      "role": "API user",
+      "platform": "GENERATED_WEB",
+      "state": "Swagger load, operation disclosure, safe request, validation, access error, response, focus, and reflow",
+      "task": "Find and safely exercise a Viewer API operation",
+      "expected_outcome": "Parameters, schema, security, response, errors, and navigation are understandable",
+      "fixture_id": "FIXTURE-API-DOCS",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": null,
+      "activation": "Viewer docs are intentionally exposed",
+      "invalidation": "Viewer API schema or renderer changes",
+      "retest": "Run Viewer Swagger task states",
+      "required_methods": [
+        "AXE",
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_VISUAL"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/backend/src/api/main.py"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "F02",
+      "asset_id": "ASSET-FASTAPI-DOCS",
+      "lifecycle": "CONDITIONAL",
+      "owner": "Viewer API owner",
+      "role": "API user",
+      "platform": "GENERATED_WEB",
+      "state": "ReDoc load, navigation, disclosure, search, long schema, focus, and reflow",
+      "task": "Navigate and read the Viewer API contract",
+      "expected_outcome": "Sections, parameters, responses, and security remain operable and readable",
+      "fixture_id": "FIXTURE-API-DOCS",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": null,
+      "activation": "Viewer ReDoc is intentionally exposed",
+      "invalidation": "Viewer API schema or renderer changes",
+      "retest": "Run Viewer ReDoc task states",
+      "required_methods": [
+        "AXE",
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_VISUAL"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/backend/src/api/main.py"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "F03",
+      "asset_id": "ASSET-FASTAPI-DOCS",
+      "lifecycle": "CONDITIONAL",
+      "owner": "VLM API owner",
+      "role": "API user",
+      "platform": "GENERATED_WEB",
+      "state": "Swagger load, health, echo judgment, missing media, validation error, focus, and reflow",
+      "task": "Find and safely exercise a VLM operation",
+      "expected_outcome": "The service contract is understandable without model or remote media access",
+      "fixture_id": "FIXTURE-API-DOCS",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": null,
+      "activation": "VLM docs are intentionally exposed with echo backend",
+      "invalidation": "VLM schema or renderer changes",
+      "retest": "Run VLM Swagger task states",
+      "required_methods": [
+        "AXE",
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_VISUAL"
+      ],
+      "evidence_refs": [
+        "evaluation/vlm_judge/api.py"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "F04",
+      "asset_id": "ASSET-FASTAPI-DOCS",
+      "lifecycle": "CONDITIONAL",
+      "owner": "VLM API owner",
+      "role": "API user",
+      "platform": "GENERATED_WEB",
+      "state": "ReDoc load, navigation, long models, errors, focus, and reflow",
+      "task": "Navigate and read the VLM API contract",
+      "expected_outcome": "Health, judgment, request, response, and error contracts remain readable",
+      "fixture_id": "FIXTURE-API-DOCS",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": null,
+      "activation": "VLM ReDoc is intentionally exposed",
+      "invalidation": "VLM schema or renderer changes",
+      "retest": "Run VLM ReDoc task states",
+      "required_methods": [
+        "AXE",
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_VISUAL"
+      ],
+      "evidence_refs": [
+        "evaluation/vlm_judge/api.py"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "F05",
+      "asset_id": "ASSET-FASTAPI-DOCS",
+      "lifecycle": "CONDITIONAL",
+      "owner": "OpenAI shim owner",
+      "role": "API user",
+      "platform": "GENERATED_WEB",
+      "state": "Swagger load, health, models, synthetic completion, unsupported stream, invalid image, focus, and reflow",
+      "task": "Find and safely exercise a shim operation",
+      "expected_outcome": "The shim contract is understandable without model loading or external data",
+      "fixture_id": "FIXTURE-API-DOCS",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": null,
+      "activation": "Shim docs are intentionally exposed with stub backend",
+      "invalidation": "Shim schema or renderer changes",
+      "retest": "Run shim Swagger task states",
+      "required_methods": [
+        "AXE",
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_VISUAL"
+      ],
+      "evidence_refs": [
+        "evaluation/vlm_judge/openai_shim.py"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "F06",
+      "asset_id": "ASSET-FASTAPI-DOCS",
+      "lifecycle": "CONDITIONAL",
+      "owner": "OpenAI shim owner",
+      "role": "API user",
+      "platform": "GENERATED_WEB",
+      "state": "ReDoc load, navigation, message alternatives, error models, focus, and reflow",
+      "task": "Navigate and read the shim API contract",
+      "expected_outcome": "Health, model, completion, content, and error contracts remain readable",
+      "fixture_id": "FIXTURE-API-DOCS",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": null,
+      "activation": "Shim ReDoc is intentionally exposed",
+      "invalidation": "Shim schema or renderer changes",
+      "retest": "Run shim ReDoc task states",
+      "required_methods": [
+        "AXE",
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_VISUAL"
+      ],
+      "evidence_refs": [
+        "evaluation/vlm_judge/openai_shim.py"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "G01",
+      "asset_id": "ASSET-GITHUB-INTAKE",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Repository owners and GitHub",
+      "role": "Contributor",
+      "platform": "GITHUB_HOSTED",
+      "state": "Signed out, redirected, default, dropdown, missing required fields, checklist, validation, preview, and submit",
+      "task": "Report a Viewer or general defect",
+      "expected_outcome": "Errors are locatable, entered content is preserved, and submission can be reviewed",
+      "fixture_id": "FIXTURE-GITHUB",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Submission enters support triage",
+      "activation": "Controlled issue submission is authorized",
+      "invalidation": "Bug form or GitHub behavior changes",
+      "retest": "Validate source and repeat controlled intake",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        ".github/ISSUE_TEMPLATE/01-bug-report.yml"
+      ],
+      "dependency_refs": [
+        "Rendered provider outcome remains NOT_ASSESSED until authorized"
+      ]
+    },
+    {
+      "journey_id": "G02",
+      "asset_id": "ASSET-GITHUB-INTAKE",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Repository owners and GitHub",
+      "role": "Contributor",
+      "platform": "GITHUB_HOSTED",
+      "state": "Signed out, redirected, default, required fields, validation, preview, and submit",
+      "task": "Submit a feature request",
+      "expected_outcome": "Problem, solution, grouping, validation, and optional context are understandable",
+      "fixture_id": "FIXTURE-GITHUB",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Submission enters product triage",
+      "activation": "Controlled issue submission is authorized",
+      "invalidation": "Feature form or GitHub behavior changes",
+      "retest": "Validate source and repeat controlled intake",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        ".github/ISSUE_TEMPLATE/02-feature-request.yml"
+      ],
+      "dependency_refs": [
+        "Rendered provider outcome remains NOT_ASSESSED until authorized"
+      ]
+    },
+    {
+      "journey_id": "G03",
+      "asset_id": "ASSET-GITHUB-INTAKE",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Repository owners and GitHub",
+      "role": "Contributor",
+      "platform": "GITHUB_HOSTED",
+      "state": "Signed out, issue type, optional environment, code, sanitization acknowledgment, validation, and submit",
+      "task": "Report an infrastructure issue",
+      "expected_outcome": "Required choices and secret-sanitization guidance are operable and errors recoverable",
+      "fixture_id": "FIXTURE-GITHUB",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Submission enters infrastructure triage",
+      "activation": "Controlled issue submission is authorized",
+      "invalidation": "Infrastructure form or GitHub behavior changes",
+      "retest": "Validate source and repeat controlled intake",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        ".github/ISSUE_TEMPLATE/03-infrastructure-issue.yml"
+      ],
+      "dependency_refs": [
+        "Rendered provider outcome remains NOT_ASSESSED until authorized"
+      ]
+    },
+    {
+      "journey_id": "G04",
+      "asset_id": "ASSET-GITHUB-INTAKE",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Repository owners and GitHub",
+      "role": "Contributor",
+      "platform": "GITHUB_HOSTED",
+      "state": "Signed out, required dropdowns, optional versions, code, checklist, validation, and submit",
+      "task": "Report a training failure",
+      "expected_outcome": "Code regions and required choices are keyboard and assistive-technology operable",
+      "fixture_id": "FIXTURE-GITHUB",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Submission enters training triage",
+      "activation": "Controlled issue submission is authorized",
+      "invalidation": "Training form or GitHub behavior changes",
+      "retest": "Validate source and repeat controlled intake",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        ".github/ISSUE_TEMPLATE/04-training-issue.yml"
+      ],
+      "dependency_refs": [
+        "Rendered provider outcome remains NOT_ASSESSED until authorized"
+      ]
+    },
+    {
+      "journey_id": "G05",
+      "asset_id": "ASSET-GITHUB-INTAKE",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Repository owners and GitHub",
+      "role": "Contributor",
+      "platform": "GITHUB_HOSTED",
+      "state": "Signed out, required location and issue, optional suggestion, validation, preview, and submit",
+      "task": "Report a documentation defect",
+      "expected_outcome": "Required fields and recovery from validation errors are understandable",
+      "fixture_id": "FIXTURE-GITHUB",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Submission enters documentation triage",
+      "activation": "Controlled issue submission is authorized",
+      "invalidation": "Documentation form or GitHub behavior changes",
+      "retest": "Validate source and repeat controlled intake",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        ".github/ISSUE_TEMPLATE/05-documentation.yml"
+      ],
+      "dependency_refs": [
+        "Rendered provider outcome remains NOT_ASSESSED until authorized"
+      ]
+    },
+    {
+      "journey_id": "G06",
+      "asset_id": "ASSET-GITHUB-INTAKE",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Repository owners and GitHub",
+      "role": "Contributor",
+      "platform": "GITHUB_HOSTED",
+      "state": "Editor, keyboard editing, preview, checklist, submit, navigation away, and return",
+      "task": "Complete the general Markdown issue template",
+      "expected_outcome": "Template, preview, checklist, navigation, and submission state remain understandable",
+      "fixture_id": "FIXTURE-GITHUB",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Submission enters repository triage",
+      "activation": "Controlled issue submission is authorized",
+      "invalidation": "General template or GitHub editor changes",
+      "retest": "Validate source and repeat controlled intake",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        ".github/ISSUE_TEMPLATE/00-general.md"
+      ],
+      "dependency_refs": [
+        "Rendered provider outcome remains NOT_ASSESSED until authorized"
+      ]
+    },
+    {
+      "journey_id": "G07",
+      "asset_id": "ASSET-GITHUB-INTAKE",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Repository owners and GitHub",
+      "role": "Contributor",
+      "platform": "GITHUB_HOSTED",
+      "state": "Signed out, signed in, keyboard focus, template choices, blank issue disabled, and external contact links",
+      "task": "Choose the correct issue or support intake path",
+      "expected_outcome": "Each option and external destination is understandable and operable",
+      "fixture_id": "FIXTURE-GITHUB",
+      "predecessor_ids": [],
+      "successor_ids": [
+        "G01",
+        "G02",
+        "G03",
+        "G04",
+        "G05",
+        "G06"
+      ],
+      "handoff": "Contact links leave GitHub for documentation or Azure support",
+      "activation": "Issue chooser is reachable",
+      "invalidation": "Chooser, contact links, templates, or GitHub behavior changes",
+      "retest": "Validate all choices and controlled navigation",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        ".github/ISSUE_TEMPLATE/config.yml"
+      ],
+      "dependency_refs": [
+        "Rendered provider outcome remains NOT_ASSESSED until authorized"
+      ]
+    },
+    {
+      "journey_id": "G08",
+      "asset_id": "ASSET-GITHUB-ACTIONS",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Repository owners and GitHub",
+      "role": "Actions user",
+      "platform": "GITHUB_HOSTED",
+      "state": "Denied, authorized, branch selection, confirmation, queued, running, succeeded, failed, cancelled, logs, summary, and artifacts",
+      "task": "Start and inspect one of ten zero-input workflows",
+      "expected_outcome": "Workflow identity, branch, status, warnings, logs, summaries, and recovery are understandable",
+      "fixture_id": "FIXTURE-GITHUB",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Workflow execution produces summaries, logs, findings, and artifacts",
+      "activation": "A safe non-destructive workflow is approved",
+      "invalidation": "Dispatch, permissions, output, or GitHub behavior changes",
+      "retest": "Validate all authored dispatch forms and sample a safe controlled run",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        ".github/workflows"
+      ],
+      "dependency_refs": [
+        "Never run deployment, provisioning, or secret-bearing workflows for accessibility evidence"
+      ]
+    },
+    {
+      "journey_id": "G09",
+      "asset_id": "ASSET-GITHUB-ACTIONS",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Repository owners and GitHub",
+      "role": "Actions user",
+      "platform": "GITHUB_HOSTED",
+      "state": "Denied, authorized, default threshold, empty, invalid, valid override, queued, running, result, and failure",
+      "task": "Set the SHA staleness threshold and interpret the run",
+      "expected_outcome": "Input meaning, range, validation, status, and result are understandable",
+      "fixture_id": "FIXTURE-GITHUB",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Typed dispatch input controls generated findings",
+      "activation": "The safe staleness workflow is approved",
+      "invalidation": "Input, validation, workflow output, or GitHub behavior changes",
+      "retest": "Validate source and repeat the controlled typed-input task",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        ".github/workflows/sha-staleness-check.yml"
+      ],
+      "dependency_refs": [
+        "Rendered provider outcome remains NOT_ASSESSED until authorized"
+      ]
+    },
+    {
+      "journey_id": "P01",
+      "asset_id": "ASSET-OSMO",
+      "lifecycle": "CONDITIONAL",
+      "owner": "Platform team and NVIDIA",
+      "role": "Least-privilege workflow user",
+      "platform": "PROVIDER",
+      "state": "Disconnected, denied, expired, authenticated, empty, populated, submitted, invalid, queued, running, succeeded, failed, cancelled, logs, and artifacts",
+      "task": "Submit and monitor a safe synthetic OSMO workflow",
+      "expected_outcome": "Access, validation, status, cancellation, logs, and artifacts remain understandable",
+      "fixture_id": "FIXTURE-OSMO",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Private access and workflow output are separate evidence",
+      "activation": "A supported browser journey and authorized deployment exist",
+      "invalidation": "OSMO version, access, role, workflow, or provider changes",
+      "retest": "Run critical task, denial, expiry, failure, and recovery",
+      "required_methods": [
+        "PROVIDER_ASSURANCE",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        "infrastructure/setup/values/osmo-control-plane.yaml"
+      ],
+      "dependency_refs": [
+        "Authorized non-production deployment and qualified reviewer"
+      ]
+    },
+    {
+      "journey_id": "P02",
+      "asset_id": "ASSET-GRAFANA",
+      "lifecycle": "CONDITIONAL",
+      "owner": "Observability team and Microsoft",
+      "role": "Grafana Viewer",
+      "platform": "PROVIDER",
+      "state": "Disconnected, denied, expired, viewer, admin configuration, no dashboard, no data, data error, navigation, search, time range, and panel inspection",
+      "task": "Navigate the managed shell and inspect activated project content",
+      "expected_outcome": "Shell behavior remains separate from currently absent project dashboards",
+      "fixture_id": "FIXTURE-AZURE",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Provider shell and project dashboard content require separate outcomes",
+      "activation": "Managed instance and approved role exist; content activates only when sourced",
+      "invalidation": "Provider, role, network, data source, or dashboard changes",
+      "retest": "Run shell task and any newly activated content tasks",
+      "required_methods": [
+        "PROVIDER_ASSURANCE",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        "infrastructure/terraform/modules/platform/observability.tf",
+        "fleet-intelligence/dashboards/grafana/fleet-overview.json"
+      ],
+      "dependency_refs": [
+        "Project dashboard content is absent"
+      ]
+    },
+    {
+      "journey_id": "P03",
+      "asset_id": "ASSET-AZURE-ML",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Training team and Microsoft",
+      "role": "Job viewer or data scientist",
+      "platform": "PROVIDER",
+      "state": "Disconnected, denied, expired, queued, running, succeeded, failed, cancelled, metrics, logs, images, artifacts, models, long names, empty, and error",
+      "task": "Inspect and manage a synthetic experiment or job",
+      "expected_outcome": "Role, status, output, cancellation, and recovery remain understandable without retained identifiers",
+      "fixture_id": "FIXTURE-AZURE",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Repository metadata and provider shell are separate evidence",
+      "activation": "Authorized workspace, role, network, and synthetic job exist",
+      "invalidation": "Provider, role, network, job, artifact, or deep-link changes",
+      "retest": "Run critical task, denial, expiry, failure, and recovery",
+      "required_methods": [
+        "PROVIDER_ASSURANCE",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        "training",
+        "evaluation"
+      ],
+      "dependency_refs": [
+        "Authorized non-production workspace and qualified reviewer"
+      ]
+    },
+    {
+      "journey_id": "D01",
+      "asset_id": "ASSET-ISAAC-GUI",
+      "lifecycle": "CONDITIONAL",
+      "owner": "Simulation team and NVIDIA",
+      "role": "Simulation operator",
+      "platform": "NATIVE",
+      "state": "Launch, load, error, menu, dialog, viewport, scene, simulation start and stop, contrast, magnification, and reduced motion",
+      "task": "Operate a synthetic Isaac scene and obtain equivalent output",
+      "expected_outcome": "Native controls and nonvisual output are assessed independently from headless execution",
+      "fixture_id": "FIXTURE-NATIVE",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "A graphical viewport does not inherit headless accessibility",
+      "activation": "A supported graphical host exposes the interface",
+      "invalidation": "Isaac version, launcher, scene, display, or host changes",
+      "retest": "Run native keyboard, visual, motion, and equivalent-output tasks",
+      "required_methods": [
+        "PROVIDER_ASSURANCE",
+        "NATIVE_TASK",
+        "MEDIA_EQUIVALENCE_REVIEW"
+      ],
+      "evidence_refs": [
+        "training/rl/scripts/launch.py"
+      ],
+      "dependency_refs": [
+        "Supported host and qualified reviewer"
+      ]
+    },
+    {
+      "journey_id": "D02",
+      "asset_id": "ASSET-THINLINC-NATIVE",
+      "lifecycle": "CONDITIONAL",
+      "owner": "Infrastructure team and ThinLinc",
+      "role": "Remote simulation operator",
+      "platform": "REMOTE",
+      "state": "Sign-in, denied, expired, disconnected, reconnected, scaled, keyboard captured and released, clipboard, file transfer, application launch, and host AT",
+      "task": "Connect with the native client and launch Isaac",
+      "expected_outcome": "Client, remote desktop, application, and semantic bridge retain separate outcomes",
+      "fixture_id": "FIXTURE-NATIVE",
+      "predecessor_ids": [],
+      "successor_ids": [
+        "D01"
+      ],
+      "handoff": "Host assistive technology may not inspect the remote accessibility tree",
+      "activation": "Bootstrap inputs and private native deployment succeed",
+      "invalidation": "ThinLinc, host, network, authentication, scaling, or app changes",
+      "retest": "Run native-client and remote-application tasks separately",
+      "required_methods": [
+        "PROVIDER_ASSURANCE",
+        "NATIVE_TASK"
+      ],
+      "evidence_refs": [
+        "infrastructure/setup/optional/isaac-sim-vm"
+      ],
+      "dependency_refs": [
+        "Current bootstrap availability is unproved"
+      ]
+    },
+    {
+      "journey_id": "D03",
+      "asset_id": "ASSET-THINLINC-WEB",
+      "lifecycle": "ABSENT",
+      "owner": "Infrastructure team and ThinLinc",
+      "role": "Remote simulation operator",
+      "platform": "REMOTE",
+      "state": "Browser sign-in, denied, expired, connected, disconnected, reconnected, scaled, keyboard escaped, application launched, reflowed, zoomed, and assistive technology",
+      "task": "Connect through Web Access and launch Isaac",
+      "expected_outcome": "No outcome is assigned until the browser route is enabled, reachable, and supported",
+      "fixture_id": "FIXTURE-ACTIVATION",
+      "predecessor_ids": [],
+      "successor_ids": [
+        "D01"
+      ],
+      "handoff": "Web Access remains separate from the native client",
+      "activation": "A supported route, TLS, network, and launch contract is proved",
+      "invalidation": "Web client, route, TLS, network, host, or app changes",
+      "retest": "Run browser, remote-desktop, and application tasks after activation",
+      "required_methods": [
+        "PROVIDER_ASSURANCE",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        "infrastructure/setup/optional/isaac-sim-vm"
+      ],
+      "dependency_refs": [
+        "Web Access route and successful installation are absent"
+      ]
+    },
+    {
+      "journey_id": "A01",
+      "asset_id": "ASSET-TERMINAL",
+      "lifecycle": "ACTIVE",
+      "owner": "Domain script owners",
+      "role": "Local operator",
+      "platform": "CLI",
+      "state": "Help, preview, success, failure, TTY, redirected output, color disabled, keyboard, paste, and cancellation",
+      "task": "Run local setup and Viewer or VLM terminal contracts",
+      "expected_outcome": "Output, errors, summaries, prompts, and recovery do not depend on color, pointer, or visual monitoring",
+      "fixture_id": "FIXTURE-TERMINAL",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": null,
+      "activation": "A representative local command is executable",
+      "invalidation": "Local command, output, prompt, summary, or recovery changes",
+      "retest": "Run local terminal contract in TTY and redirected modes",
+      "required_methods": [
+        "UNIT_TEST",
+        "MANUAL_KEYBOARD"
+      ],
+      "evidence_refs": [
+        "setup-dev.sh",
+        "data-management/viewer/start.sh"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "A02",
+      "asset_id": "ASSET-TERMINAL",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Infrastructure and training script owners",
+      "role": "Cloud operator",
+      "platform": "CLI",
+      "state": "Preview, confirm, reject, submit, poll, timeout, disconnect, remote continuation, reconnect, cancel, success, and failure",
+      "task": "Run a consequential deploy or cloud training workflow",
+      "expected_outcome": "Consequences, target, progress, cancellation, continuation, recovery, and result are understandable",
+      "fixture_id": "FIXTURE-TERMINAL",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Terminal execution crosses identity, provider, and artifact boundaries",
+      "activation": "An authorized safe non-production target exists",
+      "invalidation": "Command, target, provider, timeout, progress, or recovery changes",
+      "retest": "Run one representative consequential and long-running terminal flow",
+      "required_methods": [
+        "UNIT_TEST",
+        "MANUAL_KEYBOARD",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        "infrastructure/setup",
+        "training",
+        "evaluation"
+      ],
+      "dependency_refs": [
+        "Authorized non-production environment"
+      ]
+    },
+    {
+      "journey_id": "A03",
+      "asset_id": "ASSET-CONVERSATION",
+      "lifecycle": "ACTIVE",
+      "owner": "Dataviewer agent owner and VS Code provider",
+      "role": "VS Code user",
+      "platform": "CONVERSATION",
+      "state": "Request, progress, harmless tool approval, rejection, stale path, failure, interruption, focus return, and completion",
+      "task": "Complete a Dataviewer Copilot workflow",
+      "expected_outcome": "Progress, tool consequence, interruption, errors, handoff, focus, and completion remain understandable",
+      "fixture_id": "FIXTURE-CONVERSATION",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Agent instructions cross into VS Code host controls and tools",
+      "activation": "The Dataviewer agent is installed in a supported host",
+      "invalidation": "Agent, prompt, tool, path, progress, error, or host changes",
+      "retest": "Run one successful and one stale-path conversation",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "MANUAL_KEYBOARD",
+        "NVDA"
+      ],
+      "evidence_refs": [
+        ".github/agents/dataviewer-developer.agent.md"
+      ],
+      "dependency_refs": [
+        "Host behavior requires qualified evidence"
+      ]
+    },
+    {
+      "journey_id": "A04",
+      "asset_id": "ASSET-CONVERSATION",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Dependabot workflow owner and GitHub provider",
+      "role": "Repository maintainer",
+      "platform": "CONVERSATION",
+      "state": "Unauthorized, no-op, running, failed, rendered success, interrupted, and returned",
+      "task": "Run the Dependabot review conversation",
+      "expected_outcome": "Authorization, progress, findings, failure, and rendered completion remain understandable",
+      "fixture_id": "FIXTURE-GITHUB",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Workflow metadata compiles into a GitHub-hosted conversation",
+      "activation": "A controlled repository and safe Dependabot pull request exist",
+      "invalidation": "Agentic workflow, permissions, host rendering, or output changes",
+      "retest": "Run unauthorized, no-op, failure, and success states",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        ".github/workflows/aw-dependabot-pr-review.md"
+      ],
+      "dependency_refs": [
+        "Authorized controlled GitHub repository"
+      ]
+    },
+    {
+      "journey_id": "A05",
+      "asset_id": "ASSET-DOCUMENTS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation and domain owners",
+      "role": "Contributor or operator",
+      "platform": "DOCUMENT",
+      "state": "Root orientation, support or security, long operator guide, adopted specification, smallest generated reference, and largest generated reference",
+      "task": "Read a GitHub-rendered document and make its intended decision",
+      "expected_outcome": "Structure, links, tables, code, terminology, and support choices remain understandable",
+      "fixture_id": "FIXTURE-DOCUMENT",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Documents may direct users into commands, forms, providers, or support",
+      "activation": "A tracked document has a human audience",
+      "invalidation": "Document content, renderer, audience, or decision role changes",
+      "retest": "Validate all source and sample representative rendering families",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "MANUAL_KEYBOARD",
+        "NVDA"
+      ],
+      "evidence_refs": [
+        "README.md",
+        "SUPPORT.md",
+        "infrastructure/terraform/modules/platform/TERRAFORM.md"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "A06",
+      "asset_id": "ASSET-DOCUMENTS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation and architecture owners",
+      "role": "Architecture reader",
+      "platform": "DOCUMENT",
+      "state": "Architecture bitmap, distinct Mermaid flow, generated rendering, source equivalent, and rendering failure",
+      "task": "Understand diagram relationships and make the intended architecture decision",
+      "expected_outcome": "Every material relationship and distinction is available without vision or color",
+      "fixture_id": "FIXTURE-DOCUMENT",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Diagram source and rendered image must convey equivalent decisions",
+      "activation": "A user is directed to a diagram",
+      "invalidation": "Diagram source, relationship, renderer, image, or audience changes",
+      "retest": "Compare each materially distinct diagram with its accessible relationship equivalent",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "MEDIA_EQUIVALENCE_REVIEW"
+      ],
+      "evidence_refs": [
+        "docs"
+      ],
+      "dependency_refs": [
+        "Qualified graphics equivalence review"
+      ]
+    },
+    {
+      "journey_id": "A07",
+      "asset_id": "ASSET-GENERATED",
+      "lifecycle": "ACTIVE",
+      "owner": "Evaluation and Viewer output owners",
+      "role": "Model or dataset reviewer",
+      "platform": "GENERATED_ARTIFACT",
+      "state": "Trajectory overlay, heatmap, summary panel, aggregate panel, annotated detection preview, empty, extreme, and error",
+      "task": "Interpret plots and previews using bound structured values",
+      "expected_outcome": "The same decision is available without color, hover, spatial position, or image inspection",
+      "fixture_id": "FIXTURE-GENERATED",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Visual output and structured values require an explicit equivalence binding",
+      "activation": "A person uses the visual output to decide",
+      "invalidation": "Plot, preview, values, units, threshold, encoding, or consumer changes",
+      "retest": "Compare each unique implementation and representative extreme",
+      "required_methods": [
+        "ARTIFACT_INTEGRITY",
+        "MEDIA_EQUIVALENCE_REVIEW"
+      ],
+      "evidence_refs": [
+        "evaluation/metrics/plotting.py",
+        "data-management/viewer/frontend/src"
+      ],
+      "dependency_refs": [
+        "Qualified graphics equivalence review"
+      ]
+    },
+    {
+      "journey_id": "A08",
+      "asset_id": "ASSET-GENERATED",
+      "lifecycle": "ACTIVE",
+      "owner": "Evaluation media owners",
+      "role": "Model reviewer",
+      "platform": "GENERATED_ARTIFACT",
+      "state": "Silent rollout, meaningful audio when present, event timeline, playback, pause, seek, failure, and unsupported content",
+      "task": "Interpret generated evaluation media",
+      "expected_outcome": "Decision-relevant events, timing, and meaningful audio are available through an approved equivalent",
+      "fixture_id": "FIXTURE-GENERATED",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Media output enters human evaluation and promotion decisions",
+      "activation": "Generated media is used for a human decision",
+      "invalidation": "Media content, event meaning, audio, renderer, or decision role changes",
+      "retest": "Review one silent rollout and meaningful-audio clip only when applicable",
+      "required_methods": [
+        "ARTIFACT_INTEGRITY",
+        "MEDIA_EQUIVALENCE_REVIEW"
+      ],
+      "evidence_refs": [
+        "evaluation/sil/scripts/run-local-lerobot-eval.py"
+      ],
+      "dependency_refs": [
+        "Qualified media equivalence review"
+      ]
+    },
+    {
+      "journey_id": "A09",
+      "asset_id": "ASSET-GENERATED",
+      "lifecycle": "ACTIVE",
+      "owner": "Evaluation, HiL, and Viewer output owners",
+      "role": "Reviewer or downstream operator",
+      "platform": "GENERATED_ARTIFACT",
+      "state": "Evaluation JSON, VLM JSONL or CSV, HiL summary or JSONL, Viewer sidecar JSON, HDF5, NPZ, valid, invalid, missing summary, and extreme",
+      "task": "Inspect a structured or binary evidence bundle",
+      "expected_outcome": "Schema, provenance, units, labels, uncertainty, and human summary support the same decision",
+      "fixture_id": "FIXTURE-GENERATED",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "Machine payloads require a bound summary only when a human decision is named",
+      "activation": "A person directly interprets the bundle",
+      "invalidation": "Schema, producer, consumer, summary, or decision role changes",
+      "retest": "Run integrity and decision-equivalence cases per unique format",
+      "required_methods": [
+        "ARTIFACT_INTEGRITY",
+        "MEDIA_EQUIVALENCE_REVIEW"
+      ],
+      "evidence_refs": [
+        "evaluation",
+        "data-management/viewer/backend/src/api/services/hdf5_exporter.py"
+      ],
+      "dependency_refs": [
+        "Machine-only payloads remain integrity-only until activated"
+      ]
+    },
+    {
+      "journey_id": "A10",
+      "asset_id": "ASSET-GITHUB-ACTIONS",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Workflow and artifact owners with GitHub",
+      "role": "Repository maintainer",
+      "platform": "GITHUB_HOSTED",
+      "state": "Passing summary, failing summary, annotation, log, JSON, text, XML, SARIF, download, expired artifact, missing artifact, denied, and recovered",
+      "task": "Find, retrieve, open, attribute, and recover generated CI evidence",
+      "expected_outcome": "Status, filename, type, integrity, authorization, expiry, and recovery are understandable",
+      "fixture_id": "FIXTURE-GITHUB",
+      "predecessor_ids": [],
+      "successor_ids": [],
+      "handoff": "CI producer output is delivered through GitHub-hosted summaries and artifacts",
+      "activation": "A controlled safe workflow emits representative evidence",
+      "invalidation": "Workflow, summary, annotation, artifact, retention, permission, or GitHub behavior changes",
+      "retest": "Run passing, failing, missing, expired, denied, and recovery states",
+      "required_methods": [
+        "ARTIFACT_INTEGRITY",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        ".github/workflows"
+      ],
+      "dependency_refs": [
+        "Authorized controlled GitHub repository"
+      ]
+    },
+    {
+      "journey_id": "J01",
+      "asset_id": "ASSET-DOCUMENTS",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation and support owners",
+      "role": "Reader or contributor",
+      "platform": "DOCUMENT",
+      "state": "Orientation, operator, contribution, support, policy, specification, generated reference, issue choice, and security choice",
+      "task": "Read repository guidance and choose the correct intake channel",
+      "expected_outcome": "Rendered use, alternate format, privacy, timeliness, accommodation, and response remain separately evidenced",
+      "fixture_id": "FIXTURE-DOCUMENT",
+      "predecessor_ids": [],
+      "successor_ids": [
+        "J02",
+        "J12",
+        "J16"
+      ],
+      "handoff": "Guidance directs users into commands, GitHub intake, and support",
+      "activation": "A tracked document is a public entry point",
+      "invalidation": "Document, link, channel, renderer, or support claim changes",
+      "retest": "Validate source, rendered decision, and activated handoffs",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "MANUAL_KEYBOARD",
+        "SUPPORT_TASK"
+      ],
+      "evidence_refs": [
+        "README.md",
+        "SUPPORT.md",
+        "docs"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "J02",
+      "asset_id": "ASSET-TERMINAL",
+      "lifecycle": "ACTIVE",
+      "owner": "Bootstrap and subscription script owners",
+      "role": "Local or cloud operator",
+      "platform": "CLI",
+      "state": "Bootstrap, subscription initialization, tagged output, error, preview, and summary",
+      "task": "Prepare a local or cloud development environment",
+      "expected_outcome": "Output and errors remain accessible while absent local robotics dependencies stay visible",
+      "fixture_id": "FIXTURE-TERMINAL",
+      "predecessor_ids": [
+        "J01"
+      ],
+      "successor_ids": [
+        "J03",
+        "J04",
+        "J06"
+      ],
+      "handoff": "Environment setup precedes capture, Viewer, and cloud workflows",
+      "activation": "The supported setup command is executable",
+      "invalidation": "Setup dependency, output, prompt, error, or environment scope changes",
+      "retest": "Run preview, success, failure, and summary states",
+      "required_methods": [
+        "UNIT_TEST",
+        "MANUAL_KEYBOARD"
+      ],
+      "evidence_refs": [
+        "setup-dev.sh",
+        "infrastructure/terraform/prerequisites"
+      ],
+      "dependency_refs": [
+        "T0 capture, LeRobot, inference, and robot runtimes are not installed"
+      ]
+    },
+    {
+      "journey_id": "J03",
+      "asset_id": "ASSET-CAPTURE-CONTROLS",
+      "lifecycle": "ASPIRATIONAL",
+      "owner": "Data capture owner",
+      "role": "Data collector",
+      "platform": "CLI",
+      "state": "External recording, file transfer, trigger, warning, pause, disk stop, gap alert, failure, and recovery",
+      "task": "Capture and transfer a robot episode",
+      "expected_outcome": "External commands remain distinct from currently absent project-owned controls",
+      "fixture_id": "FIXTURE-ACTIVATION",
+      "predecessor_ids": [
+        "J02"
+      ],
+      "successor_ids": [
+        "J04",
+        "J05"
+      ],
+      "handoff": "External capture output becomes Viewer or training input",
+      "activation": "A supported recorder runtime owns configured controls and statuses",
+      "invalidation": "Recorder, transfer, trigger, status, stop, or recovery changes",
+      "retest": "Create exact controls and complete-process evidence after activation",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "MANUAL_KEYBOARD"
+      ],
+      "evidence_refs": [
+        "data-pipeline/capture"
+      ],
+      "dependency_refs": [
+        "Current journey depends on external recording and file-transfer commands"
+      ]
+    },
+    {
+      "journey_id": "J04",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer team",
+      "role": "Annotator",
+      "platform": "WEB",
+      "state": "Launch, select, inspect, annotate, edit, judge, detect, diagnose, export, error, cancel, and recover",
+      "task": "Complete the local Viewer workflow",
+      "expected_outcome": "The complete task is deterministic and rendered outcomes do not inherit from source tests",
+      "fixture_id": "FIXTURE-VIEWER",
+      "predecessor_ids": [
+        "J02",
+        "J03"
+      ],
+      "successor_ids": [
+        "J05",
+        "J09"
+      ],
+      "handoff": "Viewer export may enter training and generated-artifact review",
+      "activation": "The local Viewer and synthetic dataset are available",
+      "invalidation": "Any V01 through V19 journey or complete-process transition changes",
+      "retest": "Run mapped Viewer task packs and preserve human-dependent gaps",
+      "required_methods": [
+        "AXE",
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_LIVE_REGION",
+        "PLAYWRIGHT_VISUAL"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts"
+      ],
+      "dependency_refs": [
+        "project-user-ui-surface-area-plan:P02-T02 for playback equivalence"
+      ]
+    },
+    {
+      "journey_id": "J05",
+      "asset_id": "ASSET-TERMINAL",
+      "lifecycle": "ACTIVE",
+      "owner": "Training and evaluation owners",
+      "role": "Model developer",
+      "platform": "CLI",
+      "state": "External LeRobot training, local SiL evaluation, progress, failure, metrics, plots, media, and result",
+      "task": "Train locally and inspect evaluation outcomes",
+      "expected_outcome": "Terminal, structured, visual, and media decisions remain separately evidenced",
+      "fixture_id": "FIXTURE-TERMINAL",
+      "predecessor_ids": [
+        "J03",
+        "J04"
+      ],
+      "successor_ids": [
+        "J09",
+        "J15"
+      ],
+      "handoff": "Training output enters evaluation, artifact review, and potential inference",
+      "activation": "LeRobot is separately installed and local evaluation is supported",
+      "invalidation": "Training CLI, evaluator, artifact, plot, media, or inference changes",
+      "retest": "Run terminal and generated-output evidence for affected decisions",
+      "required_methods": [
+        "UNIT_TEST",
+        "MANUAL_KEYBOARD",
+        "ARTIFACT_INTEGRITY",
+        "MEDIA_EQUIVALENCE_REVIEW"
+      ],
+      "evidence_refs": [
+        "training/il",
+        "evaluation/sil"
+      ],
+      "dependency_refs": [
+        "Supported robot inference and safe stop remain absent"
+      ]
+    },
+    {
+      "journey_id": "J06",
+      "asset_id": "ASSET-AZURE-ML",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Infrastructure, training, and evaluation owners",
+      "role": "Cloud operator",
+      "platform": "PROVIDER",
+      "state": "Provision, connect, submit, monitor, denied, expired, timeout, remote continuation, completed, failed, cancelled, and retrieved",
+      "task": "Run a cloud training or evaluation workflow",
+      "expected_outcome": "Identity, role, target, provider status, long-running recovery, and artifact retrieval remain accessible",
+      "fixture_id": "FIXTURE-AZURE",
+      "predecessor_ids": [
+        "J02"
+      ],
+      "successor_ids": [
+        "J09",
+        "J13"
+      ],
+      "handoff": "CLI and identity lead to provider consoles and generated artifacts",
+      "activation": "Authorized identity, network, role, and non-production environment exist",
+      "invalidation": "Infrastructure, identity, role, provider, command, job, or artifact changes",
+      "retest": "Run complete safe submission, failure, continuation, and retrieval",
+      "required_methods": [
+        "MANUAL_KEYBOARD",
+        "PROVIDER_TASK",
+        "ARTIFACT_INTEGRITY"
+      ],
+      "evidence_refs": [
+        "infrastructure",
+        "training",
+        "evaluation"
+      ],
+      "dependency_refs": [
+        "Authorized non-production environment"
+      ]
+    },
+    {
+      "journey_id": "J07",
+      "asset_id": "ASSET-OSMO",
+      "lifecycle": "BROKEN",
+      "owner": "Training pipeline owner",
+      "role": "Training operator",
+      "platform": "CLI",
+      "state": "Submit, wait, trained, inference handoff, skipped inference, recovery guidance, and registration",
+      "task": "Run the advertised OSMO train-evaluate-register pipeline",
+      "expected_outcome": "The missing inference handoff remains a lifecycle failure and cannot produce accessibility pass evidence",
+      "fixture_id": "FIXTURE-ACTIVATION",
+      "predecessor_ids": [
+        "J06"
+      ],
+      "successor_ids": [
+        "J09"
+      ],
+      "handoff": "Training wait calls a missing root inference submission script",
+      "activation": "The missing inference path is replaced with an executable supported handoff",
+      "invalidation": "Pipeline, inference path, recovery guidance, or registration changes",
+      "retest": "Resolve path integrity before testing complete-process accessibility",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "UNIT_TEST"
+      ],
+      "evidence_refs": [
+        "training/pipelines/run-lerobot-pipeline.sh"
+      ],
+      "dependency_refs": [
+        "scripts/submit-osmo-lerobot-inference.sh is absent"
+      ]
+    },
+    {
+      "journey_id": "J08",
+      "asset_id": "ASSET-TERMINAL",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "HiL environment and evaluation owners",
+      "role": "HiL operator",
+      "platform": "CLI",
+      "state": "Access requested, certificate retrieved, VPN connected, context bound, smoke run, no-command run, denied, expired, disconnected, reconnected, and failed",
+      "task": "Reach and execute the no-command HiL proof",
+      "expected_outcome": "Access and no-command evidence stop before any command transport or physical motion claim",
+      "fixture_id": "FIXTURE-AZURE",
+      "predecessor_ids": [
+        "J02"
+      ],
+      "successor_ids": [
+        "J09",
+        "J15"
+      ],
+      "handoff": "Private access reaches no-command evidence only",
+      "activation": "Authorized identity, certificate, VPN, context, and non-production environment exist",
+      "invalidation": "Access, certificate, network, context, no-command runner, or evidence changes",
+      "retest": "Run access, failure, reconnect, and no-command states",
+      "required_methods": [
+        "MANUAL_KEYBOARD",
+        "ARTIFACT_INTEGRITY"
+      ],
+      "evidence_refs": [
+        "evaluation/hil/no_command_runner.py"
+      ],
+      "dependency_refs": [
+        "No supported transition to command transport or physical motion"
+      ]
+    },
+    {
+      "journey_id": "J09",
+      "asset_id": "ASSET-GENERATED",
+      "lifecycle": "ACTIVE",
+      "owner": "Producer and consumer owners",
+      "role": "Reviewer",
+      "platform": "GENERATED_ARTIFACT",
+      "state": "Metrics, labels, plots, previews, videos, HiL files, exports, summaries, logs, downloads, missing, expired, and invalid",
+      "task": "Review generated decision artifacts",
+      "expected_outcome": "Integrity, renderer access, task equivalence, provenance, retrieval, and qualified review remain distinct",
+      "fixture_id": "FIXTURE-GENERATED",
+      "predecessor_ids": [
+        "J04",
+        "J05",
+        "J06",
+        "J07",
+        "J08"
+      ],
+      "successor_ids": [
+        "J15"
+      ],
+      "handoff": "Generated evidence informs human promotion, support, or deployment decisions",
+      "activation": "A generated artifact has a named human consumer and decision",
+      "invalidation": "Producer, format, schema, renderer, consumer, decision, or delivery changes",
+      "retest": "Run integrity, equivalence, retrieval, and human review by unique implementation",
+      "required_methods": [
+        "ARTIFACT_INTEGRITY",
+        "MEDIA_EQUIVALENCE_REVIEW"
+      ],
+      "evidence_refs": [
+        "evaluation",
+        "data-management/viewer/backend/src/api/services/hdf5_exporter.py",
+        ".github/workflows"
+      ],
+      "dependency_refs": [
+        "Qualified review for decision equivalence"
+      ]
+    },
+    {
+      "journey_id": "J10",
+      "asset_id": "ASSET-CONVERSATION",
+      "lifecycle": "ACTIVE",
+      "owner": "Agent and workflow owners",
+      "role": "Developer or maintainer",
+      "platform": "CONVERSATION",
+      "state": "Dataviewer request, Dependabot request, progress, approval, rejection, stale path, interruption, failure, and completion",
+      "task": "Complete a host-rendered repository conversation",
+      "expected_outcome": "Metadata compilation does not substitute for keyboard, assistive-technology, focus, or handoff outcomes",
+      "fixture_id": "FIXTURE-CONVERSATION",
+      "predecessor_ids": [
+        "J01"
+      ],
+      "successor_ids": [
+        "J04",
+        "J06",
+        "J16"
+      ],
+      "handoff": "Conversation instructions invoke tools, repository paths, providers, and support",
+      "activation": "A supported host and relevant agent or workflow are available",
+      "invalidation": "Agent, prompt, host, tool, path, progress, error, or handoff changes",
+      "retest": "Run representative safe conversations and stale-path recovery",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "MANUAL_KEYBOARD",
+        "NVDA"
+      ],
+      "evidence_refs": [
+        ".github/agents/dataviewer-developer.agent.md",
+        ".github/workflows/aw-dependabot-pr-review.md"
+      ],
+      "dependency_refs": [
+        "OSMO conversational handoffs remain stale or missing"
+      ]
+    },
+    {
+      "journey_id": "J11",
+      "asset_id": "ASSET-FASTAPI-DOCS",
+      "lifecycle": "CONDITIONAL",
+      "owner": "API owners and FastAPI",
+      "role": "API user",
+      "platform": "GENERATED_WEB",
+      "state": "Six docs pages loaded, navigated, disclosed, searched, requested, errored, focused, and reflowed",
+      "task": "Use generated API documentation",
+      "expected_outcome": "Source schema tests remain separate from rendered interaction and support decisions",
+      "fixture_id": "FIXTURE-API-DOCS",
+      "predecessor_ids": [
+        "J01"
+      ],
+      "successor_ids": [],
+      "handoff": "Repository schemas render through provider-owned Swagger UI and ReDoc",
+      "activation": "Docs are intentionally exposed and supported",
+      "invalidation": "FastAPI, renderer, schema, route, security, or support changes",
+      "retest": "Run F01 through F06",
+      "required_methods": [
+        "AXE",
+        "PLAYWRIGHT_KEYBOARD",
+        "PLAYWRIGHT_TREE",
+        "PLAYWRIGHT_VISUAL"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/backend/src/api/main.py",
+        "evaluation/vlm_judge/api.py",
+        "evaluation/vlm_judge/openai_shim.py"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "J12",
+      "asset_id": "ASSET-GITHUB-INTAKE",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Repository owners and GitHub",
+      "role": "Contributor or maintainer",
+      "platform": "GITHUB_HOSTED",
+      "state": "Issue chooser, forms, editor, contact links, dispatch forms, run pages, summaries, logs, artifacts, denied, invalid, failed, and recovered",
+      "task": "Use GitHub intake and Actions surfaces",
+      "expected_outcome": "Authored source and provider-rendered behavior remain separate evidence",
+      "fixture_id": "FIXTURE-GITHUB",
+      "predecessor_ids": [
+        "J01"
+      ],
+      "successor_ids": [
+        "J09",
+        "J16"
+      ],
+      "handoff": "GitHub intake enters support and workflow output enters artifact review",
+      "activation": "Representative account and controlled repository are authorized",
+      "invalidation": "Form, workflow, permission, output, or GitHub behavior changes",
+      "retest": "Validate source and run controlled G01 through G09 tasks",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        ".github/ISSUE_TEMPLATE",
+        ".github/workflows"
+      ],
+      "dependency_refs": [
+        "Authorized controlled GitHub repository"
+      ]
+    },
+    {
+      "journey_id": "J13",
+      "asset_id": "ASSET-OSMO",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Platform, observability, training, and provider owners",
+      "role": "Least-privilege provider user",
+      "platform": "PROVIDER",
+      "state": "OSMO, Grafana, or Azure ML disconnected, denied, expired, empty, populated, operating, failed, recovered, and output available",
+      "task": "Complete a supported private provider task",
+      "expected_outcome": "Each non-equivalent provider, role, shell, project content, and failure path retains a separate outcome",
+      "fixture_id": "FIXTURE-AZURE",
+      "predecessor_ids": [
+        "J06"
+      ],
+      "successor_ids": [
+        "J09",
+        "J16"
+      ],
+      "handoff": "Identity and network lead to provider shells and output",
+      "activation": "A versioned deployment, route, role, synthetic task, and reviewer exist",
+      "invalidation": "Provider, version, role, network, task, content, or assurance changes",
+      "retest": "Run P01 through P03 as separately activated tasks",
+      "required_methods": [
+        "PROVIDER_ASSURANCE",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        "infrastructure/setup/values/osmo-control-plane.yaml",
+        "infrastructure/terraform/modules/platform/observability.tf",
+        "training",
+        "evaluation"
+      ],
+      "dependency_refs": [
+        "Authorized environments and qualified reviewers"
+      ]
+    },
+    {
+      "journey_id": "J14",
+      "asset_id": "ASSET-THINLINC-NATIVE",
+      "lifecycle": "CONDITIONAL",
+      "owner": "Simulation and infrastructure owners",
+      "role": "Simulation operator",
+      "platform": "REMOTE",
+      "state": "Workstation, native client, Web Access, graphical launch, headless mismatch, unavailable bootstrap, disconnected, failed, and recovered",
+      "task": "Reach and operate Isaac through a supported graphical path",
+      "expected_outcome": "Native client, Web Access, remote desktop, and Isaac remain separate evidence subjects",
+      "fixture_id": "FIXTURE-NATIVE",
+      "predecessor_ids": [
+        "J02"
+      ],
+      "successor_ids": [
+        "J09"
+      ],
+      "handoff": "Remote transport leads to a native application and generated output",
+      "activation": "Bootstrap inputs, deployment, route, display transport, and support contract succeed",
+      "invalidation": "Workstation, client, web route, network, display, Isaac, or host changes",
+      "retest": "Run D01 through D03 only where independently activated",
+      "required_methods": [
+        "PROVIDER_ASSURANCE",
+        "NATIVE_TASK",
+        "MEDIA_EQUIVALENCE_REVIEW"
+      ],
+      "evidence_refs": [
+        "infrastructure/setup/optional/isaac-sim-vm",
+        "training/rl/scripts/launch.py"
+      ],
+      "dependency_refs": [
+        "Managed jobs are headless and current ThinLinc availability is incomplete"
+      ]
+    },
+    {
+      "journey_id": "J15",
+      "asset_id": "ASSET-ROBOT-CONTROLS",
+      "lifecycle": "ABSENT",
+      "owner": "Robot integrator, fleet owners, and safety authority",
+      "role": "Robot operator",
+      "platform": "PHYSICAL",
+      "state": "Command published, driver consumed, control available, alarm perceived, stopped, faulted, reset, safely recovered, rolled out, and rolled back",
+      "task": "Operate, stop, recover, and deploy a policy to a robot fleet",
+      "expected_outcome": "No source, simulator, provider, or no-command evidence transfers to absent physical outcomes",
+      "fixture_id": "FIXTURE-ACTIVATION",
+      "predecessor_ids": [
+        "J05",
+        "J08",
+        "J09"
+      ],
+      "successor_ids": [],
+      "handoff": "Source-only ROS command output stops before hardware and human operation",
+      "activation": "Exact robot, driver, controller, pendant, protective device, command, fault, stop, reset, rollout, and rollback paths exist",
+      "invalidation": "Any physical, safety, operator, command, fleet, or hardware binding changes",
+      "retest": "Run only an authorized accessibility and safety protocol",
+      "required_methods": [
+        "SAFETY_REVIEW",
+        "NATIVE_TASK"
+      ],
+      "evidence_refs": [
+        "fleet-deployment/inference",
+        "evaluation/hil/no_command_runner.py"
+      ],
+      "dependency_refs": [
+        "Physical controls, alarms, independent stop, reset, gate, rollout, and rollback are absent"
+      ]
+    },
+    {
+      "journey_id": "J16",
+      "asset_id": "ASSET-SUPPORT",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Organizational support owner",
+      "role": "User requesting help or accommodation",
+      "platform": "CONVERSATION",
+      "state": "Notice, intake, acknowledgment, alternate format, accommodation, provider escalation, interim aid, correction, appeal, and closure",
+      "task": "Obtain accessible help through resolution",
+      "expected_outcome": "Communication effectiveness, privacy, independence, timeliness, escalation, correction, and closure are observed",
+      "fixture_id": "FIXTURE-CONVERSATION",
+      "predecessor_ids": [
+        "J01",
+        "J10",
+        "J12",
+        "J13"
+      ],
+      "successor_ids": [],
+      "handoff": "A Help link or issue form does not establish support service outcomes",
+      "activation": "A controlled support channel and accountable owner can complete a synthetic request",
+      "invalidation": "Channel, owner, service level, privacy, alternate access, statement, or provider escalation changes",
+      "retest": "Run the complete support process with a synthetic request",
+      "required_methods": [
+        "SUPPORT_TASK",
+        "COGNITIVE_REVIEW"
+      ],
+      "evidence_refs": [
+        "SUPPORT.md",
+        ".github/ISSUE_TEMPLATE"
+      ],
+      "dependency_refs": [
+        "Support-process owner and qualified reviewer"
+      ]
+    },
+    {
+      "journey_id": "H01",
+      "asset_id": "ASSET-TERMINAL",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Identity and CLI owners",
+      "role": "Cloud operator",
+      "platform": "CLI",
+      "state": "Browser or device-code identity launched, code transferred, wrong context, consent, denied, expired, timed out, retried, and returned",
+      "task": "Cross from CLI to identity and back",
+      "expected_outcome": "Focus, context, target, timeout, account, consent, denial, expiry, and retry remain accessible",
+      "fixture_id": "FIXTURE-AZURE",
+      "predecessor_ids": [
+        "J02"
+      ],
+      "successor_ids": [
+        "J06"
+      ],
+      "handoff": "CLI to browser or device-code identity and back",
+      "activation": "An authorized representative identity flow exists",
+      "invalidation": "Identity provider, CLI, account, tenant context, consent, or timeout changes",
+      "retest": "Run success, wrong-context, denial, expiry, timeout, and return",
+      "required_methods": [
+        "MANUAL_KEYBOARD",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        "infrastructure/terraform/prerequisites"
+      ],
+      "dependency_refs": [
+        "Authorized identity and qualified reviewer"
+      ]
+    },
+    {
+      "journey_id": "H02",
+      "asset_id": "ASSET-SUPPORT",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Access request and certificate owners",
+      "role": "HiL requester",
+      "platform": "CONVERSATION",
+      "state": "Requested, acknowledged, approved, rejected, published, retrieved, delayed, retried, and alternate communication",
+      "task": "Request private access and retrieve the approved certificate",
+      "expected_outcome": "Status, timing, privacy, least-data exchange, rejection, retry, and alternate communication remain accessible",
+      "fixture_id": "FIXTURE-CONVERSATION",
+      "predecessor_ids": [
+        "J08"
+      ],
+      "successor_ids": [
+        "H03"
+      ],
+      "handoff": "Requester to conditional-access owner to certificate publication and retrieval",
+      "activation": "A controlled non-production access process is authorized",
+      "invalidation": "Request, approval, publication, retrieval, timing, privacy, or channel changes",
+      "retest": "Run request through retrieval plus rejection and delay",
+      "required_methods": [
+        "SUPPORT_TASK",
+        "COGNITIVE_REVIEW"
+      ],
+      "evidence_refs": [
+        "infrastructure"
+      ],
+      "dependency_refs": [
+        "Access-process owner and authorized identity"
+      ]
+    },
+    {
+      "journey_id": "H03",
+      "asset_id": "ASSET-TERMINAL",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Network and private-service owners",
+      "role": "HiL operator",
+      "platform": "REMOTE",
+      "state": "VPN connected, disconnected, reconnected, expired, revoked, route lost, DNS lost, service reached, and recovered",
+      "task": "Cross from VPN client to private service",
+      "expected_outcome": "Connection state, certificate failure, route or DNS loss, keyboard operation, and recovery remain accessible",
+      "fixture_id": "FIXTURE-AZURE",
+      "predecessor_ids": [
+        "H02"
+      ],
+      "successor_ids": [
+        "H04"
+      ],
+      "handoff": "Native VPN client or strongSwan to private DNS, routes, and service",
+      "activation": "An authorized certificate, network, client, and private service exist",
+      "invalidation": "Client, certificate, route, DNS, network, or service changes",
+      "retest": "Run connection, loss, expiry, revocation, reconnect, and recovery",
+      "required_methods": [
+        "MANUAL_KEYBOARD",
+        "NATIVE_TASK"
+      ],
+      "evidence_refs": [
+        "infrastructure/terraform/vpn"
+      ],
+      "dependency_refs": [
+        "Authorized network and supported platform"
+      ]
+    },
+    {
+      "journey_id": "H04",
+      "asset_id": "ASSET-OSMO",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Cluster and OSMO owners",
+      "role": "Workflow operator",
+      "platform": "CLI",
+      "state": "Context selected, profile selected, target confirmed, previewed, wrong context prevented, submitted, cancelled, logged, and recovered",
+      "task": "Cross from Azure and Kubernetes context to an OSMO job",
+      "expected_outcome": "Target, least privilege, preview, cancellation, identity, logs, and wrong-context prevention remain accessible",
+      "fixture_id": "FIXTURE-OSMO",
+      "predecessor_ids": [
+        "H03"
+      ],
+      "successor_ids": [
+        "H05"
+      ],
+      "handoff": "Azure and Kubernetes context plus OSMO profile to cluster, pool, and job",
+      "activation": "Authorized context, profile, cluster, pool, and synthetic workflow exist",
+      "invalidation": "Context, profile, cluster, pool, role, command, or workflow changes",
+      "retest": "Run target confirmation, wrong-context, submit, cancel, and logs",
+      "required_methods": [
+        "MANUAL_KEYBOARD",
+        "PROVIDER_TASK"
+      ],
+      "evidence_refs": [
+        "infrastructure/setup/values/osmo-control-plane.yaml"
+      ],
+      "dependency_refs": [
+        "Authorized OSMO environment"
+      ]
+    },
+    {
+      "journey_id": "H05",
+      "asset_id": "ASSET-TERMINAL",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Submission and provider owners",
+      "role": "Cloud operator",
+      "platform": "CLI",
+      "state": "Submitted, progressing, quiet, flooding, cancelled, disconnected, timed out, continuing remotely, reconnected, completed, and retrieved",
+      "task": "Follow a long-running submission through artifacts",
+      "expected_outcome": "Updates, speech cadence, cancel versus disconnect, remote continuation, one completion, and retrieval remain accessible",
+      "fixture_id": "FIXTURE-TERMINAL",
+      "predecessor_ids": [
+        "H04",
+        "J06"
+      ],
+      "successor_ids": [
+        "J09"
+      ],
+      "handoff": "Long-running CLI or conversation submission to provider progress, completion, and artifacts",
+      "activation": "A safe long-running synthetic job and provider are authorized",
+      "invalidation": "Submission, progress, timeout, cancellation, continuation, provider, or artifact changes",
+      "retest": "Run complete, fail, cancel, disconnect, timeout, reconnect, and retrieval",
+      "required_methods": [
+        "MANUAL_KEYBOARD",
+        "PROVIDER_TASK",
+        "ARTIFACT_INTEGRITY"
+      ],
+      "evidence_refs": [
+        "training/stream.py",
+        "training",
+        "evaluation"
+      ],
+      "dependency_refs": [
+        "Authorized non-production provider"
+      ]
+    },
+    {
+      "journey_id": "H06",
+      "asset_id": "ASSET-VIEWER",
+      "lifecycle": "ACTIVE",
+      "owner": "Viewer and training owners",
+      "role": "Annotator or model developer",
+      "platform": "GENERATED_ARTIFACT",
+      "state": "Export prepared, progressing, errored, cancelled, completed, manifested, summarized, transferred, and consumed",
+      "task": "Move Viewer export or dataset files into training",
+      "expected_outcome": "Progress, cancellation, provenance, annotation meaning, human summary, and machine agreement remain accessible",
+      "fixture_id": "FIXTURE-GENERATED",
+      "predecessor_ids": [
+        "J04"
+      ],
+      "successor_ids": [
+        "J05"
+      ],
+      "handoff": "Viewer export or dataset files to training input",
+      "activation": "Synthetic Viewer export and local training consumer exist",
+      "invalidation": "Export, manifest, annotation meaning, transfer, summary, or training input changes",
+      "retest": "Run export through validated training ingestion",
+      "required_methods": [
+        "ARTIFACT_INTEGRITY",
+        "MANUAL_KEYBOARD"
+      ],
+      "evidence_refs": [
+        "data-management/viewer/backend/src/api/services/hdf5_exporter.py",
+        "training"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "H07",
+      "asset_id": "ASSET-GENERATED",
+      "lifecycle": "ACTIVE",
+      "owner": "Training, evaluation, and promotion owners",
+      "role": "Model reviewer",
+      "platform": "GENERATED_ARTIFACT",
+      "state": "Checkpoint, evaluator, metrics, plot, video, thresholds, uncertainty, passed, failed, inconclusive, and promoted",
+      "task": "Move a model through evaluation to a promotion decision",
+      "expected_outcome": "Structured equivalent, labels, units, thresholds, uncertainty, media timeline, and reviewer outcome remain bound",
+      "fixture_id": "FIXTURE-GENERATED",
+      "predecessor_ids": [
+        "J05"
+      ],
+      "successor_ids": [
+        "J09",
+        "J15"
+      ],
+      "handoff": "Model or checkpoint to evaluator, artifacts, and promotion decision",
+      "activation": "Synthetic model output and explicit promotion criteria exist",
+      "invalidation": "Model, evaluator, threshold, metric, plot, media, reviewer, or promotion changes",
+      "retest": "Run evaluation, equivalence, uncertainty, and promotion decision",
+      "required_methods": [
+        "ARTIFACT_INTEGRITY",
+        "MEDIA_EQUIVALENCE_REVIEW",
+        "COGNITIVE_REVIEW"
+      ],
+      "evidence_refs": [
+        "training",
+        "evaluation"
+      ],
+      "dependency_refs": [
+        "Qualified media and decision review"
+      ]
+    },
+    {
+      "journey_id": "H08",
+      "asset_id": "ASSET-CONVERSATION",
+      "lifecycle": "ACTIVE",
+      "owner": "Documentation, agent, and command owners",
+      "role": "Developer or operator",
+      "platform": "CONVERSATION",
+      "state": "Instruction read, path resolved, previewed, approved, rejected, executed, stale, failed, recovered, and focus returned",
+      "task": "Cross from instruction to executable path",
+      "expected_outcome": "Path, working directory, command, preview, consequence, approval, error, and host focus remain accessible",
+      "fixture_id": "FIXTURE-CONVERSATION",
+      "predecessor_ids": [
+        "J01",
+        "J10"
+      ],
+      "successor_ids": [
+        "J02",
+        "J04",
+        "J06"
+      ],
+      "handoff": "Copilot or documentation instruction to executable path",
+      "activation": "A public instruction names an executable repository path",
+      "invalidation": "Instruction, path, working directory, command, approval, consequence, or host changes",
+      "retest": "Run valid and stale path handoffs with approval and rejection",
+      "required_methods": [
+        "SOURCE_INSPECTION",
+        "MANUAL_KEYBOARD"
+      ],
+      "evidence_refs": [
+        "README.md",
+        "docs",
+        ".github/agents"
+      ],
+      "dependency_refs": []
+    },
+    {
+      "journey_id": "H09",
+      "asset_id": "ASSET-OSMO",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Provider and accountable acceptance owners",
+      "role": "Accessibility or procurement reviewer",
+      "platform": "PROVIDER",
+      "state": "Assurance located, version matched, scope matched, configuration checked, task tested, defect open, alternate path available, and accepted or rejected",
+      "task": "Relate provider assurance to project critical-task acceptance",
+      "expected_outcome": "Assurance, configuration, hands-on behavior, defects, alternatives, and acceptance remain distinct records",
+      "fixture_id": "FIXTURE-AZURE",
+      "predecessor_ids": [
+        "J13"
+      ],
+      "successor_ids": [
+        "J16"
+      ],
+      "handoff": "Provider assurance document to project critical-task acceptance",
+      "activation": "Current provider assurance and authorized task evidence exist",
+      "invalidation": "Provider, version, scope, configuration, task, defect, alternative, or acceptance changes",
+      "retest": "Reconcile current assurance with hands-on critical-task evidence",
+      "required_methods": [
+        "PROVIDER_ASSURANCE",
+        "PROVIDER_TASK",
+        "COGNITIVE_REVIEW"
+      ],
+      "evidence_refs": [
+        "infrastructure",
+        "training",
+        "evaluation"
+      ],
+      "dependency_refs": [
+        "Current provider assurance and accountable reviewer"
+      ]
+    },
+    {
+      "journey_id": "H10",
+      "asset_id": "ASSET-ROBOT-CONTROLS",
+      "lifecycle": "ABSENT",
+      "owner": "Robot integrator and safety authority",
+      "role": "Robot operator",
+      "platform": "PHYSICAL",
+      "state": "No-command evidence, command transport added, hardware bound, control available, faulted, alarmed, stopped, reset, timed, and reviewed",
+      "task": "Cross from no-command HiL into any command-capable or physical path",
+      "expected_outcome": "All transferred no-command claims are quarantined until new accessibility and safety evidence exists",
+      "fixture_id": "FIXTURE-ACTIVATION",
+      "predecessor_ids": [
+        "J08"
+      ],
+      "successor_ids": [
+        "J15",
+        "H11"
+      ],
+      "handoff": "No-command HiL to future command-capable or physical operation",
+      "activation": "Command transport, hardware, controls, fault, stop, reset, alarm, timing, and authority exist",
+      "invalidation": "Any command, hardware, control, fault, safety, or evidence binding changes",
+      "retest": "Run authorized accessibility and safety protocol without transferring no-command results",
+      "required_methods": [
+        "SAFETY_REVIEW",
+        "NATIVE_TASK"
+      ],
+      "evidence_refs": [
+        "evaluation/hil/no_command_runner.py"
+      ],
+      "dependency_refs": [
+        "Current endpoint applies zero actions"
+      ]
+    },
+    {
+      "journey_id": "H11",
+      "asset_id": "ASSET-ROBOT-CONTROLS",
+      "lifecycle": "ABSENT",
+      "owner": "Robot integrator and safety authority",
+      "role": "Robot operator",
+      "platform": "PHYSICAL",
+      "state": "ROS command, driver, controller, pendant, protective device, operator status, tactile control, independent stop, fault, reset, alarm, and training",
+      "task": "Cross from command and status to hardware and human operation",
+      "expected_outcome": "Exact controls, perceivable state, stop, fault, reset, timing, training, and role ownership are measured",
+      "fixture_id": "FIXTURE-ACTIVATION",
+      "predecessor_ids": [
+        "H10",
+        "J15"
+      ],
+      "successor_ids": [],
+      "handoff": "ROS command and status to driver, controller, pendant, protective devices, and operator",
+      "activation": "Exact control-system inventory and authorized physical test protocol exist",
+      "invalidation": "Robot, driver, controller, pendant, protective device, operator, or safety changes",
+      "retest": "Run qualified measured accessibility and safety review",
+      "required_methods": [
+        "SAFETY_REVIEW",
+        "NATIVE_TASK"
+      ],
+      "evidence_refs": [
+        "fleet-deployment/inference"
+      ],
+      "dependency_refs": [
+        "Hardware and human operation outcomes are absent"
+      ]
+    },
+    {
+      "journey_id": "H12",
+      "asset_id": "ASSET-SUPPORT",
+      "lifecycle": "ENVIRONMENT_GATED",
+      "owner": "Organizational support owner",
+      "role": "User requesting help or accommodation",
+      "platform": "CONVERSATION",
+      "state": "Help link, issue intake, acknowledgment, response, alternate format, accommodation, escalation, correction, appeal, closure, and recurrence monitoring",
+      "task": "Cross from help or intake through support resolution",
+      "expected_outcome": "Accessibility, timeliness, privacy, independence, communication, correction, and closure are observed",
+      "fixture_id": "FIXTURE-CONVERSATION",
+      "predecessor_ids": [
+        "J01",
+        "J12"
+      ],
+      "successor_ids": [
+        "J16"
+      ],
+      "handoff": "Help link or issue intake to support, accommodation, alternate format, and resolution",
+      "activation": "A controlled support owner can process a synthetic request",
+      "invalidation": "Help, intake, owner, response, privacy, alternate format, accommodation, escalation, or closure changes",
+      "retest": "Run synthetic request from intake through closure",
+      "required_methods": [
+        "SUPPORT_TASK",
+        "COGNITIVE_REVIEW"
+      ],
+      "evidence_refs": [
+        "SUPPORT.md",
+        ".github/ISSUE_TEMPLATE"
+      ],
+      "dependency_refs": [
+        "Support-process owner and qualified reviewer"
+      ]
+    }
+  ],
+  "exclusions": [
+    {
+      "exclusion_id": "EXCLUSION-GITHUB-PAGES",
+      "scope": "GitHub Pages",
+      "reason": "Explicitly excluded by the user and owned by a separate workstream"
+    },
+    {
+      "exclusion_id": "EXCLUSION-EXTERNAL",
+      "scope": "external directory",
+      "reason": "Repository policy prohibits modification and this accessibility scope excludes it"
+    }
+  ]
+}

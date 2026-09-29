@@ -7,7 +7,12 @@ vi.mock('recharts', () => ({
   ),
   LineChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   CartesianGrid: () => null,
-  Line: () => null,
+  Line: (props: Record<string, unknown>) => (
+    <div
+      data-testid={'line-' + String(props.dataKey)}
+      data-dash={String(props.strokeDasharray ?? '')}
+    />
+  ),
   ReferenceLine: () => null,
   Tooltip: ({ content }: { content: React.ReactElement<Record<string, unknown>> }) =>
     React.cloneElement(content, {
@@ -43,6 +48,7 @@ const defaultProps = {
   onSelectionPointerDown: vi.fn(),
   onSelectionPointerMove: vi.fn(),
   onSelectionPointerUp: vi.fn(),
+  onSelectionPointerCancel: vi.fn(),
   onDismissContextMenu: vi.fn(),
   selectionSurfaceRef: { current: null },
 }
@@ -59,10 +65,19 @@ describe('TrajectoryPlotChart', () => {
   it('renders tooltip rows with duplicate labels without React key warnings', () => {
     render(<TrajectoryPlotChart {...defaultProps} />)
 
-    expect(screen.getAllByText(/shoulder_pan\.pos/)).toHaveLength(2)
+    expect(screen.getAllByText(/shoulder_pan\.pos/).length).toBeGreaterThanOrEqual(2)
     expect(console.error).not.toHaveBeenCalledWith(
       expect.stringContaining('Encountered two children with the same key'),
       expect.anything(),
     )
+  })
+  it('provides a named trajectory data table and non-color series distinctions', () => {
+    render(<TrajectoryPlotChart {...defaultProps} />)
+
+    expect(screen.getByRole('table', { name: 'Trajectory data' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Frame' })).toBeInTheDocument()
+    expect(screen.getAllByRole('columnheader', { name: 'shoulder_pan.pos' })).toHaveLength(2)
+    expect(screen.getByTestId('line-series_0')).toHaveAttribute('data-dash', '')
+    expect(screen.getByTestId('line-series_6')).not.toHaveAttribute('data-dash', '')
   })
 })

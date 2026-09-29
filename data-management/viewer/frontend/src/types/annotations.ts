@@ -161,13 +161,41 @@ export interface AnomalyAnnotation {
 /** Source of the language instruction */
 export type InstructionSource = 'human' | 'template' | 'llm-generated' | 'retroactive'
 
+const BCP47_LANGUAGE = '(?:[a-z]{2,3}(?:-[a-z]{3}){0,3}|[a-z]{4}|[a-z]{5,8})'
+const BCP47_SCRIPT = '(?:-[a-z]{4})?'
+const BCP47_REGION = '(?:-(?:[a-z]{2}|[0-9]{3}))?'
+const BCP47_VARIANTS = '(?:-(?:[a-z0-9]{5,8}|[0-9][a-z0-9]{3}))*'
+const BCP47_EXTENSIONS = '(?:-[0-9a-wy-z](?:-[a-z0-9]{2,8})+)*'
+const BCP47_PRIVATE_USE = '(?:-x(?:-[a-z0-9]{1,8})+)?'
+const BCP47_PATTERN = new RegExp(
+  `^(?:${BCP47_LANGUAGE}${BCP47_SCRIPT}${BCP47_REGION}${BCP47_VARIANTS}${BCP47_EXTENSIONS}${BCP47_PRIVATE_USE}|x(?:-[a-z0-9]{1,8})+)$`,
+  'i',
+)
+
+export function normalizeLanguageTag(value: string): string | null {
+  const language = value.trim()
+  if (!BCP47_PATTERN.test(language)) {
+    return null
+  }
+
+  if (/^x-/i.test(language)) {
+    return language.toLowerCase()
+  }
+
+  try {
+    return Intl.getCanonicalLocales(language)[0] ?? null
+  } catch {
+    return null
+  }
+}
+
 /** Language instruction annotation for VLA-conditioned training */
 export interface LanguageInstructionAnnotation {
   /** Primary task instruction */
   instruction: string
   /** How this instruction was produced */
   source: InstructionSource
-  /** ISO 639-1 language code */
+  /** BCP 47 language tag */
   language: string
   /** Alternative phrasings for data augmentation */
   paraphrases: string[]

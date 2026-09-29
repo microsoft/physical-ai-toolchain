@@ -90,6 +90,8 @@ describe('ObjectDetectionWidget', () => {
     const user = userEvent.setup()
     render(<ObjectDetectionWidget />)
     const input = screen.getByRole('textbox')
+    expect(input).toHaveClass('focus-visible:ring-2')
+    expect(input).not.toHaveClass('focus-visible:ring-0')
 
     await user.type(input, 'red block{Enter}')
     expect(screen.getByText('red block')).toBeInTheDocument()
@@ -105,7 +107,7 @@ describe('ObjectDetectionWidget', () => {
 
     await user.click(screen.getByRole('button', { name: /detect/i }))
 
-    expect(await screen.findByText(/detections \(1\)/i)).toBeInTheDocument()
+    expect(await screen.findByRole('status')).toHaveTextContent(/detections \(1\)/i)
     expect(screen.getByText('block')).toBeInTheDocument()
     expect(runDetectionMock).toHaveBeenCalledWith('ds', 0, expect.objectContaining({ frames: [0] }))
 
@@ -120,7 +122,7 @@ describe('ObjectDetectionWidget', () => {
 
     await user.click(screen.getByRole('button', { name: /detect/i }))
 
-    expect(await screen.findByText(/detector offline/i)).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/detector offline/i)
   })
 
   it('restores previously saved detections for the frame', async () => {
@@ -139,7 +141,7 @@ describe('ObjectDetectionWidget', () => {
     })
     render(<ObjectDetectionWidget />)
 
-    expect(await screen.findByText(/detections \(1\)/i)).toBeInTheDocument()
+    expect(await screen.findByRole('status')).toHaveTextContent(/detections \(1\)/i)
     expect(screen.getByText(/1 saved/i)).toBeInTheDocument()
   })
 })

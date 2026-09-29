@@ -129,7 +129,7 @@ describe('AppContent', () => {
     const { rerender } = render(<AppContent />)
 
     await waitFor(() => {
-      expect(screen.getByRole('combobox', { name: 'Dataset' })).toHaveTextContent(
+      expect(screen.getByRole('button', { name: 'Dataset' })).toHaveTextContent(
         'houston_lerobot_fixed',
       )
     })
@@ -148,9 +148,7 @@ describe('AppContent', () => {
     rerender(<AppContent />)
 
     await waitFor(() => {
-      expect(screen.getByRole('combobox', { name: 'Dataset' })).toHaveTextContent(
-        'customer_lerobot',
-      )
+      expect(screen.getByRole('button', { name: 'Dataset' })).toHaveTextContent('customer_lerobot')
     })
   })
 
@@ -170,7 +168,7 @@ describe('AppContent', () => {
 
     render(<AppContent />)
 
-    const trigger = await screen.findByRole('combobox', { name: 'Dataset' })
+    const trigger = await screen.findByRole('button', { name: 'Dataset' })
     expect(trigger).toHaveTextContent('customer_lerobot')
     expect(screen.queryByPlaceholderText('Dataset ID')).not.toBeInTheDocument()
 
@@ -185,7 +183,7 @@ describe('AppContent', () => {
 
     render(<AppContent />)
 
-    const trigger = await screen.findByRole('combobox', { name: 'Dataset' })
+    const trigger = await screen.findByRole('button', { name: 'Dataset' })
     expect(trigger).toHaveTextContent('houston_lerobot_fixed')
 
     await user.click(trigger)
@@ -193,9 +191,7 @@ describe('AppContent', () => {
     await user.keyboard('{ArrowDown}{Enter}')
 
     await waitFor(() => {
-      expect(screen.getByRole('combobox', { name: 'Dataset' })).toHaveTextContent(
-        'customer_lerobot',
-      )
+      expect(screen.getByRole('button', { name: 'Dataset' })).toHaveTextContent('customer_lerobot')
     })
   })
 
@@ -215,12 +211,13 @@ describe('AppContent', () => {
 
     const banner = await screen.findByRole('banner')
     const diagnosticsButton = screen.getByRole('button', { name: /toggle diagnostics/i })
-    const datasetPicker = screen.getByRole('combobox', { name: 'Dataset' })
+    const datasetPicker = screen.getByRole('button', { name: 'Dataset' })
 
     expect(banner).toContainElement(diagnosticsButton)
     expect(diagnosticsButton.className).toContain('h-8')
     expect(diagnosticsButton.className).toContain('px-3')
     expect(datasetPicker.parentElement).toContainElement(diagnosticsButton)
+    expect(diagnosticsButton).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('advances to the next episode from the workspace top bar action', async () => {
@@ -275,5 +272,47 @@ describe('AppContent', () => {
     expect(sidebarToolbar).toHaveTextContent('3 Episodes')
     expect(sidebarToolbar.className).toContain('border-b')
     expect(sidebarToolbar.className).toContain('py-1.5')
+  })
+  it('gives the focused filter input combobox ownership and restores trigger focus', async () => {
+    const user = userEvent.setup()
+    render(<AppContent />)
+
+    const trigger = await screen.findByRole('button', { name: 'Dataset' })
+    await user.click(trigger)
+
+    const filter = screen.getByRole('combobox', { name: 'Filter datasets' })
+    expect(filter).toHaveAttribute('aria-expanded', 'true')
+    const listboxId = filter.getAttribute('aria-controls')
+    expect(listboxId).toBeTruthy()
+    expect(document.getElementById(listboxId!)).toHaveAttribute('role', 'listbox')
+    expect(filter).toHaveFocus()
+
+    await user.keyboard('{Escape}')
+
+    expect(trigger).toHaveFocus()
+    expect(screen.queryByRole('combobox', { name: 'Filter datasets' })).not.toBeInTheDocument()
+  })
+  it('stacks the shell and sidebar at narrow widths', async () => {
+    render(<AppContent />)
+
+    const main = await screen.findByRole('main')
+    const layout = main.parentElement
+    const sidebar = layout?.querySelector('aside')
+
+    expect(layout).toHaveClass('flex-col', 'sm:flex-row')
+    expect(sidebar).toHaveClass('w-full', 'sm:w-64')
+    expect(main).toHaveClass('min-w-0')
+  })
+  it('exposes help and problem-reporting actions without dataset content', async () => {
+    render(<AppContent />)
+
+    expect(await screen.findByRole('link', { name: 'Help' })).toHaveAttribute(
+      'href',
+      'https://github.com/microsoft/physical-ai-toolchain/tree/main/data-management/viewer',
+    )
+    expect(screen.getByRole('link', { name: 'Report problem' })).toHaveAttribute(
+      'href',
+      'https://github.com/microsoft/physical-ai-toolchain/issues/new?template=01-bug-report.yml',
+    )
   })
 })

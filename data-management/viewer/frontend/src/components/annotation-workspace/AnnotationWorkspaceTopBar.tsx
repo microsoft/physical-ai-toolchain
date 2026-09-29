@@ -72,7 +72,13 @@ export function AnnotationWorkspaceTopBar({
               Save & Next Episode
             </Button>
           </div>
-          <div className="min-h-[1rem] xl:text-right" data-testid="workspace-save-status-slot">
+          <div
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className="min-h-[1rem] xl:text-right"
+            data-testid="workspace-save-status-slot"
+          >
             {saveStatusMessage && (
               <p data-testid="workspace-save-status" className="text-muted-foreground text-xs">
                 {saveStatusMessage}
@@ -82,11 +88,11 @@ export function AnnotationWorkspaceTopBar({
         </div>
       </div>
       <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto md:flex-wrap xl:overflow-visible">
-        <TabsTrigger value="trajectory" className="gap-2">
+        <TabsTrigger value="trajectory" className="data-[state=inactive]:text-foreground gap-2">
           <Activity className="h-4 w-4" />
           Trajectory Viewer
         </TabsTrigger>
-        <TabsTrigger value="analyzer" className="gap-2">
+        <TabsTrigger value="analyzer" className="data-[state=inactive]:text-foreground gap-2">
           <Gauge className="h-4 w-4" />
           Episode Analyzer
         </TabsTrigger>

@@ -35,6 +35,7 @@ dependencies = [
     # Track azure-ai-ml release notes; bump together when 4.x support lands.
     "marshmallow==3.26.2",
     "mlflow-skinny==3.16.0",
+    "matplotlib==3.11.1",
     "packaging==26.3",
     # Global prerelease resolution would otherwise select pydantic, sentry-sdk,
     # and hf-xet alpha/dev releases; pin stable versions unless a direct

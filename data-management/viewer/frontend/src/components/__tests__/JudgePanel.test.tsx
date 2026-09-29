@@ -244,6 +244,14 @@ describe('JudgePanel', () => {
     ).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /run all/i }))
     expect(mockRunAll).toHaveBeenCalledWith({ processMethod: 'gvl' })
+    const confirmSpy = vi.fn(() => false)
+    vi.stubGlobal('confirm', confirmSpy)
+    await user.click(screen.getByRole('button', { name: /label all/i }))
+    expect(confirmSpy).toHaveBeenCalledWith(
+      'Replace the outcome label on 3 episodes? Existing custom labels are preserved.',
+    )
+    expect(mockApplyLabelsAll).not.toHaveBeenCalled()
+    confirmSpy.mockReturnValue(true)
     await user.click(screen.getByRole('button', { name: /label all/i }))
     expect(mockApplyLabelsAll).toHaveBeenCalledWith({ processMethod: 'gvl' })
   })
@@ -263,5 +271,13 @@ describe('JudgePanel', () => {
     expect(screen.getByText('1 / 3')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /cancel/i }))
     expect(mockCancel).toHaveBeenCalled()
+  })
+  it('explains specialized judge terminology at the point of use', () => {
+    mockUseStatus.mockReturnValue({ data: status(), isLoading: false, error: null })
+    render(<JudgePanel datasetId="demo" episodeIndex={0} />)
+
+    expect(screen.getByText(/VLM \(vision-language model\)/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/GVL.*shuffle-and-rank/i).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText(/VOC.*value-order correlation/i)).toBeInTheDocument()
   })
 })

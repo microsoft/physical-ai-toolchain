@@ -1,26 +1,30 @@
 ---
 sidebar_position: 13
 title: Accessibility Best Practices
-description: Standards for accessible documentation, CLI output, and the dataviewer web application
+description: Standards for accessible documentation, CLI output, and project-owned web applications
 author: Microsoft Robotics-AI Team
 ms.date: 2026-09-19
 ms.topic: reference
 ---
 
-Apply accessibility requirements when authoring documentation, CLI output, and dataviewer user interfaces.
+This document defines accessibility requirements for documentation, runtime web interfaces, generated evidence, and CLI output in this repository. Use it when changing user-facing content or interaction behavior.
 
 ## Scope
 
-This project applies accessibility best practices to three areas.
+This project targets WCAG 2.2 Level AA for project-owned web interfaces. Section 508 and EN 301 549 require an explicit scope decision based on authoritative organizational facts.
 
-| Area          | What the project controls                                                  |
-|---------------|----------------------------------------------------------------------------|
-| Documentation | Markdown files rendered on GitHub and documentation sites                  |
-| CLI output    | Shell scripts in `infrastructure/setup/` and `scripts/` that emit messages |
-| Web UI        | React application in `data-management/viewer/frontend/`                    |
+| Area               | What the project controls                                                        |
+|--------------------|----------------------------------------------------------------------------------|
+| Documentation      | Markdown files rendered on GitHub and the Docusaurus site                        |
+| Dataset Viewer     | Project-owned React interaction, adaptive layout, and assistive-technology paths |
+| Docusaurus runtime | Local production build, navigation, search, content semantics, and visual states |
+| Generated evidence | Project mappings, state proofs, composed bundles, and non-attestation summaries  |
+| CLI output         | Shell scripts in `infrastructure/setup/` and `scripts/` that emit messages       |
+
+GitHub Pages hosting behavior remains provider-owned. Accessibility criterion evidence targets the immutable local Docusaurus production build before publication.
 
 > [!NOTE]
-> The dataviewer frontend enables the recommended `jsx-a11y` ESLint rules. Static linting is not evidence of WCAG conformance; interaction and assistive-technology checks remain part of UI review.
+> The Dataset Viewer enables the recommended `jsx-a11y` ESLint rules. Static linting is not evidence of WCAG conformance; interaction and assistive-technology checks remain part of UI review.
 
 ## Documentation Accessibility
 
@@ -32,6 +36,8 @@ All Markdown files follow these conventions, which are enforced by markdownlint 
 * Use tables and lists for structured data rather than dense paragraphs
 * Use GitHub alerts (`> [!NOTE]`, `> [!WARNING]`) for important callouts
 * Provide text equivalents for any diagrams or visual content
+* Confirm that headings, table relationships, alerts, code, lists, task states, and links retain their intended semantics after rendering
+* Run source activation guards when content introduces media, timed behavior, forms, authentication, gestures, or new interactive components
 
 ### Alt Text Guidelines
 
@@ -76,9 +82,54 @@ Use semantic controls, accessible names, visible keyboard focus, and keyboard-op
 
 The [frontend ESLint configuration](../../data-management/viewer/frontend/eslint.config.js) defines the automated accessibility checks.
 
+## Runtime Accessibility Validation
+
+The Docusaurus test workflow separates deterministic automation from qualified human judgment. Automated tooling can decide only the propositions its method is adequate to verify; it does not establish complete conformance.
+
+| Evidence layer     | Required coverage                                                                                           |
+|--------------------|-------------------------------------------------------------------------------------------------------------|
+| Source and unit    | Content activation guards, component semantics, route and feature inventories                              |
+| Browser automation | Axe, keyboard paths, focus, live regions, accessibility-tree relationships, contrast, reflow, and geometry |
+| Qualified review   | Spoken output, reading order, meaning, label quality, graphic equivalence, and exception approval          |
+| Release evaluation | Current automated evidence plus approved, digest-bound qualified-human results                             |
+
+Run deterministic Docusaurus checks against the local production build:
+
+```bash
+npm --prefix docs/docusaurus run test:coverage
+npm --prefix docs/docusaurus run ci:test:e2e
+```
+
+The pull-request scope covers deterministic Docusaurus journeys DCS01-DCS12. Release scope adds DCS13 and every required qualified-human cell. Missing manual evidence remains `NOT_ASSESSED`; it does not block deterministic bundle production, but it prevents release completeness.
+
+## Qualified Accessibility Review
+
+Use Windows NVDA with Microsoft Edge and a human-led JAWS pass for the supported screen-reader baseline. VoiceOver and mobile assistive technology are unsupported until an explicit scope change adds them.
+
+Review DCS02-DCS08 and DCS10-DCS11 against the exact local production build:
+
+1. Record the source revision, build digest, browser and assistive-technology versions, route, state, viewport or zoom, input mode, and expected result.
+2. Verify spoken search status and result position, heading and landmark navigation, table relationships, reading order, labels, link purpose, diagram equivalence, browser zoom, focus perception, and approved exceptions.
+3. Classify each result as `PASS`, `FAIL`, `CANT_TELL`, `NOT_ASSESSED`, or `INAPPLICABLE`. Include a limitation and re-entry trigger for every `NOT_ASSESSED` result.
+4. Store raw speech, transcripts, screenshots with personal data, and restricted observations outside the repository and ordinary CI artifacts.
+5. Author a privacy-minimized result using the upstream `qualified-human-result.schema.json`. Include a non-secret reviewer identifier, qualification and approval record digests, approved observation summary, artifact digests, validity, and supersession fields.
+6. Recompose against the prior bundle and an independently retained prior-bundle digest. Supply the reviewer-registry digest from caller-controlled CI configuration rather than the registry file.
+
+Qualified review uses two cadences:
+
+| Cadence          | Review boundary                                                                                         |
+|------------------|---------------------------------------------------------------------------------------------------------|
+| Initial baseline | Full-site evaluation of all applicable routes, states, complete processes, and qualified-human methods |
+| Routine release  | Representative WCAG-EM sample plus a random 10 percent of the eligible page set                         |
+| Full reevaluation| Repeat after changes to build identity, navigation, search, rendering, evidence methods, or scope       |
+
+The composed bundle always retains `attestation: false`. A qualified result contributes evidence; it does not independently authorize a public conformance claim.
+
 ## Generated Artifacts
 
-Automated pipelines, Terraform plans, and Helm chart outputs are out of scope. Accessibility standards apply only to human-authored content committed to the repository.
+Accessibility requirements apply to generated content that people consume or use to make decisions, including diagrams, previews, reports, and evidence summaries. Terraform plans and Helm outputs remain outside the current user-journey inventory unless a project decision activates them.
+
+Retained accessibility bundles contain approved summaries, method and scope limits, stable identifiers, and artifact digests. They exclude credentials, environment-specific endpoints, raw screen-reader speech, private reviewer identities, and restricted transcript paths.
 
 ## OpenSSF Compliance
 

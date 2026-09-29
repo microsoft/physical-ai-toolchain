@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import type { ExportRequestWithEdits } from '@/api/export'
 import { Button } from '@/components/ui/button'
@@ -33,6 +33,7 @@ export function ExportDialog({ open, onOpenChange, datasetId, episodeIndices }: 
   const [outputPath, setOutputPath] = useState('/exports')
   const [applyEdits, setApplyEdits] = useState(true)
   const [includeSubtasks, setIncludeSubtasks] = useState(true)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
 
   const getEditOperations = useEditStore((state) => state.getEditOperations)
   const removedFrames = useEditStore((state) => state.removedFrames)
@@ -71,11 +72,24 @@ export function ExportDialog({ open, onOpenChange, datasetId, episodeIndices }: 
     }
   }
 
-  const showProgress = isExporting || result !== null
+  const showProgress = isExporting || result !== null || error !== null
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent
+        className="sm:max-w-[500px]"
+        onOpenAutoFocus={() => {
+          if (document.activeElement instanceof HTMLElement) {
+            returnFocusRef.current = document.activeElement
+          }
+        }}
+        onCloseAutoFocus={(event) => {
+          if (returnFocusRef.current) {
+            event.preventDefault()
+            returnFocusRef.current.focus()
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Export Episodes</DialogTitle>
           <DialogDescription>

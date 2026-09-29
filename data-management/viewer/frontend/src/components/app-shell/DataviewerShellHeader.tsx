@@ -1,4 +1,4 @@
-import { Activity, Check, ChevronsUpDown, Loader2 } from 'lucide-react'
+import { Activity, Bug, Check, ChevronsUpDown, CircleHelp, Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -69,24 +69,25 @@ function DatasetSelector({
           id="dataset-selector"
           type="button"
           variant="outline"
-          role="combobox"
           aria-label="Dataset"
           aria-expanded={isOpen}
-          aria-controls="dataset-selector-listbox"
           className="w-72 justify-between font-normal"
         >
           <span className="truncate text-left">{selectedDataset?.id || 'Select a dataset'}</span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-2" align="end">
-        <Command shouldFilter={false}>
+      <PopoverContent role="dialog" aria-label="Select dataset" className="w-72 p-2" align="end">
+        <Command label="Filter datasets" shouldFilter={false}>
           <CommandInput
             ref={filterInputRef}
             value={filterText}
             onValueChange={setFilterText}
             placeholder="Filter datasets"
-            aria-label="Filter datasets"
+            role="combobox"
+            aria-expanded={isOpen}
+            aria-controls="dataset-selector-listbox"
+            aria-autocomplete="list"
           />
           <CommandList
             id="dataset-selector-listbox"
@@ -194,6 +195,7 @@ export function DataviewerShellHeader({
             size="sm"
             onClick={onToggleDiagnostics}
             aria-label="Toggle Diagnostics"
+            aria-pressed={diagnosticsVisible}
             title={
               diagnosticsVisible
                 ? 'Diagnostics on (click to hide)'
@@ -203,6 +205,24 @@ export function DataviewerShellHeader({
             <Activity className="mr-1.5 h-3.5 w-3.5" />
             Diagnostics
           </Button>
+          <a
+            className="hover:bg-accent hover:text-accent-foreground inline-flex h-8 items-center justify-center rounded-md px-3 text-xs font-medium"
+            href="https://github.com/microsoft/physical-ai-toolchain/tree/main/data-management/viewer"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <CircleHelp className="mr-1.5 h-3.5 w-3.5" />
+            Help
+          </a>
+          <a
+            className="hover:bg-accent hover:text-accent-foreground inline-flex h-8 items-center justify-center rounded-md px-3 text-xs font-medium"
+            href="https://github.com/microsoft/physical-ai-toolchain/issues/new?template=01-bug-report.yml"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <Bug className="mr-1.5 h-3.5 w-3.5" />
+            Report problem
+          </a>
           {capabilities?.isLerobotDataset && <Badge variant="secondary">LeRobot</Badge>}
           {capabilities?.hasHdf5Files && !capabilities?.isLerobotDataset && (
             <Badge variant="outline">HDF5</Badge>

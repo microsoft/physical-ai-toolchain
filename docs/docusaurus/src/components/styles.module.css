@@ -2,6 +2,8 @@
    SPDX-License-Identifier: MIT */
 
 .card {
+  position: relative;
+  height: 100%;
   box-shadow:
     0 1.6px 3.6px rgba(0, 0, 0, 0.13),
     0 0.3px 0.9px rgba(0, 0, 0, 0.11);
@@ -48,17 +50,22 @@
   font-size: 16px;
   font-weight: 600;
   line-height: 20px;
-  color: var(--ifm-color-primary);
-  position: relative;
+  margin: 0;
 }
 
-.cardTitle::after {
+.cardTitle a::after {
   content: '';
   position: absolute;
   inset: 0;
 }
 
-.cardTitle:visited {
+.cardTitle a,
+.boxCardLinks a {
+  text-decoration: underline !important;
+  text-underline-offset: 2px;
+}
+
+.cardTitle a:visited {
   color: var(--ms-learn-visited-link);
 }
 
@@ -106,6 +113,11 @@
 
 .boxCardLinks a {
   font-size: 0.875rem;
+  color: #005ea8 !important;
+}
+
+:global(html[data-theme='dark']) .boxCardLinks a {
+  color: #b8d7f5 !important;
 }
 
 /* ================================================================
@@ -114,20 +126,34 @@
 
 .cardGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1.5rem;
+  list-style: none;
+  padding: 0;
 }
 
 .cardGridTwo {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.5rem;
+  list-style: none;
+  padding: 0;
 }
 
 .cardGridFour {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1.5rem;
+  list-style: none;
+  padding: 0;
+}
+
+.cardGridItem {
+  min-width: 0;
+}
+
+.cardGridItem > * {
+  height: 100%;
 }
 
 /* ================================================================
@@ -136,10 +162,10 @@
 
 @media (max-width: 996px) {
   .cardGrid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .cardGridFour {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -147,16 +173,13 @@
   .iconContainer {
     display: none;
   }
-}
-
-@media (max-width: 576px) {
   .cardGrid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .cardGridTwo {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .cardGridFour {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }

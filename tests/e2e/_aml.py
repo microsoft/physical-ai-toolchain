@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -483,6 +484,9 @@ def submit_aml_lerobot_eval(
     policy_args = list(policy_source.args)
     policy_description = policy_source.description
     experiment_name = e2e_name("il-eval-e2e-aml")
+    submission_script = (
+        "submit-azureml-vla-pi0-eval.sh" if policy_type in {"pi0", "pi0_fast"} else "submit-azureml-lerobot-eval.sh"
+    )
     log_e2e(
         "Submitting AzureML LeRobot eval job "
         f"for policy={policy_description}, policy_type={policy_type}, eval_episodes={eval_episodes}, "
@@ -490,7 +494,7 @@ def submit_aml_lerobot_eval(
     )
     result = run_command(
         [
-            str(repo_root / "evaluation/sil/scripts/submit-azureml-lerobot-eval.sh"),
+            str(repo_root / "evaluation/sil/scripts" / submission_script),
             *policy_args,
             "--policy-type",
             policy_type,
@@ -516,6 +520,118 @@ def submit_aml_lerobot_eval(
         raise AssertionError(f"AzureML LeRobot eval e2e submission failed\n\n{format_command_failure(result)}")
 
     return _aml_job_from_submission(result, aml_workspace, experiment_name, "AzureML LeRobot eval")
+
+
+def _reject_non_finite_json(value: str) -> None:
+    raise ValueError(f"non-finite JSON value {value}")
+
+
+def _load_strict_json(path: Path) -> Any:
+    with path.open(encoding="utf-8") as stream:
+        return json.load(stream, parse_constant=_reject_non_finite_json)
+
+
+def _find_downloaded_output_file(download_root: Path, filename: str) -> Path:
+    matches = list(download_root.rglob(filename))
+    if len(matches) != 1:
+        rendered = ", ".join(str(path.relative_to(download_root)) for path in matches) or "<none>"
+        raise AssertionError(f"Expected exactly one {filename!r} in AzureML eval output, found: {rendered}")
+    return matches[0]
+
+
+def assert_aml_lerobot_eval_artifact_contract(job: AzureMLJob, *, eval_episodes: int) -> None:
+    """Download and validate the policy-independent replay evaluation artifacts."""
+    from azure.ai.ml import MLClient
+    from azure.identity import DefaultAzureCredential
+
+    client = MLClient(
+        credential=DefaultAzureCredential(),
+        subscription_id=job.workspace.subscription_id,
+        resource_group_name=job.workspace.resource_group,
+        workspace_name=job.workspace.workspace_name,
+    )
+
+    with tempfile.TemporaryDirectory(prefix=f"{job.name}-eval-output-") as download_dir:
+        download_root = Path(download_dir)
+        client.jobs.download(name=job.name, download_path=str(download_root), output_name="eval_results")
+
+        metrics = _load_strict_json(_find_downloaded_output_file(download_root, "metrics.json"))
+        results = _load_strict_json(_find_downloaded_output_file(download_root, "eval_results.json"))
+        failure_cases_path = _find_downloaded_output_file(download_root, "failure_cases.jsonl")
+
+        assert isinstance(metrics, dict)
+        assert set(metrics) == {
+            "evaluation_schema_version",
+            "aggregate_verdict",
+            "baseline_model_version",
+            "metrics",
+        }
+        assert metrics["evaluation_schema_version"] == 1
+        assert metrics["aggregate_verdict"] == "pass"
+        assert metrics["baseline_model_version"] == "none"
+
+        metric_entries = metrics["metrics"]
+        assert isinstance(metric_entries, list)
+        assert {entry["name"] for entry in metric_entries} == {
+            "action_accuracy_l1",
+            "action_accuracy_l2",
+            "inference_latency_mean_ms",
+            "throughput_hz",
+        }
+        for entry in metric_entries:
+            assert set(entry) == {
+                "name",
+                "value",
+                "absolute_threshold",
+                "absolute_verdict",
+                "baseline_value",
+                "regression_pct",
+                "regression_verdict",
+            }
+            assert isinstance(entry["value"], int | float)
+            assert entry["absolute_threshold"] is None
+            assert entry["absolute_verdict"] == "pass"
+            assert entry["baseline_value"] is None
+            assert entry["regression_pct"] == 0.0
+            assert entry["regression_verdict"] == "skipped"
+
+        assert isinstance(results, dict)
+        assert set(results) == {
+            "job_name",
+            "policy_repo_id",
+            "policy_type",
+            "dataset_repo_id",
+            "device",
+            "episodes_evaluated",
+            "aggregate_mse",
+            "aggregate_mae",
+            "aggregate_avg_inference_ms",
+            "aggregate_throughput_hz",
+            "per_episode",
+            "status",
+        }
+        assert results["status"] == "completed"
+        assert results["episodes_evaluated"] == eval_episodes
+        assert len(results["per_episode"]) == eval_episodes
+
+        for line in failure_cases_path.read_text(encoding="utf-8").splitlines():
+            record = json.loads(line, parse_constant=_reject_non_finite_json)
+            assert set(record) == {
+                "evaluation_schema_version",
+                "episode_id",
+                "dataset_id",
+                "dataset_version",
+                "domain_category",
+                "model_version",
+                "artifact_refs",
+                "failure_mode",
+                "metric_values",
+                "metric_thresholds_violated",
+            }
+            assert record["evaluation_schema_version"] == 1
+            assert record["failure_mode"] == "rollout_error"
+
+    log_e2e(f"AzureML LeRobot eval artifact contract passed for job {job.name}")
 
 
 def resolve_aml_isaac_eval_model_override() -> AmlModelRef | None:

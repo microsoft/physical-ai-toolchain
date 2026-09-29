@@ -25,6 +25,7 @@ interface AnnotationWorkspaceTrajectoryTabProps {
   onGraphSeek: (frame: number) => void
   onSelectionStart: () => void
   onSelectionComplete: (range: [number, number]) => void
+  onSelectionCancel: () => void
   totalFrames: number
   onSubtaskSelectionChange: (id: string | null) => void
 }
@@ -46,6 +47,7 @@ export function AnnotationWorkspaceTrajectoryTab({
   onGraphSeek,
   onSelectionStart,
   onSelectionComplete,
+  onSelectionCancel,
   totalFrames,
   onSubtaskSelectionChange,
 }: AnnotationWorkspaceTrajectoryTabProps) {
@@ -78,10 +80,11 @@ export function AnnotationWorkspaceTrajectoryTab({
                   onSeekFrame={onGraphSeek}
                   onSelectionStart={onSelectionStart}
                   onSelectionComplete={onSelectionComplete}
+                  onSelectionCancel={onSelectionCancel}
                 />
                 <div className="bg-muted/20 rounded-lg border p-2">
                   <div className="mb-1 flex items-center justify-between gap-2">
-                    <h4 className="text-xs font-medium">Subtask Timeline</h4>
+                    <h3 className="text-xs font-medium">Subtask Timeline</h3>
                     <SubtaskToolbar
                       selectedSegmentId={selectedSubtaskId}
                       onSelectionChange={onSubtaskSelectionChange}

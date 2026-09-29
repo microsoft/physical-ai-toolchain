@@ -1,0 +1,3392 @@
+{
+  "schema_version": "1.0.0",
+  "requirements": [
+    {
+      "requirement_id": "WCAG22-1.1.1",
+      "framework": "WCAG_2_2",
+      "criterion": "1.1.1",
+      "proposition": "Meaningful non-text content and controls provide task-equivalent text alternatives",
+      "journey_ids": [
+        "V06",
+        "V08",
+        "V14",
+        "A06",
+        "A07",
+        "DCS01",
+        "DCS08",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "The estate includes images, icons, charts, canvas output, diagrams, and graphical controls",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT"
+      ],
+      "methods": [
+        {
+          "method": "MEDIA_EQUIVALENCE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Compare each non-text decision with its text alternative"
+        },
+        {
+          "method": "AXE",
+          "disposition": "INFORMS",
+          "proposition": "Detect missing machine-readable alternatives"
+        }
+      ],
+      "owner": "Accessibility and surface owners",
+      "freshness_rule": "Invalidate when non-text content, meaning, rendering, or alternatives change"
+    },
+    {
+      "requirement_id": "WCAG22-1.2.1",
+      "framework": "WCAG_2_2",
+      "criterion": "1.2.1",
+      "proposition": "Prerecorded audio-only or video-only content has an equivalent alternative",
+      "journey_ids": [
+        "V06",
+        "A08",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Generated silent video exists; audio-only content and exact media meaning require fixture review",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT"
+      ],
+      "methods": [
+        {
+          "method": "MEDIA_EQUIVALENCE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Compare the media and alternative for the same task"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory audio-only and video-only media"
+        }
+      ],
+      "owner": "Media and accessibility owners",
+      "freshness_rule": "Invalidate when media content, audio, events, or alternatives change"
+    },
+    {
+      "requirement_id": "WCAG22-1.2.2",
+      "framework": "WCAG_2_2",
+      "criterion": "1.2.2",
+      "proposition": "Prerecorded synchronized media includes accurate synchronized captions",
+      "journey_ids": [
+        "V06",
+        "A08",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Captions trigger only when prerecorded synchronized media contains meaningful audio",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT"
+      ],
+      "methods": [
+        {
+          "method": "MEDIA_EQUIVALENCE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Review caption accuracy, synchronization, speakers, sounds, and controls"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Detect media and caption tracks"
+        }
+      ],
+      "owner": "Media and accessibility owners",
+      "freshness_rule": "Invalidate when meaningful audio, captions, timing, or player behavior changes"
+    },
+    {
+      "requirement_id": "WCAG22-1.2.3",
+      "framework": "WCAG_2_2",
+      "criterion": "1.2.3",
+      "proposition": "Prerecorded synchronized media provides description or a full media alternative for visual information",
+      "journey_ids": [
+        "V06",
+        "A08",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "The trigger and required alternative depend on decision-relevant visual media content",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT"
+      ],
+      "methods": [
+        {
+          "method": "MEDIA_EQUIVALENCE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Compare described or text media alternatives with meaningful visual information"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory media-alternative links and tracks"
+        }
+      ],
+      "owner": "Media and accessibility owners",
+      "freshness_rule": "Invalidate when visual events, descriptions, alternatives, or task meaning changes"
+    },
+    {
+      "requirement_id": "WCAG22-1.2.4",
+      "framework": "WCAG_2_2",
+      "criterion": "1.2.4",
+      "proposition": "Live synchronized media supplies accurate captions with acceptable latency",
+      "journey_ids": [
+        "J10",
+        "J13",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "No current live synchronized-media task is established; host or provider sessions could activate it",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "MEDIA_EQUIVALENCE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Observe live caption quality and latency in the activated session"
+        },
+        {
+          "method": "PROVIDER_ASSURANCE",
+          "disposition": "INFORMS",
+          "proposition": "Identify provider caption support claims"
+        }
+      ],
+      "owner": "Host, provider, and accessibility owners",
+      "freshness_rule": "Invalidate when live media, provider, caption service, or latency changes"
+    },
+    {
+      "requirement_id": "WCAG22-1.2.5",
+      "framework": "WCAG_2_2",
+      "criterion": "1.2.5",
+      "proposition": "Prerecorded synchronized media includes an adequate audio-described track",
+      "journey_ids": [
+        "V06",
+        "A08",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Audio description depends on activated synchronized media with meaningful visual information",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT"
+      ],
+      "methods": [
+        {
+          "method": "MEDIA_EQUIVALENCE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Compare the audio-described track with all meaningful visuals"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Detect description-track metadata"
+        }
+      ],
+      "owner": "Media and accessibility owners",
+      "freshness_rule": "Invalidate when synchronized media, descriptions, timing, or player controls change"
+    },
+    {
+      "requirement_id": "WCAG22-1.3.1",
+      "framework": "WCAG_2_2",
+      "criterion": "1.3.1",
+      "proposition": "Structure, grouping, labels, relationships, and data associations are programmatically available",
+      "journey_ids": [
+        "V02",
+        "V03",
+        "V08",
+        "V14",
+        "F01",
+        "F02",
+        "G01",
+        "DCS01",
+        "DCS05",
+        "DCS06",
+        "DCS07",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Applications, forms, tables, charts, schemas, and generated pages contain meaningful relationships",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_TREE",
+          "disposition": "DECIDES",
+          "proposition": "Assert expected computed structure and relationships in exact states"
+        },
+        {
+          "method": "AXE",
+          "disposition": "INFORMS",
+          "proposition": "Detect supported relationship defects"
+        }
+      ],
+      "owner": "Accessibility and surface owners",
+      "freshness_rule": "Invalidate when content structure, grouping, relationships, or renderer changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-1.3.2",
+      "framework": "WCAG_2_2",
+      "criterion": "1.3.2",
+      "proposition": "Programmatic and spoken sequence preserves the meaning of visual and responsive layouts",
+      "journey_ids": [
+        "V03",
+        "V08",
+        "V19",
+        "F02",
+        "A05",
+        "DCS02",
+        "DCS04",
+        "DCS05",
+        "DCS06",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Lists, tables, charts, responsive layouts, and documents have meaningful order",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT"
+      ],
+      "methods": [
+        {
+          "method": "NVDA",
+          "disposition": "DECIDES",
+          "proposition": "Compare visual, DOM, focus, and spoken order for the exact task"
+        },
+        {
+          "method": "JAWS",
+          "disposition": "DECIDES",
+          "proposition": "Compare visual, DOM, focus, and spoken order for the exact task"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inspect authored DOM and document order"
+        }
+      ],
+      "owner": "Accessibility and content owners",
+      "freshness_rule": "Invalidate when layout, DOM order, responsive behavior, or content sequence changes"
+    },
+    {
+      "requirement_id": "WCAG22-1.3.3",
+      "framework": "WCAG_2_2",
+      "criterion": "1.3.3",
+      "proposition": "Instructions do not rely only on shape, color, size, visual position, orientation, or sound",
+      "journey_ids": [
+        "V05",
+        "V08",
+        "V13",
+        "G03",
+        "A05",
+        "DCS02",
+        "DCS07",
+        "DCS08",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "The estate contains task instructions, status guidance, charts, forms, and documents",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT"
+      ],
+      "methods": [
+        {
+          "method": "COGNITIVE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Review each instruction and error in its task context"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Find sensory-only wording candidates"
+        }
+      ],
+      "owner": "Content and accessibility owners",
+      "freshness_rule": "Invalidate when instructions, errors, controls, or visual encodings change"
+    },
+    {
+      "requirement_id": "WCAG22-1.3.4",
+      "framework": "WCAG_2_2",
+      "criterion": "1.3.4",
+      "proposition": "Content and tasks remain available in supported portrait and landscape orientations",
+      "journey_ids": [
+        "V19",
+        "F01",
+        "G01",
+        "D03",
+        "DCS04",
+        "DCS09"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Browser surfaces are expected to support orientation changes unless an essential exception is proved",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_VISUAL",
+          "disposition": "DECIDES",
+          "proposition": "Complete representative tasks in portrait and landscape with no loss"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Find authored orientation restrictions"
+        }
+      ],
+      "owner": "Web and provider owners",
+      "freshness_rule": "Invalidate when layout, manifest, orientation, provider, or supported-device scope changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-1.3.5",
+      "framework": "WCAG_2_2",
+      "criterion": "1.3.5",
+      "proposition": "Activated personal-data fields expose their recognized input purposes",
+      "journey_ids": [
+        "V01",
+        "G01",
+        "G02",
+        "G03",
+        "G04",
+        "G05",
+        "J16",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Applicability depends on whether an activated form collects a recognized personal-data purpose",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_TREE",
+          "disposition": "DECIDES",
+          "proposition": "Inspect expected semantics for an approved applicable-field inventory"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory field names, types, and autocomplete metadata"
+        }
+      ],
+      "owner": "Form, identity, and support owners",
+      "freshness_rule": "Invalidate when field purpose, form, authentication, or provider rendering changes"
+    },
+    {
+      "requirement_id": "WCAG22-1.4.1",
+      "framework": "WCAG_2_2",
+      "criterion": "1.4.1",
+      "proposition": "Color is not the sole means of conveying information, state, response, or distinction",
+      "journey_ids": [
+        "V08",
+        "V13",
+        "V14",
+        "A06",
+        "A07",
+        "J13",
+        "DCS08",
+        "DCS09",
+        "DCS11",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Charts, detections, statuses, diagrams, and provider visualizations use color",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "MEDIA_EQUIVALENCE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Complete each visual task without color perception"
+        },
+        {
+          "method": "PLAYWRIGHT_VISUAL",
+          "disposition": "INFORMS",
+          "proposition": "Capture non-color cues and forced-color behavior"
+        }
+      ],
+      "owner": "Visual, provider, and accessibility owners",
+      "freshness_rule": "Invalidate when palette, visual encoding, state cue, provider, or alternative changes"
+    },
+    {
+      "requirement_id": "WCAG22-1.4.2",
+      "framework": "WCAG_2_2",
+      "criterion": "1.4.2",
+      "proposition": "Automatically played audio longer than three seconds can be stopped or independently controlled",
+      "journey_ids": [
+        "V06",
+        "A08",
+        "J13",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "No current meaningful automatic-audio case is established; media or providers could activate it",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E3_NON_TEXT_GENERATED",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "MEDIA_EQUIVALENCE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Observe initial playback and independent audio control in the activated task"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory automatic playback and scripted audio"
+        }
+      ],
+      "owner": "Media and provider owners",
+      "freshness_rule": "Invalidate when audio content, automatic playback, controls, or provider behavior changes"
+    },
+    {
+      "requirement_id": "WCAG22-1.4.3",
+      "framework": "WCAG_2_2",
+      "criterion": "1.4.3",
+      "proposition": "Rendered text and images of text meet minimum contrast in every required state",
+      "journey_ids": [
+        "V02",
+        "V03",
+        "V05",
+        "V13",
+        "F01",
+        "G01",
+        "J13",
+        "DCS08",
+        "DCS09",
+        "DCS11",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "All rendered web and provider surfaces include text across default, error, disabled, and selected states",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_VISUAL",
+          "disposition": "DECIDES",
+          "proposition": "Measure rendered text contrast across the complete expected state inventory"
+        },
+        {
+          "method": "AXE",
+          "disposition": "INFORMS",
+          "proposition": "Detect supported contrast failures and incomplete nodes"
+        }
+      ],
+      "owner": "Web, provider, and visual owners",
+      "freshness_rule": "Invalidate when text, theme, state, compositing, renderer, or provider changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-1.4.4",
+      "framework": "WCAG_2_2",
+      "criterion": "1.4.4",
+      "proposition": "Text can be resized to 200 percent without loss of content or function",
+      "journey_ids": [
+        "V19",
+        "F01",
+        "F02",
+        "G01",
+        "D03",
+        "DCS09",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Browser surfaces contain dense interactive and documentation content",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_VISUAL",
+          "disposition": "DECIDES",
+          "proposition": "Complete representative tasks at 200 percent text resize with no loss"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Find viewport and fixed-size risks"
+        }
+      ],
+      "owner": "Web and provider owners",
+      "freshness_rule": "Invalidate when typography, layout, viewport, content, or provider changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-1.4.5",
+      "framework": "WCAG_2_2",
+      "criterion": "1.4.5",
+      "proposition": "Images of text are avoided unless customizable or essential",
+      "journey_ids": [
+        "V06",
+        "A06",
+        "A07",
+        "A08",
+        "J13",
+        "DCS08",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Rendered media and provider output require review for embedded text and exceptions",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "MEDIA_EQUIVALENCE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Review rendered content and any essential or logotype exception"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory candidate raster or generated text"
+        }
+      ],
+      "owner": "Content, media, and provider owners",
+      "freshness_rule": "Invalidate when imagery, embedded text, customization, or exception facts change"
+    },
+    {
+      "requirement_id": "WCAG22-1.4.10",
+      "framework": "WCAG_2_2",
+      "criterion": "1.4.10",
+      "proposition": "Content reflows at 320 CSS pixels without two-dimensional page scrolling except for essential objects",
+      "journey_ids": [
+        "V19",
+        "F01",
+        "F02",
+        "G01",
+        "D03",
+        "DCS04",
+        "DCS07",
+        "DCS09",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Web application, generated documentation, provider forms, and conditional Web Access require narrow layouts",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_VISUAL",
+          "disposition": "DECIDES",
+          "proposition": "Measure every expected region and complete tasks at 320 CSS pixels with exceptions recorded"
+        },
+        {
+          "method": "AXE",
+          "disposition": "INFORMS",
+          "proposition": "Inform supported overflow findings"
+        }
+      ],
+      "owner": "Web and provider owners",
+      "freshness_rule": "Invalidate when layout, content, overlays, viewport, provider, or exception inventory changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-1.4.11",
+      "framework": "WCAG_2_2",
+      "criterion": "1.4.11",
+      "proposition": "Essential component states, focus indicators, boundaries, and graphics meet non-text contrast",
+      "journey_ids": [
+        "V02",
+        "V05",
+        "V08",
+        "V14",
+        "V19",
+        "F01",
+        "G01",
+        "DCS08",
+        "DCS09",
+        "DCS10",
+        "DCS11",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "The interfaces contain controls, state indicators, focus, boundaries, icons, and graphics",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E3_NON_TEXT_GENERATED"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_VISUAL",
+          "disposition": "DECIDES",
+          "proposition": "Measure essential non-text contrast in each exact state including forced colors"
+        },
+        {
+          "method": "AXE",
+          "disposition": "INFORMS",
+          "proposition": "Inform supported contrast findings"
+        }
+      ],
+      "owner": "Web and visual owners",
+      "freshness_rule": "Invalidate when control styling, state, focus, graphic, theme, or renderer changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-1.4.12",
+      "framework": "WCAG_2_2",
+      "criterion": "1.4.12",
+      "proposition": "Prescribed text spacing causes no loss of content or function",
+      "journey_ids": [
+        "V19",
+        "F01",
+        "F02",
+        "G01",
+        "A05",
+        "DCS07",
+        "DCS09",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Dense application, documentation, form, and table content can clip or overlap",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_VISUAL",
+          "disposition": "DECIDES",
+          "proposition": "Apply prescribed spacing and measure clipping, overlap, content, and function"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Find fixed-height and overflow risks"
+        }
+      ],
+      "owner": "Web and content owners",
+      "freshness_rule": "Invalidate when typography, spacing, container, content, or renderer changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-1.4.13",
+      "framework": "WCAG_2_2",
+      "criterion": "1.4.13",
+      "proposition": "Additional hover or focus content is dismissible, pointer-reachable, and persistent when triggered",
+      "journey_ids": [
+        "V02",
+        "V08",
+        "V09",
+        "V19",
+        "F02",
+        "J13",
+        "DCS03",
+        "DCS11",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Tooltips, menus, chart details, generated docs, and providers can create additional content",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Trigger, dismiss, move over, and retain each applicable additional-content state"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory tooltip, popover, hover, and focus implementations"
+        }
+      ],
+      "owner": "Web and provider owners",
+      "freshness_rule": "Invalidate when tooltip, popover, hover, focus, dismissal, or persistence changes"
+    },
+    {
+      "requirement_id": "WCAG22-2.1.1",
+      "framework": "WCAG_2_2",
+      "criterion": "2.1.1",
+      "proposition": "Every function is operable through a keyboard interface unless path-dependent input is essential",
+      "journey_ids": [
+        "V02",
+        "V03",
+        "V05",
+        "V06",
+        "V08",
+        "V09",
+        "V13",
+        "V14",
+        "V18",
+        "F01",
+        "G01",
+        "J13",
+        "DCS02",
+        "DCS03",
+        "DCS04",
+        "DCS05",
+        "DCS06",
+        "DCS07",
+        "DCS10",
+        "DCS11"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "All active and conditional interactive surfaces expose keyboard-relevant functions",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Complete every mapped function with task-specific keyboard commands"
+        },
+        {
+          "method": "HVE_PROBE",
+          "disposition": "INFORMS",
+          "proposition": "Inform possible traversal and static widget risks"
+        }
+      ],
+      "owner": "Interaction and provider owners",
+      "freshness_rule": "Invalidate when controls, widgets, shortcuts, focus, provider, or task functions change",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-states.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-2.1.2",
+      "framework": "WCAG_2_2",
+      "criterion": "2.1.2",
+      "proposition": "Keyboard focus can enter, operate, and leave every component and embedded boundary",
+      "journey_ids": [
+        "V02",
+        "V05",
+        "V09",
+        "V13",
+        "V14",
+        "V18",
+        "F01",
+        "G01",
+        "D02",
+        "D03",
+        "DCS03",
+        "DCS04",
+        "DCS05",
+        "DCS06",
+        "DCS07",
+        "DCS10"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Dialogs, menus, composite widgets, generated pages, provider forms, and remote sessions can trap focus",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Traverse forward and reverse through every mapped boundary and exit mechanism"
+        },
+        {
+          "method": "HVE_PROBE",
+          "disposition": "INFORMS",
+          "proposition": "Inform possible repeated-focus stalls"
+        }
+      ],
+      "owner": "Interaction and provider owners",
+      "freshness_rule": "Invalidate when focus containment, portals, embedded content, remote transport, or keyboard behavior changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-2.1.4",
+      "framework": "WCAG_2_2",
+      "criterion": "2.1.4",
+      "proposition": "Unmodified character-key shortcuts can be disabled, remapped, or limited to focused components",
+      "journey_ids": [
+        "V05",
+        "V06",
+        "V08",
+        "V16",
+        "A03",
+        "A04",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Applicability requires an inventory of activated single-character shortcuts",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Fire each shortcut inside and outside focus and verify disable, remap, or focus scope"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory unmodified character key handlers"
+        }
+      ],
+      "owner": "Interaction and host owners",
+      "freshness_rule": "Invalidate when shortcuts, key handlers, focus scope, host, or remapping changes"
+    },
+    {
+      "requirement_id": "WCAG22-2.2.1",
+      "framework": "WCAG_2_2",
+      "criterion": "2.2.1",
+      "proposition": "User time limits are adjustable, extendible, or validly excepted with state preserved",
+      "journey_ids": [
+        "V01",
+        "V13",
+        "V18",
+        "G08",
+        "P01",
+        "P03",
+        "H01",
+        "H05",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Authentication, sessions, batch work, exports, workflow runs, and provider jobs can introduce time limits",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Exercise warning, extension, state preservation, and applicable exception paths"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory session, timer, and timeout behavior"
+        }
+      ],
+      "owner": "Identity, workflow, and provider owners",
+      "freshness_rule": "Invalidate when timeout, warning, extension, persistence, provider, or exception facts change"
+    },
+    {
+      "requirement_id": "WCAG22-2.2.2",
+      "framework": "WCAG_2_2",
+      "criterion": "2.2.2",
+      "proposition": "Moving, blinking, scrolling, or auto-updating information can be paused, stopped, hidden, or controlled when required",
+      "journey_ids": [
+        "V06",
+        "V13",
+        "V18",
+        "A08",
+        "G08",
+        "P01",
+        "P03",
+        "DCS09",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Playback, progress, batch updates, media, workflow status, and provider jobs can trigger the requirement",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E3_NON_TEXT_GENERATED",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Observe duration and complete pause, stop, hide, or update-control tasks"
+        },
+        {
+          "method": "PLAYWRIGHT_VISUAL",
+          "disposition": "INFORMS",
+          "proposition": "Capture motion and reduced-motion state"
+        }
+      ],
+      "owner": "Media, workflow, and provider owners",
+      "freshness_rule": "Invalidate when motion, update cadence, controls, duration, provider, or exception facts change"
+    },
+    {
+      "requirement_id": "WCAG22-2.3.1",
+      "framework": "WCAG_2_2",
+      "criterion": "2.3.1",
+      "proposition": "Content does not flash beyond the applicable threshold",
+      "journey_ids": [
+        "V06",
+        "V13",
+        "A08",
+        "D01",
+        "J13",
+        "DCS08",
+        "DCS09",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Generated media, status effects, simulation, and provider output require worst-case content review",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "MEDIA_EQUIVALENCE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Analyze representative worst-case capture with a recognized flash method and human review"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory animated and media content"
+        }
+      ],
+      "owner": "Media, simulation, and provider owners",
+      "freshness_rule": "Invalidate when animation, media, simulation, provider content, or flash characteristics change"
+    },
+    {
+      "requirement_id": "WCAG22-2.4.1",
+      "framework": "WCAG_2_2",
+      "criterion": "2.4.1",
+      "proposition": "Users can bypass repeated content and reach primary regions efficiently",
+      "journey_ids": [
+        "V02",
+        "V03",
+        "V19",
+        "F01",
+        "F02",
+        "G01",
+        "A05",
+        "DCS02",
+        "DCS04",
+        "DCS06",
+        "DCS07",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Long application, generated documentation, form, and document surfaces contain repeated or major regions",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Use landmarks or bypass mechanisms through the complete repeated-content structure"
+        },
+        {
+          "method": "AXE",
+          "disposition": "INFORMS",
+          "proposition": "Detect supported landmark and bypass defects"
+        }
+      ],
+      "owner": "Web and content owners",
+      "freshness_rule": "Invalidate when layout regions, repeated blocks, landmarks, navigation, or renderer changes"
+    },
+    {
+      "requirement_id": "WCAG22-2.4.2",
+      "framework": "WCAG_2_2",
+      "criterion": "2.4.2",
+      "proposition": "Each page or host view has a descriptive title",
+      "journey_ids": [
+        "V02",
+        "F01",
+        "F02",
+        "G01",
+        "G08",
+        "D03",
+        "DCS01",
+        "DCS05",
+        "DCS06"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Browser and hosted surfaces expose page or view titles",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_TREE",
+          "disposition": "DECIDES",
+          "proposition": "Assert the expected descriptive title for every mapped page and state"
+        },
+        {
+          "method": "AXE",
+          "disposition": "INFORMS",
+          "proposition": "Detect missing title metadata"
+        }
+      ],
+      "owner": "Web, host, and provider owners",
+      "freshness_rule": "Invalidate when route, state naming, title, host, or provider changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-2.4.3",
+      "framework": "WCAG_2_2",
+      "criterion": "2.4.3",
+      "proposition": "Focus order preserves meaning and operability for the complete task",
+      "journey_ids": [
+        "V02",
+        "V03",
+        "V05",
+        "V09",
+        "V13",
+        "V14",
+        "V18",
+        "F01",
+        "G01",
+        "D03",
+        "DCS02",
+        "DCS03",
+        "DCS04",
+        "DCS05",
+        "DCS06",
+        "DCS07",
+        "DCS10",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Interactive application, generated, provider, and remote surfaces have ordered focus sequences",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Assert every expected forward and reverse focus stop against visual and task order"
+        },
+        {
+          "method": "HVE_PROBE",
+          "disposition": "INFORMS",
+          "proposition": "Inform traversal anomalies"
+        }
+      ],
+      "owner": "Interaction and provider owners",
+      "freshness_rule": "Invalidate when DOM order, focus management, portal, widget, provider, or task sequence changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-2.4.4",
+      "framework": "WCAG_2_2",
+      "criterion": "2.4.4",
+      "proposition": "Each link purpose is understandable from its text and programmatic context",
+      "journey_ids": [
+        "V02",
+        "G07",
+        "A05",
+        "J01",
+        "J16",
+        "DCS01",
+        "DCS02",
+        "DCS03",
+        "DCS07",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Viewer help, issue chooser, documents, and support paths contain consequential links",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E4_HUMAN_AT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "COGNITIVE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Review each link with its programmatic context and destination consequence"
+        },
+        {
+          "method": "HVE_PROBE",
+          "disposition": "INFORMS",
+          "proposition": "Identify ambiguous or duplicate visible-link candidates"
+        }
+      ],
+      "owner": "Content and support owners",
+      "freshness_rule": "Invalidate when link text, context, destination, consequence, or support channel changes"
+    },
+    {
+      "requirement_id": "WCAG22-2.4.5",
+      "framework": "WCAG_2_2",
+      "criterion": "2.4.5",
+      "proposition": "Page sets provide multiple ways to locate pages unless an allowed process or result exception applies",
+      "journey_ids": [
+        "F01",
+        "F02",
+        "G07",
+        "A05",
+        "J01",
+        "DCS02",
+        "DCS05",
+        "DCS06",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Applicability depends on the defined page set; the single-page Viewer may be one page",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E4_HUMAN_AT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "COGNITIVE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Inventory the page set and prove two location mechanisms or an exact exception"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory navigation, search, chooser, and index mechanisms"
+        }
+      ],
+      "owner": "Information architecture and content owners",
+      "freshness_rule": "Invalidate when page set, navigation, search, process, result, or exception changes"
+    },
+    {
+      "requirement_id": "WCAG22-2.4.6",
+      "framework": "WCAG_2_2",
+      "criterion": "2.4.6",
+      "proposition": "Headings and labels describe their actual topics and purposes",
+      "journey_ids": [
+        "V02",
+        "V05",
+        "V13",
+        "F01",
+        "F02",
+        "G01",
+        "A05",
+        "DCS01",
+        "DCS02",
+        "DCS03",
+        "DCS04",
+        "DCS07",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Applications, generated documentation, forms, and documents use headings and labels",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT"
+      ],
+      "methods": [
+        {
+          "method": "COGNITIVE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Compare every heading and label with its actual topic, control, or task purpose"
+        },
+        {
+          "method": "PLAYWRIGHT_TREE",
+          "disposition": "INFORMS",
+          "proposition": "Assert heading and label presence and computed names"
+        }
+      ],
+      "owner": "Content and surface owners",
+      "freshness_rule": "Invalidate when headings, labels, topic, control purpose, or terminology changes"
+    },
+    {
+      "requirement_id": "WCAG22-2.4.7",
+      "framework": "WCAG_2_2",
+      "criterion": "2.4.7",
+      "proposition": "Every keyboard focus stop has a visible focus indicator",
+      "journey_ids": [
+        "V02",
+        "V03",
+        "V05",
+        "V09",
+        "V13",
+        "V14",
+        "V18",
+        "F01",
+        "G01",
+        "D03",
+        "DCS03",
+        "DCS04",
+        "DCS05",
+        "DCS06",
+        "DCS09",
+        "DCS10",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "All interactive web, generated, provider, and remote surfaces require visible keyboard focus",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_VISUAL",
+          "disposition": "DECIDES",
+          "proposition": "Measure rendered focus visibility and contrast at every expected keyboard stop"
+        },
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "INFORMS",
+          "proposition": "Generate the complete focus sequence"
+        }
+      ],
+      "owner": "Interaction and visual owners",
+      "freshness_rule": "Invalidate when focus styling, theme, widget, state, provider, or browser changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-2.4.11",
+      "framework": "WCAG_2_2",
+      "criterion": "2.4.11",
+      "proposition": "Focused components are not entirely hidden by author-created content",
+      "journey_ids": [
+        "V02",
+        "V05",
+        "V09",
+        "V13",
+        "V14",
+        "V18",
+        "V19",
+        "F01",
+        "G01",
+        "DCS03",
+        "DCS04",
+        "DCS05",
+        "DCS06",
+        "DCS09",
+        "DCS10",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Sticky regions, dialogs, portals, menus, overlays, and narrow layouts can obscure focus",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_VISUAL",
+          "disposition": "DECIDES",
+          "proposition": "Measure every expected focus rectangle against all open and sticky content"
+        },
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "INFORMS",
+          "proposition": "Generate the expected focus sequence and open states"
+        }
+      ],
+      "owner": "Interaction and layout owners",
+      "freshness_rule": "Invalidate when focus, overlay, sticky region, portal, zoom, reflow, or provider changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-2.5.1",
+      "framework": "WCAG_2_2",
+      "criterion": "2.5.1",
+      "proposition": "Multiple-point or path-based gestures have a single-pointer alternative unless the gesture is essential",
+      "journey_ids": [
+        "V06",
+        "V08",
+        "V09",
+        "V10",
+        "D01",
+        "D02",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Charts, timelines, reorder controls, media, native viewport surfaces, and remote clients may use path gestures",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_POINTER",
+          "disposition": "DECIDES",
+          "proposition": "Complete each path gesture through a non-path single-pointer alternative"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory gesture handlers and essential claims"
+        }
+      ],
+      "owner": "Interaction, native, and provider owners",
+      "freshness_rule": "Invalidate when gestures, pointer alternatives, native controls, remote transport, or exception facts change"
+    },
+    {
+      "requirement_id": "WCAG22-2.5.2",
+      "framework": "WCAG_2_2",
+      "criterion": "2.5.2",
+      "proposition": "Single-pointer actions can be aborted, reversed, completed on release, or otherwise safely undone",
+      "journey_ids": [
+        "V08",
+        "V09",
+        "V10",
+        "V14",
+        "V19",
+        "D01",
+        "DCS03",
+        "DCS04",
+        "DCS05",
+        "DCS06",
+        "DCS10"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Range selection, reorder, sliders, canvas, and native interactions use pointer input",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_POINTER",
+          "disposition": "DECIDES",
+          "proposition": "Exercise down, move-away, release, cancel, and undo for every mapped action"
+        },
+        {
+          "method": "UNIT_TEST",
+          "disposition": "INFORMS",
+          "proposition": "Verify handler state and cancellation logic"
+        }
+      ],
+      "owner": "Interaction and native owners",
+      "freshness_rule": "Invalidate when pointer handlers, commit timing, cancellation, undo, or native behavior changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-2.5.3",
+      "framework": "WCAG_2_2",
+      "criterion": "2.5.3",
+      "proposition": "The accessible name contains the visible text label for each labelled control",
+      "journey_ids": [
+        "V02",
+        "V05",
+        "V13",
+        "V14",
+        "V18",
+        "F01",
+        "G01",
+        "DCS03",
+        "DCS04",
+        "DCS05",
+        "DCS06",
+        "DCS07",
+        "DCS10"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Application, generated, and provider forms contain visibly labelled controls",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_TREE",
+          "disposition": "DECIDES",
+          "proposition": "Compare each visible label with the computed accessible name in reading order"
+        },
+        {
+          "method": "HVE_PROBE",
+          "disposition": "INFORMS",
+          "proposition": "Identify literal aria-label mismatch candidates"
+        }
+      ],
+      "owner": "Web and provider owners",
+      "freshness_rule": "Invalidate when visible labels, accessible names, controls, localization, or provider rendering changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-2.5.4",
+      "framework": "WCAG_2_2",
+      "criterion": "2.5.4",
+      "proposition": "Motion-actuated functions have a conventional input alternative and can be disabled unless excepted",
+      "journey_ids": [
+        "V19",
+        "D01",
+        "D02",
+        "J13",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "No current motion-actuated project function is established; native, remote, or provider interfaces could activate it",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "NATIVE_TASK",
+          "disposition": "DECIDES",
+          "proposition": "Exercise motion input, disable control, and conventional alternative on the supported device"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory motion and sensor APIs"
+        }
+      ],
+      "owner": "Native and provider owners",
+      "freshness_rule": "Invalidate when motion APIs, device support, alternatives, disable controls, or exception facts change"
+    },
+    {
+      "requirement_id": "WCAG22-2.5.7",
+      "framework": "WCAG_2_2",
+      "criterion": "2.5.7",
+      "proposition": "Every dragging operation has a non-dragging single-pointer alternative unless dragging is essential",
+      "journey_ids": [
+        "V08",
+        "V09",
+        "V10",
+        "V14",
+        "D01",
+        "D02",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Range, reorder, slider, canvas, native, and remote tasks can require dragging",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_POINTER",
+          "disposition": "DECIDES",
+          "proposition": "Complete each mapped dragging task with a non-drag single-pointer action"
+        },
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "INFORMS",
+          "proposition": "Verify keyboard equivalence without treating it as the pointer decision"
+        }
+      ],
+      "owner": "Interaction, native, and provider owners",
+      "freshness_rule": "Invalidate when dragging, single-pointer alternatives, native controls, or exception facts change",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-2.5.8",
+      "framework": "WCAG_2_2",
+      "criterion": "2.5.8",
+      "proposition": "Pointer targets meet the minimum size or spacing requirement unless an exact exception applies",
+      "journey_ids": [
+        "V02",
+        "V05",
+        "V06",
+        "V09",
+        "V10",
+        "V13",
+        "V14",
+        "V18",
+        "V19",
+        "F01",
+        "G01",
+        "DCS03",
+        "DCS04",
+        "DCS05",
+        "DCS06",
+        "DCS07",
+        "DCS10",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Dense application, generated, form, and provider controls include compact pointer targets",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_VISUAL",
+          "disposition": "DECIDES",
+          "proposition": "Measure all targets and spacing with inline, equivalent, user-agent, and essential exceptions recorded"
+        },
+        {
+          "method": "HVE_PROBE",
+          "disposition": "INFORMS",
+          "proposition": "Identify sampled target-size candidates"
+        }
+      ],
+      "owner": "Interaction and provider owners",
+      "freshness_rule": "Invalidate when control geometry, spacing, responsive layout, provider rendering, or exception inventory changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-3.1.1",
+      "framework": "WCAG_2_2",
+      "criterion": "3.1.1",
+      "proposition": "Each page exposes its expected valid primary human language",
+      "journey_ids": [
+        "V02",
+        "F01",
+        "F02",
+        "G01",
+        "A05",
+        "D03",
+        "DCS01"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Web application, generated pages, hosted forms, documents, and conditional Web Access have a primary language",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_TREE",
+          "disposition": "DECIDES",
+          "proposition": "Assert the expected valid primary language on each exact page"
+        },
+        {
+          "method": "AXE",
+          "disposition": "INFORMS",
+          "proposition": "Detect missing or invalid page language"
+        }
+      ],
+      "owner": "Content, web, and provider owners",
+      "freshness_rule": "Invalidate when page, locale, language metadata, renderer, or provider changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-3.1.2",
+      "framework": "WCAG_2_2",
+      "criterion": "3.1.2",
+      "proposition": "Language changes within content are programmatically identified except for allowed terms",
+      "journey_ids": [
+        "V12",
+        "F01",
+        "G01",
+        "A05",
+        "J16",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Multilingual instructions, code, provider text, documents, and support responses can activate language changes",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "NVDA",
+          "disposition": "DECIDES",
+          "proposition": "Review identified language changes and pronunciation in the rendered task"
+        },
+        {
+          "method": "JAWS",
+          "disposition": "DECIDES",
+          "proposition": "Review identified language changes and pronunciation in the rendered task"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inspect authored language metadata"
+        }
+      ],
+      "owner": "Content and support owners",
+      "freshness_rule": "Invalidate when multilingual content, language metadata, localization, renderer, or support response changes"
+    },
+    {
+      "requirement_id": "WCAG22-3.2.1",
+      "framework": "WCAG_2_2",
+      "criterion": "3.2.1",
+      "proposition": "Receiving focus does not unexpectedly change context",
+      "journey_ids": [
+        "V02",
+        "V03",
+        "V05",
+        "V09",
+        "V13",
+        "V14",
+        "V18",
+        "F01",
+        "G01",
+        "DCS03",
+        "DCS04",
+        "DCS05",
+        "DCS06",
+        "DCS07",
+        "DCS10",
+        "DCS11"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Interactive application, generated, and hosted surfaces contain many keyboard-focus controls",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Focus every expected control and observe route, value, window, and task context"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inspect focus handlers for context changes"
+        }
+      ],
+      "owner": "Interaction and provider owners",
+      "freshness_rule": "Invalidate when focus handlers, navigation, windows, selection, or provider behavior changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-3.2.2",
+      "framework": "WCAG_2_2",
+      "criterion": "3.2.2",
+      "proposition": "Changing a field or control does not unexpectedly change context without prior advice",
+      "journey_ids": [
+        "V02",
+        "V03",
+        "V05",
+        "V09",
+        "V13",
+        "V14",
+        "V18",
+        "F01",
+        "G01",
+        "DCS03",
+        "DCS04",
+        "DCS05",
+        "DCS06",
+        "DCS11"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Selections, form controls, generated requests, and hosted forms can trigger context changes",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Change every mapped input and observe context, warning, and user request"
+        },
+        {
+          "method": "UNIT_TEST",
+          "disposition": "INFORMS",
+          "proposition": "Inspect callbacks and state transitions"
+        }
+      ],
+      "owner": "Interaction and provider owners",
+      "freshness_rule": "Invalidate when control change, submission, navigation, warning, or provider behavior changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-states.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-3.2.3",
+      "framework": "WCAG_2_2",
+      "criterion": "3.2.3",
+      "proposition": "Repeated navigation mechanisms retain consistent relative order unless changed by the user",
+      "journey_ids": [
+        "F01",
+        "F02",
+        "G07",
+        "A05",
+        "J01",
+        "DCS01",
+        "DCS02",
+        "DCS03",
+        "DCS04",
+        "DCS07",
+        "DCS11",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Applicability depends on repeated navigation across the defined page set; the Viewer is a single-page application",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E4_HUMAN_AT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "COGNITIVE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Compare repeated navigation across the exact page set and process states"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Identify shared navigation components and page-set boundaries"
+        }
+      ],
+      "owner": "Information architecture and provider owners",
+      "freshness_rule": "Invalidate when page set, navigation, ordering, personalization, or provider changes"
+    },
+    {
+      "requirement_id": "WCAG22-3.2.4",
+      "framework": "WCAG_2_2",
+      "criterion": "3.2.4",
+      "proposition": "Components with the same function are identified consistently across the page set",
+      "journey_ids": [
+        "V02",
+        "V05",
+        "F01",
+        "F02",
+        "G01",
+        "G08",
+        "A05",
+        "DCS01",
+        "DCS02",
+        "DCS03",
+        "DCS04",
+        "DCS07",
+        "DCS11",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Application states, generated pages, hosted forms, workflows, and documents repeat functions",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "COGNITIVE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Compare names, icons, and descriptions for each repeated function"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Identify reused strings and components"
+        }
+      ],
+      "owner": "Content, design-system, and provider owners",
+      "freshness_rule": "Invalidate when repeated functions, labels, icons, components, or provider terminology changes"
+    },
+    {
+      "requirement_id": "WCAG22-3.2.6",
+      "framework": "WCAG_2_2",
+      "criterion": "3.2.6",
+      "proposition": "Repeated help mechanisms appear in a consistent relative order",
+      "journey_ids": [
+        "V02",
+        "G07",
+        "A05",
+        "J01",
+        "J16",
+        "H12",
+        "DCS01",
+        "DCS02",
+        "DCS03",
+        "DCS04",
+        "DCS11",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "The trigger depends on the presence of listed help mechanisms across a defined page set",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E4_HUMAN_AT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "COGNITIVE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Compare activated help mechanisms and their relative order across the page set"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory help links and channels"
+        }
+      ],
+      "owner": "Content and support owners",
+      "freshness_rule": "Invalidate when page set, help channel, position, ordering, or provider changes"
+    },
+    {
+      "requirement_id": "WCAG22-3.3.1",
+      "framework": "WCAG_2_2",
+      "criterion": "3.3.1",
+      "proposition": "Input errors are identified and described in text for the affected item",
+      "journey_ids": [
+        "V09",
+        "V12",
+        "V13",
+        "V14",
+        "V18",
+        "F01",
+        "G01",
+        "G09",
+        "P01",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Application, generated, hosted, dispatch, and provider tasks contain invalid-input states",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_LIVE_REGION",
+          "disposition": "DECIDES",
+          "proposition": "Run each invalid-input journey and assert item identification, text, focus, and announcement"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory error nodes and validation copy"
+        }
+      ],
+      "owner": "Form and provider owners",
+      "freshness_rule": "Invalidate when validation, error text, field binding, announcement, focus, or provider changes"
+    },
+    {
+      "requirement_id": "WCAG22-3.3.2",
+      "framework": "WCAG_2_2",
+      "criterion": "3.3.2",
+      "proposition": "Inputs provide labels or instructions sufficient for the task",
+      "journey_ids": [
+        "V09",
+        "V12",
+        "V13",
+        "V14",
+        "V18",
+        "F01",
+        "G01",
+        "G09",
+        "P01",
+        "DCS05",
+        "DCS06",
+        "DCS07",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Application, generated, hosted, and provider tasks require user input",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "COGNITIVE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Assess label and instruction sufficiency in the complete task"
+        },
+        {
+          "method": "PLAYWRIGHT_TREE",
+          "disposition": "INFORMS",
+          "proposition": "Assert label and instruction relationships"
+        }
+      ],
+      "owner": "Content, form, and provider owners",
+      "freshness_rule": "Invalidate when field purpose, label, instruction, grouping, validation, or provider changes"
+    },
+    {
+      "requirement_id": "WCAG22-3.3.3",
+      "framework": "WCAG_2_2",
+      "criterion": "3.3.3",
+      "proposition": "Known safe corrections are suggested when an input error is detected",
+      "journey_ids": [
+        "V09",
+        "V12",
+        "V14",
+        "V18",
+        "F01",
+        "G01",
+        "G09",
+        "P01",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Multiple application, generated, hosted, and provider inputs have known correction paths",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "COGNITIVE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Run invalid-input tasks and evaluate safe known correction suggestions"
+        },
+        {
+          "method": "PLAYWRIGHT_LIVE_REGION",
+          "disposition": "INFORMS",
+          "proposition": "Capture exact error and suggestion content and ordering"
+        }
+      ],
+      "owner": "Form and provider owners",
+      "freshness_rule": "Invalidate when validation, known correction, error content, safety constraint, or provider changes"
+    },
+    {
+      "requirement_id": "WCAG22-3.3.4",
+      "framework": "WCAG_2_2",
+      "criterion": "3.3.4",
+      "proposition": "Consequential data changes are reversible, checked, or confirmed before finalization",
+      "journey_ids": [
+        "V05",
+        "V11",
+        "V12",
+        "V14",
+        "V16",
+        "V18",
+        "G01",
+        "G08",
+        "P01",
+        "P03",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Applicability depends on legal, financial, or user-controlled data consequences in each task",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Complete each scoped consequential action through review, correction, confirmation, cancel, and recovery"
+        },
+        {
+          "method": "UNIT_TEST",
+          "disposition": "INFORMS",
+          "proposition": "Verify confirmation and undo state logic"
+        }
+      ],
+      "owner": "Data, workflow, and provider owners",
+      "freshness_rule": "Invalidate when consequence, data mutation, confirmation, checking, reversal, or provider changes"
+    },
+    {
+      "requirement_id": "WCAG22-3.3.7",
+      "framework": "WCAG_2_2",
+      "criterion": "3.3.7",
+      "proposition": "Previously entered information in one process is reused or selectable unless an exception applies",
+      "journey_ids": [
+        "V01",
+        "V11",
+        "V12",
+        "V18",
+        "G01",
+        "H01",
+        "H12",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Applicability depends on repeated information within each multi-step process",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Complete multi-step tasks and verify prior information is populated or selectable"
+        },
+        {
+          "method": "UNIT_TEST",
+          "disposition": "INFORMS",
+          "proposition": "Verify persistence and default state"
+        }
+      ],
+      "owner": "Form, identity, and support owners",
+      "freshness_rule": "Invalidate when process steps, prior information, persistence, privacy, security, or exception changes"
+    },
+    {
+      "requirement_id": "WCAG22-3.3.8",
+      "framework": "WCAG_2_2",
+      "criterion": "3.3.8",
+      "proposition": "Authentication avoids prohibited cognitive-function tests or supplies an accessible alternative or assistance",
+      "journey_ids": [
+        "V01",
+        "G01",
+        "G08",
+        "P01",
+        "P02",
+        "P03",
+        "D02",
+        "D03",
+        "H01",
+        "DCS12",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Hosted, GitHub, provider, and remote tasks include authentication or authentication renewal",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "MANUAL_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Authenticate and reauthenticate with paste, manager, passkey, or another non-cognitive path"
+        },
+        {
+          "method": "PROVIDER_ASSURANCE",
+          "disposition": "INFORMS",
+          "proposition": "Identify provider authentication support and exceptions"
+        }
+      ],
+      "owner": "Identity and provider owners",
+      "freshness_rule": "Invalidate when identity provider, authentication method, challenge, assistance, exception, or role changes"
+    },
+    {
+      "requirement_id": "WCAG22-4.1.2",
+      "framework": "WCAG_2_2",
+      "criterion": "4.1.2",
+      "proposition": "Interactive components expose expected names, roles, states, values, relationships, actions, and updates",
+      "journey_ids": [
+        "V02",
+        "V03",
+        "V05",
+        "V06",
+        "V08",
+        "V09",
+        "V13",
+        "V14",
+        "V18",
+        "F01",
+        "G01",
+        "D01",
+        "D03",
+        "DCS03",
+        "DCS04",
+        "DCS05",
+        "DCS06",
+        "DCS07",
+        "DCS10",
+        "DCS11",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Web, generated, hosted, native, and remote surfaces contain custom and standard interactive controls",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_TREE",
+          "disposition": "DECIDES",
+          "proposition": "Assert exact computed semantics for every expected component state"
+        },
+        {
+          "method": "NVDA",
+          "disposition": "DECIDES",
+          "proposition": "Complete critical tasks and verify actual speech, focus, state, and value"
+        },
+        {
+          "method": "JAWS",
+          "disposition": "DECIDES",
+          "proposition": "Complete critical tasks and verify actual speech, focus, state, and value"
+        },
+        {
+          "method": "HVE_PROBE",
+          "disposition": "INFORMS",
+          "proposition": "Identify nameless control candidates without promoting a clean scan"
+        }
+      ],
+      "owner": "Interaction, native, and provider owners",
+      "freshness_rule": "Invalidate when controls, semantics, state, values, relationships, platform API, or provider changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
+        "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "WCAG22-4.1.3",
+      "framework": "WCAG_2_2",
+      "criterion": "4.1.3",
+      "proposition": "Status messages expose their exact purpose and content without moving focus",
+      "journey_ids": [
+        "V03",
+        "V04",
+        "V05",
+        "V11",
+        "V12",
+        "V13",
+        "V14",
+        "V17",
+        "V18",
+        "F01",
+        "G08",
+        "P01",
+        "P03",
+        "DCS05",
+        "DCS06",
+        "DCS13"
+      ],
+      "applicability": "APPLICABLE",
+      "applicability_rationale": "Loading, errors, saves, batches, detections, exports, workflows, and providers update status without navigation",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_LIVE_REGION",
+          "disposition": "DECIDES",
+          "proposition": "Assert exact status content, role, sequence, and focus preservation for each state"
+        },
+        {
+          "method": "NVDA",
+          "disposition": "DECIDES",
+          "proposition": "Verify actual status speech and task continuity"
+        },
+        {
+          "method": "JAWS",
+          "disposition": "DECIDES",
+          "proposition": "Verify actual status speech and task continuity"
+        },
+        {
+          "method": "HVE_PROBE",
+          "disposition": "INFORMS",
+          "proposition": "Inform live-region mutation candidates"
+        }
+      ],
+      "owner": "Status, workflow, and provider owners",
+      "freshness_rule": "Invalidate when status content, timing, role, focus, workflow, or provider changes",
+      "evidence_refs": [
+        "data-management/viewer/frontend/e2e/accessibility-states.spec.ts"
+      ]
+    },
+    {
+      "requirement_id": "SECTION508-APPENDIX-A",
+      "framework": "REVISED_SECTION_508",
+      "criterion": "E101.1; E101.2; E102.1; E103.1-.4; E201.1; E202.1-.7.2; E203.1-.2; E204.1; E205.1-.4.1; E206.1; E207.1-.3; E208.1",
+      "proposition": "A covered agency classifies each delivered ICT item, user need, function, exception, content, software, hardware, and support obligation under official Appendix A identifiers",
+      "journey_ids": [
+        "J01",
+        "J04",
+        "J06",
+        "J09",
+        "J11",
+        "J12",
+        "J13",
+        "J14",
+        "J15",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "No evidence establishes a federal agency nexus, delivered ICT inventory, procurement action, or authorized exception",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "DECIDES",
+          "proposition": "Review authoritative item, audience, delivery, lifecycle, exception, and agency records"
+        },
+        {
+          "method": "PROVIDER_ASSURANCE",
+          "disposition": "INFORMS",
+          "proposition": "Supply version-scoped provider evidence without deciding agency acceptance"
+        }
+      ],
+      "owner": "Covered agency and qualified Section 508 reviewer",
+      "freshness_rule": "Invalidate when agency, item, version, delivery, acquisition, lifecycle, exception, user need, or official rule changes"
+    },
+    {
+      "requirement_id": "SECTION508-302.1",
+      "framework": "REVISED_SECTION_508",
+      "criterion": "302.1",
+      "proposition": "Visual operation has a mode that supports complete tasks without vision",
+      "journey_ids": [
+        "J04",
+        "J06",
+        "J09",
+        "J11",
+        "J12",
+        "J13",
+        "J14",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Chapter 3 applies only after federal item scope and Chapter 4 or 5 functional gaps are established",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "NVDA",
+          "disposition": "DECIDES",
+          "proposition": "Complete all inputs, outputs, errors, timing, and privacy without vision"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory nonvisual mechanisms and uncovered functions"
+        }
+      ],
+      "owner": "Qualified Section 508 and accessibility reviewers",
+      "freshness_rule": "Invalidate when functions, item scope, accessibility mode, task, AT, privacy, or platform changes"
+    },
+    {
+      "requirement_id": "SECTION508-302.2",
+      "framework": "REVISED_SECTION_508",
+      "criterion": "302.2",
+      "proposition": "Visual operation has a usable limited-vision mode",
+      "journey_ids": [
+        "V19",
+        "J11",
+        "J12",
+        "J13",
+        "J14"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Functional-gap and federal-item applicability facts are missing",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "PLAYWRIGHT_VISUAL",
+          "disposition": "DECIDES",
+          "proposition": "Complete tasks with magnification, zoom, contrast, focus, reflow, and spacing"
+        },
+        {
+          "method": "PROVIDER_ASSURANCE",
+          "disposition": "INFORMS",
+          "proposition": "Identify provider limited-vision support"
+        }
+      ],
+      "owner": "Qualified Section 508 and low-vision reviewers",
+      "freshness_rule": "Invalidate when functions, visual presentation, platform, provider, task, or support scope changes"
+    },
+    {
+      "requirement_id": "SECTION508-302.3",
+      "framework": "REVISED_SECTION_508",
+      "criterion": "302.3",
+      "proposition": "Visual operation does not require color perception",
+      "journey_ids": [
+        "V08",
+        "V13",
+        "V14",
+        "A06",
+        "A07",
+        "J13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Functional-gap and federal-item applicability facts are missing",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "MEDIA_EQUIVALENCE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Complete visual tasks with color unavailable and verify non-color cues"
+        },
+        {
+          "method": "PLAYWRIGHT_VISUAL",
+          "disposition": "INFORMS",
+          "proposition": "Capture monochrome, forced-color, and state-cue evidence"
+        }
+      ],
+      "owner": "Qualified Section 508 and visual reviewers",
+      "freshness_rule": "Invalidate when function, palette, visual encoding, provider, alternative, or item scope changes"
+    },
+    {
+      "requirement_id": "SECTION508-302.4",
+      "framework": "REVISED_SECTION_508",
+      "criterion": "302.4",
+      "proposition": "Audible operation has a complete mode that does not require hearing",
+      "journey_ids": [
+        "V06",
+        "A08",
+        "J13",
+        "J14",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Audible operation, functional gap, and federal-item facts are not established",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "MEDIA_EQUIVALENCE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Complete every audible task through captions, text, or visual equivalents"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory audible operation and alternatives"
+        }
+      ],
+      "owner": "Qualified Section 508 and media reviewers",
+      "freshness_rule": "Invalidate when audible function, captions, alternatives, provider, platform, or item scope changes"
+    },
+    {
+      "requirement_id": "SECTION508-302.5",
+      "framework": "REVISED_SECTION_508",
+      "criterion": "302.5",
+      "proposition": "Audible operation supports people with limited hearing",
+      "journey_ids": [
+        "V06",
+        "A08",
+        "J13",
+        "J14",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Audible operation, functional gap, and federal-item facts are not established",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "MEDIA_EQUIVALENCE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Complete tasks with volume, clarity, captions, transcripts, and relevant hearing technology"
+        },
+        {
+          "method": "PROVIDER_ASSURANCE",
+          "disposition": "INFORMS",
+          "proposition": "Identify provider hearing-access support"
+        }
+      ],
+      "owner": "Qualified Section 508 and hearing-access reviewers",
+      "freshness_rule": "Invalidate when audible function, volume, clarity, caption, transcript, technology, or item scope changes"
+    },
+    {
+      "requirement_id": "SECTION508-302.6",
+      "framework": "REVISED_SECTION_508",
+      "criterion": "302.6",
+      "proposition": "Speech-triggered functions have a complete non-speech operation mode",
+      "journey_ids": [
+        "A03",
+        "A04",
+        "J10",
+        "J13",
+        "J14"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "No current required speech-input function or federal-item gap is established",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "MANUAL_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Complete each speech function with keyboard, pointer, switch, or text input"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory speech input and control"
+        }
+      ],
+      "owner": "Qualified Section 508 and interaction reviewers",
+      "freshness_rule": "Invalidate when speech functions, alternatives, platform, provider, or item scope changes"
+    },
+    {
+      "requirement_id": "SECTION508-302.7",
+      "framework": "REVISED_SECTION_508",
+      "criterion": "302.7",
+      "proposition": "Manual operation has a mode that avoids fine motor control and simultaneous actions",
+      "journey_ids": [
+        "V08",
+        "V09",
+        "V10",
+        "D01",
+        "D02",
+        "J13",
+        "J14"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Functional-gap and federal-item applicability facts are missing",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT"
+      ],
+      "methods": [
+        {
+          "method": "MANUAL_KEYBOARD",
+          "disposition": "DECIDES",
+          "proposition": "Complete tasks without fine motor control, multiple-point gestures, or simultaneous keys"
+        },
+        {
+          "method": "PLAYWRIGHT_POINTER",
+          "disposition": "INFORMS",
+          "proposition": "Verify single-pointer and drag alternatives"
+        }
+      ],
+      "owner": "Qualified Section 508 and interaction reviewers",
+      "freshness_rule": "Invalidate when manual controls, gestures, key combinations, alternatives, hardware, or item scope changes"
+    },
+    {
+      "requirement_id": "SECTION508-302.8",
+      "framework": "REVISED_SECTION_508",
+      "criterion": "302.8",
+      "proposition": "Manual operation supports limited reach and strength",
+      "journey_ids": [
+        "D01",
+        "D02",
+        "J14",
+        "J15",
+        "H10",
+        "H11"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Tangible hardware, functional gap, physical reach, force, and federal delivery are not established",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SAFETY_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Measure physical reach and force and complete tasks with supported alternative input"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory tangible controls and software-controlled equipment"
+        }
+      ],
+      "owner": "Qualified Section 508, hardware, and safety reviewers",
+      "freshness_rule": "Invalidate when hardware, controls, reach, force, alternatives, safety, or item scope changes"
+    },
+    {
+      "requirement_id": "SECTION508-302.9",
+      "framework": "REVISED_SECTION_508",
+      "criterion": "302.9",
+      "proposition": "Features simplify use for people with limited language, cognitive, and learning abilities",
+      "journey_ids": [
+        "J01",
+        "J04",
+        "J06",
+        "J09",
+        "J10",
+        "J12",
+        "J13",
+        "J14",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Functional-gap and federal-item applicability facts are missing",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "COGNITIVE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Complete representative tasks covering language, consistency, errors, recovery, memory, help, and authentication"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory simplifying features and cognitive risks"
+        }
+      ],
+      "owner": "Qualified Section 508 and cognitive reviewers",
+      "freshness_rule": "Invalidate when task, language, consistency, recovery, help, authentication, provider, or item scope changes"
+    },
+    {
+      "requirement_id": "SECTION508-CHAPTER4",
+      "framework": "REVISED_SECTION_508",
+      "criterion": "401.1; 402.1-.5; 403.1; 404.1; 405.1; 406.1; 407.1-.8.3.2.2; 408.1-.3; 409.1; 410.1; 411.1; 412.1-.8.4; 413.1-.1.2; 414.1-.1.2; 415.1-.1.2",
+      "proposition": "A tangible covered ICT item satisfies each triggered Chapter 4 hardware, closed-function, operable-part, display, status, communications, caption, and description requirement",
+      "journey_ids": [
+        "J14",
+        "J15",
+        "H10",
+        "H11"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "No tangible end-user ICT item, federal bill of materials, physical interface, or triggered clause inventory is established",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SAFETY_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Inspect and measure each triggered physical control, display, status, connection, communication, caption, and description capability"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory tangible items, interfaces, functions, and candidate clauses"
+        }
+      ],
+      "owner": "Covered agency, hardware owner, and qualified safety reviewer",
+      "freshness_rule": "Invalidate when item, hardware, control, display, status, communication, physical environment, clause trigger, or agency scope changes"
+    },
+    {
+      "requirement_id": "SECTION508-CHAPTER5",
+      "framework": "REVISED_SECTION_508",
+      "criterion": "501.1; 502.1-.4G; 503.1-.4.2; 504.1-.4",
+      "proposition": "Covered software interoperates with platform accessibility services, respects preferences, completes non-Web processes, controls synchronized media, and preserves accessible authoring output where triggered",
+      "journey_ids": [
+        "J04",
+        "J06",
+        "J11",
+        "J12",
+        "J13",
+        "J14",
+        "H06",
+        "H07"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Federal delivery, exact software item, architecture, platform-service use, authoring classification, destination format, and triggered provisions are unresolved",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "NATIVE_TASK",
+          "disposition": "DECIDES",
+          "proposition": "Inspect platform accessibility APIs, preferences, AT interoperability, complete processes, and media controls"
+        },
+        {
+          "method": "ARTIFACT_INTEGRITY",
+          "disposition": "DECIDES",
+          "proposition": "Verify authoring and conversion preserve required accessibility information"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Classify software, platform-service use, authoring, and output formats"
+        }
+      ],
+      "owner": "Covered agency, software owners, and qualified Section 508 reviewers",
+      "freshness_rule": "Invalidate when software, platform, API, preference, process, media, authoring, output, provider, or agency scope changes"
+    },
+    {
+      "requirement_id": "SECTION508-CHAPTER6",
+      "framework": "REVISED_SECTION_508",
+      "criterion": "601.1; 602.1-.4; 603.1-.3",
+      "proposition": "Covered support documentation explains accessibility features, is accessible in delivered formats, supports alternate formats, and provides effective communication through support services",
+      "journey_ids": [
+        "J01",
+        "J12",
+        "J16",
+        "H12"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "No evidence identifies which documents and channels are agency-provided ICT support or establishes federal item scope",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E4_HUMAN_AT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SUPPORT_TASK",
+          "disposition": "DECIDES",
+          "proposition": "Request feature information, alternate format, accommodation, referral, and timely resolution through each supported channel"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory support documents, accessibility features, channels, and owners"
+        }
+      ],
+      "owner": "Covered agency and support owners",
+      "freshness_rule": "Invalidate when support item, feature, document, format, channel, owner, communication need, or agency scope changes"
+    },
+    {
+      "requirement_id": "SECTION508-WCAG20-4.1.1",
+      "framework": "REVISED_SECTION_508",
+      "criterion": "702.10.1; WCAG 2.0 SC 4.1.1",
+      "proposition": "Covered markup retains complete elements, valid nesting, no duplicate attributes, and unique identifiers under the incorporated WCAG 2.0 parsing requirement",
+      "journey_ids": [
+        "J04",
+        "J11",
+        "J12"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Federal content or software scope and markup applicability are not established; WCAG 2.2 removal does not close this separate 508 row",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E2_DETERMINISTIC_WEB",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "DECIDES",
+          "proposition": "Validate authored markup and parsed DOM for elements, nesting, attributes, and unique IDs"
+        },
+        {
+          "method": "AXE",
+          "disposition": "INFORMS",
+          "proposition": "Inform duplicate-ID and DOM findings without replacing standards parsing"
+        }
+      ],
+      "owner": "Covered agency and web content owners",
+      "freshness_rule": "Invalidate when markup, renderer, parser, route, delivered item, or federal scope changes"
+    },
+    {
+      "requirement_id": "SECTION504-ACTOR",
+      "framework": "SECTION_504",
+      "criterion": "29 U.S.C. 794(a); 45 CFR 84.2; agency-specific conducted-program rules",
+      "proposition": "The covered actor, assistance or conducted-program branch, awarding or conducting agency, instrument, period, and geography are established",
+      "journey_ids": [
+        "J01",
+        "J04",
+        "J06",
+        "J09",
+        "J10",
+        "J12",
+        "J13",
+        "J14",
+        "J15",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "No supplied fact establishes a recipient, indirect recipient, federally conducted program, assistance instrument, awarding agency, or geography",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "DECIDES",
+          "proposition": "Review approved organizational, award, contract, program, period, and geography records"
+        }
+      ],
+      "owner": "Qualified organizational and legal reviewer",
+      "freshness_rule": "Invalidate when actor, award, instrument, agency, program, period, geography, or controlling rule changes"
+    },
+    {
+      "requirement_id": "SECTION504-PROGRAM-BOUNDARY",
+      "framework": "SECTION_504",
+      "criterion": "29 U.S.C. 794(b); applicable agency recipient or conducted-program rule",
+      "proposition": "The statutory and regulatory program-or-activity boundary is established without reducing scope to one screen, team, or cost center",
+      "journey_ids": [
+        "J01",
+        "J02",
+        "J03",
+        "J04",
+        "J05",
+        "J06",
+        "J07",
+        "J08",
+        "J09",
+        "J10",
+        "J11",
+        "J12",
+        "J13",
+        "J14",
+        "J15",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Entity structure, recipient chain, principally engaged status, shared services, and funded operation are unknown",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "DECIDES",
+          "proposition": "Review legal entity, department, system, award, operation, and shared-service records"
+        }
+      ],
+      "owner": "Qualified organizational and legal reviewer",
+      "freshness_rule": "Invalidate when entity, recipient, structure, funded operation, program, or controlling rule changes"
+    },
+    {
+      "requirement_id": "SECTION504-HHS-DIGITAL",
+      "framework": "SECTION_504",
+      "criterion": "45 CFR 84.84-.89",
+      "proposition": "If the HHS recipient digital rule applies, covered web and mobile content, dates, exceptions, alternate versions, equivalent methods, burden decisions, and minimal-impact claims are evidenced separately",
+      "journey_ids": [
+        "J04",
+        "J11",
+        "J12",
+        "J13"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "HHS recipient status, employee count, asset delivery, contractual relationship, content dates, exceptions, and applicable deadline are unknown",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E2_DETERMINISTIC_WEB",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "DECIDES",
+          "proposition": "Review HHS recipient, employee-count, content, contract, date, exception, and authorized decision records"
+        },
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "INFORMS",
+          "proposition": "Supply technical and complete-task evidence without deciding rule applicability"
+        }
+      ],
+      "owner": "Qualified HHS Section 504 and organizational reviewer",
+      "freshness_rule": "Invalidate when recipient, employee count, deadline, asset, content, contract, exception, alternative, burden, minimal-impact, or rule changes"
+    },
+    {
+      "requirement_id": "SECTION504-CONDUCTED-PROGRAM",
+      "framework": "SECTION_504",
+      "criterion": "29 U.S.C. 794(a); 45 CFR part 85; 28 CFR part 39; applicable agency-specific rule",
+      "proposition": "A federally conducted program uses the current conducting agency rule rather than importing an unrelated recipient or digital rule",
+      "journey_ids": [
+        "J01",
+        "J04",
+        "J06",
+        "J09",
+        "J12",
+        "J13",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "No conducting agency, component, program, or agency-specific rule is identified",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "DECIDES",
+          "proposition": "Identify the conducting agency, component, program, current rule, and accountable authority"
+        }
+      ],
+      "owner": "Qualified organizational and agency-rule reviewer",
+      "freshness_rule": "Invalidate when agency, component, program, rule, authority, or delivery changes"
+    },
+    {
+      "requirement_id": "SECTION504-EQUAL-OPPORTUNITY",
+      "framework": "SECTION_504",
+      "criterion": "29 U.S.C. 794(a); 45 CFR 84.68; applicable conducted-program rule",
+      "proposition": "Covered people receive equal opportunity, benefit, service level, task completion, and recovery across the complete program journey",
+      "journey_ids": [
+        "J01",
+        "J04",
+        "J06",
+        "J09",
+        "J12",
+        "J13",
+        "J14",
+        "J15",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Covered actor, program, role, beneficiary, and complete service outcomes are unknown",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "COGNITIVE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Compare enrollment, access, completion, benefit, service, failure, and recovery outcomes for representative people"
+        },
+        {
+          "method": "PLAYWRIGHT_KEYBOARD",
+          "disposition": "INFORMS",
+          "proposition": "Supply bounded technical task evidence"
+        }
+      ],
+      "owner": "Program owner and qualified Section 504 reviewer",
+      "freshness_rule": "Invalidate when program, role, eligibility, journey, service level, outcome, recovery, or controlling rule changes"
+    },
+    {
+      "requirement_id": "SECTION504-MODIFICATION",
+      "framework": "SECTION_504",
+      "criterion": "45 CFR 84.68(b)(7); analogous applicable agency-specific provisions",
+      "proposition": "A needed reasonable modification follows individualized analysis, consultation, authorized decision, implementation, and observed outcome",
+      "journey_ids": [
+        "J04",
+        "J06",
+        "J10",
+        "J13",
+        "J14",
+        "J16",
+        "H12"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "No covered program, individualized need, affected policy, request, options, authority, or outcome is supplied",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SUPPORT_TASK",
+          "disposition": "DECIDES",
+          "proposition": "Exercise request, consultation, options, decision, implementation, user outcome, and review"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory policies, request routes, and decision authorities"
+        }
+      ],
+      "owner": "Program and accommodation owners",
+      "freshness_rule": "Invalidate when need, policy, process, options, authority, implementation, outcome, or controlling rule changes"
+    },
+    {
+      "requirement_id": "SECTION504-EFFECTIVE-COMMUNICATION",
+      "framework": "SECTION_504",
+      "criterion": "45 CFR 84.77-.81; applicable agency-specific communication provisions",
+      "proposition": "Communication and auxiliary aids or services are qualified, timely, private, independent, comprehensible, and effective for the complete task",
+      "journey_ids": [
+        "J01",
+        "J04",
+        "J06",
+        "J09",
+        "J10",
+        "J12",
+        "J13",
+        "J14",
+        "J16",
+        "H12"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Covered program, person, request, context, primary-consideration rule, selected aid, qualification, timing, and outcome are unknown",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SUPPORT_TASK",
+          "disposition": "DECIDES",
+          "proposition": "Observe request, consultation, selected aid, qualification, delivery, privacy, independence, comprehension, and completion"
+        },
+        {
+          "method": "MEDIA_EQUIVALENCE_REVIEW",
+          "disposition": "INFORMS",
+          "proposition": "Supply bounded media and graphics equivalence evidence"
+        }
+      ],
+      "owner": "Program, communication, and accessibility owners",
+      "freshness_rule": "Invalidate when communication context, request, aid, service, qualification, timing, privacy, independence, task, or rule changes"
+    },
+    {
+      "requirement_id": "SECTION504-PROGRAM-ACCESS",
+      "framework": "SECTION_504",
+      "criterion": "45 CFR 84.21-.23; 84.68(d); 84.76; applicable conducted-program provisions",
+      "proposition": "The program viewed in its entirety is accessible through integrated digital, physical, telephone, document, support, and human channels",
+      "journey_ids": [
+        "J01",
+        "J02",
+        "J03",
+        "J04",
+        "J05",
+        "J06",
+        "J07",
+        "J08",
+        "J09",
+        "J10",
+        "J11",
+        "J12",
+        "J13",
+        "J14",
+        "J15",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Covered program, channel inventory, barriers, selected methods, integration, alternatives, and beneficiary outcomes are unknown",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E3_NON_TEXT_GENERATED",
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "COGNITIVE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Walk the complete program across all channels and compare benefit, autonomy, privacy, timeliness, and integration"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory program steps, channels, owners, barriers, and alternatives"
+        }
+      ],
+      "owner": "Program owner and qualified Section 504 reviewer",
+      "freshness_rule": "Invalidate when program, channel, location, barrier, method, integration, alternative, outcome, or rule changes"
+    },
+    {
+      "requirement_id": "SECTION504-NOTICE-COORDINATION",
+      "framework": "SECTION_504",
+      "criterion": "45 CFR 84.7-.9; applicable agency-specific notice provisions",
+      "proposition": "Accessible notices and responsible coordination are available at relevant entry points with current authority, contact, language, and format",
+      "journey_ids": [
+        "J01",
+        "J10",
+        "J12",
+        "J16",
+        "H12"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Covered actor, employee threshold, notice, coordinator, authority, awareness, language, and format are unknown",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E4_HUMAN_AT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SUPPORT_TASK",
+          "disposition": "DECIDES",
+          "proposition": "Find, understand, and use current notice and responsible-contact information"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory notices, contacts, roles, languages, formats, and change history"
+        }
+      ],
+      "owner": "Organizational Section 504 coordinator",
+      "freshness_rule": "Invalidate when actor, threshold, notice, coordinator, authority, contact, language, format, or rule changes"
+    },
+    {
+      "requirement_id": "SECTION504-GRIEVANCE-CORRECTION",
+      "framework": "SECTION_504",
+      "criterion": "45 CFR 84.7; 84.98; 45 CFR 80.6-.10; applicable conducted-program complaint provisions",
+      "proposition": "Accessible grievance and complaint handling provides acknowledgment, due process, interim aid, findings, remedy, appeal, retaliation safeguards, correction, retest, and recurrence monitoring",
+      "journey_ids": [
+        "J01",
+        "J12",
+        "J16",
+        "H12"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Covered actor, grievance procedure, coordinator, complaint route, records, remedy, appeal, and monitoring are unknown",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E4_HUMAN_AT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SUPPORT_TASK",
+          "disposition": "DECIDES",
+          "proposition": "Run a synthetic complaint through accessible intake, acknowledgment, investigation, remedy, appeal, retest, and closure"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Inventory procedures, authorities, timelines, remedies, and monitoring"
+        }
+      ],
+      "owner": "Organizational grievance and program owners",
+      "freshness_rule": "Invalidate when actor, procedure, channel, due process, remedy, appeal, safeguard, correction, monitoring, or rule changes"
+    },
+    {
+      "requirement_id": "SECTION504-SELF-EVALUATION",
+      "framework": "SECTION_504",
+      "criterion": "28 CFR 41.5; 45 CFR 84.6; applicable conducted-program provisions",
+      "proposition": "Self-evaluation and consultation include affected people, identify policy or practice effects, retain modifications, and remain current",
+      "journey_ids": [
+        "J01",
+        "J04",
+        "J06",
+        "J09",
+        "J12",
+        "J13",
+        "J14",
+        "J15",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Covered actor, evaluation scope, participants, methods, identified effects, modifications, owner, and review date are unknown",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E4_HUMAN_AT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "COGNITIVE_REVIEW",
+          "disposition": "DECIDES",
+          "proposition": "Review participation, consultation, scope, methods, effects, modifications, ownership, and currency"
+        },
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "INFORMS",
+          "proposition": "Locate evaluation, consultation, and modification records"
+        }
+      ],
+      "owner": "Organizational program and Section 504 owners",
+      "freshness_rule": "Invalidate when actor, program, scope, participants, policy, modification, owner, review date, or rule changes"
+    },
+    {
+      "requirement_id": "SECTION504-MONITORING",
+      "framework": "SECTION_504",
+      "criterion": "28 CFR 41.5-.6; 45 CFR 84.6; 84.98; applicable compliance and correction provisions",
+      "proposition": "Monitoring detects barriers, links complaints and defects, corrects current and past effects, verifies regression, and prevents recurrence",
+      "journey_ids": [
+        "J04",
+        "J06",
+        "J09",
+        "J12",
+        "J13",
+        "J14",
+        "J15",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Covered actor, monitoring records, complaint signals, affected people, root cause, remedy, regression, and recurrence measures are unknown",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E1_SOURCE_CONTENT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "DECIDES",
+          "proposition": "Review reports, complaint signals, root cause, remedy, affected-person outreach, regression, and recurrence evidence"
+        },
+        {
+          "method": "ARTIFACT_INTEGRITY",
+          "disposition": "INFORMS",
+          "proposition": "Verify retained monitoring and regression artifact provenance"
+        }
+      ],
+      "owner": "Program, remediation, and monitoring owners",
+      "freshness_rule": "Invalidate when program, provider, complaint, defect, remedy, affected population, regression, recurrence, or rule changes"
+    },
+    {
+      "requirement_id": "SECTION504-EMPLOYMENT",
+      "framework": "SECTION_504",
+      "criterion": "29 U.S.C. 794(d); 45 CFR 84.16; applicable conducted-program employment provisions",
+      "proposition": "Covered employees and applicants can perform essential work through effective accommodation, accessible tools, training, support, and correct complaint procedures",
+      "journey_ids": [
+        "J02",
+        "J04",
+        "J05",
+        "J06",
+        "J08",
+        "J09",
+        "J10",
+        "J13",
+        "J14",
+        "J15",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Covered employment relationship, essential function, applicant or employee, accommodation request, workplace task, and outcome are unknown",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SUPPORT_TASK",
+          "disposition": "DECIDES",
+          "proposition": "Exercise accommodation, tools, training, support, work task, decision, and outcome for the exact role"
+        },
+        {
+          "method": "COGNITIVE_REVIEW",
+          "disposition": "INFORMS",
+          "proposition": "Assess work-task usability without deciding employment coverage"
+        }
+      ],
+      "owner": "Employment, accommodation, and program owners",
+      "freshness_rule": "Invalidate when employment relationship, essential function, role, tool, training, support, accommodation, outcome, or rule changes"
+    },
+    {
+      "requirement_id": "SECTION504-EXCEPTIONS-ALTERNATIVES",
+      "framework": "SECTION_504",
+      "criterion": "45 CFR 84.75; 84.81; 84.85-.89; applicable agency-specific provisions",
+      "proposition": "Any exception, alternate version, equivalent method, burden, alteration, or minimal-impact position is individualized, authorized, evidence-based, and paired with tested required alternative action",
+      "journey_ids": [
+        "J01",
+        "J04",
+        "J06",
+        "J09",
+        "J11",
+        "J12",
+        "J13",
+        "J14",
+        "J15",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "No covered actor, exact provision, content instance, limitation, affected person, resources, authorized decision, alternate action, or outcome is supplied",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E4_HUMAN_AT",
+        "E5_PROVIDER_NATIVE_ROBOT",
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "DECIDES",
+          "proposition": "Review exact provision, instance, facts, authority, reasons, resources, partial compliance, and required alternative"
+        },
+        {
+          "method": "SUPPORT_TASK",
+          "disposition": "DECIDES",
+          "proposition": "Test discoverability, synchronization, information, actions, timeliness, privacy, independence, ease, and outcome of the alternative"
+        }
+      ],
+      "owner": "Authorized organizational decision maker and qualified reviewer",
+      "freshness_rule": "Invalidate when provision, instance, use, limitation, resources, authority, alternative, affected task, outcome, or rule changes"
+    },
+    {
+      "requirement_id": "SECTION504-UNRESOLVED-FACTS",
+      "framework": "SECTION_504",
+      "criterion": "Applicability decision A1-A12",
+      "proposition": "Every unresolved actor, award, program, role, asset, deadline, exception, provider, request, process, and authority fact remains explicitly open with an owner and re-entry trigger",
+      "journey_ids": [
+        "J01",
+        "J04",
+        "J06",
+        "J09",
+        "J10",
+        "J11",
+        "J12",
+        "J13",
+        "J14",
+        "J15",
+        "J16"
+      ],
+      "applicability": "UNDETERMINED",
+      "applicability_rationale": "Material organizational facts remain unresolved and cannot become PASS or INAPPLICABLE",
+      "evidence_status": "NOT_ASSESSED",
+      "evidence_packs": [
+        "E6_PROCESS_GOVERNANCE"
+      ],
+      "methods": [
+        {
+          "method": "SOURCE_INSPECTION",
+          "disposition": "DECIDES",
+          "proposition": "Maintain the unresolved-facts register, owner, source, due date, effect, and re-entry condition"
+        }
+      ],
+      "owner": "Qualified organizational and legal reviewer",
+      "freshness_rule": "Invalidate when any unresolved fact, source, owner, due date, effect, or controlling rule changes"
+    }
+  ]
+}

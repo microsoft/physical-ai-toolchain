@@ -579,4 +579,13 @@ describe('TrajectoryEditor', () => {
     expect((gripperInputs[0] as HTMLInputElement).value).toBe('0.420')
     expect((gripperInputs[1] as HTMLInputElement).value).toBe('0.180')
   })
+  it('provides arm-specific names for range and numeric controls', () => {
+    setup()
+    render(<TrajectoryEditor />)
+
+    expect(screen.getByRole('slider', { name: 'Right Arm X delta' })).toBeInTheDocument()
+    expect(screen.getByRole('spinbutton', { name: 'Right Arm X delta' })).toBeInTheDocument()
+    expect(screen.getByRole('slider', { name: 'Left Arm Gripper value' })).toBeInTheDocument()
+    expect(screen.getByRole('spinbutton', { name: 'Left Arm Gripper value' })).toBeInTheDocument()
+  })
 })

@@ -75,7 +75,9 @@ command: >-
   bash -c '
   set -euo pipefail;
   source training/il/scripts/lerobot/lerobot-azureml.sh;
-  ensure_lerobot_runtime "${LEROBOT_VENV:-/opt/lerobot-venv}" training/il/lerobot av pyarrow lerobot;
+  runtime_modules=(av pyarrow lerobot);
+  if [[ "$POLICY_TYPE" == "diffusion" ]]; then runtime_modules+=(diffusers); fi;
+  ensure_lerobot_runtime "${LEROBOT_VENV:-/opt/lerobot-venv}" training/il/lerobot "${runtime_modules[@]}";
   export POLICY_REPO_ID="$AZURE_ML_INPUT_model_checkpoint";
   if [[ ! -f "$POLICY_REPO_ID/config.json" ]]; then
     checkpoint_config="";

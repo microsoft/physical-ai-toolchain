@@ -283,6 +283,37 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
     expect(mockSetCurrentFrame).toHaveBeenLastCalledWith(2)
   })
 
+  it('restores running playback when graph range selection is cancelled', () => {
+    testState.isPlaying = true
+
+    render(<AnnotationWorkspace />)
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /trajectory viewer/i }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    fireEvent.click(screen.getByRole('button', { name: /start range drag/i }))
+    fireEvent.click(screen.getByRole('button', { name: /cancel range drag/i }))
+    fireEvent.click(screen.getByRole('button', { name: /cancel range drag/i }))
+
+    expect(mockTogglePlayback).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps paused playback paused when graph range selection is cancelled', () => {
+    testState.isPlaying = false
+
+    render(<AnnotationWorkspace />)
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /trajectory viewer/i }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    fireEvent.click(screen.getByRole('button', { name: /start range drag/i }))
+    fireEvent.click(screen.getByRole('button', { name: /cancel range drag/i }))
+
+    expect(mockTogglePlayback).not.toHaveBeenCalled()
+  })
+
   it('restarts playback when a remounted video finishes loading while the store is already playing', () => {
     testState.isPlaying = true
     mockComputeSyncAction.mockReturnValue({ kind: 'play', playbackRate: 1 })
@@ -323,8 +354,8 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
     })
 
     expect(screen.getByRole('button', { name: /play playback/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /toggle auto-play/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /toggle loop playback/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^auto-play$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^loop playback$/i })).toBeInTheDocument()
     expect(screen.queryByText(/^Speed:$/)).not.toBeInTheDocument()
   })
 })

@@ -252,14 +252,22 @@ export function AnnotationWorkspacePlaybackCard({
           )}
 
           {videoSrc && !videoLoaded && showVideoLoading && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/30">
+            <div
+              role="status"
+              aria-live="polite"
+              className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/30"
+            >
               <Loader2 className="h-8 w-8 animate-spin text-white" />
               <p className="mt-2 text-sm text-white">Loading video…</p>
             </div>
           )}
 
           {!videoSrc && frameImageUrl && !imageLoaded && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/30">
+            <div
+              role="status"
+              aria-live="polite"
+              className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/30"
+            >
               <Loader2 className="h-8 w-8 animate-spin text-white" />
               <p className="mt-2 text-sm text-white">Loading episode…</p>
             </div>
@@ -316,6 +324,8 @@ export function AnnotationWorkspacePlaybackCard({
                     min={playbackRangeStart}
                     max={playbackRangeEnd}
                     value={currentFrame}
+                    aria-label="Playback frame"
+                    aria-valuetext={`Frame ${currentFrame + 1} of ${totalFrames}`}
                     onChange={(event) =>
                       onSetFrameWithinPlaybackRange(parseInt(event.target.value, 10))
                     }
@@ -417,7 +427,8 @@ function renderCompactControls({
           size="icon"
           variant={autoPlay ? 'default' : 'outline'}
           onClick={() => onSetAutoPlay(!autoPlay)}
-          aria-label="Toggle auto-play"
+          aria-label="Auto-play"
+          aria-pressed={autoPlay}
           title={autoPlay ? 'Auto-play on (click to disable)' : 'Auto-play off (click to enable)'}
           className="h-8 w-8"
         >
@@ -427,7 +438,8 @@ function renderCompactControls({
           size="icon"
           variant={autoLoop ? 'default' : 'outline'}
           onClick={() => onSetAutoLoop(!autoLoop)}
-          aria-label="Toggle loop playback"
+          aria-label="Loop playback"
+          aria-pressed={autoLoop}
           title={autoLoop ? 'Loop on (click to disable)' : 'Loop off (click to enable)'}
           className="h-8 w-8"
         >
@@ -490,6 +502,7 @@ function renderDefaultControls({
           size="sm"
           variant={autoPlay ? 'default' : 'outline'}
           onClick={() => onSetAutoPlay(!autoPlay)}
+          aria-pressed={autoPlay}
           className="px-2"
           title={autoPlay ? 'Auto-play on (click to disable)' : 'Auto-play off (click to enable)'}
         >
@@ -500,6 +513,7 @@ function renderDefaultControls({
           size="sm"
           variant={autoLoop ? 'default' : 'outline'}
           onClick={() => onSetAutoLoop(!autoLoop)}
+          aria-pressed={autoLoop}
           className="px-2"
           title={autoLoop ? 'Loop on (click to disable)' : 'Loop off (click to enable)'}
         >

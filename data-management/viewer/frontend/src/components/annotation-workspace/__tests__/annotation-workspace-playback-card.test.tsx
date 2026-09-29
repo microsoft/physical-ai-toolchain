@@ -55,7 +55,7 @@ describe('AnnotationWorkspacePlaybackCard', () => {
       frameImageUrl: '/api/datasets/test/episodes/0/frames/0?camera=wrist',
     })
 
-    expect(screen.getByText('Loading episode…')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Loading episode…')
   })
 
   it('hides loading overlay after frame image loads', () => {
@@ -154,7 +154,7 @@ describe('AnnotationWorkspacePlaybackCard', () => {
       />,
     )
 
-    expect(screen.getByText('Loading episode…')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Loading episode…')
   })
 
   it('does not show video loading overlay before 200ms delay', () => {
@@ -211,5 +211,21 @@ describe('AnnotationWorkspacePlaybackCard', () => {
     })
 
     expect(screen.queryByText('Loading video…')).not.toBeInTheDocument()
+  })
+  it('names playback position and exposes playback toggle states', () => {
+    renderPlaybackCard({ compact: true, currentFrame: 12, autoPlay: true, autoLoop: false })
+
+    expect(screen.getByRole('slider', { name: 'Playback frame' })).toHaveAttribute(
+      'aria-valuetext',
+      'Frame 13 of 100',
+    )
+    expect(screen.getByRole('button', { name: 'Auto-play' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(screen.getByRole('button', { name: 'Loop playback' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
   })
 })

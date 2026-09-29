@@ -92,6 +92,7 @@ interface TrajectoryPlotChartProps {
   onSelectionPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void
   onSelectionPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void
   onSelectionPointerUp: (event: React.PointerEvent<HTMLDivElement>) => void
+  onSelectionPointerCancel: (event: React.PointerEvent<HTMLDivElement>) => void
   onCreateSubtaskFromRange?: (range: [number, number]) => void
   onDismissContextMenu: () => void
   selectionSurfaceRef: React.RefObject<HTMLDivElement | null>
@@ -114,6 +115,7 @@ export function TrajectoryPlotChart({
   onSelectionPointerDown,
   onSelectionPointerMove,
   onSelectionPointerUp,
+  onSelectionPointerCancel,
   onCreateSubtaskFromRange,
   onDismissContextMenu,
   selectionSurfaceRef,
@@ -133,6 +135,7 @@ export function TrajectoryPlotChart({
       onPointerDown={onSelectionPointerDown}
       onPointerMove={onSelectionPointerMove}
       onPointerUp={onSelectionPointerUp}
+      onPointerCancel={onSelectionPointerCancel}
       onMouseMove={handleMouseMove}
     >
       <ResponsiveContainer
@@ -176,7 +179,7 @@ export function TrajectoryPlotChart({
             strokeDasharray="4 4"
           />
 
-          {selectedJoints.map((jointIdx) => (
+          {selectedJoints.map((jointIdx, seriesIndex) => (
             <Line
               key={resolveDataKey(jointIdx)}
               type="monotone"
@@ -185,11 +188,44 @@ export function TrajectoryPlotChart({
               stroke={JOINT_COLORS[jointIdx % JOINT_COLORS.length]}
               dot={false}
               strokeWidth={1.5}
+              strokeDasharray={
+                seriesIndex % 3 === 0 ? undefined : seriesIndex % 3 === 1 ? '6 3' : '2 2'
+              }
               isAnimationActive={false}
             />
           ))}
         </LineChart>
       </ResponsiveContainer>
+      <div className="sr-only">
+        <p>
+          Trajectory {showVelocity ? 'velocity' : 'position'} data for {selectedJoints.length}{' '}
+          selected series across {chartData.length} frames.
+        </p>
+        <table aria-label="Trajectory data">
+          <thead>
+            <tr>
+              <th scope="col">Frame</th>
+              {selectedJoints.map((jointIdx) => (
+                <th key={resolveDataKey(jointIdx)} scope="col">
+                  {resolveLabel(jointIdx)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {chartData.map((row, rowIndex) => (
+              <tr key={String(row.frame ?? rowIndex)}>
+                <th scope="row">{String(row.frame ?? rowIndex)}</th>
+                {selectedJoints.map((jointIdx) => (
+                  <td key={resolveDataKey(jointIdx)}>
+                    {String(row[resolveDataKey(jointIdx)] ?? '')}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <TrajectoryPlotSelectionOverlay
         selectedRange={selectedRange}
         selectionHighlight={selectionHighlight}

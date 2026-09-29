@@ -31,6 +31,8 @@ interface TrajectoryPlotProps {
   onSelectionStart?: () => void
   /** Called after a graph drag selection is committed */
   onSelectionComplete?: (range: [number, number]) => void
+  /** Called when an active graph drag selection is cancelled */
+  onSelectionCancel?: () => void
   /** Called when the graph explicitly seeks to a frame */
   onSeekFrame?: (frame: number) => void
 }
@@ -54,6 +56,7 @@ export const TrajectoryPlot = memo(function TrajectoryPlot({
   onCreateSubtaskFromRange,
   onSelectionStart,
   onSelectionComplete,
+  onSelectionCancel,
   onSeekFrame,
 }: TrajectoryPlotProps) {
   const state = useTrajectoryPlotState({
@@ -63,6 +66,7 @@ export const TrajectoryPlot = memo(function TrajectoryPlot({
     onCreateSubtaskFromRange,
     onSelectionStart,
     onSelectionComplete,
+    onSelectionCancel,
     onSeekFrame,
   })
 
@@ -121,6 +125,7 @@ export const TrajectoryPlot = memo(function TrajectoryPlot({
         onSelectionPointerDown={state.selection.handleSelectionPointerDown}
         onSelectionPointerMove={state.selection.handleSelectionPointerMove}
         onSelectionPointerUp={state.selection.handleSelectionPointerUp}
+        onSelectionPointerCancel={state.selection.handleSelectionPointerCancel}
         onCreateSubtaskFromRange={onCreateSubtaskFromRange}
         onDismissContextMenu={state.selection.dismissContextMenu}
         selectionSurfaceRef={state.selectionSurfaceRef}

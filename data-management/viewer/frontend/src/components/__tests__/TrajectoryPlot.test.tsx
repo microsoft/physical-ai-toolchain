@@ -144,8 +144,11 @@ describe('TrajectoryPlot', () => {
     expect(scrollRegion).toBeInTheDocument()
     expect(scrollRegion).toHaveClass('overflow-y-auto')
     expect(scrollRegion).toHaveClass('max-h-40')
-    expect(screen.getByRole('button', { name: 'Position' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Velocity' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Position' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Velocity' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
   })
 
   it('defaults normalization on and lets the chart switch back to raw position values', () => {
@@ -290,6 +293,28 @@ describe('TrajectoryPlot', () => {
 
     expect(handleRangeSelectionChange).toHaveBeenLastCalledWith([1, 6])
     expect(handleSelectionComplete).toHaveBeenCalledWith([1, 6])
+  })
+
+  it('forwards pointer cancellation after a graph selection drag starts', () => {
+    const handleSelectionCancel = vi.fn()
+
+    render(
+      <div style={{ width: 600, height: 300 }}>
+        <TrajectoryPlot className="h-full" onSelectionCancel={handleSelectionCancel} />
+      </div>,
+    )
+
+    const selectionSurface = screen.getByTestId('trajectory-selection-surface')
+    Object.defineProperty(selectionSurface, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 0, width: 300, top: 0, height: 120, right: 300, bottom: 120 }),
+    })
+
+    fireEvent.pointerDown(selectionSurface, { button: 0, clientX: 30, clientY: 20 })
+    fireEvent.pointerMove(selectionSurface, { clientX: 210, clientY: 20 })
+    fireEvent.pointerCancel(selectionSurface, { pointerId: 1 })
+
+    expect(handleSelectionCancel).toHaveBeenCalledOnce()
   })
 
   it('seeks to the clicked frame without starting subgroup selection mode', () => {

@@ -1,12 +1,24 @@
 import { describe, expect, it } from 'vitest'
 
+import languageTagCorpus from '../../../../specifications/language-tag-corpus.json'
 import {
   createDefaultAnomalyAnnotation,
   createDefaultDataQuality,
   createDefaultEpisodeAnnotation,
   createDefaultTaskCompleteness,
   createDefaultTrajectoryQuality,
+  normalizeLanguageTag,
 } from '../annotations'
+
+describe('language tag validation', () => {
+  it.each(languageTagCorpus.valid)('accepts shared valid tag %s', (language) => {
+    expect(normalizeLanguageTag(language)).not.toBeNull()
+  })
+
+  it.each(languageTagCorpus.invalid)('rejects shared invalid tag %s', (language) => {
+    expect(normalizeLanguageTag(language)).toBeNull()
+  })
+})
 
 describe('annotation default factories', () => {
   describe('createDefaultTaskCompleteness', () => {

@@ -7,7 +7,7 @@
  */
 
 import { ChevronDown, Eye, RotateCcw } from 'lucide-react'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -22,6 +22,7 @@ import { useViewerDisplay } from '@/stores/viewer-settings-store'
  */
 export function ViewerDisplayControls() {
   const [expanded, setExpanded] = useState(false)
+  const panelId = useId()
   const { displayAdjustment, isActive, setAdjustment, resetAdjustments } = useViewerDisplay()
 
   return (
@@ -29,6 +30,8 @@ export function ViewerDisplayControls() {
       {/* Toggle bar */}
       <button
         type="button"
+        aria-expanded={expanded}
+        aria-controls={panelId}
         onClick={() => setExpanded((v) => !v)}
         className="hover:bg-muted/90 flex w-full items-center justify-between rounded-lg px-3 py-1.5 transition-colors"
       >
@@ -51,7 +54,7 @@ export function ViewerDisplayControls() {
 
       {/* Expanded panel */}
       {expanded && (
-        <div className="space-y-2 px-3 pt-1 pb-3">
+        <div id={panelId} className="space-y-2 px-3 pt-1 pb-3">
           <CompactSlider
             label="Brightness"
             value={displayAdjustment.brightness}
@@ -117,15 +120,21 @@ interface CompactSliderProps {
 }
 
 function CompactSlider({ label, value, onChange, min, max, step, format }: CompactSliderProps) {
+  const inputId = useId()
+
   return (
     <div className="flex items-center gap-2">
-      <span className="text-muted-foreground w-16 shrink-0 text-xs">{label}</span>
+      <label htmlFor={inputId} className="text-muted-foreground w-16 shrink-0 text-xs">
+        {label}
+      </label>
       <input
+        id={inputId}
         type="range"
         min={min}
         max={max}
         step={step}
         value={value}
+        aria-valuetext={format(value)}
         onChange={(e) => onChange(parseFloat(e.target.value))}
         className="bg-muted [&::-moz-range-thumb]:bg-primary [&::-webkit-slider-thumb]:bg-primary h-1.5 flex-1 cursor-pointer appearance-none rounded-lg [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full"
       />

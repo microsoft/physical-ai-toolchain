@@ -68,6 +68,22 @@ describe('JointSelector', () => {
     expect(chips).toHaveLength(4)
   })
 
+  it('exposes synchronized pressed state for global, group, and joint toggles', () => {
+    render(<JointSelector {...baseProps} jointCount={4} selectedJoints={[0, 1, 2]} />)
+
+    expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: 'None' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: 'Right Arm' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(screen.getByRole('button', { name: 'Right X' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Right Qx' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+  })
+
   it('clicking a joint chip toggles selection', () => {
     const onSelect = vi.fn()
     render(
@@ -221,5 +237,40 @@ describe('JointSelector', () => {
       expect(container.querySelector('[data-group-id="right-pos"]')).toBeInTheDocument()
       expect(container.querySelector('[data-group-id="left-pos"]')).toBeInTheDocument()
     })
+  })
+  it('restores focus to a joint after dismissing its context menu', async () => {
+    const user = userEvent.setup()
+    render(<JointSelector {...baseProps} editable onEditJointLabel={vi.fn()} />)
+
+    const joint = screen.getByRole('button', { name: 'Right X' })
+    joint.focus()
+    fireEvent.contextMenu(joint)
+    expect(await screen.findByText('Edit Name')).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+
+    expect(joint).toHaveFocus()
+  })
+
+  it('supports keyboard drag reordering through the existing move contract', () => {
+    const onMoveJoint = vi.fn()
+    render(<JointSelector {...baseProps} editable onMoveJoint={onMoveJoint} />)
+
+    const joint = screen.getByRole('button', { name: 'Right X' })
+    fireEvent.keyDown(joint, { key: 'ArrowRight', altKey: true })
+
+    expect(onMoveJoint).toHaveBeenCalledWith(0, 'right-pos', 'right-pos', 2)
+  })
+
+  it('offers non-drag context menu reorder commands', async () => {
+    const user = userEvent.setup()
+    const onMoveJoint = vi.fn()
+    render(<JointSelector {...baseProps} editable onMoveJoint={onMoveJoint} />)
+
+    const joint = screen.getByRole('button', { name: 'Right X' })
+    fireEvent.contextMenu(joint)
+    await user.click(await screen.findByRole('menuitem', { name: 'Move right' }))
+
+    expect(onMoveJoint).toHaveBeenCalledWith(0, 'right-pos', 'right-pos', 2)
   })
 })

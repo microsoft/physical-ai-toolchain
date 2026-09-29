@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
+import { axe } from 'jest-axe';
 import BoxCard from '../src/components/BoxCard';
 
 describe('BoxCard', () => {
@@ -33,5 +34,12 @@ describe('BoxCard', () => {
     render(<BoxCard title="Test Card" links={links} icon="/img/icons/test.svg" />);
     const img = screen.getByRole('presentation');
     expect(img.getAttribute('src')).toBe('/img/icons/test.svg');
+  });
+
+  it('has no detectable accessibility violations', async () => {
+    const { container } = render(
+      <BoxCard title="Test Card" links={links} description="A description" icon="/img/icons/test.svg" />,
+    );
+    expect(await axe(container)).toHaveNoViolations();
   });
 });
