@@ -195,14 +195,27 @@ jobs:
       contents: read
       id-token: write
 
+  # Accessibility contracts and deterministic product and bundle evidence.
+  accessibility-evidence:
+    name: Accessibility Evidence
+    uses: ./.github/workflows/accessibility-evidence.yml
+    with:
+      run-product-evidence: true
+    permissions:
+      contents: read
+      id-token: write
+
   # Docusaurus documentation site tests and build verification
   docusaurus-tests:
     name: Docusaurus Tests
     uses: ./.github/workflows/docusaurus-tests.yml
     with:
       soft-fail: false
+      evidence-cadence: release
+      required-completeness: automated
     permissions:
       contents: read
+      id-token: write
 
   # Dataviewer backend pytest execution
   dataviewer-backend-pytests:
@@ -364,6 +377,7 @@ jobs:
       - gpu-offload-kind-smoke
       - pytest-shared-ci
       - dataviewer-frontend-tests
+      - accessibility-evidence
       - docusaurus-tests
       - dataviewer-backend-pytests
       - evaluation-pytests
