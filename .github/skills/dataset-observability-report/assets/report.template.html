@@ -1,0 +1,825 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; img-src data:; media-src blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <title>$report_title</title>
+    <style>
+        :root {
+            --clip-aspect: $clip_aspect;
+            --thumb-aspect: $thumb_aspect
+        }
+
+$styles
+    </style>
+</head>
+
+<body>
+    <a class="skip" href="#main">Skip to content</a>
+    <div class="wrap">
+        <div class="topline">
+            <div class="brand">$brand</div>
+            <div class="edition">Data observability · interactive edition · generated $generated</div>
+        </div>
+        <header class="hero">
+            <div>
+                <div class="eyebrow">$eyebrow</div>
+                <h1>$headline</h1>
+                <p class="lead">$lead</p>
+                <div class="chips">$chips</div>
+            </div>
+            $mosaic_figure
+        </header>
+
+        <section class="metrics" aria-label="Key figures">$metric_cards</section>
+    </div>
+
+    <div class="nav-shell">
+        <div class="wrap">
+            <nav aria-label="Sections">
+                <a href="#readiness">Readiness</a><a href="#overview">Overview</a><a href="#starts">Starts and
+                    events</a><a href="#timing">Timing</a><a href="#episodes">Episodes</a><a href="#watch">Watch</a><a
+                    href="#findings">Findings</a><a href="#method">Method</a>
+            </nav>
+        </div>
+    </div>
+
+    <main id="main" class="wrap">
+        <section class="section" id="readiness" aria-labelledby="readiness-title">
+            <div class="head"><span class="num">01</span>
+                <div>
+                    <h2 id="readiness-title">Readiness at a glance</h2>
+                    <p>$readiness_intro</p>
+                </div>
+            </div>
+            <div class="callouts">
+                <div class="callout good">
+                    <h3>What holds up</h3>
+                    <ul>$holds_items</ul>
+                </div>
+                <div class="callout watch">
+                    <h3>What to watch</h3>
+                    <ul>$watch_items</ul>
+                </div>
+            </div>
+            <p class="row-gap small"><a href="#findings">Findings and recommendations ↓</a></p>
+        </section>
+
+        <section class="section" id="overview" aria-labelledby="overview-title">
+            <div class="head"><span class="num">02</span>
+                <div>
+                    <h2 id="overview-title">Every episode, frame by frame</h2>
+                    <p>Each row is one episode in recording order; color shows how fast the joints move. Hover
+                        anywhere to see the cameras at that moment, and click to open the player there.</p>
+                </div>
+            </div>
+            <figure class="chart-card" id="overview-chart">
+                <div class="legend-row">$overview_legend
+                    <span class="hint" id="overview-help">Hover to preview; click to open the player. Keyboard: ↑ ↓
+                        episode (Shift: ten), ← → one second (Shift: one frame), Enter open, Escape close.</span>
+                </div>
+                $overview_chart
+                <div class="preview" hidden aria-hidden="true">
+                    <video muted playsinline preload="auto"></video>
+                    <p class="no-video" hidden>No video for this episode</p>
+                    <div class="pmeta"><strong class="pv-title"></strong><span class="pv-phase"></span><span
+                            class="pv-time mono"></span></div>
+                    <div class="mini"><i class="cursor"></i></div>
+                </div>
+                <p class="sr-only" aria-live="polite" id="overview-live"></p>
+                <figcaption>$overview_caption</figcaption>
+            </figure>
+        </section>
+
+        <section class="section" id="starts" aria-labelledby="starts-title">
+            <div class="head"><span class="num">03</span>
+                <div>
+                    <h2 id="starts-title">Start poses and gripper events</h2>
+                    <p>$starts_intro</p>
+                </div>
+            </div>
+            <div class="grid-2">
+                <figure class="chart-card" id="starts-chart">
+                    <div class="legend-row"><span class="hint" id="starts-chart-help">One point per episode: its first
+                            state projected onto the two directions that vary most. Hover a point for that episode's
+                            first frame; click to play it. Keyboard: ← → step, Enter open.</span></div>
+                    $starts_chart
+                    <div class="frame-tip" hidden aria-hidden="true"><img alt="">
+                        <p class="cap"></p>
+                        <p class="sub-cap"></p>
+                    </div>
+                    <p class="sr-only" aria-live="polite"></p>
+                    <figcaption>$starts_caption</figcaption>
+                </figure>
+                <div class="panel">
+                    <h3>Repeated start conditions</h3>
+                    <p class="small muted">$repeat_note</p>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Episodes</th>
+                                    <th scope="col">Which</th>
+                                    <th scope="col">Largest joint spread</th>
+                                    <th scope="col">Watch</th>
+                                </tr>
+                            </thead>
+                            <tbody>$repeat_rows</tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            $events_figure
+        </section>
+
+        <section class="section" id="timing" aria-labelledby="timing-title">
+            <div class="head"><span class="num">04</span>
+                <div>
+                    <h2 id="timing-title">Timing and synchronization</h2>
+                    <p>$timing_intro</p>
+                </div>
+            </div>
+            $capture_panel
+            <div class="panel row-gap">
+                <h3>Commands to measured state</h3>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th scope="col">Group</th>
+                                <th scope="col">Best shift</th>
+                                <th scope="col">Episodes at that shift</th>
+                                <th scope="col">Error unshifted</th>
+                                <th scope="col">Error shifted</th>
+                            </tr>
+                        </thead>
+                        <tbody>$tracking_rows</tbody>
+                    </table>
+                </div>
+                <p class="small muted">Root-mean-square difference between state and action in state units,
+                    unshifted and at the shift of 0 to $max_lag frames that minimizes it.</p>
+            </div>
+            <figure class="chart-card row-gap">
+                $camera_chart
+                <figcaption>Cross-correlation of each camera's frame-to-frame image change with joint speed, refined
+                    to a fraction of a frame; one point per episode, median as a bar. Indicative only: it cannot
+                    separate recorder latency from exposure timing.</figcaption>
+            </figure>
+            <div class="grid-2 row-gap">
+                <div class="panel">
+                    <h3>Cameras</h3>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Camera</th>
+                                    <th scope="col">Episodes with video</th>
+                                    <th scope="col">Frames ≠ rows</th>
+                                    <th scope="col">Repeated while moving</th>
+                                    <th scope="col">Black</th>
+                                    <th scope="col">Brightness</th>
+                                </tr>
+                            </thead>
+                            <tbody>$camera_rows</tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="panel">
+                    <h3>Integrity and placeholder channels</h3>
+                    <div class="table-wrap">
+                        <table>
+                            <tbody>$integrity_rows</tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section" id="episodes" aria-labelledby="episodes-title">
+            <div class="head"><span class="num">05</span>
+                <div>
+                    <h2 id="episodes-title">Episode explorer</h2>
+                    <p>Every episode with its duration, motion, gripper events, timing issues, and last frame. Sort a
+                        column, filter by issue, and click an episode number or a frame to open it.</p>
+                </div>
+            </div>
+            <div class="filters" role="group" aria-label="Filter episodes">$filter_buttons</div>
+            <div class="table-wrap">
+                <table class="explorer" id="explorer">
+                    <caption class="sr-only">Per-episode metrics, sortable</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col" data-key="episode" aria-sort="ascending"><button class="sort"
+                                    type="button">Episode</button></th>
+                            <th scope="col" data-key="duration"><button class="sort" type="button">Dur. s</button></th>
+                            <th scope="col" data-key="path"><button class="sort" type="button">Joint path</button></th>
+                            <th scope="col" data-key="peak"><button class="sort" type="button">Peak speed</button></th>
+                            <th scope="col" data-key="idle"><button class="sort" type="button">Idle %</button></th>
+                            <th scope="col" data-key="close"><button class="sort" type="button">Grip closes s</button>
+                            </th>
+                            <th scope="col" data-key="repeat"><button class="sort" type="button">Same start</button>
+                            </th>
+                            <th scope="col">Flags</th>
+                            <th scope="col">Last frame</th>
+                        </tr>
+                    </thead>
+                    <tbody>$episode_rows</tbody>
+                </table>
+            </div>
+            <p class="small muted">Joint path and peak speed are in state units (per second for speed). Same start:
+                episodes sharing this start condition.</p>
+        </section>
+
+        <section class="section" id="watch" aria-labelledby="watch-title">
+            <div class="head"><span class="num">06</span>
+                <div>
+                    <h2 id="watch-title">Watch any episode</h2>
+                    <p>$watch_intro</p>
+                </div>
+            </div>
+            <div class="panel">$player_main</div>
+        </section>
+
+        <section class="section" id="findings" aria-labelledby="findings-title">
+            <div class="head"><span class="num">07</span>
+                <div>
+                    <h2 id="findings-title">Findings and recommendations</h2>
+                    <p>What stands out after checking every row and every decoded video frame. Each ▶ button opens
+                        the player at the moment in question.</p>
+                </div>
+            </div>
+            <h3 class="sub">Findings</h3>
+            <div class="findings">$anomaly_cards</div>
+            <h3 class="sub">Recommendations</h3>
+            <div class="panel">
+                <ol class="improve">$improvements</ol>
+            </div>
+        </section>
+
+        <section class="section" id="method" aria-labelledby="method-title">
+            <div class="head"><span class="num">08</span>
+                <div>
+                    <h2 id="method-title">Method and lineage</h2>
+                    <p>How each number was produced and what this review cannot establish.</p>
+                </div>
+            </div>
+            <div class="grid-2">
+                <div class="panel">
+                    <h3>Inputs and checks</h3>
+                    <dl class="kv">$method_rows</dl>
+                </div>
+                <div class="panel">
+                    <h3>Limits</h3>
+                    <ul class="small">$limits_items</ul>
+                </div>
+            </div>
+            $lineage_panel
+        </section>
+    </main>
+
+    <footer>
+        <div class="wrap">
+            <p>$footer_note</p>
+            <p class="mono">$tool_hashes</p>
+        </div>
+    </footer>
+
+    <dialog class="player-dialog" id="player-dialog" aria-labelledby="player-dialog-title">
+        <div class="dialog-head">
+            <h2 id="player-dialog-title">Episode player</h2><button type="button" class="pbtn" data-close>Close</button>
+        </div>
+        $player_dialog
+    </dialog>
+
+    <div class="thumb-store" aria-hidden="true">$thumb_store</div>
+    <script type="application/json" id="report-data">$report_data</script>
+    $clip_scripts
+
+    <script>
+        (function () {
+            "use strict";
+            var DATA = JSON.parse(document.getElementById("report-data").textContent);
+            var FPS = DATA.fps;
+            var EPISODES = {};
+            var ORDER = DATA.episodes.map(function (e) { EPISODES[e.i] = e; return e.i; });
+            var each = function (list, fn) { Array.prototype.forEach.call(list, fn); };
+
+            function pad(n) { return ("00000" + n).slice(-6); }
+            function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+            function frameOf(e, t) { return clamp(Math.floor(t * FPS + 1e-3), 0, e.n - 1); }
+            function showFrame(video, e, t) { video.currentTime = (frameOf(e, t) + 0.5) / FPS; }
+            function phaseOf(e, t) {
+                var label = e.phases.length ? e.phases[0][0] : "";
+                e.phases.forEach(function (p) { if (p[1] <= t) { label = p[0]; } });
+                return label;
+            }
+            function drawPhases(container, e) {
+                each(container.querySelectorAll(".seg"), function (seg) { seg.remove(); });
+                var cursor = container.querySelector(".cursor");
+                e.phases.forEach(function (p, k) {
+                    var end = k + 1 < e.phases.length ? e.phases[k + 1][1] : e.dur;
+                    var seg = document.createElement("span");
+                    seg.className = "seg p" + (p[2] === undefined ? k % 3 : p[2]);
+                    seg.style.width = Math.max(0, end - p[1]) / e.dur * 100 + "%";
+                    seg.title = p[0];
+                    container.insertBefore(seg, cursor);
+                });
+            }
+
+            var urls = {};
+            function clipUrl(ep) {
+                if (!urls[ep]) {
+                    var node = document.getElementById("clip-" + pad(ep));
+                    if (!node) { return null; }
+                    var raw = atob(node.textContent.trim());
+                    var bytes = new Uint8Array(raw.length);
+                    for (var i = 0; i < raw.length; i++) { bytes[i] = raw.charCodeAt(i); }
+                    urls[ep] = URL.createObjectURL(new Blob([bytes], { type: "video/mp4" }));
+                }
+                return urls[ep];
+            }
+            function frameSrc(ep, role) {
+                var img = document.querySelector('img[data-ep="' + ep + '"][data-role="' + role + '"]');
+                return img ? img.getAttribute("src") : "";
+            }
+            function follow(video, fn) {
+                var raf = 0;
+                function tick() { fn(video.currentTime); raf = video.paused ? 0 : requestAnimationFrame(tick); }
+                video.addEventListener("play", function () { if (!raf) { raf = requestAnimationFrame(tick); } });
+                ["seeked", "loadeddata", "pause", "timeupdate"].forEach(function (name) {
+                    video.addEventListener(name, function () { fn(video.currentTime); });
+                });
+            }
+
+            function Player(root) {
+                var self = this;
+                this.root = root;
+                this.video = root.querySelector("video");
+                this.empty = root.querySelector(".no-video");
+                this.select = root.querySelector("[data-select]");
+                this.trackEl = root.querySelector(".ptrack");
+                this.bar = root.querySelector(".ptrack .bar");
+                this.ticks = root.querySelector(".ptrack .ticks");
+                this.cursor = root.querySelector(".ptrack .cursor");
+                this.phase = root.querySelector(".phase-label");
+                this.readout = root.querySelector(".readout");
+                this.title = root.querySelector(".player-title");
+                this.moments = root.querySelector(".moments");
+                this.facts = root.querySelector(".facts tbody");
+                this.notes = root.querySelector(".notes");
+                this.ep = null;
+                this.time = 0;
+                this.pending = null;
+                this.video.addEventListener("loadedmetadata", function () {
+                    if (self.pending !== null) { showFrame(self.video, EPISODES[self.ep], self.pending); self.pending = null; }
+                });
+                follow(this.video, function (t) { self.update(t); });
+                this.select.addEventListener("change", function () { self.load(Number(self.select.value), 0); });
+                each(root.querySelectorAll("[data-episode-step]"), function (button) {
+                    button.addEventListener("click", function () {
+                        var i = ORDER.indexOf(self.ep) + Number(button.getAttribute("data-episode-step"));
+                        if (i >= 0 && i < ORDER.length) { self.load(ORDER[i], 0); }
+                    });
+                });
+                each(root.querySelectorAll("[data-frame-step]"), function (button) {
+                    button.addEventListener("click", function () {
+                        var e = EPISODES[self.ep];
+                        self.video.pause();
+                        self.seek((frameOf(e, self.current()) + Number(button.getAttribute("data-frame-step"))) / FPS);
+                    });
+                });
+                var rates = root.querySelectorAll("[data-rate]");
+                each(rates, function (button) {
+                    button.addEventListener("click", function () {
+                        var rate = Number(button.getAttribute("data-rate"));
+                        self.video.defaultPlaybackRate = rate;
+                        self.video.playbackRate = rate;
+                        each(rates, function (other) { other.setAttribute("aria-pressed", String(other === button)); });
+                    });
+                });
+                var dragging = false;
+                function seekFromPointer(event) {
+                    var box = self.trackEl.getBoundingClientRect(), e = EPISODES[self.ep];
+                    self.seek(clamp((event.clientX - box.left) / box.width, 0, 1) * e.dur);
+                }
+                this.trackEl.addEventListener("pointerdown", function (event) {
+                    dragging = true;
+                    self.trackEl.setPointerCapture(event.pointerId);
+                    self.video.pause();
+                    seekFromPointer(event);
+                });
+                this.trackEl.addEventListener("pointermove", function (event) { if (dragging) { seekFromPointer(event); } });
+                this.trackEl.addEventListener("pointerup", function () { dragging = false; });
+                this.trackEl.addEventListener("keydown", function (event) {
+                    var direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+                    if (!direction) { return; }
+                    event.preventDefault();
+                    self.video.pause();
+                    self.seek(self.current() + direction * (event.shiftKey ? 1 / FPS : 1));
+                });
+                root.addEventListener("click", function (event) {
+                    var target = event.target.closest("[data-t]");
+                    if (!target || !root.contains(target)) { return; }
+                    self.video.pause();
+                    self.seek(Number(target.getAttribute("data-t")));
+                });
+            }
+            Player.prototype.current = function () {
+                return EPISODES[this.ep].clip ? this.video.currentTime : this.time;
+            };
+            Player.prototype.seek = function (t) {
+                var e = EPISODES[this.ep];
+                t = clamp(t, 0, e.dur - 1 / FPS);
+                if (e.clip) { showFrame(this.video, e, t); } else { this.time = t; this.update(t); }
+            };
+            Player.prototype.load = function (ep, t) {
+                var e = EPISODES[ep];
+                t = t || 0;
+                if (this.ep === ep) { this.seek(t); return; }
+                this.ep = ep;
+                this.time = t;
+                this.select.value = String(ep);
+                this.title.textContent = e.label;
+                this.empty.hidden = e.clip;
+                this.video.hidden = !e.clip;
+                if (e.clip) {
+                    this.pending = t;
+                    this.video.src = clipUrl(ep);
+                } else {
+                    this.video.removeAttribute("src");
+                    this.video.load();
+                }
+                drawPhases(this.bar, e);
+                this.ticks.textContent = "";
+                e.ticks.forEach(function (tick) {
+                    var i = document.createElement("i");
+                    i.className = "ptick " + tick[0];
+                    i.style.left = tick[1] / e.dur * 100 + "%";
+                    i.title = tick[2];
+                    this.ticks.appendChild(i);
+                }, this);
+                this.moments.textContent = "";
+                e.moments.forEach(function (moment) {
+                    var button = document.createElement("button");
+                    button.type = "button";
+                    button.className = "pbtn";
+                    button.setAttribute("data-t", moment[1]);
+                    button.textContent = moment[0] + " · " + moment[1].toFixed(2) + " s";
+                    this.moments.appendChild(button);
+                }, this);
+                var src = frameSrc(ep, "last");
+                if (src) {
+                    var end = document.createElement("button"), img = document.createElement("img");
+                    end.type = "button";
+                    end.className = "endframe";
+                    end.setAttribute("data-t", (e.n - 1) / FPS);
+                    img.src = src;
+                    img.alt = "";
+                    end.appendChild(img);
+                    end.appendChild(document.createTextNode("last frame"));
+                    this.moments.appendChild(end);
+                }
+                this.facts.textContent = "";
+                e.facts.forEach(function (fact) {
+                    var row = document.createElement("tr"), th = document.createElement("th"), td = document.createElement("td");
+                    th.scope = "row";
+                    th.textContent = fact[0];
+                    td.textContent = fact[1];
+                    row.appendChild(th);
+                    row.appendChild(td);
+                    this.facts.appendChild(row);
+                }, this);
+                this.notes.textContent = "";
+                e.notes.forEach(function (note) {
+                    var item = document.createElement("li"), button = document.createElement("button");
+                    button.type = "button";
+                    button.className = "play-btn";
+                    button.setAttribute("data-t", note[0]);
+                    button.setAttribute("aria-label", "Show " + note[0].toFixed(1) + " seconds");
+                    button.textContent = note[0].toFixed(1) + " s";
+                    item.appendChild(button);
+                    item.appendChild(document.createTextNode(note[1]));
+                    this.notes.appendChild(item);
+                }, this);
+                if (!e.notes.length) {
+                    var item = document.createElement("li");
+                    item.className = "muted";
+                    item.textContent = "Nothing flagged beyond the figures above.";
+                    this.notes.appendChild(item);
+                }
+                this.trackEl.setAttribute("aria-valuemax", e.dur.toFixed(1));
+                this.update(t);
+            };
+            Player.prototype.update = function (t) {
+                var e = EPISODES[this.ep];
+                if (!e) { return; }
+                var k = frameOf(e, t), phase = phaseOf(e, t);
+                this.cursor.style.left = clamp(t / e.dur * 100, 0, 100) + "%";
+                if (this.phase.textContent !== phase) { this.phase.textContent = phase; }
+                this.readout.textContent = (k / FPS).toFixed(2) + " s · frame " + k + " of " + e.n;
+                this.trackEl.setAttribute("aria-valuenow", (k / FPS).toFixed(1));
+                this.trackEl.setAttribute("aria-valuetext", (k / FPS).toFixed(1) + " seconds, " + phase);
+            };
+
+            var dialog = document.getElementById("player-dialog");
+            var mainPlayer = new Player(document.querySelector("#watch [data-player]"));
+            var dialogPlayer = new Player(dialog.querySelector("[data-player]"));
+            mainPlayer.load(DATA.typical, 0);
+            function openPlayer(ep, t) {
+                mainPlayer.video.pause();
+                if (!dialog.open) { dialog.showModal(); }
+                dialogPlayer.load(ep, t);
+            }
+            dialog.querySelector("[data-close]").addEventListener("click", function () { dialog.close(); });
+            dialog.addEventListener("close", function () { dialogPlayer.video.pause(); });
+            dialog.addEventListener("keydown", function (event) {
+                if (event.key === "Escape" && dialog.open) { event.preventDefault(); dialog.close(); }
+            });
+            dialog.addEventListener("click", function (event) {
+                if (event.target !== dialog) { return; }
+                var box = dialog.getBoundingClientRect();
+                if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) { dialog.close(); }
+            });
+            document.addEventListener("click", function (event) {
+                var button = event.target.closest("[data-watch]");
+                if (!button) { return; }
+                var parts = button.getAttribute("data-watch").split(":");
+                openPlayer(Number(parts[0]), Number(parts[1]));
+            });
+
+            function Preview(fig) {
+                var self = this;
+                this.fig = fig;
+                this.card = fig.querySelector(".preview");
+                this.video = this.card.querySelector("video");
+                this.empty = this.card.querySelector(".no-video");
+                this.title = this.card.querySelector(".pv-title");
+                this.phase = this.card.querySelector(".pv-phase");
+                this.time = this.card.querySelector(".pv-time");
+                this.mini = this.card.querySelector(".mini");
+                this.cursor = this.card.querySelector(".mini .cursor");
+                this.ep = null;
+                this.pending = null;
+                this.video.addEventListener("loadedmetadata", function () {
+                    if (self.pending !== null) { showFrame(self.video, EPISODES[self.ep], self.pending); self.pending = null; }
+                });
+            }
+            Preview.prototype.show = function (ep, t) {
+                var e = EPISODES[ep];
+                t = clamp(t, 0, e.dur - 1 / FPS);
+                if (this.ep !== ep) {
+                    this.ep = ep;
+                    this.title.textContent = "Episode " + ep;
+                    this.empty.hidden = e.clip;
+                    this.video.hidden = !e.clip;
+                    if (e.clip) {
+                        this.pending = t;
+                        this.video.src = clipUrl(ep);
+                    }
+                    drawPhases(this.mini, e);
+                } else if (e.clip && this.video.readyState >= 1) {
+                    showFrame(this.video, e, t);
+                } else {
+                    this.pending = t;
+                }
+                this.video.pause();
+                this.phase.textContent = phaseOf(e, t);
+                this.time.textContent = (frameOf(e, t) / FPS).toFixed(2) + " / " + e.dur.toFixed(2) + " s";
+                this.cursor.style.left = clamp(t / e.dur * 100, 0, 100) + "%";
+                this.card.hidden = false;
+            };
+            Preview.prototype.place = function (clientX, clientY) {
+                var box = this.fig.getBoundingClientRect(), w = this.card.offsetWidth, h = this.card.offsetHeight;
+                var y = clientY - box.top - h - 18;
+                if (y < 8) { y = clientY - box.top + 24; }
+                this.card.style.left = clamp(clientX - box.left - w / 2, 8, box.width - w - 8) + "px";
+                this.card.style.top = y + "px";
+            };
+            Preview.prototype.hide = function () {
+                this.video.pause();
+                this.card.hidden = true;
+            };
+
+            (function overviewChart() {
+                var fig = document.getElementById("overview-chart"), svg = document.getElementById("overview-svg");
+                if (!fig || !svg) { return; }
+                var preview = new Preview(fig), live = document.getElementById("overview-live");
+                var x0 = Number(svg.getAttribute("data-x0")), x1 = Number(svg.getAttribute("data-x1"));
+                var y0 = Number(svg.getAttribute("data-y0")), rh = Number(svg.getAttribute("data-rh")), tmax = Number(svg.getAttribute("data-max"));
+                var head = svg.querySelector(".playhead"), rowmark = svg.querySelector(".rowmark");
+                var active = null, activeT = 0, focusIndex = 0, queued = null;
+                function toSvg(clientX, clientY) {
+                    var point = svg.createSVGPoint();
+                    point.x = clientX;
+                    point.y = clientY;
+                    return point.matrixTransform(svg.getScreenCTM().inverse());
+                }
+                function toClient(x, y) {
+                    var point = svg.createSVGPoint();
+                    point.x = x;
+                    point.y = y;
+                    return point.matrixTransform(svg.getScreenCTM());
+                }
+                function set(index, t, clientX, clientY) {
+                    index = clamp(index, 0, ORDER.length - 1);
+                    var ep = ORDER[index], e = EPISODES[ep];
+                    t = clamp(t, 0, e.dur - 1 / FPS);
+                    active = ep;
+                    activeT = t;
+                    focusIndex = index;
+                    preview.show(ep, t);
+                    var y = y0 + index * rh, x = x0 + t / tmax * (x1 - x0);
+                    head.setAttribute("x1", x);
+                    head.setAttribute("x2", x);
+                    head.setAttribute("y1", y - 4);
+                    head.setAttribute("y2", y + rh + 4);
+                    head.setAttribute("visibility", "visible");
+                    rowmark.setAttribute("y", y);
+                    rowmark.setAttribute("visibility", "visible");
+                    if (clientX === undefined) {
+                        var p = toClient(x, y);
+                        clientX = p.x;
+                        clientY = p.y;
+                    }
+                    preview.place(clientX, clientY);
+                }
+                function hide() {
+                    preview.hide();
+                    head.setAttribute("visibility", "hidden");
+                    rowmark.setAttribute("visibility", "hidden");
+                    active = null;
+                }
+                svg.addEventListener("pointermove", function (event) {
+                    var p = toSvg(event.clientX, event.clientY);
+                    if (p.x < x0 || p.x > x1 || p.y < y0 || p.y >= y0 + ORDER.length * rh) { hide(); return; }
+                    var request = [Math.floor((p.y - y0) / rh), (p.x - x0) / (x1 - x0) * tmax, event.clientX, event.clientY];
+                    if (!queued) {
+                        requestAnimationFrame(function () { var r = queued; queued = null; if (r) { set(r[0], r[1], r[2], r[3]); } });
+                    }
+                    queued = request;
+                });
+                svg.addEventListener("pointerleave", function () { queued = null; hide(); });
+                svg.addEventListener("click", function () {
+                    if (active === null) { return; }
+                    var ep = active, t = activeT;
+                    hide();
+                    openPlayer(ep, t);
+                });
+                svg.addEventListener("blur", hide);
+                svg.addEventListener("keydown", function (event) {
+                    var keys = ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"];
+                    if (active === null && keys.indexOf(event.key) !== -1) {
+                        event.preventDefault();
+                        set(focusIndex, 0);
+                        return;
+                    }
+                    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                        event.preventDefault();
+                        set(focusIndex + (event.key === "ArrowDown" ? 1 : -1) * (event.shiftKey ? 10 : 1), activeT);
+                    } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                        event.preventDefault();
+                        set(focusIndex, activeT + (event.key === "ArrowRight" ? 1 : -1) * (event.shiftKey ? 1 / FPS : 1));
+                    } else if (event.key === "Enter" && active !== null) {
+                        event.preventDefault();
+                        var ep = active, t = activeT;
+                        hide();
+                        openPlayer(ep, t);
+                    } else if (event.key === "Escape") {
+                        hide();
+                    }
+                    if (active !== null) { live.textContent = EPISODES[active].label + " at " + activeT.toFixed(1) + " seconds"; }
+                });
+            })();
+
+            function markerChart(id) {
+                var fig = document.getElementById(id), svg = fig && fig.querySelector("svg");
+                if (!svg) { return; }
+                var tip = fig.querySelector(".frame-tip"), card = fig.querySelector(".preview");
+                var preview = card ? new Preview(fig) : null;
+                var img = tip && tip.querySelector("img"), cap = tip && tip.querySelector(".cap"), sub = tip && tip.querySelector(".sub-cap");
+                var live = fig.querySelector("[aria-live]");
+                var marks = Array.prototype.map.call(svg.querySelectorAll(".mk"), function (el) {
+                    return {
+                        el: el, ep: Number(el.getAttribute("data-ep")), role: el.getAttribute("data-role"), t: Number(el.getAttribute("data-t")),
+                        x: Number(el.getAttribute("data-x")), y: Number(el.getAttribute("data-y")), cap: el.getAttribute("data-cap") || ""
+                    };
+                }).sort(function (a, b) { return a.ep - b.ep || a.t - b.t; });
+                var current = null, index = -1;
+                function highlight(ep) {
+                    each(svg.querySelectorAll(".hl"), function (el) { el.classList.remove("hl"); });
+                    svg.classList.toggle("dim", ep !== null);
+                    if (ep !== null) { each(svg.querySelectorAll('[data-ep="' + ep + '"]'), function (el) { el.classList.add("hl"); }); }
+                }
+                function show(mark, announce) {
+                    if (current === mark) { return; }
+                    current = mark;
+                    highlight(mark.ep);
+                    mark.el.parentNode.appendChild(mark.el);
+                    var ctm = svg.getScreenCTM(), box = fig.getBoundingClientRect();
+                    var cx = ctm.a * mark.x + ctm.e, cy = ctm.d * mark.y + ctm.f;
+                    var text = "Episode " + mark.ep + " · " + mark.role + (mark.t ? " at " + mark.t.toFixed(2) + " s" : "");
+                    if (preview) {
+                        preview.show(mark.ep, mark.t);
+                        preview.place(cx, cy);
+                    } else {
+                        img.src = frameSrc(mark.ep, "first");
+                        img.hidden = !img.getAttribute("src");
+                        cap.textContent = text;
+                        sub.textContent = mark.cap;
+                        tip.hidden = false;
+                        var w = tip.offsetWidth, h = tip.offsetHeight, x = cx - box.left + 16, y = cy - box.top - h - 12;
+                        if (x + w > box.width - 8) { x = cx - box.left - w - 16; }
+                        if (y < 8) { y = cy - box.top + 16; }
+                        tip.style.left = Math.max(8, x) + "px";
+                        tip.style.top = y + "px";
+                    }
+                    if (announce) { live.textContent = text + (mark.cap ? ", " + mark.cap : ""); }
+                }
+                function hide() {
+                    current = null;
+                    if (preview) { preview.hide(); } else { tip.hidden = true; }
+                    highlight(null);
+                    svg.style.cursor = "";
+                }
+                svg.addEventListener("pointermove", function (event) {
+                    var ctm = svg.getScreenCTM(), point = svg.createSVGPoint();
+                    point.x = event.clientX;
+                    point.y = event.clientY;
+                    var p = point.matrixTransform(ctm.inverse()), radius = 14 / ctm.a, best = null, bestDistance = radius * radius;
+                    marks.forEach(function (mark) {
+                        var d = (mark.x - p.x) * (mark.x - p.x) + (mark.y - p.y) * (mark.y - p.y);
+                        if (d < bestDistance) { bestDistance = d; best = mark; }
+                    });
+                    if (best) { show(best, false); svg.style.cursor = "pointer"; } else if (current) { hide(); }
+                });
+                svg.addEventListener("pointerleave", hide);
+                svg.addEventListener("click", function () { if (current) { var mark = current; hide(); openPlayer(mark.ep, mark.t); } });
+                svg.addEventListener("blur", hide);
+                svg.addEventListener("keydown", function (event) {
+                    if (!marks.length) { return; }
+                    if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+                        event.preventDefault();
+                        index = index < 0 ? (event.key === "ArrowRight" ? 0 : marks.length - 1) : (index + (event.key === "ArrowRight" ? 1 : -1) + marks.length) % marks.length;
+                        show(marks[index], true);
+                    } else if (event.key === "Enter" && current) {
+                        event.preventDefault();
+                        var mark = current;
+                        hide();
+                        openPlayer(mark.ep, mark.t);
+                    } else if (event.key === "Escape") {
+                        hide();
+                    }
+                });
+            }
+            markerChart("starts-chart");
+            markerChart("events-chart");
+
+            var table = document.getElementById("explorer");
+            var body = table.tBodies[0];
+            var headers = Array.prototype.slice.call(table.tHead.rows[0].cells).filter(function (th) { return th.querySelector("button"); });
+            headers.forEach(function (th) {
+                th.querySelector("button").addEventListener("click", function () {
+                    var key = th.getAttribute("data-key");
+                    var direction = th.getAttribute("aria-sort") === "ascending" ? "descending" : "ascending";
+                    headers.forEach(function (other) { other.removeAttribute("aria-sort"); });
+                    th.setAttribute("aria-sort", direction);
+                    var rows = Array.prototype.slice.call(body.rows);
+                    rows.sort(function (a, b) {
+                        var va = parseFloat(a.getAttribute("data-" + key)), vb = parseFloat(b.getAttribute("data-" + key));
+                        if (isNaN(va)) { va = Infinity; }
+                        if (isNaN(vb)) { vb = Infinity; }
+                        return direction === "ascending" ? va - vb : vb - va;
+                    });
+                    rows.forEach(function (row) { body.appendChild(row); });
+                });
+            });
+            var buttons = Array.prototype.slice.call(document.querySelectorAll(".filters button"));
+            buttons.forEach(function (button) {
+                button.addEventListener("click", function () {
+                    var filter = button.getAttribute("data-filter");
+                    buttons.forEach(function (b) { b.setAttribute("aria-pressed", String(b === button)); });
+                    each(body.rows, function (row) {
+                        var kinds = row.getAttribute("data-kind").split(" ");
+                        row.hidden = filter !== "all" && kinds.indexOf(filter) === -1;
+                    });
+                });
+            });
+
+            var links = Array.prototype.slice.call(document.querySelectorAll("nav a"));
+            if ("IntersectionObserver" in window) {
+                var observer = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (entry) {
+                        if (!entry.isIntersecting) { return; }
+                        links.forEach(function (link) { link.setAttribute("aria-current", String(link.getAttribute("href") === "#" + entry.target.id)); });
+                    });
+                }, { rootMargin: "-40% 0px -55% 0px" });
+                document.querySelectorAll("main section[id]").forEach(function (section) { observer.observe(section); });
+            }
+        })();
+    </script>
+</body>
+
+</html>

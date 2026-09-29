@@ -1,0 +1,23 @@
+[project]
+name = "dataset-observability-report"
+version = "0.1.0"
+description = "Observability reports for LeRobot v3 releases with Azure ML lineage"
+requires-python = ">=3.12"
+dependencies = [
+    "azure-identity==1.25.3",
+    "azureml-mlflow==1.62.0.post6",
+    "mlflow-skinny==3.16.0",
+    "numpy==2.5.3",
+    "pyarrow==25.0.1",
+]
+
+[dependency-groups]
+dev = [
+    "ruff==0.16.7",
+]
+
+[tool.ruff]
+extend = "../../../pyproject.toml"
+
+[tool.uv]
+package = false

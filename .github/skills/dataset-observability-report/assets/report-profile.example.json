@@ -1,0 +1,30 @@
+{
+    "title": "Pick-and-place demonstrations · observability review",
+    "brand": "Robot data review",
+    "eyebrow": "$robot_type · $episodes episodes · $fps fps",
+    "headline": "$episodes demonstrations of <em>pick and place</em>, reviewed frame by frame",
+    "lead": "$frames frames and $minutes minutes of recording across $cameras cameras. Every data row and every decoded video frame was checked; section 07 lists what to resolve before training.",
+    "readiness_intro": "What the automated checks confirm, and what the recording team should resolve before this dataset is used for training.",
+    "findings": [
+        {
+            "severity": "medium",
+            "title": "The operator's hand enters the workspace",
+            "body": "<p>Confirmed by eye: a hand reaches past the gripper while the arm moves. Relabel or exclude the episode before training.</p><p><button type=\"button\" class=\"play-btn\" data-watch=\"0:2.5\" aria-label=\"Play episode 0 at 2.5 seconds\">Episode 0 at 2.5 s</button></p>"
+        }
+    ],
+    "recommendations": [
+        "<strong>Record more start poses.</strong> This session has $start_conditions distinct start conditions across $episodes episodes."
+    ],
+    "limits": [
+        "Task success was not scored; episodes were not compared with an operator log."
+    ],
+    "episode_notes": {
+        "0": [
+            [
+                2.5,
+                "Operator hand visible at the left edge of the frame"
+            ]
+        ]
+    },
+    "footer_note": "Generated from the dataset bytes by observe.py, media.py, and render.py. The dataset was read, never written."
+}

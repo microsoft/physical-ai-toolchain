@@ -1,0 +1,48 @@
+{
+    "title": "Versions and lineage",
+    "summary": "Each stage records the identity of the one before it, so a model version traces back to the exact recorded bytes.",
+    "nodes": [
+        {
+            "kind": "Recorded dataset",
+            "title": "pick-place-session-01",
+            "mono": "inputs digest 3f2a9c1d0b7e4a65",
+            "lines": [
+                "LeRobot v3.0 · 40 episodes · 30 fps",
+                "Observability bundle computed from these bytes"
+            ]
+        },
+        {
+            "kind": "Viewer release",
+            "title": "release r-0001",
+            "mono": "manifest sha256 9b41e07c2d5a8f13",
+            "lines": [
+                "38 episodes accepted after annotation and validation",
+                "Release statistics sha256 c07d52e9a1b4f386"
+            ]
+        },
+        {
+            "kind": "Azure ML data asset",
+            "title": "pick-place-session-01-4d8e2a1f:r-0001",
+            "mono": "uri_folder",
+            "lines": [
+                "Asset version equals the Viewer release ID",
+                "Properties carry the manifest and statistics digests"
+            ]
+        },
+        {
+            "kind": "Registered model",
+            "title": "pick-place-act:3",
+            "mono": "training run act-pick-place-0001",
+            "lines": [
+                "Tagged with the release ID and manifest digest",
+                "Evaluated in simulation before registration"
+            ]
+        }
+    ],
+    "links": [
+        {
+            "label": "Open Azure ML studio",
+            "url": "https://ml.azure.com/"
+        }
+    ]
+}
