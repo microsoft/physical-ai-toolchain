@@ -60,12 +60,15 @@ describe('useToast', () => {
       secondId = result.current.toast({ title: 'Second' })
     })
 
+    expect(vi.getTimerCount()).toBe(2)
+
     act(() => {
       result.current.dismiss(firstId)
     })
 
     expect(result.current.toasts).toHaveLength(1)
     expect(result.current.toasts[0].id).toBe(secondId)
+    expect(vi.getTimerCount()).toBe(1)
   })
 
   it('auto-dismisses a toast after 5 seconds', () => {
@@ -102,19 +105,18 @@ describe('useToast', () => {
     expect(result.current.toasts).toHaveLength(1)
   })
 
-  it('does not throw when the auto-dismiss timer fires after unmount', () => {
+  it('clears pending auto-dismiss timers on unmount', () => {
     const { result, unmount } = renderHook(() => useToast())
 
     act(() => {
-      result.current.toast({ title: 'Pending' })
+      result.current.toast({ title: 'First' })
+      result.current.toast({ title: 'Second' })
     })
+
+    expect(vi.getTimerCount()).toBe(2)
 
     unmount()
 
-    expect(() => {
-      act(() => {
-        vi.advanceTimersByTime(5000)
-      })
-    }).not.toThrow()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })
