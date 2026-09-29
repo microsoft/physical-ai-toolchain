@@ -100,6 +100,15 @@ jobs:
       upload-sarif: true
       exclude-paths: 'scripts/tests/Fixtures/**,shared/ci/tests/Fixtures/**'
 
+  # Canonical public dependency source enforcement
+  public-dependency-feeds:
+    name: Public Dependency Feeds
+    uses: ./.github/workflows/public-dependency-feeds.yml
+    with:
+      soft-fail: false
+    permissions:
+      contents: read
+
   # Advisory container base-image CVE findings
   container-scan:
     name: Container Scan
@@ -367,6 +376,7 @@ jobs:
       - link-lang-check
       - markdown-link-check
       - dependency-pinning
+      - public-dependency-feeds
       - container-scan
       - pester-tests
       - pytest-training
