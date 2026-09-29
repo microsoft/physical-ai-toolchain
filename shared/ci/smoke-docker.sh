@@ -24,12 +24,14 @@ require_tools docker curl
 export VITE_AZURE_CLIENT_ID="${VITE_AZURE_CLIENT_ID:-00000000-0000-0000-0000-000000000000}"
 export VITE_AZURE_TENANT_ID="${VITE_AZURE_TENANT_ID:-00000000-0000-0000-0000-000000000000}"
 
-# Isolate the backend's read-only data mount so the run leaves no root-owned
-# directory in the working tree.
+# Isolate backend bind mounts so the run leaves no container-created directory
+# in the working tree.
 data_dir="$(mktemp -d)"
 models_dir="$(mktemp -d)"
 export DATAVIEWER_HOST_DATA_DIR="$data_dir"
 export DATAVIEWER_HOST_MODELS_DIR="$models_dir"
+export DATAVIEWER_UID="${DATAVIEWER_UID:-$(id -u)}"
+export DATAVIEWER_GID="${DATAVIEWER_GID:-$(id -g)}"
 export DETECTION_MODEL_DIGESTS="${DETECTION_MODEL_DIGESTS:-{}}"
 
 cleanup() {
