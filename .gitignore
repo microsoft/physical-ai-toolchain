@@ -470,6 +470,9 @@ venv/
 .github/instructions/hve-core/copilot-tracking.instructions.md
 .github/skills/rpi-*/
 
+# Isaac Sim assets
+.isaac-sim-assets/
+
 # Environment-specific deployment artifacts
 infrastructure/setup/generated/
 infrastructure/setup/config/out/
@@ -492,6 +495,9 @@ AGENTS.md
 envs/
 
 datasets/
+local/
+
+*.etli
 
 # Sources staged into the gpu-offload build context by examples/ur10e-single
 gpu-offload/examples/ur10e-single/.ur10e-src/

@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { useCapabilities } from '@/hooks/use-datasets'
 import { useSaveEpisodeLabels } from '@/hooks/use-labels'
 import { useRunVlmJudge, useVlmJudgeStatus } from '@/hooks/use-vlm-judge'
 import { applyOutcomeLabel, outcomeToLabel, useVlmJudgeBatch } from '@/hooks/use-vlm-judge-batch'
@@ -134,7 +135,9 @@ export const JudgePanel = memo(function JudgePanel({
   totalEpisodes,
   className,
 }: JudgePanelProps) {
-  const status = useVlmJudgeStatus({ datasetId, episodeIndex })
+  const capabilities = useCapabilities(datasetId)
+  const judgeEnabled = capabilities.data?.vlmJudgeEnabled === true
+  const status = useVlmJudgeStatus({ datasetId, episodeIndex, enabled: judgeEnabled })
   const runMutation = useRunVlmJudge()
   const saveLabels = useSaveEpisodeLabels()
   const batch = useVlmJudgeBatch(datasetId, totalEpisodes ?? 0)
@@ -148,7 +151,7 @@ export const JudgePanel = memo(function JudgePanel({
     () => pickResult(status.data, runMutation.data),
     [status.data, runMutation.data],
   )
-  const enabled = status.data?.enabled !== false
+  const enabled = judgeEnabled && status.data?.enabled !== false
   const errorMessage = useMemo(() => {
     if (runMutation.error) return displayErrorMessage(runMutation.error)
     if (status.error) return displayErrorMessage(status.error as Error)
@@ -181,7 +184,7 @@ export const JudgePanel = memo(function JudgePanel({
   const hasBatch = (totalEpisodes ?? 0) > 0
   const busy = runMutation.isPending || batch.isRunning || saveLabels.isPending
 
-  if (status.isLoading) {
+  if (capabilities.isLoading || (judgeEnabled && status.isLoading)) {
     return (
       <section className={cn('rounded-md border p-3 text-sm', className)} aria-busy="true">
         <header className="flex items-center justify-between">
@@ -200,7 +203,9 @@ export const JudgePanel = memo(function JudgePanel({
         </header>
         <p className="text-muted-foreground mt-2 text-xs">
           VLM-as-judge is not enabled for this server. Set
-          <code className="bg-muted mx-1 rounded px-1 py-0.5">VLM_JUDGE_ENABLED=true</code>
+          <code className="bg-muted text-foreground mx-1 rounded px-1 py-0.5">
+            VLM_JUDGE_ENABLED=true
+          </code>
           on the backend to activate it.
         </p>
       </section>
