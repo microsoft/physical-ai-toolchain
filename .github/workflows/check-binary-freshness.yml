@@ -47,6 +47,8 @@ jobs:
                   Repo               = 'astral-sh/uv'
                   ShellVariable      = 'UV_VERSION'
                   PowerShellVariable = 'UvVersion'
+                  GitHubAction       = 'astral-sh/setup-uv'
+                  GitHubActionInput  = 'version'
               }
               @{
                   Name               = 'terraform-docs'
@@ -73,43 +75,72 @@ jobs:
 
           Import-Module ./scripts/security/Modules/PinnedToolVersions.psm1 -Force
           $candidateFiles = Get-PinCandidateFiles -RepoRoot $PWD
+          $quarantineDays = 7
 
           $results = @()
 
           foreach ($tool in $tools) {
+              $pinParameters = @{
+                  ShellVariable      = $tool.ShellVariable
+                  PowerShellVariable = $tool.PowerShellVariable
+                  Files              = $candidateFiles
+                  RepoRoot           = $PWD
+              }
+              if ($tool.GitHubAction) {
+                  $pinParameters.GitHubAction = $tool.GitHubAction
+                  $pinParameters.GitHubActionInput = $tool.GitHubActionInput
+              }
               $assignments = @(
-                  Get-PinnedToolVersionAssignments `
-                      -ShellVariable $tool.ShellVariable `
-                      -PowerShellVariable $tool.PowerShellVariable `
-                      -Files $candidateFiles `
-                      -RepoRoot $PWD
+                  Get-PinnedToolVersionAssignments @pinParameters
               )
               if ($assignments.Count -eq 0) {
                   throw "No version assignments found for $($tool.Name) ($($tool.ShellVariable))"
               }
 
-              $latestTag = gh api "repos/$($tool.Repo)/releases/latest" --jq '.tag_name' 2>$null
-              if (-not $latestTag) {
-                  throw "Could not fetch latest release for $($tool.Repo) — freshness check cannot produce reliable results"
+              $releaseJson = gh api "repos/$($tool.Repo)/releases?per_page=20" 2>$null
+              if ($LASTEXITCODE -ne 0 -or -not $releaseJson) {
+                  throw "Could not fetch releases for $($tool.Repo) — freshness check cannot produce reliable results"
+              }
+              try {
+                  $releases = @($releaseJson | ConvertFrom-Json)
+              }
+              catch {
+                  throw "Could not parse releases for $($tool.Repo): $($_.Exception.Message)"
               }
 
-              $latestVersion = $latestTag -replace '^v', ''
-              $freshness = Get-PinnedToolFreshness -Assignments $assignments -LatestVersion $latestVersion
+              $release = Get-EligibleToolRelease `
+                  -Releases $releases `
+                  -QuarantineDays $quarantineDays `
+                  -Now ([datetimeoffset]::UtcNow)
+              $freshness = Get-PinnedToolFreshness `
+                  -Assignments $assignments `
+                  -LatestVersion $release.EligibleVersion
 
               $results += [ordered]@{
-                  Name           = $tool.Name
-                  Repo           = $tool.Repo
-                  PinnedVersions = $freshness.PinnedVersions
-                  LatestVersion  = $latestVersion
-                  LatestTag      = $latestTag
-                  IsStale        = $freshness.IsStale
-                  IsInconsistent = $freshness.IsInconsistent
-                  Assignments    = $assignments
+                  Name                 = $tool.Name
+                  Repo                 = $tool.Repo
+                  PinnedVersions       = $freshness.PinnedVersions
+                  LatestVersion        = $release.LatestVersion
+                  LatestTag            = $release.LatestTag
+                  LatestPublishedAt    = $release.LatestPublishedAt
+                  EligibleVersion      = $release.EligibleVersion
+                  EligibleTag          = $release.EligibleTag
+                  QuarantineEndsAt      = $release.QuarantineEndsAt
+                  IsQuarantined        = $release.IsQuarantined
+                  IsStale              = $freshness.IsStale
+                  IsInconsistent       = $freshness.IsInconsistent
+                  Assignments          = $assignments
               }
 
               $status = if ($freshness.IsStale) { '⚠️' } else { '✅' }
               $extra = if ($freshness.IsInconsistent) { ' [INCONSISTENT]' } else { '' }
-              Write-Host "$status $($tool.Name): pinned=$($freshness.PinnedVersions -join ', ') latest=$latestVersion$extra"
+              $quarantine = if ($release.IsQuarantined) {
+                  " newest=$($release.LatestVersion) [QUARANTINED]"
+              } else { '' }
+              Write-Host (
+                  "$status $($tool.Name): pinned=$($freshness.PinnedVersions -join ', ') " +
+                  "required=$($release.EligibleVersion)$quarantine$extra"
+              )
           }
 
           $staleCount = @($results | Where-Object { $_.IsStale }).Count
@@ -129,15 +160,19 @@ jobs:
 
           $tableRows = foreach ($r in $results) {
               $status = if ($r.IsStale) { '⚠️ Update available' } else { '✅ Current' }
-              $latest = "[$($r.LatestVersion)](https://github.com/$($r.Repo)/releases/tag/$($r.LatestTag))"
-              "| $($r.Name) | $($r.PinnedVersions -join ', ') | $latest | $status |"
+              $eligible = "[$($r.EligibleVersion)](https://github.com/$($r.Repo)/releases/tag/$($r.EligibleTag))"
+              $newest = "[$($r.LatestVersion)](https://github.com/$($r.Repo)/releases/tag/$($r.LatestTag))"
+              if ($r.IsQuarantined) {
+                  $newest += ' (quarantined)'
+              }
+              "| $($r.Name) | $($r.PinnedVersions -join ', ') | $eligible | $newest | $status |"
           }
 
           $staleTools = @($results | Where-Object { $_.IsStale })
           $fileLines = foreach ($r in $staleTools) {
               foreach ($pin in $r.Assignments) {
-                  if ($pin.Version -ne $r.LatestVersion) {
-                      "- ``$($pin.File)`` — $($r.Name) $($pin.Version) → $($r.LatestVersion)"
+                  if ($pin.Version -ne $r.EligibleVersion) {
+                      "- ``$($pin.File)`` — $($r.Name) $($pin.Version) → $($r.EligibleVersion)"
                   }
               }
           }
@@ -150,6 +185,14 @@ jobs:
               "`n### ⚠️ Version Inconsistencies`n`n$($warnings -join "`n")"
           } else { '' }
 
+          $quarantined = @($results | Where-Object { $_.IsQuarantined }) | ForEach-Object {
+              $eligibleAt = ([datetimeoffset]$_.QuarantineEndsAt).ToString('yyyy-MM-dd HH:mm:ss UTC')
+              "- **$($_.Name)**: $($_.LatestVersion) is quarantined until $eligibleAt; $($_.EligibleVersion) remains required"
+          }
+          $quarantineSection = if ($quarantined) {
+              "`n### Quarantined Releases`n`n$($quarantined -join "`n")"
+          } else { '' }
+
           $marker = '<!-- automation:binary-freshness -->'
           $runUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
           $checkDate = Get-Date -Format 'yyyy-MM-dd' -AsUTC
@@ -157,14 +200,15 @@ jobs:
           $body = @"
           ## Binary Dependency Freshness Report
 
-          | Tool | Pinned Version(s) | Latest | Status |
-          |------|--------|--------|--------|
+          | Tool | Pinned Version(s) | Required | Newest | Status |
+          |------|--------|--------|--------|--------|
           $($tableRows -join "`n")
 
           ### Files Requiring Updates
 
           $($fileLines -join "`n")
           $warningSection
+          $quarantineSection
 
           ### Update Instructions
 
@@ -236,7 +280,12 @@ jobs:
 
           $rows = foreach ($r in $results) {
               $status = if ($r.IsStale) { '⚠️ Stale' } else { '✅ Current' }
-              "| $($r.Name) | $($r.PinnedVersions -join ', ') | $($r.LatestVersion) | $status |"
+              $newest = if ($r.IsQuarantined) {
+                  "$($r.LatestVersion) (quarantined)"
+              } else {
+                  $r.LatestVersion
+              }
+              "| $($r.Name) | $($r.PinnedVersions -join ', ') | $($r.EligibleVersion) | $newest | $status |"
           }
 
           $staleCount = @($results | Where-Object { $_.IsStale }).Count
@@ -244,8 +293,8 @@ jobs:
           $summary = @"
           ## Binary Dependency Freshness
 
-          | Tool | Pinned Version(s) | Latest | Status |
-          |------|--------|--------|--------|
+          | Tool | Pinned Version(s) | Required | Newest | Status |
+          |------|--------|--------|--------|--------|
           $($rows -join "`n")
 
           **Stale:** $staleCount / $($results.Count)
