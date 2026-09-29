@@ -5,6 +5,8 @@ Provides endpoints for listing datasets, retrieving metadata,
 and accessing episode information with HDF5 and LeRobot parquet support.
 """
 
+from __future__ import annotations
+
 import asyncio
 from pathlib import Path
 
@@ -12,7 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
-from ..models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, TrajectoryPoint
+from ..config import AppConfig, get_app_config
+from ..models.datasources import AcceptedDatasetContract, DatasetInfo, EpisodeData, EpisodeMeta, TrajectoryPoint
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..services.video_transcode import ensure_browser_compatible
 from ..validation import (
@@ -46,6 +49,12 @@ class DatasetCapabilities(BaseModel):
 
     episode_count: int
     """Number of episodes detected."""
+
+    dataset_contract: AcceptedDatasetContract | None = None
+    """Validated descriptor metadata with matching artifact digests, when present."""
+
+    vlm_judge_enabled: bool
+    """Whether the optional VLM judge API is mounted."""
 
 
 @router.get("", response_model=list[DatasetInfo])
@@ -82,6 +91,7 @@ async def get_dataset(
 async def get_dataset_capabilities(
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     service: DatasetService = Depends(get_dataset_service),
+    config: AppConfig = Depends(get_app_config),
 ) -> DatasetCapabilities:
     """
     Get capabilities and format support status for a dataset.
@@ -102,6 +112,8 @@ async def get_dataset_capabilities(
         lerobot_support=service.has_lerobot_support(),
         is_lerobot_dataset=is_lerobot,
         episode_count=episode_count,
+        dataset_contract=service.get_dataset_contract(dataset_id),
+        vlm_judge_enabled=config.vlm_judge_enabled,
     )
 
 

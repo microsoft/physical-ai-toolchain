@@ -509,7 +509,7 @@ export function useAnnotationWorkspaceVideoSync({
     if (Math.abs(video.currentTime - targetTime) > 0.5 / fps) {
       video.currentTime = targetTime
     }
-  }, [currentFrame, fps, isPlaying, originalFrameIndex, toVideoTime])
+  }, [currentFrame, fps, isPlaying, originalFrameIndex, toVideoTime, videoSrc])
 
   const handleVideoEnded = useCallback(() => {
     onRecordEvent('playback', 'video-ended', {
