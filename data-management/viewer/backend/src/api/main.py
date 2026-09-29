@@ -1,9 +1,11 @@
 """FastAPI application entry point."""
 
+import asyncio
 import logging
 import os
+import tempfile
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -47,9 +49,53 @@ _config = load_config()
 logger = logging.getLogger(__name__)
 
 
+def _validate_local_storage_writable(data_path: str) -> None:
+    """Verify local storage supports the atomic writes used for annotations."""
+    file_descriptor: int | None = None
+    temporary_path: str | None = None
+    replacement_path: str | None = None
+
+    try:
+        file_descriptor, temporary_path = tempfile.mkstemp(
+            dir=data_path,
+            prefix=".dataviewer-write-",
+            suffix=".tmp",
+        )
+        os.write(file_descriptor, b"dataviewer-storage-probe")
+        os.fsync(file_descriptor)
+        os.close(file_descriptor)
+        file_descriptor = None
+
+        replacement_path = f"{temporary_path}.replace"
+        os.replace(temporary_path, replacement_path)
+        temporary_path = None
+        os.unlink(replacement_path)
+        replacement_path = None
+    except OSError as exc:
+        sanitized_path = data_path.replace("\r", "").replace("\n", "")
+        effective_uid = os.geteuid() if hasattr(os, "geteuid") else -1
+        effective_gid = os.getegid() if hasattr(os, "getegid") else -1
+        raise RuntimeError(
+            f"Local storage path '{sanitized_path}' is not writable by effective UID {effective_uid} "
+            f"and GID {effective_gid}. Grant the process write access. For rootful Docker on Linux or WSL, "
+            "set DATAVIEWER_UID and DATAVIEWER_GID to the results of 'id -u' and 'id -g'."
+        ) from exc
+    finally:
+        if file_descriptor is not None:
+            with suppress(OSError):
+                os.close(file_descriptor)
+        for path in (temporary_path, replacement_path):
+            if path is not None:
+                with suppress(OSError):
+                    os.unlink(path)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """Clean up blob sync temp directories on shutdown."""
+    """Validate local storage and clean up blob sync directories."""
+    if _config.storage_backend == "local":
+        await asyncio.to_thread(_validate_local_storage_writable, _config.data_path)
+
     yield
     from .services.dataset_service import get_dataset_service
 

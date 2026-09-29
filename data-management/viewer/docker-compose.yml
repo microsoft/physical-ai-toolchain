@@ -4,6 +4,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    user: "${DATAVIEWER_UID:-999}:${DATAVIEWER_GID:-999}"
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     environment:
@@ -32,7 +33,7 @@ services:
       DATAVIEWER_AUTH_DISABLED: "${DATAVIEWER_AUTH_DISABLED:-true}"
     volumes:
       # Local storage persists annotations and labels beside each dataset
-      - "${DATAVIEWER_HOST_DATA_DIR:-./datasets}:/data:rw"
+      - "${DATAVIEWER_HOST_DATA_DIR:-./datasets}:/data:${DATAVIEWER_DATA_MOUNT_OPTIONS:-rw}"
       # Mount reviewed detection weights as immutable runtime inputs
       - "${DATAVIEWER_HOST_MODELS_DIR:-./models}:/models:ro"
     healthcheck:

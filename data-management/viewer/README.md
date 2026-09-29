@@ -546,8 +546,20 @@ Without `--write-analysis`, the JSONL and CSV files remain standalone exports an
 ### Docker Compose (local)
 
 ```bash
-# Local storage mode without object detection
+# Local storage mode without object detection: Docker Desktop for macOS or Windows
 DATAVIEWER_HOST_DATA_DIR=/path/to/datasets docker compose up --build
+
+# Rootful Docker Engine on Linux or directly inside WSL
+DATAVIEWER_UID="$(id -u)" \
+DATAVIEWER_GID="$(id -g)" \
+DATAVIEWER_HOST_DATA_DIR=/path/to/datasets \
+docker compose up --build
+
+# Rootless Docker only
+DATAVIEWER_UID=0 \
+DATAVIEWER_GID=0 \
+DATAVIEWER_HOST_DATA_DIR=/path/to/datasets \
+docker compose up --build
 
 # Azure Blob Storage mode
 export STORAGE_BACKEND=azure
@@ -557,7 +569,19 @@ export AZURE_STORAGE_ANNOTATION_CONTAINER=annotations
 docker compose up --build
 ```
 
-Local storage requires write access to `DATAVIEWER_HOST_DATA_DIR` because annotations and labels are persisted atomically under each dataset directory.
+Local storage requires write access to `DATAVIEWER_HOST_DATA_DIR` because annotations and labels are persisted atomically under each dataset directory. The backend validates create, flush, replace, and delete operations during startup and exits with the effective UID and GID when the mount is not writable.
+
+| Environment | Runtime identity |
+|-------------|------------------|
+| Docker Desktop for macOS or Windows | Uses the image-defined UID/GID 999 |
+| Rootful Docker Engine on Linux or directly inside WSL | Set `DATAVIEWER_UID` and `DATAVIEWER_GID` from `id -u` and `id -g` |
+| Rootless Docker | Set `DATAVIEWER_UID=0` and `DATAVIEWER_GID=0`; rootless UID 0 maps to the invoking host user |
+| Docker daemon with user-namespace remapping | Pre-arrange host directory ownership for the daemon's subordinate UID/GID mapping |
+
+> [!WARNING]
+> Do not use the rootless UID/GID 0 override with a rootful Docker daemon. It runs the backend as host-capable container root.
+
+On SELinux-enforcing hosts, set `DATAVIEWER_DATA_MOUNT_OPTIONS=rw,z` for a dataset shared with other containers or `rw,Z` for a private mount. These options relabel the host directory; do not apply them to system paths or directories whose existing labels must remain unchanged.
 
 Object detection is optional. To enable it, stage reviewed model weights outside the repository before starting the services:
 

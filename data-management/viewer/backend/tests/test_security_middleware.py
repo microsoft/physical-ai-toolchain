@@ -186,26 +186,24 @@ class TestEnhancedHealthCheck:
         assert "api" in data["checks"]
         assert "storage" in data["checks"]
 
-    def test_degraded_returns_503(self, tmp_path):
-        """Health returns 503 when storage path does not exist."""
+    def test_startup_rejects_missing_storage(self, tmp_path, monkeypatch):
+        """Application startup fails when local storage does not exist."""
         import src.api.config as config_mod
         import src.api.services.annotation_service as ann_mod
         import src.api.services.dataset_service as ds_mod
 
         nonexistent = str(tmp_path / "does_not_exist")
-        os.environ["DATA_DIR"] = nonexistent
+        monkeypatch.setenv("DATA_DIR", nonexistent)
         config_mod._app_config = None
         ds_mod._dataset_service = None
         ann_mod._annotation_service = None
 
-        from src.api.main import app
+        import src.api.main as main_mod
 
-        with TestClient(app) as c:
-            resp = c.get("/health")
-            data = resp.json()
-            assert data["checks"]["storage"] == "unhealthy"
-            assert data["status"] == "degraded"
-            assert resp.status_code == 503
+        monkeypatch.setattr(main_mod, "_config", config_mod.load_config())
+
+        with pytest.raises(RuntimeError, match=r"Local storage path .* is not writable"), TestClient(main_mod.app):
+            pass
 
         config_mod._app_config = None
         ds_mod._dataset_service = None
