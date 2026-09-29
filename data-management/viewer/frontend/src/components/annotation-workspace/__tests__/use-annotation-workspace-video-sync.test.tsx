@@ -589,7 +589,7 @@ describe('useAnnotationWorkspaceVideoSync videoWindow', () => {
     expect(video.currentTime).toBeCloseTo(2.0, 5)
   })
 
-  it('seeks to videoOffset + frame/fps when the current frame is non-zero', () => {
+  it('preserves the windowed frame across paused preloaded camera switches', () => {
     // totalFrames=30, windowDuration=3s → fps=10. Frame 6 → 0.6s episode time
     // → toVideoTime(0.6) = 2.0 + 0.6 = 2.6
     const baseProps = {
@@ -615,7 +615,7 @@ describe('useAnnotationWorkspaceVideoSync videoWindow', () => {
       onRecordEvent: vi.fn(),
     }
 
-    const { result } = renderHook((props) => useAnnotationWorkspaceVideoSync(props), {
+    const { result, rerender } = renderHook((props) => useAnnotationWorkspaceVideoSync(props), {
       initialProps: baseProps,
     })
 
@@ -630,6 +630,34 @@ describe('useAnnotationWorkspaceVideoSync videoWindow', () => {
     })
 
     expect(video.currentTime).toBeCloseTo(2.6, 5)
+
+    const toolVideo = document.createElement('video')
+    Object.defineProperty(toolVideo, 'duration', { configurable: true, value: 60 })
+    Object.defineProperty(toolVideo, 'currentTime', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    })
+    act(() => {
+      Object.defineProperty(result.current.videoRef, 'current', {
+        value: toolVideo,
+        writable: true,
+      })
+    })
+
+    const toolProps = { ...baseProps, videoSrc: '/videos/tool.mp4' }
+    rerender(toolProps)
+    expect(toolVideo.currentTime).toBeCloseTo(2.6, 5)
+
+    const advancedProps = { ...toolProps, currentFrame: 9, originalFrameIndex: 9 }
+    rerender(advancedProps)
+    expect(toolVideo.currentTime).toBeCloseTo(2.9, 5)
+
+    act(() => {
+      Object.defineProperty(result.current.videoRef, 'current', { value: video, writable: true })
+    })
+    rerender({ ...advancedProps, videoSrc: baseProps.videoSrc })
+    expect(video.currentTime).toBeCloseTo(2.9, 5)
   })
 
   it('seeks to frame/fps without offset when videoWindow is null', () => {

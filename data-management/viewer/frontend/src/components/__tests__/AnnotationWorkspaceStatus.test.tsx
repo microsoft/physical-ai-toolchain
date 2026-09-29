@@ -129,6 +129,7 @@ describe('AnnotationWorkspace status and header actions', () => {
 
     expect(screen.queryByRole('tab', { name: /episode viewer/i })).not.toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /trajectory viewer/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /episode analyzer/i })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: /object detection/i })).not.toBeInTheDocument()
   })
 
@@ -193,6 +194,29 @@ describe('AnnotationWorkspace status and header actions', () => {
 
     expect(mockSaveEpisodeLabels).toHaveBeenCalledWith({ episodeIdx: 0, labels: ['FAILURE'] })
     expect(handleSaveAndNextEpisode).toHaveBeenCalledTimes(1)
+  })
+
+  it('saves labels on the final episode without advancing', async () => {
+    const handleSaveAndNextEpisode = vi.fn()
+    testState.episodeLabels = { 0: [] }
+    testState.savedEpisodeLabels = { 0: [] }
+    const { rerender } = render(
+      <AnnotationWorkspace onSaveAndNextEpisode={handleSaveAndNextEpisode} />,
+    )
+
+    testState.episodeLabels = { 0: ['SUCCESS'] }
+    rerender(<AnnotationWorkspace onSaveAndNextEpisode={handleSaveAndNextEpisode} />)
+
+    const saveButton = screen.getByRole('button', { name: /^save episode$/i })
+    expect(saveButton).toBeEnabled()
+
+    await act(async () => {
+      fireEvent.click(saveButton)
+      await Promise.resolve()
+    })
+
+    expect(mockSaveEpisodeLabels).toHaveBeenCalledWith({ episodeIdx: 0, labels: ['SUCCESS'] })
+    expect(handleSaveAndNextEpisode).not.toHaveBeenCalled()
   })
 
   it('resets labels back to the original episode labels without saving when Reset All is clicked', async () => {

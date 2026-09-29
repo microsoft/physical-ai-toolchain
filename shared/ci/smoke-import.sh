@@ -9,6 +9,7 @@
 #               PR's committed lock exactly as production does and imports the
 #               domain on the real interpreter. Catches the interpreter/ABI-at-
 #               import class. Expects the repository mounted at the CWD.
+# cspell:ignore redir
 set -o errexit -o nounset -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,7 +28,7 @@ Usage: $(basename "$0") DOMAIN [OPTIONS]
 Install a domain's locked dependencies and import it, GPU-free.
 
 DOMAIN:
-    rl            Reinforcement learning (training/rl), Python 3.11
+    rl            Reinforcement learning (training/rl), Python 3.12
     il            Imitation learning / LeRobot (training/il/lerobot), Python 3.12
     vla           Vision-language-action / LeRobot (training/vla/lerobot), Python 3.12
     evaluation    Software-in-the-loop evaluation (evaluation), Python 3.12
@@ -77,7 +78,7 @@ declare -a export_args probe
 case "$domain" in
     rl)
         project="training/rl"
-        py_version="3.11"
+        py_version="3.12"
         # Import the heavy framework stack (the #809 ABI surface) plus the
         # first-party entrypoint. launch.py defers Isaac/skrl imports, so a bare
         # module import would not exercise the ABI the gate exists to catch.
@@ -128,12 +129,51 @@ ensure_uv() {
     # Bootstrap a pinned uv inside a container that lacks it (image mode).
     command -v uv &> /dev/null && return 0
     info "Installing uv ${UV_VERSION}"
-    curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/uv.tar.gz
-    echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum -c --quiet -
-    tar -xzf /tmp/uv.tar.gz -C /tmp
-    mkdir -p "${HOME}/.local/bin"
-    install -m 0755 /tmp/uv-x86_64-unknown-linux-gnu/uv "${HOME}/.local/bin/uv"
-    rm -rf /tmp/uv.tar.gz /tmp/uv-x86_64-unknown-linux-gnu
+    local temp_dir archive http_code curl_exit attempt retryable
+    temp_dir="$(mktemp -d)"
+    archive="${temp_dir}/uv.tar.gz"
+    for attempt in 1 2 3; do
+        if http_code="$(curl -LsSf --proto '=https' --proto-redir '=https' \
+            --connect-timeout 10 --max-time 35 -w '%{http_code}' \
+            "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
+            -o "$archive")"; then
+            curl_exit=0
+        else
+            curl_exit=$?
+        fi
+        if (( curl_exit == 0 )) && [[ "$http_code" == "200" ]]; then
+            break
+        fi
+        retryable=false
+        if (( curl_exit == 22 )) && { [[ "$http_code" == "408" || "$http_code" == "429" ]] ||
+            [[ "$http_code" =~ ^5[0-9][0-9]$ ]]; }; then
+            retryable=true
+        elif [[ "$http_code" == "000" ]] && [[ "$curl_exit" =~ ^(5|6|7|28|52|55|56)$ ]]; then
+            retryable=true
+        fi
+        rm -f -- "$archive"
+        if [[ "$retryable" != true || "$attempt" -eq 3 ]]; then
+            rmdir -- "$temp_dir"
+            fatal "uv download failed (curl exit ${curl_exit}, HTTP ${http_code}, attempt ${attempt}/3)"
+        fi
+        sleep 2
+    done
+    if ! echo "${UV_SHA256}  ${archive}" | sha256sum -c --quiet -; then
+        rm -f -- "$archive"
+        rmdir -- "$temp_dir"
+        fatal "uv archive checksum mismatch"
+    fi
+    if ! tar -tzf "$archive" > /dev/null || ! tar -xzf "$archive" -C "$temp_dir" ||
+        [[ ! -f "${temp_dir}/uv-x86_64-unknown-linux-gnu/uv" ]]; then
+        rm -rf -- "$temp_dir"
+        fatal "uv archive is invalid: ${archive}"
+    fi
+    if ! mkdir -p "${HOME}/.local/bin" ||
+        ! install -m 0755 "${temp_dir}/uv-x86_64-unknown-linux-gnu/uv" "${HOME}/.local/bin/uv"; then
+        rm -rf -- "$temp_dir"
+        fatal "uv installation failed"
+    fi
+    rm -rf -- "$temp_dir"
     export PATH="${HOME}/.local/bin:${PATH}"
 }
 
@@ -168,6 +208,9 @@ smoke_image() {
     section "Runtime-image import smoke: ${domain}"
 
     local python_exec runtime_project="$project"
+    local isaac_provided_re='^(torch|torchvision|triton|cuda-bindings|cuda-pathfinder|cuda-toolkit|nvidia-(cu|nccl|nvjitlink|nvshmem|nvtx)[a-z0-9.-]*)=='
+    local -a install_args
+    local runtime_site_packages
     if [[ "$domain" == "il" || "$domain" == "vla" || "$domain" == "evaluation" ]]; then
         # Published PyTorch images ship Python 3.11; LeRobot needs >= 3.12.
         # Provision 3.12 in a venv, exactly as the production entry scripts do.
@@ -192,10 +235,20 @@ smoke_image() {
         python_exec="/isaac-sim/kit/python/bin/python3"
         [[ -x "$python_exec" ]] || python_exec="python3"
         export UV_PYTHON="$python_exec"
-        # Mirror production (training/rl/scripts/train.sh): install the committed
-        # lock with --no-deps onto the real interpreter.
+        if [[ -w "$($python_exec -c 'import site; print(site.getsitepackages()[0])')" ]]; then
+            install_args=(--no-cache-dir --no-deps --reinstall --system --requirement -)
+        else
+            runtime_site_packages="/tmp/smoke-runtime-site-packages-${domain}"
+            rm -rf "$runtime_site_packages"
+            mkdir -p "$runtime_site_packages"
+            export PYTHONPATH="${runtime_site_packages}:${PYTHONPATH:-}"
+            install_args=(--no-cache-dir --no-deps --reinstall --target "$runtime_site_packages" --requirement -)
+        fi
+
+        # Preserve the container's matched Torch/CUDA stack, as in production.
         uv export --frozen --no-hashes --no-emit-project --project "$project" \
-            | uv pip install --no-cache-dir --no-deps --system --requirement -
+            | grep -Ev "$isaac_provided_re" \
+            | uv pip install "${install_args[@]}"
     fi
 
     run_probe "$python_exec"
@@ -210,21 +263,23 @@ run_probe() {
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
-cd "$REPO_ROOT"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    cd "$REPO_ROOT"
 
-# Bootstrap uv when absent (in-container image mode); no-op when setup-uv
-# already provided it (CPU mode on the runner).
-ensure_uv
+    # Bootstrap uv when absent (in-container image mode); no-op when setup-uv
+    # already provided it (CPU mode on the runner).
+    ensure_uv
 
-if [[ "$mode" == "cpu" ]]; then
-    smoke_cpu
-else
-    smoke_image
+    if [[ "$mode" == "cpu" ]]; then
+        smoke_cpu
+    else
+        smoke_image
+    fi
+
+    section "Smoke Summary"
+    print_kv "Domain" "$domain"
+    print_kv "Mode" "$mode"
+    print_kv "Project" "$project"
+    print_kv "Python" "$py_version"
+    info "Import smoke passed"
 fi
-
-section "Smoke Summary"
-print_kv "Domain" "$domain"
-print_kv "Mode" "$mode"
-print_kv "Project" "$project"
-print_kv "Python" "$py_version"
-info "Import smoke passed"

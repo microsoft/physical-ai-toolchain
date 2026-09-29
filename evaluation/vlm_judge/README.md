@@ -108,14 +108,19 @@ Mount inside an existing FastAPI app (e.g., the dataviewer backend):
 from pathlib import Path
 from evaluation.vlm_judge.api import build_router
 from evaluation.vlm_judge.service import (
-    BackendConfig, FrameConfig, JudgeService, ServiceConfig,
+    BackendConfig,
+    FrameConfig,
+    JudgeService,
+    ServiceConfig,
 )
 
-service = JudgeService(ServiceConfig(
-    backend=BackendConfig(kind="qwen3-vl", model_id="Qwen/Qwen3-VL-4B-Instruct"),
-    frames=FrameConfig(n_frames=12),
-    cache_dir=Path("outputs/vlm-judge/cache"),
-))
+service = JudgeService(
+    ServiceConfig(
+        backend=BackendConfig(kind="qwen3-vl", model_id="Qwen/Qwen3-VL-4B-Instruct"),
+        frames=FrameConfig(n_frames=12),
+        cache_dir=Path("outputs/vlm-judge/cache"),
+    )
+)
 app.include_router(build_router(service), prefix="/api/vlm-judge")
 ```
 

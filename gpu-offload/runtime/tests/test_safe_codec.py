@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from remoter import class2dict, remoter
+from remoter import autoremote, class2dict, remoter, rmtclass
 from remoter.safe_codec import (
     AdapterContext,
     AdapterRegistry,
@@ -57,6 +57,29 @@ class _FakeTorch:
         assert dtype is cls.float32
         cls.allocation_count += 1
         return _FakeTensor().reshape(shape)
+
+
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        ({"allowedmodules": ["valid.module", 7]}, r"allowedmodules\[1\]"),
+        ({"remotefuncs": [{7: {}}]}, r"remotefuncs\[0\] target"),
+        ({"remoteclasses": "not-a-list"}, "remoteclasses must be a list"),
+        ({"stubs": {"stub.module/Target": 7}}, "stub target"),
+    ],
+)
+def test_configured_modules_reject_non_string_targets_before_installing_permissions(
+    monkeypatch: pytest.MonkeyPatch,
+    config: dict[str, object],
+    message: str,
+) -> None:
+    allowed_modules = {"remoter.remoter", "remoter.rmtclass"}
+    monkeypatch.setattr(remoter, "allowed_modules", allowed_modules)
+
+    with pytest.raises(ValueError, match=message):
+        autoremote.allow_configured_modules(config)
+
+    assert remoter.allowed_modules == allowed_modules
 
 
 def _tensor_wire_payload(*, data: bytes, shape: list[int]) -> dict[str, object]:
@@ -262,6 +285,257 @@ def test_malformed_function_call_returns_wire_safe_error() -> None:
     assert decoded_result is None
     assert isinstance(decoded_error, remoter.RemoteExecutionError)
     assert "seven fields" in str(decoded_error)
+
+
+def test_undeclared_function_is_rejected_before_rehydration_or_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(remoter, "allowed_functions", frozenset({"declared.module//run"}))
+    monkeypatch.setattr(remoter, "callable_policy_frozen", True)
+    monkeypatch.setattr(
+        remoter,
+        "rehydrate_args",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("arguments must not be rehydrated")),
+    )
+    monkeypatch.setattr(
+        remoter,
+        "getfuncobjfromname",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("function must not be imported")),
+    )
+    payload = remoter.serialize_payload(("tcp://server", "os//system", "os", "system", "", (), {}))
+
+    func, funcargs, args, kwargs, error = remoter.decode_function_call(payload, None, {}, None)
+
+    assert func is None
+    assert funcargs["key"] == "os//system"
+    assert args == ()
+    assert kwargs == {}
+    assert isinstance(error, remoter.CallableNotAllowedError)
+    assert "not allowed" in str(error)
+
+
+def test_mismatched_callable_identity_is_rejected_before_rehydration_or_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(remoter, "allowed_functions", frozenset({"declared.module//run"}))
+    monkeypatch.setattr(remoter, "callable_policy_frozen", True)
+    monkeypatch.setattr(
+        remoter,
+        "rehydrate_args",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("arguments must not be rehydrated")),
+    )
+    monkeypatch.setattr(
+        remoter,
+        "getfuncobjfromname",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("function must not be imported")),
+    )
+    payload = remoter.serialize_payload(("tcp://server", "declared.module//run", "os", "system", "", (), {}))
+
+    func, _, args, kwargs, error = remoter.decode_function_call(payload, None, {}, None)
+
+    assert func is None
+    assert args == ()
+    assert kwargs == {}
+    assert isinstance(error, remoter.CallableNotAllowedError)
+    assert "does not match decoded identity" in str(error)
+
+
+def test_declared_function_is_resolved_after_identity_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    expected_function = object()
+    events: list[str] = []
+    monkeypatch.setattr(remoter, "allowed_functions", frozenset({"declared.module//run"}))
+    monkeypatch.setattr(remoter, "callable_policy_frozen", True)
+
+    def rehydrate_args(*_args: object, **_kwargs: object) -> tuple[tuple[str], dict[str, str]]:
+        events.append("rehydrate")
+        return ("argument",), {"name": "value"}
+
+    def resolve_function(*_args: object, **_kwargs: object) -> object:
+        events.append("resolve")
+        return expected_function
+
+    monkeypatch.setattr(remoter, "rehydrate_args", rehydrate_args)
+    monkeypatch.setattr(remoter, "getfuncobjfromname", resolve_function)
+    payload = remoter.serialize_payload(("tcp://server", "declared.module//run", "declared.module", "run", "", (), {}))
+
+    func, _, args, kwargs, error = remoter.decode_function_call(payload, None, {}, None)
+
+    assert func is expected_function
+    assert args == ("argument",)
+    assert kwargs == {"name": "value"}
+    assert error is None
+    assert events == ["rehydrate", "resolve"]
+
+
+def test_callable_policy_is_immutable_after_freeze(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(remoter, "allowed_functions", {"declared.module//run"})
+    monkeypatch.setattr(remoter, "callable_policy_frozen", False)
+
+    policy = remoter.freeze_callable_policy()
+
+    assert policy == frozenset({"declared.module//run"})
+    remoter.allow_function("declared.module//run")
+    with pytest.raises(RuntimeError, match="policy is frozen"):
+        remoter.allow_function("undeclared.module//run")
+
+
+def test_allowall_runtime_mode_is_rejected() -> None:
+    with pytest.raises(ValueError, match="allowall is not supported"):
+        remoter.Remoter({}, "127.0.0.1", 0, None, None, 0, True, None)
+
+
+def test_server_callable_patterns_expand_to_exact_unwrapped_methods(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Policy:
+        def __init__(self) -> None:
+            pass
+
+        def allowed(self) -> None:
+            pass
+
+        def blocked(self) -> None:
+            pass
+
+        def local_only(self) -> None:
+            pass
+
+    Policy.__qualname__ = "Policy"
+    for method_name in ("__init__", "allowed", "blocked", "local_only"):
+        getattr(Policy, method_name).__qualname__ = f"Policy.{method_name}"
+
+    module_name = Policy.__module__
+    class_key = f"{module_name}/Policy"
+    original_init = Policy.__init__
+    original_allowed = Policy.allowed
+    monkeypatch.setattr(
+        remoter,
+        "allowed_functions",
+        {
+            f"{module_name}/Policy/blocked",
+            f"{module_name}/Policy/local_only",
+        },
+    )
+    monkeypatch.setattr(remoter, "callable_policy_frozen", False)
+    monkeypatch.setattr(
+        remoter,
+        "remoterclassparams",
+        {
+            class_key: {
+                "servercallablemethods": ["__init__", "allow*", "blocked"],
+                "serverdeniedmethods": ["block*"],
+            }
+        },
+    )
+
+    rmtclass.allowallfunctions(Policy, isserver=True)
+
+    assert f"{module_name}/Policy/__init__" in remoter.allowed_functions
+    assert f"{module_name}/Policy/allowed" in remoter.allowed_functions
+    assert f"{module_name}/Policy/blocked" not in remoter.allowed_functions
+    assert f"{module_name}/Policy/local_only" not in remoter.allowed_functions
+    assert Policy.__init__ is original_init
+    assert Policy.allowed is original_allowed
+
+
+def test_server_callable_pattern_must_match_a_method(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Policy:
+        def __init__(self) -> None:
+            pass
+
+    Policy.__qualname__ = "Policy"
+    Policy.__init__.__qualname__ = "Policy.__init__"
+    class_key = f"{Policy.__module__}/Policy"
+    monkeypatch.setattr(remoter, "allowed_functions", set())
+    monkeypatch.setattr(remoter, "callable_policy_frozen", False)
+    monkeypatch.setattr(
+        remoter,
+        "remoterclassparams",
+        {class_key: {"servercallablemethods": ["missing_*"]}},
+    )
+
+    with pytest.raises(ValueError, match="matches no methods"):
+        rmtclass.allowallfunctions(Policy, isserver=True)
+
+
+def test_legacy_server_remoteability_field_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Policy:
+        def __init__(self) -> None:
+            pass
+
+    Policy.__qualname__ = "Policy"
+    Policy.__init__.__qualname__ = "Policy.__init__"
+    class_key = f"{Policy.__module__}/Policy"
+    monkeypatch.setattr(remoter, "allowed_functions", set())
+    monkeypatch.setattr(remoter, "callable_policy_frozen", False)
+    monkeypatch.setattr(remoter, "remoterclassparams", {class_key: {"remoteableserver": True}})
+
+    with pytest.raises(ValueError, match="use servercallablemethods"):
+        rmtclass.allowallfunctions(Policy, isserver=True)
+
+
+def test_inherited_method_policy_uses_configured_class_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    class BasePolicy:
+        def __init__(self) -> None:
+            pass
+
+        def predict(self) -> None:
+            pass
+
+    class AllowedPolicy(BasePolicy):
+        pass
+
+    class BlockedPolicy(BasePolicy):
+        pass
+
+    for cls in (BasePolicy, AllowedPolicy, BlockedPolicy):
+        cls.__qualname__ = cls.__name__
+    for method_name in ("__init__", "predict"):
+        getattr(BasePolicy, method_name).__qualname__ = f"BasePolicy.{method_name}"
+
+    monkeypatch.setattr(remoter, "allowed_functions", set())
+    monkeypatch.setattr(remoter, "callable_policy_frozen", False)
+    monkeypatch.setattr(
+        remoter,
+        "remoterclassparams",
+        {
+            f"{AllowedPolicy.__module__}/AllowedPolicy": {"servercallablemethods": ["pre*"]},
+            f"{BlockedPolicy.__module__}/BlockedPolicy": {"servercallablemethods": []},
+        },
+    )
+
+    rmtclass.allowallfunctions(AllowedPolicy, isserver=True)
+    rmtclass.allowallfunctions(BlockedPolicy, isserver=True)
+
+    module_name = BasePolicy.__module__
+    allowed_key = f"{module_name}/AllowedPolicy/predict"
+    blocked_key = f"{module_name}/BlockedPolicy/predict"
+    base_key = f"{module_name}/BasePolicy/predict"
+    assert allowed_key in remoter.allowed_functions
+    assert blocked_key not in remoter.allowed_functions
+    assert base_key not in remoter.allowed_functions
+
+    rmtclass.allowallfunctions(AllowedPolicy, isserver=False)
+    instance = object.__new__(AllowedPolicy)
+    payload = remoter.encode_function_call(instance.predict, "direct", {}, None)
+    _, key, decoded_module, func_name, class_name, _, _ = remoter.deserialize_payload(payload)
+    assert key == allowed_key
+    assert decoded_module == module_name
+    assert class_name == "AllowedPolicy"
+    assert func_name == "predict"
+
+    captured: dict[str, object] = {}
+
+    class FakeRuntime:
+        init = True
+
+        def runSyncFunction(self, *args: object, **kwargs: object) -> str:
+            captured["args"] = args
+            captured["callable_key"] = kwargs["_remote_callable_key"]
+            return "result"
+
+    monkeypatch.setattr(remoter, "remoter", FakeRuntime())
+
+    assert instance.predict() == "result"
+    assert captured["callable_key"] == allowed_key
 
 
 def test_decode_result_rejects_invalid_envelope() -> None:

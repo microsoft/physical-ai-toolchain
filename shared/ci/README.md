@@ -53,14 +53,14 @@ shared/ci/smoke-import.sh rl --mode cpu
 
 ## 🧪 Domains
 
-| Domain        | Python | Runtime image                           | CPU smoke | Runtime-image smoke |
-|---------------|--------|-----------------------------------------|-----------|---------------------|
-| `rl`          | 3.11   | Isaac Lab (`DEFAULT_ISAAC_LAB_IMAGE`)   | yes       | yes                 |
-| `il`          | 3.12   | PyTorch (`lerobot-train.yaml` default)  | yes       | yes                 |
-| `vla`         | 3.12   | PyTorch (`DEFAULT_LEROBOT_TRAIN_IMAGE`) | yes       | yes                 |
-| `evaluation`  | 3.12   | PyTorch (`evaluate.yaml`)               | yes       | yes                 |
-| `vlm-judge`   | 3.12   | none                                    | yes       | no                  |
-| `osmo-replay` | 3.11   | Python (`replay-azureml.yaml`)          | yes       | yes                 |
+| Domain        | Python | Runtime image                             | CPU smoke | Runtime-image smoke |
+|---------------|--------|-------------------------------------------|-----------|---------------------|
+| `rl`          | 3.12   | Isaac Lab 3.0 (`DEFAULT_ISAAC_LAB_IMAGE`) | yes       | yes                 |
+| `il`          | 3.12   | PyTorch (`lerobot-train.yaml` default)    | yes       | yes                 |
+| `vla`         | 3.12   | PyTorch (`DEFAULT_LEROBOT_TRAIN_IMAGE`)   | yes       | yes                 |
+| `evaluation`  | 3.12   | PyTorch (`evaluate.yaml`)                 | yes       | yes                 |
+| `vlm-judge`   | 3.12   | none                                      | yes       | no                  |
+| `osmo-replay` | 3.11   | Python (`replay-azureml.yaml`)            | yes       | yes                 |
 
 Image references come from their source of truth: `scripts/lib/common.sh` for `rl` and `vla`, `training/il/workflows/osmo/lerobot-train.yaml` for `il`, `evaluation/sil/workflows/azureml/components/evaluate.yaml` for `evaluation`, and `workflows/osmo/replay-azureml.yaml` for `osmo-replay`.
 
@@ -96,6 +96,12 @@ The CPU depth is also the cheap baseline that runs on every PR, while the runtim
 The domain locks encode pyproject `override-dependencies` and package sources. The IL, VLA, and evaluation runtime-image smokes use frozen `uv sync`, preserving the explicit PyTorch CUDA index. Evaluation uses the IL runtime lock in `training/il/lerobot`; its CPU smoke uses the `evaluation` lock. The RL and OSMO replay runtime-image smokes export their locks and install with `--no-deps`. Both paths install the committed resolution rather than resolving dependencies again.
 
 The import step is required: dependency or ABI skew can install cleanly and fail only when imported. For the CPU depth, the export removes the CUDA local-version suffix from torch and torchvision before `--torch-backend cpu` selects CPU wheels, and strips standalone `nvidia-*`, `cuda-*`, and `torchcodec` packages. Installation uses `--no-deps` to retain the exported versions.
+
+When a runtime image lacks uv, `smoke-import.sh` downloads the pinned archive with at most three attempts.
+Each transfer has a 35-second limit, with two-second pauses, so transfer recovery takes less than 120 seconds.
+Only connection and timeout errors or HTTP 408, 429, and 5xx responses are retried.
+A 404, checksum mismatch, invalid archive, install failure, or failed import stops the smoke immediately.
+Run `bash shared/ci/tests/smoke-import-bootstrap.sh` to exercise the controlled transfer and archive fixtures locally.
 
 ### Per-domain runtime images and interpreters
 
