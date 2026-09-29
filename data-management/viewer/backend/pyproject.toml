@@ -52,7 +52,7 @@ export = [
     "h5py==3.16.0",
 ]
 yolo = [
-    "ultralytics==8.4.157",
+    "ultralytics==8.4.158",
 ]
 vlm-judge = [
     "physical-ai-vlm-judge==0.1.0",

@@ -1582,7 +1582,7 @@ requires-dist = [
     { name = "slowapi", specifier = "==0.1.10" },
     { name = "torch", marker = "extra == 'vlm-judge'", specifier = "==2.14.0" },
     { name = "transformers", marker = "extra == 'vlm-judge'", specifier = "==5.17.0" },
-    { name = "ultralytics", marker = "extra == 'yolo'", specifier = "==8.4.157" },
+    { name = "ultralytics", marker = "extra == 'yolo'", specifier = "==8.4.158" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.53.0" },
 ]
 provides-extras = ["dev", "azure", "analysis", "huggingface", "auth", "hdf5", "export", "yolo", "vlm-judge"]
@@ -3354,7 +3354,7 @@ wheels = [
 
 [[package]]
 name = "ultralytics"
-version = "8.4.157"
+version = "8.4.158"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cloudpickle" },
@@ -3373,9 +3373,9 @@ dependencies = [
     { name = "ultralytics-platform" },
     { name = "ultralytics-thop" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3f/40/ab1dabd033848514c5cf2ac5de5eddfa93cd88d9ec46eb0b8c0d81e19140/ultralytics-8.4.157.tar.gz", hash = "sha256:e6ca945f26f7c642a742439115787c9bfe4379a017180aa9b8fb952feab2f127", size = 1234355, upload-time = "2026-09-20T13:59:24.119Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/37/e68b9f2e7f423c65134834f6a187556f6bfbbdf2649e39d4fb70260a1331/ultralytics-8.4.158.tar.gz", hash = "sha256:55599ea08b54f0f3b70155c995a794654dcb8ae5e87f71adc85cbedd277c7220", size = 1237404, upload-time = "2026-09-21T20:53:34.02Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/59/05/a557be380143810f12b7b263206d03842348dde92073994180b08ffb3886/ultralytics-8.4.157-py3-none-any.whl", hash = "sha256:66d70a59abbb9ec04592b3f8c22df731236e2b5da31b8df226b11d1b9f9d1eea", size = 1450713, upload-time = "2026-09-20T13:59:20.204Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/90/ef80dd4ef67158120b5a602be23dc9612d67c11b5307ea2936d38e28feb7/ultralytics-8.4.158-py3-none-any.whl", hash = "sha256:9574da525a40fa6dc699d3d21def8f7d7bb1fcd47976845cfae2768c8ad91cea", size = 1453620, upload-time = "2026-09-21T20:53:30.019Z" },
 ]
 
 [[package]]
