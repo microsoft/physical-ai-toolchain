@@ -38,11 +38,11 @@ Start the dataviewer app, optionally configuring the dataset path.
 
 If the user provides a dataset path:
 
-1. Read `data-management/viewer/backend/.env`.
-2. Replace the `DATA_DIR=` line with the absolute path to the user's dataset directory.
-3. Confirm the update.
+1. Resolve and verify the dataset parent directory.
+2. Pass that directory to `start.sh` through `--data-dir`.
+3. Follow the dataviewer skill's accepted-dataset checks when a descriptor is present.
 
-If no path is provided, use the existing `DATA_DIR` value.
+If no path is provided, retain the configured `DATA_DIR` or launcher default. Change `backend/.env` only when the user explicitly requests persistent defaults; a workflow handoff must not rewrite it.
 
 #### Step 2: Start the Application
 
@@ -53,6 +53,7 @@ If no path is provided, use the existing `DATA_DIR` value.
     ```
 
     Use default ports (8000/5173) when no overrides are specified.
+    Append `--data-dir /path/to/datasets` when a dataset parent was provided.
 
 2. Wait for the health check to pass by checking terminal output.
 3. Confirm both backend and frontend are running on the configured ports.
@@ -163,11 +164,12 @@ Batch analysis across all episodes using Python scripts via the terminal for eff
 
 #### Step 3: Apply Labels via API
 
-1. Use `PUT /api/datasets/{id}/episodes/{idx}/labels` with body `{"labels": ["LABEL1", "LABEL2"]}` for each episode.
-2. For bulk annotation, use a Python script with `urllib.request` to loop over all episodes.
-3. After all labels are applied, persist with `POST /api/datasets/{id}/labels/save`.
+1. Follow the dataviewer skill's revision-safe label workflow. Read the current labels and ETag before each update.
+2. Use `PUT /api/datasets/{id}/episodes/{idx}/labels` with the intended label set and `If-Match` containing that ETag, or `If-None-Match: *` when no ETag exists. Authenticated servers also require authentication and CSRF headers.
+3. Successful PUT requests persist immediately. Stop and reconcile HTTP 412 conflicts; do not overwrite another writer's changes.
+4. Verify saved labels with GET. The optional `POST /labels/save` endpoint is not a required persistence step and also needs a current revision precondition.
 
-Labels are stored on disk at `{DATA_DIR}/{dataset_id}/meta/episode_labels.json`. To clear all labels for a fresh start, overwrite the `episodes` key with an empty object `{}` in this file and reload the page.
+Local labels are stored at `{DATA_DIR}/{dataset_id}/meta/episode_labels.json`. Clear labels through revision-conditional API updates when requested, not by overwriting a running server's files.
 
 #### Step 4: Verify via Playwright UI
 
@@ -186,7 +188,7 @@ For episodes that need label correction:
 2. Scroll to "Episode Labels" section (use `browser_evaluate` with `scrollIntoView`).
 3. Click a selected label button to remove it (toggling behavior).
 4. Click the correct label button to add it.
-5. Click "Save All" to persist.
+5. Click "Save & Next Episode", or "Save Episode" on the final episode, to persist.
 
 Return to Phase 2 to continue browsing, or proceed to Phase 4 for feature development.
 
@@ -240,17 +242,17 @@ Full surface reference and prompt schema live in the dataviewer skill ("VLM-as-J
 
 #### Step 1: Confirm the judge is enabled
 
-1. Read `data-management/viewer/backend/.env`.
-2. Verify `VLM_JUDGE_ENABLED=true` and that `VLM_JUDGE_BACKEND` matches user intent (`echo` for wiring, `qwen3-vl` for local GPU, `openai-compat` for remote endpoints).
-3. **For `qwen3-vl` backend**, prefer the shim pattern: rewrite `.env` to `VLM_JUDGE_BACKEND=openai-compat` + `VLM_JUDGE_BASE_URL=http://127.0.0.1:8001/v1`, then start `python -m evaluation.vlm_judge.openai_shim` from the **root** `.venv` (which has Torch + transformers). The dataviewer's own venv stays lightweight. Probe `http://127.0.0.1:8001/health` before continuing.
-4. If any value is missing, edit `.env` and **restart** `start.sh` — uvicorn auto-reload does not pick up env changes.
-5. Probe `GET /api/datasets/{id}/episodes/0/judge` for the user's first dataset; a response with `enabled: true` confirms the router is mounted.
+1. Resolve the requested judge settings without exposing credentials or changing persistent defaults.
+2. Pass `VLM_JUDGE_ENABLED=true` and the selected `VLM_JUDGE_BACKEND` to the launcher process (`echo` for wiring, `qwen3-vl` for local GPU, `openai-compat` for remote endpoints).
+3. For `qwen3-vl`, prefer the shim pattern: pass `VLM_JUDGE_BACKEND=openai-compat` and `VLM_JUDGE_BASE_URL=http://127.0.0.1:8001/v1` to the viewer, then start `python -m evaluation.vlm_judge.openai_shim` from the root environment with its inference dependencies. Probe `http://127.0.0.1:8001/health` before continuing.
+4. Restart an owned backend when launch settings change; code reload does not refresh its environment. Persist settings in `.env` only when explicitly requested.
+5. Probe `GET /api/datasets/{id}/capabilities` and require `vlm_judge_enabled: true` before requesting episode judgments.
 
 #### Step 2: Smoke-test with the echo backend
 
 When the user wants confidence in the wiring before paying for inference:
 
-1. Set `VLM_JUDGE_BACKEND=echo` in `.env`, restart the backend.
+1. Pass `VLM_JUDGE_BACKEND=echo` to an owned backend session.
 2. Run `python -m evaluation.vlm_judge.run --dataset datasets/<id> --backend echo --limit 2 --n-frames 6 --output /tmp/vj-<id>.jsonl` for each dataset.
 3. Tail the JSONL to verify episode discovery, view selection, and frame extraction. The VLM responses are deterministic placeholders; `outcome_success` is always `true`.
 
@@ -284,5 +286,5 @@ Return to Phase 2 for episode-level review or Phase 3 if the judge findings shou
 - Surface any errors or issues immediately with suggested fixes.
 - When annotating, report progress with counts (e.g., "Annotated 32/64 episodes, 31 LEFT, 33 RIGHT").
 - For annotation tasks, prefer API-first bulk operations followed by UI verification over annotating each episode individually through the UI.
-- Always call the save endpoint after bulk API annotation to persist labels to disk.
+- Verify persisted labels after bulk API annotation; successful revision-conditional PUT requests already save them.
 - For VLM judge runs, prefer the CLI for bulk evaluation and the UI panel for verification of representative episodes; both share the same disk cache so work is never duplicated.

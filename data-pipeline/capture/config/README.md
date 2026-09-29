@@ -191,9 +191,9 @@ from pydantic import ValidationError
 from models.config_models import RecordingConfig
 
 config_data = {
-  "topics": [{"name": "/joint_states", "frequency_hz": 100.0}],
-  "trigger": {"type": "gpio", "pin": 17},
-  "output_dir": "/data/recordings",
+    "topics": [{"name": "/joint_states", "frequency_hz": 100.0}],
+    "trigger": {"type": "gpio", "pin": 17},
+    "output_dir": "/data/recordings",
 }
 
 try:
