@@ -1,6 +1,7 @@
 {
   "enableTraining": "true",
   "enableInference": "false",
+  "nginxIngress.enabled": "true",
   "clusterPurpose": "${CLUSTER_PURPOSE}",
   "amloperator.skipResourceValidation": "${SKIP_RESOURCE_VALIDATION}",
   "installNvidiaDevicePlugin": "false",

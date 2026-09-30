@@ -120,6 +120,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Extension Name" "$extension_name"
   print_kv "Compute Name" "$compute_name"
   print_kv "Cluster Purpose" "$cluster_purpose"
+  print_kv "Nginx Ingress" "Enabled for OSMO"
   print_kv "Skip Resource Validation" "$skip_resource_validation"
   print_kv "Enforce Volcano Capacity Check" "$enforce_volcano_capacity_check"
   print_kv "ML Workspace" "${ml_workspace:-<not configured>}"
@@ -172,7 +173,8 @@ if az k8s-extension show --name "$extension_name" --cluster-type managedClusters
     --cluster-type managedClusters \
     --cluster-name "$cluster" \
     --resource-group "$rg" \
-    --config-file "$CONFIG_DIR/out/azureml-aks-config.json"
+    --config-file "$CONFIG_DIR/out/azureml-aks-config.json" \
+    --yes
 else
   info "Installing AzureML extension..."
   az k8s-extension create \

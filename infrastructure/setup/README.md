@@ -2,7 +2,7 @@
 title: Cluster Setup
 description: AKS cluster configuration with NVIDIA GPU operator, KAI Scheduler, and AzureML extension
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-25
+ms.date: 2026-09-30
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -21,7 +21,7 @@ AKS cluster configuration for robotics workloads. Deploys NVIDIA GPU operator, K
 
 Each script writes AKS credentials to an isolated kubeconfig and requires an explicit context for Kubernetes and Helm operations.
 
-The AzureML extension enables training and batch scoring. Real-time inference support and the `azureml-fe` inference router are disabled. Rerunning the script updates an existing extension to match the generated configuration.
+The AzureML extension enables training and batch scoring. Real-time inference support and the `azureml-fe` inference router are disabled. The extension-managed nginx ingress controller remains enabled for OSMO routing. Rerunning the script updates an existing extension; Azure can retain inactive inference settings from an earlier installation because configuration updates merge stored settings.
 
 Deployment order:
 

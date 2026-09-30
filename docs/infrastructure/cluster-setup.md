@@ -3,7 +3,7 @@ sidebar_position: 5
 title: Cluster Setup
 description: Kubernetes service deployment, AzureML extension, and OSMO platform configuration
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-25
+ms.date: 2026-09-30
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -168,9 +168,21 @@ When deploying with `should_enable_private_endpoint = false`, cluster endpoints 
 
 ### AzureML Extension
 
-The AzureML extension is configured for training and batch scoring. `enableInference` is `false`, so the extension does not deploy the `azureml-fe` real-time inference router or expose an inference service.
+The AzureML extension is configured for training and batch scoring. `enableInference` is `false`, so the extension does not deploy the `azureml-fe` real-time inference router or expose an inference service. `nginxIngress.enabled` remains `true` because OSMO routes its UI and API through the extension-managed `azureml-nginx` ingress controller.
 
-Rerun `02-deploy-azureml-extension.sh` to reconcile an existing extension with the generated training-only configuration. The update disables extension-hosted real-time inference; migrate any separately created online endpoints before applying it.
+Rerun `02-deploy-azureml-extension.sh` to reconcile an existing extension with the generated training-only configuration. The update disables extension-hosted real-time inference; migrate any separately created online endpoints before applying it. Azure extension updates merge configuration settings, so a cluster upgraded from an inference-enabled configuration can retain stored inference-router settings even though `enableInference=false` makes them inactive. Fresh installs omit those settings.
+
+Inspect the effective stored settings after an update:
+
+```bash
+az k8s-extension show \
+  --name <extension-name> \
+  --cluster-type managedClusters \
+  --cluster-name <cluster-name> \
+  --resource-group <resource-group> \
+  --query configurationSettings \
+  --output json
+```
 
 ## 📜 Scripts
 
