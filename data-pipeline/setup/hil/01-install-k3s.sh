@@ -26,12 +26,14 @@ OPTIONS:
     --pod-cidr CIDR          Pod CIDR (default: $EDGE_K3S_POD_CIDR)
     --service-cidr CIDR      Service CIDR (default: $EDGE_K3S_SERVICE_CIDR)
     --data-dir DIR           K3s data directory (default: $EDGE_K3S_DATA_DIR)
+    --default-runtime NAME   Default container runtime (default: unset)
     --kubeconfig-out PATH    Protected operator kubeconfig output
     --config-preview         Print configuration and exit
 
 EXAMPLES:
     $(basename "$0") --config-preview
     $(basename "$0") --node-name hil-lab-01
+    $(basename "$0") --default-runtime nvidia
 EOF
 }
 
@@ -42,6 +44,7 @@ context="$EDGE_K3S_CONTEXT"
 pod_cidr="$EDGE_K3S_POD_CIDR"
 service_cidr="$EDGE_K3S_SERVICE_CIDR"
 data_dir="$EDGE_K3S_DATA_DIR"
+default_runtime="$EDGE_K3S_DEFAULT_RUNTIME"
 kubeconfig_out="${HIL_KUBECONFIG:-${XDG_DATA_HOME:-$HOME/.local/share}/physical-ai-toolchain/hil/kubeconfig.yaml}"
 config_preview=false
 
@@ -54,11 +57,16 @@ while [[ $# -gt 0 ]]; do
     --pod-cidr)         pod_cidr="$2"; shift 2 ;;
     --service-cidr)     service_cidr="$2"; shift 2 ;;
     --data-dir)         data_dir="$2"; shift 2 ;;
+    --default-runtime)  default_runtime="$2"; shift 2 ;;
     --kubeconfig-out)   kubeconfig_out="$2"; shift 2 ;;
     --config-preview)   config_preview=true; shift ;;
     *)                  fatal "Unknown option: $1" ;;
   esac
 done
+
+if [[ -n "$default_runtime" && ! "$default_runtime" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  fatal "--default-runtime must contain only letters, numbers, dots, underscores, and hyphens"
+fi
 
 # Show the intended local compute configuration and exit without inspecting or changing the host.
 if [[ "$config_preview" == "true" ]]; then
@@ -70,6 +78,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Pod CIDR" "$pod_cidr"
   print_kv "Service CIDR" "$service_cidr"
   print_kv "Data Directory" "$data_dir"
+  print_kv "Default Runtime" "${default_runtime:-K3s default}"
   print_kv "Kubeconfig" "$kubeconfig_out"
   print_kv "VPN" "not required"
   print_kv "Remote Access" "none"
@@ -113,6 +122,9 @@ disable:
   - servicelb
   - traefik
 EOF
+if [[ -n "$default_runtime" ]]; then
+  printf 'default-runtime: %s\n' "$default_runtime" >> "$tmp_dir/config.yaml"
+fi
 
 cat > "$tmp_dir/k3s.service" <<EOF
 [Unit]
@@ -219,6 +231,7 @@ print_kv "K3s Version" "$version"
 print_kv "Node" "$node_name"
 print_kv "Context" "$context"
 print_kv "Kubeconfig" "$kubeconfig_out"
+print_kv "Default Runtime" "${default_runtime:-K3s default}"
 print_kv "Local Identity" "$identity_file"
 print_kv "VPN Dependency" "none"
 print_kv "Next" "Run $SCRIPT_DIR/02-connect-osmo-backend.sh after environment input preparation"
