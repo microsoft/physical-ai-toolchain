@@ -154,24 +154,42 @@ export function useDatasetLabels() {
     enabled: !!currentDataset && !!principalScopeId,
     staleTime: 30 * 1000,
   })
+  const labelsData = query.data?.data
+  const hasDatasetLabels = !!labelsData && labelsData.datasetId === currentDataset?.id
 
   useEffect(() => {
     prepareDatasetLabels(currentDataset?.id ?? null)
   }, [currentDataset?.id, prepareDatasetLabels])
 
   useEffect(() => {
-    if (!query.data || query.data.data.datasetId !== currentDataset?.id || !principalScopeId) return
+    if (!labelsData || labelsData.datasetId !== currentDataset?.id || !principalScopeId) return
 
-    const datasetId = query.data.data.datasetId
-    setAvailableLabels(query.data.data.availableLabels)
+    const datasetId = labelsData.datasetId
+    setAvailableLabels(labelsData.availableLabels)
     if (labelDatasetId === datasetId) {
-      reconcileEpisodeLabels(datasetId, query.data.data.episodes)
+      reconcileEpisodeLabels(datasetId, labelsData.episodes)
     } else {
-      setDatasetEpisodeLabels(datasetId, query.data.data.episodes)
+      setDatasetEpisodeLabels(datasetId, labelsData.episodes)
     }
     hydratedDatasetRef.current = datasetId
-    setAllEpisodeAnalysis(query.data.data.analysis ?? {})
+    setAllEpisodeAnalysis(labelsData.analysis ?? {})
     setLoaded(true)
+  }, [
+    currentDataset?.id,
+    labelDatasetId,
+    labelsData,
+    principalScopeId,
+    reconcileEpisodeLabels,
+    setAllEpisodeAnalysis,
+    setAvailableLabels,
+    setDatasetEpisodeLabels,
+    setLoaded,
+  ])
+
+  useEffect(() => {
+    const datasetId = currentDataset?.id
+    if (!datasetId || !principalScopeId || !hasDatasetLabels) return
+
     const hydrationEditGeneration = useLabelStore.getState().editGeneration
     let active = true
     void loadPersistedLabelDraft(datasetId, principalScopeId).then((draft) => {
@@ -194,18 +212,7 @@ export function useDatasetLabels() {
     return () => {
       active = false
     }
-  }, [
-    currentDataset?.id,
-    labelDatasetId,
-    principalScopeId,
-    query.data,
-    reconcileEpisodeLabels,
-    setAllEpisodeAnalysis,
-    setAvailableLabels,
-    restoreLabelDraft,
-    setDatasetEpisodeLabels,
-    setLoaded,
-  ])
+  }, [currentDataset?.id, hasDatasetLabels, principalScopeId, restoreLabelDraft])
 
   useEffect(() => {
     const datasetId = currentDataset?.id

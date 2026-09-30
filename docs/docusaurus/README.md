@@ -2,7 +2,7 @@
 title: Docusaurus Site Operations
 description: Install, validate, test, serve, and troubleshoot the documentation site
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-27
+ms.date: 2026-09-28
 ms.topic: how-to
 ---
 
@@ -64,6 +64,10 @@ npm run ci:docs:test:e2e
 Run the setup command once per environment to install Google Chrome and its system dependencies. The test command
 builds the site once, generates route and Mermaid manifests, starts a non-reused loopback server, executes
 representative keyboard, search, adaptive, table, and Mermaid journeys, and crawls every deployed route with axe.
+
+Keyboard tests wait for rendered disclosure visibility as well as `aria-expanded` before traversing links.
+Mobile navigation tests also wait for the background to become inert before checking focus containment.
+Use these observable states rather than fixed delays; keep the subsequent keyboard-focus assertions.
 
 Browser evidence is written to these ignored paths:
 

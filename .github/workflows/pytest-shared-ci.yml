@@ -34,14 +34,15 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
-          version: '0.12.8'
+          version: '0.12.20'
+          checksum: '6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f'
 
       - name: Install dependencies
         run: uv sync --frozen --group dev
 
       - name: Run pytest
         run: >-
-          uv run --frozen pytest -o addopts="" shared/ci/tests -v
+          uv run --frozen pytest -o addopts="" shared/ci/tests scripts/tests/security/test_zap_to_sarif.py -v
           --cov=shared/ci
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-shared-ci.xml

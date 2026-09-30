@@ -7,6 +7,7 @@ warmup endpoints with the dataset service mocked out.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -16,6 +17,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from src.api.models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, TrajectoryPoint
+from src.api.services.dataset_service import DatasetService
 
 
 @pytest.fixture
@@ -43,6 +45,7 @@ def mock_service() -> MagicMock:
     svc.get_blob_video_stream = AsyncMock(return_value=None)
     svc.dataset_has_hdf5 = MagicMock(return_value=False)
     svc.dataset_is_lerobot = MagicMock(return_value=True)
+    svc.get_dataset_contract = MagicMock(return_value=None)
     svc.has_hdf5_support = MagicMock(return_value=True)
     svc.has_lerobot_support = MagicMock(return_value=True)
     svc._episode_cache = MagicMock()
@@ -112,10 +115,114 @@ class TestListAndGetDataset:
 
 
 class TestCapabilities:
+    def test_capabilities_with_verified_contract(
+        self, client: TestClient, override_service: MagicMock, accepted_dataset_path: Path
+    ) -> None:
+        override_service.get_dataset_contract = DatasetService(
+            base_path=str(accepted_dataset_path.parent)
+        ).get_dataset_contract
+
+        response = client.get(f"/api/datasets/{accepted_dataset_path.name}/capabilities")
+
+        assert response.status_code == 200
+        contract = response.json()["dataset_contract"]
+        assert contract["output_adapter_id"] == "lerobot_v3"
+        assert contract["profile_id"] == "profile-alpha"
+        assert contract["capture_features"] == [{"feature_id": "state-alpha", "kind": "observation_state"}]
+        assert contract["sensors"] == [{"sensor_id": "view-alpha", "media_kind": "rgb"}]
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("output_adapter_id", None),
+            ("output_adapter_version", None),
+            ("viewer_adapter_id", None),
+            ("profile_id", None),
+            ("profile_sha256", None),
+            ("capture_features", None),
+            ("sensors", None),
+            ("output_adapter_id", 42),
+            ("output_adapter_version", []),
+            ("viewer_adapter_id", False),
+            ("profile_id", {}),
+            ("profile_sha256", []),
+            ("capture_features", ["invalid"]),
+            ("sensors", [1]),
+            ("capture_features", {}),
+            ("sensors", "invalid"),
+            ("schema_version", 2),
+            ("dataset_id", "different-dataset"),
+            ("artifacts", {}),
+        ],
+    )
+    def test_capabilities_ignores_invalid_contract(
+        self,
+        client: TestClient,
+        override_service: MagicMock,
+        accepted_dataset_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        field: str,
+        value: object,
+    ) -> None:
+        descriptor_path = accepted_dataset_path / "accepted-dataset.json"
+        descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+        if value is None:
+            descriptor.pop(field)
+        else:
+            descriptor[field] = value
+        descriptor_path.write_text(json.dumps(descriptor), encoding="utf-8")
+        override_service.get_dataset_contract = DatasetService(
+            base_path=str(accepted_dataset_path.parent)
+        ).get_dataset_contract
+
+        response = client.get(f"/api/datasets/{accepted_dataset_path.name}/capabilities")
+
+        assert response.status_code == 200
+        assert response.json()["dataset_contract"] is None
+        assert "Ignoring invalid accepted-dataset contract" in caplog.text
+
+    @pytest.mark.parametrize("descriptor_state", ["absent", "invalid-json", "modified-artifact"])
+    def test_capabilities_without_a_valid_descriptor(
+        self,
+        client: TestClient,
+        override_service: MagicMock,
+        accepted_dataset_path: Path,
+        descriptor_state: str,
+    ) -> None:
+        descriptor_path = accepted_dataset_path / "accepted-dataset.json"
+        if descriptor_state == "absent":
+            descriptor_path.unlink()
+        elif descriptor_state == "invalid-json":
+            descriptor_path.write_text("{invalid json", encoding="utf-8")
+        else:
+            (accepted_dataset_path / "capture-provenance.json").write_text("changed", encoding="utf-8")
+        override_service.get_dataset_contract = DatasetService(
+            base_path=str(accepted_dataset_path.parent)
+        ).get_dataset_contract
+
+        response = client.get(f"/api/datasets/{accepted_dataset_path.name}/capabilities")
+
+        assert response.status_code == 200
+        assert response.json()["dataset_contract"] is None
+
     def test_capabilities_with_dataset(self, client: TestClient, override_service) -> None:
         override_service.get_dataset = AsyncMock(return_value=_make_dataset("ds-1", total=7))
         override_service.dataset_has_hdf5 = MagicMock(return_value=True)
         override_service.dataset_is_lerobot = MagicMock(return_value=False)
+        override_service.get_dataset_contract = MagicMock(
+            return_value={
+                "dataset_id": "ds-1",
+                "output_adapter_id": "lerobot_v3",
+                "output_adapter_version": "0.6.0",
+                "viewer_adapter_id": "dataviewer_v1",
+                "profile_id": "profile-alpha",
+                "profile_sha256": "a" * 64,
+                "capture_provenance_sha256": "b" * 64,
+                "export_validation_sha256": "c" * 64,
+                "capture_features": [{"feature_id": "state-alpha", "kind": "observation_state"}],
+                "sensors": [{"sensor_id": "view-alpha", "media_kind": "rgb"}],
+            }
+        )
         resp = client.get("/api/datasets/ds-1/capabilities")
         assert resp.status_code == 200
         body = resp.json()
@@ -124,6 +231,19 @@ class TestCapabilities:
         assert body["is_lerobot_dataset"] is False
         assert body["hdf5_support"] is True
         assert body["lerobot_support"] is True
+        assert body["vlm_judge_enabled"] is False
+        assert body["dataset_contract"] == {
+            "dataset_id": "ds-1",
+            "output_adapter_id": "lerobot_v3",
+            "output_adapter_version": "0.6.0",
+            "viewer_adapter_id": "dataviewer_v1",
+            "profile_id": "profile-alpha",
+            "profile_sha256": "a" * 64,
+            "capture_provenance_sha256": "b" * 64,
+            "export_validation_sha256": "c" * 64,
+            "capture_features": [{"feature_id": "state-alpha", "kind": "observation_state"}],
+            "sensors": [{"sensor_id": "view-alpha", "media_kind": "rgb"}],
+        }
 
     def test_capabilities_without_dataset_reports_zero_episodes(self, client: TestClient, override_service) -> None:
         override_service.get_dataset = AsyncMock(return_value=None)
