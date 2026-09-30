@@ -90,13 +90,13 @@ verify_sha256() {
 
 section "UV Package Manager Setup"
 
-UV_VERSION="0.12.8"
+UV_VERSION="0.12.20"
 if ! command -v uv &>/dev/null; then
   info "Installing uv package manager..."
   UV_ARCH=$(uname -m)
   case "${UV_ARCH}" in
-    x86_64)  UV_TRIPLE="x86_64-unknown-linux-gnu"; UV_SHA256="2e2b37e9811e17675a9e70bed5e1a58fc8c0388be63d751d72cc735188c149ff" ;;
-    aarch64) UV_TRIPLE="aarch64-unknown-linux-gnu"; UV_SHA256="ba8661f4fd207c8e94814191598e619b355ac10d5014e851e21eb800f9ef2b00" ;;
+    x86_64)  UV_TRIPLE="x86_64-unknown-linux-gnu"; UV_SHA256="6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f" ;;
+    aarch64) UV_TRIPLE="aarch64-unknown-linux-gnu"; UV_SHA256="8a7aad7bc76a2fae5151566ff3e43eacce0b2a113d5e4de3e4afe3e58fa2441e" ;;
     *) error "Unsupported architecture for uv: ${UV_ARCH}"; exit 1 ;;
   esac
   curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_TRIPLE}.tar.gz" -o /tmp/uv.tar.gz

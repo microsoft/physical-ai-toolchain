@@ -7,12 +7,13 @@
 .SYNOPSIS
     Defines pin discovery functions used by binary freshness checks.
 .DESCRIPTION
-    Enumerates tracked shell, PowerShell, JSON, and JSONC source files, extracts
-    supported literal version assignments, and classifies them against an
-    upstream release.
+    Enumerates tracked shell, PowerShell, JSON, JSONC, and YAML source files,
+    extracts supported literal version assignments, and classifies them against
+    an upstream release.
 #>
 
 $script:PinRegexTimeout = [timespan]::FromSeconds(2)
+$script:PinSemanticVersionPattern = '[0-9]+(?:\.[0-9]+)+(?:[-+][0-9A-Za-z.-]+)?'
 $script:PinShellLeadingAssignmentPattern =
     '(?:[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?:"(?:\\.|[^"\\])*"|''[^'']*''|[^\s]+)\s+)*'
 $script:PinShellCommandPrefixPattern =
@@ -57,7 +58,10 @@ function Get-PinCandidateFiles {
         )
     )
 
-    $gitOutput = @(git -c core.quotePath=false -C $RepoRoot ls-files -- '*.sh' '*.ps1' '*.json' '*.jsonc' 2>&1)
+    $gitOutput = @(
+        git -c core.quotePath=false -C $RepoRoot ls-files -- `
+            '*.sh' '*.ps1' '*.json' '*.jsonc' '*.yml' '*.yaml' 2>&1
+    )
     $gitExitCode = $LASTEXITCODE
     if ($gitExitCode -ne 0) {
         throw "Could not enumerate tracked source files (git exit code $gitExitCode): $($gitOutput -join "`n")"
@@ -663,6 +667,68 @@ function Get-PinJsonVersionAssignments {
     }
 }
 
+function Get-GitHubActionInputVersionAssignments {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Content,
+
+        [Parameter(Mandatory)]
+        [string]$File,
+
+        [Parameter(Mandatory)]
+        [string]$Action,
+
+        [Parameter(Mandatory)]
+        [string]$InputName,
+
+        [Parameter(Mandatory)]
+        [string]$SemanticVersionPattern
+    )
+
+    if ($Content -notmatch ([regex]::Escape($Action) + '@')) {
+        return
+    }
+    if (-not (Get-Command ConvertFrom-Yaml -ErrorAction SilentlyContinue)) {
+        throw "Cannot parse monitored workflow '$File': powershell-yaml is not installed"
+    }
+
+    try {
+        $workflow = ConvertFrom-Yaml -Yaml $Content -ErrorAction Stop
+    }
+    catch {
+        throw "Could not parse '$File' as YAML: $($_.Exception.Message)"
+    }
+
+    foreach ($job in @($workflow.jobs.Values)) {
+        foreach ($step in @($job.steps)) {
+            if ($step -isnot [System.Collections.IDictionary]) {
+                continue
+            }
+            $uses = [string]$step['uses']
+            if ($uses -notmatch ('^' + [regex]::Escape($Action) + '@')) {
+                continue
+            }
+            $inputs = $step['with']
+            if ($inputs -isnot [System.Collections.IDictionary] -or -not $inputs.Contains($InputName)) {
+                continue
+            }
+
+            $value = [string]$inputs[$InputName]
+            $versionMatch = [regex]::Match($value, '^v?' + $SemanticVersionPattern + '$')
+            if (-not $versionMatch.Success) {
+                throw "Found '$InputName' for '$Action' in '$File' but the value is not a supported literal version"
+            }
+
+            [pscustomobject]@{
+                File    = $File
+                Version = $versionMatch.Groups['Version'].Value
+            }
+        }
+    }
+}
+
 function Get-PinnedToolVersionAssignments {
     <#
     .SYNOPSIS
@@ -675,6 +741,10 @@ function Get-PinnedToolVersionAssignments {
         Repository root used to resolve and contain candidate paths.
     .PARAMETER PowerShellVariable
         Optional PowerShell variable name used in assignment statements.
+    .PARAMETER GitHubAction
+        Optional GitHub Action whose workflow input contains the tool version.
+    .PARAMETER GitHubActionInput
+        GitHub Action input name containing the tool version.
     .OUTPUTS
         PSCustomObject records with File and Version properties.
     #>
@@ -691,10 +761,20 @@ function Get-PinnedToolVersionAssignments {
         [string]$RepoRoot,
 
         [Parameter()]
-        [string]$PowerShellVariable
+        [string]$PowerShellVariable,
+
+        [Parameter()]
+        [string]$GitHubAction,
+
+        [Parameter()]
+        [string]$GitHubActionInput
     )
 
-    $semanticVersion = '(?<Version>[0-9]+(?:\.[0-9]+)+(?:[-+][0-9A-Za-z.-]+)?)'
+    if ([string]::IsNullOrWhiteSpace($GitHubAction) -ne [string]::IsNullOrWhiteSpace($GitHubActionInput)) {
+        throw 'GitHubAction and GitHubActionInput must be provided together'
+    }
+
+    $semanticVersion = '(?<Version>' + $script:PinSemanticVersionPattern + ')'
     $shellVariablePattern = [regex]::Escape($ShellVariable)
     $shellPatterns = New-PinShellAssignmentPatterns `
         -ShellVariable $ShellVariable `
@@ -714,6 +794,17 @@ function Get-PinnedToolVersionAssignments {
         }
 
         $extension = [System.IO.Path]::GetExtension($canonicalPath)
+        if ($extension -in @('.yml', '.yaml')) {
+            if ($GitHubAction) {
+                Get-GitHubActionInputVersionAssignments `
+                    -Content $content `
+                    -File $file `
+                    -Action $GitHubAction `
+                    -InputName $GitHubActionInput `
+                    -SemanticVersionPattern $semanticVersion
+            }
+            continue
+        }
         if ($extension -eq '.ps1') {
             if (
                 $PowerShellVariable -and
@@ -763,6 +854,121 @@ function Get-PinnedToolVersionAssignments {
     @($pins | Sort-Object File, Version -Unique)
 }
 
+function Get-EligibleToolRelease {
+    <#
+    .SYNOPSIS
+        Selects the stable release used for freshness comparison.
+    .DESCRIPTION
+        Quarantines the single newest stable release until it reaches the
+        configured publication age. The immediately preceding stable release
+        remains eligible during that interval.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [object[]]$Releases,
+
+        [Parameter()]
+        [ValidateRange(0, 365)]
+        [int]$QuarantineDays = 7,
+
+        [Parameter()]
+        [datetimeoffset]$Now = [datetimeoffset]::UtcNow
+    )
+
+    $stableReleases = foreach ($release in $Releases) {
+        if (
+            $null -eq $release.tag_name -or
+            $null -eq $release.published_at -or
+            $null -eq $release.draft -or
+            $null -eq $release.prerelease
+        ) {
+            throw 'Release metadata must include tag_name, published_at, draft, and prerelease'
+        }
+        if ($release.draft -or $release.prerelease) {
+            continue
+        }
+
+        try {
+            $publishedAt = [datetimeoffset]::Parse(
+                [string]$release.published_at,
+                [System.Globalization.CultureInfo]::InvariantCulture
+            ).ToUniversalTime()
+        }
+        catch {
+            throw "Release '$($release.tag_name)' has an invalid published_at timestamp"
+        }
+
+        $tag = [string]$release.tag_name
+        $version = $tag -replace '^v', ''
+        if ($version -notmatch ('^' + $script:PinSemanticVersionPattern + '$')) {
+            throw "Release tag '$tag' is not a supported semantic version"
+        }
+
+        [pscustomobject]@{
+            Tag         = $tag
+            Version     = $version
+            PublishedAt = $publishedAt
+        }
+    }
+
+    $orderedReleases = @($stableReleases | Sort-Object PublishedAt -Descending)
+    if ($orderedReleases.Count -eq 0) {
+        throw 'No stable releases were returned'
+    }
+
+    $newest = $orderedReleases[0]
+    $quarantineEndsAt = $newest.PublishedAt.AddDays($QuarantineDays)
+    $quarantineCutoff = $Now.ToUniversalTime().AddDays(-$QuarantineDays)
+    $isQuarantined = $newest.PublishedAt -gt $quarantineCutoff
+    if ($isQuarantined -and $orderedReleases.Count -lt 2) {
+        throw 'The newest stable release is quarantined and no preceding stable release was returned'
+    }
+    $eligible = if ($isQuarantined) { $orderedReleases[1] } else { $newest }
+
+    [pscustomobject][ordered]@{
+        LatestTag           = $newest.Tag
+        LatestVersion       = $newest.Version
+        LatestPublishedAt   = $newest.PublishedAt
+        EligibleTag         = $eligible.Tag
+        EligibleVersion     = $eligible.Version
+        EligiblePublishedAt = $eligible.PublishedAt
+        QuarantineEndsAt    = $quarantineEndsAt
+        IsQuarantined       = $isQuarantined
+    }
+}
+
+function ConvertFrom-GitHubReleasePage {
+    <#
+    .SYNOPSIS
+        Flattens release arrays returned by gh api --paginate --slurp.
+    #>
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [object[]]$Pages
+    )
+
+    foreach ($page in $Pages) {
+        if (
+            $page -is [System.Collections.IEnumerable] -and
+            $page -isnot [string] -and
+            $page -isnot [System.Collections.IDictionary]
+        ) {
+            foreach ($release in $page) {
+                $release
+            }
+        }
+        else {
+            $page
+        }
+    }
+}
+
 function Get-PinnedToolFreshness {
     <#
     .SYNOPSIS
@@ -790,8 +996,10 @@ function Get-PinnedToolFreshness {
 }
 
 Export-ModuleMember -Function @(
+    'ConvertFrom-GitHubReleasePage',
     'Get-PinCandidateFiles',
     'Get-PinnedToolVersionAssignments',
+    'Get-EligibleToolRelease',
     'Get-PowerShellAssignments',
     'Get-PinnedToolFreshness'
 )
