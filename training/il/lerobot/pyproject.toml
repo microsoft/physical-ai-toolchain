@@ -61,7 +61,7 @@ dependencies = [
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
     "gitpython==3.1.62",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
-    "urllib3==2.7.0",
+    "urllib3==2.8.0",
     # Pin cryptography to 50.0.1 (Dependabot-tracked in the lerobot-dependencies
     # group). 48.0.1 is the security floor: wheels below it bundle a vulnerable
     # OpenSSL (GHSA-537c-gmf6-5ccf, high severity). Transitive via azure-identity,
