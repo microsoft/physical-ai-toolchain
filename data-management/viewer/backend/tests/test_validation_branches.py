@@ -5,8 +5,6 @@ from fastapi import HTTPException
 
 from src.api.validation import (
     SanitizedModel,
-    _parse_int_csv,
-    _sanitize_nested_value,
     path_int_param,
     path_string_param,
     query_bool_param,
@@ -16,15 +14,6 @@ from src.api.validation import (
     range_header_param,
     validate_safe_string,
 )
-
-
-class TestSanitizeNested:
-    def test_list_tuple_set_dict_recursion(self):
-        result = _sanitize_nested_value(["a\nb", ("c\rd",), {"e\nf"}, {"k\nk": "v\rv"}])
-        assert result == ["ab", ("cd",), {"ef"}, {"kk": "vv"}]
-
-    def test_passthrough_non_string(self):
-        assert _sanitize_nested_value(42) == 42
 
 
 class TestSanitizedModel:
@@ -39,6 +28,20 @@ class TestSanitizedModel:
         assert m.tags == ["xy"]
         assert m.meta == {"kk": "vv"}
 
+    def test_sanitizes_supported_nested_containers(self):
+        class M(SanitizedModel):
+            value: object
+
+        model = M(value=["a\nb", ("c\rd",), {"e\nf"}, {"k\nk": "v\rv"}])
+        assert model.value == ["ab", ("cd",), {"ef"}, {"kk": "vv"}]
+
+    def test_preserves_non_string_values(self):
+        class M(SanitizedModel):
+            value: object
+
+        model = M(value=42)
+        assert model.value == 42
+
 
 class TestValidateSafeString:
     @pytest.mark.parametrize("bad", ["a/b", "a\\b", ".", "..", "x\x00y"])
@@ -46,6 +49,7 @@ class TestValidateSafeString:
         with pytest.raises(HTTPException) as exc:
             validate_safe_string(bad, label="thing")
         assert exc.value.status_code == 400
+        assert exc.value.detail == f"Invalid thing: '{bad}'"
 
     def test_rejects_empty_when_not_allowed(self):
         with pytest.raises(HTTPException) as exc:
@@ -57,16 +61,20 @@ class TestValidateSafeString:
 
     def test_pattern_string_compiled(self):
         assert validate_safe_string("abc", pattern=r"^[a-z]+$") == "abc"
-        with pytest.raises(HTTPException):
+        with pytest.raises(HTTPException) as exc:
             validate_safe_string("ABC", pattern=r"^[a-z]+$")
+        assert exc.value.status_code == 400
+        assert exc.value.detail == "Invalid value: 'ABC'"
 
 
 class TestDependencyFactories:
     def test_path_string_dependency_validates(self):
         dep = path_string_param("name", label="name")
         assert dep(value="ok") == "ok"
-        with pytest.raises(HTTPException):
+        with pytest.raises(HTTPException) as exc:
             dep(value="bad/name")
+        assert exc.value.status_code == 400
+        assert exc.value.detail == "Invalid name: 'bad/name'"
 
     def test_query_string_none_returns_none(self):
         dep = query_string_param("q", default=None)
@@ -99,16 +107,20 @@ class TestDependencyFactories:
         assert dep(raw_value="1,2,3") == [1, 2, 3]
 
 
-class TestParseIntCsv:
+class TestQueryCsvIntsErrors:
     def test_empty_raises(self):
+        dep = query_csv_ints_param("ids")
         with pytest.raises(HTTPException) as exc:
-            _parse_int_csv("  ,  ", "ids")
-        assert "at least one integer" in exc.value.detail
+            dep(raw_value="  ,  ")
+        assert exc.value.status_code == 400
+        assert exc.value.detail == "ids must contain at least one integer"
 
     def test_invalid_format_raises(self):
+        dep = query_csv_ints_param("ids")
         with pytest.raises(HTTPException) as exc:
-            _parse_int_csv("1,abc", "ids")
-        assert "Invalid ids format" in exc.value.detail
+            dep(raw_value="1,abc")
+        assert exc.value.status_code == 400
+        assert exc.value.detail == "Invalid ids format. Use comma-separated integers."
 
 
 class TestRangeHeader:
@@ -122,18 +134,24 @@ class TestRangeHeader:
 
     def test_missing_start_raises(self):
         dep = range_header_param()
-        with pytest.raises(HTTPException):
+        with pytest.raises(HTTPException) as exc:
             dep(header_value="bytes=-10")
+        assert exc.value.status_code == 400
+        assert exc.value.detail == "Invalid Range header"
 
     def test_end_less_than_start_raises(self):
         dep = range_header_param()
-        with pytest.raises(HTTPException):
+        with pytest.raises(HTTPException) as exc:
             dep(header_value="bytes=10-5")
+        assert exc.value.status_code == 400
+        assert exc.value.detail == "Invalid Range header"
 
     def test_non_numeric_raises(self):
         dep = range_header_param()
-        with pytest.raises(HTTPException):
+        with pytest.raises(HTTPException) as exc:
             dep(header_value="bytes=abc-xyz")
+        assert exc.value.status_code == 400
+        assert exc.value.detail == "Invalid Range header"
 
     def test_open_ended(self):
         dep = range_header_param()
