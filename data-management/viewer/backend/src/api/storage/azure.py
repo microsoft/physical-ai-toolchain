@@ -85,9 +85,10 @@ class AzureBlobStorageAdapter(StorageAdapter):
         self.sas_token = sas_token
         self.use_managed_identity = use_managed_identity
         self._client: BlobServiceClient | None = None
+        self._credential: DefaultAzureCredential | None = None
 
     async def _get_client(self) -> BlobServiceClient:
-        """Get or create the blob service client."""
+        """Get or create the client with the SDK's default exponential retry policy."""
         if self._client is None:
             account_url = f"https://{self.account_name}.blob.core.windows.net"
 
@@ -97,10 +98,10 @@ class AzureBlobStorageAdapter(StorageAdapter):
                     credential=self.sas_token,
                 )
             else:
-                credential = DefaultAzureCredential()
+                self._credential = DefaultAzureCredential()
                 self._client = BlobServiceClient(
                     account_url=account_url,
-                    credential=credential,
+                    credential=self._credential,
                 )
 
         return self._client
@@ -337,7 +338,12 @@ class AzureBlobStorageAdapter(StorageAdapter):
             raise StorageError(f"Failed to delete blob {blob_path}: {e}", cause=e)
 
     async def close(self) -> None:
-        """Close the blob service client."""
-        if self._client is not None:
-            await self._client.close()
-            self._client = None
+        """Close the blob service client and managed credential."""
+        client, self._client = self._client, None
+        credential, self._credential = self._credential, None
+        try:
+            if client is not None:
+                await client.close()
+        finally:
+            if credential is not None:
+                await credential.close()

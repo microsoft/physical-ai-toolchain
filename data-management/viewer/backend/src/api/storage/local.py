@@ -60,11 +60,10 @@ class LocalStorageAdapter(StorageAdapter):
         )
 
     async def _read_content(self, path: Path) -> str | None:
-        safe_base = os.path.realpath(str(self.base_path))
-        normalized = os.path.normpath(os.path.realpath(str(path)))
-        if not normalized.startswith(safe_base + os.sep):
-            raise StorageError("Annotation path escapes the configured dataset directory")
-        safe_path = Path(normalized)
+        try:
+            safe_path = await asyncio.to_thread(validate_path_containment, path, self.base_path)
+        except HTTPException as exc:
+            raise StorageError("Annotation path escapes the configured dataset directory", cause=exc) from exc
         if not await aiofiles.os.path.exists(safe_path):
             return None
         async with aiofiles.open(safe_path, encoding="utf-8") as file:
@@ -103,7 +102,7 @@ class LocalStorageAdapter(StorageAdapter):
         Returns:
             EpisodeAnnotationFile if annotations exist, None otherwise.
         """
-        file_path = self._get_annotation_path(dataset_id, episode_index)
+        file_path = await asyncio.to_thread(self._get_annotation_path, dataset_id, episode_index)
 
         try:
             if not await aiofiles.os.path.exists(file_path):
@@ -125,7 +124,7 @@ class LocalStorageAdapter(StorageAdapter):
         episode_index: int,
     ) -> VersionedValue[EpisodeAnnotationFile]:
         """Retrieve an annotation and its strong content ETag."""
-        file_path = self._get_annotation_path(dataset_id, episode_index)
+        file_path = await asyncio.to_thread(self._get_annotation_path, dataset_id, episode_index)
         try:
             content = await self._read_content(file_path)
             if content is None:
@@ -163,8 +162,8 @@ class LocalStorageAdapter(StorageAdapter):
         Raises:
             StorageError: If the save operation fails.
         """
-        file_path = self._get_annotation_path(dataset_id, episode_index)
-        annotations_dir = self._get_annotations_dir(dataset_id)
+        file_path = await asyncio.to_thread(self._get_annotation_path, dataset_id, episode_index)
+        annotations_dir = file_path.parent
 
         try:
             async with self._resource_lock(file_path):
@@ -214,7 +213,7 @@ class LocalStorageAdapter(StorageAdapter):
         Returns:
             Sorted list of episode indices that have annotations.
         """
-        annotations_dir = self._get_annotations_dir(dataset_id)
+        annotations_dir = await asyncio.to_thread(self._get_annotations_dir, dataset_id)
 
         try:
             if not await aiofiles.os.path.exists(annotations_dir):
@@ -252,7 +251,7 @@ class LocalStorageAdapter(StorageAdapter):
         Returns:
             True if annotations were deleted, False if they didn't exist.
         """
-        file_path = self._get_annotation_path(dataset_id, episode_index)
+        file_path = await asyncio.to_thread(self._get_annotation_path, dataset_id, episode_index)
 
         try:
             async with self._resource_lock(file_path):
