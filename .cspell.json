@@ -41,7 +41,12 @@
 		"fixpoint",
 		"freqs",
 		"fstring",
+<<<<<<< HEAD
 		"getconf",
+=======
+		"getegid",
+		"geteuid",
+>>>>>>> 1d196a23a8fd202e9f8e32232a3c4ff7a29f2a97
 		"getparam",
 		"getserverlabel",
 		"getfixturevalue",
