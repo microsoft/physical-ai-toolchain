@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Troubleshooting Guide
 description: Symptom-based resolution guide for common errors in the robotics reference architecture
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-21
+ms.date: 2026-09-30
 ms.topic: troubleshooting
 keywords:
   - troubleshooting
@@ -201,10 +201,10 @@ Switch model validation mode from `ro_mount` to `download` in the AzureML job YA
 
 **Resolution:**
 
-Use the NumPy version pinned in `training/rl/pyproject.toml`. The Isaac Lab 3.0 Post 1 image is validated with NumPy 2.5.1. Do not replace the image-provided PyTorch or CUDA packages.
+Use the NumPy version pinned in `training/rl/pyproject.toml`. The Isaac Lab 3.0 Post 1 runtime used by OSMO 6.3.1 is validated with NumPy 2.5.3. Do not replace the image-provided PyTorch or CUDA packages.
 
 ```bash
-uv pip install "numpy==2.5.1"
+uv pip install "numpy==2.5.3"
 ```
 
 ### Isaac Sim process hangs after training completes

@@ -177,7 +177,7 @@ Example:
 | `--num-envs` / `-n`            | `2048`                                                                   | Number of parallel environments                  | `NUM_ENVS`                    |
 | `--max-iterations` / `-m`      | unset                                                                    | Max iterations (empty to unset)                  | `MAX_ITERATIONS`              |
 | `--image` / `-i`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:3.0.0-beta2-post1`) | Container image                                  | `IMAGE`                       |
-| `--payload-root` / `-p`        | `/workspace/isaac_payload`                                               | Runtime extraction root                          | `PAYLOAD_ROOT`                |
+| `--payload-root` / `-p`        | `/tmp/isaac_payload`                                                     | Runtime extraction root                          | `PAYLOAD_ROOT`                |
 | `--backend` / `-b`             | `skrl`                                                                   | Training backend: `skrl` (default), `rsl_rl`     | `TRAINING_BACKEND`            |
 | `--checkpoint-uri` / `-c`      | unset                                                                    | MLflow checkpoint artifact URI                   | `CHECKPOINT_URI`              |
 | `--checkpoint-mode` / `-M`     | `from-scratch`                                                           | `from-scratch`, `warm-start`, `resume`, `fresh`  | `CHECKPOINT_MODE`             |

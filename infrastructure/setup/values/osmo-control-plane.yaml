@@ -1,7 +1,7 @@
 # Global configuration shared across all OSMO services
 global:
   osmoImageLocation: nvcr.io/nvidia/osmo
-  osmoImageTag: "6.3.0"
+  osmoImageTag: "6.3.1"
   serviceAccountName: osmo-control-plane
 
   logs:
@@ -24,8 +24,8 @@ services:
 
     workflow:
       backend_images:
-        init: "nvcr.io/nvidia/osmo/init-container:6.3.0@sha256:1071863497eba749e4f680a336a08e0fe48cba7d0ddea402fecb732bb6de2041"
-        client: "nvcr.io/nvidia/osmo/client:6.3.0@sha256:b2073f3f7cae0936bc66153eb8ff879b14679557a686aa05c3677f676a37afd7"
+        init: "nvcr.io/nvidia/osmo/init-container:6.3.1@sha256:b2669a4b514ad315a59c153dd5d8b4b906e40f9a9ec8cc65dd6c157692513cd2"
+        client: "nvcr.io/nvidia/osmo/client:6.3.1@sha256:b26ef864a85394a05e696191668f0d02b8861e1912cbd08040673461fc2b7d63"
       workflow_data:
         credential:
           endpoint: ""
