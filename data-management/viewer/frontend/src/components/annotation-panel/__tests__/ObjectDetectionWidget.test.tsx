@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -84,6 +84,28 @@ describe('ObjectDetectionWidget', () => {
     render(<ObjectDetectionWidget />)
     expect(screen.getByRole('button', { name: /detect/i })).toBeInTheDocument()
     expect(screen.getByText(/reference frame/i)).toBeInTheDocument()
+  })
+
+  it('keeps camera selection controlled when cameras arrive asynchronously', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    useEpisodeStore.getState().setCurrentEpisode({ ...episode, cameras: [] })
+    render(<ObjectDetectionWidget />)
+
+    act(() => {
+      useEpisodeStore.getState().setCurrentEpisode(episode)
+    })
+
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /camera/i })).toBeInTheDocument(),
+    )
+    await waitFor(() => {
+      expect(
+        consoleWarn.mock.calls.some(([message]) =>
+          String(message).includes('uncontrolled to controlled'),
+        ),
+      ).toBe(false)
+    })
+    consoleWarn.mockRestore()
   })
 
   it('adds and removes detection labels', async () => {

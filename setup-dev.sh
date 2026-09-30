@@ -4,6 +4,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${SCRIPT_DIR}/.venv"
 DISABLE_VENV=false
+CONFIG_PREVIEW=false
+
+show_help() {
+  cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Prepare the local Physical AI Toolchain development environment.
+
+Options:
+    --disable-venv        Install packages without creating .venv
+    --config-preview      Print local configuration and exit without changes
+    --help, -h            Show this help message
+EOF
+}
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -11,8 +25,17 @@ while [[ $# -gt 0 ]]; do
       DISABLE_VENV=true
       shift
       ;;
+    --config-preview)
+      CONFIG_PREVIEW=true
+      shift
+      ;;
+    --help|-h)
+      show_help
+      exit 0
+      ;;
     *)
       echo "Unknown option: $1" >&2
+      show_help >&2
       exit 1
       ;;
   esac
@@ -20,6 +43,15 @@ done
 
 # shellcheck source=scripts/lib/common.sh
 source "${SCRIPT_DIR}/scripts/lib/common.sh"
+
+if [[ "${CONFIG_PREVIEW}" == "true" ]]; then
+  section "Configuration Preview"
+  print_kv "Repository" "${SCRIPT_DIR}"
+  print_kv "Python" "$(cat "${SCRIPT_DIR}/.python-version")"
+  print_kv "Virtual Environment" "$([[ "${DISABLE_VENV}" == "true" ]] && echo disabled || echo "${VENV_DIR}")"
+  print_kv "Mutation" "None"
+  exit 0
+fi
 
 # Preamble: Recommend devcontainer for easier setup
 echo
@@ -58,9 +90,9 @@ verify_sha256() {
 
 section "UV Package Manager Setup"
 
+UV_VERSION="0.12.8"
 if ! command -v uv &>/dev/null; then
   info "Installing uv package manager..."
-  UV_VERSION="0.12.8"
   UV_ARCH=$(uname -m)
   case "${UV_ARCH}" in
     x86_64)  UV_TRIPLE="x86_64-unknown-linux-gnu"; UV_SHA256="2e2b37e9811e17675a9e70bed5e1a58fc8c0388be63d751d72cc735188c149ff" ;;
@@ -75,6 +107,7 @@ if ! command -v uv &>/dev/null; then
   rm -rf /tmp/uv.tar.gz "/tmp/uv-${UV_TRIPLE}"
 fi
 
+[[ "$(uv --version)" == "uv ${UV_VERSION}"* ]] || fatal "Expected uv ${UV_VERSION}; found $(uv --version)"
 info "Using uv: $(uv --version)"
 
 # ===================================================================
@@ -160,11 +193,8 @@ else
   fi
 fi
 
-info "Syncing dependencies from pyproject.toml..."
-uv sync
-
-info "Locking dependencies..."
-uv lock
+info "Syncing dependencies from uv.lock..."
+uv sync --frozen
 
 section "Isaac Lab Setup"
 
@@ -176,8 +206,8 @@ if [[ -d "${ISAACLAB_DIR}" ]]; then
 else
   info "Cloning Isaac Lab for intellisense/Pylance support..."
   mkdir -p "${SCRIPT_DIR}/external"
-  # Pin to the commit matching the runtime image tag (v2.3.2); bump with the image.
-  ISAACLAB_COMMIT="37ddf626871758333d6ed89cf64ad702aef127d0"
+  # Pin to the commit matching the runtime image tag; bump with the image.
+  ISAACLAB_COMMIT="ffff603eafc6b74264a5261cc0183d6a65390d78"
   # Clone-and-checkout into a temp dir, then move into place so an interrupted run never
   # leaves a half-pinned clone that a re-run would skip (the directory guard above).
   ISAACLAB_TMP="$(mktemp -d "${SCRIPT_DIR}/external/.IsaacLab.XXXXXX")"

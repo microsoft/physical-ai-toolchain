@@ -42,15 +42,12 @@ _fake_utils = ModuleType("training.utils")
 _fake_utils.AzureConfigError = _AzureConfigError
 _fake_utils.AzureMLContext = _AzureMLContext
 _fake_utils.bootstrap_azure_ml = _bootstrap_azure_ml
-sys.modules.setdefault("training.utils", _fake_utils)
 
 _fake_utils_context = ModuleType("training.utils.context")
 _fake_utils_context.AzureStorageContext = _AzureStorageContext
-sys.modules.setdefault("training.utils.context", _fake_utils_context)
 
 _fake_launch = ModuleType("training.rl.scripts.launch")
 _fake_launch._ensure_dependencies = MagicMock()
-sys.modules.setdefault("training.rl.scripts.launch", _fake_launch)
 
 _fake_azure = ModuleType("azure")
 _fake_azure_identity = ModuleType("azure.identity")
@@ -63,8 +60,6 @@ class _DefaultAzureCredential:
 
 _fake_azure_identity.DefaultAzureCredential = _DefaultAzureCredential
 _fake_azure.identity = _fake_azure_identity
-sys.modules.setdefault("azure", _fake_azure)
-sys.modules.setdefault("azure.identity", _fake_azure_identity)
 
 _fake_mlflow = MagicMock(name="mlflow")
 
@@ -81,13 +76,20 @@ class _RunCtx:
 
 
 _fake_mlflow.start_run = MagicMock(return_value=_RunCtx())
-sys.modules.setdefault("mlflow", _fake_mlflow)
-
-
-_MOD = load_training_module(
-    "training_rl_scripts_smoke_test_azure",
-    "training/rl/scripts/smoke_test_azure.py",
-)
+with pytest.MonkeyPatch.context() as imports:
+    for name, module in {
+        "training.utils": _fake_utils,
+        "training.utils.context": _fake_utils_context,
+        "training.rl.scripts.launch": _fake_launch,
+        "azure": _fake_azure,
+        "azure.identity": _fake_azure_identity,
+        "mlflow": _fake_mlflow,
+    }.items():
+        imports.setitem(sys.modules, name, module)
+    _MOD = load_training_module(
+        "training_rl_scripts_smoke_test_azure",
+        "training/rl/scripts/smoke_test_azure.py",
+    )
 
 
 @pytest.fixture(autouse=True)

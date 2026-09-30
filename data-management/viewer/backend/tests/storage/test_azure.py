@@ -635,3 +635,22 @@ class TestAzureBlobStorageAdapterErrorPaths:
         # Should not raise even though _client is None
         await adapter.close()
         assert adapter._client is None
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    async def test_close_releases_credential_when_client_close_fails(self):
+        from src.api.storage.azure import AzureBlobStorageAdapter
+
+        adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", use_managed_identity=True)
+        mock_client = MagicMock()
+        mock_client.close = AsyncMock(side_effect=RuntimeError("close failed"))
+        mock_credential = MagicMock()
+        mock_credential.close = AsyncMock()
+        adapter._client = mock_client
+        adapter._credential = mock_credential
+
+        with pytest.raises(RuntimeError, match="close failed"):
+            await adapter.close()
+
+        mock_credential.close.assert_awaited_once()
+        assert adapter._client is None
+        assert adapter._credential is None

@@ -51,6 +51,19 @@ export interface DatasetInfo {
 }
 
 /** Capabilities available for a dataset */
+export interface AcceptedDatasetContract {
+  datasetId: string
+  outputAdapterId: string
+  outputAdapterVersion: string
+  viewerAdapterId: string
+  profileId: string
+  profileSha256: string
+  captureProvenanceSha256: string
+  exportValidationSha256: string
+  captureFeatures: Array<Record<string, unknown>>
+  sensors: Array<Record<string, unknown>>
+}
+
 export interface DatasetCapabilities {
   /** Whether h5py is installed and available on backend */
   hdf5Support: boolean
@@ -62,6 +75,10 @@ export interface DatasetCapabilities {
   isLerobotDataset: boolean
   /** Number of episodes detected */
   episodeCount: number
+  /** Verified adapter/profile/provenance contract when emitted by the exporter */
+  datasetContract: AcceptedDatasetContract | null
+  /** Whether the optional VLM judge API is mounted */
+  vlmJudgeEnabled: boolean
 }
 
 // ============================================================================

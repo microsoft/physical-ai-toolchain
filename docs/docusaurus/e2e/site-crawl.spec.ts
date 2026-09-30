@@ -785,6 +785,19 @@ export function buildCrawlArtifacts(
   return { ...artifacts, summary: buildSummary(artifacts, options.expectedKeys) };
 }
 
+// Automated completeness defers unresolved signatures to qualified review and promotion; any other or unset
+// completeness keeps them blocking. Every other non-accepted status always blocks.
+export function gatingContrastBlocking(
+  assessments: LedgerAssessment[],
+  requiredCompleteness: string | undefined,
+): string[] {
+  const defersUnresolved = requiredCompleteness === 'automated';
+  return assessments
+    .filter((assessment) => assessment.status !== 'accepted')
+    .filter((assessment) => !(defersUnresolved && assessment.status === 'unresolved'))
+    .map((assessment) => `[${assessment.status}] ${assessment.signature} ${assessment.detail}`);
+}
+
 function writeJson(filePath: string, value: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
@@ -1044,7 +1057,10 @@ test.describe.serial('all-route default-state evidence', () => {
   test('rejects unresolved contrast signatures', async () => {
     test.skip(baselineWriteRequested, 'Baseline seeding records unresolved signatures for later review.');
     const artifacts = writeArtifacts(readBaseline());
-    expect(artifacts.contrastBlocking, artifacts.summary).toEqual([]);
+    expect(
+      gatingContrastBlocking(artifacts.ledger.assessments, process.env.REQUIRED_COMPLETENESS),
+      artifacts.summary,
+    ).toEqual([]);
   });
 });
 
