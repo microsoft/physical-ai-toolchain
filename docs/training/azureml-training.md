@@ -3,7 +3,7 @@ sidebar_position: 2
 title: Azure ML Training Workflows
 description: Submit Isaac Lab and LeRobot training jobs to Azure Machine Learning
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-29
+ms.date: 2026-09-30
 ms.topic: how-to
 keywords:
   - azure ml
@@ -31,6 +31,7 @@ Selected RL, LeRobot, and software-in-the-loop (SiL) examples, not an exhaustive
 | `train.yaml`               | Isaac Lab SKRL training    | `training/rl/scripts/submit-azureml-training.sh`               |
 | `isaaclab-evaluation.yaml` | Isaac Lab evaluation       | `evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh` |
 | `lerobot-train.yaml`       | LeRobot behavioral cloning | `training/il/scripts/submit-azureml-lerobot-training.sh`       |
+| `gpu-smoke.yaml`           | GPU target smoke test      | `training/smoke/scripts/submit-azureml-gpu-smoke.sh`           |
 
 ## ⚙️ Isaac Lab Training Parameters
 
@@ -131,6 +132,37 @@ LeRobot training:
   --dataset-repo-id lerobot/aloha_sim_insertion_human \
   --policy-type act
 ```
+
+## 🩺 Smoke-Test a GPU Target
+
+Before you commit GPU time to training, prove that an InstanceType gets a working GPU and that the services training depends on are reachable from inside a job:
+
+```bash
+./training/smoke/scripts/submit-azureml-gpu-smoke.sh --instance-type gpu-a10-1x --stream
+```
+
+The job trains a small model for 200 steps on one GPU, which takes a few minutes. It runs these checks, and a failure in one doesn't stop the others:
+
+| Check              | Passes when                                                                                           |
+|--------------------|-------------------------------------------------------------------------------------------------------|
+| `device`           | PyTorch sees a CUDA device (it records the GPU, driver, and CUDA versions)                            |
+| `matmul`           | A timed half-precision matmul matches a float64 reference                                             |
+| `azure_workspace`  | The job identity gets a token, reads the workspace, and configures MLflow tracking                    |
+| `mlflow_run`       | The job attaches to its Azure ML MLflow run and logs parameters                                       |
+| `training`         | A small network trains on the GPU and its loss falls below half the starting loss                     |
+| `mlflow_metrics`   | Every per-step loss metric reads back from MLflow                                                     |
+| `checkpoints`      | Periodic checkpoints exist in the `checkpoints` output, and the final one reloads intact              |
+| `mlflow_artifacts` | The final checkpoint uploads as an MLflow artifact and downloads back intact through its `runs:/` URI |
+| `storage`          | The identity uploads a checkpoint to the Terraform storage account; the test blob is then deleted     |
+| `model_registry`   | The final checkpoint registers as a `custom_model` and reads back                                     |
+
+The `mlflow_artifacts` check downloads rather than lists, because MLflow 3 lists `runs:/` paths through a logged-model search that Azure ML's MLflow endpoint doesn't implement (HTTP 404). Downloads through `runs:/` URIs, which training uses to resume from checkpoints, work.
+
+With `--stream`, the script waits for the job, downloads its `checkpoints` output, and prints each check's result from `smoke-summary.json`. It exits non-zero unless the job completed and every check passed. Checks that depend on a failed check are reported as skipped, so start with the first failure.
+
+Each run leaves a job and its MLflow run in the `gpu-smoke` experiment and a new `gpu-smoke-test` model version. Pass `--skip-register-model` to skip the registry check, or `--storage-account ""` to skip the storage check.
+
+The image is PyTorch with CUDA 12.4, which runs on NVIDIA driver 550 and newer. That includes the GRID drivers AKS installs on A10 nodes. Training images built for CUDA 13 need driver 580 or newer, so a passing smoke test doesn't prove those images run on an older driver.
 
 ## 💾 Checkpoint Management
 

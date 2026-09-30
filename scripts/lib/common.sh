@@ -20,18 +20,20 @@ unset _common_sh_dir _env_local
 # scripts/update-image-digests.sh.
 #
 # derive_azureml_environment_version_from_image() below derives AzureML environment
-# versions from the checked-in Isaac Lab and LeRobot defaults. update-image-digests.sh
-# keeps the direct-submit workflow pins synchronized with those defaults.
+# versions from the checked-in Isaac Lab, LeRobot, and GPU smoke test defaults.
+# update-image-digests.sh keeps the direct-submit workflow pins synchronized with them.
 DEFAULT_ISAAC_LAB_IMAGE="${DEFAULT_ISAAC_LAB_IMAGE:-nvcr.io/nvidia/isaac-lab:3.0.0-beta2-post1@sha256:ae9c938a16df856effad6dab92115ee0dce2a8813f56847eeeccbebc008d02c4}"
 DEFAULT_LEROBOT_TRAIN_IMAGE="${DEFAULT_LEROBOT_TRAIN_IMAGE:-pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407}"
 DEFAULT_LEROBOT_EVAL_IMAGE="${DEFAULT_LEROBOT_EVAL_IMAGE:-pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407}"
 DEFAULT_GROOT_IMAGE="${DEFAULT_GROOT_IMAGE:-pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel@sha256:0cf3402e946b7c384ba943ee05c90b4c5a4a05227923921f2b0918c011cfaf56}"
+# CUDA 12.4 runs on NVIDIA driver 550 and newer, including AKS-managed GRID drivers.
+DEFAULT_AZUREML_SMOKE_IMAGE="${DEFAULT_AZUREML_SMOKE_IMAGE:-pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime@sha256:77f17f843507062875ce8be2a6f76aa6aa3df7f9ef1e31d9d7432f4b0f563dee}"
 # isaac-lab tag, available to callers that need the tag without the digest.
 _isaac_ref="${DEFAULT_ISAAC_LAB_IMAGE%@*}"
 DEFAULT_ISAAC_LAB_IMAGE_VERSION="${DEFAULT_ISAAC_LAB_IMAGE_VERSION:-${_isaac_ref##*:}}"
 unset _isaac_ref
 export DEFAULT_ISAAC_LAB_IMAGE DEFAULT_ISAAC_LAB_IMAGE_VERSION
-export DEFAULT_LEROBOT_TRAIN_IMAGE DEFAULT_LEROBOT_EVAL_IMAGE DEFAULT_GROOT_IMAGE
+export DEFAULT_LEROBOT_TRAIN_IMAGE DEFAULT_LEROBOT_EVAL_IMAGE DEFAULT_GROOT_IMAGE DEFAULT_AZUREML_SMOKE_IMAGE
 
 # Logging functions with color support (NO_COLOR standard: https://no-color.org)
 if [[ -z "${NO_COLOR+x}" ]]; then
