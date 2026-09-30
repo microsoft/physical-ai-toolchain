@@ -38,6 +38,11 @@ such as RUN --mount and HEALTHCHECK --start-interval. The frontend Dockerfile
 uses both, so build it with --local-build (Docker with buildx, platform
 \$DATAVIEWER_BUILD_PLATFORM, default linux/amd64).
 
+Backend images install the extras in \$DATAVIEWER_BACKEND_EXTRAS (default:
+azure analysis export auth). The yolo extra adds CUDA torch and makes the image
+larger than the 8 GB that Container Apps' Consumption profile supports, so object
+detection returns 503 on Container Apps.
+
 EXAMPLES:
     $(basename "$0")
     $(basename "$0") --tag v0.1.0
@@ -182,6 +187,12 @@ print_kv "Backend Storage" "$backend_storage_status"
 print_kv "Build Mode" "$([[ "$skip_build" == "true" ]] && echo 'Skipped' || echo "$build_mode")"
 if [[ "$skip_build" == "false" ]]; then
   print_kv "Needs BuildKit" "$([[ ${#buildkit_images[@]} -gt 0 ]] && echo "${buildkit_images[*]}" || echo 'none')"
+  if [[ "$skip_backend" == "false" ]]; then
+    print_kv "Backend Extras" "${DATAVIEWER_BACKEND_EXTRAS:-none}"
+    if [[ " $DATAVIEWER_BACKEND_EXTRAS " == *" yolo "* ]]; then
+      warn "The yolo extra makes the backend image larger than Container Apps' Consumption profile supports (8 GB)."
+    fi
+  fi
 fi
 
 if [[ "$config_preview" == "true" ]]; then
@@ -238,6 +249,7 @@ if [[ "$skip_build" == "false" ]]; then
     if [[ "$local_build" == "true" ]]; then
       docker buildx build \
         --platform "$DATAVIEWER_BUILD_PLATFORM" \
+        --build-arg "BACKEND_EXTRAS=${DATAVIEWER_BACKEND_EXTRAS}" \
         --file "$backend_dockerfile" \
         --tag "$backend_image" \
         --push \
@@ -246,6 +258,7 @@ if [[ "$skip_build" == "false" ]]; then
       az acr build \
         --registry "$acr_name" \
         --image "${DATAVIEWER_BACKEND_IMAGE}:${image_tag}" \
+        --build-arg "BACKEND_EXTRAS=${DATAVIEWER_BACKEND_EXTRAS}" \
         --file "$backend_dockerfile" \
         "$SRC_DIR/backend/"
     fi
