@@ -32,8 +32,8 @@ configure_uv() {
 
 if ! command -v uv &>/dev/null; then
   echo "Installing uv package manager..."
-  UV_VERSION="0.12.19"
-  UV_SHA256="23bf5552d220e0842b65c862097b2ebaeba0064b74eda5e565e77fd25969d8c8"
+  UV_VERSION="0.12.20"
+  UV_SHA256="6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f"
   curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/uv.tar.gz
   echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum -c --quiet -
   tar -xzf /tmp/uv.tar.gz -C /tmp

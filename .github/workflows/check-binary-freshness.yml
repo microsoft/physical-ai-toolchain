@@ -34,6 +34,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install powershell-yaml
+        run: Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Force -SkipPublisherCheck -Scope CurrentUser
+
       - name: Check pinned versions against latest releases
         id: check
         env:
@@ -97,12 +100,13 @@ jobs:
                   throw "No version assignments found for $($tool.Name) ($($tool.ShellVariable))"
               }
 
-              $releaseJson = gh api "repos/$($tool.Repo)/releases?per_page=20" 2>$null
+              $releaseJson = gh api --paginate --slurp "repos/$($tool.Repo)/releases?per_page=20" 2>$null
               if ($LASTEXITCODE -ne 0 -or -not $releaseJson) {
                   throw "Could not fetch releases for $($tool.Repo) — freshness check cannot produce reliable results"
               }
               try {
-                  $releases = @($releaseJson | ConvertFrom-Json)
+                  $releasePages = @($releaseJson | ConvertFrom-Json)
+                  $releases = @(ConvertFrom-GitHubReleasePage -Pages $releasePages)
               }
               catch {
                   throw "Could not parse releases for $($tool.Repo): $($_.Exception.Message)"

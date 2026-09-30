@@ -687,103 +687,43 @@ function Get-GitHubActionInputVersionAssignments {
         [string]$SemanticVersionPattern
     )
 
-    $lines = @($Content -split "`r?`n")
-    $actionPattern = [regex]::Escape($Action)
-    $inputPattern = [regex]::Escape($InputName)
-    $usesPattern = '^(?<Indent>\s*)(?<Dash>-\s+)?uses:\s*[''"]?' +
-        $actionPattern + '@[^''"\s#]+[''"]?\s*(?:#.*)?$'
+    if ($Content -notmatch ([regex]::Escape($Action) + '@')) {
+        return
+    }
+    if (-not (Get-Command ConvertFrom-Yaml -ErrorAction SilentlyContinue)) {
+        throw "Cannot parse monitored workflow '$File': powershell-yaml is not installed"
+    }
 
-    for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex++) {
-        $usesMatch = [regex]::Match($lines[$lineIndex], $usesPattern)
-        if (-not $usesMatch.Success) {
-            continue
-        }
+    try {
+        $workflow = ConvertFrom-Yaml -Yaml $Content -ErrorAction Stop
+    }
+    catch {
+        throw "Could not parse '$File' as YAML: $($_.Exception.Message)"
+    }
 
-        $propertyIndent = $usesMatch.Groups['Indent'].Length
-        if ($usesMatch.Groups['Dash'].Success) {
-            $propertyIndent += 2
-        }
-        $stepIndent = $usesMatch.Groups['Indent'].Length
-        $stepStart = $lineIndex
-        if (-not $usesMatch.Groups['Dash'].Success) {
-            for ($candidateIndex = $lineIndex - 1; $candidateIndex -ge 0; $candidateIndex--) {
-                $candidate = $lines[$candidateIndex]
-                if ($candidate -match '^\s*(?:#.*)?$') {
-                    continue
-                }
-                $candidateIndent = ([regex]::Match($candidate, '^\s*')).Value.Length
-                if ($candidate -match '^\s*-\s+' -and $candidateIndent -lt $propertyIndent) {
-                    $stepIndent = $candidateIndent
-                    $stepStart = $candidateIndex
-                    break
-                }
-                if ($candidateIndent -lt $propertyIndent) {
-                    break
-                }
-            }
-        }
-
-        $stepEnd = $lines.Count
-        for ($candidateIndex = $stepStart + 1; $candidateIndex -lt $lines.Count; $candidateIndex++) {
-            $line = $lines[$candidateIndex]
-            if ($line -match '^\s*(?:#.*)?$') {
+    foreach ($job in @($workflow.jobs.Values)) {
+        foreach ($step in @($job.steps)) {
+            if ($step -isnot [System.Collections.IDictionary]) {
                 continue
             }
-            $indent = ([regex]::Match($line, '^\s*')).Value.Length
-            if (
-                $indent -lt $stepIndent -or
-                ($candidateIndex -gt $stepStart -and $indent -eq $stepIndent -and $line -match '^\s*-\s+')
-            ) {
-                $stepEnd = $candidateIndex
-                break
-            }
-        }
-
-        for ($candidateIndex = $stepStart; $candidateIndex -lt $stepEnd; $candidateIndex++) {
-            if ($lines[$candidateIndex] -notmatch '^\s*with:\s*(?:#.*)?$') {
+            $uses = [string]$step['uses']
+            if ($uses -notmatch ('^' + [regex]::Escape($Action) + '@')) {
                 continue
             }
-            $withIndent = ([regex]::Match($lines[$candidateIndex], '^\s*')).Value.Length
-            if ($withIndent -ne $propertyIndent) {
+            $inputs = $step['with']
+            if ($inputs -isnot [System.Collections.IDictionary] -or -not $inputs.Contains($InputName)) {
                 continue
             }
 
-            for ($inputIndex = $candidateIndex + 1; $inputIndex -lt $stepEnd; $inputIndex++) {
-                $line = $lines[$inputIndex]
-                if ($line -match '^\s*(?:#.*)?$') {
-                    continue
-                }
-                $indent = ([regex]::Match($line, '^\s*')).Value.Length
-                if ($indent -le $withIndent) {
-                    break
-                }
+            $value = [string]$inputs[$InputName]
+            $versionMatch = [regex]::Match($value, '^v?' + $SemanticVersionPattern + '$')
+            if (-not $versionMatch.Success) {
+                throw "Found '$InputName' for '$Action' in '$File' but the value is not a supported literal version"
+            }
 
-                $inputMatch = [regex]::Match(
-                    $line,
-                    '^\s*' + $inputPattern + ':\s*(?<Value>.*?)\s*(?:#.*)?$'
-                )
-                if (-not $inputMatch.Success) {
-                    continue
-                }
-
-                $value = $inputMatch.Groups['Value'].Value.Trim()
-                if (
-                    $value.Length -ge 2 -and
-                    $value[0] -in @("'", '"') -and
-                    $value[$value.Length - 1] -eq $value[0]
-                ) {
-                    $value = $value.Substring(1, $value.Length - 2)
-                }
-                $versionMatch = [regex]::Match($value, '^v?' + $SemanticVersionPattern + '$')
-                if (-not $versionMatch.Success) {
-                    throw "Found '$InputName' for '$Action' in '$File' but the value is not a supported literal version"
-                }
-
-                [pscustomobject]@{
-                    File    = $File
-                    Version = $versionMatch.Groups['Version'].Value
-                }
-                break
+            [pscustomobject]@{
+                File    = $File
+                Version = $versionMatch.Groups['Version'].Value
             }
         }
     }
@@ -1000,6 +940,35 @@ function Get-EligibleToolRelease {
     }
 }
 
+function ConvertFrom-GitHubReleasePage {
+    <#
+    .SYNOPSIS
+        Flattens release arrays returned by gh api --paginate --slurp.
+    #>
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [object[]]$Pages
+    )
+
+    foreach ($page in $Pages) {
+        if (
+            $page -is [System.Collections.IEnumerable] -and
+            $page -isnot [string] -and
+            $page -isnot [System.Collections.IDictionary]
+        ) {
+            foreach ($release in $page) {
+                $release
+            }
+        }
+        else {
+            $page
+        }
+    }
+}
+
 function Get-PinnedToolFreshness {
     <#
     .SYNOPSIS
@@ -1027,6 +996,7 @@ function Get-PinnedToolFreshness {
 }
 
 Export-ModuleMember -Function @(
+    'ConvertFrom-GitHubReleasePage',
     'Get-PinCandidateFiles',
     'Get-PinnedToolVersionAssignments',
     'Get-EligibleToolRelease',

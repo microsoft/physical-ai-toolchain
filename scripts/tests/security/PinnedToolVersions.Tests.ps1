@@ -497,20 +497,22 @@ UV_VERSION="0.12.8"
 
     It 'Extracts a configured GitHub Action input from YAML workflows' {
         @'
-steps:
-  - name: Set up uv
-    uses: astral-sh/setup-uv@0123456789abcdef # v10.2.0
-    with:
-      version: '0.12.8'
-  - uses: astral-sh/setup-uv@fedcba9876543210
-    with:
-      version: v0.12.8
-  - name: Set up uv with reordered keys
-    with:
-      version: "0.12.8" # Binary version
-    env:
-      UV_CACHE_DIR: /tmp/uv-cache
-    uses: astral-sh/setup-uv@abcdef0123456789
+jobs:
+  test:
+    steps:
+      - name: Set up uv
+        uses: astral-sh/setup-uv@0123456789abcdef # v10.2.0
+        with:
+          version: '0.12.8'
+      - uses: astral-sh/setup-uv@fedcba9876543210
+        with:
+          "version": v0.12.8
+      - name: Set up uv with reordered keys
+        with:
+          'version': "0.12.8" # Binary version
+        env:
+          UV_CACHE_DIR: /tmp/uv-cache
+        uses: astral-sh/setup-uv@abcdef0123456789
 '@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'workflow.yml')
 
         $pins = Get-PinnedToolVersionAssignments `
@@ -526,13 +528,15 @@ steps:
 
     It 'Ignores unrelated workflow actions and missing configured inputs' {
         @'
-steps:
-  - uses: actions/setup-python@0123456789abcdef
-    with:
-      version: '0.12.8'
-  - uses: astral-sh/setup-uv@fedcba9876543210
-    with:
-      enable-cache: true
+jobs:
+  test:
+    steps:
+      - uses: actions/setup-python@0123456789abcdef
+        with:
+          version: '0.12.8'
+      - uses: astral-sh/setup-uv@fedcba9876543210
+        with:
+          enable-cache: true
 '@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'workflow.yaml')
 
         $pins = Get-PinnedToolVersionAssignments `
@@ -546,10 +550,12 @@ steps:
 
     It 'Rejects a dynamic configured GitHub Action input' {
         @'
-steps:
-  - uses: astral-sh/setup-uv@0123456789abcdef
-    with:
-      version: ${{ inputs.uv-version }}
+jobs:
+  test:
+    steps:
+      - uses: astral-sh/setup-uv@0123456789abcdef
+        with:
+          "version": ${{ inputs.uv-version }}
 '@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'workflow.yml')
 
         {
@@ -559,6 +565,49 @@ steps:
                 -GitHubAction 'astral-sh/setup-uv' `
                 -GitHubActionInput 'version'
         } | Should -Throw "*value is not a supported literal version*"
+    }
+
+    It 'Ignores action-like text inside YAML block scalars' {
+        @'
+jobs:
+  test:
+    steps:
+      - run: |
+          uses: astral-sh/setup-uv@not-a-real-step
+          with:
+            version: '9.9.9'
+      - uses: astral-sh/setup-uv@0123456789abcdef
+        with:
+          version: '0.12.8'
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'workflow.yml')
+
+        $pins = Get-PinnedToolVersionAssignments `
+            @script:Parameters `
+            -Files @('workflow.yml') `
+            -GitHubAction 'astral-sh/setup-uv' `
+            -GitHubActionInput 'version'
+
+        $pins.Count | Should -Be 1
+        $pins[0].Version | Should -Be '0.12.8'
+    }
+
+    It 'Fails closed when a monitored workflow is malformed' {
+        @'
+jobs:
+  test:
+    steps:
+      - uses: astral-sh/setup-uv@0123456789abcdef
+       with:
+          version: '0.12.8'
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'workflow.yml')
+
+        {
+            Get-PinnedToolVersionAssignments `
+                @script:Parameters `
+                -Files @('workflow.yml') `
+                -GitHubAction 'astral-sh/setup-uv' `
+                -GitHubActionInput 'version'
+        } | Should -Throw "*Could not parse 'workflow.yml' as YAML*"
     }
 
     It 'Requires both GitHub Action parameters' {
@@ -646,6 +695,45 @@ Describe 'Repository pin discovery' -Tag 'Integration' {
         @($pins.File) | Should -Contain '.github/workflows/python-lint.yml'
         @($pins.File | Where-Object { $_ -like '.github/workflows/*' }).Count | Should -Be 15
         @($pins.Version | Sort-Object -Unique).Count | Should -Be 1
+    }
+}
+
+Describe 'ConvertFrom-GitHubReleasePage' -Tag 'Unit' {
+    It 'Retains the stable predecessor from a later API page' {
+        $firstPage = @(
+            [pscustomobject]@{
+                tag_name     = '0.12.20'
+                published_at = '2026-09-28T05:00:00Z'
+                draft        = $false
+                prerelease   = $false
+            }
+        )
+        $firstPage += 1..19 | ForEach-Object {
+            [pscustomobject]@{
+                tag_name     = "0.13.0-beta.$_"
+                published_at = '2026-09-27T05:00:00Z'
+                draft        = $false
+                prerelease   = $true
+            }
+        }
+        $secondPage = @(
+            [pscustomobject]@{
+                tag_name     = '0.12.19'
+                published_at = '2026-09-18T05:00:00Z'
+                draft        = $false
+                prerelease   = $false
+            }
+        )
+
+        $releases = @(ConvertFrom-GitHubReleasePage -Pages @($firstPage, $secondPage))
+        $result = Get-EligibleToolRelease `
+            -Releases $releases `
+            -Now ([datetimeoffset]'2026-09-29T05:00:00Z') `
+            -QuarantineDays 7
+
+        $releases.Count | Should -Be 21
+        $result.LatestVersion | Should -Be '0.12.20'
+        $result.EligibleVersion | Should -Be '0.12.19'
     }
 }
 
