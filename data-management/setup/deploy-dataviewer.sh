@@ -21,8 +21,8 @@ OPTIONS:
     --tag TAG                Image tag (default: auto-generated from git SHA)
     --skip-build             Skip container image builds (use existing images)
     --skip-update            Skip container app update (build images only)
-    --skip-backend           Skip backend build/deploy
-    --skip-frontend          Skip frontend build/deploy
+    --skip-backend           Skip backend build, deploy, and auth settings
+    --skip-frontend          Skip frontend build, deploy, and Easy Auth settings
     --local-build            Build with local Docker BuildKit and push to ACR
                              instead of ACR quick builds
     --config-preview         Print configuration and exit
@@ -159,6 +159,14 @@ else
   backend_storage_status="$backend_storage_env (removes $legacy_backend_storage_env)"
 fi
 
+if [[ "$skip_update" == "true" || "$skip_frontend" == "true" ]]; then
+  easy_auth_status="Unchanged"
+elif [[ "$auth_enabled" == "true" ]]; then
+  easy_auth_status="Configured"
+else
+  easy_auth_status="Disabled"
+fi
+
 #------------------------------------------------------------------------------
 # Configuration Preview
 #------------------------------------------------------------------------------
@@ -183,6 +191,7 @@ print_kv "Identity" "${identity_id##*/}"
 print_kv "Skip Build" "$skip_build"
 print_kv "Skip Update" "$skip_update"
 print_kv "Auth Enabled" "$auth_enabled"
+print_kv "Easy Auth" "$easy_auth_status"
 print_kv "Backend Storage" "$backend_storage_status"
 print_kv "Build Mode" "$([[ "$skip_build" == "true" ]] && echo 'Skipped' || echo "$build_mode")"
 if [[ "$skip_build" == "false" ]]; then
@@ -325,88 +334,98 @@ fi
 # Configure Authentication
 #------------------------------------------------------------------------------
 
+# Auth changes apply only to the apps this run selects. With --skip-frontend,
+# the Entra app credentials and Easy Auth settings stay as they are.
 if [[ "$auth_enabled" == "true" && "$skip_update" == "false" ]]; then
 
-  section "Configuring Backend Authentication"
-  info "Setting auth env vars on $backend_app..."
-  az containerapp update \
-    --name "$backend_app" \
-    --resource-group "$rg" \
-    --set-env-vars \
-      "DATAVIEWER_AUTH_PROVIDER=easy_auth" \
-      "DATAVIEWER_AUTH_DISABLED=false" \
-      "DATAVIEWER_AZURE_TENANT_ID=${entra_tenant_id}" \
-      "DATAVIEWER_AZURE_CLIENT_ID=${entra_client_id}" \
-    --output none
+  if [[ "$skip_backend" == "false" ]]; then
+    section "Configuring Backend Authentication"
+    info "Setting auth env vars on $backend_app..."
+    az containerapp update \
+      --name "$backend_app" \
+      --resource-group "$rg" \
+      --set-env-vars \
+        "DATAVIEWER_AUTH_PROVIDER=easy_auth" \
+        "DATAVIEWER_AUTH_DISABLED=false" \
+        "DATAVIEWER_AZURE_TENANT_ID=${entra_tenant_id}" \
+        "DATAVIEWER_AZURE_CLIENT_ID=${entra_client_id}" \
+      --output none
+  fi
 
-  section "Configuring Easy Auth on Frontend"
+  if [[ "$skip_frontend" == "false" ]]; then
+    section "Configuring Easy Auth on Frontend"
 
-  # Create client secret for server-directed OAuth flow
-  info "Creating client secret for Easy Auth..."
-  client_secret=$(az ad app credential reset \
-    --id "$entra_client_id" \
-    --display-name "easy-auth" \
-    --years 2 \
-    --query password -o tsv)
+    # Create client secret for server-directed OAuth flow
+    info "Creating client secret for Easy Auth..."
+    client_secret=$(az ad app credential reset \
+      --id "$entra_client_id" \
+      --display-name "easy-auth" \
+      --years 2 \
+      --query password -o tsv)
 
-  # Enable ID token issuance (required for Easy Auth)
-  info "Enabling ID token issuance..."
-  az ad app update --id "$entra_client_id" \
-    --enable-id-token-issuance true \
-    --output none
+    # Enable ID token issuance (required for Easy Auth)
+    info "Enabling ID token issuance..."
+    az ad app update --id "$entra_client_id" \
+      --enable-id-token-issuance true \
+      --output none
 
-  # Add web redirect URI for Easy Auth callback
-  frontend_fqdn=$(az containerapp show \
-    --name "$frontend_app" \
-    --resource-group "$rg" \
-    --query 'properties.configuration.ingress.fqdn' -o tsv)
+    # Add web redirect URI for Easy Auth callback
+    frontend_fqdn=$(az containerapp show \
+      --name "$frontend_app" \
+      --resource-group "$rg" \
+      --query 'properties.configuration.ingress.fqdn' -o tsv)
 
-  info "Adding Easy Auth callback redirect URI..."
-  az ad app update --id "$entra_client_id" \
-    --web-redirect-uris "https://${frontend_fqdn}/.auth/login/aad/callback" \
-    --output none
+    info "Adding Easy Auth callback redirect URI..."
+    az ad app update --id "$entra_client_id" \
+      --web-redirect-uris "https://${frontend_fqdn}/.auth/login/aad/callback" \
+      --output none
 
-  # Configure Easy Auth identity provider
-  info "Configuring Easy Auth Microsoft provider..."
-  az containerapp auth microsoft update \
-    --name "$frontend_app" \
-    --resource-group "$rg" \
-    --client-id "$entra_client_id" \
-    --client-secret "$client_secret" \
-    --issuer "https://login.microsoftonline.com/${entra_tenant_id}/v2.0" \
-    --yes \
-    --output none
+    # Configure Easy Auth identity provider
+    info "Configuring Easy Auth Microsoft provider..."
+    az containerapp auth microsoft update \
+      --name "$frontend_app" \
+      --resource-group "$rg" \
+      --client-id "$entra_client_id" \
+      --client-secret "$client_secret" \
+      --issuer "https://login.microsoftonline.com/${entra_tenant_id}/v2.0" \
+      --yes \
+      --output none
 
-  # Require authentication for all requests
-  info "Setting unauthenticated client action to RedirectToLoginPage..."
-  az containerapp auth update \
-    --name "$frontend_app" \
-    --resource-group "$rg" \
-    --unauthenticated-client-action RedirectToLoginPage \
-    --redirect-provider azureactivedirectory \
-    --output none
+    # Require authentication for all requests
+    info "Setting unauthenticated client action to RedirectToLoginPage..."
+    az containerapp auth update \
+      --name "$frontend_app" \
+      --resource-group "$rg" \
+      --unauthenticated-client-action RedirectToLoginPage \
+      --redirect-provider azureactivedirectory \
+      --output none
+  fi
 
 elif [[ "$auth_enabled" == "false" && "$skip_update" == "false" ]]; then
 
   section "Disabling Authentication"
 
-  info "Setting auth-disabled env vars on $backend_app..."
-  az containerapp update \
-    --name "$backend_app" \
-    --resource-group "$rg" \
-    --set-env-vars "DATAVIEWER_AUTH_DISABLED=true" \
-    --remove-env-vars \
-      DATAVIEWER_AUTH_PROVIDER \
-      DATAVIEWER_AZURE_TENANT_ID \
-      DATAVIEWER_AZURE_CLIENT_ID \
-    --output none
+  if [[ "$skip_backend" == "false" ]]; then
+    info "Setting auth-disabled env vars on $backend_app..."
+    az containerapp update \
+      --name "$backend_app" \
+      --resource-group "$rg" \
+      --set-env-vars "DATAVIEWER_AUTH_DISABLED=true" \
+      --remove-env-vars \
+        DATAVIEWER_AUTH_PROVIDER \
+        DATAVIEWER_AZURE_TENANT_ID \
+        DATAVIEWER_AZURE_CLIENT_ID \
+      --output none
+  fi
 
-  info "Allowing anonymous access on $frontend_app..."
-  az containerapp auth update \
-    --name "$frontend_app" \
-    --resource-group "$rg" \
-    --enabled false \
-    --output none
+  if [[ "$skip_frontend" == "false" ]]; then
+    info "Allowing anonymous access on $frontend_app..."
+    az containerapp auth update \
+      --name "$frontend_app" \
+      --resource-group "$rg" \
+      --enabled false \
+      --output none
+  fi
 
 fi
 
@@ -422,7 +441,7 @@ print_kv "Frontend App" "$frontend_app"
 print_kv "Image Tag" "$image_tag"
 print_kv "Build" "$([[ "$skip_build" == "true" ]] && echo 'Skipped' || echo "Complete ($build_mode)")"
 print_kv "Update" "$([[ "$skip_update" == "true" ]] && echo 'Skipped' || echo 'Complete')"
-print_kv "Easy Auth" "$([[ "$auth_enabled" == "true" ]] && echo 'Configured' || echo 'Disabled')"
+print_kv "Easy Auth" "$easy_auth_status"
 print_kv "Backend Storage" "$backend_storage_status"
 [[ -n "$frontend_url" ]] && print_kv "Frontend URL" "$frontend_url"
 info "Deployment complete"
