@@ -18,6 +18,13 @@ should_create_resource_group = true
 system_node_pool_vm_size    = "Standard_D8ds_v5"
 system_node_pool_node_count = 1
 
+// Per-resource public network access; unset keys follow should_enable_public_network_access.
+// Keys: acr, azureml_workspace, key_vault, storage_account, data_lake_storage_account, postgresql,
+// redis, log_analytics, application_insights, grafana, monitor_workspace, data_collection_endpoint
+// public_network_access_overrides = {
+//   storage_account = false
+// }
+
 // AKS SKU tier and support plan (defaults: Standard, KubernetesOfficial).
 // Long-term support requires Premium.
 // aks_sku_tier     = "Premium"

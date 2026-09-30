@@ -166,6 +166,21 @@ Update output consumers to read the cluster entry from the new map output:
 terraform output -json aml_compute_clusters | jq '."gpu-cluster"'
 ```
 
+### Public network access per resource
+
+`should_enable_public_network_access` sets public network access for the platform resources: ACR, the Azure ML workspace, Key Vault, the storage accounts, PostgreSQL, Redis, Log Analytics, Application Insights, Grafana, the Monitor workspace, and the data collection endpoint. Use `public_network_access_overrides` when some of them need different exposure, for example a registry that builds images publicly while data stays private:
+
+```hcl
+should_enable_public_network_access = true
+public_network_access_overrides = {
+  storage_account = false
+  key_vault       = false
+  postgresql      = false
+}
+```
+
+The keys are `acr`, `azureml_workspace`, `key_vault`, `storage_account`, `data_lake_storage_account`, `postgresql`, `redis`, `log_analytics`, `application_insights`, `grafana`, `monitor_workspace`, and `data_collection_endpoint`. A Key Vault override also sets its firewall default action, and a PostgreSQL override also controls its public firewall rules. When exposure was changed outside Terraform, set overrides to match before the next apply so the plan doesn't reverse it.
+
 ### AKS SKU tier and long-term support
 
 The cluster uses the Standard tier and the `KubernetesOfficial` support plan unless you set `aks_sku_tier` and `aks_support_plan`. AKS long-term support keeps a Kubernetes version supported after community support ends, and it requires the Premium tier:

@@ -449,8 +449,14 @@ variable "should_enable_private_aks_cluster" {
 
 variable "should_enable_public_network_access" {
   type        = bool
-  description = "Whether to enable public network access to the Azure ML workspace"
+  description = "Whether to enable public network access on platform resources: ACR, Azure ML workspace, Key Vault, storage accounts, PostgreSQL, Redis, Log Analytics, Application Insights, Grafana, Monitor workspace, and data collection endpoint. public_network_access_overrides can change individual resources"
   default     = true
+}
+
+variable "public_network_access_overrides" {
+  type        = map(bool)
+  description = "Per-resource public network access that overrides should_enable_public_network_access. Keys: acr, azureml_workspace, key_vault, storage_account, data_lake_storage_account, postgresql, redis, log_analytics, application_insights, grafana, monitor_workspace, data_collection_endpoint"
+  default     = {}
 }
 
 variable "should_enable_storage_shared_access_key" {

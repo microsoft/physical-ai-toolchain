@@ -27,7 +27,7 @@ resource "azurerm_managed_redis" "main" {
     eviction_policy                    = "VolatileLRU"
   }
 
-  public_network_access = var.should_enable_public_network_access ? "Enabled" : "Disabled"
+  public_network_access = local.public_network_access.redis ? "Enabled" : "Disabled"
 
   timeouts {
     create = "90m"
