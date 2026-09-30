@@ -3,7 +3,7 @@ sidebar_position: 11
 title: Manage Node Pools
 description: Add, remove, and resize AKS node pools on an existing cluster
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-22
+ms.date: 2026-09-29
 ms.topic: how-to
 keywords:
   - node-pools
@@ -29,7 +29,7 @@ Examples:
 
 ## How It Works
 
-All node pools are driven by the `node_pools` Terraform variable in `infrastructure/terraform/`. The variable is a map keyed by pool name; Terraform uses `for_each` over the map to manage each pool, its subnet, NSG associations, and NAT gateway associations independently.
+All node pools are driven by the `node_pools` Terraform variable in `infrastructure/terraform/`. The variable is a map keyed by pool name; Terraform uses `for_each` over the map to manage each pool, its subnet, NSG associations, and NAT gateway associations independently. A pool that shares another pool's subnet through `subnet_pool_key` has no subnet or associations of its own.
 
 Pool changes follow the standard repo flow:
 
@@ -58,19 +58,22 @@ Script `03` deploys the selected `osmo-platforms.yaml` as a Helm values overlay.
 
 These fields on a `node_pools` entry are `ForceNew` — editing them destroys and recreates the pool under the same name:
 
-| Field                        | In-place? | Notes                                                   |
-|------------------------------|-----------|---------------------------------------------------------|
-| `vm_size`                    | No        | VMSS SKU is immutable; AKS rejects in-place SKU changes |
-| `subnet_address_prefixes`    | No        | The subnet itself is also a `ForceNew` resource         |
-| `zones`                      | No        | Availability zone is set at pool creation               |
-| `priority`                   | No        | `Regular` vs `Spot` is set at pool creation             |
-| `eviction_policy`            | No        | Tied to `priority`; only valid for `Spot`               |
-| `gpu_driver`                 | No        | Affects pool creation flags                             |
-| `node_count`                 | Yes       | When autoscaler is disabled                             |
-| `min_count`, `max_count`     | Yes       | When autoscaler is enabled                              |
-| `should_enable_auto_scaling` | Yes       | Toggling on/off updates the existing pool               |
-| `node_labels`                | Yes       | Applied to existing nodes                               |
-| `node_taints`                | Yes       | Applied to existing nodes (workloads may be evicted)    |
+| Field                          | In-place? | Notes                                                                |
+|--------------------------------|-----------|----------------------------------------------------------------------|
+| `vm_size`                      | No        | VMSS SKU is immutable; AKS rejects in-place SKU changes              |
+| `subnet_address_prefixes`      | No        | The subnet itself is also a `ForceNew` resource                      |
+| `subnet_pool_key`              | No        | Moves the pool to another subnet; add a new pool instead             |
+| `zones`                        | No        | Availability zone is set at pool creation                            |
+| `priority`                     | No        | `Regular` vs `Spot` is set at pool creation                          |
+| `eviction_policy`              | No        | Tied to `priority`; only valid for `Spot`                            |
+| `gpu_driver`                   | No        | Affects pool creation flags                                          |
+| `node_count`                   | Yes       | When autoscaler is disabled                                          |
+| `min_count`, `max_count`       | Yes       | When autoscaler is enabled                                           |
+| `should_enable_auto_scaling`   | Yes       | Toggling on/off updates the existing pool                            |
+| `node_labels`                  | Yes       | Applied to existing nodes                                            |
+| `node_taints`                  | Yes       | Applied to existing nodes (workloads may be evicted)                 |
+| `max_surge`, `max_unavailable` | Yes       | Non-Spot pools only; set at most one                                 |
+| `undrainable_node_behavior`    | Yes       | Non-Spot pools only; removing it after it was set recreates the pool |
 
 Anything in the "No" rows means choosing between two flows:
 
@@ -167,6 +170,48 @@ Use this to add capacity (different SKU, different priority, different zones) wi
 
    The OSMO-side pool/platform configuration is applied by the rerun in step 4; a successful run is the confirmation. The environment-specific pool definition lives in the generated bundle. The checked-in [`infrastructure/setup/values/osmo-platforms.yaml`](../../infrastructure/setup/values/osmo-platforms.yaml) remains an instructional fallback.
 
+### Share a Subnet with Another Pool
+
+Set `subnet_pool_key` to another entry's key when a pool should run in that entry's subnet instead of its own. The sharing entry omits `subnet_address_prefixes` and creates no subnet, NSG association, or NAT gateway association. The entry it names must own its subnet; it can't share one itself.
+
+```hcl
+node_pools = {
+  h100spot = {
+    vm_size                    = "Standard_NC40ads_H100_v5"
+    subnet_address_prefixes    = ["10.0.8.0/24"]
+    priority                   = "Spot"
+    eviction_policy            = "Delete"
+    should_enable_auto_scaling = true
+    min_count                  = 0
+    max_count                  = 1
+    node_taints                = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
+    node_labels                = { accelerator = "nvidia" }
+    gpu_driver                 = "Install"
+  }
+  h100ondemand = {
+    vm_size                   = "Standard_NC40ads_H100_v5"
+    subnet_pool_key           = "h100spot"
+    node_count                = 1
+    gpu_driver                = "Install"
+    undrainable_node_behavior = "Schedule"
+  }
+}
+```
+
+Size the owner's subnet for the nodes of every pool that uses it. Sharing also lets Terraform import a pool that was created in another pool's subnet without moving it.
+
+### Control Pool Upgrades
+
+Non-Spot pools accept three upgrade settings. When none is set, the module uses `max_surge = "10%"` with no drain timeout or soak time, as before.
+
+| Field                       | Values                   | Effect                                                                                                                                                       |
+|-----------------------------|--------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `max_surge`                 | Node count or percentage | Extra nodes AKS adds during an upgrade. Each surge node counts against quota.                                                                                |
+| `max_unavailable`           | Node count or percentage | Nodes AKS takes offline instead of adding surge nodes. `"1"` lets a single-node GPU pool upgrade without surge quota, with downtime while its node upgrades. |
+| `undrainable_node_behavior` | `Cordon` or `Schedule`   | What AKS does with a node it can't drain. Removing the setting after it was set recreates the pool.                                                          |
+
+Set at most one of `max_surge` or `max_unavailable`. Spot pools don't support upgrade settings, and the module rejects them on Spot entries.
+
 ### Remove a Pool
 
 1. Drain workloads off the pool. For OSMO workflows, stop submitting to that pool and let active workflows finish, or cordon the nodes:
@@ -233,9 +278,9 @@ Faster but disruptive. Use only when no workloads are running on the pool, or wh
 
 | Topic                       | Guidance                                                                                                                                                                                                                                                                                                                                                                                               |
 |-----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Subnet planning             | Every pool gets its own subnet. Pick a CIDR that does not overlap `aks_subnet_config` or any other pool's `subnet_address_prefixes`. AKS Overlay mode applies to pods; size the node IP space here.                                                                                                                                                                                                    |
+| Subnet planning             | Every pool gets its own subnet unless it sets `subnet_pool_key`. Pick a CIDR that does not overlap `aks_subnet_config` or any other pool's `subnet_address_prefixes`, and size a shared subnet for every pool in it. AKS Overlay mode applies to pods; size the node IP space here.                                                                                                                    |
 | OSMO flag parity            | Pass the same flags used for the initial `03-deploy-osmo.sh` run, including `--platform-values` and options such as `--use-acr`. Omitting them reverts the deployment to defaults.                                                                                                                                                                                                                     |
-| Spot constraints            | Azure rejects `upgrade_settings` for Spot pools; the Terraform module already handles this. `eviction_policy` applies only when `priority = "Spot"`.                                                                                                                                                                                                                                                   |
+| Spot constraints            | Azure rejects `upgrade_settings` for Spot pools; the Terraform module omits them and rejects `max_surge`, `max_unavailable`, and `undrainable_node_behavior` on Spot entries. `eviction_policy` applies only when `priority = "Spot"`.                                                                                                                                                                 |
 | Autoscaling                 | `min_count = 0` is allowed; the pool scales up on demand from pending pods. KAI/Volcano coscheduling requires whole-pool capacity for gang-scheduled jobs.                                                                                                                                                                                                                                             |
 | Scale-from-zero for AzureML | GPU pools used by AzureML jobs must declare `node_labels = { accelerator = "nvidia" }`. Without this static label, the cluster autoscaler cannot prove a from-zero scale-up would satisfy AzureML InstanceTypes that select on `accelerator: nvidia`, and refuses to scale. See [Azure ML Training Workflows — Scale-from-zero GPU Pools](../training/azureml-training.md#-scale-from-zero-gpu-pools). |
 | OSMO reconciliation         | Regenerate the environment bundle after scheduling-property changes, then rerun `03-deploy-osmo.sh` with its `--platform-values` file to reconcile pool, platform, and backend configuration.                                                                                                                                                                                                          |

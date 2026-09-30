@@ -394,7 +394,8 @@ variable "node_pools" {
   type = map(object({
     node_count                 = optional(number, null)
     vm_size                    = string
-    subnet_address_prefixes    = list(string)
+    subnet_address_prefixes    = optional(list(string), [])
+    subnet_pool_key            = optional(string, null)
     node_taints                = optional(list(string), [])
     node_labels                = optional(map(string), {})
     should_enable_auto_scaling = optional(bool, false)
@@ -404,8 +405,11 @@ variable "node_pools" {
     zones                      = optional(list(string), null)
     eviction_policy            = optional(string, "Deallocate")
     gpu_driver                 = optional(string, null)
+    undrainable_node_behavior  = optional(string, null)
+    max_surge                  = optional(string, null)
+    max_unavailable            = optional(string, null)
   }))
-  description = "Additional node pools for the AKS cluster. Map key is used as the node pool name. Note: Pod subnets are not used with Azure CNI Overlay mode"
+  description = "Additional node pools for the AKS cluster. Map key is used as the node pool name. Each entry either owns a subnet through subnet_address_prefixes or shares another entry's subnet through subnet_pool_key. Non-Spot entries can set undrainable_node_behavior (Cordon or Schedule) and one of max_surge or max_unavailable; max_surge defaults to 10% when neither is set. Note: Pod subnets are not used with Azure CNI Overlay mode"
   default = {
     gpu = {
       vm_size                    = "Standard_NV36ads_A10_v5"

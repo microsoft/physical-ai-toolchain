@@ -3,7 +3,7 @@
  *
  * This file creates the AKS-specific networking infrastructure for the SiL module including:
  * - AKS system node pool subnet
- * - GPU node pool subnets
+ * - GPU node pool subnets (one per pool, except pools that share another pool's subnet)
  * - NSG associations for all AKS subnets
  * - NAT Gateway associations for outbound connectivity
  *
@@ -28,7 +28,7 @@ resource "azurerm_subnet" "aks" {
 // ============================================================
 
 resource "azurerm_subnet" "gpu_node_pool" {
-  for_each = var.node_pools
+  for_each = local.subnet_owner_node_pools
 
   name                            = "snet-aks-${each.key}-${local.resource_name_suffix}"
   resource_group_name             = var.resource_group.name
@@ -47,7 +47,7 @@ resource "azurerm_subnet_network_security_group_association" "aks" {
 }
 
 resource "azurerm_subnet_network_security_group_association" "gpu_node_pool" {
-  for_each = var.node_pools
+  for_each = local.subnet_owner_node_pools
 
   subnet_id                 = azurerm_subnet.gpu_node_pool[each.key].id
   network_security_group_id = var.network_security_group.id
@@ -65,7 +65,7 @@ resource "azurerm_subnet_nat_gateway_association" "aks" {
 }
 
 resource "azurerm_subnet_nat_gateway_association" "gpu_node_pool" {
-  for_each = var.should_enable_nat_gateway ? var.node_pools : {}
+  for_each = var.should_enable_nat_gateway ? local.subnet_owner_node_pools : {}
 
   subnet_id      = azurerm_subnet.gpu_node_pool[each.key].id
   nat_gateway_id = var.nat_gateway.id

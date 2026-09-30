@@ -132,7 +132,7 @@ resource "azurerm_kubernetes_cluster_node_pool" "gpu" {
   kubernetes_cluster_id = azurerm_kubernetes_cluster.main.id
   node_count            = each.value.node_count
   vm_size               = each.value.vm_size
-  vnet_subnet_id        = azurerm_subnet.gpu_node_pool[each.key].id
+  vnet_subnet_id        = azurerm_subnet.gpu_node_pool[coalesce(each.value.subnet_pool_key, each.key)].id
   node_taints           = each.value.node_taints
   auto_scaling_enabled  = each.value.should_enable_auto_scaling
   min_count             = each.value.should_enable_auto_scaling ? each.value.min_count : null
@@ -147,9 +147,11 @@ resource "azurerm_kubernetes_cluster_node_pool" "gpu" {
   dynamic "upgrade_settings" {
     for_each = each.value.priority != "Spot" ? [1] : []
     content {
-      max_surge                     = "10%"
+      max_surge                     = each.value.max_unavailable == null ? coalesce(each.value.max_surge, "10%") : null
+      max_unavailable               = each.value.max_unavailable
       drain_timeout_in_minutes      = 0
       node_soak_duration_in_minutes = 0
+      undrainable_node_behavior     = each.value.undrainable_node_behavior
     }
   }
 

@@ -50,7 +50,7 @@ output "gpu_node_pool_subnets" {
 }
 
 output "node_pools" {
-  description = "GPU node pool configurations for OSMO pool and pod template generation. Null when AKS deployment is disabled."
+  description = "GPU node pool configurations for OSMO pool, pod template, and Azure ML InstanceType generation, including each pool's scaling settings. Null when AKS deployment is disabled."
   value       = try(module.sil[0].node_pools, null)
 }
 
