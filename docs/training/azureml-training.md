@@ -163,7 +163,7 @@ With the chart default `amloperator.skipResourceValidation: false`, the operator
 
 Result: a permanent deadlock — you cannot submit the job that would cause the GPU resource to become available.
 
-`02-deploy-azureml-extension.sh` sets the flag to `true` by default. Override with `--enforce-resource-validation` on fixed-capacity clusters where you want misconfigured InstanceTypes to fail fast at submission rather than producing Pods stuck in `Pending`.
+`02-deploy-azureml-extension.sh` sets `amloperator.skipResourceValidation=true` by default, both when it installs the extension and on reruns against an existing extension whose live setting differs. Extensions installed before the script managed this setting keep the chart default until you rerun it. Override with `--enforce-resource-validation` on fixed-capacity clusters where you want misconfigured InstanceTypes to fail fast at submission rather than producing Pods stuck in `Pending`.
 
 Trade-off when enabled (the default): a typo in an `InstanceType` (e.g. `nvidia.com/gpu: 8` on a 4-GPU SKU) manifests as `FailedScheduling` events on a long-Pending Pod instead of an immediate job failure. Diagnose with `kubectl describe pod`.
 
@@ -187,11 +187,30 @@ The Azure ML extension installs Volcano with `overcommit` and `proportion` plugi
 
 On a cluster whose GPU pools sit at `count = 0`, the GPU capacity term is `0 × 1.2 = 0`, so every GPU PodGroup fails enqueue and stays in phase `Pending` forever. Because Volcano only creates the underlying Pod once the PodGroup reaches `Inqueue`, no Pending Pod ever appears in kube-scheduler's queue — and without a Pending Pod, the AKS cluster autoscaler has nothing to scale up against.
 
-`02-deploy-azureml-extension.sh` patches `volcano-scheduler-configmap` with [`infrastructure/setup/manifests/volcano-scheduler-config-scale-from-zero.conf`](../../infrastructure/setup/manifests/volcano-scheduler-config-scale-from-zero.conf) (both plugins removed from tier 3) and restarts `volcano-scheduler` after extension install. Gang scheduling is preserved because the `gang` plugin still gates the `allocate` action — multi-pod jobs continue to wait for `minAvailable` before any task starts.
+`02-deploy-azureml-extension.sh` creates the `volcano-scheduler-scale-from-zero` configmap in the `azureml` namespace from [`infrastructure/setup/manifests/volcano-scheduler-config-scale-from-zero.conf`](../../infrastructure/setup/manifests/volcano-scheduler-config-scale-from-zero.conf) (both plugins removed from tier 3). It then points the extension at that configmap through the `volcanoScheduler.schedulerConfigMap` extension setting.
 
-Override with `--enforce-volcano-capacity-check` on multi-tenant clusters where queue-level capacity fairness must be enforced at submit time. Scale-from-zero will then be impossible without keeping at least one GPU node warm (`min_count ≥ 1`).
+Gang scheduling is preserved because the `gang` plugin still gates the `allocate` action — multi-pod jobs continue to wait for `minAvailable` before any task starts.
+
+The extension upgrades itself automatically, and each upgrade restores the chart's own `volcano-scheduler-configmap`, so an in-place edit of that configmap doesn't last. Extension settings do persist across upgrades. Reruns update only the settings that differ from the live extension, and restart `volcano-scheduler` when only the configmap content changed. `cleanup/uninstall-azureml-extension.sh` deletes the `azureml` namespace, which removes the configmap.
+
+Override with `--enforce-volcano-capacity-check` on multi-tenant clusters where queue-level capacity fairness must be enforced at submit time. It resets `volcanoScheduler.schedulerConfigMap` to the chart's config. Scale-from-zero will then be impossible without keeping at least one GPU node warm (`min_count ≥ 1`).
 
 ### Verifying scale-up
+
+Confirm the extension settings and the scheduler config first:
+
+```bash
+az k8s-extension show --name azureml-<aks-cluster> --cluster-type managedClusters \
+  --cluster-name <aks-cluster> --resource-group <resource-group> \
+  --query 'configurationSettings.{skipResourceValidation: "amloperator.skipResourceValidation", volcanoConfigMap: "volcanoScheduler.schedulerConfigMap"}'
+# Expected: skipResourceValidation "true", volcanoConfigMap "volcano-scheduler-scale-from-zero"
+
+kubectl get cm -n azureml volcano-scheduler-scale-from-zero \
+  -o jsonpath='{.data.volcano-scheduler\.conf}' | grep -E 'overcommit|proportion'
+# Expected: no output
+```
+
+Then submit a job and follow the autoscaler:
 
 ```bash
 # Submit a job, then watch the autoscaler decision.
