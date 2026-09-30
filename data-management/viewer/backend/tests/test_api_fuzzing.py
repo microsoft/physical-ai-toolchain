@@ -64,7 +64,10 @@ def api_schema(client):
                 projects=ProjectsConfig(
                     default=ProjectConfig(
                         generation=GenerationConfig(
-                            modes=[schemathesis.GenerationMode.POSITIVE],
+                            modes=[
+                                schemathesis.GenerationMode.POSITIVE,
+                                schemathesis.GenerationMode.NEGATIVE,
+                            ],
                             deterministic=True,
                         )
                     )
@@ -75,7 +78,7 @@ def api_schema(client):
         client.app.dependency_overrides.pop(get_detection_service, None)
 
 
-schema = schemathesis.pytest.from_fixture("api_schema").exclude(path_regex=r"^/api/(ai/.+|datasets/.+/judge)$")
+schema = schemathesis.pytest.from_fixture("api_schema")
 
 
 @schema.parametrize()

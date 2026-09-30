@@ -64,6 +64,15 @@ class TestCluster:
         for a in result.assignments:
             assert 0.0 <= a.similarity_score <= 1.0
 
+    def test_one_cluster_per_trajectory_uses_neutral_silhouette(self, clusterer):
+        pytest.importorskip("sklearn")
+        trajectories = [np.zeros((10, 7)), np.ones((10, 7))]
+
+        result = clusterer.cluster(trajectories, num_clusters=2)
+
+        assert result.num_clusters == 2
+        assert result.silhouette_score == 1.0
+
     def test_auto_select_num_clusters(self, clusterer, synthetic_trajectories):
         pytest.importorskip("sklearn")
         result = clusterer.cluster(synthetic_trajectories)

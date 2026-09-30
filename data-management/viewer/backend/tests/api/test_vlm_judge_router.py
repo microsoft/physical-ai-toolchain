@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import av
@@ -86,6 +87,27 @@ def _reload_app(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> TestClient:
 
     main_mod = importlib.reload(main_mod)
     return TestClient(main_mod.app)
+
+
+@pytest.fixture(autouse=True)
+def restore_default_app(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Restore the default router set after each VLM-enabled app reload."""
+    yield
+    monkeypatch.setenv("VLM_JUDGE_ENABLED", "false")
+
+    import src.api.config as config_mod
+    import src.api.services.annotation_service as ann_service_mod
+    import src.api.services.dataset_service.service as ds_service_mod
+    from src.api.services.vlm_judge_service import reset_vlm_judge_service
+
+    config_mod._app_config = None
+    ann_service_mod._annotation_service = None
+    ds_service_mod._dataset_service = None
+    reset_vlm_judge_service()
+
+    import src.api.main as main_mod
+
+    importlib.reload(main_mod)
 
 
 @pytest.fixture
