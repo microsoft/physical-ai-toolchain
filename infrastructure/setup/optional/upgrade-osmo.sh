@@ -305,6 +305,11 @@ stop_db_helper() {
     helper_pod=""
 }
 
+require_key_vault_secret() {
+    az keyvault secret show --vault-name "$1" --name "$2" --query id -o tsv >/dev/null 2>&1 || \
+        fatal "Can't read $2 from Key Vault $1. $3"
+}
+
 #------------------------------------------------------------------------------
 # Stage State
 #------------------------------------------------------------------------------
@@ -685,8 +690,7 @@ stage_reset() {
     [[ "$backup_host" == "$pg_fqdn" ]] || \
         fatal "The backed-up database host (${backup_host:-unknown}) isn't the Terraform PostgreSQL server ($pg_fqdn)"
     for secret in psql-admin-password redis-primary-key; do
-        az keyvault secret show --vault-name "$key_vault" --name "$secret" --query id -o tsv >/dev/null || \
-            fatal "Can't read $secret from Key Vault $key_vault; cleanup/uninstall-osmo.sh needs it"
+        require_key_vault_secret "$key_vault" "$secret" "cleanup/uninstall-osmo.sh needs it."
     done
     kubectl get configmap "$SECRET_MEK" -n "$NS_OSMO_CONTROL_PLANE" >/dev/null 2>&1 || \
         fatal "MEK ConfigMap $SECRET_MEK not found in $NS_OSMO_CONTROL_PLANE"
@@ -709,7 +713,7 @@ stage_reset() {
 }
 
 stage_hop_63() {
-    local path values_json names legacy mek_owner missing values_sha line
+    local path values_json names legacy mek_owner missing values_sha line key_vault
     local -a deploy_command
     path=$(upgrade_path)
     values_json="$work_dir/platform-values.json"
@@ -734,6 +738,16 @@ stage_hop_63() {
 
     section "Preflight"
     legacy=$(osmo_legacy_releases "$NS_OSMO_CONTROL_PLANE" "$OSMO_CHART_VERSION")
+    key_vault=$(tf_get "$tf_output" "key_vault_name.value" "")
+    [[ -n "$key_vault" ]] || fatal "hop-6.3 needs the Key Vault Terraform output"
+    require_key_vault_secret "$key_vault" osmo-admin-password \
+        "03-deploy-osmo.sh mounts it through its SecretProviderClass. Set osmo_config.should_create_secret = true in terraform.tfvars and apply Terraform first."
+    if [[ " ${deploy_args[*]:-} " != *" --use-incluster-postgres "* ]]; then
+        require_key_vault_secret "$key_vault" psql-admin-password "03-deploy-osmo.sh needs it for external PostgreSQL."
+    fi
+    if [[ " ${deploy_args[*]:-} " != *" --use-incluster-redis "* ]]; then
+        require_key_vault_secret "$key_vault" redis-primary-key "03-deploy-osmo.sh needs it for Managed Redis."
+    fi
     kubectl get configmap "$SECRET_MEK" -n "$NS_OSMO_CONTROL_PLANE" >/dev/null 2>&1 || \
         fatal "MEK ConfigMap $SECRET_MEK not found in $NS_OSMO_CONTROL_PLANE"
     mek_owner=$(kubectl get configmap "$SECRET_MEK" -n "$NS_OSMO_CONTROL_PLANE" \
