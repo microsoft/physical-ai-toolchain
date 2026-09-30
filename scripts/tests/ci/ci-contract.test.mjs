@@ -5,9 +5,10 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, matchesGlob } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 import { evaluateChecks, requiredLanes } from '../../ci/evaluate-checks.mjs';
 import { comparePaths, loadContract, parseChangedPaths, selectChecks, selectionOutputs } from '../../ci/select-checks.mjs';
 import { readWorkflowGraph, validateWorkflows } from '../../ci/validate-workflows.mjs';
@@ -61,6 +62,56 @@ test('reusable permissions: skipped scheduled callers still require upstream per
     message.includes('scheduled-docusaurus') && message.includes('callee permission id-token: write')));
 });
 const nodeEnvironment = { ...process.env, NODE_DISABLE_COMPILE_CACHE: '1' };
+
+const rootTestModules = [
+  'tests/test_accessibility_evidence.py', 'tests/test_accessibility_promotion.py',
+  'tests/test_e2e_polling.py', 'tests/test_redis_tls_client.py', 'tests/test_future_contract.py',
+];
+const retainedCoverageSources = [
+  'tests/fuzz_harness.py', 'training/utils/metrics.py',
+  'data-management/viewer/backend/src/api/validation.py', 'scripts/accessibility/evidence_gate.py',
+];
+
+test('coverage boundary: root collection omits test modules but retains harness and product sources', () => {
+  const manifest = readFileSync(join(root, 'pyproject.toml'), 'utf8');
+  const run = manifest.split('[tool.coverage.run]')[1]?.split('[tool.coverage.report]')[0];
+  assert.ok(run, 'Missing coverage run configuration');
+  const omit = run.match(/^omit = \[([\s\S]*?)^\]/m);
+  assert.ok(omit, 'Missing coverage run omissions');
+  const patterns = [...omit[1].matchAll(/^\s*"([^"]+)"/gm)].map(match => match[1]);
+  assert.ok(patterns.includes('tests/test_*.py'), 'Root test modules must not be coverage sources');
+  for (const path of rootTestModules) {
+    assert.ok(patterns.some(pattern => matchesGlob(path, pattern)), `Test module remains measured: ${path}`);
+  }
+  for (const path of retainedCoverageSources) {
+    assert.equal(patterns.some(pattern => matchesGlob(path, pattern)), false, `Source was omitted: ${path}`);
+  }
+});
+
+test('coverage boundary: Codecov ignores root test modules without hiding fuzz or product coverage', () => {
+  const config = parseYaml(readFileSync(join(root, 'codecov.yml'), 'utf8'));
+  assert.ok(config.ignore.includes('tests/test_*.py'), 'Codecov must reject root test-module coverage');
+  for (const path of rootTestModules) {
+    assert.ok(config.ignore.some(pattern => matchesGlob(path, pattern)), `Test module remains eligible: ${path}`);
+  }
+  for (const path of retainedCoverageSources) {
+    assert.equal(config.ignore.some(pattern => matchesGlob(path, pattern)), false, `Source was ignored: ${path}`);
+  }
+  assert.deepEqual(config.flags['pytest-fuzz'].paths, ['tests/', 'data-management/viewer/backend/src/', 'training/']);
+  assert.deepEqual(config.component_management.individual_components.find(item => item.component_id === 'fuzz-suite').paths,
+    ['tests/fuzz_harness.py', 'tests/fuzz-corpus/**']);
+});
+
+test('coverage boundary: fuzz workflow retains test selection and all measured source directories', () => {
+  const steps = graph['.github/workflows/fuzz-regression-tests.yml'].jobs['fuzz-regression'].steps;
+  const run = steps.find(step => step.name === 'Run fuzz regression tests').run;
+  assert.match(run, /pytest -o addopts="" tests\/fuzz_harness\.py\s/);
+  assert.deepEqual([...run.matchAll(/--cov=([^\s]+)/g)].map(match => match[1]),
+    ['tests', 'data-management/viewer/backend/src', 'training']);
+  const upload = steps.find(step => step.name === 'Upload coverage to Codecov');
+  assert.equal(upload.with.flags, 'pytest-fuzz');
+  assert.equal(upload.with.files, 'logs/coverage-fuzz.xml');
+});
 
 test('gitleaks: tested-revision helper and native regressions own scan and summary policy', () => {
   const workflow = graph['.github/workflows/gitleaks-scan.yml'];
