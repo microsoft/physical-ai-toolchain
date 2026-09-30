@@ -1,6 +1,6 @@
 """Behavior tests for the accessibility evidence gate."""
 
-# cspell:ignore syspath
+# cspell:ignore confcutdir rootdir syspath
 
 from __future__ import annotations
 
@@ -705,6 +705,36 @@ class TestBundleIntegrity:
 
 
 class TestAccessibilityWorkflowSource:
+    def test_given_project_contracts_when_run_then_collects_scoped_python_coverage(self) -> None:
+        # Arrange
+        workflow = _load_yaml(_ACCESSIBILITY_WORKFLOW_PATH)
+        steps = {step["name"]: step for step in workflow["jobs"]["evidence"]["steps"]}
+        contract = steps["Validate project evidence contracts"]
+
+        # Act
+        arguments = contract["run"].split("uvx --from ruff", 1)[0].replace("\\\n", " ").split()
+
+        # Assert
+        assert contract["env"]["COVERAGE_FILE"] == "logs/.coverage-accessibility"
+        assert "--cov-config=/dev/null" in arguments
+        assert "--cov-branch" in arguments
+        assert "python -m pytest" in contract["run"]
+        assert "--rootdir=." in arguments
+        assert "--confcutdir=." in arguments
+        assert [argument for argument in arguments if argument.startswith("--cov=")] == [
+            "--cov=tests.test_accessibility_evidence",
+            "--cov=tests.test_accessibility_promotion",
+            "--cov=scripts.accessibility",
+        ]
+        assert "--cov-report=xml:logs/coverage-accessibility.xml" in arguments
+        assert "--junitxml=logs/accessibility-evidence-tests.xml" in arguments
+        assert "--cov-append" not in arguments
+        assert not any(argument.startswith("--cov-fail-under") for argument in arguments)
+        assert "set -euo pipefail" in contract["run"]
+        assert contract.get("if") is None
+        assert contract.get("continue-on-error") is None
+        assert workflow["jobs"]["evidence"].get("continue-on-error") is None
+
     @pytest.mark.parametrize(
         ("path", "job_id", "step_name"),
         [

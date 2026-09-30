@@ -113,6 +113,72 @@ test('coverage boundary: fuzz workflow retains test selection and all measured s
   assert.equal(upload.with.files, 'logs/coverage-fuzz.xml');
 });
 
+test('accessibility coverage: exact report upload isolates OIDC and fails closed', () => {
+  const workflow = graph['.github/workflows/accessibility-evidence.yml'];
+  const verify = candidate => {
+    const producer = candidate.jobs.evidence;
+    assert.deepEqual(producer.permissions, { contents: 'read' });
+    const artifacts = producer.steps.filter(step => step.name === 'Upload Python coverage artifact');
+    assert.equal(artifacts.length, 1, 'Expected one dedicated Python coverage artifact');
+    const artifact = artifacts[0];
+    assert.match(artifact.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/);
+    assert.equal(artifact.if, 'always()');
+    assert.equal(artifact['continue-on-error'], undefined);
+    assert.deepEqual(artifact.with, {
+      name: 'pytest-accessibility-coverage-xml', path: 'logs/coverage-accessibility.xml',
+      'if-no-files-found': 'error', 'retention-days': 30,
+    });
+    const uploader = candidate.jobs['accessibility-python-codecov'];
+    assert.ok(uploader, 'Missing dedicated Python coverage uploader');
+    assert.equal(uploader.needs, 'evidence');
+    assert.equal(uploader.if, 'always()');
+    assert.equal(uploader['continue-on-error'], undefined);
+    assert.deepEqual(uploader.permissions, { contents: 'read', 'id-token': 'write' });
+    assert.equal(uploader.steps.length, 3);
+    const [checkout, download, upload] = uploader.steps;
+    assert.match(checkout.uses, /^actions\/checkout@[a-f0-9]{40}$/);
+    assert.deepEqual(checkout.with, { 'persist-credentials': false });
+    assert.match(download.uses, /^actions\/download-artifact@[a-f0-9]{40}$/);
+    assert.deepEqual(download.with, { name: 'pytest-accessibility-coverage-xml', path: 'coverage' });
+    assert.match(upload.uses, /^codecov\/codecov-action@[a-f0-9]{40}$/);
+    assert.deepEqual(upload.with, {
+      files: 'coverage/coverage-accessibility.xml', disable_search: true, use_oidc: true,
+      fail_ci_if_error: true, flags: 'pytest-accessibility', name: 'pytest-accessibility-coverage',
+    });
+    for (const step of uploader.steps) {
+      assert.equal(step.if, undefined);
+      assert.equal(step['continue-on-error'], undefined);
+      assert.equal(step.run, undefined);
+    }
+  };
+  verify(workflow);
+  for (const mutate of [
+    candidate => { candidate.jobs.evidence.steps.find(step => step.name === 'Upload Python coverage artifact').with['if-no-files-found'] = 'warn'; },
+    candidate => { delete candidate.jobs['accessibility-python-codecov'].permissions['id-token']; },
+    candidate => { candidate.jobs['accessibility-python-codecov'].steps[1].with.name = 'other-report'; },
+    candidate => { candidate.jobs['accessibility-python-codecov'].steps[2].with.files = 'other.xml'; },
+    candidate => { candidate.jobs['accessibility-python-codecov'].steps[2].with.flags = 'pytest-fuzz'; },
+    candidate => { candidate.jobs['accessibility-python-codecov'].steps[2].with.fail_ci_if_error = false; },
+  ]) {
+    const candidate = structuredClone(workflow);
+    mutate(candidate);
+    assert.throws(() => verify(candidate), assert.AssertionError);
+  }
+});
+
+test('accessibility coverage: flag retains test and product measurements without new gates', () => {
+  const config = parseYaml(readFileSync(join(root, 'codecov.yml'), 'utf8'));
+  const paths = [
+    'scripts/accessibility/', 'tests/test_accessibility_evidence.py', 'tests/test_accessibility_promotion.py',
+  ];
+  assert.deepEqual(config.flags['pytest-accessibility'], { paths, carryforward: true });
+  assert.equal(config.coverage.status.project['pytest-accessibility'], undefined);
+  assert.equal(config.component_management.individual_components.some(item => item.component_id === 'pytest-accessibility'), false);
+  for (const path of [...rootTestModules, ...retainedCoverageSources, 'scripts/accessibility/promotion.py']) {
+    assert.equal(config.ignore.some(pattern => matchesGlob(path, pattern)), false, `Coverage was ignored: ${path}`);
+  }
+});
+
 test('gitleaks: tested-revision helper and native regressions own scan and summary policy', () => {
   const workflow = graph['.github/workflows/gitleaks-scan.yml'];
   assert.deepEqual(Object.keys(workflow.on).sort(), ['pull_request', 'push', 'workflow_call']);
