@@ -232,6 +232,80 @@ function New-SarifReport {
 # Hash & version checks
 # ============================================================
 
+function Test-DownloadedArtifact {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Url
+    )
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $bytes = [byte[]]::new(512)
+        $length = $stream.Read($bytes, 0, $bytes.Length)
+    }
+    finally {
+        $stream.Dispose()
+    }
+
+    if ($length -eq 0) { return $false }
+
+    $prefix = [System.Text.Encoding]::UTF8.GetString($bytes, 0, $length).TrimStart([char]0xfeff)
+    if ($prefix -match '^\s*(?:\{\s*"|\[\s*[\{"]|<!doctype\s+html|<html\b)') {
+        return $false
+    }
+
+    $urlPath = ([uri]$Url).AbsolutePath
+    if ($urlPath -match '\.zip$') {
+        if ($length -lt 4 -or $bytes[0] -ne 0x50 -or $bytes[1] -ne 0x4b) {
+            return $false
+        }
+        try {
+            $archive = [System.IO.Compression.ZipFile]::OpenRead($Path)
+            try { return ($archive.Entries.Count -gt 0) }
+            finally { $archive.Dispose() }
+        }
+        catch [System.IO.InvalidDataException] {
+            return $false
+        }
+    }
+    if ($urlPath -match '\.(?:tar\.gz|tgz)$') {
+        if ($length -lt 2 -or $bytes[0] -ne 0x1f -or $bytes[1] -ne 0x8b) {
+            return $false
+        }
+        $archiveStream = [System.IO.File]::OpenRead($Path)
+        try {
+            if ($archiveStream.Length -lt 18) { return $false }
+
+            $archiveStream.Seek(-4, [System.IO.SeekOrigin]::End) | Out-Null
+            $trailer = [byte[]]::new(4)
+            $archiveStream.ReadExactly($trailer)
+            $expectedSize = [System.BitConverter]::ToUInt32($trailer)
+            $archiveStream.Position = 0
+
+            try {
+                $gzip = [System.IO.Compression.GZipStream]::new(
+                    $archiveStream, [System.IO.Compression.CompressionMode]::Decompress, $true
+                )
+                try {
+                    $buffer = [byte[]]::new(65536)
+                    $total = [long]0
+                    while (($read = $gzip.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                        $total += $read
+                    }
+                    return (($total % 4294967296) -eq $expectedSize)
+                }
+                finally { $gzip.Dispose() }
+            }
+            catch [System.IO.InvalidDataException] {
+                return $false
+            }
+        }
+        finally { $archiveStream.Dispose() }
+    }
+    return $true
+}
+
 function Invoke-HashCheck {
     <#
     .SYNOPSIS
@@ -258,6 +332,16 @@ function Invoke-HashCheck {
                 Url     = $Url
                 File    = $File
                 Message = "Failed to download $Name from $Url"
+            }
+        }
+
+        if (-not (Test-DownloadedArtifact -Path $tmp.FullName -Url $Url)) {
+            return @{
+                Status  = 'DownloadFailed'
+                Name    = $Name
+                Url     = $Url
+                File    = $File
+                Message = "Unexpected content when downloading $Name from $Url"
             }
         }
 
@@ -311,7 +395,13 @@ function Invoke-WithRetry {
     )
 
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-        $result = & $Action
+        try {
+            $result = & $Action
+        }
+        catch {
+            Write-Warning "  Attempt $attempt/$MaxAttempts failed: $($_.Exception.Message)"
+            $result = $null
+        }
         if ($null -ne $result -and "$result" -ne '') {
             return $result
         }
@@ -345,14 +435,51 @@ function Get-HelmOciLatestVersion {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Chart,
-        [scriptblock]$HelmInvoker = { param($HelmArgs) & helm @HelmArgs }
+        [scriptblock]$RequestInvoker = {
+            param($Uri, $Headers)
+            Invoke-RestMethod -Uri $Uri -Headers $Headers -ErrorAction Stop
+        }
     )
 
-    $output = & $HelmInvoker @('show', 'chart', $Chart) 2>$null
-    if (-not $output) { return $null }
-    $line = $output | Where-Object { $_ -match '^version:' } | Select-Object -First 1
-    if (-not $line) { return $null }
-    return ($line -split ':', 2)[1].Trim()
+    if ($Chart -notmatch '^oci://ghcr\.io/(?<Repository>[a-zA-Z0-9._/-]+)$') {
+        throw "Unsupported OCI chart source: $Chart"
+    }
+    $repository = $Matches.Repository
+    $tokenUrl = "https://ghcr.io/token?service=ghcr.io&scope=repository:${repository}:pull"
+    $auth = & $RequestInvoker $tokenUrl @{}
+    if (-not $auth.token) {
+        throw "GHCR did not provide a pull token for $Chart"
+    }
+
+    $headers = @{ Authorization = "Bearer $($auth.token)" }
+    $versions = [System.Collections.Generic.List[string]]::new()
+    $lastTag = $null
+    do {
+        $url = "https://ghcr.io/v2/$repository/tags/list?n=100"
+        if ($lastTag) {
+            $url += "&last=$([uri]::EscapeDataString($lastTag))"
+        }
+        $response = & $RequestInvoker $url $headers
+        if ($null -eq $response.tags) {
+            throw "GHCR did not return a tag list for $Chart"
+        }
+        $tags = @($response.tags)
+        foreach ($tag in $tags) {
+            if ($tag -match '^v?\d+\.\d+\.\d+$') {
+                $versions.Add($tag)
+            }
+        }
+        if ($tags.Count -lt 100) { break }
+        if ($lastTag -eq $tags[-1]) {
+            throw "GHCR tag pagination did not advance for $Chart"
+        }
+        $lastTag = $tags[-1]
+    } while ($true)
+
+    if ($versions.Count -eq 0) {
+        throw "GHCR has no stable chart versions for $Chart"
+    }
+    return ($versions | Sort-Object { [version]($_ -replace '^v', '') } -Descending | Select-Object -First 1)
 }
 
 # ============================================================
@@ -450,14 +577,14 @@ function ConvertTo-HashCheckSarifResult {
         'Match' { return $null }
         'DownloadFailed' {
             return (New-SarifResult -RuleId 'binary-freshness/download-failure' `
-                    -Message $Result.Message -File $File -Level 'error')
+                    -Message $Result.Message -File $File -Level 'warning')
         }
         'Mismatch' {
             return (New-SarifResult -RuleId 'binary-freshness/hash-mismatch' `
                     -Message $Result.Message -File $File -Level 'warning')
         }
     }
-    return $null
+    throw "Unknown binary check status: $($Result.Status)"
 }
 
 function ConvertTo-HelmCheckSarifResult {
@@ -483,6 +610,18 @@ function ConvertTo-HelmCheckSarifResult {
     return $null
 }
 
+function Get-BinaryCheckExitCode {
+    [CmdletBinding()]
+    param(
+        [int]$IntegrityFailures = 0,
+        [switch]$Fatal
+    )
+
+    if ($Fatal) { return 2 }
+    if ($IntegrityFailures -gt 0) { return 1 }
+    return 0
+}
+
 function Invoke-BinaryFreshnessCheck {
     [CmdletBinding()]
     param(
@@ -499,7 +638,9 @@ function Invoke-BinaryFreshnessCheck {
         $defaultsConf = 'infrastructure/setup/defaults.conf'
 
         $sarifResults = [System.Collections.Generic.List[object]]::new()
-        $mismatch = 0
+        $integrityFailures = 0
+        $versionDrift = 0
+        $lookupFailures = 0
 
         # ---- Binary hash checks ----
         Write-Host ''
@@ -514,18 +655,27 @@ function Invoke-BinaryFreshnessCheck {
 
         foreach ($check in $binaryChecks) {
             Write-Host "Checking $($check.Name)..."
-            $result = Invoke-HashCheck -Name $check.Name -Url $check.Url -Expected ($check.Expected ?? '') -File $check.File
+            if ($check.Expected -notmatch '^[0-9a-fA-F]{64}$') {
+                throw "Invalid SHA-256 pin for $($check.Name) in $($check.File)"
+            }
+            $result = Invoke-HashCheck -Name $check.Name -Url $check.Url -Expected $check.Expected -File $check.File
 
             switch ($result.Status) {
                 'Match'          { Write-Host "  [OK] $($check.Name) hash matches" }
-                'DownloadFailed' { Write-Host "::error file=$($check.File)::$($result.Message)" }
-                'Mismatch'       { Write-Host "::warning file=$($check.File)::$($result.Message)" }
+                'DownloadFailed' {
+                    $lookupFailures++
+                    Write-Host "::warning file=$($check.File)::$($result.Message)"
+                }
+                'Mismatch' {
+                    $integrityFailures++
+                    Write-Host "::warning file=$($check.File)::$($result.Message)"
+                }
+                default { throw "Unknown binary check status: $($result.Status)" }
             }
 
             $sarif = ConvertTo-HashCheckSarifResult -Result $result -File $check.File
             if ($sarif) {
                 $sarifResults.Add($sarif)
-                $mismatch++
             }
         }
 
@@ -537,7 +687,11 @@ function Invoke-BinaryFreshnessCheck {
         $kaiPinned = Get-ShellVariable -Path $defaultsConf -Name 'KAI_SCHEDULER_VERSION'
         $osmoPinned = Get-ShellVariable -Path $defaultsConf -Name 'OSMO_CHART_VERSION'
         $gpuRepo = Get-ShellVariable -Path $defaultsConf -Name 'HELM_REPO_GPU_OPERATOR'
+        $kaiRepo = Get-ShellVariable -Path $defaultsConf -Name 'HELM_REPO_KAI'
         $osmoRepo = Get-ShellVariable -Path $defaultsConf -Name 'HELM_REPO_OSMO'
+        if ($kaiRepo -notmatch '^oci://ghcr\.io/[a-zA-Z0-9._/-]+$') {
+            throw "Invalid KAI OCI chart source in $defaultsConf"
+        }
 
         $helmChecks = @(
             @{
@@ -549,7 +703,7 @@ function Invoke-BinaryFreshnessCheck {
             @{
                 Name   = 'KAI Scheduler'
                 Pinned = $kaiPinned
-                Latest = (Invoke-WithRetry -MaxAttempts 3 -Action { Get-HelmOciLatestVersion -Chart 'oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler' })
+                Latest = (Invoke-WithRetry -MaxAttempts 3 -Action { Get-HelmOciLatestVersion -Chart "$kaiRepo/kai-scheduler" })
                 Source = 'OCI registry'
             }
             @{
@@ -578,7 +732,11 @@ function Invoke-BinaryFreshnessCheck {
             $sarif = ConvertTo-HelmCheckSarifResult -Check $check -File $defaultsConf
             if ($sarif) {
                 $sarifResults.Add($sarif)
-                $mismatch++
+                switch ($sarif.ruleId) {
+                    'binary-freshness/version-drift' { $versionDrift++ }
+                    'binary-freshness/lookup-failure' { $lookupFailures++ }
+                    default { throw "Unknown Helm SARIF rule: $($sarif.ruleId)" }
+                }
             }
         }
 
@@ -595,17 +753,25 @@ function Invoke-BinaryFreshnessCheck {
         Write-Host ''
         Write-Host '=== Summary ==='
         Write-Host "SARIF File       : $SarifFile"
-        Write-Host "Mismatches       : $mismatch"
+        Write-Host "Hash Mismatches  : $integrityFailures"
+        Write-Host "Version Drift    : $versionDrift"
+        Write-Host "Lookup Failures  : $lookupFailures"
         Write-Host "SARIF Findings   : $($sarifResults.Count)"
 
-        if ($mismatch -gt 0) {
-            Write-Host "::warning::$mismatch pinned hash(es) differ from upstream. Review warnings above and update the affected scripts."
+        if ($integrityFailures -gt 0) {
+            Write-Host "::warning::$integrityFailures confirmed pinned hash mismatch(es). Review affected artifacts before updating pins."
         }
         else {
-            Write-Host 'All pinned hashes match upstream.'
+            Write-Host 'No confirmed pinned hash mismatches.'
         }
 
-        return @{ Mismatch = $mismatch; Findings = $sarifResults.Count }
+        return @{
+            IntegrityFailures = $integrityFailures
+            VersionDrift      = $versionDrift
+            LookupFailures    = $lookupFailures
+            Findings          = $sarifResults.Count
+            ExitCode          = Get-BinaryCheckExitCode -IntegrityFailures $integrityFailures
+        }
     }
     finally {
         Pop-Location
@@ -662,17 +828,17 @@ if ($MyInvocation.InvocationName -ne '.') {
 
     foreach ($tool in @('helm')) {
         if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-            Write-Error "Required tool not found: $tool"
-            exit 2
+            Write-Error "Required tool not found: $tool" -ErrorAction Continue
+            exit (Get-BinaryCheckExitCode -Fatal)
         }
     }
 
     try {
         $outcome = Invoke-BinaryFreshnessCheck -RepoRoot $resolvedRoot -SarifFile $SarifFile -Repository $repository
-        exit ([int]($outcome.Mismatch -gt 0))
+        exit $outcome.ExitCode
     }
     catch {
-        Write-Error $_
-        exit 2
+        Write-Error $_ -ErrorAction Continue
+        exit (Get-BinaryCheckExitCode -Fatal)
     }
 }

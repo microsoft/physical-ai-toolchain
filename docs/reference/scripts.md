@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Script Reference
 description: Submission script inventory, CLI arguments, variable reference, and configuration for AzureML and OSMO training and inference pipelines.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-01
+ms.date: 2026-09-29
 ms.topic: reference
 keywords:
   - scripts
