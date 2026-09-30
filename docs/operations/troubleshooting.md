@@ -197,14 +197,14 @@ Switch model validation mode from `ro_mount` to `download` in the AzureML job YA
 
 ### numpy ImportError or ABI mismatch in Isaac Sim container
 
-**Cause:** numpy 2.x is installed but Isaac Sim 4.x requires numpy < 2.0.0 for ABI compatibility with its bundled libraries.
+**Cause:** The installed NumPy version differs from the version validated in the Isaac Lab runtime image.
 
 **Resolution:**
 
-The `train.sh` script pins numpy to `>=1.26.0,<2.0.0`. Verify this pin is present. If using a custom entrypoint, add:
+Use the NumPy version pinned in `training/rl/pyproject.toml`. The Isaac Lab 3.0 Post 1 image is validated with NumPy 2.5.1. Do not replace the image-provided PyTorch or CUDA packages.
 
 ```bash
-uv pip install "numpy>=1.26.0,<2.0.0"
+uv pip install "numpy==2.5.1"
 ```
 
 ### Isaac Sim process hangs after training completes

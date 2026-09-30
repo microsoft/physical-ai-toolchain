@@ -10,24 +10,10 @@ import pytest
 from conftest import load_training_module
 
 
-class _AzureConfigError(Exception):
-    pass
-
-
 class _AzureMLContext:
     def __init__(self, tracking_uri: str = "azureml://tracking") -> None:
         self.tracking_uri = tracking_uri
 
-
-def _bootstrap_azure_ml(experiment_name: str | None = None, **_: object) -> _AzureMLContext:
-    return _AzureMLContext()
-
-
-_fake_utils = ModuleType("training.utils")
-_fake_utils.AzureConfigError = _AzureConfigError
-_fake_utils.AzureMLContext = _AzureMLContext
-_fake_utils.bootstrap_azure_ml = _bootstrap_azure_ml
-sys.modules.setdefault("training.utils", _fake_utils)
 
 _MOD = load_training_module("training_rl_scripts_launch_rsl_rl", "training/rl/scripts/launch_rsl_rl.py")
 
@@ -316,14 +302,13 @@ class TestMain:
         called_args = run_training.call_args.kwargs["args"]
         assert called_args.checkpoint == str(tmp_path / "ckpt")
 
-    def test_azure_config_error(self, monkeypatch):
+    def test_azure_config_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._patch_dependencies(monkeypatch)
 
-        def boom(args):
-            raise _AzureConfigError("bad creds")
+        def boom(args: object) -> None:
+            raise _MOD.AzureConfigError("bad creds")
 
         monkeypatch.setattr(_MOD, "_initialize_mlflow_context", boom)
-        monkeypatch.setattr(_MOD, "AzureConfigError", _AzureConfigError)
         with pytest.raises(SystemExit) as exc:
             _MOD.main(["--mode", "train"])
         assert "bad creds" in str(exc.value)

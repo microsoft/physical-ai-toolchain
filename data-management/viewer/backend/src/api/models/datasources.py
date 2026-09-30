@@ -81,6 +81,21 @@ class DatasetInfo(BaseModel):
     tasks: list[TaskInfo] = Field(default_factory=list, description="Available tasks")
 
 
+class AcceptedDatasetContract(BaseModel):
+    """Dataset adapter identities and verified capture artifact digests."""
+
+    dataset_id: str
+    output_adapter_id: str
+    output_adapter_version: str
+    viewer_adapter_id: str
+    profile_id: str
+    profile_sha256: str
+    capture_provenance_sha256: str
+    export_validation_sha256: str
+    capture_features: list[dict[str, object]]
+    sensors: list[dict[str, object]]
+
+
 # ============================================================================
 # Episode Types
 # ============================================================================

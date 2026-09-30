@@ -1,5 +1,5 @@
 // Dataviewer module container apps tests
-// Validates container image selection and ACR registry configuration
+// Validates container app ingress, image selection, and ACR registry configuration
 
 mock_provider "azurerm" {}
 mock_provider "azuread" {}
@@ -49,6 +49,11 @@ run "default_placeholder_images" {
   assert {
     condition     = azurerm_container_app.frontend.template[0].container[0].image == "mcr.microsoft.com/k8se/quickstart:latest"
     error_message = "Frontend should use placeholder image when no custom image is specified"
+  }
+
+  assert {
+    condition     = azurerm_container_app.backend.ingress[0].allow_insecure_connections == false
+    error_message = "Backend ingress must reject insecure connections"
   }
 }
 
