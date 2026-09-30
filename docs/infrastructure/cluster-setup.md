@@ -71,7 +71,7 @@ kubectl cluster-info
 <!-- -->
 
 > [!NOTE]
-> **Supported OSMO version.** This repository targets a single current OSMO release — **6.3** (chart `1.3.0`, image `6.3.0`; see [Component Inventory](../contributing/component-updates.md#component-inventory)). Support tracks the current upstream release and may change as OSMO advances; older versions are not maintained here.
+> **Supported OSMO version.** This repository targets a single current OSMO release — **6.3** (chart `1.3.1`, image `6.3.1`; see [Component Inventory](../contributing/component-updates.md#component-inventory)). Support tracks the current upstream release and may change as OSMO advances; older versions are not maintained here.
 
 <!-- -->
 
@@ -125,8 +125,8 @@ ACR_NAME=$(terraform output -json container_registry | jq -r '.value.name')
 az acr login --name "$ACR_NAME"
 
 # Set versions
-OSMO_VERSION="${OSMO_VERSION:-6.3.0}"
-CHART_VERSION="${CHART_VERSION:-1.3.0}"
+OSMO_VERSION="${OSMO_VERSION:-6.3.1}"
+CHART_VERSION="${CHART_VERSION:-1.3.1}"
 
 OSMO_IMAGES=(
   service worker logger agent
