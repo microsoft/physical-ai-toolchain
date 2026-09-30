@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Azure ML Arc VLA Setup and Operations
 description: Prepare an Ubuntu K3s GPU host, connect it through Azure Arc, attach it to Azure ML, and run PI 0.5 VLA training
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-29
+ms.date: 2026-09-30
 ms.topic: how-to
 keywords:
   - vla
@@ -213,7 +213,9 @@ data-pipeline/setup/edge/06-deploy-azureml-extension.sh \
   --config-preview
 ```
 
-Remove `--config-preview` after reviewing the target. The script creates or updates the training-only extension, applies the reviewed InstanceTypes, attaches the Kubernetes compute, reconciles required workspace and storage roles, and writes a sanitized deployment receipt under the ignored bundle directory.
+Remove `--config-preview` after reviewing the target. The script creates or updates the training-only extension, applies the reviewed InstanceTypes, attaches the Kubernetes compute, reconciles required workspace and storage roles, and writes a deployment receipt under the ignored bundle directory.
+
+Azure ML data operations on attached Kubernetes compute use the identity assigned to the compute. The script grants that identity `AzureML Data Scientist` on the workspace and `Storage Blob Data Contributor` on workspace storage. The Azure ML extension identity does not own training data access and must have zero effective Blob data roles on workspace storage. The script checks inherited and group assignments and stops without removing them when it finds an unsupported extension-identity role.
 
 Use the following raw commands only to diagnose or recover an incomplete automated deployment.
 
@@ -338,6 +340,162 @@ az ml compute show \
 
 Do not submit VLA training until the provisioning state is `Succeeded`.
 
+## Validate Managed Data Access
+
+Static role assignments and TLS checks do not prove that Azure ML can stage an output into a downstream input. Run the network validation and a managed writer-to-reader smoke before every first VLA submission on a new Arc compute:
+
+```bash
+data-pipeline/setup/edge/07-validate-azureml-network.sh \
+  --subscription-id "<workspace-subscription-id>" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --compute-name "<compute-name>" \
+  --bundle-dir "infrastructure/setup/generated/<environment>"
+
+data-pipeline/setup/edge/08-run-azureml-cpu-smoke.sh \
+  --subscription-id "<workspace-subscription-id>" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --compute-name "<compute-name>" \
+  --instance-type "<cpu-instance-type>" \
+  --environment "azureml:<environment-name>:<version>" \
+  --bundle-dir "infrastructure/setup/generated/<environment>" \
+  --config-preview
+```
+
+Remove `--config-preview` to submit the smoke after reviewing the rendered contract. The writer uploads a small token through the compute managed identity. The reader downloads that output through the same managed data path and verifies its contents. Both child jobs and the parent pipeline must report `Completed` in `azureml-cpu-smoke-result.json`.
+
+> [!IMPORTANT]
+> Do not submit the VLA pipeline when setup reports an extension-principal Blob role or when either smoke child fails. Preserve the generated receipt and Azure ML job details, then correct the compute identity, storage private endpoint, DNS, or data-capability failure. Do not grant workspace storage access to the extension identity.
+
+## Validate Sweep Failure Isolation
+
+Run the serial sweep smoke before the first VLA submission on an Arc compute:
+
+The smoke uses the Arc extension's `defaultinstancetype` for CPU-only trials. Confirm that this InstanceType exists before submission:
+
+```bash
+kubectl get instancetypes.amlarc.azureml.com defaultinstancetype
+```
+
+```bash
+az ml job create \
+  --file training/vla/workflows/azureml/sweep-failure-smoke.yaml \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --set compute="azureml:<compute-name>" \
+  --stream
+```
+
+If `--stream` exits with a local artifact-storage credential error while the job remains active, monitor the control-plane status instead:
+
+```bash
+az ml job show \
+  --name "<sweep-job-name>" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --query status \
+  --output tsv
+```
+
+The Azure ML schema validator does not verify Arc InstanceType names. A missing InstanceType causes each child to fail before Arc creates a pod, so treat the `kubectl` check above as a required preflight.
+
+The `success` trial writes `result.json` and logs `sweep_smoke_score=1`. The `fail` trial exits nonzero. The parent sweep must report `Completed`, and the best trial output must be downloadable:
+
+```bash
+az ml job download \
+  --name "<sweep-job-name>" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --output-name smoke_result \
+  --download-path "infrastructure/setup/generated/<environment>/sweep-smoke"
+```
+
+Confirm that the downloaded output contains `result.json` with `"selected": true`. Stop before VLA submission if the parent fails or the successful output is unavailable.
+
+## Run the External Resumable Orchestrator
+
+Use the external orchestrator when the standalone sweep succeeds but a pipeline containing the nested sweep fails before Azure ML creates child jobs. This behavior was observed on Arc: the standalone serial sweep completed and selected its successful trial, while the production nested-sweep pipeline failed before child or pod materialization.
+
+Create an ignored configuration file under `infrastructure/setup/generated/<environment>/vla-external-orchestrator.json`:
+
+```json
+{
+  "workspace": {
+    "subscription_id": "<workspace-subscription-id>",
+    "resource_group": "<workspace-resource-group>",
+    "workspace_name": "<workspace-name>"
+  },
+  "compute": {
+    "preflight": "azureml:<compute-name>",
+    "calibrate": "azureml:<compute-name>",
+    "training": "azureml:<compute-name>",
+    "finalize": "azureml:<compute-name>",
+    "evaluate": "azureml:<compute-name>",
+    "decide": "azureml:<compute-name>"
+  },
+  "instance_types": {
+    "calibrate": "gpu",
+    "training": "gpu",
+    "evaluate": "gpu"
+  },
+  "calibration_candidates": [1, 2, 4],
+  "experiment_name": "vla-external-orchestrator",
+  "managed_identity_client_id": null,
+  "inputs": {
+    "dataset": "azureml:<dataset-data-asset>:<version>",
+    "dataset_asset_id": "azureml:<dataset-data-asset>:<version>",
+    "dataset_repo_id": "<hugging-face-dataset>",
+    "promotion_policy": "azureml:<promotion-policy-data-asset>:<version>",
+    "model_name": "pi05-ur10e",
+    "policy_type": "pi05",
+    "init_from_policy_hf_repo_id": "lerobot/pi05_base",
+    "init_from_policy_hf_revision": "b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba",
+    "adapter_name": "lerobot-pi",
+    "code_repository": "https://github.com/microsoft/physical-ai-toolchain.git",
+    "code_revision": "<full-commit-sha>",
+    "pipeline_contract_fingerprint": "<pipeline-contract-sha256>",
+    "train_expert_only": "true",
+    "gradient_checkpointing": "true",
+    "use_imagenet_stats": "false",
+    "rename_map_b64": "<base64-encoded-rename-map>",
+    "headroom_fraction": 0.1,
+    "probe_timeout_seconds": 3600,
+    "training_steps": 40000,
+    "save_freq": 1000,
+    "log_freq": 1,
+    "eval_episodes": 10,
+    "job_name": "vla-evidence-pipeline",
+    "output_dir": "/workspace/outputs/train",
+    "mixed_precision": "bf16",
+    "policy_dtype": "bfloat16",
+    "mlflow_token_refresh_retries": 3,
+    "mlflow_http_request_timeout": 60,
+    "azure_client_id": "none",
+    "hf_key_vault_url": "<key-vault-url>",
+    "hf_token_secret_name": "<secret-name>"
+  }
+}
+```
+
+Set `managed_identity_client_id` for a user-assigned identity. Leave it `null` for the compute's assigned managed identity. `DefaultAzureCredential` authenticates the operator process, and every submitted component job uses Azure ML managed identity.
+
+Run one reconciliation step:
+
+```bash
+uv run python training/vla/scripts/external_orchestrator.py \
+  --config "infrastructure/setup/generated/<environment>/vla-external-orchestrator.json" \
+  --state-file "infrastructure/setup/generated/<environment>/vla-external-orchestrator-state.json"
+```
+
+The default `--state-file` is `infrastructure/setup/generated/vla-external-orchestrator-state.json`. The entire generated tree is gitignored. Keep the state file for the life of the run.
+
+Each invocation reconciles the current job through the Azure ML control plane. It returns while that job is nonterminal. Run the same command again after the job changes state. The orchestrator records a deterministic job name before submission, so an interruption during submission resumes by querying that name instead of creating another job. It does not use SDK log streaming.
+
+Calibration candidates run serially as separate standalone command jobs. A failed candidate remains recorded and the next candidate proceeds. After all candidates terminate, the largest completed candidate supplies its `calibration_report` and `workload_contract` output URIs to training. The calibration component reports success only after it writes both safe-output contracts.
+
+Preflight, training, finalize, evaluate, or decide failure marks the workflow failed and stops submission. The orchestrator never retries a failed job. A completed state prints every standalone job name and the final `decision` and `policy` Azure ML output URIs. Changing configuration while reusing a state file is rejected; start an intentional new run with a new state path.
+
 ## Submit PI 0.5 Training
 
 Connect the operator workstation to the environment's point-to-site VPN when workspace storage uses private endpoints. Store `HF_TOKEN` in an ignored local environment file or retrieve it from an approved secret store; never pass a real token in tracked YAML.
@@ -371,7 +529,6 @@ az ml job create \
   --set inputs.train_expert_only=true \
   --set inputs.gradient_checkpointing=true \
   --set inputs.rename_map_b64="$RENAME_MAP_B64" \
-  --set inputs.candidate_batch_sizes=1,2,4 \
   --set inputs.training_steps=40000 \
   --set inputs.save_freq=1000 \
   --set inputs.compute_calibrate="azureml:<compute-name>" \
@@ -383,7 +540,12 @@ az ml job create \
   --set inputs.hf_token_secret_name="<secret-name>"
 ```
 
-Review the pinned dataset and model revisions, code revision, compute target, candidate batch sizes, training duration, camera mapping, and Key Vault reference before submission. The calibration job measures the candidate micro-batches and passes its generated workload contract and report directly to training.
+Review the pinned dataset and model revisions, code revision, compute target, candidate batch sizes, training duration, camera mapping, and Key Vault reference before submission. The checked-in pipeline evaluates candidates `[1,2,4]` with `max_total_trials: 3`. Azure CLI does not preserve list types when overriding a nested sweep choice, so change the checked-in choice values and matching trial limit together when a different candidate set is required.
+
+Calibration uses a serial Azure ML grid sweep. Each candidate starts in a separate execution container, runs one real optimizer step, and logs `safe_micro_batch_size` only after its calibration report retains the configured CUDA headroom. The sweep selects the largest safe candidate and passes that trial's workload contract and calibration report directly to training. Model and data-loader initialization repeat for every candidate.
+
+> [!IMPORTANT]
+> Validate failed-trial tolerance on the attached Arc compute before the first VLA sweep. A failed trial must leave the sweep completed with the successful trial selected and its named outputs downloadable. Stop before VLA submission if this gate fails; do not raise the InstanceType limit or broaden storage roles as a workaround.
 
 Azure CLI prints the accepted pipeline name and portal URL. If the command is interrupted before it prints the job name, check the Azure ML jobs page before resubmitting.
 
@@ -505,6 +667,7 @@ The environment is ready when:
 - The node exposes the expected `nvidia.com/gpu` capacity.
 - The `gpu` InstanceType fits live allocatable capacity.
 - Azure ML compute provisioning reports `Succeeded`.
+- The managed data smoke writer, reader, and parent pipeline report `Completed`.
 - A PI 0.5 job reaches checkpoint loading, dataset construction, and optimizer updates.
 - MLflow metrics and checkpoint outputs advance.
 

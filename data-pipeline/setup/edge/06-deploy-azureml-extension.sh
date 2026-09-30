@@ -410,6 +410,13 @@ compute_json=$(az ml compute show \
   --output json)
 compute_principal_id=$(jq -r '.identity.principal_id // .identity.principalId // empty' <<< "$compute_json")
 [[ -n "$compute_principal_id" ]] || fatal "Azure ML compute identity principal ID is unavailable"
+compute_identity_type=$(jq -r '.identity.type // empty' <<< "$compute_json")
+[[ -n "$compute_identity_type" ]] || fatal "Azure ML compute identity type is unavailable"
+
+extension_principal_id=$(az k8s-extension show "${extension_args[@]}" \
+  --query identity.principalId \
+  --output tsv)
+[[ -n "$extension_principal_id" ]] || fatal "Azure ML extension identity principal ID is unavailable"
 
 workspace_storage_id=$(az ml workspace show \
   --name "$workspace_name" \
@@ -473,6 +480,29 @@ else
   fi
 fi
 
+storage_role_count=$(az role assignment list \
+  --subscription "$workspace_subscription_id" \
+  --assignee-object-id "$compute_principal_id" \
+  --scope "$workspace_storage_id" \
+  --include-inherited \
+  --query "[?roleDefinitionName=='Storage Blob Data Contributor' || roleDefinitionName=='Storage Blob Data Owner'] | length(@)" \
+  --output tsv)
+(( storage_role_count > 0 )) || fatal "Azure ML compute identity Blob data access could not be verified"
+
+section "Verify Azure ML Extension Least Privilege"
+extension_blob_role_count=$(az role assignment list \
+  --subscription "$workspace_subscription_id" \
+  --assignee-object-id "$extension_principal_id" \
+  --scope "$workspace_storage_id" \
+  --include-groups \
+  --include-inherited \
+  --query "[?roleDefinitionName=='Storage Blob Data Reader' || roleDefinitionName=='Storage Blob Data Contributor' || roleDefinitionName=='Storage Blob Data Owner'] | length(@)" \
+  --output tsv)
+if (( extension_blob_role_count > 0 )); then
+  fatal "Azure ML extension identity has $extension_blob_role_count effective Blob data role(s) at workspace storage scope; review and remove unsupported assignments explicitly"
+fi
+info "Azure ML extension identity has no effective Blob data role at workspace storage scope"
+
 jq -n \
   --arg arcClusterResourceId "$arc_cluster_id" \
   --arg extensionName "$extension_name" \
@@ -480,9 +510,13 @@ jq -n \
   --arg workspaceResourceGroup "$workspace_resource_group" \
   --arg workspaceName "$workspace_name" \
   --arg computeName "$compute_name" \
+  --arg computeIdentityType "$compute_identity_type" \
   --arg computePrincipalId "$compute_principal_id" \
+  --arg extensionPrincipalId "$extension_principal_id" \
   --arg workspaceStorageId "$workspace_storage_id" \
   --arg namespace "$namespace" \
+  --argjson computeBlobRoleCount "$storage_role_count" \
+  --argjson extensionBlobRoleCount "$extension_blob_role_count" \
   '{
     arcClusterResourceId: $arcClusterResourceId,
     extensionName: $extensionName,
@@ -490,7 +524,17 @@ jq -n \
     workspaceResourceGroup: $workspaceResourceGroup,
     workspaceName: $workspaceName,
     computeName: $computeName,
-    computePrincipalId: $computePrincipalId,
+    computeIdentity: {
+      type: $computeIdentityType,
+      principalId: $computePrincipalId,
+      dataAccessOwner: true,
+      effectiveBlobContributorOrOwnerCount: $computeBlobRoleCount
+    },
+    extensionIdentity: {
+      principalId: $extensionPrincipalId,
+      dataAccessOwner: false,
+      effectiveBlobDataRoleCount: $extensionBlobRoleCount
+    },
     workspaceStorageId: $workspaceStorageId,
     namespace: $namespace
   }' > "$bundle_dir/azureml-arc-deployment.json"
@@ -502,6 +546,7 @@ print_kv "Workspace" "$workspace_name"
 print_kv "Compute" "$compute_name"
 print_kv "Compute Identity" "$compute_principal_id"
 print_kv "Workspace Storage RBAC" "Storage Blob Data Contributor"
+print_kv "Extension Blob Data Roles" "$extension_blob_role_count"
 print_kv "Namespace" "$namespace"
 print_kv "Connectivity" "$connectivity_mode"
 print_kv "Instance Types" "$([[ "$skip_instance_types" == "true" ]] && echo skipped || echo applied)"

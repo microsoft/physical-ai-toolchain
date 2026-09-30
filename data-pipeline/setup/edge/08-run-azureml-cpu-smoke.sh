@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Submit a bounded CPU-only smoke job to Azure ML attached Kubernetes compute.
+# Verify managed output-to-input staging on Azure ML attached Kubernetes compute.
 set -o errexit -o nounset -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,8 +13,8 @@ show_help() {
   cat << EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Submit a bounded CPU-only command job to an existing Azure ML workspace and
-attached Kubernetes compute target.
+Submit a bounded CPU-only writer-to-reader pipeline to an existing Azure ML
+workspace and attached Kubernetes compute target.
 
 OPTIONS:
     -h, --help                       Show this help message
@@ -48,28 +48,65 @@ render_job_spec() {
     --arg compute "azureml:$compute_name" \
     --arg instance_type "$instance_type" \
     '{
-      "$schema": "https://azuremlschemas.azureedge.net/latest/commandJob.schema.json",
-      "type": "command",
+      "$schema": "https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json",
+      "type": "pipeline",
       "name": $job_name,
-      "display_name": "Physical AI CPU smoke",
-      "description": "Validate CPU job execution on attached Kubernetes compute.",
-      "experiment_name": "physical-ai-cpu-smoke",
-      "environment": $environment,
-      "compute": $compute,
-      "resources": {
-        "instance_count": 1,
-        "instance_type": $instance_type
+      "display_name": "Physical AI managed data smoke",
+      "description": "Verify that a managed reader can download a managed writer output.",
+      "experiment_name": "physical-ai-managed-data-smoke",
+      "settings": {
+        "default_compute": $compute,
+        "continue_on_step_failure": false
       },
-      "outputs": {
-        "smoke": {
-          "type": "uri_folder",
-          "mode": "rw_mount"
+      "jobs": {
+        "writer": {
+          "type": "command",
+          "display_name": "Managed data smoke writer",
+          "environment": $environment,
+          "identity": {"type": "managed"},
+          "resources": {
+            "instance_count": 1,
+            "instance_type": $instance_type
+          },
+          "inputs": {
+            "expected_token": "arc-managed-data-smoke-v1"
+          },
+          "outputs": {
+            "smoke": {
+              "type": "uri_folder",
+              "mode": "upload"
+            }
+          },
+          "limits": {"timeout": 300},
+          "command": "set -eu; mkdir -p \"${{outputs.smoke}}\"; printf \"%s\\n\" \"${{inputs.expected_token}}\" > \"${{outputs.smoke}}/result.txt\""
+        },
+        "reader": {
+          "type": "command",
+          "display_name": "Managed data smoke reader",
+          "environment": $environment,
+          "identity": {"type": "managed"},
+          "resources": {
+            "instance_count": 1,
+            "instance_type": $instance_type
+          },
+          "inputs": {
+            "expected_token": "arc-managed-data-smoke-v1",
+            "smoke": {
+              "type": "uri_folder",
+              "path": "${{parent.jobs.writer.outputs.smoke}}",
+              "mode": "download"
+            }
+          },
+          "outputs": {
+            "verification": {
+              "type": "uri_folder",
+              "mode": "upload"
+            }
+          },
+          "limits": {"timeout": 300},
+          "command": "set -eu; actual=$(cat \"${{inputs.smoke}}/result.txt\"); test \"$actual\" = \"${{inputs.expected_token}}\"; mkdir -p \"${{outputs.verification}}\"; printf \"verified\\n\" > \"${{outputs.verification}}/result.txt\""
         }
-      },
-      "limits": {
-        "timeout": 300
-      },
-      "command": "set -eu; architecture=$(uname -m); processors=$(getconf _NPROCESSORS_ONLN); { echo cpu-smoke-ok; echo \"$architecture\"; echo \"$processors\"; } | tee ${{outputs.smoke}}/result.txt"
+      }
     }'
 }
 
@@ -137,12 +174,16 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Job Specification" "$job_spec_file"
   print_kv "Job Result" "$job_result_file"
   render_job_spec | jq -e '
-    .type == "command" and
-    .resources.instance_count == 1 and
-    (.resources | has("instance_type")) and
-    .outputs.smoke.type == "uri_folder" and
-    .outputs.smoke.mode == "rw_mount" and
-    (.command | contains("cpu-smoke-ok"))
+    .type == "pipeline" and
+    .settings.continue_on_step_failure == false and
+    .jobs.writer.identity.type == "managed" and
+    .jobs.reader.identity.type == "managed" and
+    .jobs.writer.resources.instance_count == 1 and
+    .jobs.reader.resources.instance_count == 1 and
+    .jobs.writer.outputs.smoke.mode == "upload" and
+    .jobs.reader.inputs.smoke.mode == "download" and
+    .jobs.reader.inputs.smoke.path == "${{parent.jobs.writer.outputs.smoke}}" and
+    (.jobs.reader.command | contains("result.txt"))
   ' > /dev/null
   print_kv "Job Spec Validation" "Passed"
   exit 0
@@ -178,9 +219,9 @@ az ml environment show \
   --output none
 
 #------------------------------------------------------------------------------
-# Render and Submit CPU Smoke Job
+# Render and Submit Managed Data Smoke
 #------------------------------------------------------------------------------
-section "Submit CPU Smoke Job"
+section "Submit Managed Data Smoke"
 
 umask 077
 mkdir -p "$bundle_dir"
@@ -193,26 +234,35 @@ az ml job create \
   --subscription "$subscription_id" \
   --output none
 
-if ! az ml job stream \
-  --name "$job_name" \
-  --resource-group "$resource_group" \
-  --workspace-name "$workspace_name" \
-  --subscription "$subscription_id"; then
-  warn "Azure ML log streaming ended before a successful terminal state"
-fi
-
-job_deadline=$((SECONDS + 420))
+job_deadline=$((SECONDS + 900))
 last_job_status=""
 while :; do
-  az ml job show \
+  parent_json=$(az ml job show \
     --name "$job_name" \
     --resource-group "$resource_group" \
     --workspace-name "$workspace_name" \
     --subscription "$subscription_id" \
     --query '{name:name,status:status,compute:compute,environment:environment,creationContext:creation_context}' \
-    --output json > "$job_result_file"
+    --output json)
+  children_json=$(az ml job list \
+    --parent-job-name "$job_name" \
+    --resource-group "$resource_group" \
+    --workspace-name "$workspace_name" \
+    --subscription "$subscription_id" \
+    --output json)
+  jq -n \
+    --argjson parent "$parent_json" \
+    --argjson children "$children_json" \
+    '{
+      parent: $parent,
+      children: [$children[] | {
+        name: .name,
+        displayName: (.display_name // .displayName),
+        status: .status
+      }]
+    }' > "$job_result_file"
 
-  job_status=$(jq -r '.status' "$job_result_file")
+  job_status=$(jq -r '.parent.status' "$job_result_file")
   if [[ "$job_status" != "$last_job_status" ]]; then
     info "Azure ML job status: $job_status"
     last_job_status="$job_status"
@@ -227,6 +277,11 @@ while :; do
   sleep 5
 done
 
+completed_writer_count=$(jq '[.children[] | select(.displayName == "writer" and .status == "Completed")] | length' "$job_result_file")
+completed_reader_count=$(jq '[.children[] | select(.displayName == "reader" and .status == "Completed")] | length' "$job_result_file")
+(( completed_writer_count == 1 )) || fatal "Managed data smoke writer did not complete successfully"
+(( completed_reader_count == 1 )) || fatal "Managed data smoke reader did not complete successfully"
+
 #------------------------------------------------------------------------------
 # Deployment Summary
 #------------------------------------------------------------------------------
@@ -237,4 +292,4 @@ print_kv "Compute" "$compute_name"
 print_kv "Instance Type" "$instance_type"
 print_kv "Job Specification" "$job_spec_file"
 print_kv "Job Result" "$job_result_file"
-info "Azure ML CPU smoke completed"
+info "Azure ML managed writer-to-reader smoke completed"

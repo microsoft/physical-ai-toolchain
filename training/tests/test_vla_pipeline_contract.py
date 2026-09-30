@@ -6,9 +6,12 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 import yaml
 
+from training.vla.scripts import sweep_failure_smoke
 from training.vla.scripts.preflight_dataset import build_dataset_record
 from training.vla.scripts.vla_contracts import RecordKind, load_record, write_record
 
@@ -16,6 +19,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ENTRYPOINT = _REPO_ROOT / "training/vla/scripts/azureml-component-entry.sh"
 _COMPONENT_ROOT = _REPO_ROOT / "training/vla/workflows/azureml/components"
 _PIPELINE = _REPO_ROOT / "training/vla/workflows/azureml/vla-training-pipeline.yaml"
+_SWEEP_SMOKE = _REPO_ROOT / "training/vla/workflows/azureml/sweep-failure-smoke.yaml"
 
 
 def _write_dataset(root: Path) -> Path:
@@ -131,8 +135,19 @@ def test_given_evidence_pipeline_when_parsed_then_six_stages_are_serialized() ->
     assert pipeline["identity"] == {"type": "managed_identity"}
     assert "register_checkpoint" not in pipeline["inputs"]
     assert "dataset_revision" not in pipeline["inputs"]
+    assert "candidate_batch_sizes" not in pipeline["inputs"]
     assert all("compute" in job for job in jobs.values())
-    assert jobs["calibration_step"]["inputs"]["dataset"] == "${{parent.inputs.dataset}}"
+    calibration = jobs["calibration_step"]
+    assert calibration["type"] == "sweep"
+    assert calibration["sampling_algorithm"] == "grid"
+    assert calibration["search_space"]["micro_batch_size"] == {"type": "choice", "values": [1, 2, 4]}
+    assert calibration["objective"] == {"goal": "maximize", "primary_metric": "safe_micro_batch_size"}
+    assert calibration["limits"]["max_total_trials"] == 3
+    assert calibration["limits"]["max_concurrent_trials"] == 1
+    assert calibration["resources"]["instance_type"] == "gpu"
+    assert calibration["trial"] == "./components/calibrate.yaml"
+    assert calibration["inputs"]["micro_batch_size"] == "${{search_space.micro_batch_size}}"
+    assert calibration["inputs"]["dataset"] == "${{parent.inputs.dataset}}"
     assert jobs["training_step"]["inputs"]["dataset"] == "${{parent.inputs.dataset}}"
     assert jobs["evaluate_step"]["inputs"]["dataset"] == "${{parent.inputs.dataset}}"
     assert jobs["evaluate_step"]["inputs"]["candidate"] == "${{parent.jobs.finalize_step.outputs.candidate}}"
@@ -149,6 +164,55 @@ def test_given_evidence_pipeline_when_parsed_then_six_stages_are_serialized() ->
         "policy",
         "decision",
     } == set(pipeline["outputs"])
+
+
+def test_given_sweep_smoke_when_parsed_then_failure_is_isolated_and_success_is_selectable() -> None:
+    sweep = yaml.safe_load(_SWEEP_SMOKE.read_text(encoding="utf-8"))
+
+    assert sweep["type"] == "sweep"
+    assert sweep["sampling_algorithm"] == "grid"
+    assert sweep["search_space"]["mode"] == {"type": "choice", "values": ["success", "fail"]}
+    assert sweep["objective"] == {"goal": "maximize", "primary_metric": "sweep_smoke_score"}
+    assert sweep["limits"]["max_total_trials"] == 2
+    assert sweep["limits"]["max_concurrent_trials"] == 1
+    assert sweep["resources"]["instance_type"] == "defaultinstancetype"
+    assert sweep["trial"]["resources"]["instance_type"] == "defaultinstancetype"
+    assert sweep["trial"]["code"] == "../../scripts"
+    assert sweep["trial"]["environment"] == {"image": "mcr.microsoft.com/azureml/openmpi5.0-ubuntu24.04:latest"}
+    assert set(sweep["outputs"]) == {"smoke_result"}
+    assert "azureml-mlflow==1.62.0.post6" in sweep["trial"]["command"]
+    assert "mlflow-skinny==3.13.0" in sweep["trial"]["command"]
+    assert "${{search_space.mode}}" in sweep["trial"]["command"]
+    assert "${{outputs.smoke_result}}" in sweep["trial"]["command"]
+
+
+def test_given_successful_sweep_smoke_trial_when_run_then_result_and_metric_are_published(
+    mocker: pytest.MockFixture,
+    tmp_path: Path,
+) -> None:
+    log_metric = mocker.patch.object(sweep_failure_smoke.mlflow, "log_metric")
+
+    result = sweep_failure_smoke.run(SimpleNamespace(mode="success", output_dir=tmp_path))
+
+    assert result == 0
+    assert json.loads((tmp_path / "result.json").read_text(encoding="utf-8")) == {
+        "mode": "success",
+        "selected": True,
+    }
+    log_metric.assert_called_once_with(sweep_failure_smoke.SMOKE_METRIC, 1)
+
+
+def test_given_failed_sweep_smoke_trial_when_run_then_it_fails_without_metric(
+    mocker: pytest.MockFixture,
+    tmp_path: Path,
+) -> None:
+    log_metric = mocker.patch.object(sweep_failure_smoke.mlflow, "log_metric")
+
+    with pytest.raises(RuntimeError, match="Deliberate sweep trial failure"):
+        sweep_failure_smoke.run(SimpleNamespace(mode="fail", output_dir=tmp_path))
+
+    assert not (tmp_path / "result.json").exists()
+    log_metric.assert_not_called()
 
 
 def test_given_successful_trainer_when_entrypoint_returns_then_run_record_exists(tmp_path: Path) -> None:

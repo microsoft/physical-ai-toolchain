@@ -76,6 +76,106 @@ def test_given_successful_candidate_when_calibration_runs_then_evidence_is_writt
     assert run_candidate.call_count == 2
 
 
+def test_given_safe_sweep_trial_when_calibration_runs_then_objective_is_logged_after_outputs(
+    mocker: pytest.MockFixture,
+    tmp_path: Path,
+) -> None:
+    workload = calibrate_vla._sample_workload()
+    workload_output = tmp_path / "workload"
+    report_output = tmp_path / "report"
+    args = calibrate_vla.create_parser().parse_args(
+        [
+            "--sweep-trial",
+            "--workload-output-dir",
+            str(workload_output),
+            "--output-dir",
+            str(report_output),
+            "--candidate-batch-sizes",
+            "2",
+        ]
+    )
+    mocker.patch.object(calibrate_vla, "_build_workload", return_value=workload)
+    mocker.patch.object(
+        calibrate_vla,
+        "_run_candidate",
+        return_value={
+            "micro_batch_size": 2,
+            "outcome": "success",
+            "device_name": "test-gpu",
+            "peak_allocated_bytes": 50,
+            "peak_reserved_bytes": 60,
+            "free_bytes_after_step": 40,
+            "total_bytes": 100,
+            "duration_seconds": 0.5,
+            "samples_per_second": 4.0,
+            "optimizer_steps": 1,
+        },
+    )
+    log_metric = mocker.Mock()
+    mlflow_module = ModuleType("mlflow")
+    mlflow_module.log_metric = log_metric
+    mocker.patch.dict(sys.modules, {"mlflow": mlflow_module})
+
+    result = calibrate_vla.run(args)
+
+    assert result == calibrate_vla.EXIT_SUCCESS
+    assert (workload_output / "workload.json").is_file()
+    assert (report_output / "calibration-report.json").is_file()
+    log_metric.assert_called_once_with(calibrate_vla.SWEEP_OBJECTIVE_METRIC, 2)
+
+
+def test_given_unsafe_sweep_trial_when_calibration_runs_then_objective_is_not_logged(
+    mocker: pytest.MockFixture,
+    tmp_path: Path,
+) -> None:
+    args = calibrate_vla.create_parser().parse_args(
+        [
+            "--sweep-trial",
+            "--workload-output-dir",
+            str(tmp_path / "workload"),
+            "--output-dir",
+            str(tmp_path / "report"),
+            "--candidate-batch-sizes",
+            "4",
+        ]
+    )
+    mocker.patch.object(calibrate_vla, "_build_workload", return_value=calibrate_vla._sample_workload())
+    mocker.patch.object(
+        calibrate_vla,
+        "_run_candidate",
+        return_value={"micro_batch_size": 4, "outcome": "oom", "error_type": "OutOfMemoryError"},
+    )
+    mlflow_module = ModuleType("mlflow")
+    mlflow_module.log_metric = mocker.Mock()
+    mocker.patch.dict(sys.modules, {"mlflow": mlflow_module})
+
+    with pytest.raises(calibrate_vla.CalibrationError, match="did not retain"):
+        calibrate_vla.run(args)
+
+    mlflow_module.log_metric.assert_not_called()
+
+
+def test_given_multiple_candidates_when_sweep_trial_runs_then_it_is_rejected(
+    mocker: pytest.MockFixture,
+    tmp_path: Path,
+) -> None:
+    args = calibrate_vla.create_parser().parse_args(
+        [
+            "--sweep-trial",
+            "--workload-output-dir",
+            str(tmp_path / "workload"),
+            "--output-dir",
+            str(tmp_path / "report"),
+            "--candidate-batch-sizes",
+            "1,2",
+        ]
+    )
+    mocker.patch.object(calibrate_vla, "_build_workload", return_value=calibrate_vla._sample_workload())
+
+    with pytest.raises(calibrate_vla.CalibrationError, match="exactly one"):
+        calibrate_vla.run(args)
+
+
 def test_given_one_optimizer_step_when_probe_runs_then_measurements_are_written(
     mocker: pytest.MockFixture,
     tmp_path: Path,
@@ -192,6 +292,7 @@ def test_given_mixed_precision_when_candidate_runs_then_accelerate_launch_matche
 
     command = popen.call_args.args[0]
     assert command[:4] == ["accelerate", "launch", "--num_processes=1", "--mixed_precision=bf16"]
+    assert command[4] == str(Path(calibrate_vla.__file__).resolve())
     assert result["outcome"] == "oom"
 
 
@@ -282,6 +383,10 @@ def test_given_calibration_contract_when_parsed_then_only_secret_coordinates_are
     pipeline = yaml.safe_load(_PIPELINE.read_text(encoding="utf-8"))
     calibration_inputs = pipeline["jobs"]["calibration_step"]["inputs"]
 
+    assert component["inputs"]["micro_batch_size"]["type"] == "integer"
+    assert component["command"].startswith("env AZUREML_PARAMETER_adapter_name=")
+    assert "${{inputs.micro_batch_size}}" in component["command"]
+    assert "CALIBRATION_SWEEP_TRIAL=true" in component["command"]
     expected = {"azure_client_id", "hf_key_vault_url", "hf_token_secret_name"}
     assert expected <= set(component["inputs"])
     assert expected <= set(calibration_inputs)

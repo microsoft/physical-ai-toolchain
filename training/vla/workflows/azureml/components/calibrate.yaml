@@ -2,7 +2,7 @@ $schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.jso
 type: command
 name: vla_calibrate
 display_name: VLA Calibration
-version: "1"
+version: "2"
 description: Measure VLA CUDA memory through isolated one-step optimizer probes.
 
 code: ../../../../..
@@ -43,9 +43,8 @@ inputs:
   rename_map_b64:
     type: string
     default: none
-  candidate_batch_sizes:
-    type: string
-    default: "1"
+  micro_batch_size:
+    type: integer
   headroom_fraction:
     type: number
     default: 0.1
@@ -84,4 +83,32 @@ outputs:
 environment:
   image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
 
-command: bash training/vla/scripts/azureml-component-entry.sh calibrate
+command: >-
+  env AZUREML_PARAMETER_adapter_name='${{inputs.adapter_name}}'
+  AZUREML_PARAMETER_dataset_repo_id='${{inputs.dataset_repo_id}}'
+  AZUREML_PARAMETER_dataset_asset_id='${{inputs.dataset_asset_id}}'
+  AZUREML_PARAMETER_policy_type='${{inputs.policy_type}}'
+  AZUREML_PARAMETER_mixed_precision='${{inputs.mixed_precision}}'
+  AZUREML_PARAMETER_policy_dtype='${{inputs.policy_dtype}}'
+  AZUREML_PARAMETER_init_from_policy_hf_repo_id='${{inputs.init_from_policy_hf_repo_id}}'
+  AZUREML_PARAMETER_init_from_policy_hf_revision='${{inputs.init_from_policy_hf_revision}}'
+  AZUREML_PARAMETER_train_expert_only='${{inputs.train_expert_only}}'
+  AZUREML_PARAMETER_gradient_checkpointing='${{inputs.gradient_checkpointing}}'
+  AZUREML_PARAMETER_use_imagenet_stats='${{inputs.use_imagenet_stats}}'
+  AZUREML_PARAMETER_rename_map_b64='${{inputs.rename_map_b64}}'
+  AZUREML_PARAMETER_candidate_batch_sizes='${{inputs.micro_batch_size}}'
+  AZUREML_PARAMETER_headroom_fraction='${{inputs.headroom_fraction}}'
+  AZUREML_PARAMETER_probe_timeout_seconds='${{inputs.probe_timeout_seconds}}'
+  AZUREML_PARAMETER_code_repository='${{inputs.code_repository}}'
+  AZUREML_PARAMETER_code_revision='${{inputs.code_revision}}'
+  AZUREML_PARAMETER_compute_target='${{inputs.compute_target}}'
+  AZUREML_PARAMETER_azure_client_id='${{inputs.azure_client_id}}'
+  AZUREML_PARAMETER_hf_key_vault_url='${{inputs.hf_key_vault_url}}'
+  AZUREML_PARAMETER_hf_token_secret_name='${{inputs.hf_token_secret_name}}'
+  AZUREML_PARAMETER_runtime_image='${{inputs.runtime_image}}'
+  AZURE_ML_INPUT_dataset='${{inputs.dataset}}'
+  AZURE_ML_INPUT_dataset_manifest='${{inputs.dataset_manifest}}'
+  AZURE_ML_OUTPUT_workload_contract='${{outputs.workload_contract}}'
+  AZURE_ML_OUTPUT_calibration_report='${{outputs.calibration_report}}'
+  CALIBRATION_SWEEP_TRIAL=true
+  bash training/vla/scripts/azureml-component-entry.sh calibrate

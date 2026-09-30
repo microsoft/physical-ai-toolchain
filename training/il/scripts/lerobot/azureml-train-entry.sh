@@ -366,8 +366,11 @@ if [[ "${CALIBRATION_MODE:-false}" == "true" ]]; then
     exit 1
   }
 
-  calibration_args=(
-    python3 training/vla/scripts/calibrate_vla.py
+  calibration_args=(python3 training/vla/scripts/calibrate_vla.py)
+  if [[ "${CALIBRATION_SWEEP_TRIAL:-false}" == "true" ]]; then
+    calibration_args+=(--sweep-trial)
+  fi
+  calibration_args+=(
     --workload-output-dir "${calibration_workload_output_dir}"
     --output-dir "${calibration_output_dir}"
     --candidate-batch-sizes "${CALIBRATION_BATCH_SIZES:-1}"

@@ -55,6 +55,7 @@ EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 EXIT_ERROR = 2
 EXIT_OOM = 10
+SWEEP_OBJECTIVE_METRIC = "safe_micro_batch_size"
 
 _OWNED_TRAINING_ARGUMENTS = (
     "--batch_size",
@@ -459,7 +460,6 @@ def _run_candidate(
         "launch",
         f"--num_processes={expected_world_size}",
         f"--mixed_precision={mixed_precision}",
-        sys.executable,
         str(Path(__file__).resolve()),
         "--probe",
         "--probe-output",
@@ -544,6 +544,8 @@ def _run_calibration(args: argparse.Namespace) -> int:
     workload_path = args.workload_output_dir / "workload.json"
     _write_json(workload_path, workload)
     candidates = _parse_candidate_batch_sizes(args.candidate_batch_sizes)
+    if args.sweep_trial and len(candidates) != 1:
+        raise CalibrationError("Sweep trial mode requires exactly one candidate batch size")
 
     with tempfile.TemporaryDirectory(prefix="vla-calibration-") as temporary_directory:
         probe_dir = Path(temporary_directory)
@@ -563,6 +565,13 @@ def _run_calibration(args: argparse.Namespace) -> int:
     report = _build_report(workload, results, args.headroom_fraction)
     report_path = args.output_dir / "calibration-report.json"
     digest = write_record(report_path, report)
+    if args.sweep_trial:
+        recommendation = report["recommendation"]
+        if recommendation["status"] != "recommended":
+            raise CalibrationError("Sweep trial candidate did not retain the required CUDA memory headroom")
+        import mlflow
+
+        mlflow.log_metric(SWEEP_OBJECTIVE_METRIC, recommendation["micro_batch_size"])
     print(
         json.dumps(
             {
@@ -708,6 +717,7 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", type=Path, help="Directory for calibration-report.json")
     parser.add_argument("--calibration-report", type=Path, help="Calibration report used by training")
     parser.add_argument("--resolve-training-batch-size", action="store_true")
+    parser.add_argument("--sweep-trial", action="store_true", help="Run exactly one selectable sweep candidate")
     parser.add_argument("--candidate-batch-sizes", default="1", help="Ascending comma-separated batch sizes")
     parser.add_argument("--headroom-fraction", type=float, default=0.1)
     parser.add_argument("--probe-timeout-seconds", type=int, default=3600)

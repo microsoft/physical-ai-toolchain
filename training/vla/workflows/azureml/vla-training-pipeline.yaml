@@ -30,7 +30,6 @@ inputs:
   gradient_checkpointing: "false"
   use_imagenet_stats: "false"
   rename_map_b64: none
-  candidate_batch_sizes: "1"
   headroom_fraction: 0.1
   probe_timeout_seconds: 3600
   training_steps: 2
@@ -101,13 +100,24 @@ jobs:
       dataset_manifest: ${{parent.outputs.dataset_manifest}}
 
   calibration_step:
-    type: command
-    component: ./components/calibrate.yaml
+    type: sweep
     compute: ${{parent.inputs.compute_calibrate}}
     identity:
       type: managed_identity
     resources:
       instance_type: gpu
+    sampling_algorithm: grid
+    search_space:
+      micro_batch_size:
+        type: choice
+        values: [1, 2, 4]
+    objective:
+      goal: maximize
+      primary_metric: safe_micro_batch_size
+    limits:
+      max_total_trials: 3
+      max_concurrent_trials: 1
+      trial_timeout: 3600
     inputs:
       dataset: ${{parent.inputs.dataset}}
       dataset_manifest: ${{parent.jobs.preflight_step.outputs.dataset_manifest}}
@@ -123,7 +133,6 @@ jobs:
       gradient_checkpointing: ${{parent.inputs.gradient_checkpointing}}
       use_imagenet_stats: ${{parent.inputs.use_imagenet_stats}}
       rename_map_b64: ${{parent.inputs.rename_map_b64}}
-      candidate_batch_sizes: ${{parent.inputs.candidate_batch_sizes}}
       headroom_fraction: ${{parent.inputs.headroom_fraction}}
       probe_timeout_seconds: ${{parent.inputs.probe_timeout_seconds}}
       code_repository: ${{parent.inputs.code_repository}}
@@ -132,9 +141,12 @@ jobs:
       azure_client_id: ${{parent.inputs.azure_client_id}}
       hf_key_vault_url: ${{parent.inputs.hf_key_vault_url}}
       hf_token_secret_name: ${{parent.inputs.hf_token_secret_name}}
+      runtime_image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
+      micro_batch_size: ${{search_space.micro_batch_size}}
     outputs:
       workload_contract: ${{parent.outputs.workload_contract}}
       calibration_report: ${{parent.outputs.calibration_report}}
+    trial: ./components/calibrate.yaml
 
   training_step:
     type: command
