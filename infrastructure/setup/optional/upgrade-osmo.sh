@@ -1015,7 +1015,7 @@ on_exit() {
     if [[ "$stage_running" == "true" && "$rc" -ne 0 ]]; then
         if [[ "$stage_changed" == "true" ]]; then
             record_stage failed "{\"exit_code\": $rc}"
-            error "Stage $stage failed after making changes. Follow the rollback runbook in docs/infrastructure/cluster-setup.md."
+            error "Stage $stage failed after making changes. Fix the cause and rerun it, or follow the rollback runbook in docs/infrastructure/osmo-upgrade.md."
         else
             printf '%s\n' "$state_snapshot" > "$state_file"
             record_event "$([[ "$stage_cancelled" == "true" ]] && echo cancelled || echo stopped-before-changes)"
