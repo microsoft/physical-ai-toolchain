@@ -21,7 +21,8 @@ The frontend serves static assets and proxies `/api/` requests to the backend se
 
 Images are pushed to the Azure Container Registry provisioned by the infrastructure domain. `data-management/setup/deploy-dataviewer.sh` builds them and rolls them out to Container Apps.
 
-* The backend Dockerfile's `BACKEND_EXTRAS` build argument selects the Python extras to install. Its default, `azure analysis export auth yolo`, includes `yolo`, whose `ultralytics` dependency pulls CUDA-enabled PyTorch and makes the image about 10 GB compressed. The Container Apps Consumption profile supports images up to 8 GB per replica, so the script builds with `DATAVIEWER_BACKEND_EXTRAS` (default `azure analysis export auth`). Object detection then returns HTTP 503 on Container Apps.
+* The backend Dockerfile's `BACKEND_EXTRAS` build argument lists the Python extras to install, separated by commas. Its default, `azure,analysis,export,auth,yolo`, includes `yolo`, whose `ultralytics` dependency pulls CUDA-enabled PyTorch and makes the image about 10 GB compressed.
+* The Container Apps Consumption profile supports images up to 8 GB per replica, so the script builds with `DATAVIEWER_BACKEND_EXTRAS` (default `azure,analysis,export,auth`). Object detection then returns HTTP 503 on Container Apps.
 * The frontend Dockerfile uses BuildKit features (`RUN --mount`, `HEALTHCHECK --start-interval`) that ACR quick builds reject. Build it with the script's `--local-build` option, which builds with local Docker BuildKit and pushes to the registry.
 
 ## Kubernetes Deployment

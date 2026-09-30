@@ -38,10 +38,10 @@ such as RUN --mount and HEALTHCHECK --start-interval. The frontend Dockerfile
 uses both, so build it with --local-build (Docker with buildx, platform
 \$DATAVIEWER_BUILD_PLATFORM, default linux/amd64).
 
-Backend images install the extras in \$DATAVIEWER_BACKEND_EXTRAS (default:
-azure analysis export auth). The yolo extra adds CUDA torch and makes the image
-larger than the 8 GB that Container Apps' Consumption profile supports, so object
-detection returns 503 on Container Apps.
+Backend images install the comma-separated extras in \$DATAVIEWER_BACKEND_EXTRAS
+(default: azure,analysis,export,auth). The yolo extra adds CUDA torch and makes
+the image larger than the 8 GB that Container Apps' Consumption profile supports,
+so object detection returns 503 on Container Apps.
 
 EXAMPLES:
     $(basename "$0")
@@ -95,6 +95,10 @@ if [[ "$local_build" == "true" ]]; then
 else
   build_mode="ACR quick build"
 fi
+
+# ACR Tasks passes build arguments to docker build unquoted, so the extras list
+# is normalized to commas with no spaces.
+backend_extras=$(printf '%s' "$DATAVIEWER_BACKEND_EXTRAS" | tr -s ', ' ',,' | sed -e 's/^,//' -e 's/,$//')
 
 buildkit_images=()
 if [[ "$skip_build" == "false" ]]; then
@@ -197,8 +201,8 @@ print_kv "Build Mode" "$([[ "$skip_build" == "true" ]] && echo 'Skipped' || echo
 if [[ "$skip_build" == "false" ]]; then
   print_kv "Needs BuildKit" "$([[ ${#buildkit_images[@]} -gt 0 ]] && echo "${buildkit_images[*]}" || echo 'none')"
   if [[ "$skip_backend" == "false" ]]; then
-    print_kv "Backend Extras" "${DATAVIEWER_BACKEND_EXTRAS:-none}"
-    if [[ " $DATAVIEWER_BACKEND_EXTRAS " == *" yolo "* ]]; then
+    print_kv "Backend Extras" "${backend_extras:-none}"
+    if [[ ",$backend_extras," == *",yolo,"* ]]; then
       warn "The yolo extra makes the backend image larger than Container Apps' Consumption profile supports (8 GB)."
     fi
   fi
@@ -258,7 +262,7 @@ if [[ "$skip_build" == "false" ]]; then
     if [[ "$local_build" == "true" ]]; then
       docker buildx build \
         --platform "$DATAVIEWER_BUILD_PLATFORM" \
-        --build-arg "BACKEND_EXTRAS=${DATAVIEWER_BACKEND_EXTRAS}" \
+        --build-arg "BACKEND_EXTRAS=${backend_extras}" \
         --file "$backend_dockerfile" \
         --tag "$backend_image" \
         --push \
@@ -267,7 +271,7 @@ if [[ "$skip_build" == "false" ]]; then
       az acr build \
         --registry "$acr_name" \
         --image "${DATAVIEWER_BACKEND_IMAGE}:${image_tag}" \
-        --build-arg "BACKEND_EXTRAS=${DATAVIEWER_BACKEND_EXTRAS}" \
+        --build-arg "BACKEND_EXTRAS=${backend_extras}" \
         --file "$backend_dockerfile" \
         "$SRC_DIR/backend/"
     fi
