@@ -23,7 +23,7 @@ dependencies = [
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
     "cryptography==50.0.1",
-    "pyjwt==2.13.0",
+    "pyjwt==2.14.0",
     "rsl-rl-lib==5.5.0",
     "skrl==2.1.0",
     "tensordict==0.14.1",
