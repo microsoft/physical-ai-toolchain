@@ -34,12 +34,12 @@ jobs:
           version: '0.12.8'
 
       # Ruff version is pinned to match the `ruff` dev-dependency pin in the root
-      # pyproject.toml. Keep these in sync; bump both together (via Dependabot).
+      # pyproject.toml. Keep CLI and CI pins in sync; the editor uses extension-bundled Ruff.
       - name: Ruff lint check
         id: ruff-check
         continue-on-error: true
         run: |
-          uvx --with ruff==0.15.21 ruff check . --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
+          uvx --from ruff==0.16.7 ruff check . --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
             'RUFF_CHECK_FAILED=true' >> $env:GITHUB_ENV
@@ -50,7 +50,7 @@ jobs:
         id: ruff-format
         continue-on-error: true
         run: |
-          uvx --with ruff==0.15.21 ruff format --check --diff . 2>&1 | Tee-Object -FilePath ruff-format-results.txt
+          uvx --from ruff==0.16.7 ruff format --check --diff . 2>&1 | Tee-Object -FilePath ruff-format-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
             'RUFF_FORMAT_FAILED=true' >> $env:GITHUB_ENV
@@ -81,5 +81,5 @@ jobs:
       - name: Fail job if errors found
         if: (env.RUFF_CHECK_FAILED == 'true' || env.RUFF_FORMAT_FAILED == 'true' || env.HF_PINS_FAILED == 'true') && !inputs.soft-fail
         run: |
-          Write-Output "::error::Python lint violations detected. Run 'uvx --with ruff==0.15.21 ruff check --fix .', 'uvx --with ruff==0.15.21 ruff format .', and 'npm run lint:hfpins' locally."
+          Write-Output "::error::Python lint violations detected. Run 'uvx --from ruff==0.16.7 ruff check --fix .', 'uvx --from ruff==0.16.7 ruff format .', and 'npm run lint:hfpins' locally."
           exit 1

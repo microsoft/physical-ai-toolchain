@@ -41,7 +41,7 @@ jobs:
 
       - name: Run pytest
         run: >-
-          uv run --frozen pytest -o addopts="" shared/ci/tests -v
+          uv run --frozen pytest -o addopts="" shared/ci/tests scripts/tests/security/test_zap_to_sarif.py -v
           --cov=shared/ci
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-shared-ci.xml
