@@ -68,7 +68,7 @@ purge_redis=false
 db_name="osmo"
 use_local_osmo=false
 config_preview=false
-postgres_image="postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94"
+postgres_image="$POSTGRES_CLIENT_IMAGE"
 python_image="python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea"
 redis_tls_client=$(<"$SCRIPT_DIR/redis_tls_client.py")
 
@@ -472,14 +472,16 @@ if [[ "$skip_backend" == "false" ]]; then
     fi
 fi
 
-if kubectl get namespace "$NS_OSMO_CONTROL_PLANE" &>/dev/null; then
+if [[ "$skip_k8s_cleanup" == "true" ]]; then
+    info "Namespaces kept (--skip-k8s-cleanup)"
+elif kubectl get namespace "$NS_OSMO_CONTROL_PLANE" &>/dev/null; then
     error "$NS_OSMO_CONTROL_PLANE namespace still exists"
     verification_failed=true
 else
     info "$NS_OSMO_CONTROL_PLANE namespace removed"
 fi
 
-if [[ "$skip_backend" == "false" ]]; then
+if [[ "$skip_backend" == "false" && "$skip_k8s_cleanup" == "false" ]]; then
     for ns in "$NS_OSMO_OPERATOR" "$NS_OSMO_WORKFLOWS"; do
         if kubectl get namespace "$ns" &>/dev/null; then
             error "$ns namespace still exists"

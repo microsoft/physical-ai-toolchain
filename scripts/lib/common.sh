@@ -787,6 +787,23 @@ require_protected_file() {
 # OSMO Preflight Validation
 # // ===================================================================
 
+# List installed pre-6.3 OSMO releases as "<release>\t<chart>" lines: separate service, router,
+# or web-ui chart releases, or an osmo release on an older chart line than the pinned one.
+# Releases uninstalled with --keep-history own no resources and are skipped.
+# Usage: osmo_legacy_releases <namespace> <pinned-chart-version>
+osmo_legacy_releases() {
+  local namespace="${1:?namespace required}" pinned="${2:?pinned chart version required}"
+  helm list --all -n "$namespace" -o json | jq -r --arg pinned "$pinned" '
+    def minor_line: capture("^(?<major>[0-9]+)\\.(?<minor>[0-9]+)") | [(.major | tonumber), (.minor | tonumber)];
+    .[] | select(.status != "uninstalled")
+    | (.chart | capture("^(?<name>.+)-(?<version>[0-9]+\\.[0-9]+\\.[0-9]+.*)$")) as $chart
+    | select(
+        (.name != "osmo" and ($chart.name | IN("service", "router", "web-ui")))
+        or (.name == "osmo" and (($chart.version | minor_line) < ($pinned | minor_line)))
+      )
+    | "\(.name)\t\(.chart)"'
+}
+
 is_prerelease_tag() {
   local tag="${1:?image tag required}"
   [[ "$tag" =~ (rc|beta|alpha|pre|dev) ]] || [[ "$tag" =~ ^v20[0-9]{2}\. ]]

@@ -3,7 +3,7 @@ sidebar_position: 5
 title: Cluster Setup
 description: Kubernetes service deployment, AzureML extension, and OSMO platform configuration
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-21
+ms.date: 2026-09-30
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -64,26 +64,14 @@ kubectl cluster-info
 ```
 
 > [!IMPORTANT]
-> **Do not re-run `03-deploy-osmo.sh` against a Postgres database that already holds OSMO state from a previous AKS cluster.** Script 03 mints a fresh Master Encryption Key on every run; the new key cannot decrypt rows wrapped by the previous one, and OSMO will fail with `jwcrypto` `InvalidJWEData` / `InvalidTag` errors on login and on workflow submission.
+> **Do not re-run `03-deploy-osmo.sh` against a Postgres database that already holds OSMO state from a previous AKS cluster.** On a cluster without a `mek-config` ConfigMap, script 03 creates a new Master Encryption Key. The new key cannot decrypt rows wrapped by the previous one, and OSMO will fail with `jwcrypto` `InvalidJWEData` / `InvalidTag` errors on login and on workflow submission. Reruns on the same cluster keep the existing key.
 >
 > If you destroyed and re-created AKS while preserving the Postgres flexible server, first drop and re-create the `osmo` database (or `TRUNCATE` the `configs`, `credential`, `ueks`, and `backends` tables) before running script 03 again.
 
 <!-- -->
 
 > [!NOTE]
-> **Supported OSMO version.** This repository targets a single current OSMO release — **6.3** (chart `1.3.0`, image `6.3.0`; see [Component Inventory](../contributing/component-updates.md#component-inventory)). Support tracks the current upstream release and may change as OSMO advances; older versions are not maintained here.
-
-<!-- -->
-
-> [!WARNING]
-> **Upgrading from OSMO 6.2?** A direct rerun is not supported. OSMO 6.3 folds the standalone `router` and `web-ui` charts into the `service` chart, and `03-deploy-osmo.sh` now installs a single Helm release named `osmo` (replacing the previous `service`, `router`, and `ui` releases). It also defaults to ConfigMap mode (`services.configs.enabled: true`), under which CLI/API config writes return HTTP 409. Before deploying 6.3:
->
-> 1. Export any database-stored config to Helm values with NVIDIA's `deployments/upgrades/export_configs_to_helm.py`, then fold it into `infrastructure/setup/values/osmo-platforms.yaml` (ConfigMap mode replaces the `osmo config` API).
-> 2. Remove the legacy Helm releases so the new `osmo` release installs cleanly (adjust names/namespace to your install):
->    `helm uninstall web-ui router service -n osmo-control-plane`
-> 3. Run `infrastructure/setup/03-deploy-osmo.sh`.
->
-> See NVIDIA's [OSMO 6.3.0 release notes](https://github.com/NVIDIA/OSMO/blob/main/releases/6.3.0.md) for the full list of breaking changes (router/web-ui consolidation, squid-proxy sidecar removal, ConfigMap mode).
+> **Supported OSMO version.** This repository targets a single current OSMO release — **6.3** (chart `1.3.0`, image `6.3.0`; see [Component Inventory](../contributing/component-updates.md#component-inventory)). Support tracks the current upstream release and may change as OSMO advances; older versions are not maintained here. To move an older install to 6.3, see [Upgrade from Earlier OSMO Releases](#-upgrade-from-earlier-osmo-releases).
 
 ## 🔐 Deployment Scenarios
 
@@ -162,6 +150,17 @@ cd ../002-setup
 | Registry     |      nvcr.io      |       Private ACR       |
 | Air-Gap      |         ✗         |            ✓            |
 
+## 🔄 Upgrade from Earlier OSMO Releases
+
+`03-deploy-osmo.sh` stops when `osmo-control-plane` holds a pre-6.3 install: separate releases of the `service`, `router`, or `web-ui` charts, or an `osmo` release on an older chart line. Upgrade those installs, from 6.0-era builds through 6.2, with `infrastructure/setup/optional/upgrade-osmo.sh`, one confirmed stage per run:
+
+| Path      | Stages                                                            |
+|-----------|-------------------------------------------------------------------|
+| Keep data | `backup` → `hop-6.2` → `tokens` → `export` → `hop-6.3` → `verify` |
+| Fresh     | `backup` → `reset` → `hop-6.3` → `verify`                         |
+
+Both paths end in ConfigMap mode, where config writes through the CLI or API return HTTP 409 and pools change through Helm values. See [OSMO Upgrade from Pre-6.3 Releases](osmo-upgrade.md) for prerequisites, the config review, HiL token renewal, and the rollback runbook.
+
 ## 🔒 Security Considerations
 
 When deploying with `should_enable_private_endpoint = false`, cluster endpoints are publicly accessible. Secure the following components:
@@ -219,4 +218,5 @@ kubectl get sa -n osmo-control-plane osmo-control-plane -o yaml | grep azure.wor
 ## 🔗 Related
 
 - [Cluster Operations](cluster-setup-advanced.md) — accessing OSMO, troubleshooting, optional scripts
+- [OSMO Upgrade from Pre-6.3 Releases](osmo-upgrade.md) — staged upgrade, backups, and rollback
 - [Cleanup and Destroy](cleanup.md) — resource teardown procedures

@@ -290,6 +290,15 @@ fi
 
 connect_aks "$resource_group" "$aks_cluster" "$kubeconfig" "$context"
 
+# Pre-6.3 installs run separate service, router, and web-ui releases, or an older osmo
+# chart line. Installing over them collides on resource ownership, so stop before any
+# change. --skip-preflight doesn't skip this check.
+legacy_releases=$(osmo_legacy_releases "$NS_OSMO_CONTROL_PLANE" "$chart_version")
+if [[ -n "$legacy_releases" ]]; then
+    error "Legacy OSMO releases in $NS_OSMO_CONTROL_PLANE: $(awk -F'\t' '{printf "%s%s (%s)", (NR > 1 ? ", " : ""), $1, $2}' <<< "$legacy_releases")"
+    fatal "This script installs OSMO as one osmo release on chart $chart_version and can't run over them. Upgrade with infrastructure/setup/optional/upgrade-osmo.sh; see docs/infrastructure/osmo-upgrade.md"
+fi
+
 if [[ -n "$hil_backend_name" ]] && helm status osmo -n "$NS_OSMO_CONTROL_PLANE" >/dev/null 2>&1; then
         current_values=$(helm get values osmo -n "$NS_OSMO_CONTROL_PLANE" -o json --all)
         if jq -e --arg name "$hil_backend_name" '.services.configs.backends[$name] != null' <<< "$current_values" >/dev/null; then
@@ -470,7 +479,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: psql
-      image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
+      image: $POSTGRES_CLIENT_IMAGE
       env:
         - name: PGPASSWORD
           valueFrom:
