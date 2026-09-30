@@ -164,6 +164,40 @@ Each run leaves a job and its MLflow run in the `gpu-smoke` experiment and a new
 
 The image is PyTorch with CUDA 12.4, which runs on NVIDIA driver 550 and newer. That includes the GRID drivers AKS installs on A10 nodes. Training images built for CUDA 13 need driver 580 or newer, so a passing smoke test doesn't prove those images run on an older driver.
 
+## 🔌 HiL Clusters as Azure ML Computes
+
+An Arc-connected K3s HiL host can run Azure ML training jobs as its own Kubernetes compute. Preview, then run the attach from an operator machine that has the Terraform outputs:
+
+```bash
+./infrastructure/setup/05-attach-hil-azureml-compute.sh \
+  --arc-cluster-resource-id <arc-resource-id> \
+  --compute-name <compute-name> \
+  --config-preview
+
+./infrastructure/setup/05-attach-hil-azureml-compute.sh \
+  --arc-cluster-resource-id <arc-resource-id> \
+  --compute-name <compute-name> \
+  --require-gpu
+```
+
+The script:
+
+1. Installs a training-only Azure ML extension on the Arc cluster from `infrastructure/setup/config/azureml-arc-config.template.json`, or updates only the settings that differ on an existing one.
+2. Applies InstanceTypes through Arc cluster connect, using a temporary kubeconfig it removes when it exits. The default `infrastructure/setup/manifests/azureml-instance-types-hil.yaml` defines `defaultinstancetype` for CPU jobs and `gpu` for one GPU; pass an environment manifest with `--instance-types-manifest`.
+3. Attaches the cluster as a Kubernetes compute with a system-assigned identity in the `azureml` namespace.
+4. Grants that identity AzureML Data Scientist on the workspace and Storage Blob Data Contributor on the workspace storage.
+
+Before you run it:
+
+- Connect the cluster to Arc with `data-pipeline/setup/edge/05-connect-arc-kubernetes.sh --cluster-admin-signed-in-user`, so Arc cluster connect accepts your identity.
+- For GPU jobs, run `data-pipeline/setup/hil/05-enable-k3s-gpu.sh` on the host first. InstanceTypes can't set a runtime class, so the NVIDIA runtime must be the K3s default. `--require-gpu` stops the attach until the node reports `nvidia.com/gpu`.
+- You need Contributor on the Arc cluster's resource group and rights to assign roles on the workspace and its storage.
+- Compute names are 16 characters at most. The default, `k8s-<cluster>`, is truncated, so pass `--compute-name`.
+
+The extension creates an Azure Relay namespace and hybrid connection in the Arc cluster's resource group. Don't modify them; doing so breaks the compute. Workspace storage accepts only private traffic, so the host needs the HiL VPN with private DNS before its jobs can read or write data.
+
+Submit to the HiL compute like any other, for example `training/smoke/scripts/submit-azureml-gpu-smoke.sh --compute <compute-name> --instance-type gpu --stream`.
+
 ## 💾 Checkpoint Management
 
 | Mode           | Behavior                                   |

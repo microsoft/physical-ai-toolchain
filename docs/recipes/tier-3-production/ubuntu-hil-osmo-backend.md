@@ -2,7 +2,7 @@
 title: Ubuntu HiL OSMO Backend
 description: Prepare one Ubuntu T3 HiL node, optionally establish private reachability, connect it to an existing OSMO environment, and prove CPU and no-command outcomes.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-29
+ms.date: 2026-09-30
 ms.topic: tutorial
 ---
 
@@ -339,6 +339,15 @@ data-pipeline/setup/hil/04-run-no-command-check.sh \
 The result must contain representative proposed actions, zero applied actions, `command_transport: none`, a passed negative probe, `NO_COMMAND_TRANSPORT`, and the owned local node identity. The no-command check also requires the managed-identity OSMO upload timestamp, retrieves its unique output URI with `osmo data download`, and verifies the exact result manifest.
 
 Static validation covers the repository contracts only. Run live Arc federation, runtime upload, and OSMO download validation against the target environment before treating durable output as operational.
+
+## Optional Azure ML Compute
+
+The same host can also run Azure ML training jobs:
+
+1. For GPU jobs, run `data-pipeline/setup/hil/05-enable-k3s-gpu.sh --config-preview` on the host, then run it without the flag. It checks the driver, the NVIDIA Container Toolkit, and the `nvidia` RuntimeClass, makes the NVIDIA runtime the K3s default, and installs the pinned device plugin. K3s restarts once when the runtime changes.
+2. From an operator machine, attach the Arc cluster with `infrastructure/setup/05-attach-hil-azureml-compute.sh`. See [HiL Clusters as Azure ML Computes](../../training/azureml-training.md#-hil-clusters-as-azure-ml-computes).
+
+Azure ML jobs on the host reach workspace storage over its private endpoint, so they need the VPN from [Optional Private Reachability](#optional-private-reachability).
 
 ## Failure and Rerun Behavior
 

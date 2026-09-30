@@ -28,12 +28,15 @@ DEFAULT_LEROBOT_EVAL_IMAGE="${DEFAULT_LEROBOT_EVAL_IMAGE:-pytorch/pytorch:2.13.0
 DEFAULT_GROOT_IMAGE="${DEFAULT_GROOT_IMAGE:-pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel@sha256:0cf3402e946b7c384ba943ee05c90b4c5a4a05227923921f2b0918c011cfaf56}"
 # CUDA 12.4 runs on NVIDIA driver 550 and newer, including AKS-managed GRID drivers.
 DEFAULT_AZUREML_SMOKE_IMAGE="${DEFAULT_AZUREML_SMOKE_IMAGE:-pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime@sha256:77f17f843507062875ce8be2a6f76aa6aa3df7f9ef1e31d9d7432f4b0f563dee}"
+# NVIDIA Kubernetes device plugin for K3s hosts that expose GPUs without the GPU Operator.
+DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE="${DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE:-nvcr.io/nvidia/k8s-device-plugin:v0.17.4@sha256:3c54348fe5a57e5700e7d8068e7531d2ef2d5f3ccb70c8f6bac0953432527abd}"
 # isaac-lab tag, available to callers that need the tag without the digest.
 _isaac_ref="${DEFAULT_ISAAC_LAB_IMAGE%@*}"
 DEFAULT_ISAAC_LAB_IMAGE_VERSION="${DEFAULT_ISAAC_LAB_IMAGE_VERSION:-${_isaac_ref##*:}}"
 unset _isaac_ref
 export DEFAULT_ISAAC_LAB_IMAGE DEFAULT_ISAAC_LAB_IMAGE_VERSION
 export DEFAULT_LEROBOT_TRAIN_IMAGE DEFAULT_LEROBOT_EVAL_IMAGE DEFAULT_GROOT_IMAGE DEFAULT_AZUREML_SMOKE_IMAGE
+export DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE
 
 # Logging functions with color support (NO_COLOR standard: https://no-color.org)
 if [[ -z "${NO_COLOR+x}" ]]; then
