@@ -1,0 +1,48 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+display_name: GR00T N1.7 Training
+description: NVIDIA GR00T N1.7 fine-tuning on a mounted GR00T LeRobot v2 dataset.
+experiment_name: groot-n17-training
+identity:
+  type: managed_identity
+
+code: .
+environment: azureml:groot-n17-training-env:placeholder
+compute: azureml:gpu-h100-train
+resources:
+  instance_count: 1
+  shm_size: 64g
+
+inputs:
+  dataset:
+    type: uri_folder
+    mode: ro_mount
+    path: azureml:placeholder:1
+command: >-
+  env
+  DATASET_PATH="${{inputs.dataset}}"
+  OUTPUT_ROOT="${{outputs.checkpoints}}"
+  RESUME_CHECKPOINT="${{inputs.dataset}}"
+  MODEL_CACHE_ROOT=""
+  bash vla/scripts/groot/azureml-train-entry.sh
+
+environment_variables:
+  AZURE_SUBSCRIPTION_ID: placeholder
+  AZURE_RESOURCE_GROUP: placeholder
+  AZUREML_WORKSPACE_NAME: placeholder
+  DATA_CONFIG: custom_n17
+  BASE_MODEL: nvidia/GR00T-N1.7-3B
+  BASE_MODEL_REVISION: 2fc962b973bccdd5d8ce4f67cc63b264d6886495
+  ISAAC_GROOT_REF: 23ace64f17aa5015259b8609d371eb61a357c776
+  EMBODIMENT_TAG: NEW_EMBODIMENT
+  BATCH_SIZE: "4"
+  MAX_STEPS: "100"
+  SAVE_STEPS: "50"
+  DATALOADER_WORKERS: "4"
+  NUM_GPUS: "2"
+  AZURE_UPLOAD: "false"
+
+outputs:
+  checkpoints:
+    type: uri_folder
+    mode: upload

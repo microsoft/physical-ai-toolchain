@@ -1,0 +1,28 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+display_name: GR00T N1.7 Model Cache
+description: Cache immutable Hugging Face model snapshots in private Azure storage.
+experiment_name: groot-n17-model-cache
+identity:
+  type: managed_identity
+
+code: .
+environment: azureml:groot-n17-training-env:placeholder
+compute: azureml:gpu-h100-train
+
+command: >-
+  python -m pip install --quiet azure-identity==1.25.3 huggingface-hub==0.35.3 &&
+  python vla/scripts/groot/cache-huggingface-models.py
+  --output "${{outputs.model_cache}}"
+  --model groot-n17 nvidia/GR00T-N1.7-3B "$GROOT_REVISION"
+  --model cosmos-reason2-2b nvidia/Cosmos-Reason2-2B "$COSMOS_REVISION"
+
+environment_variables:
+  HF_TOKEN_SECRET_URL: placeholder
+  GROOT_REVISION: 2fc962b973bccdd5d8ce4f67cc63b264d6886495
+  COSMOS_REVISION: 9ce19a195e423419c349abfc86fd07178b230561
+
+outputs:
+  model_cache:
+    type: uri_folder
+    mode: upload

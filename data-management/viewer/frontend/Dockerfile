@@ -7,9 +7,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY data-management/viewer/frontend/package.json data-management/viewer/frontend/package.json
-RUN --mount=type=cache,target=/root/.npm \
-    --mount=type=secret,id=npmrc,target=/root/.npmrc \
-    npm ci --ignore-scripts --workspace robotic-training-data-tool --include-workspace-root=false
+RUN npm ci --ignore-scripts --workspace robotic-training-data-tool --include-workspace-root=false
 
 COPY data-management/viewer/frontend data-management/viewer/frontend
 COPY data-management/viewer/specifications/language-tag-corpus.json data-management/viewer/specifications/language-tag-corpus.json
@@ -50,7 +48,7 @@ USER nginx
 
 # localhost resolves to IPv6 [::1] first in this image, but nginx listens on
 # IPv4 0.0.0.0:8080 only, so probe 127.0.0.1 explicitly.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --start-interval=3s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1
 
 CMD ["/bin/sh", "-c", "envsubst '${NGINX_BACKEND_HOST} ${NGINX_BACKEND_SCHEME} ${NGINX_RESOLVER}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
