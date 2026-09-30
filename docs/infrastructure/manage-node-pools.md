@@ -86,7 +86,7 @@ Anything in the "No" rows means choosing between two flows:
 
 ```bash
 terraform -chdir=infrastructure/terraform output -json | \
-  jq -r '.node_pools.value | to_entries[] | "\(.key)\t\(.value.vm_size)\t\(.value.priority)"'
+  jq -r '.node_pools.value | to_entries[] | "\(.key)\t\(.value.vm_size)\t\(.value.priority)\tautoscale=\(.value.should_enable_auto_scaling)\tcount=\(.value.node_count)\tmin=\(.value.min_count)\tmax=\(.value.max_count)"'
 ```
 
 ### Resize an Existing Pool (In-Place)
@@ -125,6 +125,34 @@ Resizing means changing `node_count`, `min_count`, `max_count`, `node_labels`, o
      --platform-values infrastructure/setup/generated/<environment>/osmo-platforms.yaml \
      --use-acr
    ```
+
+### Park a Pool Without Nodes
+
+Park a pool when its VM size has no quota or capacity yet but you want to keep its definition. A parked pool has autoscaling off and no nodes, so no `terraform apply`, cluster start, or pending pod tries to allocate a node.
+
+```hcl
+node_pools = {
+  rtxprogpu = {
+    vm_size                    = "Standard_NC144ds_xl_RTXPRO6000BSE_v6"
+    subnet_address_prefixes    = ["10.0.7.0/24"]
+    node_taints                = ["nvidia.com/gpu:NoSchedule"]
+    gpu_driver                 = "Install"
+    should_enable_auto_scaling = false
+    node_count                 = 0
+  }
+}
+```
+
+Parking an existing pool changes only its autoscaling and node count, so Terraform updates it in place without creating VMs. Leave `vm_size`, `gpu_driver`, and the subnet as they are; changing any of them replaces the pool.
+
+Nothing can run on a parked pool, so remove what targets it:
+
+| Target                                      | How to remove it                                                                                                                                                                  |
+|---------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Azure ML InstanceType that selects the pool | `kubectl delete instancetype <name>`. Applying a regenerated manifest doesn't delete it, and with resource validation skipped, Azure ML jobs for it wait in Pending indefinitely. |
+| OSMO pool, platform, and pod template       | Regenerate the environment bundle, which leaves parked pools out, then rerun `03-deploy-osmo.sh` with its `--platform-values` file.                                               |
+
+The `node_pools` Terraform output reports `should_enable_auto_scaling` and `node_count`, which is how bundle generation recognizes a parked pool. To bring the pool back once quota exists, restore its autoscaling or node count, apply, and regenerate the bundle.
 
 ### Add a New Pool
 

@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Troubleshooting Guide
 description: Symptom-based resolution guide for common errors in the robotics reference architecture
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-21
+ms.date: 2026-09-29
 ms.topic: troubleshooting
 keywords:
   - troubleshooting
@@ -82,11 +82,11 @@ Set `mig.strategy: single` in the GPU Operator Helm values for RTX PRO 6000 node
 
 ### GPU Operator attempts to install drivers on GRID driver nodes
 
-**Cause:** Nodes with pre-installed Azure GRID drivers (`580.105.08-grid-azure`) do not need the GPU Operator datacenter driver. Installing both causes conflicts.
+**Cause:** Nodes that already have the Azure GRID driver don't need the GPU Operator datacenter driver, and installing both causes conflicts. The GPU Operator detects the GRID driver that AKS installs on `gpu_driver = "Install"` pools and labels those nodes `nvidia.com/gpu.deploy.driver=pre-installed`. Pools created with `gpu_driver = "None"` get the GRID driver from the fallback DaemonSet instead, which the operator can't detect before it installs.
 
 **Resolution:**
 
-Label GRID driver nodes with `nvidia.com/gpu.deploy.driver=false` to prevent the GPU Operator from deploying its own driver DaemonSet.
+For `gpu_driver = "None"` pools that use the GRID driver DaemonSet, label the nodes `nvidia.com/gpu.deploy.driver=false` through the pool's `node_labels`. The label stops the GPU Operator from deploying its own driver and lets the DaemonSet install the Microsoft vGPU 20 (R595) driver. New RTX PRO 6000 pools should use `gpu_driver = "Install"`, which needs no label. See [GPU Configuration](../reference/gpu-configuration.md#rtx-pro-6000-nodes).
 
 ### Vulkan initialization fails in Isaac Sim containers
 

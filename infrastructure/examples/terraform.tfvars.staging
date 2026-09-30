@@ -18,16 +18,16 @@ should_create_resource_group = true
 system_node_pool_vm_size    = "Standard_D8ds_v5"
 system_node_pool_node_count = 2
 
-// Single GPU pool with dedicated subnet
+// Single GPU pool with dedicated subnet. AKS installs the GRID driver for
+// RTX PRO 6000 sizes. Each NC144ds_xl node uses 144 vCPUs of RTX PRO 6000
+// quota; request enough for max_count nodes plus one upgrade surge node.
 node_pools = {
   rtxprogpu = {
-    vm_size                    = "Standard_NC128ds_xl_RTXPRO6000BSE_v6"
+    vm_size                    = "Standard_NC144ds_xl_RTXPRO6000BSE_v6"
     subnet_address_prefixes    = ["10.0.7.0/24"]
     node_taints                = ["nvidia.com/gpu:NoSchedule"]
-    gpu_driver                 = "None"
-    node_labels = {
-      "nvidia.com/gpu.deploy.driver" = "false"
-    }
+    node_labels                = { accelerator = "nvidia" }
+    gpu_driver                 = "Install"
     priority                   = "Regular"
     should_enable_auto_scaling = true
     min_count                  = 1

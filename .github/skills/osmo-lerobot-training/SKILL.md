@@ -234,7 +234,7 @@ While the background eval poller is running, monitor the poller log and navigate
 | GPU | VRAM | Recommended Batch Size | Notes |
 |-----|------|----------------------|-------|
 | A10 | 24GB | 32 | Standard configuration |
-| RTX PRO 6000 | 48GB | 64 | Requires `mig.strategy: single` |
+| RTX PRO 6000 | 96GB (whole GPU) | 64 | Requires `mig.strategy: single`; fractional sizes have 48GB or 24GB |
 | H100 | 80GB | 128 | Standard MIG disabled |
 
 ### Azure ML Context
