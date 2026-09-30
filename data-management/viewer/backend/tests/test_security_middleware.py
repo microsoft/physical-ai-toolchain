@@ -21,9 +21,9 @@ def security_client(tmp_path):
     ds_mod._dataset_service = None
     ann_mod._annotation_service = None
 
-    from src.api.main import app
+    import src.api.main as main_mod
 
-    with TestClient(app) as c:
+    with TestClient(main_mod.app) as c:
         yield c
 
     config_mod._app_config = None
@@ -186,26 +186,24 @@ class TestEnhancedHealthCheck:
         assert "api" in data["checks"]
         assert "storage" in data["checks"]
 
-    def test_degraded_returns_503(self, tmp_path):
-        """Health returns 503 when storage path does not exist."""
+    def test_startup_rejects_missing_storage(self, tmp_path, monkeypatch):
+        """Application startup fails when local storage does not exist."""
         import src.api.config as config_mod
         import src.api.services.annotation_service as ann_mod
         import src.api.services.dataset_service as ds_mod
 
         nonexistent = str(tmp_path / "does_not_exist")
-        os.environ["DATA_DIR"] = nonexistent
+        monkeypatch.setenv("DATA_DIR", nonexistent)
         config_mod._app_config = None
         ds_mod._dataset_service = None
         ann_mod._annotation_service = None
 
-        from src.api.main import app
+        import src.api.main as main_mod
 
-        with TestClient(app) as c:
-            resp = c.get("/health")
-            data = resp.json()
-            assert data["checks"]["storage"] == "unhealthy"
-            assert data["status"] == "degraded"
-            assert resp.status_code == 503
+        monkeypatch.setattr(main_mod, "_config", config_mod.load_config())
+
+        with pytest.raises(RuntimeError, match=r"Local storage path .* is not writable"), TestClient(main_mod.app):
+            pass
 
         config_mod._app_config = None
         ds_mod._dataset_service = None
@@ -236,9 +234,9 @@ class TestDetectionSecurity:
         ann_mod._annotation_service = None
         auth_mod.reset_auth_provider()
 
-        from src.api.main import app
+        import src.api.main as main_mod
 
-        with TestClient(app) as c:
+        with TestClient(main_mod.app) as c:
             resp = c.delete(
                 "/api/datasets/test/episodes/0/detections",
                 headers={"X-API-Key": "test-key"},
@@ -268,9 +266,9 @@ class TestDetectionSecurity:
         """ImportError during detection returns 503 with install hint."""
         from unittest.mock import AsyncMock, MagicMock
 
+        import src.api.main as main_mod
         import src.api.services.dataset_service as ds_mod
         import src.api.services.detection_service as det_mod
-        from src.api.main import app
 
         mock_episode = MagicMock()
         mock_episode.meta.length = 5
@@ -283,8 +281,8 @@ class TestDetectionSecurity:
         mock_det = MagicMock()
         mock_det.detect_episode = AsyncMock(side_effect=ImportError("No module named 'ultralytics'"))
 
-        app.dependency_overrides[ds_mod.get_dataset_service] = lambda: mock_ds
-        app.dependency_overrides[det_mod.get_detection_service] = lambda: mock_det
+        main_mod.app.dependency_overrides[ds_mod.get_dataset_service] = lambda: mock_ds
+        main_mod.app.dependency_overrides[det_mod.get_detection_service] = lambda: mock_det
         try:
             resp = security_client.post(
                 "/api/datasets/test-ds/episodes/0/detect",
@@ -293,16 +291,16 @@ class TestDetectionSecurity:
             assert resp.status_code == 503
             assert "YOLO" in resp.json()["detail"]
         finally:
-            app.dependency_overrides.pop(ds_mod.get_dataset_service, None)
-            app.dependency_overrides.pop(det_mod.get_detection_service, None)
+            main_mod.app.dependency_overrides.pop(ds_mod.get_dataset_service, None)
+            main_mod.app.dependency_overrides.pop(det_mod.get_detection_service, None)
 
     def test_detect_generic_exception_returns_500(self, security_client):
         """Generic exception during detection returns 500."""
         from unittest.mock import AsyncMock, MagicMock
 
+        import src.api.main as main_mod
         import src.api.services.dataset_service as ds_mod
         import src.api.services.detection_service as det_mod
-        from src.api.main import app
 
         mock_episode = MagicMock()
         mock_episode.meta.length = 5
@@ -315,8 +313,8 @@ class TestDetectionSecurity:
         mock_det = MagicMock()
         mock_det.detect_episode = AsyncMock(side_effect=RuntimeError("GPU out of memory"))
 
-        app.dependency_overrides[ds_mod.get_dataset_service] = lambda: mock_ds
-        app.dependency_overrides[det_mod.get_detection_service] = lambda: mock_det
+        main_mod.app.dependency_overrides[ds_mod.get_dataset_service] = lambda: mock_ds
+        main_mod.app.dependency_overrides[det_mod.get_detection_service] = lambda: mock_det
         try:
             resp = security_client.post(
                 "/api/datasets/test-ds/episodes/0/detect",
@@ -325,8 +323,8 @@ class TestDetectionSecurity:
             assert resp.status_code == 500
             assert resp.json()["detail"] == "Detection failed"
         finally:
-            app.dependency_overrides.pop(ds_mod.get_dataset_service, None)
-            app.dependency_overrides.pop(det_mod.get_detection_service, None)
+            main_mod.app.dependency_overrides.pop(ds_mod.get_dataset_service, None)
+            main_mod.app.dependency_overrides.pop(det_mod.get_detection_service, None)
 
 
 # ============================================================================
@@ -559,20 +557,20 @@ class TestValidationExceptionHandler:
         ds_mod._dataset_service = None
         ann_mod._annotation_service = None
 
+        import src.api.main as main_mod
         import src.api.services.detection_service as det_mod
-        from src.api.main import app
 
         mock_det = MagicMock()
         mock_det.get_cached = MagicMock(side_effect=RuntimeError("unexpected crash"))
 
-        app.dependency_overrides[det_mod.get_detection_service] = lambda: mock_det
+        main_mod.app.dependency_overrides[det_mod.get_detection_service] = lambda: mock_det
         try:
-            with TestClient(app, raise_server_exceptions=False) as c:
+            with TestClient(main_mod.app, raise_server_exceptions=False) as c:
                 resp = c.get("/api/datasets/test/episodes/0/detections")
                 assert resp.status_code == 500
                 assert resp.json()["detail"] == "Internal server error"
         finally:
-            app.dependency_overrides.pop(det_mod.get_detection_service, None)
+            main_mod.app.dependency_overrides.pop(det_mod.get_detection_service, None)
             config_mod._app_config = None
             ds_mod._dataset_service = None
             ann_mod._annotation_service = None
@@ -596,9 +594,9 @@ class TestHealthCheckBranches:
         mock_service = MagicMock(spec=[])
         ds_mod._dataset_service = mock_service
 
-        from src.api.main import app
+        import src.api.main as main_mod
 
-        with TestClient(app) as c:
+        with TestClient(main_mod.app) as c:
             resp = c.get("/health")
             data = resp.json()
             assert data["checks"]["api"] == "healthy"
@@ -620,14 +618,14 @@ class TestHealthCheckBranches:
         ds_mod._dataset_service = None
         ann_mod._annotation_service = None
 
-        from src.api.main import app
+        import src.api.main as main_mod
 
         def raise_error():
             raise RuntimeError("service init failed")
 
         monkeypatch.setattr(ds_mod, "get_dataset_service", raise_error)
 
-        with TestClient(app) as c:
+        with TestClient(main_mod.app) as c:
             resp = c.get("/health")
             data = resp.json()
             assert data["checks"]["storage"] == "unhealthy"
