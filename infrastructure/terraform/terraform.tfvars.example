@@ -74,7 +74,6 @@ node_pools = {
 //     vm_size                    = "Standard_NC144ds_xl_RTXPRO6000BSE_v6"
 //     subnet_address_prefixes    = ["10.0.7.0/24"]
 //     node_taints                = ["nvidia.com/gpu:NoSchedule"]
-//     node_labels                = { accelerator = "nvidia" }
 //     gpu_driver                 = "Install"
 //     priority                   = "Regular"
 //     should_enable_auto_scaling = true

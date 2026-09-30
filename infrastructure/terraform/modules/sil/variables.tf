@@ -123,7 +123,6 @@ variable "node_pools" {
       node_count                 = null
       subnet_address_prefixes    = ["10.0.16.0/24"]
       node_taints                = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
-      node_labels                = { accelerator = "nvidia" }
       gpu_driver                 = "Install"
       priority                   = "Spot"
       should_enable_auto_scaling = true
@@ -172,6 +171,14 @@ variable "node_pools" {
       pool.undrainable_node_behavior == null ? true : contains(["Cordon", "Schedule"], pool.undrainable_node_behavior)
     ])
     error_message = "undrainable_node_behavior must be Cordon or Schedule."
+  }
+
+  validation {
+    condition = alltrue([
+      for key, pool in var.node_pools :
+      !contains(keys(pool.node_labels), "accelerator")
+    ])
+    error_message = "node_labels can't set accelerator: AKS reserves that label and sets accelerator=nvidia on GPU nodes itself. Select GPU pools by agentpool instead."
   }
 }
 

@@ -174,7 +174,7 @@ Use unique lowercase identifiers derived from the pool key. Preserve both braces
 Generate `azureml-instance-types.yaml` from the same pool data:
 
 - Always include `defaultinstancetype` for CPU workloads.
-- Create one GPU InstanceType per pool that isn't parked, with the pool selector and constraining Terraform labels.
+- Create one GPU InstanceType per pool that isn't parked. Select the pool with `agentpool: <pool key>` plus its constraining Terraform labels, such as the Spot label. Don't select on `accelerator`: AKS sets it on running GPU nodes, and the autoscaler can't predict it for a current GPU size at zero.
 - Use `gpuspot` for the first spot pool and `gpu` for the first regular pool when those names are unambiguous; otherwise use `gpu-<pool>`.
 - Set the GPU limit to a value no greater than verified per-node capacity. Use `1` for scale-to-zero pools without live capacity.
 - Do not generate multi-GPU InstanceTypes without verified capacity or an explicit user requirement.

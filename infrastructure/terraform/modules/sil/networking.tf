@@ -51,6 +51,13 @@ resource "azurerm_subnet_network_security_group_association" "gpu_node_pool" {
 
   subnet_id                 = azurerm_subnet.gpu_node_pool[each.key].id
   network_security_group_id = var.network_security_group.id
+
+  lifecycle {
+    // Azure can return this ID with the resource group in different letter case, and the
+    // provider then plans a replacement on every run. Pools always use the platform NSG;
+    // if that NSG is ever replaced, replace these associations with terraform apply -replace.
+    ignore_changes = [network_security_group_id]
+  }
 }
 
 // ============================================================

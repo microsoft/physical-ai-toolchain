@@ -527,3 +527,31 @@ run "rejects_invalid_undrainable_node_behavior" {
 
   expect_failures = [var.node_pools]
 }
+
+run "rejects_reserved_accelerator_label" {
+  command = plan
+
+  variables {
+    resource_prefix         = run.setup.resource_prefix
+    environment             = run.setup.environment
+    instance                = run.setup.instance
+    location                = run.setup.location
+    resource_group          = run.setup.resource_group
+    virtual_network         = run.setup.virtual_network
+    subnets                 = run.setup.subnets
+    network_security_group  = run.setup.network_security_group
+    nat_gateway             = run.setup.nat_gateway
+    log_analytics_workspace = run.setup.log_analytics_workspace
+    container_registry      = run.setup.container_registry
+    node_pools = {
+      gpu = {
+        vm_size                 = "Standard_NV36ads_A10_v5"
+        node_count              = 1
+        subnet_address_prefixes = ["10.0.20.0/24"]
+        node_labels             = { accelerator = "nvidia" }
+      }
+    }
+  }
+
+  expect_failures = [var.node_pools]
+}

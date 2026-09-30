@@ -151,7 +151,7 @@ LeRobot training:
 
 ## 🛌 Scale-from-zero GPU Pools
 
-The SiL module's default GPU pool uses `min_count = 0`; the root deployment's default GPU pool uses `min_count = 1`. Check the effective `node_pools` configuration before assuming scale-to-zero. For a pool configured to reach zero, the setup script overrides two scheduler checks and the Terraform pool definition supplies a static GPU label, as described below.
+The SiL module's default GPU pool uses `min_count = 0`; the root deployment's default GPU pool uses `min_count = 1`. Check the effective `node_pools` configuration before assuming scale-to-zero. For a pool configured to reach zero, the setup script overrides two scheduler checks, and the pool's InstanceTypes must select it by `agentpool`, as described below.
 
 ### `aml-operator` resource validation
 
@@ -167,19 +167,23 @@ Result: a permanent deadlock — you cannot submit the job that would cause the 
 
 Trade-off when enabled (the default): a typo in an `InstanceType` (e.g. `nvidia.com/gpu: 8` on a 4-GPU SKU) manifests as `FailedScheduling` events on a long-Pending Pod instead of an immediate job failure. Diagnose with `kubectl describe pod`.
 
-### Static `accelerator=nvidia` node label
+### Select GPU pools by `agentpool`
 
-The InstanceTypes installed by `02-deploy-azureml-extension.sh` (`gpuspot`, `gpu`, `gpuspot2`, …) select on `accelerator: nvidia`. That label is normally applied at runtime by NFD / GPU Operator on already-running GPU nodes. When the pool is at zero, the cluster autoscaler builds a synthetic node template from **static** AKS-side labels only (transmitted to it via VMSS tags) and never sees `accelerator=nvidia` — so it concludes that scaling the pool up would not satisfy the pending Pod, and refuses.
+The default InstanceTypes in [`infrastructure/setup/manifests/azureml-instance-types.yaml`](../../infrastructure/setup/manifests/azureml-instance-types.yaml) (`gpuspot`, `gpu`, `gpuspot2`, …) select on `accelerator: nvidia`. AKS sets that label on GPU nodes when they join the cluster, so these InstanceTypes match running GPU nodes. For current GPU sizes, they can't wake a pool at zero.
 
-The fix is to declare the label statically on every GPU pool via Terraform:
+When a pool is at zero, the cluster autoscaler builds a node template from the pool's VMSS. The template carries the pool's `agentpool` label, but it predicts `accelerator=nvidia` only for older GPU sizes (K80 through A100), not for A10, H100, or RTX PRO 6000 sizes. The autoscaler then concludes that a new node wouldn't satisfy the pending Pod, and doesn't scale up.
 
-```hcl
-node_labels = {
-  accelerator = "nvidia"
-}
+You can't declare the label yourself: AKS reserves `accelerator` and rejects it in `node_labels` with `NodeLabelKeyNotAllowed`, and the Terraform module rejects it at plan time.
+
+For pools that scale from zero, apply InstanceTypes that select the pool by name:
+
+```yaml
+nodeSelector:
+  agentpool: <pool key>
+  kubernetes.azure.com/scalesetpriority: spot # Spot pools only
 ```
 
-Already wired into the default `gpu` pool in `infrastructure/terraform/variables.tf` and `infrastructure/terraform/modules/sil/variables.tf`. Any custom GPU pool added via `node_pools` in `terraform.tfvars` must include the same label. NFD and the static label coexist without conflict.
+The environment deployment bundle generates InstanceTypes this way from Terraform outputs. Apply them with `02-deploy-azureml-extension.sh --instance-types-manifest`.
 
 ### Volcano enqueue-time capacity gate
 
