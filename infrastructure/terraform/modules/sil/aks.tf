@@ -37,7 +37,8 @@ resource "azurerm_kubernetes_cluster" "main" {
   dns_prefix                        = "aks-${var.resource_prefix}-${var.environment}"
   kubernetes_version                = null // Use latest stable version
   automatic_upgrade_channel         = "patch"
-  sku_tier                          = "Standard"
+  sku_tier                          = var.aks_config.sku_tier
+  support_plan                      = var.aks_config.support_plan
   private_cluster_enabled           = var.aks_config.should_enable_private_cluster
   private_dns_zone_id               = var.aks_config.should_enable_private_cluster && local.pe_enabled ? var.private_dns_zones["aks"].id : null
   local_account_disabled            = true

@@ -67,8 +67,10 @@ variable "aks_config" {
     should_enable_private_cluster               = bool
     system_node_pool_zones                      = optional(list(string))
     should_enable_microsoft_defender            = optional(bool, false)
+    sku_tier                                    = optional(string, "Standard")
+    support_plan                                = optional(string, "KubernetesOfficial")
   })
-  description = "AKS cluster configuration for the system node pool"
+  description = "AKS cluster configuration for the system node pool, SKU tier, and support plan. AKSLongTermSupport requires the Premium tier"
   default = {
     system_node_pool_vm_size                    = "Standard_D8ds_v5"
     system_node_pool_node_count                 = 2
@@ -77,6 +79,21 @@ variable "aks_config" {
     system_node_pool_max_count                  = null
     should_enable_private_cluster               = true
     system_node_pool_zones                      = null
+  }
+
+  validation {
+    condition     = contains(["Free", "Standard", "Premium"], var.aks_config.sku_tier)
+    error_message = "aks_config.sku_tier must be Free, Standard, or Premium."
+  }
+
+  validation {
+    condition     = contains(["KubernetesOfficial", "AKSLongTermSupport"], var.aks_config.support_plan)
+    error_message = "aks_config.support_plan must be KubernetesOfficial or AKSLongTermSupport."
+  }
+
+  validation {
+    condition     = var.aks_config.support_plan != "AKSLongTermSupport" || var.aks_config.sku_tier == "Premium"
+    error_message = "aks_config.support_plan AKSLongTermSupport requires aks_config.sku_tier Premium."
   }
 }
 

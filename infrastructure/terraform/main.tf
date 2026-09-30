@@ -197,6 +197,8 @@ module "sil" {
     should_enable_private_cluster               = var.should_enable_private_aks_cluster
     system_node_pool_zones                      = var.system_node_pool_zones
     should_enable_microsoft_defender            = var.should_enable_microsoft_defender
+    sku_tier                                    = var.aks_sku_tier
+    support_plan                                = var.aks_support_plan
   }
 
   node_pools = var.node_pools

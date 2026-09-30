@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Infrastructure Reference
 description: Architecture, module structure, outputs, and troubleshooting for the Terraform deployment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-09-29
 ms.topic: reference
 keywords:
   - architecture
@@ -165,6 +165,17 @@ Update output consumers to read the cluster entry from the new map output:
 ```bash
 terraform output -json aml_compute_clusters | jq '."gpu-cluster"'
 ```
+
+### AKS SKU tier and long-term support
+
+The cluster uses the Standard tier and the `KubernetesOfficial` support plan unless you set `aks_sku_tier` and `aks_support_plan`. AKS long-term support keeps a Kubernetes version supported after community support ends, and it requires the Premium tier:
+
+```hcl
+aks_sku_tier     = "Premium"
+aks_support_plan = "AKSLongTermSupport"
+```
+
+Check the plan a version supports with `az aks get-versions --location <region>`. A version that lists only `AKSLongTermSupport` can't move back to `KubernetesOfficial` until the cluster upgrades to a version that lists both. When a cluster was moved to Premium or long-term support outside Terraform, set these values to match before the next apply; otherwise the plan reverts the tier.
 
 ## 📦 Modules
 

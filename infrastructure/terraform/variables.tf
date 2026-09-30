@@ -465,6 +465,18 @@ variable "should_enable_microsoft_defender" {
   default     = false
 }
 
+variable "aks_sku_tier" {
+  type        = string
+  description = "AKS cluster SKU tier: Free, Standard, or Premium. AKS long-term support requires Premium"
+  default     = "Standard"
+}
+
+variable "aks_support_plan" {
+  type        = string
+  description = "AKS support plan: KubernetesOfficial or AKSLongTermSupport. AKSLongTermSupport requires aks_sku_tier = Premium and keeps a Kubernetes version supported after community support ends"
+  default     = "KubernetesOfficial"
+}
+
 /*
  * Observability Feature Flags - Optional
  */
