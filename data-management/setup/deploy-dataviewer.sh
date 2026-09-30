@@ -28,6 +28,9 @@ OPTIONS:
 When building images, the tag defaults to 'sha-<git-short-hash>' for unique
 revisions. Use --tag to override, or --skip-build to reference existing images.
 
+Backend updates also set STORAGE_BACKEND=azure and remove the legacy
+HMI_STORAGE_BACKEND variable, so a new image never falls back to local storage.
+
 EXAMPLES:
     $(basename "$0")
     $(basename "$0") --tag v0.1.0
@@ -105,6 +108,16 @@ fi
 backend_image="${acr_login_server}/${DATAVIEWER_BACKEND_IMAGE}:${image_tag}"
 frontend_image="${acr_login_server}/${DATAVIEWER_FRONTEND_IMAGE}:${image_tag}"
 
+# Terraform ignores the container template after creation, so backend rollouts
+# reconcile the storage setting; current images default to local storage without it.
+backend_storage_env="STORAGE_BACKEND=azure"
+legacy_backend_storage_env="HMI_STORAGE_BACKEND"
+if [[ "$skip_update" == "true" || "$skip_backend" == "true" ]]; then
+  backend_storage_status="Unchanged"
+else
+  backend_storage_status="$backend_storage_env (removes $legacy_backend_storage_env)"
+fi
+
 #------------------------------------------------------------------------------
 # Configuration Preview
 #------------------------------------------------------------------------------
@@ -129,6 +142,7 @@ print_kv "Identity" "${identity_id##*/}"
 print_kv "Skip Build" "$skip_build"
 print_kv "Skip Update" "$skip_update"
 print_kv "Auth Enabled" "$auth_enabled"
+print_kv "Backend Storage" "$backend_storage_status"
 
 if [[ "$config_preview" == "true" ]]; then
   info "Config preview mode — exiting without changes."
@@ -209,11 +223,13 @@ if [[ "$skip_update" == "false" ]]; then
 
   if [[ "$skip_backend" == "false" ]]; then
     section "Updating Backend Container App"
-    info "Deploying $backend_image to $backend_app..."
+    info "Deploying $backend_image to $backend_app with $backend_storage_env..."
     az containerapp update \
       --name "$backend_app" \
       --resource-group "$rg" \
-      --image "$backend_image"
+      --image "$backend_image" \
+      --set-env-vars "$backend_storage_env" \
+      --remove-env-vars "$legacy_backend_storage_env"
   fi
 
   if [[ "$skip_frontend" == "false" ]]; then
@@ -328,5 +344,6 @@ print_kv "Image Tag" "$image_tag"
 print_kv "Build" "$([[ "$skip_build" == "true" ]] && echo 'Skipped' || echo 'Complete')"
 print_kv "Update" "$([[ "$skip_update" == "true" ]] && echo 'Skipped' || echo 'Complete')"
 print_kv "Easy Auth" "$([[ "$auth_enabled" == "true" ]] && echo 'Configured' || echo 'Disabled')"
+print_kv "Backend Storage" "$backend_storage_status"
 [[ -n "$frontend_url" ]] && print_kv "Frontend URL" "$frontend_url"
 info "Deployment complete"

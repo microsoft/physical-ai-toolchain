@@ -231,3 +231,18 @@ output "conversion_pipeline_fabric_capacity" {
   description = "Conversion pipeline Microsoft Fabric capacity. Null when capacity is reused or pipeline is disabled."
   value       = try(module.conversion_pipeline[0].fabric_capacity, null)
 }
+
+// ============================================================
+// Dataviewer Outputs (Optional)
+// ============================================================
+
+output "dataviewer" {
+  description = "Dataviewer Container Apps deployment details read by deploy-dataviewer.sh. Null when the dataviewer is not deployed."
+  value = var.should_deploy_dataviewer ? {
+    environment = module.dataviewer[0].container_app_environment
+    backend     = module.dataviewer[0].backend
+    frontend    = module.dataviewer[0].frontend
+    identity    = module.dataviewer[0].dataviewer_identity
+    entra_id    = module.dataviewer[0].entra_id
+  } : null
+}

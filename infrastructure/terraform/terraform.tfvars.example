@@ -173,3 +173,14 @@ aml_compute_clusters = {}
 // VM Subnet
 // If you plan to add a Virtual Machine with Isaac Sim we need to enable the creating of the subnet
 // should_create_vm_subnet = true
+
+// Dataviewer (Azure Container Apps)
+// Deploys the dataviewer backend and frontend in a delegated subnet. After apply, run
+// data-management/setup/deploy-dataviewer.sh to build and roll out the images.
+// Pick a subnet that doesn't overlap node pool subnets.
+// should_deploy_dataviewer = true
+// dataviewer_config = {
+//   subnet_address_prefix  = "10.0.16.0/21"
+//   should_enable_internal = true   // VNet-only access through the VPN
+//   should_deploy_auth     = false  // Entra ID app registration for public access
+// }

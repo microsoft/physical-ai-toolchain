@@ -632,3 +632,34 @@ variable "conversion_pipeline_config" {
   description = "Conversion pipeline module configuration. Only consumed when should_deploy_conversion_pipeline is true"
   default     = {}
 }
+
+/*
+ * Dataviewer Configuration - Optional
+ *
+ * The dataviewer module is opt-in. When should_deploy_dataviewer is true, the module
+ * deploys the dataviewer backend and frontend on Azure Container Apps in a delegated
+ * subnet, with a managed identity for registry pulls and workspace storage access.
+ * data-management/setup/deploy-dataviewer.sh reads the dataviewer output to build and
+ * roll out images.
+ */
+
+variable "should_deploy_dataviewer" {
+  type        = bool
+  description = "Whether to deploy the dataviewer application on Azure Container Apps"
+  default     = false
+}
+
+variable "dataviewer_config" {
+  type = object({
+    subnet_address_prefix        = optional(string, "10.0.16.0/21")
+    should_enable_internal       = optional(bool, true)
+    backend_image                = optional(string, "")
+    frontend_image               = optional(string, "")
+    storage_dataset_container    = optional(string, "datasets")
+    storage_annotation_container = optional(string, "annotations")
+    should_deploy_auth           = optional(bool, false)
+    redirect_uris                = optional(list(string), ["http://localhost:5173/", "http://localhost:5174/"])
+  })
+  description = "Dataviewer Container Apps configuration: delegated subnet, internal (VNet-only) or public access, container images, storage containers, and Entra ID auth. Leave image fields empty to provision with a placeholder image that deploy-dataviewer.sh replaces. The default subnet 10.0.16.0/21 must not overlap node pool or other VNet subnets. Only consumed when should_deploy_dataviewer is true"
+  default     = {}
+}
