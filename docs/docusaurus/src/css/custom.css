@@ -148,9 +148,19 @@ textarea:focus-visible,
    ================================================================ */
 
 .navbar {
-  height: 54px;
+  /* Override the theme's specificity-raised height so enlarged controls can wrap. */
+  height: auto !important;
+  min-height: var(--ifm-navbar-height);
   box-shadow: none;
   border-bottom: 1px solid var(--ifm-toc-border-color);
+}
+
+.navbar__items {
+  flex-wrap: wrap;
+}
+
+.navbar__brand {
+  flex-shrink: 0;
 }
 
 .navbar__logo {
