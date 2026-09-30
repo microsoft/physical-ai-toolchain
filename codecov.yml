@@ -298,8 +298,6 @@ ignore:
   - "evaluation/tests/**"
   - "scripts/tests/**"
   - "scripts/security/zap-to-sarif.py"
-  # Exclude test modules while retaining tests/fuzz_harness.py coverage.
-  - "tests/test_*.py"
   - "tests/e2e/**"
   - "fleet-deployment/inference/tests/**"
   - "**/__pycache__/**"

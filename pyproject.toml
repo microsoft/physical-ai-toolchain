@@ -174,8 +174,6 @@ omit = [
     "training/**/conftest.py",
     "training/**/__init__.py",
     "training/tests/**",
-    # Keep the fuzz harness measured, not unrelated root test modules.
-    "tests/test_*.py",
     "tests/e2e/**",
     "tests/generate_fuzz_corpus.py",
 ]
