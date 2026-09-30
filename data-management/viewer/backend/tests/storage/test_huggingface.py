@@ -22,7 +22,6 @@ class TestHuggingFaceHubAdapter:
         self.repo_id = huggingface_repo_id
         self.temp_dir = tmp_path
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.hf_hub_download")
     @patch("src.api.storage.huggingface.HfFileSystem")
@@ -75,7 +74,6 @@ class TestHuggingFaceHubAdapter:
             repo_type="dataset",
         )
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.hf_hub_download")
     @patch("src.api.storage.huggingface.HfFileSystem")
@@ -111,7 +109,6 @@ class TestHuggingFaceHubAdapter:
         assert len(result) == 5
         assert [ep.index for ep in result] == [0, 1, 2, 3, 4]
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.hf_hub_download")
     @patch("src.api.storage.huggingface.HfFileSystem")
@@ -217,7 +214,6 @@ class TestHuggingFaceHubAdapter:
         adapter = HuggingFaceHubAdapter(repo_id="test/dataset")
         assert isinstance(adapter, StorageAdapter)
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     async def test_write_methods_raise_not_implemented(self):
         """Verify all write methods raise NotImplementedError."""
@@ -233,7 +229,6 @@ class TestHuggingFaceHubAdapter:
         with pytest.raises(NotImplementedError):
             await adapter.delete_annotation("ds", 0)
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.hf_hub_download")
     @patch("src.api.storage.huggingface.HfFileSystem")
@@ -263,7 +258,6 @@ class TestHuggingFaceHubAdapterBranches:
         self.repo_id = huggingface_repo_id
         self.temp_dir = tmp_path
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
@@ -278,7 +272,6 @@ class TestHuggingFaceHubAdapterBranches:
         with pytest.raises(StorageError, match="network down"):
             await adapter.get_dataset_info()
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
@@ -296,7 +289,6 @@ class TestHuggingFaceHubAdapterBranches:
         with pytest.raises(StorageError, match=self.repo_id):
             await adapter.get_dataset_info()
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
@@ -321,7 +313,6 @@ class TestHuggingFaceHubAdapterBranches:
         assert [t.description for t in result.tasks] == ["pick", "place"]
         assert [t.task_index for t in result.tasks] == [0, 1]
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
@@ -365,7 +356,6 @@ class TestHuggingFaceHubAdapterBranches:
 
         assert [ep.index for ep in result] == [0, 2]
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
@@ -381,7 +371,6 @@ class TestHuggingFaceHubAdapterBranches:
             await adapter.get_dataset_info()
         assert "hub unreachable" in str(excinfo.value)
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
@@ -397,7 +386,6 @@ class TestHuggingFaceHubAdapterBranches:
             await adapter.list_episodes()
         assert "hub unreachable" in str(excinfo.value)
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")
@@ -413,7 +401,6 @@ class TestHuggingFaceHubAdapterBranches:
             await adapter.get_episode_data(0)
         assert "hub unreachable" in str(excinfo.value)
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
     @patch("src.api.storage.huggingface.HfFileSystem")
     @patch("src.api.storage.huggingface.hf_hub_download")

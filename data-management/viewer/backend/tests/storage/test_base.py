@@ -52,13 +52,11 @@ class TestStorageAdapterContract:
 
 
 class TestStorageAdapterDefaults:
-    @pytest.mark.asyncio
     async def test_close_default_is_noop(self) -> None:
         adapter = _FakeAdapter()
         result = await adapter.close()
         assert result is None
 
-    @pytest.mark.asyncio
     async def test_get_annotations_batch_default_uses_get_annotation(self) -> None:
         adapter = _FakeAdapter()
         ann = create_test_annotation(0)
@@ -66,7 +64,6 @@ class TestStorageAdapterDefaults:
         result = await adapter.get_annotations_batch("ds", [0, 1])
         assert result == {0: ann, 1: None}
 
-    @pytest.mark.asyncio
     async def test_abstract_default_bodies_return_none_to_subclasses(self) -> None:
         adapter = _SuperAdapter()
         annotation = create_test_annotation(0)

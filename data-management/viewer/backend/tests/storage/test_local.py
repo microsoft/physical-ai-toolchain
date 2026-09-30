@@ -31,13 +31,11 @@ class TestLocalStorageAdapter:
         self.adapter = local_storage_adapter
         self.dataset_id = dataset_id
 
-    @pytest.mark.asyncio
     async def test_get_annotation_not_found(self):
         """Test getting a non-existent annotation returns None."""
         result = await self.adapter.get_annotation(self.dataset_id, 0)
         assert result is None
 
-    @pytest.mark.asyncio
     async def test_save_and_get_annotation(self):
         """Test saving and retrieving an annotation."""
         annotation = create_test_annotation(episode_index=5)
@@ -55,7 +53,6 @@ class TestLocalStorageAdapter:
         assert result.episode_index == 5
         assert result.annotations[0].task_completeness.rating == TaskCompletenessRating.SUCCESS
 
-    @pytest.mark.asyncio
     async def test_save_overwrites_existing(self):
         """Test that saving an annotation overwrites existing one."""
         # Save initial annotation
@@ -71,7 +68,6 @@ class TestLocalStorageAdapter:
         result = await self.adapter.get_annotation(self.dataset_id, 1)
         assert result.annotations[0].notes == "Updated notes"
 
-    @pytest.mark.asyncio
     async def test_conditional_save_rejects_stale_revision_without_modifying_data(self):
         annotation = create_test_annotation(episode_index=1)
         initial_etag = await self.adapter.save_annotation(self.dataset_id, 1, annotation, if_none_match=True)
@@ -90,7 +86,6 @@ class TestLocalStorageAdapter:
         assert versioned.value is not None
         assert versioned.value.annotations[0].notes == "Current notes"
 
-    @pytest.mark.asyncio
     async def test_create_only_save_rejects_existing_resource(self):
         annotation = create_test_annotation(episode_index=2)
         current_etag = await self.adapter.save_annotation(self.dataset_id, 2, annotation, if_none_match=True)
@@ -100,7 +95,6 @@ class TestLocalStorageAdapter:
 
         assert exc_info.value.current_etag == current_etag
 
-    @pytest.mark.asyncio
     async def test_versioned_read_rejects_invalid_json(self):
         annotations_dir = Path(self.temp_dir) / self.dataset_id / "annotations" / "episodes"
         annotations_dir.mkdir(parents=True)
@@ -109,7 +103,6 @@ class TestLocalStorageAdapter:
         with pytest.raises(StorageError, match="Invalid JSON"):
             await self.adapter.get_annotation_versioned(self.dataset_id, 3)
 
-    @pytest.mark.asyncio
     async def test_versioned_read_wraps_unexpected_failure(self):
         with (
             patch.object(self.adapter, "_read_content", side_effect=RuntimeError("read failed")),
@@ -117,14 +110,12 @@ class TestLocalStorageAdapter:
         ):
             await self.adapter.get_annotation_versioned(self.dataset_id, 3)
 
-    @pytest.mark.asyncio
     async def test_conditional_delete_rejects_missing_resource(self):
         with pytest.raises(RevisionConflictError) as exc_info:
             await self.adapter.delete_annotation(self.dataset_id, 3, if_match='"revision"')
 
         assert exc_info.value.current_etag is None
 
-    @pytest.mark.asyncio
     async def test_conditional_delete_rejects_stale_revision(self):
         annotation = create_test_annotation(episode_index=3)
         current_etag = await self.adapter.save_annotation(self.dataset_id, 3, annotation)
@@ -135,7 +126,6 @@ class TestLocalStorageAdapter:
         assert exc_info.value.current_etag == current_etag
         assert await self.adapter.get_annotation(self.dataset_id, 3) is not None
 
-    @pytest.mark.asyncio
     async def test_conditional_delete_accepts_current_revision(self):
         annotation = create_test_annotation(episode_index=3)
         current_etag = await self.adapter.save_annotation(self.dataset_id, 3, annotation)
@@ -145,13 +135,11 @@ class TestLocalStorageAdapter:
         assert deleted is True
         assert await self.adapter.get_annotation(self.dataset_id, 3) is None
 
-    @pytest.mark.asyncio
     async def test_list_annotated_episodes_empty(self):
         """Test listing episodes when no annotations exist."""
         result = await self.adapter.list_annotated_episodes(self.dataset_id)
         assert result == []
 
-    @pytest.mark.asyncio
     async def test_list_annotated_episodes(self):
         """Test listing episodes with annotations."""
         # Create several annotations
@@ -163,7 +151,6 @@ class TestLocalStorageAdapter:
         result = await self.adapter.list_annotated_episodes(self.dataset_id)
         assert result == [1, 2, 3, 5]
 
-    @pytest.mark.asyncio
     async def test_delete_annotation(self):
         """Test deleting an annotation."""
         # Save annotation
@@ -180,13 +167,11 @@ class TestLocalStorageAdapter:
         # Verify deleted
         assert await self.adapter.get_annotation(self.dataset_id, 10) is None
 
-    @pytest.mark.asyncio
     async def test_delete_annotation_not_found(self):
         """Test deleting a non-existent annotation returns False."""
         result = await self.adapter.delete_annotation(self.dataset_id, 999)
         assert result is False
 
-    @pytest.mark.asyncio
     async def test_invalid_json_raises_error(self):
         """Test that invalid JSON raises StorageError."""
         # Create invalid JSON file
@@ -198,7 +183,6 @@ class TestLocalStorageAdapter:
         with pytest.raises(StorageError):
             await self.adapter.get_annotation(self.dataset_id, 1)
 
-    @pytest.mark.asyncio
     async def test_atomic_write(self):
         """Test that writes are atomic (no partial files)."""
         annotation = create_test_annotation(episode_index=1)
@@ -209,7 +193,6 @@ class TestLocalStorageAdapter:
         temp_files = list(annotations_dir.glob("*.tmp"))
         assert len(temp_files) == 0
 
-    @pytest.mark.asyncio
     async def test_multiple_datasets(self):
         """Test that different datasets are isolated."""
         # Save to two datasets
@@ -231,7 +214,6 @@ class TestLocalStorageAdapter:
         assert await self.adapter.get_annotation("dataset-a", 1) is None
         assert await self.adapter.get_annotation("dataset-b", 1) is not None
 
-    @pytest.mark.asyncio
     async def test_save_uses_async_tempfile(self):
         """Verify save_annotation delegates sync I/O to asyncio.to_thread."""
         annotation = create_test_annotation(episode_index=0)
@@ -239,14 +221,12 @@ class TestLocalStorageAdapter:
             await self.adapter.save_annotation(self.dataset_id, 0, annotation)
             assert mock_to_thread.call_count >= 1
 
-    @pytest.mark.asyncio
     async def test_path_traversal_rejected(self):
         """Verify dataset_id with path traversal components raises StorageError."""
         annotation = create_test_annotation(episode_index=0)
         with pytest.raises(StorageError, match="path traversal detected"):
             await self.adapter.save_annotation("../../etc", 0, annotation)
 
-    @pytest.mark.asyncio
     async def test_ensure_directory_oserror_wrapped(self):
         """makedirs OSError is wrapped as StorageError during save."""
         annotation = create_test_annotation(episode_index=0)
@@ -260,7 +240,6 @@ class TestLocalStorageAdapter:
         ):
             await self.adapter.save_annotation(self.dataset_id, 0, annotation)
 
-    @pytest.mark.asyncio
     async def test_get_annotation_invalid_json_explicit(self):
         """Malformed JSON triggers the JSONDecodeError branch."""
         annotations_dir = Path(self.temp_dir) / self.dataset_id / "annotations" / "episodes"
@@ -270,7 +249,6 @@ class TestLocalStorageAdapter:
         with pytest.raises(StorageError, match="Invalid JSON"):
             await self.adapter.get_annotation(self.dataset_id, 2)
 
-    @pytest.mark.asyncio
     async def test_get_annotation_read_failure(self):
         """Unexpected read errors are wrapped as StorageError."""
         annotations_dir = Path(self.temp_dir) / self.dataset_id / "annotations" / "episodes"
@@ -283,7 +261,6 @@ class TestLocalStorageAdapter:
         ):
             await self.adapter.get_annotation(self.dataset_id, 3)
 
-    @pytest.mark.asyncio
     async def test_save_cleans_temp_file_on_replace_failure(self):
         """When os.replace fails, the temp file is cleaned and StorageError raised."""
         annotation = create_test_annotation(episode_index=4)
@@ -305,7 +282,6 @@ class TestLocalStorageAdapter:
         leftover = list(annotations_dir.glob("annotation_*.tmp"))
         assert leftover == []
 
-    @pytest.mark.asyncio
     async def test_list_skips_malformed_filename(self):
         """Files matching the prefix/suffix but with non-numeric index are skipped."""
         annotations_dir = Path(self.temp_dir) / self.dataset_id / "annotations" / "episodes"
@@ -316,7 +292,6 @@ class TestLocalStorageAdapter:
         result = await self.adapter.list_annotated_episodes(self.dataset_id)
         assert result == [7]
 
-    @pytest.mark.asyncio
     async def test_list_listdir_failure_wrapped(self):
         """listdir failures are wrapped as StorageError."""
         annotations_dir = Path(self.temp_dir) / self.dataset_id / "annotations" / "episodes"
@@ -335,7 +310,6 @@ class TestLocalStorageAdapter:
         ):
             await self.adapter.list_annotated_episodes(self.dataset_id)
 
-    @pytest.mark.asyncio
     async def test_delete_failure_wrapped(self):
         """Failures from aiofiles.os.remove are wrapped as StorageError."""
         annotation = create_test_annotation(episode_index=8)
@@ -350,7 +324,6 @@ class TestLocalStorageAdapter:
         ):
             await self.adapter.delete_annotation(self.dataset_id, 8)
 
-    @pytest.mark.asyncio
     async def test_save_cleanup_skipped_when_temp_already_gone(self):
         """If temp file is already gone when cleanup runs, unlink is not called."""
         annotation = create_test_annotation(episode_index=9)
@@ -375,7 +348,6 @@ class TestLocalStorageAdapter:
 
         assert unlink_called["count"] == 0
 
-    @pytest.mark.asyncio
     async def test_list_annotated_episodes_empty_directory(self):
         """An existing but empty annotations directory returns []."""
         annotations_dir = Path(self.temp_dir) / self.dataset_id / "annotations" / "episodes"

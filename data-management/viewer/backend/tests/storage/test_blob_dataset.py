@@ -64,7 +64,6 @@ class TestPrefixHelpers:
 class TestGetClient:
     """Client construction and caching."""
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     @patch("src.api.storage.blob_dataset.BlobServiceClient")
     async def test_dataset_exists_uses_sas_when_provided(self, mock_blob_service: MagicMock) -> None:
@@ -81,7 +80,6 @@ class TestGetClient:
         assert await provider.dataset_exists("org--repo") is True
         assert mock_blob_service.call_count == 1
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     @patch("src.api.storage.blob_dataset.AsyncDefaultAzureCredential")
     @patch("src.api.storage.blob_dataset.BlobServiceClient")
@@ -110,7 +108,6 @@ class TestGetClient:
 class TestReadBlobBytes:
     """Blob-backed metadata reads."""
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_get_info_json_reads_blob_bytes(self) -> None:
         mock_client = MagicMock()
@@ -130,7 +127,6 @@ class TestReadBlobBytes:
         mock_blob.download_blob.assert_awaited_once_with()
         mock_download.readall.assert_awaited_once_with()
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_get_info_json_returns_none_on_not_found(self) -> None:
         _NotFound = type("ResourceNotFoundError", (Exception,), {})
@@ -145,7 +141,6 @@ class TestReadBlobBytes:
         with patch("src.api.storage.blob_dataset.ResourceNotFoundError", _NotFound):
             assert await provider.get_info_json("org--repo") is None
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_get_info_json_returns_none_on_download_error(self) -> None:
         mock_client = MagicMock()
@@ -162,7 +157,6 @@ class TestReadBlobBytes:
 class TestScanAllDatasetIds:
     """Container scan classifying LeRobot vs HDF5 datasets."""
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_scan_classifies_and_dedupes(self):
         _NotFound = type("ResourceNotFoundError", (Exception,), {})
@@ -203,7 +197,6 @@ class TestScanAllDatasetIds:
         assert result["lerobot"] == ["org1--repo1", "org2--repo2"]
         assert result["hdf5"] == ["team--projectA"]
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_scan_swallows_outer_exception(self):
         mock_client = MagicMock()
@@ -213,7 +206,6 @@ class TestScanAllDatasetIds:
         result = await provider.scan_all_dataset_ids()
         assert result == {"lerobot": [], "hdf5": []}
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_list_dataset_ids_delegates_to_scan(self):
         provider = create_blob_dataset_provider(MagicMock())
@@ -227,7 +219,6 @@ class TestScanAllDatasetIds:
 
 
 class TestDatasetExists:
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_dataset_exists_true(self):
         mock_blob = MagicMock()
@@ -241,7 +232,6 @@ class TestDatasetExists:
         assert await provider.dataset_exists("org--repo") is True
         mock_container.get_blob_client.assert_called_once_with("org/repo/meta/info.json")
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_dataset_exists_not_found(self):
         _NotFound = type("ResourceNotFoundError", (Exception,), {})
@@ -256,7 +246,6 @@ class TestDatasetExists:
         with patch("src.api.storage.blob_dataset.ResourceNotFoundError", _NotFound):
             assert await provider.dataset_exists("org--repo") is False
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_dataset_exists_false_on_generic_error(self):
         mock_blob = MagicMock()
@@ -271,7 +260,6 @@ class TestDatasetExists:
 
 
 class TestGetInfoJson:
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_get_info_json_returns_parsed_and_caches(self):
         provider = create_blob_dataset_provider(MagicMock())
@@ -286,14 +274,12 @@ class TestGetInfoJson:
             assert await provider.get_info_json("org--repo") == payload
             assert read_mock.call_count == 1
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_get_info_json_returns_none_when_missing(self):
         provider = create_blob_dataset_provider(MagicMock())
         with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=None)):
             assert await provider.get_info_json("org--repo") is None
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_get_info_json_returns_none_on_invalid_json(self):
         provider = create_blob_dataset_provider(MagicMock())
@@ -302,7 +288,6 @@ class TestGetInfoJson:
 
 
 class TestGetBlobProperties:
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_get_blob_properties_success(self):
         props = MagicMock()
@@ -319,7 +304,6 @@ class TestGetBlobProperties:
         result = await provider.get_blob_properties("path/to/blob")
         assert result == {"size": 42, "content_type": "video/mp4"}
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_get_blob_properties_default_content_type(self):
         props = MagicMock()
@@ -336,7 +320,6 @@ class TestGetBlobProperties:
         result = await provider.get_blob_properties("p")
         assert result == {"size": 7, "content_type": "application/octet-stream"}
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_get_blob_properties_not_found(self):
         _NotFound = type("ResourceNotFoundError", (Exception,), {})
@@ -351,7 +334,6 @@ class TestGetBlobProperties:
         with patch("src.api.storage.blob_dataset.ResourceNotFoundError", _NotFound):
             assert await provider.get_blob_properties("p") is None
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_get_blob_properties_returns_none_on_error(self):
         mock_blob = MagicMock()
@@ -366,7 +348,6 @@ class TestGetBlobProperties:
 
 
 class TestVideoPathCandidates:
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_resolve_uses_template_layout(self) -> None:
         provider = create_blob_dataset_provider(MagicMock())
@@ -390,7 +371,6 @@ class TestVideoPathCandidates:
 
 
 class TestResolveVideoBlobPath:
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_resolve_returns_first_existing_candidate(self):
         provider = create_blob_dataset_provider(MagicMock())
@@ -405,7 +385,6 @@ class TestResolveVideoBlobPath:
             result = await provider.resolve_video_blob_path("org--repo", 5, "cam0")
             assert result == "org/repo/videos/cam0/chunk-000/file-005.mp4"
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_resolve_falls_back_to_scan(self):
         names = [
@@ -437,7 +416,6 @@ class TestResolveVideoBlobPath:
 class TestEpisodeVideoWindow:
     """Per-episode video time-window lookup."""
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_window_returned_from_cache(self):
         provider = create_blob_dataset_provider(MagicMock())
@@ -447,7 +425,6 @@ class TestEpisodeVideoWindow:
         result = await provider.get_episode_video_window("org--repo", 5, "cam0")
         assert result == (1.5, 4.25)
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_window_none_when_degenerate(self):
         provider = create_blob_dataset_provider(MagicMock())
@@ -456,7 +433,6 @@ class TestEpisodeVideoWindow:
         }
         assert await provider.get_episode_video_window("org--repo", 5, "cam0") is None
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_window_none_when_metadata_missing(self):
         provider = create_blob_dataset_provider(MagicMock())
@@ -467,7 +443,6 @@ class TestEpisodeVideoWindow:
         ):
             assert await provider.get_episode_video_window("org--repo", 0, "cam0") is None
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_window_none_when_camera_absent(self):
         provider = create_blob_dataset_provider(MagicMock())
@@ -478,7 +453,6 @@ class TestEpisodeVideoWindow:
 class TestLoadEpisodeVideoMetadata:
     """Public handling of unavailable episode metadata."""
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_window_returns_none_on_container_failure(self) -> None:
         mock_client = MagicMock()
@@ -486,7 +460,6 @@ class TestLoadEpisodeVideoMetadata:
         provider = create_blob_dataset_provider(mock_client)
         assert await provider.get_episode_video_window("org--repo", 0, "cam0") is None
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_window_returns_none_without_parquet_blobs(self) -> None:
         mock_container = MagicMock()
@@ -498,7 +471,6 @@ class TestLoadEpisodeVideoMetadata:
 
 
 class TestStreamVideo:
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_stream_video_yields_chunks(self):
         chunks = [b"a", b"bc", b"def"]
@@ -521,7 +493,6 @@ class TestStreamVideo:
 
 
 class TestUploadVideo:
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     @patch("src.api.storage.blob_dataset.BlobServiceClient")
     async def test_upload_video_success(self, mock_blob_service_cls: MagicMock, tmp_path: Path) -> None:
@@ -545,7 +516,6 @@ class TestUploadVideo:
         mock_container.get_blob_client.assert_called_once_with("org/repo/meta/videos/cam0/episode_000007.mp4")
         mock_blob.upload_blob.assert_awaited_once()
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     @patch("src.api.storage.blob_dataset.BlobServiceClient")
     async def test_upload_video_returns_false_on_error(self, mock_blob_service_cls):
@@ -556,7 +526,6 @@ class TestUploadVideo:
 
 
 class TestSyncDatasetToLocal:
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_sync_dataset_skips_videos_and_hdf5(self, tmp_path: Path) -> None:
         names = [
@@ -588,7 +557,6 @@ class TestSyncDatasetToLocal:
             assert not (local_dir / ".cache").exists()
             assert read_mock.await_count == 2
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_sync_dataset_returns_false_on_exception(self, tmp_path: Path) -> None:
         mock_client = MagicMock()
@@ -598,7 +566,6 @@ class TestSyncDatasetToLocal:
 
 
 class TestSyncMetaOnly:
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_sync_meta_only_filters_to_allowed_blobs(self, tmp_path: Path) -> None:
         names = [
@@ -627,7 +594,6 @@ class TestSyncMetaOnly:
             assert (local_dir / "meta" / "episodes" / "chunk-0.parquet").exists()
             assert not (local_dir / "meta" / "something_else.json").exists()
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_sync_meta_only_returns_false_when_info_missing(self, tmp_path: Path) -> None:
         mock_container = MagicMock()
@@ -640,7 +606,6 @@ class TestSyncMetaOnly:
 
 
 class TestSyncHdf5Dataset:
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_sync_hdf5_downloads_json_touches_hdf5_streams_video(self, tmp_path: Path) -> None:
         names = [
@@ -668,7 +633,6 @@ class TestSyncHdf5Dataset:
             video_path = local_dir / "meta" / "videos" / "cam0" / "episode_000000.mp4"
             assert video_path.read_bytes() == b"v1v2"
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_sync_hdf5_returns_false_on_error(self, tmp_path: Path) -> None:
         mock_client = MagicMock()
@@ -678,7 +642,6 @@ class TestSyncHdf5Dataset:
 
 
 class TestSyncHdf5Episode:
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_sync_hdf5_episode_streams_to_disk(self, tmp_path: Path) -> None:
         names = ["team/proj/episode_000003.hdf5"]
@@ -697,7 +660,6 @@ class TestSyncHdf5Episode:
         assert result is True
         assert (tmp_path / "episode_000003.hdf5").read_bytes() == b"chunk1chunk2"
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_sync_hdf5_episode_short_circuits_when_present(self, tmp_path: Path) -> None:
         names = ["team/proj/episode_000001.hdf5"]
@@ -715,7 +677,6 @@ class TestSyncHdf5Episode:
         assert result is True
         mock_blob.download_blob.assert_not_called()
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_sync_hdf5_episode_returns_false_when_not_listed(self, tmp_path: Path) -> None:
         mock_container = MagicMock()
@@ -728,7 +689,6 @@ class TestSyncHdf5Episode:
 
 
 class TestHdf5Helpers:
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_get_hdf5_dataset_config_parses_json(self):
         provider = create_blob_dataset_provider(MagicMock())
@@ -739,21 +699,18 @@ class TestHdf5Helpers:
         ):
             assert await provider.get_hdf5_dataset_config("team--proj") == {"k": 1}
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_get_hdf5_dataset_config_returns_none_when_missing(self):
         provider = create_blob_dataset_provider(MagicMock())
         with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=None)):
             assert await provider.get_hdf5_dataset_config("team--proj") is None
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_get_hdf5_dataset_config_returns_none_on_invalid_json(self):
         provider = create_blob_dataset_provider(MagicMock())
         with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=b"not-json")):
             assert await provider.get_hdf5_dataset_config("team--proj") is None
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_count_hdf5_episodes_counts_only_hdf5(self):
         names = [
@@ -768,7 +725,6 @@ class TestHdf5Helpers:
         provider = create_blob_dataset_provider(mock_client)
         assert await provider.count_hdf5_episodes("team--proj") == 2
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_count_hdf5_episodes_returns_zero_on_error(self):
         mock_client = MagicMock()
@@ -778,7 +734,6 @@ class TestHdf5Helpers:
 
 
 class TestClose:
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_close_releases_client(self):
         mock_client = MagicMock()
@@ -788,7 +743,6 @@ class TestClose:
         mock_client.close.assert_awaited_once()
         assert provider._client is None
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_close_when_client_never_initialized(self):
         provider = create_blob_dataset_provider()
@@ -842,7 +796,6 @@ def _build_episodes_parquet(*, episodes, cameras_by_episode):
 class TestLoadEpisodeVideoMetadataHappyPath:
     """Public video-window behavior backed by real parquet metadata."""
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_video_windows_parse_real_parquet(self) -> None:
         payload = _build_episodes_parquet(
@@ -866,7 +819,6 @@ class TestLoadEpisodeVideoMetadataHappyPath:
             assert await provider.get_episode_video_window("org--repo", 1, "cam1") == (1.5, 3.0)
             assert await provider.get_episode_video_window("org--repo", 2, "cam0") == (3.0, 4.25)
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_window_ignores_parquet_without_episode_index_column(self) -> None:
         import pyarrow as pa
@@ -887,7 +839,6 @@ class TestLoadEpisodeVideoMetadataHappyPath:
         with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=payload)):
             assert await provider.get_episode_video_window("org--repo", 0, "cam0") is None
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_window_ignores_incomplete_camera_columns(self) -> None:
         import pyarrow as pa
@@ -912,7 +863,6 @@ class TestLoadEpisodeVideoMetadataHappyPath:
         with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=payload)):
             assert await provider.get_episode_video_window("org--repo", 0, "cam0") is None
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_window_returns_none_for_unreadable_parquet(self) -> None:
         mock_container = MagicMock()
@@ -930,7 +880,6 @@ class TestLoadEpisodeVideoMetadataHappyPath:
 class TestGetEpisodeVideoEntryCache:
     """Public video-window metadata cache behavior."""
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_window_cache_miss_loads_metadata_once(self) -> None:
         provider = create_blob_dataset_provider(MagicMock())
@@ -947,7 +896,6 @@ class TestGetEpisodeVideoEntryCache:
         load_mock.assert_awaited_once_with("org--repo")
         assert provider._episode_video_cache["org--repo"] is loaded
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_window_returns_none_when_loader_returns_none(self) -> None:
         provider = create_blob_dataset_provider(MagicMock())
@@ -963,7 +911,6 @@ class TestGetEpisodeVideoEntryCache:
 class TestResolveVideoBlobPathMetaDriven:
     """resolve_video_blob_path branches that use meta-driven (chunk, file)."""
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_meta_driven_candidate_resolves_first(self):
         provider = create_blob_dataset_provider(MagicMock())
@@ -986,7 +933,6 @@ class TestResolveVideoBlobPathMetaDriven:
             result = await provider.resolve_video_blob_path("org--repo", 7, "cam0")
         assert result == "org/repo/videos/cam0/chunk-002/file-005.mp4"
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_meta_entry_with_invalid_template_falls_through(self):
         provider = create_blob_dataset_provider(MagicMock())
@@ -1014,7 +960,6 @@ class TestResolveVideoBlobPathMetaDriven:
         assert result is not None
         assert result.startswith("org/repo/videos/cam0/")
 
-    @pytest.mark.asyncio
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_fallback_scan_recognizes_episode_suffix(self):
         names = [
