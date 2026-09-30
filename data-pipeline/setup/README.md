@@ -24,6 +24,7 @@ Direct setup scripts for one Ubuntu T3 HiL node. The scripts reconcile local res
 | `hil/vpn/00-request-vpn-access.sh`       | Retrieve VPN inputs, reuse the private key, and publish the CSR   |
 | `hil/vpn/01-retrieve-vpn-certificate.sh` | Retrieve and install the signed public response                   |
 | `hil/vpn/02-connect-vpn.sh`              | Reconcile the strongSwan connection and optional private DNS      |
+| `edge/05-connect-arc-kubernetes.sh`      | Connect K3s to Azure Arc and optionally grant cluster-admin       |
 | `deploy-acsa.sh`                         | Reconcile ACSA for a separate Arc-enabled storage workflow        |
 
 The trusted environment owner publishes host-bound inputs to Key Vault with `infrastructure/setup/04-prepare-osmo-hil-node.sh`. The consumer validates the catalog, artifact digests, and token metadata before changing the local K3s target. Ubuntu scripts do not create remote desired state or change Key Vault networking or RBAC.

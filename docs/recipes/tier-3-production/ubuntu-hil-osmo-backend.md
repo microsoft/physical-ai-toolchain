@@ -2,7 +2,7 @@
 title: Ubuntu HiL OSMO Backend
 description: Prepare one Ubuntu T3 HiL node, optionally establish private reachability, connect it to an existing OSMO environment, and prove CPU and no-command outcomes.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-23
+ms.date: 2026-09-29
 ms.topic: tutorial
 ---
 
@@ -151,6 +151,8 @@ data-pipeline/setup/hil/01-install-k3s.sh \
 data-pipeline/setup/hil/01-install-k3s.sh \
   --node-name <host>
 ```
+
+Connect the cluster to Azure Arc before the environment owner publishes, because the publisher verifies the Arc resource. Follow [Connect to Azure Arc](../../data-pipeline/edge-k3s-setup.md#connect-to-azure-arc), including a `--cluster-admin-*` grant for each operator who uses Arc cluster connect.
 
 ## Optional Private Reachability
 
