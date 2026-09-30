@@ -72,27 +72,27 @@ const retainedCoverageSources = [
   'data-management/viewer/backend/src/api/validation.py', 'scripts/accessibility/evidence_gate.py',
 ];
 
-test('coverage boundary: root collection omits test modules but retains harness and product sources', () => {
+test('coverage boundary: root collection retains test modules, harness and product sources', () => {
   const manifest = readFileSync(join(root, 'pyproject.toml'), 'utf8');
   const run = manifest.split('[tool.coverage.run]')[1]?.split('[tool.coverage.report]')[0];
   assert.ok(run, 'Missing coverage run configuration');
   const omit = run.match(/^omit = \[([\s\S]*?)^\]/m);
   assert.ok(omit, 'Missing coverage run omissions');
   const patterns = [...omit[1].matchAll(/^\s*"([^"]+)"/gm)].map(match => match[1]);
-  assert.ok(patterns.includes('tests/test_*.py'), 'Root test modules must not be coverage sources');
+  assert.equal(patterns.includes('tests/test_*.py'), false, 'Root test modules must remain coverage sources');
   for (const path of rootTestModules) {
-    assert.ok(patterns.some(pattern => matchesGlob(path, pattern)), `Test module remains measured: ${path}`);
+    assert.equal(patterns.some(pattern => matchesGlob(path, pattern)), false, `Test module was omitted: ${path}`);
   }
   for (const path of retainedCoverageSources) {
     assert.equal(patterns.some(pattern => matchesGlob(path, pattern)), false, `Source was omitted: ${path}`);
   }
 });
 
-test('coverage boundary: Codecov ignores root test modules without hiding fuzz or product coverage', () => {
+test('coverage boundary: Codecov retains root test modules, fuzz and product coverage', () => {
   const config = parseYaml(readFileSync(join(root, 'codecov.yml'), 'utf8'));
-  assert.ok(config.ignore.includes('tests/test_*.py'), 'Codecov must reject root test-module coverage');
+  assert.equal(config.ignore.includes('tests/test_*.py'), false, 'Codecov must retain root test-module coverage');
   for (const path of rootTestModules) {
-    assert.ok(config.ignore.some(pattern => matchesGlob(path, pattern)), `Test module remains eligible: ${path}`);
+    assert.equal(config.ignore.some(pattern => matchesGlob(path, pattern)), false, `Test module was ignored: ${path}`);
   }
   for (const path of retainedCoverageSources) {
     assert.equal(config.ignore.some(pattern => matchesGlob(path, pattern)), false, `Source was ignored: ${path}`);
