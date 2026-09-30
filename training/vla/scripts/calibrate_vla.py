@@ -594,7 +594,13 @@ def _sample_workload() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "source_model": {"repository": "org/model", "revision": revision},
-        "dataset": {"uri": "azureml:data:1", "version": "1", "features_sha256": digest},
+        "dataset": {
+            "asset_id": "azureml:data:1",
+            "dataset_fingerprint": digest,
+            "features_sha256": digest,
+            "metadata_sha256": digest,
+            "total_episodes": 1,
+        },
         "code": {"repository": "org/repo", "revision": revision},
         "runtime": {"image": f"image@sha256:{digest}", "lock_sha256": digest},
         "adapter": {"name": "lerobot-pi", "version": "1", "config_sha256": digest},
@@ -618,13 +624,22 @@ def _run_self_check() -> None:
         "observation.images.camera1": {"dtype": "video", "shape": [480, 640, 3]},
         "observation.state": {"dtype": "float32", "shape": [6]},
     }
+    features_sha256 = sha256_bytes(canonical_json(features).encode("utf-8"))
     dataset, input_shapes = _dataset_contract(
         {"features": features},
-        "org/dataset",
-        "b" * 40,
+        {
+            "schema_version": SCHEMA_VERSION,
+            "kind": RecordKind.DATASET.value,
+            "created_at": "2026-01-01T00:00:00Z",
+            "asset_id": "azureml:data:1",
+            "dataset_repo_id": "org/dataset",
+            "features_sha256": features_sha256,
+            "metadata_sha256": "a" * 64,
+            "total_episodes": 1,
+        },
         {"observation.images.camera1": "observation.images.base_0_rgb"},
     )
-    if dataset["features_sha256"] != sha256_bytes(canonical_json(features).encode("utf-8")):
+    if dataset["features_sha256"] != features_sha256:
         raise CalibrationError("Dataset feature hashing changed")
     if input_shapes != {"observation.images.base_0_rgb": [3, 480, 640]}:
         raise CalibrationError("Dataset image shape normalization changed")

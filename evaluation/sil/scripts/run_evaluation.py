@@ -952,10 +952,10 @@ def main() -> int:
         if agg_mse is not None:
             mlflow.log_metrics(
                 {
-                "aggregate_mse": agg_mse,
-                "aggregate_mae": agg_mae,
-                "aggregate_avg_inference_ms": agg_inf_ms,
-                "aggregate_throughput_hz": agg_throughput,
+                    "aggregate_mse": agg_mse,
+                    "aggregate_mae": agg_mae,
+                    "aggregate_avg_inference_ms": agg_inf_ms,
+                    "aggregate_throughput_hz": agg_throughput,
                 }
             )
         mlflow.log_artifact(str(results_path))

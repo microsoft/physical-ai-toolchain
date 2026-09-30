@@ -290,6 +290,7 @@ def create_parser() -> argparse.ArgumentParser:
 
 def run(args: argparse.Namespace) -> int:
     """Validate evidence and register the finalized candidate."""
+
     def local_evidence_factory() -> dict[str, Any]:
         return validate_local_evidence(
             args.candidate,

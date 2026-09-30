@@ -59,8 +59,7 @@ def _validate_features(info: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(features, dict) or not features:
         raise ContractError("meta/info.json features must be a non-empty object")
     has_visual_feature = any(
-        isinstance(value, dict)
-        and (value.get("dtype") in {"image", "video"} or name.startswith("observation.images."))
+        isinstance(value, dict) and (value.get("dtype") in {"image", "video"} or name.startswith("observation.images."))
         for name, value in features.items()
     )
     if not has_visual_feature:

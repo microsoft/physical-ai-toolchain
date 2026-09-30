@@ -53,9 +53,7 @@ def test_given_empty_dataset_when_preflight_runs_then_it_is_rejected(tmp_path: P
 
 
 @pytest.mark.parametrize("dataset_repo_id", ["../escape", "/absolute/path"])
-def test_given_unsafe_repo_id_when_preflight_runs_then_it_is_rejected(
-    tmp_path: Path, dataset_repo_id: str
-) -> None:
+def test_given_unsafe_repo_id_when_preflight_runs_then_it_is_rejected(tmp_path: Path, dataset_repo_id: str) -> None:
     dataset = tmp_path / "dataset"
     _write_dataset(dataset)
 

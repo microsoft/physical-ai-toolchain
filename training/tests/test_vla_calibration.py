@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import signal
 import subprocess
+import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import yaml
@@ -14,6 +16,142 @@ from training.vla.scripts import calibrate_vla
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CALIBRATION_COMPONENT = _REPO_ROOT / "training/vla/workflows/azureml/components/calibrate.yaml"
 _PIPELINE = _REPO_ROOT / "training/vla/workflows/azureml/vla-training-pipeline.yaml"
+
+
+def test_given_self_check_when_calibration_runs_then_contract_checks_pass(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    args = calibrate_vla.create_parser().parse_args(["--self-check"])
+
+    result = calibrate_vla.run(args)
+
+    assert result == calibrate_vla.EXIT_SUCCESS
+    assert capsys.readouterr().out == "VLA calibration self-check passed\n"
+
+
+def test_given_successful_candidate_when_calibration_runs_then_evidence_is_written(
+    mocker: pytest.MockFixture,
+    tmp_path: Path,
+) -> None:
+    workload = calibrate_vla._sample_workload()
+    workload_output = tmp_path / "workload"
+    report_output = tmp_path / "report"
+    args = calibrate_vla.create_parser().parse_args(
+        [
+            "--workload-output-dir",
+            str(workload_output),
+            "--output-dir",
+            str(report_output),
+            "--candidate-batch-sizes",
+            "1,2",
+        ]
+    )
+    mocker.patch.object(calibrate_vla, "_build_workload", return_value=workload)
+    run_candidate = mocker.patch.object(
+        calibrate_vla,
+        "_run_candidate",
+        side_effect=[
+            {
+                "micro_batch_size": 1,
+                "outcome": "success",
+                "device_name": "test-gpu",
+                "peak_allocated_bytes": 50,
+                "peak_reserved_bytes": 60,
+                "free_bytes_after_step": 40,
+                "total_bytes": 100,
+                "duration_seconds": 0.5,
+                "samples_per_second": 2.0,
+                "optimizer_steps": 1,
+            },
+            {"micro_batch_size": 2, "outcome": "oom", "error_type": "OutOfMemoryError"},
+        ],
+    )
+
+    result = calibrate_vla.run(args)
+
+    report = yaml.safe_load((report_output / "calibration-report.json").read_text(encoding="utf-8"))
+    assert result == calibrate_vla.EXIT_SUCCESS
+    assert report["recommendation"]["micro_batch_size"] == 1
+    assert (workload_output / "workload.json").is_file()
+    assert run_candidate.call_count == 2
+
+
+def test_given_one_optimizer_step_when_probe_runs_then_measurements_are_written(
+    mocker: pytest.MockFixture,
+    tmp_path: Path,
+) -> None:
+    probe_output = tmp_path / "probe.json"
+    update_policy = mocker.Mock(return_value="updated")
+    lerobot_train = SimpleNamespace(update_policy=update_policy)
+    lerobot_train.main = lambda: lerobot_train.update_policy()
+    cuda = SimpleNamespace(
+        is_available=lambda: True,
+        device_count=lambda: 1,
+        synchronize=lambda: None,
+        mem_get_info=lambda: (40, 100),
+        get_device_name=lambda: "test-gpu",
+        max_memory_allocated=lambda: 50,
+        max_memory_reserved=lambda: 60,
+        empty_cache=mocker.Mock(),
+        OutOfMemoryError=RuntimeError,
+    )
+    torch_module = ModuleType("torch")
+    torch_module.cuda = cuda
+    lerobot_module = ModuleType("lerobot")
+    scripts_module = ModuleType("lerobot.scripts")
+    scripts_module.lerobot_train = lerobot_train
+    mocker.patch.dict(
+        sys.modules,
+        {"torch": torch_module, "lerobot": lerobot_module, "lerobot.scripts": scripts_module},
+    )
+    args = calibrate_vla.create_parser().parse_args(
+        [
+            "--probe",
+            "--probe-output",
+            str(probe_output),
+            "--probe-batch-size",
+            "2",
+            "--expected-world-size",
+            "1",
+            "--",
+            "--policy.type=smolvla",
+        ]
+    )
+
+    result = calibrate_vla.run(args)
+
+    measurements = yaml.safe_load(probe_output.read_text(encoding="utf-8"))
+    assert result == calibrate_vla.EXIT_SUCCESS
+    assert measurements["optimizer_steps"] == 1
+    assert measurements["peak_reserved_bytes"] == 60
+    assert lerobot_train.update_policy is update_policy
+    cuda.empty_cache.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (["--probe"], "Probe mode requires"),
+        (["--resolve-training-batch-size"], "Training batch-size resolution requires"),
+        ([], "Calibration requires"),
+        (
+            ["--workload-output-dir", "workload", "--output-dir", "report", "--headroom-fraction", "1"],
+            "headroom-fraction",
+        ),
+        (
+            ["--workload-output-dir", "workload", "--output-dir", "report", "--probe-timeout-seconds", "0"],
+            "probe-timeout-seconds",
+        ),
+    ],
+)
+def test_given_invalid_cli_inputs_when_calibration_runs_then_it_is_rejected(
+    arguments: list[str],
+    message: str,
+) -> None:
+    args = calibrate_vla.create_parser().parse_args(arguments)
+
+    with pytest.raises(calibrate_vla.CalibrationError, match=message):
+        calibrate_vla.run(args)
 
 
 @pytest.mark.parametrize("train_expert_only", [False, True])

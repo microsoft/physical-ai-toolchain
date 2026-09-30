@@ -367,3 +367,81 @@ def test_verify_lifecycle_inputs_rejects_tampered_candidate(tmp_path: Path) -> N
 def test_require_finite_metrics_rejects_nan() -> None:
     with pytest.raises(ValueError, match="Non-finite evaluation metrics: mse"):
         _MOD._require_finite_metrics({"mse": float("nan")})
+
+
+def _configure_main_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    policy_repo_id: str = "owner/policy",
+) -> Path:
+    dataset = tmp_path / "dataset"
+    (dataset / "meta").mkdir(parents=True)
+    monkeypatch.setenv("POLICY_REPO_ID", policy_repo_id)
+    monkeypatch.setenv("DATASET_DIR", str(dataset))
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path / "output"))
+    monkeypatch.setenv("MLFLOW_ENABLE", "false")
+    for name in (
+        "CANDIDATE_MANIFEST_PATH",
+        "TRAINING_RECORD_PATH",
+        "DATASET_MANIFEST_PATH",
+        "DATASET_ASSET_ID",
+        "AZUREML_ROOT_RUN_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    return dataset
+
+
+def test_given_missing_policy_when_main_runs_then_it_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_main_environment(monkeypatch, tmp_path, policy_repo_id="")
+
+    result = _MOD.main()
+
+    assert result == 1
+
+
+def test_given_missing_dataset_source_when_main_runs_then_it_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_main_environment(monkeypatch, tmp_path)
+    monkeypatch.setenv("DATASET_DIR", str(tmp_path / "missing"))
+    monkeypatch.setenv("DATASET_REPO_ID", "none")
+
+    result = _MOD.main()
+
+    assert result == 1
+
+
+def test_given_incomplete_lifecycle_inputs_when_main_runs_then_contract_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_main_environment(monkeypatch, tmp_path)
+    monkeypatch.setenv("CANDIDATE_MANIFEST_PATH", str(tmp_path / "candidate-manifest.json"))
+
+    with pytest.raises(_MOD.ContractError, match="Incomplete lifecycle evaluation inputs"):
+        _MOD.main()
+
+
+def test_given_dataset_without_visual_features_when_main_runs_then_it_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    dataset = _configure_main_environment(monkeypatch, tmp_path)
+    (dataset / "meta" / "info.json").write_text(
+        json.dumps(
+            {
+                "fps": 30,
+                "features": {"observation.state": {"dtype": "float32", "shape": [6]}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _MOD.main()
+
+    assert result == 1

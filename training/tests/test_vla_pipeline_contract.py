@@ -111,7 +111,7 @@ def test_given_evaluation_component_when_parsed_then_finalized_evidence_is_requi
     assert set(component["outputs"]) == {"evaluation"}
     assert component["inputs"]["candidate"]["mode"] == "ro_mount"
     assert "training/vla/lerobot" in component["command"]
-    assert "REGISTER_MODEL=\"none\"" in component["command"]
+    assert 'REGISTER_MODEL="none"' in component["command"]
     assert "find " not in component["command"]
 
 
