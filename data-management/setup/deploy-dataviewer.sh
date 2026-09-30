@@ -23,6 +23,8 @@ OPTIONS:
     --skip-update            Skip container app update (build images only)
     --skip-backend           Skip backend build/deploy
     --skip-frontend          Skip frontend build/deploy
+    --local-build            Build with local Docker BuildKit and push to ACR
+                             instead of ACR quick builds
     --config-preview         Print configuration and exit
 
 When building images, the tag defaults to 'sha-<git-short-hash>' for unique
@@ -31,11 +33,17 @@ revisions. Use --tag to override, or --skip-build to reference existing images.
 Backend updates also set STORAGE_BACKEND=azure and remove the legacy
 HMI_STORAGE_BACKEND variable, so a new image never falls back to local storage.
 
+ACR quick builds use Docker's classic builder, which rejects BuildKit syntax
+such as RUN --mount and HEALTHCHECK --start-interval. The frontend Dockerfile
+uses both, so build it with --local-build (Docker with buildx, platform
+\$DATAVIEWER_BUILD_PLATFORM, default linux/amd64).
+
 EXAMPLES:
     $(basename "$0")
     $(basename "$0") --tag v0.1.0
     $(basename "$0") --skip-build
     $(basename "$0") --skip-frontend --tag sha-abc1234
+    $(basename "$0") --local-build --skip-backend
 EOF
 }
 
@@ -47,6 +55,7 @@ skip_build=false
 skip_update=false
 skip_backend=false
 skip_frontend=false
+local_build=false
 config_preview=false
 
 while [[ $# -gt 0 ]]; do
@@ -58,12 +67,39 @@ while [[ $# -gt 0 ]]; do
     --skip-update)       skip_update=true; shift ;;
     --skip-backend)      skip_backend=true; shift ;;
     --skip-frontend)     skip_frontend=true; shift ;;
+    --local-build)       local_build=true; shift ;;
     --config-preview)    config_preview=true; shift ;;
     *)                   fatal "Unknown option: $1" ;;
   esac
 done
 
 require_tools az terraform jq
+[[ "$local_build" == "true" && "$skip_build" == "false" ]] && require_tools docker
+
+SRC_DIR="$SCRIPT_DIR/../viewer"
+backend_dockerfile="$SRC_DIR/backend/Dockerfile"
+frontend_dockerfile="$REPO_ROOT/data-management/viewer/frontend/Dockerfile"
+
+# ACR quick builds use the classic builder; detect Dockerfiles that need BuildKit.
+requires_buildkit() {
+  grep -Eq '^[[:space:]]*RUN[[:space:]]+--mount=|--start-interval=' "$1"
+}
+
+if [[ "$local_build" == "true" ]]; then
+  build_mode="local Docker BuildKit ($DATAVIEWER_BUILD_PLATFORM)"
+else
+  build_mode="ACR quick build"
+fi
+
+buildkit_images=()
+if [[ "$skip_build" == "false" ]]; then
+  if [[ "$skip_backend" == "false" ]] && requires_buildkit "$backend_dockerfile"; then
+    buildkit_images+=(backend)
+  fi
+  if [[ "$skip_frontend" == "false" ]] && requires_buildkit "$frontend_dockerfile"; then
+    buildkit_images+=(frontend)
+  fi
+fi
 
 # Auto-generate a unique image tag when building and no explicit --tag provided.
 # Uses git short SHA for traceability; falls back to timestamp outside a git repo.
@@ -143,10 +179,18 @@ print_kv "Skip Build" "$skip_build"
 print_kv "Skip Update" "$skip_update"
 print_kv "Auth Enabled" "$auth_enabled"
 print_kv "Backend Storage" "$backend_storage_status"
+print_kv "Build Mode" "$([[ "$skip_build" == "true" ]] && echo 'Skipped' || echo "$build_mode")"
+if [[ "$skip_build" == "false" ]]; then
+  print_kv "Needs BuildKit" "$([[ ${#buildkit_images[@]} -gt 0 ]] && echo "${buildkit_images[*]}" || echo 'none')"
+fi
 
 if [[ "$config_preview" == "true" ]]; then
   info "Config preview mode — exiting without changes."
   exit 0
+fi
+
+if [[ "$skip_build" == "false" && "$local_build" == "false" && ${#buildkit_images[@]} -gt 0 ]]; then
+  fatal "ACR quick builds can't build the ${buildkit_images[*]} Dockerfile (BuildKit syntax). Rerun with --local-build, or skip that image."
 fi
 
 #------------------------------------------------------------------------------
@@ -181,18 +225,30 @@ fi
 # Build Container Images
 #------------------------------------------------------------------------------
 
-SRC_DIR="$SCRIPT_DIR/../viewer"
-
 if [[ "$skip_build" == "false" ]]; then
+
+  if [[ "$local_build" == "true" ]]; then
+    info "Signing Docker in to $acr_login_server..."
+    az acr login --name "$acr_name"
+  fi
 
   if [[ "$skip_backend" == "false" ]]; then
     section "Building Backend Image"
-    info "Building $backend_image..."
-    az acr build \
-      --registry "$acr_name" \
-      --image "${DATAVIEWER_BACKEND_IMAGE}:${image_tag}" \
-      --file "$SRC_DIR/backend/Dockerfile" \
-      "$SRC_DIR/backend/"
+    info "Building $backend_image ($build_mode)..."
+    if [[ "$local_build" == "true" ]]; then
+      docker buildx build \
+        --platform "$DATAVIEWER_BUILD_PLATFORM" \
+        --file "$backend_dockerfile" \
+        --tag "$backend_image" \
+        --push \
+        "$SRC_DIR/backend/"
+    else
+      az acr build \
+        --registry "$acr_name" \
+        --image "${DATAVIEWER_BACKEND_IMAGE}:${image_tag}" \
+        --file "$backend_dockerfile" \
+        "$SRC_DIR/backend/"
+    fi
   fi
 
   if [[ "$skip_frontend" == "false" ]]; then
@@ -206,12 +262,22 @@ if [[ "$skip_build" == "false" ]]; then
       info "Entra ID auth enabled — injecting MSAL build args"
     fi
 
-    az acr build \
-      --registry "$acr_name" \
-      --image "${DATAVIEWER_FRONTEND_IMAGE}:${image_tag}" \
-      ${build_args[@]+"${build_args[@]}"} \
-      --file "data-management/viewer/frontend/Dockerfile" \
-      "$REPO_ROOT"
+    if [[ "$local_build" == "true" ]]; then
+      docker buildx build \
+        --platform "$DATAVIEWER_BUILD_PLATFORM" \
+        ${build_args[@]+"${build_args[@]}"} \
+        --file "$frontend_dockerfile" \
+        --tag "$frontend_image" \
+        --push \
+        "$REPO_ROOT"
+    else
+      az acr build \
+        --registry "$acr_name" \
+        --image "${DATAVIEWER_FRONTEND_IMAGE}:${image_tag}" \
+        ${build_args[@]+"${build_args[@]}"} \
+        --file "data-management/viewer/frontend/Dockerfile" \
+        "$REPO_ROOT"
+    fi
   fi
 fi
 
@@ -341,7 +407,7 @@ print_kv "Frontend Image" "$frontend_image"
 print_kv "Backend App" "$backend_app"
 print_kv "Frontend App" "$frontend_app"
 print_kv "Image Tag" "$image_tag"
-print_kv "Build" "$([[ "$skip_build" == "true" ]] && echo 'Skipped' || echo 'Complete')"
+print_kv "Build" "$([[ "$skip_build" == "true" ]] && echo 'Skipped' || echo "Complete ($build_mode)")"
 print_kv "Update" "$([[ "$skip_update" == "true" ]] && echo 'Skipped' || echo 'Complete')"
 print_kv "Easy Auth" "$([[ "$auth_enabled" == "true" ]] && echo 'Configured' || echo 'Disabled')"
 print_kv "Backend Storage" "$backend_storage_status"
