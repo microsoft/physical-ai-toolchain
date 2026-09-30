@@ -343,6 +343,7 @@ test('tiers disclosure toggles, traverses, and closes without trapping focus', e
   await page.goto(siteRoute('/documentation/'));
   await expectPageReady(page);
   const trigger = page.locator('.navbar__item.dropdown > a').filter({ hasText: labelData.labelRegistry.tiers });
+  const firstTier = page.locator('.navbar__item.dropdown .dropdown__menu a').first();
   await expect(trigger).toHaveRole('button');
   await expect(trigger).toHaveAttribute('aria-haspopup', 'true');
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
@@ -351,12 +352,14 @@ test('tiers disclosure toggles, traverses, and closes without trapping focus', e
   await page.keyboard.press('Enter');
   await expect(trigger).toHaveAttribute('aria-expanded', 'true');
   await expect(trigger).toBeFocused();
+  await expect(firstTier).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await expect(firstTier).toBeHidden();
   await page.keyboard.press('Enter');
   await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  await expect(firstTier).toBeVisible();
 
-  const firstTier = page.locator('.navbar__item.dropdown .dropdown__menu a').first();
   await page.keyboard.press('Tab');
   await expect(firstTier).toBeFocused();
   const expandedState = await page.locator('.navbar__item.dropdown .dropdown__menu').evaluate((menu) => {
@@ -394,10 +397,14 @@ test('tiers disclosure toggles, traverses, and closes without trapping focus', e
 
   await page.locator('a.navbar__brand').focus();
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await expect(firstTier).toBeHidden();
 
   await trigger.focus();
   await page.keyboard.press('Enter');
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  await expect(firstTier).toBeVisible();
   await page.keyboard.press('Tab');
+  await expect(firstTier).toBeFocused();
   await page.keyboard.press('Enter');
   await expectPageReady(page);
   expect(new URL(page.url()).pathname).toBe(`/physical-ai-toolchain${labelData.tierNavigation[0].route}`);

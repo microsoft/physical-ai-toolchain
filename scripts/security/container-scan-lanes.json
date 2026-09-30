@@ -1,0 +1,39 @@
+{
+  "lanes": [
+    {
+      "id": "devcontainer-cuda",
+      "sources": [{ "path": ".devcontainer/Dockerfile", "from": 0 }]
+    },
+    {
+      "id": "devcontainer-base",
+      "sources": [{ "path": ".devcontainer/Dockerfile", "from": 1 }]
+    },
+    {
+      "id": "dataviewer-backend",
+      "sources": [{ "path": "data-management/viewer/backend/Dockerfile", "from": 0 }]
+    },
+    {
+      "id": "dataviewer-frontend-build",
+      "sources": [{ "path": "data-management/viewer/frontend/Dockerfile", "from": 0 }]
+    },
+    {
+      "id": "dataviewer-frontend-serve",
+      "sources": [{ "path": "data-management/viewer/frontend/Dockerfile", "from": 1 }]
+    },
+    {
+      "id": "gpu-offload-controller",
+      "sources": [
+        { "path": "gpu-offload/controller/Containerfile", "from": 0 },
+        { "path": "gpu-offload/controller/Containerfile.local", "from": 0 }
+      ]
+    },
+    {
+      "id": "gpu-offload-first-run-client",
+      "sources": [{ "path": "gpu-offload/examples/first-run/Containerfile", "from": 1 }]
+    },
+    {
+      "id": "gpu-offload-ur10e-client",
+      "sources": [{ "path": "gpu-offload/examples/ur10e-single/Containerfile", "from": 1 }]
+    }
+  ]
+}

@@ -277,6 +277,9 @@ test('mobile navigation contains keyboard focus and restores the toggle on close
   await menuButton.focus();
   await menuButton.press('Enter');
   await expect(menuButton).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('.navbar-sidebar')).toBeVisible();
+  await expect(page.locator('main')).toHaveAttribute('inert', '');
+  await expect(page.locator('footer')).toHaveAttribute('inert', '');
   let focusEnteredSidebar = false;
   for (let index = 0; index < 3 && !focusEnteredSidebar; index += 1) {
     await page.keyboard.press('Tab');
@@ -285,9 +288,6 @@ test('mobile navigation contains keyboard focus and restores the toggle on close
     );
   }
   expect(focusEnteredSidebar).toBe(true);
-
-  await expect(page.locator('main')).toHaveAttribute('inert', '');
-  await expect(page.locator('footer')).toHaveAttribute('inert', '');
 
   const sidebarControls = page.locator([
     '.navbar-sidebar__brand a:visible',
