@@ -172,6 +172,11 @@ textarea:focus-visible,
   vertical-align: middle;
 }
 
+/* Keep menu visibility synchronized with disclosure state for native keyboard navigation. */
+.navbar__item.dropdown > .dropdown__menu {
+  transition: none !important;
+}
+
 html[data-theme='dark'] .navbar {
   background-color: #1f1f1f;
 }
