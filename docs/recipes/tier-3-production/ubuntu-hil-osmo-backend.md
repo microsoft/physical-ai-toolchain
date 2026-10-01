@@ -33,7 +33,9 @@ Manual SCP is permitted only as an out-of-band operator procedure. It must not i
 
 ## Prepare the Environment
 
-Complete these actions from a trusted environment-operator host. The existing OSMO control plane must already contain the intended backend and pool.
+Complete these actions from a trusted environment-operator host. The OSMO control plane must already contain the intended backend and pool.
+
+To add them, run `infrastructure/setup/03-deploy-osmo.sh` with `--hil-backend-name <backend>` and `--private-service-ip` set to the internal load balancer's current address, plus the options the environment was deployed with. The flag adds the backend and a CPU pool of the same name, and `--hil-pool-name` picks a different pool name. In ConfigMap mode, OSMO rebuilds its config from Helm values on every 03 run, so pass the same options each time or the backend drops out.
 
 ### Create the Exchange Secrets
 
