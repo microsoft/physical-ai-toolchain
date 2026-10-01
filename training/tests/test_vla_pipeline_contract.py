@@ -91,6 +91,8 @@ def _training_environment(tmp_path: Path, trainer: Path) -> tuple[dict[str, str]
             "AZURE_ML_INPUT_workload_contract": str(workload_dir),
             "AZURE_ML_OUTPUT_checkpoints": str(checkpoints),
             "AZURE_ML_OUTPUT_training_record": str(training_record),
+            "AZURE_ML_OUTPUT_candidate": str(tmp_path / "candidate"),
+            "AZURE_ML_OUTPUT_candidate_manifest": str(tmp_path / "candidate-manifest"),
         }
     )
     return environment, training_record
@@ -101,7 +103,7 @@ def test_given_training_component_when_parsed_then_registration_is_absent() -> N
 
     assert "register_checkpoint" not in component["inputs"]
     assert {"dataset", "dataset_manifest", "dataset_asset_id"} <= set(component["inputs"])
-    assert "training_record" in component["outputs"]
+    assert {"training_record", "candidate", "candidate_manifest"} <= set(component["outputs"])
 
 
 def test_given_calibration_entrypoint_when_parsed_then_trial_creates_its_manifest() -> None:
@@ -120,7 +122,6 @@ def test_given_training_pipeline_when_parsed_then_only_training_stages_are_seria
     assert list(jobs) == [
         "preflight_step",
         "training_step",
-        "finalize_step",
     ]
     assert pipeline["settings"]["continue_on_step_failure"] is False
     assert pipeline["identity"] == {"type": "managed_identity"}
@@ -128,11 +129,14 @@ def test_given_training_pipeline_when_parsed_then_only_training_stages_are_seria
     assert "dataset_revision" not in pipeline["inputs"]
     assert {"workload_contract", "calibration_report"} <= set(pipeline["inputs"])
     assert {"candidate_batch_sizes", "compute_calibrate"}.isdisjoint(pipeline["inputs"])
+    assert "compute_finalize" not in pipeline["inputs"]
     assert all("compute" in job for job in jobs.values())
     assert jobs["training_step"]["inputs"]["dataset"] == "${{parent.inputs.dataset}}"
     assert jobs["training_step"]["inputs"]["calibration_report"] == "${{parent.inputs.calibration_report}}"
     assert jobs["training_step"]["inputs"]["workload_contract"] == "${{parent.inputs.workload_contract}}"
     assert jobs["training_step"]["resources"]["instance_type"] == "gpu-high-memory"
+    assert jobs["training_step"]["outputs"]["candidate"] == "${{parent.outputs.candidate}}"
+    assert jobs["training_step"]["outputs"]["candidate_manifest"] == "${{parent.outputs.candidate_manifest}}"
     assert {
         "dataset_manifest",
         "checkpoints",
@@ -171,7 +175,7 @@ def test_given_calibration_sweep_when_parsed_then_trials_are_isolated_and_output
 
 
 def test_given_training_components_when_parsed_then_code_assets_are_training_scoped() -> None:
-    components = ("preflight.yaml", "train.yaml", "finalize.yaml")
+    components = ("preflight.yaml", "train.yaml")
 
     for component_name in components:
         component = yaml.safe_load((_COMPONENT_ROOT / component_name).read_text(encoding="utf-8"))
@@ -231,6 +235,7 @@ def test_given_successful_trainer_when_entrypoint_returns_then_run_record_exists
     trainer = tmp_path / "trainer.sh"
     trainer.write_text(
         '#!/usr/bin/env bash\nset -euo pipefail\nmkdir -p "${AZURE_ML_OUTPUT_CHECKPOINTS}/last/pretrained_model"\n'
+        'printf \'{"type":"policy"}\\n\' >"${AZURE_ML_OUTPUT_CHECKPOINTS}/last/pretrained_model/config.json"\n'
         'printf model >"${AZURE_ML_OUTPUT_CHECKPOINTS}/last/pretrained_model/model.safetensors"\n',
         encoding="utf-8",
     )
@@ -241,6 +246,8 @@ def test_given_successful_trainer_when_entrypoint_returns_then_run_record_exists
 
     assert result.returncode == 0
     assert load_record(training_record / "training-record.json", RecordKind.RUN)["run_id"] == "evidence-job"
+    assert (tmp_path / "candidate/model.safetensors").is_file()
+    assert (tmp_path / "candidate-manifest/candidate-manifest.json").is_file()
 
 
 def test_given_failed_trainer_when_entrypoint_returns_then_no_run_record_exists(tmp_path: Path) -> None:

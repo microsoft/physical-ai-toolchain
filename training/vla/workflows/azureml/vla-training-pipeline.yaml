@@ -48,7 +48,6 @@ inputs:
   hf_token_secret_name: none
   compute_preflight: azureml:placeholder
   compute_train: azureml:placeholder
-  compute_finalize: azureml:placeholder
 
 outputs:
   dataset_manifest:
@@ -121,24 +120,10 @@ jobs:
     outputs:
       checkpoints: ${{parent.outputs.checkpoints}}
       training_record: ${{parent.outputs.training_record}}
-    identity:
-      type: managed_identity
-
-  finalize_step:
-    type: command
-    component: ./components/finalize.yaml
-    compute: ${{parent.inputs.compute_finalize}}
-    identity:
-      type: managed_identity
-    inputs:
-      checkpoints: ${{parent.jobs.training_step.outputs.checkpoints}}
-      training_record: ${{parent.jobs.training_step.outputs.training_record}}
-      dataset_manifest: ${{parent.jobs.preflight_step.outputs.dataset_manifest}}
-      adapter_name: ${{parent.inputs.adapter_name}}
-      policy_type: ${{parent.inputs.policy_type}}
-    outputs:
       candidate: ${{parent.outputs.candidate}}
       candidate_manifest: ${{parent.outputs.candidate_manifest}}
+    identity:
+      type: managed_identity
 
 tags:
   framework: lerobot

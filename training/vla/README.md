@@ -1,7 +1,6 @@
 # VLA Training
 
-Vision-Language-Action (VLA) training for `pi0`, `pi0_fast`, and `pi05` policies via `lerobot[dataset,pi]`. Azure ML validates data, calibrates batch size, trains the policy, and finalizes an immutable candidate.
-NVIDIA GR00T fine-tuning runs through OSMO using the same lifecycle domain.
+Vision-Language-Action (VLA) training for `pi0`, `pi0_fast`, and `pi05` policies via `lerobot[dataset,pi]`. Azure ML uses a standalone calibration sweep followed by a training pipeline that consumes the selected calibration outputs. NVIDIA GR00T fine-tuning runs through OSMO using the same lifecycle domain.
 
 ## 📁 Directory Structure
 
@@ -47,6 +46,12 @@ The LeRobot PI adapter rejects values outside `pi0|pi0_fast|pi05` before trainin
 Submit a versioned Azure ML dataset to the standalone calibration sweep, then
 pass the selected outputs to the training pipeline. Use immutable dataset,
 model, and code revisions.
+
+> [!IMPORTANT]
+> The training pipeline does not run calibration. Wait until the standalone
+> sweep reports `Completed`, resolve `properties.best_child_run_id`, and bind
+> that child's `workload_contract` and `calibration_report` datastore folders
+> to the pipeline inputs.
 
 Before the first calibration sweep on an Arc compute target, run the
 [sweep failure-isolation smoke test](../../docs/training/vla-azureml-arc-setup.md#validate-sweep-failure-isolation).
@@ -111,7 +116,6 @@ az ml job create \
   --set inputs.gradient_checkpointing=true \
   --set inputs.compute_preflight="azureml:<compute-name>" \
   --set inputs.compute_train="azureml:<compute-name>" \
-  --set inputs.compute_finalize="azureml:<compute-name>" \
   --set inputs.hf_key_vault_url="<key-vault-url>" \
   --set inputs.hf_token_secret_name="<secret-name>"
 ```

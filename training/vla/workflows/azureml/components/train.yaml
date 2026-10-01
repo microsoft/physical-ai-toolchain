@@ -104,6 +104,14 @@ outputs:
     type: uri_folder
     mode: upload
     description: Post-success training lineage bound to checkpoints and dataset evidence.
+  candidate:
+    type: uri_folder
+    mode: upload
+    description: Adapter-valid policy candidate selected from the successful training run.
+  candidate_manifest:
+    type: uri_folder
+    mode: upload
+    description: Immutable candidate lineage and artifact fingerprints.
 
 environment:
   image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407

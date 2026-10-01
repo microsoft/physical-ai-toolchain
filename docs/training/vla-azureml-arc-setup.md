@@ -566,7 +566,6 @@ az ml job create \
   --set inputs.save_freq=1000 \
   --set inputs.compute_preflight="$COMPUTE" \
   --set inputs.compute_train="$COMPUTE" \
-  --set inputs.compute_finalize="$COMPUTE" \
   --set inputs.subscription_id="<workspace-subscription-id>" \
   --set inputs.resource_group="<workspace-resource-group>" \
   --set inputs.workspace_name="<workspace-name>" \

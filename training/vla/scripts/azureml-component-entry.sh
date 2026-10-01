@@ -129,6 +129,7 @@ case "${mode}" in
       USE_IMAGENET_STATS TRAINING_STEPS SAVE_FREQ LOG_FREQ JOB_NAME OUTPUT_DIR \
       MIXED_PRECISION CODE_REPOSITORY CODE_REVISION COMPUTE_TARGET RUNTIME_IMAGE \
       AZURE_ML_OUTPUT_checkpoints AZURE_ML_OUTPUT_training_record \
+      AZURE_ML_OUTPUT_candidate AZURE_ML_OUTPUT_candidate_manifest \
       AZURE_ML_INPUT_dataset AZURE_ML_INPUT_dataset_manifest \
       AZURE_ML_INPUT_calibration_report AZURE_ML_INPUT_workload_contract
 
@@ -164,4 +165,12 @@ if [[ "${mode}" == "train" ]]; then
     --workload-contract "${CALIBRATION_WORKLOAD_CONTRACT}" \
     --dataset-manifest "${DATASET_MANIFEST}" \
     --output "${TRAINING_RECORD_OUTPUT}"
+  python3 "${training_root}/vla/scripts/finalize_candidate.py" \
+    --checkpoints "${TRAINING_CHECKPOINT_OUTPUT}" \
+    --training-record "${TRAINING_RECORD_OUTPUT}" \
+    --dataset-manifest "$(dirname "${DATASET_MANIFEST}")" \
+    --candidate-output "$(environment_value AZURE_ML_OUTPUT_candidate)" \
+    --manifest-output "$(environment_value AZURE_ML_OUTPUT_candidate_manifest)" \
+    --adapter-name "${ADAPTER_NAME}" \
+    --policy-type "${POLICY_TYPE}"
 fi
