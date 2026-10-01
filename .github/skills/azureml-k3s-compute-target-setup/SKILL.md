@@ -1,0 +1,289 @@
+---
+name: azureml-k3s-compute-target-setup
+description: "Set up a K3s cluster on an NVIDIA GPU host, connect it to Azure Arc, and configure Azure ML to use it as a Kubernetes compute target. Includes GPU smoke-test and validation instructions for Azure ML jobs on the Arc-connected cluster - Brought to you by microsoft/physical-ai-toolchain"
+---
+
+# Azure ML K3s Compute Target Setup
+
+Set up K3s on an Ubuntu host with an NVIDIA GPU, connect the host and cluster to Azure Arc, and attach the cluster to Azure ML as a Kubernetes compute target. Then prove real CUDA execution with a bounded smoke job before submitting a long-running training job. A GPU reservation in the Azure ML job spec is not proof the container can see the device; validate at the container level every time the runtime stack changes.
+
+## Prerequisites
+
+| Requirement                                                               | Purpose                                                                                             |
+|---------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| Ubuntu host with an NVIDIA GPU and driver installed                       | K3s workload target                                                                                 |
+| Existing Arc resource group, subscription ID, tenant ID                   | `azcmagent` and `connectedk8s` registration targets                                                 |
+| Azure ML workspace with a Kubernetes-attachable extension                 | Compute target for job submission                                                                   |
+| `az` CLI with `connectedk8s`, `k8s-extension`, `ml`, and `ssh` extensions | Arc and Azure ML operations, and remote access to the host                                          |
+| NVIDIA Container Toolkit installed on the host                            | Provides the `nvidia-container-runtime` binary K3s detects                                          |
+| HuggingFace account with access to any gated base model                   | Required only when warm-starting from a gated repository (for example `google/paligemma-3b-pt-224`) |
+
+## Choose Where Each Command Runs
+
+Host setup and every `kubectl` command must run on the GPU host: the K3s kubeconfig points at the host-local API server. Azure ML attach, role assignment, and job submission commands run from any workstation with an authenticated `az` session.
+
+| Step                                                                                          | Runs on                                   |
+|-----------------------------------------------------------------------------------------------|-------------------------------------------|
+| Connect the host to Arc, install K3s and the NVIDIA device plugin, connect the cluster to Arc | GPU host, from a clone of this repository |
+| `kubectl` checks, node labeling, and `InstanceType` apply                                     | GPU host                                  |
+| Azure ML extension install, compute attach, role assignments                                  | Any workstation                           |
+| Job submission, `az ml job show`, and `az ml job stream`                                      | Any workstation                           |
+
+Before running a host step, confirm you are on the target host. Run these checks and compare the hostname with the intended host:
+
+```bash
+hostname
+nvidia-smi -L
+systemctl is-active k3s
+```
+
+If `nvidia-smi` is missing or the hostname does not match, you are not on the GPU host. Connect to it before continuing:
+
+* Before the host is Arc-connected, use regular SSH or console access to reach it, then clone this repository on the host.
+* After [Connect the Host to Arc](#connect-the-host-to-arc) completes, use `az ssh arc`. It needs no public IP address or inbound port, and requires Owner or Contributor on the Arc-enabled server and the `Microsoft.HybridConnectivity` resource provider.
+
+Enable SSH on the Arc-enabled server once, from a workstation:
+
+```bash
+az extension add --name ssh
+az provider register -n Microsoft.HybridConnectivity
+
+machine_id=/subscriptions/<subscription-id>/resourceGroups/<arc-resource-group>/providers/Microsoft.HybridCompute/machines/<arc-server-name>
+az rest --method put \
+  --uri "https://management.azure.com${machine_id}/providers/Microsoft.HybridConnectivity/endpoints/default?api-version=2023-03-15" \
+  --body '{"properties": {"type": "default"}}'
+az rest --method put \
+  --uri "https://management.azure.com${machine_id}/providers/Microsoft.HybridConnectivity/endpoints/default/serviceconfigurations/SSH?api-version=2023-03-15" \
+  --body '{"properties": {"serviceName": "SSH", "port": 22}}'
+```
+
+Open a session on the host, then run the host steps inside it:
+
+```bash
+az ssh arc --resource-group <arc-resource-group> --name <arc-server-name> --local-user <host-user>
+```
+
+Inside the session, point `kubectl` at the protected kubeconfig written by the K3s installer:
+
+```bash
+export KUBECONFIG="$HOME/.local/share/physical-ai-toolchain/hil/kubeconfig.yaml"
+```
+
+## Connect the Host to Arc
+
+Run on the GPU host. Preview, then connect the Ubuntu server:
+
+```bash
+data-pipeline/setup/edge/03-connect-arc-server.sh \
+  --subscription-id <subscription-id> --tenant-id <tenant-id> \
+  --resource-group <arc-resource-group> --location <location> \
+  --server-name <arc-server-name> --config-preview
+
+data-pipeline/setup/edge/03-connect-arc-server.sh \
+  --subscription-id <subscription-id> --tenant-id <tenant-id> \
+  --resource-group <arc-resource-group> --location <location> \
+  --server-name <arc-server-name>
+```
+
+## Install K3s and Configure the GPU Default Runtime
+
+Run on the GPU host. Install the pinned, owned K3s compute plane, passing `--default-runtime nvidia` on any host where GPU-backed Azure ML jobs will run:
+
+```bash
+data-pipeline/setup/hil/01-install-k3s.sh --default-runtime nvidia --config-preview
+data-pipeline/setup/hil/01-install-k3s.sh --default-runtime nvidia
+```
+
+> [!IMPORTANT]
+> Azure ML InstanceType `limits.nvidia.com/gpu` only reserves the device through the Kubernetes device plugin. It does not set a pod `runtimeClassName`, so on a K3s host whose default runtime is not NVIDIA, the container starts with no `/dev/nvidia*` devices and `torch.cuda.device_count()` returns `0` even though the job reports a reserved GPU. Setting `default-runtime: nvidia` in the K3s config is required whenever the Azure ML Kubernetes extension does not expose per-pod runtime-class configuration.
+
+Then install the NVIDIA Kubernetes device plugin so the node advertises `nvidia.com/gpu`. [configure-k3s-nvidia.sh](../../../gpu-offload/scripts/configure-k3s-nvidia.sh) installs a digest-pinned plugin. It also writes the `default-runtime: nvidia` drop-in and restarts K3s, which covers hosts installed before `--default-runtime` existed. Run it on the host with `KUBECONFIG` set, once no job containers are running:
+
+```bash
+gpu-offload/scripts/configure-k3s-nvidia.sh --context physical-ai-edge --config-preview
+gpu-offload/scripts/configure-k3s-nvidia.sh --context physical-ai-edge
+```
+
+Verify the NVIDIA device plugin is healthy and the node advertises allocatable GPUs before attaching Azure ML:
+
+```bash
+kubectl get pods -n kube-system -l name=nvidia-device-plugin-ds
+kubectl get node <node-name> -o jsonpath='{.status.allocatable.nvidia\.com/gpu}'
+```
+
+## Connect the K3s Cluster to Arc
+
+Run on the GPU host. Connect the cluster with the OIDC issuer and workload identity enabled:
+
+```bash
+data-pipeline/setup/edge/05-connect-arc-kubernetes.sh \
+  --subscription-id <subscription-id> --tenant-id <tenant-id> \
+  --resource-group <arc-resource-group> --location <location> \
+  --cluster-name <arc-cluster-name> --kubeconfig <kubeconfig-path> \
+  --enable-workload-identity --config-preview
+
+data-pipeline/setup/edge/05-connect-arc-kubernetes.sh \
+  --subscription-id <subscription-id> --tenant-id <tenant-id> \
+  --resource-group <arc-resource-group> --location <location> \
+  --cluster-name <arc-cluster-name> --kubeconfig <kubeconfig-path> \
+  --enable-workload-identity
+```
+
+## Attach the Cluster to Azure ML
+
+`infrastructure/setup/02-deploy-azureml-extension.sh` targets the Terraform-managed AKS cluster and does not apply to an Arc-connected K3s cluster. From a workstation, install the AzureML Kubernetes extension on the connected cluster directly. The device plugin installed by `configure-k3s-nvidia.sh` already runs on the host, so leave the extension's copy disabled:
+
+```bash
+az k8s-extension create --name azureml \
+  --extension-type Microsoft.AzureML.Kubernetes \
+  --cluster-type connectedClusters --cluster-name <arc-cluster-name> \
+  --resource-group <arc-resource-group> --subscription <subscription-id> \
+  --scope cluster --release-namespace azureml --release-train stable \
+  --configuration-settings enableTraining=true enableInference=false \
+    clusterPurpose=DevTest installNvidiaDevicePlugin=false \
+    installDcgmExporter=false relayserver.enabled=true
+
+az k8s-extension show --name azureml \
+  --cluster-type connectedClusters --cluster-name <arc-cluster-name> \
+  --resource-group <arc-resource-group> --query provisioningState -o tsv
+```
+
+Wait for `Succeeded`. Then, on the GPU host, wait for the `InstanceType` CRD, label the GPU node, and apply [azureml-instance-types.yaml](../../../infrastructure/setup/manifests/azureml-instance-types.yaml). The GPU `InstanceType`s select nodes labeled `accelerator=nvidia`, and without the label, jobs stay pending:
+
+```bash
+kubectl get crd instancetypes.amlarc.azureml.com
+kubectl label node <node-name> accelerator=nvidia --overwrite
+kubectl apply -f infrastructure/setup/manifests/azureml-instance-types.yaml
+```
+
+From a workstation, attach the connected cluster as Azure ML compute with a system-assigned identity:
+
+```bash
+az ml compute attach --name <compute-name> --type Kubernetes \
+  --resource-id /subscriptions/<subscription-id>/resourceGroups/<arc-resource-group>/providers/Microsoft.Kubernetes/connectedClusters/<arc-cluster-name> \
+  --namespace azureml --identity-type SystemAssigned \
+  --resource-group <workspace-resource-group> --workspace-name <workspace-name>
+```
+
+Grant the compute identity access to the workspace and its default storage account so jobs can read data assets and write outputs:
+
+```bash
+principal_id=$(az ml compute show --name <compute-name> \
+  --resource-group <workspace-resource-group> --workspace-name <workspace-name> \
+  --query identity.principal_id -o tsv)
+workspace_id=$(az ml workspace show --name <workspace-name> \
+  --resource-group <workspace-resource-group> --query id -o tsv)
+storage_id=$(az ml workspace show --name <workspace-name> \
+  --resource-group <workspace-resource-group> --query storage_account -o tsv)
+
+az role assignment create --assignee-object-id "$principal_id" \
+  --assignee-principal-type ServicePrincipal \
+  --role "AzureML Data Scientist" --scope "$workspace_id"
+az role assignment create --assignee-object-id "$principal_id" \
+  --assignee-principal-type ServicePrincipal \
+  --role "Storage Blob Data Contributor" --scope "$storage_id"
+```
+
+Confirm the `gpu` `InstanceType` matches actual node capacity (one `nvidia.com/gpu` limit per pod) before submitting jobs; request a larger InstanceType only when the node advertises more allocatable GPUs.
+
+## Azure ML Credentials and Dataset Inputs
+
+| Requirement                                                                                                                   | Where it applies                                                                                 |
+|-------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------|
+| `az login` session with rights to the target subscription and workspace                                                       | All `az ml` submission commands                                                                  |
+| `AzureML Data Scientist` on the workspace and `Storage Blob Data Contributor` on its storage account for the compute identity | Granted after `az ml compute attach`; required for data asset mounts, outputs, and MLflow        |
+| `HF_TOKEN` with access to the gated base repository                                                                           | Only when `--policy-repo-id` or the HuggingFace dataset path resolves to a gated repository      |
+| Datastore-backed Azure ML data asset, referenced with an explicit numeric version (`azureml:NAME:VERSION`)                    | `--dataset-asset`; shorthand references without a version are rejected to keep runs reproducible |
+
+Store `HF_TOKEN` in the untracked repository-root `.env.local`, never as a CLI argument or in chat. The submission script loads `.env.local` and forwards `HF_TOKEN` to the job, so `--hf-token` is not needed. Tokens passed as CLI arguments are visible to any process inspecting the host, so rotate a token immediately if it was ever exposed that way. `.amlignore` already excludes `.env` and `.env.*` from the Azure ML code snapshot.
+
+Data asset mount failures during job start often mean the registered asset version does not resolve against its backing datastore. Register a new datastore-backed version and reference that explicit version rather than reusing a broken one:
+
+```bash
+az ml data create --name <dataset-name> --version <next-version> \
+  --type uri_folder --path azureml://datastores/<datastore>/paths/<path>
+```
+
+## Submit a Bounded GPU Smoke Test
+
+Submit a short run (10 to 20 steps) before committing to a full training job. Keep `--save-freq` at or below the step count so at least one checkpoint round-trips. Pass `--compute` with the attached compute name. When Terraform outputs are unavailable, set `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, and `AZUREML_WORKSPACE_NAME` in `.env.local` or pass `--subscription-id`, `--resource-group`, and `--workspace-name`:
+
+```bash
+training/vla/scripts/submit-azureml-vla-pi0-training.sh \
+  -d <dataset-repo-id> --dataset-asset azureml:<dataset-name>:<version> \
+  -p pi05 --policy-repo-id lerobot/pi05_base \
+  --training-steps 10 --batch-size 16 --save-freq 10 --log-freq 1 \
+  --train-expert-only --mixed-precision bf16 \
+  --compute <compute-name> --instance-type gpu \
+  -j <job-name> --config-preview
+
+training/vla/scripts/submit-azureml-vla-pi0-training.sh \
+  -d <dataset-repo-id> --dataset-asset azureml:<dataset-name>:<version> \
+  -p pi05 --policy-repo-id lerobot/pi05_base \
+  --training-steps 10 --batch-size 16 --save-freq 10 --log-freq 1 \
+  --train-expert-only --mixed-precision bf16 \
+  --compute <compute-name> --instance-type gpu \
+  -j <job-name>
+```
+
+## Validate GPU Usage Without Interrupting the Job
+
+Never cancel a running job to validate it. Use read-only checks against the live pod and a bounded log stream instead.
+
+The `az ml` commands run from any workstation. The `kubectl` commands run on the GPU host; when you submitted the job from another machine, open an `az ssh arc` session on the host as described in [Choose Where Each Command Runs](#choose-where-each-command-runs) and set `KUBECONFIG` there first.
+
+Confirm the job status from the workstation, then find its pod on the host:
+
+```bash
+az ml job show --name <job-name> --query '{status:status}' -o json
+```
+
+```bash
+kubectl get pods -n azureml -l azureml.job.name=<job-name>
+```
+
+Confirm NVIDIA devices and live utilization inside the execution-wrapper container, on the host:
+
+```bash
+kubectl exec -n azureml <pod-name> -c <pod-name-execution-wrapper> -- \
+  sh -c 'ls /dev/nvidia*; nvidia-smi --query-gpu=name,memory.total,memory.used,utilization.gpu --format=csv,noheader'
+```
+
+Confirm PyTorch itself reports the device, using the job's installed virtual environment rather than a system Python:
+
+```bash
+kubectl exec -n azureml <pod-name> -c <pod-name-execution-wrapper> -- \
+  /opt/lerobot-venv/bin/python -c "import torch; print(torch.cuda.is_available(), torch.cuda.device_count())"
+```
+
+Stream a bounded window of user logs from the workstation and look for the training entrypoint's own detection line rather than relying on `nvidia-smi` alone, because it confirms the training process itself, not just the container, sees CUDA:
+
+```bash
+timeout --signal=INT 20s az ml job stream --name <job-name>
+```
+
+The training entrypoint logs `[GPU-DETECT] torch.cuda.device_count()=<n>, CUDA_VISIBLE_DEVICES=<value>` from [train.py](../../../training/il/scripts/lerobot/train.py) before invoking `lerobot-train`. A count of `0` on a job with a reserved GPU means the runtime injection is broken, not that the GPU is unavailable. `timeout` only stops the local log viewer; it does not cancel the Azure ML job.
+
+`[GPU-DETECT]` only proves the container sees a device, not that training is using it. Confirm real GPU execution from the `lerobot-train` step log lines themselves: a rising `mem_gb` value across steps, a `step:<n>` counter advancing toward `--steps`, and a `Checkpoint policy after step <n>` line once the run finishes.
+
+A smoke run reaching all configured steps within tens of seconds with `mem_gb` in the low double digits confirms the GPU did the work. A run stuck at step 0 or taking hours per step, even with `device_count=1`, still indicates the GPU is not actually being used.
+
+An Azure ML job can stay in `Running` after the training loop finishes while large checkpoints upload; a `pretrained_model` payload of several gigabytes can take many minutes after the last `step:<n>` log line. Do not treat this as a hang.
+
+A `[MLflow] Failed to log artifacts for <step>` message citing a task-queue flush timeout is a transient MLflow tracking-API timeout, not a training or upload failure, as long as the raw upload progress bar that follows it reaches 100%.
+
+## Troubleshooting
+
+| Symptom                                                                                            | Likely Cause                                                                               | Resolution                                                                                                                                                  |
+|----------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Job reserves one GPU but `[GPU-DETECT] torch.cuda.device_count()=0`                                | Pod has no `runtimeClassName` and K3s default runtime is not NVIDIA                        | Run `gpu-offload/scripts/configure-k3s-nvidia.sh --context physical-ai-edge` on the host once no job containers are active                                  |
+| `nvidia-smi` missing or `/dev/nvidia*` absent inside the container                                 | Same root cause as above                                                                   | Confirm with the `kubectl exec` device checks in the validation section, then apply the K3s default runtime fix                                             |
+| `403` fetching a gated HuggingFace repository                                                      | Account lacks gated-repo access, or `HF_TOKEN` is stale                                    | Sign in to huggingface.co as the account that owns `HF_TOKEN`, request access on the model page, refresh the token in `.env.local` if needed, then resubmit |
+| Data asset mount fails at job start                                                                | Asset version not backed by a resolvable datastore path                                    | Register a new datastore-backed asset version and reference it explicitly                                                                                   |
+| `az ml compute attach` fails after Arc connects cleanly                                            | AzureML extension still provisioning or `InstanceType` CRD not ready yet                   | Wait for the extension `provisioningState` to reach `Succeeded` and the CRD to exist, then retry the attach                                                 |
+| Job stays `Queued` with the `gpu` instance type                                                    | GPU node lacks the `accelerator=nvidia` label required by the `InstanceType` node selector | Run `kubectl label node <node-name> accelerator=nvidia --overwrite`                                                                                         |
+| Training runs entirely on CPU with no error                                                        | Same GPU runtime-injection root cause; PyTorch silently falls back                         | Apply the K3s default runtime fix before assuming a code-level bug                                                                                          |
+| Job stays `Running` well after the last `step:<n>` log line                                        | Large checkpoint still uploading to blob storage                                           | Check for an active upload progress bar in the log before assuming a hang                                                                                   |
+| `[MLflow] Failed to log artifacts for <step>: ... Failed to flush task queue within 300.0 seconds` | Transient MLflow tracking-API timeout, unrelated to the checkpoint data itself             | Confirm the raw upload progress bar immediately after it reaches 100%; no data is lost                                                                      |
+
+> Brought to you by microsoft/physical-ai-toolchain
