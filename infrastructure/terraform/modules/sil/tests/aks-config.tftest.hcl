@@ -403,3 +403,121 @@ run "empty_node_pools" {
     error_message = "Should create 0 GPU subnets when no node pools"
   }
 }
+
+// ============================================================
+// Cluster SKU Tier and Support Plan
+// ============================================================
+
+run "cluster_tier_defaults" {
+  command = plan
+
+  variables {
+    resource_prefix         = run.setup.resource_prefix
+    environment             = run.setup.environment
+    instance                = run.setup.instance
+    location                = run.setup.location
+    resource_group          = run.setup.resource_group
+    virtual_network         = run.setup.virtual_network
+    subnets                 = run.setup.subnets
+    network_security_group  = run.setup.network_security_group
+    nat_gateway             = run.setup.nat_gateway
+    log_analytics_workspace = run.setup.log_analytics_workspace
+    container_registry      = run.setup.container_registry
+    aks_config = {
+      system_node_pool_vm_size                    = "Standard_D8ds_v5"
+      system_node_pool_node_count                 = 2
+      should_enable_system_node_pool_auto_scaling = false
+      should_enable_private_cluster               = false
+    }
+  }
+
+  assert {
+    condition     = azurerm_kubernetes_cluster.main.sku_tier == "Standard" && azurerm_kubernetes_cluster.main.support_plan == "KubernetesOfficial"
+    error_message = "Clusters should default to the Standard tier and KubernetesOfficial support plan"
+  }
+}
+
+run "cluster_tier_premium_long_term_support" {
+  command = plan
+
+  variables {
+    resource_prefix         = run.setup.resource_prefix
+    environment             = run.setup.environment
+    instance                = run.setup.instance
+    location                = run.setup.location
+    resource_group          = run.setup.resource_group
+    virtual_network         = run.setup.virtual_network
+    subnets                 = run.setup.subnets
+    network_security_group  = run.setup.network_security_group
+    nat_gateway             = run.setup.nat_gateway
+    log_analytics_workspace = run.setup.log_analytics_workspace
+    container_registry      = run.setup.container_registry
+    aks_config = {
+      system_node_pool_vm_size                    = "Standard_D8ds_v5"
+      system_node_pool_node_count                 = 2
+      should_enable_system_node_pool_auto_scaling = false
+      should_enable_private_cluster               = false
+      sku_tier                                    = "Premium"
+      support_plan                                = "AKSLongTermSupport"
+    }
+  }
+
+  assert {
+    condition     = azurerm_kubernetes_cluster.main.sku_tier == "Premium" && azurerm_kubernetes_cluster.main.support_plan == "AKSLongTermSupport"
+    error_message = "sku_tier and support_plan should pass through to the cluster"
+  }
+}
+
+run "rejects_long_term_support_without_premium" {
+  command = plan
+
+  variables {
+    resource_prefix         = run.setup.resource_prefix
+    environment             = run.setup.environment
+    instance                = run.setup.instance
+    location                = run.setup.location
+    resource_group          = run.setup.resource_group
+    virtual_network         = run.setup.virtual_network
+    subnets                 = run.setup.subnets
+    network_security_group  = run.setup.network_security_group
+    nat_gateway             = run.setup.nat_gateway
+    log_analytics_workspace = run.setup.log_analytics_workspace
+    container_registry      = run.setup.container_registry
+    aks_config = {
+      system_node_pool_vm_size                    = "Standard_D8ds_v5"
+      system_node_pool_node_count                 = 2
+      should_enable_system_node_pool_auto_scaling = false
+      should_enable_private_cluster               = false
+      support_plan                                = "AKSLongTermSupport"
+    }
+  }
+
+  expect_failures = [var.aks_config]
+}
+
+run "rejects_invalid_sku_tier" {
+  command = plan
+
+  variables {
+    resource_prefix         = run.setup.resource_prefix
+    environment             = run.setup.environment
+    instance                = run.setup.instance
+    location                = run.setup.location
+    resource_group          = run.setup.resource_group
+    virtual_network         = run.setup.virtual_network
+    subnets                 = run.setup.subnets
+    network_security_group  = run.setup.network_security_group
+    nat_gateway             = run.setup.nat_gateway
+    log_analytics_workspace = run.setup.log_analytics_workspace
+    container_registry      = run.setup.container_registry
+    aks_config = {
+      system_node_pool_vm_size                    = "Standard_D8ds_v5"
+      system_node_pool_node_count                 = 2
+      should_enable_system_node_pool_auto_scaling = false
+      should_enable_private_cluster               = false
+      sku_tier                                    = "Basic"
+    }
+  }
+
+  expect_failures = [var.aks_config]
+}

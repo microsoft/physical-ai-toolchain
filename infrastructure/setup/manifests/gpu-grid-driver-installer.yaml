@@ -2,8 +2,11 @@
 # Microsoft GRID Driver DaemonSet for Azure RTX PRO 6000 (vGPU) nodes
 #
 # The RTX PRO 6000 BSE in Azure uses SR-IOV vGPU passthrough (PCI ID 10de:2bb5)
-# which requires the Microsoft GRID driver (v19.x vGPU Unified Driver) instead
-# of the standard NVIDIA datacenter driver bundled with the GPU Operator.
+# which requires the Microsoft GRID driver (vGPU 20.x, R595) instead of the
+# standard NVIDIA datacenter driver bundled with the GPU Operator.
+#
+# This is a fallback for pools created with gpu_driver = "None". AKS installs the
+# GRID driver itself on pools with gpu_driver = "Install", which need no DaemonSet.
 #
 # This DaemonSet runs on every node labeled nvidia.com/gpu.deploy.driver=false.
 # An init container installs the GRID driver on the host via nsenter. The main

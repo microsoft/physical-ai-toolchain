@@ -58,7 +58,7 @@ resource "azurerm_postgresql_flexible_server" "main" {
   zone                          = var.postgresql_config.zone
   backup_retention_days         = 7
   geo_redundant_backup_enabled  = false
-  public_network_access_enabled = var.should_enable_public_network_access
+  public_network_access_enabled = local.public_network_access.postgresql
 
   dynamic "high_availability" {
     for_each = var.postgresql_config.should_enable_high_availability ? [1] : []
@@ -105,7 +105,7 @@ resource "azurerm_private_endpoint" "postgresql" {
 // Allow Azure services (0.0.0.0/0.0.0.0) when public network access is enabled.
 // Required for AKS pods to reach PostgreSQL without private endpoints.
 resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_azure_services" {
-  count = var.should_deploy_postgresql && var.should_enable_public_network_access ? 1 : 0
+  count = var.should_deploy_postgresql && local.public_network_access.postgresql ? 1 : 0
 
   name             = "AllowAzureServices"
   server_id        = azurerm_postgresql_flexible_server.main[0].id
@@ -116,7 +116,7 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_azure_service
 // Allow only the AKS NAT Gateway egress IP when private endpoints are disabled.
 // Tighter than AllowAzureServices; both rules coexist for defense-in-depth.
 resource "azurerm_postgresql_flexible_server_firewall_rule" "aks_egress" {
-  count = var.should_deploy_postgresql && var.should_enable_public_network_access && !local.pe_enabled && var.should_enable_nat_gateway ? 1 : 0
+  count = var.should_deploy_postgresql && local.public_network_access.postgresql && !local.pe_enabled && var.should_enable_nat_gateway ? 1 : 0
 
   name             = "aks-nat-gateway-egress"
   server_id        = azurerm_postgresql_flexible_server.main[0].id

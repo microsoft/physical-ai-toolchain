@@ -67,8 +67,10 @@ variable "aks_config" {
     should_enable_private_cluster               = bool
     system_node_pool_zones                      = optional(list(string))
     should_enable_microsoft_defender            = optional(bool, false)
+    sku_tier                                    = optional(string, "Standard")
+    support_plan                                = optional(string, "KubernetesOfficial")
   })
-  description = "AKS cluster configuration for the system node pool"
+  description = "AKS cluster configuration for the system node pool, SKU tier, and support plan. AKSLongTermSupport requires the Premium tier"
   default = {
     system_node_pool_vm_size                    = "Standard_D8ds_v5"
     system_node_pool_node_count                 = 2
@@ -78,13 +80,29 @@ variable "aks_config" {
     should_enable_private_cluster               = true
     system_node_pool_zones                      = null
   }
+
+  validation {
+    condition     = contains(["Free", "Standard", "Premium"], var.aks_config.sku_tier)
+    error_message = "aks_config.sku_tier must be Free, Standard, or Premium."
+  }
+
+  validation {
+    condition     = contains(["KubernetesOfficial", "AKSLongTermSupport"], var.aks_config.support_plan)
+    error_message = "aks_config.support_plan must be KubernetesOfficial or AKSLongTermSupport."
+  }
+
+  validation {
+    condition     = var.aks_config.support_plan != "AKSLongTermSupport" || var.aks_config.sku_tier == "Premium"
+    error_message = "aks_config.support_plan AKSLongTermSupport requires aks_config.sku_tier Premium."
+  }
 }
 
 variable "node_pools" {
   type = map(object({
     vm_size                    = string
     node_count                 = optional(number, null)
-    subnet_address_prefixes    = list(string)
+    subnet_address_prefixes    = optional(list(string), [])
+    subnet_pool_key            = optional(string, null)
     node_taints                = optional(list(string), [])
     node_labels                = optional(map(string), {})
     gpu_driver                 = optional(string)
@@ -94,15 +112,17 @@ variable "node_pools" {
     max_count                  = optional(number, null)
     zones                      = optional(list(string), null)
     eviction_policy            = optional(string, "Deallocate")
+    undrainable_node_behavior  = optional(string, null)
+    max_surge                  = optional(string, null)
+    max_unavailable            = optional(string, null)
   }))
-  description = "Additional AKS node pools configuration. Map key is used as the node pool name. Note: Pod subnets are not used with Azure CNI Overlay mode"
+  description = "Additional AKS node pools configuration. Map key is used as the node pool name. Each entry either owns a subnet through subnet_address_prefixes or shares another entry's subnet through subnet_pool_key. Non-Spot entries can set undrainable_node_behavior (Cordon or Schedule) and one of max_surge or max_unavailable; max_surge defaults to 10% when neither is set. Note: Pod subnets are not used with Azure CNI Overlay mode"
   default = {
     gpu = {
       vm_size                    = "Standard_NV36ads_A10_v5"
       node_count                 = null
       subnet_address_prefixes    = ["10.0.16.0/24"]
       node_taints                = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
-      node_labels                = { accelerator = "nvidia" }
       gpu_driver                 = "Install"
       priority                   = "Spot"
       should_enable_auto_scaling = true
@@ -111,6 +131,54 @@ variable "node_pools" {
       zones                      = []
       eviction_policy            = "Delete"
     }
+  }
+
+  validation {
+    condition = alltrue([
+      for key, pool in var.node_pools :
+      pool.subnet_pool_key == null ? true : try(var.node_pools[pool.subnet_pool_key].subnet_pool_key == null, false)
+    ])
+    error_message = "subnet_pool_key must name another node_pools entry that owns its subnet (an entry that sets subnet_address_prefixes and no subnet_pool_key)."
+  }
+
+  validation {
+    condition = alltrue([
+      for key, pool in var.node_pools :
+      (pool.subnet_pool_key == null) == (length(pool.subnet_address_prefixes) > 0)
+    ])
+    error_message = "Each node_pools entry must set exactly one of subnet_address_prefixes or subnet_pool_key."
+  }
+
+  validation {
+    condition = alltrue([
+      for key, pool in var.node_pools :
+      pool.max_surge == null || pool.max_unavailable == null
+    ])
+    error_message = "A node_pools entry can set max_surge or max_unavailable, not both."
+  }
+
+  validation {
+    condition = alltrue([
+      for key, pool in var.node_pools :
+      pool.priority != "Spot" || (pool.max_surge == null && pool.max_unavailable == null && pool.undrainable_node_behavior == null)
+    ])
+    error_message = "Spot node_pools entries don't support upgrade settings; leave max_surge, max_unavailable, and undrainable_node_behavior unset."
+  }
+
+  validation {
+    condition = alltrue([
+      for key, pool in var.node_pools :
+      pool.undrainable_node_behavior == null ? true : contains(["Cordon", "Schedule"], pool.undrainable_node_behavior)
+    ])
+    error_message = "undrainable_node_behavior must be Cordon or Schedule."
+  }
+
+  validation {
+    condition = alltrue([
+      for key, pool in var.node_pools :
+      !contains(keys(pool.node_labels), "accelerator")
+    ])
+    error_message = "node_labels can't set accelerator: AKS reserves that label and sets accelerator=nvidia on GPU nodes itself. Select GPU pools by agentpool instead."
   }
 }
 
