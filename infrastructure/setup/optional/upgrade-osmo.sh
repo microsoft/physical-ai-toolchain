@@ -3,7 +3,7 @@
 #
 # Data-keeping path: backup -> hop-6.2 -> tokens -> export -> hop-6.3 -> verify
 # Fresh path:        backup -> reset -> hop-6.3 -> verify
-# cspell:ignore fromdateiso pgroll slurpfile
+# cspell:ignore fromdateiso pgroll rtrimstr schemaname slurpfile
 set -o errexit -o nounset -o pipefail
 umask 077
 
@@ -310,6 +310,53 @@ require_key_vault_secret() {
         fatal "Can't read $2 from Key Vault $1. $3"
 }
 
+# Build one read-only query from pgroll migration files. It prints a line for each
+# object whose state differs from what the migrations need (before) or leave (after).
+# pgroll rejects a whole migration when one of these checks fails, and the chart's
+# runner logs that as skipped while the Helm hook still succeeds.
+MIGRATION_CHECK_JQ=$(cat <<'JQ'
+def sq: "'" + gsub("'"; "''") + "'";
+[inputs
+  | (input_filename | split("/") | last | rtrimstr(".json")) as $m
+  | [.operations[] | to_entries[0] | select(.key == "create_table") | .value.name] as $created
+  | .operations[] | to_entries[0] | .key as $op | .value as $v
+  | if $op == "sql" then empty
+    elif $op == "drop_column" then {m: $m, kind: "column", t: $v.table, o: $v.column, e: ($mode == "before")}
+    elif $op == "add_column" then
+      (if $mode == "before" and ($created | any(. == $v.table) | not)
+       then {m: $m, kind: "table", t: $v.table, o: $v.table, e: true} else empty end),
+      {m: $m, kind: "column", t: $v.table, o: $v.column.name, e: ($mode == "after")}
+    elif $op == "create_table" then {m: $m, kind: "table", t: $v.name, o: $v.name, e: ($mode == "after")}
+    elif $op == "create_index" then
+      (if $mode == "before" and ($created | any(. == $v.table) | not)
+       then {m: $m, kind: "table", t: $v.table, o: $v.table, e: true} else empty end),
+      {m: $m, kind: "index", t: $v.table, o: $v.name, e: ($mode == "after")}
+    else error("unsupported pgroll operation \($op) in \($m)") end]
+| unique
+| "WITH checks(migration, kind, table_name, object_name, should_exist) AS (VALUES "
+  + (map("(\(.m | sq), \(.kind | sq), \(.t | sq), \(.o | sq), \(.e))") | join(", "))
+  + ") SELECT migration || ': ' || kind || ' ' || CASE kind WHEN 'column' THEN table_name || '.' || object_name"
+  + " WHEN 'index' THEN object_name || ' on ' || table_name ELSE object_name END"
+  + " || CASE WHEN should_exist THEN ' is missing' ELSE ' already exists' END FROM checks c"
+  + " WHERE should_exist <> CASE c.kind"
+  + " WHEN 'column' THEN EXISTS (SELECT 1 FROM information_schema.columns i WHERE i.table_schema = 'public'"
+  + " AND i.table_name = c.table_name AND i.column_name = c.object_name)"
+  + " WHEN 'table' THEN EXISTS (SELECT 1 FROM information_schema.tables i WHERE i.table_schema = 'public'"
+  + " AND i.table_name = c.object_name)"
+  + " ELSE EXISTS (SELECT 1 FROM pg_indexes i WHERE i.schemaname = 'public' AND i.indexname = c.object_name) END"
+  + " ORDER BY 1;"
+JQ
+)
+
+# Usage: migration_check <migrations-dir> <before|after> <connection> > <output-file>
+migration_check() {
+    local sql
+    sql=$(jq -rn --arg mode "$2" "$MIGRATION_CHECK_JQ" "$1"/*.json)
+    start_db_helper
+    kubectl exec "$helper_pod" -n "$NS_OSMO_CONTROL_PLANE" -- psql "$3" -v ON_ERROR_STOP=1 -tAc "$sql"
+    stop_db_helper
+}
+
 #------------------------------------------------------------------------------
 # Stage State
 #------------------------------------------------------------------------------
@@ -483,7 +530,7 @@ stage_backup() {
 
 stage_hop_62() {
     local backup_path releases target_line release chart_name chart_version line saved tgz timeout version
-    local plan="" upgrades=""
+    local plan="" upgrades="" service_tgz="" service_release="" migrations_dir="" connection=""
     local -a args
     backup_path="$backup_dir/$(latest_backup)"
     releases=$(helm list --all -n "$NS_OSMO_CONTROL_PLANE" -o json)
@@ -520,13 +567,32 @@ stage_hop_62() {
             fatal "$release enables OSMO authentication. Follow NVIDIA's 6.0 to 6.2 authentication steps; this script upgrades no-auth installs."
         fi
         case "$chart_name" in
-            service) tgz=$(pull_and_verify_chart "osmo/service" "$OSMO_UPGRADE_62_CHART_VERSION" "$OSMO_UPGRADE_62_SERVICE_CHART_SHA256" "$work_dir/charts/service") ;;
+            service)
+                tgz=$(pull_and_verify_chart "osmo/service" "$OSMO_UPGRADE_62_CHART_VERSION" "$OSMO_UPGRADE_62_SERVICE_CHART_SHA256" "$work_dir/charts/service")
+                service_tgz="$tgz"
+                service_release="$release"
+                ;;
             router)  tgz=$(pull_and_verify_chart "osmo/router" "$OSMO_UPGRADE_62_CHART_VERSION" "$OSMO_UPGRADE_62_ROUTER_CHART_SHA256" "$work_dir/charts/router") ;;
             web-ui)  tgz=$(pull_and_verify_chart "osmo/web-ui" "$OSMO_UPGRADE_62_CHART_VERSION" "$OSMO_UPGRADE_62_WEB_UI_CHART_SHA256" "$work_dir/charts/web-ui") ;;
         esac
         upgrades+="$release"$'\t'"$chart_name"$'\t'"$chart_version"$'\t'"$tgz"$'\n'
     done <<< "$plan"
     [[ -n "$upgrades" ]] || fatal "No legacy releases need the 6.2 upgrade"
+
+    if [[ -n "$service_tgz" ]]; then
+        section "Check Database Schema"
+        migrations_dir="$work_dir/migrations"
+        mkdir -p "$migrations_dir"
+        tar -xzf "$service_tgz" -C "$migrations_dir" --strip-components=2 service/migrations
+        compgen -G "$migrations_dir/*.json" >/dev/null || fatal "Chart $OSMO_UPGRADE_62_CHART_VERSION has no service/migrations files"
+        connection=$(db_connection "$(helm get values "$service_release" -n "$NS_OSMO_CONTROL_PLANE" -o json --all)")
+        migration_check "$migrations_dir" before "$connection" > "$work_dir/migration-check.txt"
+        if [[ -s "$work_dir/migration-check.txt" ]]; then
+            while read -r line; do error "$line"; done < "$work_dir/migration-check.txt"
+            fatal "The database doesn't match the schema NVIDIA's 6.2 migrations expect, so pgroll would skip them and leave OSMO without its 6.2 schema. Pre-release builds can differ from the 6.0 release. Use the fresh path (--stage reset) instead."
+        fi
+        info "The database matches the schema the 6.2 migrations expect"
+    fi
 
     section "Plan: Upgrade to OSMO $OSMO_UPGRADE_62_IMAGE_VERSION"
     while IFS=$'\t' read -r release chart_name chart_version tgz; do
@@ -561,6 +627,15 @@ stage_hop_62() {
         helm "${args[@]}" --wait --timeout "$timeout"
     done <<< "$upgrades"
     wait_for_deployments "$NS_OSMO_CONTROL_PLANE"
+
+    if [[ -n "$service_tgz" ]]; then
+        migration_check "$migrations_dir" after "$connection" > "$work_dir/migration-check.txt"
+        if [[ -s "$work_dir/migration-check.txt" ]]; then
+            while read -r line; do error "$line"; done < "$work_dir/migration-check.txt"
+            fatal "The 6.2 database migrations didn't fully apply. Restore the backup with the rollback runbook, or use the fresh path (--stage reset)."
+        fi
+        info "The 6.2 database migrations applied"
+    fi
 
     require_service_url
     version=$(service_version)

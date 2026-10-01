@@ -54,12 +54,14 @@ optional/upgrade-osmo.sh --stage tokens --backup-dir "$backup_dir" --token-expir
 optional/upgrade-osmo.sh --stage export --backup-dir "$backup_dir" --bundle-dir "$bundle_dir"
 ```
 
-| Stage     | What it does                                                                                                                                                                                                                                              |
-|-----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `backup`  | Dumps the OSMO database with `pg_dump` from a temporary pod that reads `db-secret`, and checks that the dump holds table data. Saves `mek-config`, the values and manifests of every OSMO Helm release, the operator token Secret, and every config type. |
-| `hop-6.2` | Upgrades the legacy releases to chart 1.2.1 with `nvcr.io/nvidia/osmo` images tagged `6.2`. The service release's pre-upgrade hook runs NVIDIA's pgroll database migrations. The envoy, oauth2Proxy, rateLimit, and authz sidecars stay off.              |
-| `tokens`  | Replaces the service tokens that the 6.2 migrations delete. Creates the `backend-operator` user and an `osmo-backend` token, stores it in the operator's token Secret, restarts the operator, and waits for the backend to come online.                   |
-| `export`  | Runs NVIDIA's `export_configs_to_helm.py` from the pinned commit after checking its SHA-256. Confirms that every backed-up pool, platform, pod template, and backend is in the export, then writes `<bundle>/osmo-platforms.yaml` if that file is absent. |
+| Stage     | What it does                                                                                                                                                                                                                                                                                                                                                                                                        |
+|-----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `backup`  | Dumps the OSMO database with `pg_dump` from a temporary pod that reads `db-secret`, and checks that the dump holds table data. Saves `mek-config`, the values and manifests of every OSMO Helm release, the operator token Secret, and every config type.                                                                                                                                                           |
+| `hop-6.2` | Upgrades the legacy releases to chart 1.2.1 with `nvcr.io/nvidia/osmo` images tagged `6.2`. The service release's pre-upgrade hook runs NVIDIA's pgroll database migrations. Before it changes anything, the stage checks the database for the columns, tables, and indexes those migrations add and drop, and afterwards it confirms they applied. The envoy, oauth2Proxy, rateLimit, and authz sidecars stay off. |
+| `tokens`  | Replaces the service tokens that the 6.2 migrations delete. Creates the `backend-operator` user and an `osmo-backend` token, stores it in the operator's token Secret, restarts the operator, and waits for the backend to come online.                                                                                                                                                                             |
+| `export`  | Runs NVIDIA's `export_configs_to_helm.py` from the pinned commit after checking its SHA-256. Confirms that every backed-up pool, platform, pod template, and backend is in the export, then writes `<bundle>/osmo-platforms.yaml` if that file is absent.                                                                                                                                                           |
+
+NVIDIA's migrations expect a 6.0 release schema. A pre-release build can differ, and pgroll then skips a whole migration while the Helm hook still succeeds. `hop-6.2` stops before upgrading such a database; use [Start Fresh](#start-fresh) for those installs.
 
 Review `<bundle>/osmo-platforms.yaml` before you continue:
 
@@ -86,7 +88,7 @@ optional/upgrade-osmo.sh --stage hop-6.3 --backup-dir "$backup_dir" --bundle-dir
 optional/upgrade-osmo.sh --stage verify --backup-dir "$backup_dir"
 ```
 
-`reset` uninstalls the legacy releases, then runs `cleanup/uninstall-osmo.sh --skip-backend --skip-k8s-cleanup --purge-postgres --purge-redis`. That drops the database's `public` schema and flushes the Redis `{osmo}:*` keys, so OSMO workflow records and config history are gone. The storage container and its data, `mek-config`, the database and Redis secrets, the namespaces, and the backend operator stay.
+`reset` uninstalls the legacy releases, then runs `cleanup/uninstall-osmo.sh --skip-backend --skip-k8s-cleanup --purge-postgres --purge-redis`. That drops the database's `public` schema and pgroll's migration state, and flushes the Redis `{osmo}:*` keys, so OSMO workflow records and config history are gone. The storage container and its data, `mek-config`, the database and Redis secrets, the namespaces, and the backend operator stay.
 
 ## Install 6.3 and Verify
 
