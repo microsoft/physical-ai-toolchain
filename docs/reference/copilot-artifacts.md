@@ -40,6 +40,8 @@ The cloud-agent setup workflow provisions the RPI skill suite at runtime.
 | Prompt      | `/submit-lerobot-training`       | Submit LeRobot training job to OSMO                 | `.github/prompts/submit-lerobot-training.prompt.md`               |
 | Skill       | azureml-k3s-compute-target-setup | Attach an Arc-connected K3s GPU cluster to Azure ML | `.github/skills/azureml-k3s-compute-target-setup/SKILL.md`        |
 | Skill       | dataviewer                       | Dataset browsing, annotation, and export            | `.github/skills/dataviewer/SKILL.md`                              |
+| Skill       | e2e-infrastructure               | Deploy and undeploy cloud E2E infrastructure        | `.github/skills/e2e-infrastructure/SKILL.md`                      |
+| Skill       | e2e-tests                        | Launch and monitor cloud E2E tests                  | `.github/skills/e2e-tests/SKILL.md`                               |
 | Skill       | environment-deployment           | Generate and consume environment deployment bundles | `.github/skills/environment-deployment/SKILL.md`                  |
 | Skill       | fleet-deployment                 | Deploy trained policies through fleet GitOps        | `.github/skills/fleet-deployment/SKILL.md`                        |
 | Skill       | fleet-intelligence               | Monitor fleet telemetry and drift                   | `.github/skills/fleet-intelligence/SKILL.md`                      |
@@ -50,18 +52,20 @@ The cloud-agent setup workflow provisions the RPI skill suite at runtime.
 
 ## 🔗 Quick Reference
 
-| Want to...                             | Use this artifact                                         |
-|----------------------------------------|-----------------------------------------------------------|
-| Launch the Dataset Analysis Tool       | `/start-dataviewer` prompt → Dataviewer Developer         |
-| Browse and annotate training episodes  | Dataviewer Developer agent                                |
-| Submit a LeRobot training job          | `/submit-lerobot-training` prompt → OSMO Training Manager |
-| Check training job status              | `/check-training-status` prompt → OSMO Training Manager   |
-| Save a conversation log                | `/chatlog` prompt                                         |
-| Run the full RPI lifecycle             | `rpi-quick` skill                                         |
-| Enforce commit message standards       | `commit-message` instruction (auto-applied)               |
-| Enforce coding standards in dataviewer | `dataviewer` instruction (auto-applied)                   |
-| Enforce markdown writing standards     | `docs-style-and-conventions` instruction (auto-applied)   |
-| Enforce shell script standards         | `shell-scripts` instruction (auto-applied)                |
+| Want to...                                | Use this artifact                                         |
+|-------------------------------------------|-----------------------------------------------------------|
+| Launch the Dataset Analysis Tool          | `/start-dataviewer` prompt → Dataviewer Developer         |
+| Browse and annotate training episodes     | Dataviewer Developer agent                                |
+| Deploy or remove cloud E2E infrastructure | `e2e-infrastructure` skill                                |
+| Run and monitor cloud E2E tests           | `e2e-tests` skill                                         |
+| Submit a LeRobot training job             | `/submit-lerobot-training` prompt → OSMO Training Manager |
+| Check training job status                 | `/check-training-status` prompt → OSMO Training Manager   |
+| Save a conversation log                   | `/chatlog` prompt                                         |
+| Run the full RPI lifecycle                | `rpi-quick` skill                                         |
+| Enforce commit message standards          | `commit-message` instruction (auto-applied)               |
+| Enforce coding standards in dataviewer    | `dataviewer` instruction (auto-applied)                   |
+| Enforce markdown writing standards        | `docs-style-and-conventions` instruction (auto-applied)   |
+| Enforce shell script standards            | `shell-scripts` instruction (auto-applied)                |
 
 ## 🤖 Agents
 
@@ -134,6 +138,22 @@ discovery (frontmatter only) → instructions (SKILL.md body) → resources
 | Directory | `.github/skills/dataviewer/`                                               |
 | Resources | `references/PLAYWRIGHT.md` (selectors, interaction recipes, API endpoints) |
 | Used by   | Dataviewer Developer agent                                                 |
+
+### e2e-infrastructure
+
+| Property  | Value                                                                        |
+|-----------|------------------------------------------------------------------------------|
+| Directory | `.github/skills/e2e-infrastructure/`                                         |
+| Resources | `scripts/manage-e2e-infrastructure.sh`, `templates/terraform.tfvars.example` |
+| Used by   | Copilot sessions managing dedicated cloud E2E infrastructure                 |
+
+### e2e-tests
+
+| Property  | Value                                                     |
+|-----------|-----------------------------------------------------------|
+| Directory | `.github/skills/e2e-tests/`                               |
+| Resources | `scripts/run-e2e-tests.sh`                                |
+| Used by   | Copilot sessions launching and monitoring cloud E2E tests |
 
 ### osmo-lerobot-training
 
