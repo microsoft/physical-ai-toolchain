@@ -59,7 +59,7 @@ dependencies = [
     # would track lerobot's transitive range and could drift on dependency bumps.
     "accelerate==1.15.0",
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
-    "gitpython==3.1.62",
+    "gitpython==3.2.0",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
     # Pin cryptography to 50.0.1 (Dependabot-tracked in the lerobot-dependencies
