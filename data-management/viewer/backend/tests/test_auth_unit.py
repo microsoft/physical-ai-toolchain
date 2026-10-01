@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 import sys
 import types
 from unittest.mock import MagicMock
@@ -14,7 +12,6 @@ from fastapi import HTTPException
 
 from src.api.auth import (
     ApiKeyProvider,
-    EasyAuthProvider,
     JwtProvider,
     require_auth,
     require_role,
@@ -62,61 +59,6 @@ class TestApiKeyProvider:
         assert "ApiKey" in ApiKeyProvider("k").www_authenticate
 
 
-class TestEasyAuthProvider:
-    def test_decodes_principal(self):
-        principal = {
-            "claims": [
-                {"typ": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", "val": "user-1"},
-                {"typ": "name", "val": "Alice"},
-                {"typ": "roles", "val": "admin"},
-                {"typ": "roles", "val": "viewer"},
-            ]
-        }
-        encoded = base64.b64encode(json.dumps(principal).encode()).decode()
-        provider = EasyAuthProvider()
-        result = asyncio.run(
-            provider.authenticate(make_asgi_request("POST", "/api/x", headers={"X-MS-CLIENT-PRINCIPAL": encoded}))
-        )
-        assert result == {
-            "sub": "user-1",
-            "name": "Alice",
-            "roles": ["admin", "viewer"],
-            "auth_method": "easy_auth",
-        }
-
-    def test_missing_principal_returns_none(self):
-        assert asyncio.run(EasyAuthProvider().authenticate(make_asgi_request("POST", "/api/x"))) is None
-
-    def test_invalid_base64_returns_none(self):
-        result = asyncio.run(
-            EasyAuthProvider().authenticate(
-                make_asgi_request("POST", "/api/x", headers={"X-MS-CLIENT-PRINCIPAL": "not-valid-base64!!!"})
-            )
-        )
-        assert result is None
-
-    def test_invalid_json_payload_returns_none(self):
-        encoded = base64.b64encode(b"not-json").decode()
-        result = asyncio.run(
-            EasyAuthProvider().authenticate(
-                make_asgi_request("POST", "/api/x", headers={"X-MS-CLIENT-PRINCIPAL": encoded})
-            )
-        )
-        assert result is None
-
-    def test_missing_claims_yields_blank_identity(self):
-        encoded = base64.b64encode(json.dumps({}).encode()).decode()
-        result = asyncio.run(
-            EasyAuthProvider().authenticate(
-                make_asgi_request("POST", "/api/x", headers={"X-MS-CLIENT-PRINCIPAL": encoded})
-            )
-        )
-        assert result == {"sub": "", "name": "", "roles": [], "auth_method": "easy_auth"}
-
-    def test_www_authenticate_header(self):
-        assert "EasyAuth" in EasyAuthProvider().www_authenticate
-
-
 class TestJwtProvider:
     def test_missing_bearer_returns_none(self):
         provider = JwtProvider("https://example/jwks", "aud", "iss")
@@ -137,21 +79,102 @@ class TestJwtProvider:
         fake_jwt = types.ModuleType("jwt")
         fake_jwt.PyJWKClient = MagicMock(return_value=jwks_client)
         fake_jwt.PyJWTError = Exception
-        fake_jwt.decode = MagicMock(return_value={"sub": "abc", "aud": "aud"})
+        fake_jwt.decode = MagicMock(
+            return_value={"sub": "abc", "aud": "aud", "exp": 4_102_444_800, "scp": "access_as_user other"}
+        )
         monkeypatch.setitem(sys.modules, "jwt", fake_jwt)
 
-        provider = JwtProvider("https://example/jwks", "aud", "iss")
+        provider = JwtProvider(
+            "https://example/jwks",
+            "aud",
+            "iss",
+            required_scope="access_as_user",
+            required_claims=("exp", "sub"),
+        )
         result = asyncio.run(
             provider.authenticate(make_asgi_request("POST", "/api/x", headers={"Authorization": "Bearer my-token"}))
         )
-        assert result == {"sub": "abc", "aud": "aud", "auth_method": "azure_ad"}
+        assert result == {
+            "sub": "abc",
+            "aud": "aud",
+            "exp": 4_102_444_800,
+            "scp": "access_as_user other",
+            "auth_method": "azure_ad",
+        }
         fake_jwt.decode.assert_called_once()
         # JWKS client is cached on the provider after first use.
         result2 = asyncio.run(
             provider.authenticate(make_asgi_request("POST", "/api/x", headers={"Authorization": "Bearer my-token"}))
         )
-        assert result2 == {"sub": "abc", "aud": "aud", "auth_method": "azure_ad"}
+        assert result2 == {
+            "sub": "abc",
+            "aud": "aud",
+            "exp": 4_102_444_800,
+            "scp": "access_as_user other",
+            "auth_method": "azure_ad",
+        }
         fake_jwt.PyJWKClient.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"exp": 4_102_444_800, "scp": "access_as_user"},
+            {"sub": "abc", "scp": "access_as_user"},
+            {"sub": " ", "exp": 4_102_444_800, "scp": "access_as_user"},
+        ],
+    )
+    def test_missing_required_claim_returns_none(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        payload: dict[str, object],
+    ):
+        signing_key = MagicMock()
+        signing_key.key = "fake-key"
+        jwks_client = MagicMock()
+        jwks_client.get_signing_key_from_jwt.return_value = signing_key
+
+        fake_jwt = types.ModuleType("jwt")
+        fake_jwt.PyJWKClient = MagicMock(return_value=jwks_client)
+        fake_jwt.PyJWTError = Exception
+        fake_jwt.decode = MagicMock(return_value=payload)
+        monkeypatch.setitem(sys.modules, "jwt", fake_jwt)
+
+        provider = JwtProvider(
+            "https://example/jwks",
+            "aud",
+            "iss",
+            required_scope="access_as_user",
+            required_claims=("exp", "sub"),
+        )
+
+        result = asyncio.run(
+            provider.authenticate(make_asgi_request("POST", "/api/x", headers={"Authorization": "Bearer token"}))
+        )
+
+        assert result is None
+
+    @pytest.mark.parametrize("scope_claim", [None, "another_scope"])
+    def test_missing_required_scope_returns_none(self, monkeypatch: pytest.MonkeyPatch, scope_claim: str | None):
+        signing_key = MagicMock()
+        signing_key.key = "fake-key"
+        jwks_client = MagicMock()
+        jwks_client.get_signing_key_from_jwt.return_value = signing_key
+
+        payload = {"sub": "abc", "aud": "aud"}
+        if scope_claim is not None:
+            payload["scp"] = scope_claim
+        fake_jwt = types.ModuleType("jwt")
+        fake_jwt.PyJWKClient = MagicMock(return_value=jwks_client)
+        fake_jwt.PyJWTError = Exception
+        fake_jwt.decode = MagicMock(return_value=payload)
+        monkeypatch.setitem(sys.modules, "jwt", fake_jwt)
+
+        provider = JwtProvider("https://example/jwks", "aud", "iss", required_scope="access_as_user")
+        result = asyncio.run(
+            provider.authenticate(make_asgi_request("POST", "/api/x", headers={"Authorization": "Bearer fake-token"}))
+        )
+
+        assert result is None
 
     def test_decode_error_returns_none(self, monkeypatch: pytest.MonkeyPatch):
         class FakeJWTError(Exception):
@@ -227,18 +250,18 @@ class TestProviderSelection:
             self._expect_challenge("ApiKey")
         assert any("DATAVIEWER_API_KEY" in r.message for r in caplog.records)
 
-    def test_unknown_falls_back_to_apikey(self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
+    def test_unknown_provider_fails_closed(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "bogus")
         monkeypatch.setenv("DATAVIEWER_API_KEY", "k")
-        with caplog.at_level("ERROR", logger="src.api.auth"):
-            self._expect_challenge("ApiKey")
-        assert any("Unknown DATAVIEWER_AUTH_PROVIDER" in r.message for r in caplog.records)
+        with pytest.raises(ValueError, match="DATAVIEWER_AUTH_PROVIDER"):
+            asyncio.run(require_auth(make_asgi_request("POST", "/api/x")))
 
-    def test_easy_auth_selection(self, monkeypatch: pytest.MonkeyPatch):
+    def test_easy_auth_provider_is_rejected(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "easy_auth")
-        self._expect_challenge("EasyAuth")
+        with pytest.raises(ValueError, match="DATAVIEWER_AUTH_PROVIDER"):
+            asyncio.run(require_auth(make_asgi_request("POST", "/api/x")))
 
     def test_azure_ad_selection(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
@@ -268,6 +291,25 @@ class TestRequireAuth:
             asyncio.run(require_auth(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "wrong"})))
         assert exc_info.value.status_code == 401
         assert "WWW-Authenticate" in exc_info.value.headers
+
+    def test_forged_easy_auth_header_is_rejected(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
+        monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "azure_ad")
+        monkeypatch.setenv("DATAVIEWER_AZURE_TENANT_ID", "tenant")
+        monkeypatch.setenv("DATAVIEWER_AZURE_CLIENT_ID", "client")
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                require_auth(
+                    make_asgi_request(
+                        "POST",
+                        "/api/x",
+                        headers={"X-MS-CLIENT-PRINCIPAL": "forged-principal"},
+                    )
+                )
+            )
+
+        assert exc_info.value.status_code == 401
 
     def test_failure_logs_unknown_client_when_missing(self, monkeypatch: pytest.MonkeyPatch):
         # Build a request with no client tuple to exercise the "unknown" branch.
@@ -327,6 +369,7 @@ class TestPrincipalContext:
         "user",
         [
             {"sub": "subject", "auth_method": "unsupported"},
+            {"sub": "subject", "auth_method": "easy_auth"},
             {"sub": "", "auth_method": "apikey"},
         ],
     )
