@@ -3,7 +3,7 @@ sidebar_position: 12
 title: Updating External Components
 description: Process for identifying, updating, and vetting reused externally-maintained components
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-29
+ms.date: 2026-10-01
 ms.topic: how-to
 keywords:
   - component-updates
@@ -47,28 +47,30 @@ For quick dependency commands, see the [Component Updates](pull-request-process.
 
 ## Automated Updates (Dependabot)
 
-Dependabot checks version updates weekly on Monday. Configuration lives in [.github/dependabot.yml](pathname://../../.github/dependabot.yml). The 24 update entries retain separate Python and Docker runtime environments while sharing npm and Terraform configurations across compatible directories.
+Dependabot checks version updates weekly on Monday. Configuration lives in [.github/dependabot.yml](pathname://../../.github/dependabot.yml). The 25 update entries keep separate npm, Python, and Docker environments where their constraints differ and share one Terraform configuration across compatible directories.
 
-| Ecosystem      | Coverage                                                                                      | Grouping                                                                             |
-|----------------|-----------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
-| npm            | Root workspace, including the Dataviewer frontend, and `/docs/docusaurus`                     | Shared development tools, Vitest, Docusaurus, authentication, and web runtime groups |
-| uv             | 14 project roots covering development, training, evaluation, data, workflows, and GPU offload | Separate patch/minor group per project                                               |
-| terraform      | `/infrastructure/terraform`, plus `dns`, `vpn`, and `automation`                              | One coordinated patch/minor provider group                                           |
-| github-actions | Workflow files, excluding generated `*.lock.yml` files                                        | One patch/minor group; compiler-managed actions remain excluded                      |
-| gomod          | `/infrastructure/terraform/e2e`                                                               | One patch/minor group                                                                |
-| docker         | Six configured Dataviewer and GPU-offload Dockerfile directories                              | Separate patch/minor group per directory                                             |
+| Ecosystem      | Coverage                                                                                      | Grouping                                                         |
+|----------------|-----------------------------------------------------------------------------------------------|------------------------------------------------------------------|
+| npm            | Root workspace, including the Dataviewer frontend, and `/docs/docusaurus` as separate entries | Per-entry development, runtime, and framework groups (see below) |
+| uv             | 14 project roots covering development, training, evaluation, data, workflows, and GPU offload | Separate patch/minor group per project                           |
+| terraform      | `/infrastructure/terraform`, plus `dns`, `vpn`, and `automation`                              | One coordinated patch/minor provider group                       |
+| github-actions | Workflow files, excluding generated `*.lock.yml` files                                        | One patch/minor group; compiler-managed actions remain excluded  |
+| gomod          | `/infrastructure/terraform/e2e`                                                               | One patch/minor group                                            |
+| docker         | Six configured Dataviewer and GPU-offload Dockerfile directories                              | Separate patch/minor group per directory                         |
 
-The shared npm configuration uses these version-update groups:
+The npm entries use these version-update groups:
 
-| Group                | Included updates                                                                   | Review boundary                                                                                                  |
-|----------------------|------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
-| `npm-vitest`         | `vitest` and `@vitest/*`, including major versions                                 | Keep the test runner and coverage provider together; require frontend tests and coverage validation              |
-| `npm-docusaurus`     | Patch/minor `@docusaurus/*` updates across development and production dependencies | Keep framework packages aligned; require documentation typecheck, build, and tests                               |
-| `npm-authentication` | Patch/minor production `@azure/msal-*` updates                                     | Review authentication separately from tooling and other runtime changes                                          |
-| `npm-development`    | Other patch/minor development dependencies across both npm roots                   | Keep tooling separate from production dependencies; validate affected lint, test, build, or test-server behavior |
-| `npm-runtime`        | Other patch/minor production dependencies across both npm roots                    | Review web runtime behavior separately from tooling and authentication                                           |
+| Entry              | Group                | Included updates                                                                   | Review boundary                                                                                                  |
+|--------------------|----------------------|------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
+| `/`                | `npm-vitest`         | `vitest` and `@vitest/*`, including major versions                                 | Keep the test runner and coverage provider together; require frontend tests and coverage validation              |
+| `/`                | `npm-authentication` | Patch/minor production `@azure/msal-*` updates                                     | Review authentication separately from tooling and other runtime changes                                          |
+| `/`                | `npm-development`    | Other patch/minor development dependencies                                         | Keep tooling separate from production dependencies; validate affected lint, test, build, or test-server behavior |
+| `/`                | `npm-runtime`        | Other patch/minor production dependencies                                          | Review web runtime behavior separately from tooling and authentication                                           |
+| `/docs/docusaurus` | `docs-docusaurus`    | Patch/minor `@docusaurus/*` updates across development and production dependencies | Keep framework packages aligned; require documentation typecheck, build, and tests                               |
+| `/docs/docusaurus` | `docs-development`   | Other patch/minor development dependencies                                         | Validate documentation lint, accessibility, build, and test-server behavior                                      |
+| `/docs/docusaurus` | `docs-runtime`       | Other patch/minor production dependencies                                          | Review site runtime behavior separately from tooling                                                             |
 
-Groups are evaluated in order. Explicit exclusions keep the coupled families out of the generic groups. Apart from the dedicated Vitest group, major updates remain outside groups and require separate compatibility review. Existing ESLint 10 exclusions apply to both npm roots until the accessibility and React plugins support that major version.
+Groups are evaluated in order within each entry. Explicit exclusions keep the coupled families out of the generic groups. Apart from the dedicated Vitest group, major updates remain outside groups and require separate compatibility review. The root entry ignores ESLint 10, including ESLint 10 security fixes, until the Dataviewer accessibility and React plugins support that major version. The documentation site already uses ESLint 10, so its separate entry receives those updates.
 
 Version updates use a seven-day cooldown, with a fourteen-day major-version cooldown where configured. The open-PR limit applies to each update entry, not the entire repository. Security updates remain ungrouped and are not delayed by the version-update schedule or cooldown.
 

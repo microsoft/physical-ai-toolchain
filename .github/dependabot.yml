@@ -3,9 +3,7 @@
 version: 2
 updates:
 - package-ecosystem: npm
-  directories:
-  - /
-  - /docs/docusaurus
+  directory: /
   schedule:
     interval: weekly
     day: monday
@@ -21,13 +19,6 @@ updates:
       - "@vitest/*"
       update-types:
       - major
-      - minor
-      - patch
-    npm-docusaurus:
-      applies-to: version-updates
-      patterns:
-      - "@docusaurus/*"
-      update-types:
       - minor
       - patch
     npm-authentication:
@@ -46,7 +37,6 @@ updates:
       exclude-patterns:
       - vitest
       - "@vitest/*"
-      - "@docusaurus/*"
       update-types:
       - minor
       - patch
@@ -57,7 +47,6 @@ updates:
       - "*"
       exclude-patterns:
       - "@azure/msal-*"
-      - "@docusaurus/*"
       update-types:
       - minor
       - patch
@@ -69,6 +58,50 @@ updates:
   - dependency-name: eslint
     versions:
     - ">=10"
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - npm
+  commit-message:
+    prefix: chore
+    include: scope
+# Separate from the root entry so the root ESLint 10 ignore does not apply here.
+- package-ecosystem: npm
+  directory: /docs/docusaurus
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    docs-docusaurus:
+      applies-to: version-updates
+      patterns:
+      - "@docusaurus/*"
+      update-types:
+      - minor
+      - patch
+    docs-development:
+      applies-to: version-updates
+      dependency-type: development
+      patterns:
+      - "*"
+      exclude-patterns:
+      - "@docusaurus/*"
+      update-types:
+      - minor
+      - patch
+    docs-runtime:
+      applies-to: version-updates
+      dependency-type: production
+      patterns:
+      - "*"
+      exclude-patterns:
+      - "@docusaurus/*"
+      update-types:
+      - minor
+      - patch
   open-pull-requests-limit: 5
   labels:
   - dependencies
