@@ -45,6 +45,11 @@ The LeRobot PI adapter rejects values outside `pi0|pi0_fast|pi05` before trainin
 
 Submit a versioned Azure ML dataset to the training pipeline. Use immutable dataset, model, and code revisions:
 
+Before the first calibration sweep on an Arc compute target, run the
+[sweep failure-isolation smoke test](../../docs/training/vla-azureml-arc-setup.md#validate-sweep-failure-isolation).
+Continue only when the sweep completes despite its deliberate failed trial and
+publishes the successful trial output.
+
 ```bash
 CODE_REVISION=$(git rev-parse HEAD)
 
