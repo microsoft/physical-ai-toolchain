@@ -277,6 +277,9 @@ test('mobile navigation contains keyboard focus and restores the toggle on close
   await menuButton.focus();
   await menuButton.press('Enter');
   await expect(menuButton).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('.navbar-sidebar')).toBeVisible();
+  await expect(page.locator('main')).toHaveAttribute('inert', '');
+  await expect(page.locator('footer')).toHaveAttribute('inert', '');
   let focusEnteredSidebar = false;
   for (let index = 0; index < 3 && !focusEnteredSidebar; index += 1) {
     await page.keyboard.press('Tab');
@@ -285,9 +288,6 @@ test('mobile navigation contains keyboard focus and restores the toggle on close
     );
   }
   expect(focusEnteredSidebar).toBe(true);
-
-  await expect(page.locator('main')).toHaveAttribute('inert', '');
-  await expect(page.locator('footer')).toHaveAttribute('inert', '');
 
   const sidebarControls = page.locator([
     '.navbar-sidebar__brand a:visible',
@@ -1469,20 +1469,7 @@ interface ReviewedAdaptiveException {
   readonly reentryTrigger: string;
 }
 
-const reviewedAdaptiveExceptions: readonly ReviewedAdaptiveException[] = [
-  {
-    id: 'search-hit-preview-truncated-in-reflow',
-    producer: 'layout',
-    signature: /^clipped: span\.hit(Title|Path)_/,
-    states: ['search-results-open'],
-    conditionIds: ['reflow-320', 'text-spacing-at-320', 'orientation-portrait', 'text-resize-200'],
-    rationale:
-      'The local search plugin renders fixed-width single-line result previews. The complete title and path remain in the accessible name and on the destination route.',
-    owner: 'accessibility owner',
-    reentryTrigger:
-      'Qualified review of search result preview truncation, or any docusaurus-search-local upgrade.',
-  },
-];
+const reviewedAdaptiveExceptions: readonly ReviewedAdaptiveException[] = [];
 
 interface ClassifiedFinding {
   readonly conditionId: string;

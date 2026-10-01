@@ -10,6 +10,7 @@
 # pytest-dataviewer    | dataviewer-backend-pytests.yml | data-management/viewer/backend  | logs/coverage.xml                 | --cov=src
 # pytest-evaluation    | evaluation-pytests.yml         | evaluation                      | evaluation/logs/coverage.xml      | --cov=.
 # pytest-fuzz          | fuzz-regression-tests.yml      | repo root                       | logs/coverage.xml                 | --cov=tests --cov=data-management/viewer/backend/src --cov=training
+# pytest-accessibility | accessibility-evidence.yml    | repo root                       | logs/coverage-accessibility.xml  | root accessibility suites and scripts/accessibility
 # vitest               | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | vitest --coverage
 # vitest-components    | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | subset: src/components/
 # vitest-features      | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | subset: src/components/{dashboard,annotation-panel,frame-editor,episode-viewer}/
@@ -113,6 +114,12 @@ flags:
       - tests/
       - data-management/viewer/backend/src/
       - training/
+    carryforward: true
+  pytest-accessibility:
+    paths:
+      - scripts/accessibility/
+      - tests/test_accessibility_evidence.py
+      - tests/test_accessibility_promotion.py
     carryforward: true
   pytest-evaluation:
     paths:

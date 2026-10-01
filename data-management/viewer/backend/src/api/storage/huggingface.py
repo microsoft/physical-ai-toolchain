@@ -174,10 +174,10 @@ class HuggingFaceHubAdapter(StorageAdapter):
 
             try:
                 # Check for episode parquet files
-                chunk_dirs = fs.ls(episodes_dir)
+                chunk_dirs = await asyncio.to_thread(fs.ls, episodes_dir)
                 for chunk_dir in chunk_dirs:
                     if "chunk-" in chunk_dir:
-                        episode_files = fs.ls(chunk_dir)
+                        episode_files = await asyncio.to_thread(fs.ls, chunk_dir)
                         for ep_file in episode_files:
                             if ep_file.endswith(".parquet"):
                                 # Extract episode index from filename

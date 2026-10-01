@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MIT
 
 # Behavioral coverage for scripts/security/image-slug.sh, the disambiguation-slug
-# helper used by container-scan.yml (SARIF names/categories). The slug must be
+# helper used by container-scan.yml (SARIF filenames). The slug must be
 # deterministic and collision-free across image refs whose tags collapse to the
 # same alphanumeric form.
 
