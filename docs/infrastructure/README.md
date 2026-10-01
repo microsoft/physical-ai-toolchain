@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Deployment Guide
 description: Infrastructure deployment and cluster configuration for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-31
+ms.date: 2026-09-30
 ms.topic: overview
 keywords:
   - deployment
@@ -27,6 +27,7 @@ End-to-end deployment of Azure infrastructure and Kubernetes services for the ro
 | [Cluster Automation](automation.md)                     | Scheduled start/stop automation for cost management                      |
 | [Cluster Setup](cluster-setup.md)                       | Kubernetes service deployment and OSMO configuration                     |
 | [Cluster Operations](cluster-setup-advanced.md)         | Accessing OSMO, troubleshooting, and optional scripts                    |
+| [OSMO Upgrade](osmo-upgrade.md)                         | Staged upgrade of a pre-6.3 OSMO install to 6.3, with rollback           |
 | [Cleanup and Destroy](cleanup.md)                       | Remove cluster components and destroy Azure infrastructure               |
 
 ## 📋 Deployment Order

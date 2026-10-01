@@ -3,7 +3,7 @@ sidebar_position: 2
 title: "Quickstart: Clone to First Training Job"
 description: Deploy infrastructure and submit your first robotics training job in 9 steps
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-11
+ms.date: 2026-10-01
 ms.topic: tutorial
 keywords:
   - quickstart
@@ -174,11 +174,11 @@ kubectl get pods -n gpu-operator
 
 ## Step 7: Deploy OSMO Components
 
-Deploy the OSMO control plane and backend.
+Deploy the OSMO control plane and backend. Pass `--private-service-ip` with a free address in the AKS subnet (`10.0.5.0/24` by default) for the internal load balancer in front of OSMO. [Cluster Setup](../infrastructure/cluster-setup.md#-deployment-scenarios) explains how to choose it.
 
 ```bash
-bash 03-deploy-osmo.sh --config-preview
-bash 03-deploy-osmo.sh
+bash 03-deploy-osmo.sh --private-service-ip <unused-aks-subnet-ip> --config-preview
+bash 03-deploy-osmo.sh --private-service-ip <unused-aks-subnet-ip>
 ```
 
 Verify OSMO pods:
@@ -228,13 +228,14 @@ kubectl logs -n osmo-workflows -l app=osmo-training --tail=50
 
 ## Cleanup
 
-Remove OSMO Helm releases before destroying infrastructure to avoid orphaned resources:
+Uninstall OSMO before destroying infrastructure to avoid orphaned resources:
 
 ```bash
 cd infrastructure/setup
-helm uninstall osmo-operator -n osmo-operator --ignore-not-found
-helm uninstall service router ui -n osmo-control-plane --ignore-not-found
+bash cleanup/uninstall-osmo.sh
 ```
+
+See [Cleanup and Destroy](../infrastructure/cleanup.md) for the script's options.
 
 Destroy all infrastructure when finished to stop incurring costs. From the repository root:
 
@@ -252,3 +253,8 @@ See [Cost Considerations](../contributing/cost-considerations.md) for detailed p
 | [MLflow Integration](../training/mlflow-integration.md) | Track experiments with MLflow           |
 | [Infrastructure Guide](../infrastructure/README.md)     | Full deployment reference and options   |
 | [Contributing Guide](../contributing/README.md)         | Development workflow and code standards |
+
+<!-- markdownlint-disable MD036 -->
+*🤖 Crafted with precision by ✨Copilot following brilliant human instruction,
+then carefully refined by our team of discerning human reviewers.*
+<!-- markdownlint-enable MD036 -->
