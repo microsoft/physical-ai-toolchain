@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections import defaultdict
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -164,6 +165,14 @@ def _statuses(summary: dict[str, Any]) -> dict[str, str]:
 @pytest.fixture(autouse=True)
 def _clear_azureml_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MLFLOW_RUN_ID", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _fake_azure_ml_entities(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Other test modules stub azure.ai.ml without its entities when collected.
+    entities = ModuleType("azure.ai.ml.entities")
+    entities.Model = SimpleNamespace  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "azure.ai.ml.entities", entities)
 
 
 def test_runner_skips_checks_that_depend_on_a_failure() -> None:
