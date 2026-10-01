@@ -31,12 +31,13 @@ Node pools are configured via the `node_pools` map in `terraform.tfvars`:
 
 ### GPU Driver Strategy
 
-| GPU          | Driver Source                  | MIG Strategy                      |
-|--------------|--------------------------------|-----------------------------------|
-| H100         | GPU Operator datacenter driver | Disabled                          |
-| RTX PRO 6000 | Microsoft GRID DaemonSet       | `mig.strategy: single` (required) |
+| GPU          | Driver Source                                                               | MIG Strategy                      |
+|--------------|-----------------------------------------------------------------------------|-----------------------------------|
+| A10          | AKS-managed driver (`gpu_driver = "Install"`)                               | Not applicable                    |
+| H100         | GPU Operator datacenter driver                                              | Disabled                          |
+| RTX PRO 6000 | AKS-managed GRID driver (`gpu_driver = "Install"`); GRID DaemonSet fallback | `mig.strategy: single` (required) |
 
-RTX PRO 6000 nodes must set `nvidia.com/gpu.deploy.driver=false` to prevent GPU Operator driver conflicts with the pre-installed Azure GRID driver.
+RTX PRO 6000 pools use GA sizes such as `Standard_NC144ds_xl_RTXPRO6000BSE_v6`. Only pools created with `gpu_driver = "None"` set `nvidia.com/gpu.deploy.driver=false`, which keeps the GPU Operator driver off those nodes and lets the fallback DaemonSet install the Azure GRID driver. A pool without quota stays parked with autoscaling off and `node_count = 0`.
 
 ### Setup Script Order
 

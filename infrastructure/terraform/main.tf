@@ -92,6 +92,7 @@ module "platform" {
   // Feature flags
   should_enable_private_endpoint          = var.should_enable_private_endpoint
   should_enable_public_network_access     = var.should_enable_public_network_access
+  public_network_access_overrides         = var.public_network_access_overrides
   should_enable_storage_shared_access_key = var.should_enable_storage_shared_access_key
   should_add_current_user_key_vault_admin = var.should_add_current_user_key_vault_admin
   should_add_current_user_storage_blob    = var.should_add_current_user_storage_blob
@@ -197,6 +198,8 @@ module "sil" {
     should_enable_private_cluster               = var.should_enable_private_aks_cluster
     system_node_pool_zones                      = var.system_node_pool_zones
     should_enable_microsoft_defender            = var.should_enable_microsoft_defender
+    sku_tier                                    = var.aks_sku_tier
+    support_plan                                = var.aks_support_plan
   }
 
   node_pools = var.node_pools
@@ -264,4 +267,47 @@ module "conversion_pipeline" {
   fabric_capacity_sku            = var.conversion_pipeline_config.fabric_capacity_sku
   fabric_admin_members           = var.conversion_pipeline_config.fabric_admin_members
   fabric_workspace_sp_object_id  = var.conversion_pipeline_config.fabric_workspace_sp_object_id
+}
+
+// ============================================================
+// Dataviewer Module - Container Apps (Optional)
+// ============================================================
+
+module "dataviewer" {
+  source = "./modules/dataviewer"
+  count  = var.should_deploy_dataviewer ? 1 : 0
+
+  depends_on = [module.platform]
+
+  // Core variables
+  environment     = var.environment
+  resource_prefix = var.resource_prefix
+  instance        = var.instance
+  location        = var.location
+  resource_group  = local.resource_group
+
+  // Dependencies from platform module (typed objects)
+  virtual_network         = module.platform.virtual_network
+  network_security_group  = module.platform.network_security_group
+  nat_gateway             = module.platform.nat_gateway
+  log_analytics_workspace = module.platform.log_analytics_workspace
+  container_registry      = module.platform.container_registry
+  storage_account         = module.platform.storage_account
+
+  // Networking
+  should_enable_nat_gateway = var.should_enable_nat_gateway
+  subnet_address_prefix     = var.dataviewer_config.subnet_address_prefix
+  should_enable_internal    = var.dataviewer_config.should_enable_internal
+
+  // Container images
+  backend_image  = var.dataviewer_config.backend_image
+  frontend_image = var.dataviewer_config.frontend_image
+
+  // Storage
+  storage_dataset_container    = var.dataviewer_config.storage_dataset_container
+  storage_annotation_container = var.dataviewer_config.storage_annotation_container
+
+  // Auth
+  should_deploy_dataviewer_auth = var.dataviewer_config.should_deploy_auth
+  dataviewer_redirect_uris      = var.dataviewer_config.redirect_uris
 }

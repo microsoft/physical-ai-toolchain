@@ -115,6 +115,34 @@ updates:
     prefix: chore
     include: scope
 - package-ecosystem: uv
+  directory: /training/smoke
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    training-smoke-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  ignore:
+  # azure-ai-ml imports symbols that marshmallow 4.x removed; mirror training/rl.
+  - dependency-name: "marshmallow"
+    versions:
+    - ">=4.0.0"
+  labels:
+  - dependencies
+  - python
+  - training
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /training/il/lerobot
   schedule:
     interval: weekly
