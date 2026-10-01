@@ -18,6 +18,8 @@ const isObject = value => value !== null && typeof value === 'object' && !Array.
 const hasOwn = (value, key) => Object.hasOwn(value ?? {}, key);
 const evidenceOutputs = ['work-status', 'expected-count', 'executed-count', 'artifact-id', 'artifact-url', 'test-count', 'skipped-count', 'first-failure'];
 const outcomeAction = './.github/actions/ci-outcome';
+// Ref pinning is enforced by the dependency pinning lane so Dependabot ref bumps do not break bindings.
+const actionPath = uses => String(uses ?? '').split('@')[0];
 
 function jsonInput(value) {
   try { return JSON.parse(value); } catch { return undefined; }
@@ -148,7 +150,8 @@ function validateExecution(graph, contract, check) {
       for (const operation of required ?? []) {
         const step = (job.steps ?? []).find(step => step.id === operation);
         const binding = metadata.bindings?.[operation];
-        check(Boolean(step) && isObject(binding) && (binding.uses ? step.uses === binding.uses && step.run === undefined :
+        if (binding?.uses) check(!binding.uses.includes('@'), `${name}:${id}:${operation}: operation binding must name the action path without a ref`);
+        check(Boolean(step) && isObject(binding) && (binding.uses ? actionPath(step.uses) === binding.uses && step.run === undefined :
           typeof step.run === 'string' && binding['run-sha256'] === createHash('sha256').update(step.run).digest('hex')),
         `${name}:${id}:${operation}: required operation implementation mismatch`);
         if (binding?.uses) check(binding['with-sha256'] === createHash('sha256').update(JSON.stringify(step?.with ?? {})).digest('hex'),

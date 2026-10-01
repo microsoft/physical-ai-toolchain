@@ -62,8 +62,10 @@ CI bootstrap and release automation.
 required reports, matrix shards, and reusable output bindings. `ci/select-checks.mjs` compares
 the PR event base to the tested merge SHA and publishes explicit selection reasons.
 Selected PR lanes and every main lane disable inner changed-file filtering.
-Execution bindings pin each required `run` scalar by SHA-256 and each action by its immutable
-`uses` reference and the SHA-256 of `JSON.stringify` of its parsed `with` mapping.
+Execution bindings pin each required `run` scalar by SHA-256 and each action by its `uses`
+path (without the `@` ref) and the SHA-256 of `JSON.stringify` of its parsed `with` mapping.
+The dependency pinning and SHA staleness lanes enforce action ref pinning, so Dependabot
+action bumps do not require contract edits.
 Review operation changes before updating these hashes; do not regenerate them to dismiss
 unexplained workflow drift.
 

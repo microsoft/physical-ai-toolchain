@@ -78,6 +78,26 @@ test('dependency review evidence passes only required-step statuses, not action 
 });
 const nodeEnvironment = { ...process.env, NODE_DISABLE_COMPILE_CACHE: '1' };
 
+test('action operation bindings accept ref bumps but reject substituted actions', () => {
+  const codeqlPath = '.github/workflows/codeql-analysis.yml';
+  const initStep = candidate => candidate.graph[codeqlPath].jobs.analyze.steps.find(step => step.id === 'init');
+  const errorsFor = mutate => {
+    const candidate = { graph: structuredClone(graph), contract: structuredClone(contract) };
+    mutate(candidate);
+    return validateWorkflows(candidate.graph, candidate.contract);
+  };
+
+  assert.deepEqual(errorsFor(candidate => {
+    initStep(candidate).uses = `github/codeql-action/init@${'a'.repeat(40)}`;
+  }), []);
+  assert.ok(errorsFor(candidate => {
+    initStep(candidate).uses = `github/codeql-action/upload-sarif@${'a'.repeat(40)}`;
+  }).some(message => message.includes('codeql-analysis:analyze:init: required operation implementation mismatch')));
+  assert.ok(errorsFor(candidate => {
+    candidate.contract.execution['codeql-analysis'].jobs.analyze.bindings.init.uses = `github/codeql-action/init@${'a'.repeat(40)}`;
+  }).some(message => message.includes('codeql-analysis:analyze:init: operation binding must name the action path without a ref')));
+});
+
 const rootTestModules = [
   'tests/test_accessibility_evidence.py', 'tests/test_accessibility_promotion.py',
   'tests/test_e2e_polling.py', 'tests/test_redis_tls_client.py', 'tests/test_future_contract.py',
