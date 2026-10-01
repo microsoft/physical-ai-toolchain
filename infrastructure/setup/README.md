@@ -2,7 +2,7 @@
 title: Cluster Setup
 description: AKS cluster configuration with NVIDIA GPU operator, KAI Scheduler, and AzureML extension
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-23
+ms.date: 2026-10-01
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -23,9 +23,15 @@ Each script writes AKS credentials to an isolated kubeconfig and requires an exp
 
 Deployment order:
 
-1. `./01-deploy-robotics-charts.sh` — GPU Operator, KAI Scheduler
-2. `./02-deploy-azureml-extension.sh` — AzureML K8s extension, compute attach
-3. `./03-deploy-osmo.sh` — OSMO control plane and backend operator
+1. `./01-deploy-robotics-charts.sh`: GPU Operator, KAI Scheduler
+2. `./02-deploy-azureml-extension.sh`: AzureML K8s extension, compute attach
+3. `./03-deploy-osmo.sh`: OSMO control plane and backend operator
+
+On a new cluster, `03-deploy-osmo.sh` needs `--private-service-ip` with a free address in the AKS subnet for the internal load balancer in front of OSMO. Later runs reuse that address. See [Cluster Setup](../../docs/infrastructure/cluster-setup.md#-deployment-scenarios).
+
+`03-deploy-osmo.sh` stops on OSMO installs that predate 6.3. Upgrade them with `optional/upgrade-osmo.sh`, one confirmed stage per run. See [OSMO Upgrade from Pre-6.3 Releases](../../docs/infrastructure/osmo-upgrade.md).
+
+To run Azure ML training jobs on an Arc-connected HiL cluster, an operator runs `./05-attach-hil-azureml-compute.sh`. See [HiL Clusters as Azure ML Computes](../../docs/training/azureml-training.md#-hil-clusters-as-azure-ml-computes).
 
 After an existing OSMO backend and pool are ready, a trusted environment owner uses `./04-prepare-osmo-hil-node.sh` to publish exact host-bound inputs. The Ubuntu path deploys only the local backend resources.
 

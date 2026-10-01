@@ -20,7 +20,6 @@ metadata:
 spec:
   nodeSelector:
     agentpool: gpu
-    accelerator: nvidia
     kubernetes.azure.com/scalesetpriority: spot
   resources:
     requests:
