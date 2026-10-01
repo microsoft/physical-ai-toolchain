@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Script Reference
 description: Submission script inventory, CLI arguments, variable reference, and configuration for AzureML and OSMO training and inference pipelines.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-30
+ms.date: 2026-10-01
 ms.topic: reference
 keywords:
   - scripts
@@ -163,7 +163,7 @@ Located in `training/smoke/scripts/`. See [Smoke-Test a GPU Target](../training/
 Example:
 
 ```bash
-./submit-azureml-gpu-smoke.sh --instance-type gpu-a10-1x --stream
+./submit-azureml-gpu-smoke.sh --instance-type <instance-type> --stream
 ```
 
 ### `submit-azureml-isaaclab-evaluation.sh`

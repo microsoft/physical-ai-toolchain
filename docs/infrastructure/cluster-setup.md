@@ -3,7 +3,7 @@ sidebar_position: 5
 title: Cluster Setup
 description: Kubernetes service deployment, AzureML extension, and OSMO platform configuration
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-30
+ms.date: 2026-10-01
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -60,7 +60,7 @@ kubectl cluster-info
 
 # Choose your path:
 # - AzureML: ./02-deploy-azureml-extension.sh
-# - OSMO:    ./03-deploy-osmo.sh
+# - OSMO:    ./03-deploy-osmo.sh --private-service-ip <unused-aks-subnet-ip>
 ```
 
 > [!IMPORTANT]
@@ -71,7 +71,7 @@ kubectl cluster-info
 <!-- -->
 
 > [!NOTE]
-> **Supported OSMO version.** This repository targets a single current OSMO release — **6.3** (chart `1.3.0`, image `6.3.0`; see [Component Inventory](../contributing/component-updates.md#component-inventory)). Support tracks the current upstream release and may change as OSMO advances; older versions are not maintained here. To move an older install to 6.3, see [Upgrade from Earlier OSMO Releases](#-upgrade-from-earlier-osmo-releases).
+> **Supported OSMO version.** This repository targets one OSMO release, **6.3** (chart `1.3.0`, image `6.3.0`; see [Component Inventory](../contributing/component-updates.md#component-inventory)). Support follows the current upstream release, and older versions aren't maintained here. To move an older install to 6.3, see [Upgrade from Earlier OSMO Releases](#-upgrade-from-earlier-osmo-releases).
 
 ## 🔐 Deployment Scenarios
 
@@ -86,6 +86,7 @@ Use Azure Workload Identity for key-less authentication.
 osmo_config = {
   should_enable_identity   = true
   should_federate_identity = true
+  should_create_secret     = true
   control_plane_namespace  = "osmo-control-plane"
   operator_namespace       = "osmo-operator"
   workflows_namespace      = "osmo-workflows"
@@ -95,10 +96,14 @@ osmo_config = {
 ```bash
 ./01-deploy-robotics-charts.sh
 ./02-deploy-azureml-extension.sh
-./03-deploy-osmo.sh
+./03-deploy-osmo.sh --private-service-ip <unused-aks-subnet-ip>
 ```
 
 Script `03-deploy-osmo.sh` auto-detects the OSMO managed identity from Terraform outputs and configures ServiceAccount annotations for the service and backend operator.
+
+On a new cluster, pass `--private-service-ip` with a free address in the AKS subnet (`10.0.5.0/24` by default). Script 03 gives that address to the internal load balancer in front of OSMO, which VPN clients, the private DNS record, and HiL backends use. Pick an address that no node or other resource holds, outside the Kubernetes service CIDR and the five addresses Azure reserves in every subnet.
+
+Later runs reuse the address when you omit the flag. Passing a different one moves the load balancer, so update the DNS record and HiL backends if you do.
 
 ### Workload Identity + Private ACR (Air-Gapped)
 
@@ -139,7 +144,7 @@ done
 cd ../002-setup
 ./01-deploy-robotics-charts.sh
 ./02-deploy-azureml-extension.sh
-./03-deploy-osmo.sh --use-acr
+./03-deploy-osmo.sh --use-acr --private-service-ip <unused-aks-subnet-ip>
 ```
 
 ### Scenario Comparison
@@ -217,6 +222,11 @@ kubectl get sa -n osmo-control-plane osmo-control-plane -o yaml | grep azure.wor
 
 ## 🔗 Related
 
-- [Cluster Operations](cluster-setup-advanced.md) — accessing OSMO, troubleshooting, optional scripts
-- [OSMO Upgrade from Pre-6.3 Releases](osmo-upgrade.md) — staged upgrade, backups, and rollback
-- [Cleanup and Destroy](cleanup.md) — resource teardown procedures
+- [Cluster Operations](cluster-setup-advanced.md): accessing OSMO, troubleshooting, optional scripts
+- [OSMO Upgrade from Pre-6.3 Releases](osmo-upgrade.md): staged upgrade, backups, and rollback
+- [Cleanup and Destroy](cleanup.md): resource teardown procedures
+
+<!-- markdownlint-disable MD036 -->
+*🤖 Crafted with precision by ✨Copilot following brilliant human instruction,
+then carefully refined by our team of discerning human reviewers.*
+<!-- markdownlint-enable MD036 -->

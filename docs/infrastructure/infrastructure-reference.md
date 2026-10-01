@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Infrastructure Reference
 description: Architecture, module structure, outputs, and troubleshooting for the Terraform deployment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-29
+ms.date: 2026-10-01
 ms.topic: reference
 keywords:
   - architecture
@@ -243,7 +243,7 @@ See [VPN Gateway](vpn.md) for configuration options and VPN client setup.
 
 ### Private DNS for OSMO UI
 
-Configure DNS resolution for the OSMO UI LoadBalancer after setup from `infrastructure/setup/03-deploy-osmo.sh` (requires VPN):
+After `infrastructure/setup/03-deploy-osmo.sh` creates the internal load balancer in front of OSMO, give it a private DNS name (requires VPN):
 
 ```bash
 cd dns
@@ -353,7 +353,7 @@ az lock delete --name <lock-name> --resource-group <resource-group>
 
 ## 🔗 Related
 
-- [Infrastructure Deployment](infrastructure.md) — deploy and configure Terraform resources
+- [Infrastructure Deployment](infrastructure.md): deploy and configure Terraform resources
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

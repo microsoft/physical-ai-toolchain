@@ -3,7 +3,7 @@ sidebar_position: 11
 title: Manage Node Pools
 description: Add, remove, and resize AKS node pools on an existing cluster
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-29
+ms.date: 2026-10-01
 ms.topic: how-to
 keywords:
   - node-pools
@@ -19,7 +19,7 @@ Add, remove, and resize AKS GPU and CPU node pools on a running cluster, then re
 
 ## When to Use
 
-Use this when a workload requires resources the existing pools cannot provide. An AKS node pool has a single VM SKU, so changing the SKU means provisioning a new pool — node pool resources cannot be edited in place beyond a few mutable fields (see [What Can and Cannot Change in Place](#what-can-and-cannot-change-in-place)).
+Use this when a workload needs resources the existing pools can't provide. An AKS node pool has a single VM SKU, so changing the SKU means provisioning a new pool. Only a few node pool fields can change in place (see [What Can and Cannot Change in Place](#what-can-and-cannot-change-in-place)).
 
 Examples:
 
@@ -38,11 +38,11 @@ Pool changes follow the standard repo flow:
 3. Regenerate the environment bundle so `infrastructure/setup/generated/<environment>/osmo-platforms.yaml` matches the applied pool configuration.
 4. If the new pool requires different `nodeSelector`, tolerations, or resource overrides, rerun `infrastructure/setup/03-deploy-osmo.sh` with the generated platform values.
 
-Script `03` deploys the selected `osmo-platforms.yaml` as a Helm values overlay. Pass the generated file with `--platform-values`; the checked-in `infrastructure/setup/values/osmo-platforms.yaml` is an instructional fallback, not environment-specific desired state. Rerun is only needed when platform configuration changes (nodeSelector, tolerations, resource limits) — not for count-only scaling changes.
+Script `03` deploys the selected `osmo-platforms.yaml` as a Helm values overlay. Pass the generated file with `--platform-values`; the checked-in `infrastructure/setup/values/osmo-platforms.yaml` is an instructional fallback, not environment-specific desired state. Rerun it when platform configuration changes, such as nodeSelector, tolerations, or resource limits. Count-only scaling changes don't need a rerun.
 
 > [!NOTE]
 > Single-node multi-GPU jobs require an OSMO platform whose pod-template `nodeSelector` targets a multi-GPU node SKU.
-> The shipped `gpu_platform_2x` platform (pod template `gpu_tpl_2x`) binds a 2x A100 pool and is selected via the workflow `platform` field — for example `submit-osmo-lerobot-training.sh --num-gpus 2 --platform gpu_platform_2x`.
+> The shipped `gpu_platform_2x` platform (pod template `gpu_tpl_2x`) binds a 2x A100 pool and is selected through the workflow `platform` field, for example `submit-osmo-lerobot-training.sh --num-gpus 2 --platform gpu_platform_2x`.
 > The single-GPU `gpu_platform` cannot satisfy a 2-GPU request because its node SKU exposes one GPU. Add further multi-GPU platforms by copying this pair in `osmo-platforms.yaml`.
 
 ## Prerequisites
@@ -56,7 +56,7 @@ Script `03` deploys the selected `osmo-platforms.yaml` as a Helm values overlay.
 
 ## What Can and Cannot Change in Place
 
-These fields on a `node_pools` entry are `ForceNew` — editing them destroys and recreates the pool under the same name:
+These fields on a `node_pools` entry are `ForceNew`, so editing one destroys and recreates the pool under the same name:
 
 | Field                          | In-place? | Notes                                                                |
 |--------------------------------|-----------|----------------------------------------------------------------------|
@@ -303,20 +303,20 @@ Faster but disruptive. Use only when no workloads are running on the pool, or wh
 
 ## Operational Notes
 
-| Topic                       | Guidance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-|-----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Subnet planning             | Every pool gets its own subnet unless it sets `subnet_pool_key`. Pick a CIDR that does not overlap `aks_subnet_config` or any other pool's `subnet_address_prefixes`, and size a shared subnet for every pool in it. AKS Overlay mode applies to pods; size the node IP space here.                                                                                                                                                                                                                          |
-| OSMO flag parity            | Pass the same flags used for the initial `03-deploy-osmo.sh` run, including `--platform-values` and options such as `--use-acr`. Omitting them reverts the deployment to defaults.                                                                                                                                                                                                                                                                                                                           |
-| Spot constraints            | Azure rejects `upgrade_settings` for Spot pools; the Terraform module omits them and rejects `max_surge`, `max_unavailable`, and `undrainable_node_behavior` on Spot entries. `eviction_policy` applies only when `priority = "Spot"`.                                                                                                                                                                                                                                                                       |
-| Autoscaling                 | `min_count = 0` is allowed; the pool scales up on demand from pending pods. KAI/Volcano coscheduling requires whole-pool capacity for gang-scheduled jobs.                                                                                                                                                                                                                                                                                                                                                   |
-| Scale-from-zero for AzureML | AKS reserves the `accelerator` label and sets it on GPU nodes itself, so `node_labels` can't declare it. For a pool at zero, the cluster autoscaler predicts the pool's `agentpool` label but not `accelerator` for A10, H100, or RTX PRO 6000 sizes. InstanceTypes for pools that scale from zero must select `agentpool: <pool key>`, as the environment bundle generates them. See [Azure ML Training Workflows — Scale-from-zero GPU Pools](../training/azureml-training.md#-scale-from-zero-gpu-pools). |
-| OSMO reconciliation         | Regenerate the environment bundle after scheduling-property changes, then rerun `03-deploy-osmo.sh` with its `--platform-values` file to reconcile pool, platform, and backend configuration.                                                                                                                                                                                                                                                                                                                |
+| Topic                       | Guidance                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+|-----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Subnet planning             | Every pool gets its own subnet unless it sets `subnet_pool_key`. Pick a CIDR that does not overlap `aks_subnet_config` or any other pool's `subnet_address_prefixes`, and size a shared subnet for every pool in it. AKS Overlay mode applies to pods; size the node IP space here.                                                                                                                                                                                            |
+| OSMO flag parity            | Pass the same flags used for the initial `03-deploy-osmo.sh` run, including `--platform-values` and options such as `--use-acr`. Omitting them reverts the deployment to defaults.                                                                                                                                                                                                                                                                                             |
+| Spot constraints            | Azure rejects `upgrade_settings` for Spot pools; the Terraform module omits them and rejects `max_surge`, `max_unavailable`, and `undrainable_node_behavior` on Spot entries. `eviction_policy` applies only when `priority = "Spot"`.                                                                                                                                                                                                                                         |
+| Autoscaling                 | `min_count = 0` is allowed; the pool scales up on demand from pending pods. KAI/Volcano coscheduling requires whole-pool capacity for gang-scheduled jobs.                                                                                                                                                                                                                                                                                                                     |
+| Scale-from-zero for AzureML | AKS reserves the `accelerator` label and sets it on GPU nodes itself, so `node_labels` can't declare it. For a pool at zero, the cluster autoscaler predicts the pool's `agentpool` label but not `accelerator` for A10, H100, or RTX PRO 6000 sizes. InstanceTypes for pools that scale from zero must select `agentpool: <pool key>`, as the environment bundle generates them. See [Scale-from-zero GPU Pools](../training/azureml-training.md#-scale-from-zero-gpu-pools). |
+| OSMO reconciliation         | Regenerate the environment bundle after scheduling-property changes, then rerun `03-deploy-osmo.sh` with its `--platform-values` file to reconcile pool, platform, and backend configuration.                                                                                                                                                                                                                                                                                  |
 
 ## 🔗 Related
 
-- [Cluster Setup](cluster-setup.md) — initial deployment and scenarios
-- [Cluster Operations](cluster-setup-advanced.md) — troubleshooting and optional scripts
-- [Infrastructure Reference](infrastructure-reference.md) — `node_pools` variable schema
+- [Cluster Setup](cluster-setup.md): initial deployment and scenarios
+- [Cluster Operations](cluster-setup-advanced.md): troubleshooting and optional scripts
+- [Infrastructure Reference](infrastructure-reference.md): `node_pools` variable schema
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

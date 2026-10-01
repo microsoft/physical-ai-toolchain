@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Troubleshooting Guide
 description: Symptom-based resolution guide for common errors in the robotics reference architecture
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-29
+ms.date: 2026-10-01
 ms.topic: troubleshooting
 keywords:
   - troubleshooting
@@ -419,7 +419,7 @@ If new pods still exhaust `/dev/shm`, raise `USER_SHM_SIZE` in `infrastructure/s
 4. Cancel and resubmit the workflow. New pods pick up the updated `service_base_url`.
 
 > [!NOTE]
-> `service_base_url` points to `osmo-gateway`, which routes `/api/logger`, `/api/agent`, `/api/auth`, and related paths to the correct backend services.
+> The default `service_base_url` points at `osmo-gateway` directly, and the Azure ML ingress controller forwards to it, so both values reach the gateway. The gateway routes `/api/logger`, `/api/agent`, `/api/auth`, and related paths to the right backend services.
 
 ### OSMO UI shows "server IP address could not be found" for workflow logs
 

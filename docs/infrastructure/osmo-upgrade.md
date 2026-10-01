@@ -2,7 +2,7 @@
 title: OSMO Upgrade from Pre-6.3 Releases
 description: Staged upgrade of a pre-6.3 OSMO control plane to OSMO 6.3 in ConfigMap mode, with backups and rollback
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-30
+ms.date: 2026-10-01
 ms.topic: how-to
 keywords:
   - osmo
@@ -30,24 +30,30 @@ Both paths end on OSMO 6.3 in ConfigMap mode, where pools, platforms, pod templa
 |---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Environment window  | The control plane is unavailable during `hop-6.2` and for several minutes of `hop-6.3`. Announce the downtime.                                                                                                                                                                                                        |
 | Cluster access      | Network access to the AKS API and the OSMO internal ingress, plus the Azure roles in [Cluster Setup](cluster-setup.md#azure-rbac-permissions)                                                                                                                                                                         |
-| OSMO authentication | Disabled, as `03-deploy-osmo.sh` deploys it. The script calls the OSMO API as `admin` through the no-auth `x-osmo-user` header. For installs with authentication, follow NVIDIA's guides.                                                                                                                             |
+| OSMO authentication | Off, which is how `03-deploy-osmo.sh` deploys OSMO. The script calls the OSMO API as `admin` through the no-auth `x-osmo-user` header. For installs with authentication, follow NVIDIA's guides.                                                                                                                      |
 | OSMO CLI            | 6.2.10 or later for `tokens`, and 6.3.0 once the upgrade completes. See [Install the OSMO CLI](#install-the-osmo-cli).                                                                                                                                                                                                |
 | uv                  | `export`, `hop-6.3`, and `verify` parse YAML with a uv-managed Python                                                                                                                                                                                                                                                 |
 | Key Vault secrets   | `osmo-admin-password`, `psql-admin-password`, and `redis-primary-key`, readable from this host. `03-deploy-osmo.sh` mounts `osmo-admin-password`, which Terraform creates when `osmo_config.should_create_secret` is `true`, the default. `reset` and `hop-6.3` check the secrets they need before removing anything. |
 | Backup directory    | An absolute path outside the repository and environment bundles. The script creates it with mode 700. It holds the MEK, the operator token, and the database dump.                                                                                                                                                    |
 | Environment bundle  | `infrastructure/setup/generated/<environment>/` from the environment-deployment skill. `export` writes `osmo-platforms.yaml` there, and `hop-6.3` reads it.                                                                                                                                                           |
 
-Each run executes one stage, checks that the previous stage succeeded, and records the outcome in `<backup-dir>/upgrade-state.json`. The stages that change the control plane (`hop-6.2`, `reset`, and `hop-6.3`) print a plan and wait for you to type the AKS cluster name. A stage that stops before changing anything leaves no record, so you can fix the cause and run it again. Add `--config-preview` to any stage to check its inputs.
+Each run executes one stage, checks that the previous stage succeeded, and records the outcome in `<backup-dir>/upgrade-state.json`. A stage that stops before it changes anything keeps the previous status and only logs the stop, so you can fix the cause and run it again. Add `--config-preview` to any stage to check its inputs.
+
+The stages that replace releases or data (`hop-6.2`, `reset`, and `hop-6.3`) print a plan and wait for you to type the AKS cluster name. `tokens` doesn't ask, although it replaces the backend operator's token and restarts the operator.
+
+Run the commands on this page from `infrastructure/setup`, with these variables set:
+
+```bash
+cd infrastructure/setup
+backup_dir="$HOME/osmo-upgrade/<environment>"
+bundle_dir="generated/<environment>"
+```
 
 ## Keep OSMO Data
 
 Back up, move to 6.2, recreate the backend operator token, and export the database configs:
 
 ```bash
-cd infrastructure/setup
-backup_dir="$HOME/osmo-upgrade/<environment>"
-bundle_dir="generated/<environment>"
-
 optional/upgrade-osmo.sh --stage backup --backup-dir "$backup_dir"
 optional/upgrade-osmo.sh --stage hop-6.2 --backup-dir "$backup_dir"
 optional/upgrade-osmo.sh --stage tokens --backup-dir "$backup_dir" --token-expiry <yyyy-mm-dd>
@@ -82,7 +88,6 @@ optional/upgrade-osmo.sh --stage verify --backup-dir "$backup_dir"
 ## Start Fresh
 
 ```bash
-cd infrastructure/setup
 optional/upgrade-osmo.sh --stage backup --backup-dir "$backup_dir"
 optional/upgrade-osmo.sh --stage reset --backup-dir "$backup_dir"
 # Generate $bundle_dir/osmo-platforms.yaml from Terraform node_pools with the environment-deployment skill
@@ -115,7 +120,11 @@ Then submit a test workflow to each pool.
 
 ## Renew HiL Backend Tokens
 
-`tokens` lists the backends other than the AKS backend. Each needs a new token: rerun `04-prepare-osmo-hil-node.sh` with `--renew-token` from the environment-operator host, then redeploy the backend on the HiL host. See [Ubuntu HiL OSMO Backend](../recipes/tier-3-production/ubuntu-hil-osmo-backend.md).
+HiL backends need new tokens after either path. On the keep-data path, `tokens` lists them. On the fresh path, `reset` deletes every token along with the HiL backend config, so add each backend back first: pass `-- --hil-backend-name <name> --private-service-ip <internal-lb-ip>` to `hop-6.3` with the internal load balancer's current address, or list the backend in the values file.
+
+For each HiL backend, rerun `04-prepare-osmo-hil-node.sh` with `--renew-token` from the environment-operator host, then redeploy the backend on the HiL host. Without `--renew-token`, the script reuses the catalog's token while it's unexpired, and that token no longer works. See [Ubuntu HiL OSMO Backend](../recipes/tier-3-production/ubuntu-hil-osmo-backend.md).
+
+ConfigMap mode rebuilds the config from Helm values on every `03-deploy-osmo.sh` run. A backend added through `--hil-backend-name` stays only while later runs pass the same options; a run without them drops the backend and sets `service_base_url` back to the in-cluster gateway address. Putting the backend and `service_base_url` in the values file avoids that.
 
 ## Install the OSMO CLI
 
@@ -170,8 +179,6 @@ Use the isolated kubeconfig for every command, and don't delete `mek-config`:
    cleanup/uninstall-osmo.sh --skip-backend --skip-k8s-cleanup --purge-postgres --purge-redis
    kubectl apply -f "$backup/db-helper-pod.json"
    kubectl wait pod/osmo-upgrade-db-restore -n osmo-control-plane --for=condition=Ready
-   kubectl exec -n osmo-control-plane osmo-upgrade-db-restore -- \
-     psql "$(cat "$backup/db-connection.txt")" -c 'DROP SCHEMA IF EXISTS pgroll CASCADE'
    kubectl exec -i -n osmo-control-plane osmo-upgrade-db-restore -- \
      pg_restore --clean --if-exists --no-owner --no-privileges \
      --dbname "$(cat "$backup/db-connection.txt")" < "$backup/osmo-db.dump"
