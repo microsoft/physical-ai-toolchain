@@ -1,0 +1,57 @@
+# Azure ML GPU Smoke Test Job Template
+#
+# Structural template used by submit-azureml-gpu-smoke.sh, which sets the code
+# path, compute, instance type, environment version, and Azure context.
+#
+# The job trains a small model on one GPU and checks the services a training job
+# depends on: identity and workspace access, MLflow metrics and artifacts,
+# checkpoints in the job output, Azure Storage uploads, and the model registry.
+# Results are written to smoke-summary.json in the checkpoints output.
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+display_name: Azure ML GPU Smoke Test
+description: Short GPU training run that checks MLflow, checkpoints, storage, and the model registry.
+experiment_name: gpu-smoke
+identity:
+  type: managed_identity
+
+# submit-azureml-gpu-smoke.sh uploads training/ as the code snapshot.
+code: ../../..
+# Direct submission requires this environment version to be registered first.
+# The submit script registers the asset and verifies its image.
+# scripts/update-image-digests.sh keeps it aligned with DEFAULT_AZUREML_SMOKE_IMAGE.
+environment: azureml:gpu-smoke-env:2.6.0-cuda12.4-cudnn9-runtime-sha256-77f17f843507062875ce8be2a6f76aa6aa3df7f9ef1e31d9d7432f4b0f563dee
+compute: azureml:k8s-compute
+
+resources:
+  instance_type: gpuspot
+
+inputs:
+  steps: "200"
+  checkpoint_interval: "50"
+  model_name: gpu-smoke-test
+  register_model: "true"
+
+# Azure ML snapshots training/ as the code root, so recreate the top-level
+# training path that the entry script and Python imports expect.
+command: >-
+  if [ ! -e training ]; then ln -s . training; fi &&
+  bash training/smoke/scripts/azureml-gpu-smoke-entry.sh
+  --steps ${{inputs.steps}}
+  --checkpoint-interval ${{inputs.checkpoint_interval}}
+  --model-name ${{inputs.model_name}}
+  --register-model ${{inputs.register_model}}
+  --output-dir ${{outputs.checkpoints}}
+
+environment_variables:
+  MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES: "3"
+  MLFLOW_HTTP_REQUEST_TIMEOUT: "60"
+  # Set by submit-azureml-gpu-smoke.sh:
+  # AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZUREML_WORKSPACE_NAME
+  # AZURE_STORAGE_ACCOUNT_NAME (enables the storage check)
+
+outputs:
+  checkpoints:
+    type: uri_folder
+    mode: upload

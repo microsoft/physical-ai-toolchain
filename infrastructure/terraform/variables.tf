@@ -394,7 +394,8 @@ variable "node_pools" {
   type = map(object({
     node_count                 = optional(number, null)
     vm_size                    = string
-    subnet_address_prefixes    = list(string)
+    subnet_address_prefixes    = optional(list(string), [])
+    subnet_pool_key            = optional(string, null)
     node_taints                = optional(list(string), [])
     node_labels                = optional(map(string), {})
     should_enable_auto_scaling = optional(bool, false)
@@ -404,14 +405,16 @@ variable "node_pools" {
     zones                      = optional(list(string), null)
     eviction_policy            = optional(string, "Deallocate")
     gpu_driver                 = optional(string, null)
+    undrainable_node_behavior  = optional(string, null)
+    max_surge                  = optional(string, null)
+    max_unavailable            = optional(string, null)
   }))
-  description = "Additional node pools for the AKS cluster. Map key is used as the node pool name. Note: Pod subnets are not used with Azure CNI Overlay mode"
+  description = "Additional node pools for the AKS cluster. Map key is used as the node pool name. Each entry either owns a subnet through subnet_address_prefixes or shares another entry's subnet through subnet_pool_key. Non-Spot entries can set undrainable_node_behavior (Cordon or Schedule) and one of max_surge or max_unavailable; max_surge defaults to 10% when neither is set. Note: Pod subnets are not used with Azure CNI Overlay mode"
   default = {
     gpu = {
       vm_size                    = "Standard_NV36ads_A10_v5"
       subnet_address_prefixes    = ["10.0.7.0/24"]
       node_taints                = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
-      node_labels                = { accelerator = "nvidia" }
       gpu_driver                 = "Install"
       priority                   = "Spot"
       should_enable_auto_scaling = true
@@ -445,8 +448,14 @@ variable "should_enable_private_aks_cluster" {
 
 variable "should_enable_public_network_access" {
   type        = bool
-  description = "Whether to enable public network access to the Azure ML workspace"
+  description = "Whether to enable public network access on platform resources: ACR, Azure ML workspace, Key Vault, storage accounts, PostgreSQL, Redis, Log Analytics, Application Insights, Grafana, Monitor workspace, and data collection endpoint. public_network_access_overrides can change individual resources"
   default     = true
+}
+
+variable "public_network_access_overrides" {
+  type        = map(bool)
+  description = "Per-resource public network access that overrides should_enable_public_network_access. Keys: acr, azureml_workspace, key_vault, storage_account, data_lake_storage_account, postgresql, redis, log_analytics, application_insights, grafana, monitor_workspace, data_collection_endpoint"
+  default     = {}
 }
 
 variable "should_enable_storage_shared_access_key" {
@@ -459,6 +468,18 @@ variable "should_enable_microsoft_defender" {
   type        = bool
   description = "Whether to enable Microsoft Defender for Containers on the AKS cluster"
   default     = false
+}
+
+variable "aks_sku_tier" {
+  type        = string
+  description = "AKS cluster SKU tier: Free, Standard, or Premium. AKS long-term support requires Premium"
+  default     = "Standard"
+}
+
+variable "aks_support_plan" {
+  type        = string
+  description = "AKS support plan: KubernetesOfficial or AKSLongTermSupport. AKSLongTermSupport requires aks_sku_tier = Premium and keeps a Kubernetes version supported after community support ends"
+  default     = "KubernetesOfficial"
 }
 
 /*
@@ -626,5 +647,36 @@ variable "conversion_pipeline_config" {
     fabric_workspace_sp_object_id        = optional(string, null)
   })
   description = "Conversion pipeline module configuration. Only consumed when should_deploy_conversion_pipeline is true"
+  default     = {}
+}
+
+/*
+ * Dataviewer Configuration - Optional
+ *
+ * The dataviewer module is opt-in. When should_deploy_dataviewer is true, the module
+ * deploys the dataviewer backend and frontend on Azure Container Apps in a delegated
+ * subnet, with a managed identity for registry pulls and workspace storage access.
+ * data-management/setup/deploy-dataviewer.sh reads the dataviewer output to build and
+ * roll out images.
+ */
+
+variable "should_deploy_dataviewer" {
+  type        = bool
+  description = "Whether to deploy the dataviewer application on Azure Container Apps"
+  default     = false
+}
+
+variable "dataviewer_config" {
+  type = object({
+    subnet_address_prefix        = optional(string, "10.0.16.0/21")
+    should_enable_internal       = optional(bool, true)
+    backend_image                = optional(string, "")
+    frontend_image               = optional(string, "")
+    storage_dataset_container    = optional(string, "datasets")
+    storage_annotation_container = optional(string, "annotations")
+    should_deploy_auth           = optional(bool, false)
+    redirect_uris                = optional(list(string), ["http://localhost:5173/", "http://localhost:5174/"])
+  })
+  description = "Dataviewer Container Apps configuration: delegated subnet, internal (VNet-only) or public access, container images, storage containers, and Entra ID auth. Leave image fields empty to provision with a placeholder image that deploy-dataviewer.sh replaces. The default subnet 10.0.16.0/21 must not overlap node pool or other VNet subnets. Only consumed when should_deploy_dataviewer is true"
   default     = {}
 }

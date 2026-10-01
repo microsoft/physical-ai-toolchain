@@ -2,7 +2,7 @@
 title: Workflow Templates (AzureML)
 description: Selected AzureML workflow templates for RL, LeRobot, and SiL training and evaluation.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-22
+ms.date: 2026-09-30
 ms.topic: reference
 keywords:
   - azureml
@@ -21,6 +21,7 @@ in `training/` and `evaluation/`.
 | Template                              | Purpose                                                   | Source YAML path                                                    | Typical submit path                                                                                   |
 |---------------------------------------|-----------------------------------------------------------|---------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
 | `train.yaml`                          | Isaac Lab RL training job structure                       | `training/rl/workflows/azureml/train.yaml`                          | `training/rl/scripts/submit-azureml-training.sh`                                                      |
+| `gpu-smoke.yaml`                      | GPU target and training service smoke test                | `training/smoke/workflows/azureml/gpu-smoke.yaml`                   | `training/smoke/scripts/submit-azureml-gpu-smoke.sh`                                                  |
 | `lerobot-train.yaml`                  | LeRobot behavioral cloning training job structure         | `training/il/workflows/azureml/lerobot-train.yaml`                  | `training/il/scripts/submit-azureml-lerobot-training.sh`                                              |
 | `isaaclab-evaluation.yaml`            | Isaac Lab policy evaluation against registered models     | `evaluation/sil/workflows/azureml/isaaclab-evaluation.yaml`         | `evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh`                                        |
 | `lerobot-eval.yaml`                   | LeRobot policy evaluation and optional model registration | `evaluation/sil/workflows/azureml/lerobot-eval.yaml`                | `evaluation/sil/scripts/submit-azureml-lerobot-eval.sh`                                               |
@@ -38,6 +39,16 @@ The pipeline submitter selects the three-step template by default. `--with-regis
 | Primary parameters and overrides | `inputs.task` (`Isaac-Velocity-Rough-Anymal-C-v0`), `inputs.num_envs` (`"2048"`), `inputs.max_iterations` (`"600"`), `inputs.checkpoint_mode` (`from-scratch`), `inputs.checkpoint_uri` (`none`), `inputs.register_checkpoint` (`none`), `inputs.run_azure_smoke_test` (`"false"`). |
 | Typical submit path              | `training/rl/scripts/submit-azureml-training.sh`                                                                                                                                                                                                                                    |
 | Usage notes                      | Keep template values as structural defaults. The submit script sets runtime command, compute, and Azure context. Direct submission requires the pinned environment version to be registered first.                                                                                  |
+
+## gpu-smoke.yaml
+
+| Field                            | Details                                                                                                                                                                            |
+|----------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Purpose                          | Structural template for a short GPU training job that checks MLflow, checkpoints, storage, and the model registry.                                                                 |
+| Source YAML path                 | `training/smoke/workflows/azureml/gpu-smoke.yaml`                                                                                                                                  |
+| Primary parameters and overrides | `inputs.steps` (`"200"`), `inputs.checkpoint_interval` (`"50"`), `inputs.model_name` (`gpu-smoke-test`), `inputs.register_model` (`"true"`), `resources.instance_type` (`gpuspot`) |
+| Typical submit path              | `training/smoke/scripts/submit-azureml-gpu-smoke.sh`                                                                                                                               |
+| Usage notes                      | The submit script sets compute, instance type, and Azure context, and registers the pinned environment. Results are written to `smoke-summary.json` in the `checkpoints` output.   |
 
 ## lerobot-train.yaml
 

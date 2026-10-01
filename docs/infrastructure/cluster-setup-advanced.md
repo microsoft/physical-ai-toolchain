@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Cluster Operations and Troubleshooting
 description: Accessing OSMO, troubleshooting common issues, and optional deployment scripts
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-09-30
 ms.topic: reference
 keywords:
   - troubleshooting
@@ -146,11 +146,12 @@ Cross-domain shared libraries live in `scripts/lib/` at the repository root.
 
 ## 🧩 Optional Scripts
 
-| Script                                    | Purpose                      |
-|-------------------------------------------|------------------------------|
-| `optional/deploy-volcano-scheduler.sh`    | Volcano (alternative to KAI) |
-| `optional/uninstall-volcano-scheduler.sh` | Uninstall Volcano scheduler  |
-| `optional/add-user-to-platform.sh`        | Add user to OSMO platform    |
+| Script                                    | Purpose                                                          |
+|-------------------------------------------|------------------------------------------------------------------|
+| `optional/deploy-volcano-scheduler.sh`    | Volcano (alternative to KAI)                                     |
+| `optional/uninstall-volcano-scheduler.sh` | Uninstall Volcano scheduler                                      |
+| `optional/add-user-to-platform.sh`        | Add user to OSMO platform                                        |
+| `optional/upgrade-osmo.sh`                | Upgrade a pre-6.3 OSMO install to 6.3 ([guide](osmo-upgrade.md)) |
 
 For adding, removing, or resizing AKS node pools on a running cluster, see [Manage Node Pools](manage-node-pools.md).
 
