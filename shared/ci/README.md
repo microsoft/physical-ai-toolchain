@@ -39,7 +39,9 @@ shared/ci/smoke-image.sh osmo-replay               # runtime-image smoke (Python
 shared/ci/smoke-import.sh rl --mode cpu
 ```
 
-`smoke-image.sh` mounts the repository at `/workspace` and runs `smoke-import.sh <domain> --mode <mode>` inside a linux/amd64 container: a lightweight uv image for `--mode cpu`, the domain's production image for `--mode image`. CI runs the CPU smoke directly on its linux runners and calls `smoke-image.sh` for the runtime-image depth after a free-disk-space step.
+`smoke-image.sh` mounts the repository at `/workspace` and runs `smoke-import.sh <domain> --mode <mode>` inside a linux/amd64 container: a lightweight uv image for `--mode cpu`, the domain's production image for `--mode image`. CI runs the CPU smoke directly on its linux runners and calls `smoke-image.sh` for the runtime-image depth.
+
+The `rl` runtime-image job always frees runner disk first because the Isaac Lab image is much larger. The PyTorch-based jobs run `check-disk.sh` and free disk only when less than 40 GiB is available, since the cleanup alone can take over 10 minutes. These jobs report disk usage after the smoke.
 
 > [!NOTE]
 > The runtime images are multi-gigabyte. The first `--mode image` run pulls the image; expect several minutes and ensure free disk.
@@ -50,6 +52,7 @@ shared/ci/smoke-import.sh rl --mode cpu
 |-------------------|----------------------------------------------------------------------------------|
 | `smoke-import.sh` | Inner probe: install a domain's locked deps and import it; runs on linux/x86_64  |
 | `smoke-image.sh`  | Run `smoke-import.sh` in a linux/amd64 container (`--mode cpu\|image`), any host |
+| `check-disk.sh`   | Report free disk and flag when the runtime-image smoke needs a cleanup first     |
 
 ## 🧪 Domains
 

@@ -79,11 +79,15 @@ jobs:
 
   # Runtime-image smoke: import the domain inside its real production container,
   # on the real interpreter. Path-gated (large image pull) via the caller input.
+  # Timeouts leave headroom for slow runner disk and package-index downloads.
+  # Only the Isaac Lab image always needs disk cleanup. The PyTorch runtime image
+  # fits on a stock runner, so those jobs clean up only when space is low; the
+  # cleanup step alone can take over 10 minutes.
   image-smoke-rl:
     name: Runtime-Image Smoke (rl)
     if: inputs.rl
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -104,7 +108,7 @@ jobs:
     name: Runtime-Image Smoke (il)
     if: inputs.il
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: read
     steps:
@@ -113,7 +117,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check free disk space
+        id: disk
+        run: shared/ci/check-disk.sh
+
       - name: Free disk space
+        if: steps.disk.outputs.low == 'true'
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # v1.3.1
         with:
           tool-cache: true
@@ -121,11 +130,15 @@ jobs:
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh il
 
+      - name: Report disk usage
+        if: always()
+        run: df -h /
+
   image-smoke-evaluation:
     name: Runtime-Image Smoke (evaluation)
     if: inputs.evaluation
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: read
     steps:
@@ -134,7 +147,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check free disk space
+        id: disk
+        run: shared/ci/check-disk.sh
+
       - name: Free disk space
+        if: steps.disk.outputs.low == 'true'
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # v1.3.1
         with:
           tool-cache: true
@@ -142,11 +160,15 @@ jobs:
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh evaluation
 
+      - name: Report disk usage
+        if: always()
+        run: df -h /
+
   image-smoke-vla:
     name: Runtime-Image Smoke (vla)
     if: inputs.vla
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: read
     steps:
@@ -155,13 +177,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check free disk space
+        id: disk
+        run: shared/ci/check-disk.sh
+
       - name: Free disk space
+        if: steps.disk.outputs.low == 'true'
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # v1.3.1
         with:
           tool-cache: true
 
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh vla
+
+      - name: Report disk usage
+        if: always()
+        run: df -h /
 
   image-smoke-osmo-replay:
     name: Runtime-Image Smoke (osmo-replay)
