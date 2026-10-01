@@ -97,5 +97,5 @@ jobs:
         uses: ./.github/actions/ci-outcome
         with:
           workflow: dependency-review
-          steps-json: ${{ toJSON(steps) }}
+          steps-json: '{"review":{"outcome":"${{ steps.review.outcome }}","conclusion":"${{ steps.review.conclusion }}"}}'
           required-steps: '["review"]'

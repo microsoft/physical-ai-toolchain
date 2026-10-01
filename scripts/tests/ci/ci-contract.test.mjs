@@ -39,6 +39,7 @@ const docsPath = '.github/workflows/deploy-docs.yml';
 const promotionPath = '.github/workflows/docusaurus-accessibility-promotion.yml';
 const smokePath = '.github/workflows/smoke-cpu.yml';
 const weeklyPath = '.github/workflows/weekly-validation.yml';
+const dependencyReviewPath = '.github/workflows/dependency-review.yml';
 const summaryId = 'pr-validation-summary';
 const unknownSha = '0'.repeat(40);
 
@@ -63,6 +64,17 @@ test('reusable permissions: skipped scheduled callers still require upstream per
   delete candidate['.github/workflows/accessibility-evidence.yml'].jobs['scheduled-docusaurus'].permissions['id-token'];
   assert.ok(validateWorkflows(candidate, contract).some(message =>
     message.includes('scheduled-docusaurus') && message.includes('callee permission id-token: write')));
+});
+test('dependency review evidence passes only required-step statuses, not action outputs', () => {
+  const producer = graph[dependencyReviewPath].jobs['dependency-review'].steps.find(step => step.id === 'outcome');
+  assert.equal(producer.with['steps-json'],
+    '{"review":{"outcome":"${{ steps.review.outcome }}","conclusion":"${{ steps.review.conclusion }}"}}');
+
+  const candidate = structuredClone(graph);
+  candidate[dependencyReviewPath].jobs['dependency-review'].steps.find(step => step.id === 'outcome')
+    .with['steps-json'] = '${{ toJSON(steps) }}';
+  assert.ok(validateWorkflows(candidate, contract).some(message =>
+    message.includes('dependency-review:dependency-review: incorrect producer identity or step context')));
 });
 const nodeEnvironment = { ...process.env, NODE_DISABLE_COMPILE_CACHE: '1' };
 

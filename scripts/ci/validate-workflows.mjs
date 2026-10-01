@@ -23,6 +23,13 @@ function jsonInput(value) {
   try { return JSON.parse(value); } catch { return undefined; }
 }
 
+function requiredStepStatusJson(requiredSteps) {
+  if (!Array.isArray(requiredSteps)) return '';
+  return JSON.stringify(Object.fromEntries(requiredSteps.map(id => [id, {
+    outcome: `\${{ steps.${id}.outcome }}`,
+    conclusion: `\${{ steps.${id}.conclusion }}`,
+  }])));
+}
 function timeoutLimit(workflow, job) {
   if (/aggregate|summary|discover|outcome/.test(job)) return 10;
   if (workflow === 'accessibility-evidence' && ['evidence', 'product-evidence'].includes(job)) return 20;
@@ -107,7 +114,8 @@ function validateExecution(graph, contract, check) {
       const producer = producers.find(step => step.id === metadata.producer);
       check(producers.length === 1 && Boolean(producer), `${name}:${id}: missing unique evidence producer`);
       check(expression(producer?.if) === 'always()' && producer?.['continue-on-error'] === undefined, `${name}:${id}: evidence publication must always execute without suppression`);
-      check(producer?.with?.workflow === name && producer?.with?.['steps-json'] === '${{ toJSON(steps) }}', `${name}:${id}: incorrect producer identity or step context`);
+      const expectedStepsJson = name === 'dependency-review' ? requiredStepStatusJson(metadata['required-steps']) : '${{ toJSON(steps) }}';
+      check(producer?.with?.workflow === name && producer?.with?.['steps-json'] === expectedStepsJson, `${name}:${id}: incorrect producer identity or step context`);
       check(isDeepStrictEqual(jsonInput(producer?.with?.['required-steps']), metadata['required-steps']), `${name}:${id}: required operation declaration mismatch`);
       const reports = metadata.reports?.map(report => ({ ...report, path: report.path?.replaceAll('{shard}', metadata['shard-input'] ?? 'default') }));
       check(isDeepStrictEqual(jsonInput(producer?.with?.reports ?? '[]'), reports), `${name}:${id}: required report declaration mismatch`);
