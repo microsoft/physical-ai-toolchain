@@ -178,8 +178,8 @@ Only RTX PRO 6000 pools created with `gpu_driver = "None"` need the `nvidia.com/
 
 | Guide | Description |
 |-------|-------------|
-| [Infrastructure README](../../infrastructure/README.md) | Domain overview and quick start |
-| [Terraform README](../../infrastructure/terraform/README.md) | Terraform configuration reference |
-| [Setup README](../../infrastructure/setup/README.md) | Setup script reference |
-| [Infrastructure Deployment](../../docs/infrastructure/infrastructure.md) | Full deployment walkthrough |
-| [GPU Configuration](../../docs/reference/gpu-configuration.md) | Detailed GPU driver and operator reference |
+| [Infrastructure README](../../../infrastructure/README.md) | Domain overview and quick start |
+| [Terraform README](../../../infrastructure/terraform/README.md) | Terraform configuration reference |
+| [Setup README](../../../infrastructure/setup/README.md) | Setup script reference |
+| [Infrastructure Deployment](../../../docs/infrastructure/infrastructure.md) | Full deployment walkthrough |
+| [GPU Configuration](../../../docs/reference/gpu-configuration.md) | Detailed GPU driver and operator reference |
