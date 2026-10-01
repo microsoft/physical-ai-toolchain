@@ -4,11 +4,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import fs, { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import fs, { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
-import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { dirname, join, matchesGlob } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 import { buildSummary, evaluateChecks, readReceiptTools, requiredLanes, visibleLanes } from '../../ci/evaluate-checks.mjs';
 import { aggregateOutcomes, inspectReport, outcomeOutputs, publishOutcome, recordOutcome } from '../../ci/publish-outcome.mjs';
 import { comparePaths, loadContract, parseChangedPaths, selectChecks, selectionOutputs } from '../../ci/select-checks.mjs';
@@ -23,7 +25,7 @@ const graph = readWorkflowGraph(root);
 const allSelectors = [
   'training', 'rl', 'il', 'vla', 'evaluation', 'osmo_replay', 'dm_tools', 'data_pipeline',
   'inference', 'gpu_offload', 'gpu_offload_e2e', 'shared_ci', 'dv_backend', 'dv_frontend',
-  'fuzz', 'docusaurus', 'pester', 'containers',
+  'accessibility', 'fuzz', 'docusaurus', 'pester', 'containers',
 ];
 const pythonConsumers = [
   'training', 'rl', 'il', 'vla', 'evaluation', 'osmo_replay', 'dm_tools', 'data_pipeline',
@@ -34,10 +36,151 @@ const cpuDomains = ['rl', 'il', 'vla', 'evaluation', 'vlm-judge', 'osmo-replay']
 const prPath = '.github/workflows/pr-validation.yml';
 const mainPath = '.github/workflows/main.yml';
 const docsPath = '.github/workflows/deploy-docs.yml';
+const promotionPath = '.github/workflows/docusaurus-accessibility-promotion.yml';
 const smokePath = '.github/workflows/smoke-cpu.yml';
 const weeklyPath = '.github/workflows/weekly-validation.yml';
 const summaryId = 'pr-validation-summary';
 const unknownSha = '0'.repeat(40);
+
+for (const owner of [prPath, mainPath]) {
+  for (const jobId of ['accessibility-evidence', 'docusaurus-tests']) {
+    test(`reusable permissions: ${owner}:${jobId} grants coverage OIDC through the entire call chain`, () => {
+      assert.equal(graph[owner].jobs[jobId].permissions['id-token'], 'write');
+      const candidate = structuredClone(graph);
+      const policy = structuredClone(contract);
+      delete candidate[owner].jobs[jobId].permissions['id-token'];
+      policy.permissionProfiles['missing-oidc'] = { contents: 'read' };
+      const lane = policy.lanes.find(item => item.id === jobId);
+      lane.permissionProfile = 'missing-oidc';
+      assert.ok(validateWorkflows(candidate, policy).some(message =>
+        message.includes(`${owner}:${jobId}`) && message.includes('callee permission id-token: write')));
+    });
+  }
+}
+
+test('reusable permissions: skipped scheduled callers still require upstream permission grants', () => {
+  const candidate = structuredClone(graph);
+  delete candidate['.github/workflows/accessibility-evidence.yml'].jobs['scheduled-docusaurus'].permissions['id-token'];
+  assert.ok(validateWorkflows(candidate, contract).some(message =>
+    message.includes('scheduled-docusaurus') && message.includes('callee permission id-token: write')));
+});
+const nodeEnvironment = { ...process.env, NODE_DISABLE_COMPILE_CACHE: '1' };
+
+const rootTestModules = [
+  'tests/test_accessibility_evidence.py', 'tests/test_accessibility_promotion.py',
+  'tests/test_e2e_polling.py', 'tests/test_redis_tls_client.py', 'tests/test_future_contract.py',
+];
+const retainedCoverageSources = [
+  'tests/fuzz_harness.py', 'training/utils/metrics.py',
+  'data-management/viewer/backend/src/api/validation.py', 'scripts/accessibility/evidence_gate.py',
+];
+
+test('coverage boundary: root collection retains test modules, harness and product sources', () => {
+  const manifest = readFileSync(join(root, 'pyproject.toml'), 'utf8');
+  const run = manifest.split('[tool.coverage.run]')[1]?.split('[tool.coverage.report]')[0];
+  assert.ok(run, 'Missing coverage run configuration');
+  const omit = run.match(/^omit = \[([\s\S]*?)^\]/m);
+  assert.ok(omit, 'Missing coverage run omissions');
+  const patterns = [...omit[1].matchAll(/^\s*"([^"]+)"/gm)].map(match => match[1]);
+  assert.equal(patterns.includes('tests/test_*.py'), false, 'Root test modules must remain coverage sources');
+  for (const path of rootTestModules) {
+    assert.equal(patterns.some(pattern => matchesGlob(path, pattern)), false, `Test module was omitted: ${path}`);
+  }
+  for (const path of retainedCoverageSources) {
+    assert.equal(patterns.some(pattern => matchesGlob(path, pattern)), false, `Source was omitted: ${path}`);
+  }
+});
+
+test('coverage boundary: Codecov retains root test modules, fuzz and product coverage', () => {
+  const config = parseYaml(readFileSync(join(root, 'codecov.yml'), 'utf8'));
+  assert.equal(config.ignore.includes('tests/test_*.py'), false, 'Codecov must retain root test-module coverage');
+  for (const path of rootTestModules) {
+    assert.equal(config.ignore.some(pattern => matchesGlob(path, pattern)), false, `Test module was ignored: ${path}`);
+  }
+  for (const path of retainedCoverageSources) {
+    assert.equal(config.ignore.some(pattern => matchesGlob(path, pattern)), false, `Source was ignored: ${path}`);
+  }
+  assert.deepEqual(config.flags['pytest-fuzz'].paths, ['tests/', 'data-management/viewer/backend/src/', 'training/']);
+  assert.deepEqual(config.component_management.individual_components.find(item => item.component_id === 'fuzz-suite').paths,
+    ['tests/fuzz_harness.py', 'tests/fuzz-corpus/**']);
+});
+
+test('coverage boundary: fuzz workflow retains test selection and all measured source directories', () => {
+  const steps = graph['.github/workflows/fuzz-regression-tests.yml'].jobs['fuzz-regression'].steps;
+  const run = steps.find(step => step.name === 'Run fuzz regression tests').run;
+  assert.match(run, /pytest -o addopts="" tests\/fuzz_harness\.py\s/);
+  assert.deepEqual([...run.matchAll(/--cov=([^\s]+)/g)].map(match => match[1]),
+    ['tests', 'data-management/viewer/backend/src', 'training']);
+  const upload = steps.find(step => step.name === 'Upload coverage to Codecov');
+  assert.equal(upload.with.flags, 'pytest-fuzz');
+  assert.equal(upload.with.files, 'logs/coverage-fuzz.xml');
+});
+
+test('accessibility coverage: exact report upload isolates OIDC and fails closed', () => {
+  const workflow = graph['.github/workflows/accessibility-evidence.yml'];
+  const verify = candidate => {
+    const producer = candidate.jobs.evidence;
+    assert.deepEqual(producer.permissions, { contents: 'read' });
+    const artifacts = producer.steps.filter(step => step.name === 'Upload Python coverage artifact');
+    assert.equal(artifacts.length, 1, 'Expected one dedicated Python coverage artifact');
+    const artifact = artifacts[0];
+    assert.match(artifact.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/);
+    assert.equal(artifact.if, 'always()');
+    assert.equal(artifact['continue-on-error'], undefined);
+    assert.deepEqual(artifact.with, {
+      name: 'pytest-accessibility-coverage-xml', path: 'logs/coverage-accessibility.xml',
+      'if-no-files-found': 'error', 'retention-days': 30,
+    });
+    const uploader = candidate.jobs['accessibility-python-codecov'];
+    assert.ok(uploader, 'Missing dedicated Python coverage uploader');
+    assert.equal(uploader.needs, 'evidence');
+    assert.equal(uploader.if, 'always()');
+    assert.equal(uploader['continue-on-error'], undefined);
+    assert.deepEqual(uploader.permissions, { contents: 'read', 'id-token': 'write' });
+    assert.equal(uploader.steps.length, 3);
+    const [checkout, download, upload] = uploader.steps;
+    assert.match(checkout.uses, /^actions\/checkout@[a-f0-9]{40}$/);
+    assert.deepEqual(checkout.with, { 'persist-credentials': false });
+    assert.match(download.uses, /^actions\/download-artifact@[a-f0-9]{40}$/);
+    assert.deepEqual(download.with, { name: 'pytest-accessibility-coverage-xml', path: 'coverage' });
+    assert.match(upload.uses, /^codecov\/codecov-action@[a-f0-9]{40}$/);
+    assert.deepEqual(upload.with, {
+      files: 'coverage/coverage-accessibility.xml', disable_search: true, use_oidc: true,
+      fail_ci_if_error: true, flags: 'pytest-accessibility', name: 'pytest-accessibility-coverage',
+    });
+    for (const step of uploader.steps) {
+      assert.equal(step.if, undefined);
+      assert.equal(step['continue-on-error'], undefined);
+      assert.equal(step.run, undefined);
+    }
+  };
+  verify(workflow);
+  for (const mutate of [
+    candidate => { candidate.jobs.evidence.steps.find(step => step.name === 'Upload Python coverage artifact').with['if-no-files-found'] = 'warn'; },
+    candidate => { delete candidate.jobs['accessibility-python-codecov'].permissions['id-token']; },
+    candidate => { candidate.jobs['accessibility-python-codecov'].steps[1].with.name = 'other-report'; },
+    candidate => { candidate.jobs['accessibility-python-codecov'].steps[2].with.files = 'other.xml'; },
+    candidate => { candidate.jobs['accessibility-python-codecov'].steps[2].with.flags = 'pytest-fuzz'; },
+    candidate => { candidate.jobs['accessibility-python-codecov'].steps[2].with.fail_ci_if_error = false; },
+  ]) {
+    const candidate = structuredClone(workflow);
+    mutate(candidate);
+    assert.throws(() => verify(candidate), assert.AssertionError);
+  }
+});
+
+test('accessibility coverage: flag retains test and product measurements without new gates', () => {
+  const config = parseYaml(readFileSync(join(root, 'codecov.yml'), 'utf8'));
+  const paths = [
+    'scripts/accessibility/', 'tests/test_accessibility_evidence.py', 'tests/test_accessibility_promotion.py',
+  ];
+  assert.deepEqual(config.flags['pytest-accessibility'], { paths, carryforward: true });
+  assert.equal(config.coverage.status.project['pytest-accessibility'], undefined);
+  assert.equal(config.component_management.individual_components.some(item => item.component_id === 'pytest-accessibility'), false);
+  for (const path of [...rootTestModules, ...retainedCoverageSources, 'scripts/accessibility/promotion.py']) {
+    assert.equal(config.ignore.some(pattern => matchesGlob(path, pattern)), false, `Coverage was ignored: ${path}`);
+  }
+});
 
 test('gitleaks: tested-revision helper and native regressions own scan and summary policy', () => {
   const workflow = graph['.github/workflows/gitleaks-scan.yml'];
@@ -153,7 +296,7 @@ function createRepository(t, files = {}) {
 function runSelector(repo, base, head, output, args = []) {
   const result = spawnSync(process.execPath, [selectorPath, ...args], {
     cwd: repo.cwd,
-    env: { ...repo.env, BASE_SHA: base, HEAD_SHA: head, GITHUB_OUTPUT: output },
+    env: { ...repo.env, NODE_DISABLE_COMPILE_CACHE: '1', BASE_SHA: base, HEAD_SHA: head, GITHUB_OUTPUT: output },
     encoding: 'utf8',
     timeout: 30_000,
   });
@@ -170,12 +313,27 @@ const selectionCases = [
   ['lint wrapper changes select every consumer', 'scripts/linting/Invoke-TerraformValidation.ps1', allSelectors],
   ['workflow changes select every consumer', '.github/workflows/python-lint.yml', allSelectors],
   ['local action changes select every consumer', '.github/actions/setup/action.yml', allSelectors],
-  ['training image defaults also select training and fuzz tests', 'training/setup/defaults.conf', [...imageConsumers, 'training', 'fuzz']],
+  ['training image defaults also select training, accessibility, and fuzz tests', 'training/setup/defaults.conf', [...imageConsumers, 'training', 'accessibility', 'fuzz']],
   ['shared shell defaults conservatively select every consumer', 'scripts/lib/common.sh', allSelectors],
   ['shared image scripts also select their own tests', 'shared/ci/smoke-image.sh', [...imageConsumers, 'shared_ci']],
-  ['VLM judge selects evaluation and the viewer backend', 'evaluation/vlm_judge/judge.py', ['evaluation', 'dv_backend']],
-  ['data-pipeline config selects its Python tests', 'data-pipeline/pyproject.toml', ['data_pipeline']],
-  ['Terraform provider locks retain unconditional validation', 'infrastructure/terraform/.terraform.lock.hcl', []],
+  ['VLM judge selects evaluation, the viewer backend, and accessibility', 'evaluation/vlm_judge/judge.py', ['evaluation', 'dv_backend', 'accessibility']],
+  ['data-pipeline config selects its Python and accessibility tests', 'data-pipeline/pyproject.toml', ['data_pipeline', 'accessibility']],
+  ['Terraform provider locks retain unconditional validation and accessibility', 'infrastructure/terraform/.terraform.lock.hcl', ['accessibility']],
+  ['accessibility contracts select evidence and docs', '.github/accessibility/surfaces.yaml', ['accessibility', 'docusaurus']],
+  ['issue templates select evidence', '.github/ISSUE_TEMPLATE/bug_report.yml', ['accessibility']],
+  ['code ownership selects evidence', '.github/CODEOWNERS', ['accessibility']],
+  ['viewer agent changes select evidence', '.github/agents/dataviewer-developer.agent.md', ['accessibility']],
+  ['evidence adapter changes select evidence and docs', 'scripts/accessibility/evidence_gate.py', ['accessibility', 'docusaurus']],
+  ['evidence tests select evidence, docs, and fuzz', 'tests/test_accessibility_evidence.py', ['accessibility', 'docusaurus', 'fuzz']],
+  ['viewer frontend changes select evidence and frontend tests', 'data-management/viewer/frontend/src/App.tsx', ['accessibility', 'dv_frontend']],
+  ['viewer backend changes select evidence, backend, and fuzz tests', 'data-management/viewer/backend/src/main.py', ['accessibility', 'dv_backend', 'fuzz']],
+  ['fleet deployment selects evidence', 'fleet-deployment/README.md', ['accessibility']],
+  ['fleet intelligence selects evidence', 'fleet-intelligence/README.md', ['accessibility']],
+  ['developer setup selects evidence', 'setup-dev.sh', ['accessibility']],
+  ['readme changes select evidence and docs', 'README.md', ['accessibility', 'docusaurus']],
+  ['support changes select evidence and docs', 'SUPPORT.md', ['accessibility', 'docusaurus']],
+  ['accessibility documentation selects evidence and docs', 'docs/contributing/accessibility.md', ['accessibility', 'docusaurus']],
+  ['root workspace lock changes select every consumer', 'package-lock.json', allSelectors],
   ['unrelated data does not select conditional consumers', 'archives/episode.bin', []],
 ];
 
@@ -192,10 +350,12 @@ const gitCases = [
   { name: 'added path', initial: {}, path: 'docs/new guide.md', operation: 'add', expected: ['docusaurus'] },
   { name: 'modified path', initial: { 'docs/guide.md': fileContent }, path: 'docs/guide.md', operation: 'modify', expected: ['docusaurus'] },
   { name: 'deleted path', initial: { 'docs/guide.md': fileContent }, path: 'docs/guide.md', operation: 'delete', expected: ['docusaurus'] },
-  { name: 'rename between consumers', initial: { 'docs/guide.md': fileContent }, path: 'docs/guide.md', to: 'data-pipeline/config.txt', expected: ['docusaurus', 'data_pipeline'] },
-  { name: 'reverse rename between consumers', initial: { 'data-pipeline/config.txt': fileContent }, path: 'data-pipeline/config.txt', to: 'docs/guide.md', expected: ['docusaurus', 'data_pipeline'] },
+  { name: 'rename between consumers', initial: { 'docs/guide.md': fileContent }, path: 'docs/guide.md', to: 'data-pipeline/config.txt', expected: ['docusaurus', 'data_pipeline', 'accessibility'] },
+  { name: 'reverse rename between consumers', initial: { 'data-pipeline/config.txt': fileContent }, path: 'data-pipeline/config.txt', to: 'docs/guide.md', expected: ['docusaurus', 'data_pipeline', 'accessibility'] },
   { name: 'rename where only the old path matches', initial: { 'docs/guide.md': fileContent }, path: 'docs/guide.md', to: 'archives/guide.txt', expected: ['docusaurus'] },
   { name: 'rename where only the new path matches', initial: { 'archives/guide.txt': fileContent }, path: 'archives/guide.txt', to: 'docs/guide.md', expected: ['docusaurus'] },
+  { name: 'rename away from accessibility input', initial: { 'scripts/accessibility/evidence.py': fileContent },   path: 'scripts/accessibility/evidence.py', to: 'archives/evidence.py', expected: ['accessibility', 'docusaurus'] },
+    { name: 'deleted accessibility input', initial: { '.github/accessibility/surfaces.yaml': fileContent }, path: '.github/accessibility/surfaces.yaml', operation: 'delete', expected: ['accessibility', 'docusaurus'] },
 ];
 
 for (const fixture of gitCases) {
@@ -323,11 +483,86 @@ test('workflow graph: actual parsed repository and declared invariants pass', ()
   assert.equal(osv.classification, 'advisory');
   assert.equal(osv.outcomeSchema, 'advisory');
   assert.equal(graph[prPath].jobs[summaryId].needs.includes('osv-scanner'), true);
-  assert.deepEqual(Object.keys(graph[docsPath].on).sort(), ['push', 'workflow_dispatch']);
-  assert.equal(graph[docsPath].jobs.test.uses, './.github/workflows/docusaurus-tests.yml');
-  assert.equal(graph[docsPath].jobs.build.needs, 'test');
+  assert.deepEqual(Object.keys(graph[docsPath].on), ['workflow_run']);
+  assert.equal(graph[docsPath].jobs.test, undefined);
+  assert.equal(graph[docsPath].jobs.build.needs, undefined);
   assert.equal(graph[docsPath].jobs.deploy.needs, 'build');
+  assert.deepEqual(Object.keys(graph[promotionPath].on), ['workflow_dispatch']);
+  assert.deepEqual(Object.keys(graph[promotionPath].jobs), ['promote']);
 });
+
+test('workflow graph: accessibility evidence is conditional on PRs and required on main', () => {
+  const lane = contract.lanes.find(lane => lane.id === 'accessibility-evidence');
+  assert.equal(lane.selector, 'accessibility');
+  assert.equal(lane.classification, 'mandatory');
+  assert.equal(lane.outcomeSchema, 'required');
+  for (const [owner, path] of [['pr', prPath], ['main', mainPath]]) {
+    const job = graph[path].jobs[lane.owners[owner]];
+    assert.equal(job.uses, './.github/workflows/accessibility-evidence.yml');
+    assert.equal(job.with['run-product-evidence'], true);
+    assert.equal(job.if, owner === 'pr' ? "needs.changes.outputs.accessibility == 'true'" : undefined);
+    assert.ok(requiredLanes(contract, owner).some(required => required.id === lane.id));
+  }
+});
+
+test('workflow graph: Docusaurus retains evidence composition and build-first coverage', () => {
+  const steps = graph['.github/workflows/docusaurus-tests.yml'].jobs.docusaurus.steps;
+  const scripts = JSON.parse(readFileSync(join(root, 'docs/docusaurus/package.json'), 'utf8')).scripts;
+  const coverage = steps.find(step => step.id === 'test-coverage').run;
+  assert.match(coverage, /^set -euo pipefail\nnpm run typecheck\nnpm run build\nnpx --no-install jest --coverage --json /);
+  assert.ok(coverage.includes('--outputFile="$GITHUB_WORKSPACE/logs/docusaurus-jest.json"'));
+  assert.ok(coverage.includes('--test-reporter-destination="$GITHUB_WORKSPACE/logs/docusaurus-node.xml"'));
+  assert.ok(coverage.includes('scripts/validate-mermaid-accessibility.test.mjs\nnode scripts/validate-mermaid-accessibility.mjs'));
+  assert.match(scripts['test:coverage'], /^npm run typecheck && npm run build && jest --coverage\b/);
+  assert.equal(steps.find(step => step.id === 'label-consistency').run, 'npm run lint:label-registry');
+  assert.ok(steps.some(step => step.run?.includes('--prepare-docusaurus-composition')));
+  assert.ok(steps.some(step => step.run?.includes('--prepare-docusaurus-source-manifest')));
+  assert.equal(steps.some(step => step.name === 'Build verification'), false);
+  assert.equal(graph[mainPath].jobs['docusaurus-tests'].with['evidence-cadence'], 'release');
+  assert.equal(graph[mainPath].jobs['docusaurus-tests'].with['required-completeness'], 'automated');
+});
+
+test('workflow graph: accessibility promotion owns the only Pages deployment trigger', () => {
+  assert.equal(graph[promotionPath].name, 'Docusaurus Accessibility Promotion');
+  assert.deepEqual(graph[promotionPath].permissions, { contents: 'read', actions: 'read' });
+  assert.deepEqual(graph[promotionPath].jobs.promote.permissions, { contents: 'read', actions: 'read' });
+  assert.deepEqual(graph[docsPath].permissions, { contents: 'read', actions: 'read' });
+  assert.deepEqual(graph[docsPath].jobs.build.permissions, { contents: 'read', actions: 'read', pages: 'write' });
+  assert.deepEqual(graph[docsPath].jobs.deploy.permissions, { contents: 'read', actions: 'read', pages: 'write', 'id-token': 'write' });
+  assert.deepEqual(graph[docsPath].on.workflow_run.workflows, [graph[promotionPath].name]);
+  assert.deepEqual(graph[docsPath].on.workflow_run.types, ['completed']);
+  assert.deepEqual(contract.lanes.find(lane => lane.id === 'docusaurus-tests').owners, {
+    pr: 'docusaurus-tests', main: 'docusaurus-tests',
+  });
+});
+
+test('workflow graph: promotion origin guards allow equivalent ordering and expression wrappers', () => {
+  const candidate = structuredClone(graph);
+  candidate[docsPath].jobs.build.if = [
+    'github.event.workflow_run.head_repository.full_name==github.repository',
+    'github.event.workflow_run.repository.full_name==github.repository',
+    "github.event.workflow_run.head_branch=='main'",
+    "github.event.workflow_run.event=='workflow_dispatch'",
+    "github.event.workflow_run.conclusion=='success'",
+  ].join(' && ');
+  candidate[docsPath].jobs.deploy.needs = ['build'];
+  assert.deepEqual(validateWorkflows(candidate, contract), []);
+});
+
+for (const combined of [false, true]) {
+  test(`workflow graph: final evidence verification precedes current-main check (${combined ? 'combined' : 'separate'} steps)`, () => {
+    const candidate = structuredClone(graph);
+    const steps = candidate[docsPath].jobs.deploy.steps;
+    const publishIndex = steps.findIndex(step => step.uses?.startsWith('actions/deploy-pages@'));
+    const verify = 'python -m scripts.accessibility.promotion verify-promoted';
+    const current = 'python -m scripts.accessibility.promotion check-current';
+    const checks = combined
+      ? [{ run: `set -euo pipefail\n${verify}\n${current}\n`, shell: 'bash' }]
+      : [{ run: verify, shell: 'bash' }, { run: current, shell: 'bash' }];
+    steps.splice(publishIndex - 1, 1, ...checks);
+    assert.deepEqual(validateWorkflows(candidate, contract), []);
+  });
+}
 
 function writeActionGraph(cwd) {
   writeFixture(cwd, '.github/workflows/test.yml', 'on: workflow_call\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/outer\n');
@@ -431,6 +666,78 @@ test('secondary callers: a separately declared caller passes without a validator
   candidate.graph[caller] = { on: 'workflow_dispatch', jobs: { check: { uses: './.github/workflows/spell-check.yml' } } };
   candidate.contract.secondaryCallers[caller] = { events: ['workflow_dispatch'], jobs: { check: 'spell-check.yml' } };
   assert.deepEqual(validateWorkflows(candidate.graph, candidate.contract), []);
+});
+
+function eventGatedCaller(condition, rootEvents = ['push', 'pull_request']) {
+  const candidate = { graph: structuredClone(graph), contract: structuredClone(contract) };
+  const caller = '.github/workflows/cadenced-check.yml';
+  const root = '.github/workflows/consumer.yml';
+  candidate.graph[caller] = {
+    on: { workflow_call: {}, schedule: [{ cron: '0 9 * * 1' }], workflow_dispatch: {} },
+    jobs: { check: { if: condition, uses: './.github/workflows/spell-check.yml' } },
+  };
+  candidate.contract.secondaryCallers[caller] = {
+    events: ['schedule', 'workflow_dispatch'], jobs: { check: 'spell-check.yml' },
+  };
+  candidate.graph[root] = { on: rootEvents, jobs: { nested: { uses: `./${caller}` } } };
+  return { ...candidate, caller, root };
+}
+
+for (const condition of [
+  "${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}",
+  "github.event_name=='schedule'||github.event_name=='workflow_dispatch'",
+  "github.event_name == 'schedule'",
+  "${{ github.event_name == 'SCHEDULE' }}",
+]) {
+  test(`secondary callers: registered event guard excludes every root event (${condition})`, () => {
+    const candidate = eventGatedCaller(condition);
+    assert.deepEqual(validateWorkflows(candidate.graph, candidate.contract), []);
+  });
+}
+
+for (const [name, condition, rootEvents] of [
+  ['missing guard', undefined, ['push']],
+  ['boolean guard', false, ['push']],
+  ['one overlapping root event', "github.event_name == 'schedule'", ['push', 'schedule']],
+  ['case-insensitive overlapping event', "github.event_name == 'SCHEDULE'", ['schedule']],
+  ['undeclared guard event', "github.event_name == 'pull_request_target'", ['push']],
+  ['additional truthy branch', "github.event_name == 'schedule' || true", ['push']],
+  ['unsupported comparison', "github.event_name != 'push'", ['push']],
+  ['unsupported function', "contains('schedule', github.event_name)", ['push']],
+  ['incomplete expression wrapper', "${{ github.event_name == 'schedule'", ['push']],
+  ['extra expression wrapper', "${{ github.event_name == 'schedule' }} || true", ['push']],
+]) {
+  test(`secondary callers: event guard rejects ${name}`, () => {
+    const candidate = eventGatedCaller(condition, rootEvents);
+    const errors = validateWorkflows(candidate.graph, candidate.contract);
+    assert.ok(errors.some(error => error.includes(`${candidate.caller}:check`)
+      && error.includes(`from executable root ${candidate.root}`) && error.includes('duplicate event ownership')), JSON.stringify(errors));
+  });
+}
+
+test('secondary callers: an event-excluded undeclared call still fails', () => {
+  const candidate = eventGatedCaller("github.event_name == 'schedule'");
+  delete candidate.contract.secondaryCallers[candidate.caller];
+  const errors = validateWorkflows(candidate.graph, candidate.contract);
+  assert.ok(errors.some(error => error.includes(`${candidate.caller}:check`)
+    && error.includes(`from executable root ${candidate.root}`) && error.includes('duplicate event ownership')), JSON.stringify(errors));
+});
+
+test('secondary callers: an event-excluded call cannot inherit an invalid declaration', () => {
+  const candidate = eventGatedCaller("github.event_name == 'schedule'");
+  candidate.contract.secondaryCallers[candidate.caller].events = ['schedule'];
+  const errors = validateWorkflows(candidate.graph, candidate.contract);
+  assert.ok(errors.some(error => error.includes('secondary caller event mismatch')), JSON.stringify(errors));
+  assert.ok(errors.some(error => error.includes(`${candidate.caller}:check`)
+    && error.includes(`from executable root ${candidate.root}`) && error.includes('duplicate event ownership')), JSON.stringify(errors));
+});
+
+test('secondary callers: event-excluded registered calls still validate descendant ownership', () => {
+  const candidate = eventGatedCaller("github.event_name == 'schedule'");
+  candidate.graph['.github/workflows/spell-check.yml'].jobs.nested = { uses: './.github/workflows/markdown-lint.yml' };
+  const errors = validateWorkflows(candidate.graph, candidate.contract);
+  assert.ok(errors.some(error => error.includes('spell-check.yml:nested')
+    && error.includes(`from executable root ${candidate.root}`) && error.includes('duplicate event ownership')), JSON.stringify(errors));
 });
 
 test('secondary callers: pure reusable workflows without an executable root are not event owners', () => {
@@ -597,10 +904,163 @@ const graphMutations = [
     pr['osv-scanner'].steps.find(step => step.uses?.startsWith('google/osv-scanner-action/'))['continue-on-error'] = false;
   }, 'OSV must remain advisory'],
   ['OSV advisory scan outcome hidden', ({ pr }) => { pr['osv-scanner'].outputs['work-status'] = '${{ steps.osv-scan.conclusion }}'; }, 'OSV advisory summary must expose the scan outcome'],
-  ['docs chained to another workflow instead of independent push', ({ docs }) => {
-    delete docs.on.push;
+  ['docs chained to CI instead of accessibility promotion', ({ docs }) => {
     docs.on.workflow_run = { workflows: ['CI'], types: ['completed'] };
-  }, 'Documentation deployment must remain independent'],
+  }, 'Documentation deployment must consume only completed accessibility promotion runs'],
+  ['additional deployment workflow allowlist entry', ({ docs }) => {
+    docs.on.workflow_run.workflows.push('CI');
+  }, 'Documentation deployment must consume only completed accessibility promotion runs'],
+  ['requested rather than completed promotion trigger', ({ docs }) => {
+    docs.on.workflow_run.types = ['requested'];
+  }, 'Documentation deployment must consume only completed accessibility promotion runs'],
+  ['non-main promotion branch filter', ({ docs }) => {
+    docs.on.workflow_run.branches = ['release'];
+  }, 'Documentation deployment must consume only completed accessibility promotion runs'],
+  ['manual deployment bypass', ({ docs }) => { docs.on.workflow_dispatch = {}; }, 'event ownership mismatch'],
+  ['push deployment bypass', ({ docs }) => { docs.on.push = {}; }, 'event ownership mismatch'],
+  ['automatically triggered promotion', ({ promotion }) => { promotion.on.push = {}; }, 'event ownership mismatch'],
+  ['renamed promotion workflow', ({ promotion }) => { promotion.name = 'Different Promotion'; }, 'workflow name mismatch'],
+  ['unregistered promotion job', ({ promotion }) => {
+    promotion.jobs.extra = { 'runs-on': 'ubuntu-latest', steps: [] };
+  }, 'undeclared job extra'],
+  ['unregistered deployment job', ({ docs }) => {
+    docs.jobs.extra = { 'runs-on': 'ubuntu-latest', steps: [] };
+  }, 'undeclared job extra'],
+  ['synchronous documentation retesting', ({ docs }) => {
+    docs.jobs.test = { uses: './.github/workflows/docusaurus-tests.yml' };
+  }, 'undeclared job test'],
+  ['promotion workflow write permissions', ({ promotion }) => {
+    promotion.permissions.contents = 'write';
+  }, 'workflow permission profile mismatch'],
+  ['deployment workflow Pages permission escalation', ({ docs }) => {
+    docs.permissions.pages = 'write';
+  }, 'workflow permission profile mismatch'],
+  ['promotion job Pages permissions', ({ promotion }) => {
+    promotion.jobs.promote.permissions.pages = 'write';
+  }, 'permission profile mismatch'],
+  ['deployment build OIDC permissions', ({ docs }) => {
+    docs.jobs.build.permissions['id-token'] = 'write';
+  }, 'permission profile mismatch'],
+  ['missing promotion approval environment', ({ promotion }) => {
+    delete promotion.jobs.promote.environment;
+  }, 'protected accessibility-release environment'],
+  ['promotion failure suppression', ({ promotion }) => {
+    promotion.jobs.promote['continue-on-error'] = true;
+  }, 'fail-closed manual execution'],
+  ['promotion skip condition', ({ promotion }) => {
+    promotion.jobs.promote.if = 'false';
+  }, 'fail-closed manual execution'],
+  ['artifact verification without origin guards', ({ docs }) => {
+    delete docs.jobs.build.if;
+  }, 'successful main-branch same-repository promotion'],
+  ['artifact verification with disjunctive origin guards', ({ docs }) => {
+    docs.jobs.build.if = docs.jobs.build.if.replace('&&', '||');
+  }, 'successful main-branch same-repository promotion'],
+  ['artifact verification accepts failed promotion', ({ docs }) => {
+    docs.jobs.build.if = docs.jobs.build.if.replace("'success'", "'failure'");
+  }, 'successful main-branch same-repository promotion'],
+  ['artifact verification accepts untrusted branch', ({ docs }) => {
+    docs.jobs.build.if = docs.jobs.build.if.replace("'main'", "'feature'");
+  }, 'successful main-branch same-repository promotion'],
+  ['artifact verification failure suppression', ({ docs }) => {
+    docs.jobs.build['continue-on-error'] = true;
+  }, 'artifact verification must execute without failure suppression'],
+  ['deployment bypasses artifact verification', ({ docs }) => {
+    delete docs.jobs.deploy.needs;
+  }, 'deployment must require successful artifact verification'],
+  ['deployment ignores failed artifact verification', ({ docs }) => {
+    docs.jobs.deploy.if = 'always()';
+  }, 'deployment must require successful artifact verification'],
+  ['deployment failure suppression', ({ docs }) => {
+    docs.jobs.deploy['continue-on-error'] = true;
+  }, 'deployment must require successful artifact verification'],
+  ['missing Pages environment', ({ docs }) => {
+    delete docs.jobs.deploy.environment;
+  }, 'github-pages environment'],
+  ['promotion checks out untrusted artifact revision', ({ promotion }) => {
+    promotion.jobs.promote.steps.find(step => step.uses?.startsWith('actions/checkout@')).with.ref = '${{ inputs.source_revision }}';
+  }, 'promotion must check out trusted main'],
+  ['deployment checks out source run revision', ({ docs }) => {
+    docs.jobs.build.steps.find(step => step.uses?.startsWith('actions/checkout@')).with.ref = '${{ github.event.workflow_run.head_sha }}';
+  }, 'artifact verification must check out trusted main'],
+  ['deployment rebuilds downloaded documentation', ({ docs }) => {
+    docs.jobs.build.steps.push({ run: 'npm run build' });
+  }, 'retained build without rebuilding or retesting'],
+  ['conditional Pages artifact publication', ({ docs }) => {
+    docs.jobs.build.steps.find(step => step.uses?.startsWith('actions/upload-pages-artifact@')).if = 'false';
+  }, 'one unconditional Pages artifact'],
+  ['suppressed Pages deployment failure', ({ docs }) => {
+    docs.jobs.deploy.steps.find(step => step.uses?.startsWith('actions/deploy-pages@'))['continue-on-error'] = true;
+  }, 'one unconditional Pages deployment'],
+  ['promotion downloads artifact by mutable name', ({ promotion }) => {
+    const step = promotion.jobs.promote.steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
+    delete step.with['artifact-ids'];
+    step.with.name = 'latest-evidence';
+  }, 'validate producer identity before downloading the exact same-repository artifact'],
+  ['deployment downloads from an unverified run', ({ docs }) => {
+    docs.jobs.build.steps.find(step => step.uses?.startsWith('actions/download-artifact@')).with['run-id'] = '${{ github.run_id }}';
+  }, 'validate producer identity before downloading the exact same-repository artifact'],
+  ['deployment downloads from another repository', ({ docs }) => {
+    docs.jobs.build.steps.find(step => step.uses?.startsWith('actions/download-artifact@')).with.repository = 'other/repository';
+  }, 'validate producer identity before downloading the exact same-repository artifact'],
+  ['producer validation after artifact download', ({ docs }) => {
+    const steps = docs.jobs.build.steps;
+    const checkIndex = steps.findIndex(step => step.id === 'promotion');
+    const downloadIndex = steps.findIndex(step => step.uses?.startsWith('actions/download-artifact@'));
+    [steps[checkIndex], steps[downloadIndex]] = [steps[downloadIndex], steps[checkIndex]];
+  }, 'validate producer identity before downloading the exact same-repository artifact'],
+  ['suppressed producer validation failure', ({ docs }) => {
+    docs.jobs.build.steps.find(step => step.id === 'promotion')['continue-on-error'] = true;
+  }, 'validate producer identity before downloading the exact same-repository artifact'],
+  ['promotion omits hidden retained files', ({ promotion }) => {
+    promotion.jobs.promote.steps.find(step => step.uses?.startsWith('actions/upload-artifact@')).with['include-hidden-files'] = false;
+  }, 'immediately before retaining the complete package'],
+  ['promotion accepts an empty retained package', ({ promotion }) => {
+    promotion.jobs.promote.steps.find(step => step.uses?.startsWith('actions/upload-artifact@')).with['if-no-files-found'] = 'warn';
+  }, 'immediately before retaining the complete package'],
+  ['promotion loses run-bound artifact identity', ({ promotion }) => {
+    promotion.jobs.promote.steps.find(step => step.uses?.startsWith('actions/upload-artifact@')).with.name = 'latest-promotion';
+  }, 'immediately before retaining the complete package'],
+  ['promotion suppresses final verification', ({ promotion }) => {
+    const steps = promotion.jobs.promote.steps;
+    steps[steps.findIndex(step => step.uses?.startsWith('actions/upload-artifact@')) - 1]['continue-on-error'] = true;
+  }, 'immediately before retaining the complete package'],
+  ['promotion lowers required completeness', ({ promotion }) => {
+    const step = promotion.jobs.promote.steps.find(step => step.run?.includes('--require-completeness release'));
+    step.run = step.run.replace('--require-completeness release', '--require-completeness automated');
+  }, 'release-complete recomposition'],
+  ['Pages uploads a different build directory', ({ docs }) => {
+    docs.jobs.build.steps.find(step => step.uses?.startsWith('actions/upload-pages-artifact@')).with.path = 'docs/docusaurus/build';
+  }, 'verify the exact retained build before Pages upload'],
+  ['conditional retained build verification', ({ docs }) => {
+    docs.jobs.build.steps.find(step => step.id === 'verify').if = 'false';
+  }, 'verify the exact retained build before Pages upload'],
+  ['missing final current-main check', ({ docs }) => {
+    const steps = docs.jobs.deploy.steps;
+    steps.splice(steps.findIndex(step => step.uses?.startsWith('actions/deploy-pages@')) - 1, 1);
+  }, 'recheck current main immediately before publication'],
+  ['suppressed final current-main check', ({ docs }) => {
+    const steps = docs.jobs.deploy.steps;
+    steps[steps.findIndex(step => step.uses?.startsWith('actions/deploy-pages@')) - 1]['continue-on-error'] = true;
+  }, 'recheck current main immediately before publication'],
+  ['intervening step after current-main check', ({ docs }) => {
+    const steps = docs.jobs.deploy.steps;
+    steps.splice(steps.findIndex(step => step.uses?.startsWith('actions/deploy-pages@')), 0, { run: 'echo unchecked' });
+  }, 'recheck current main immediately before publication'],
+  ['final current-main check uses an unrelated revision', ({ docs }) => {
+    docs.jobs.deploy.env.SOURCE_SHA = '${{ github.sha }}';
+  }, 'recheck current main immediately before publication'],
+  ['post-approval verification downloads another artifact', ({ docs }) => {
+    docs.jobs.deploy.steps.find(step => step.uses?.startsWith('actions/download-artifact@')).with['artifact-ids'] = '123';
+  }, 'revalidate the same retained package after environment approval'],
+  ['post-approval evidence verification is suppressed', ({ docs }) => {
+    docs.jobs.deploy.steps.find(step => step.run?.includes('verify-promoted'))['continue-on-error'] = true;
+  }, 'revalidate the same retained package after environment approval'],
+  ['combined final verification follows current-main check', ({ docs }) => {
+    const steps = docs.jobs.deploy.steps;
+    const finalCheck = steps[steps.findIndex(step => step.uses?.startsWith('actions/deploy-pages@')) - 1];
+    finalCheck.run = 'set -euo pipefail\npython -m scripts.accessibility.promotion check-current\npython -m scripts.accessibility.promotion verify-promoted\n';
+  }, 'revalidate the same retained package after environment approval'],
   ['missing selector output wiring', ({ pr }) => { delete pr.changes.outputs.dv_backend; }, 'Missing selector output: dv_backend'],
   ['inverted selection allowing an unexpected skip', ({ pr }) => { pr['docusaurus-tests'].if = "needs.changes.outputs.docusaurus == 'false'"; }, 'selector condition mismatch'],
   ['required outcome schema permitting selected skips', ({ contract }) => { contract.outcomeSchemas.required.selected.push('skipped'); }, 'Required outcomes must fail closed'],
@@ -644,7 +1104,7 @@ for (const [name, mutate, diagnostic] of graphMutations) {
     assert.deepEqual(validateWorkflows(candidate.graph, candidate.contract), [], 'Original graph must be valid');
     const pr = candidate.graph[prPath].jobs;
     mutate({
-      ...candidate, pr, main: candidate.graph[mainPath].jobs, docs: candidate.graph[docsPath],
+      ...candidate, pr, main: candidate.graph[mainPath].jobs, docs: candidate.graph[docsPath], promotion: candidate.graph[promotionPath],
       summary: pr[summaryId], cpu: candidate.graph[smokePath].jobs['import-smoke'],
     });
     const errors = validateWorkflows(candidate.graph, candidate.contract);
@@ -978,6 +1438,19 @@ test('outcomes: verified unselected lanes may legitimately skip', t => {
   assert.equal(needs.changes.outputs.training, 'false');
   assert.equal(needs['pytest-training'].result, 'skipped');
   assert.equal(needs['docusaurus-tests'].result, 'success');
+  assert.deepEqual(evaluateChecks(needs, contract), []);
+});
+
+test('outcomes: selected accessibility evidence must succeed', t => {
+  const needs = outcomeFixture(t, { all: true });
+  needs['accessibility-evidence'].result = 'skipped';
+  assert.ok(evaluateChecks(needs, contract).includes('accessibility-evidence: expected success but received skipped'));
+});
+
+test('outcomes: unselected accessibility evidence may skip', t => {
+  const needs = outcomeFixture(t);
+  assert.equal(needs.changes.outputs.accessibility, 'false');
+  assert.equal(needs['accessibility-evidence'].result, 'skipped');
   assert.deepEqual(evaluateChecks(needs, contract), []);
 });
 
@@ -1569,7 +2042,7 @@ test('evaluator CLI: valid needs succeed and malformed or missing input fails cl
     ['{', 1, 'Expected property name'],
     [undefined, 1, 'Missing needs object'],
   ]) {
-    const env = { ...process.env, ...evidence.env, CI_SUMMARY_PATH: join(temporaryDirectory(t), 'summary.json') };
+    const env = { ...nodeEnvironment, ...evidence.env, CI_SUMMARY_PATH: join(temporaryDirectory(t), 'summary.json') };
     if (input === undefined) delete env.NEEDS_JSON;
     else env.NEEDS_JSON = input;
     const result = spawnSync(process.execPath, [evaluatorPath], { cwd: root, env, encoding: 'utf8' });
@@ -1580,11 +2053,11 @@ test('evaluator CLI: valid needs succeed and malformed or missing input fails cl
 });
 
 test('validator CLI: repository succeeds and a missing workflow directory fails closed', t => {
-  const success = spawnSync(process.execPath, [validatorPath], { cwd: root, encoding: 'utf8' });
+  const success = spawnSync(process.execPath, [validatorPath], { cwd: root, env: nodeEnvironment, encoding: 'utf8' });
   assert.ifError(success.error);
   assert.equal(success.status, 0, success.stderr);
   assert.ok(success.stdout.includes('CI workflow graph and dependency contract are valid.'));
-  const failure = spawnSync(process.execPath, [validatorPath], { cwd: temporaryDirectory(t), encoding: 'utf8' });
+  const failure = spawnSync(process.execPath, [validatorPath], { cwd: temporaryDirectory(t), env: nodeEnvironment, encoding: 'utf8' });
   assert.ifError(failure.error);
   assert.equal(failure.status, 1);
   assert.ok(failure.stderr.includes('.github'));

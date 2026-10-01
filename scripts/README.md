@@ -2,7 +2,7 @@
 title: Scripts
 description: CI/CD scripts, shared libraries, linting, security, and Pester tests for the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-25
+ms.date: 2026-10-01
 ms.topic: reference
 keywords:
   - scripts
@@ -102,6 +102,12 @@ Container findings are advisory; container discovery, scanning, and report publi
 required execution. Only superseded PR runs cancel automatically; main and release runs do not.
 Summaries consume the workflow cancellation context even when no child started. A cancelled
 or superseded run never produces a successful release gate.
+
+Accessibility validation participates in both required summaries. The Docusaurus accessibility
+collector retains its 90-minute budget for provenance checks, browser collection, and evidence
+composition; it is not a build-only job. Scheduled Docusaurus calls remain excluded from PR and
+main execution inventories. Documentation deployment consumes verified accessibility promotion
+artifacts independently of the release-please gate.
 
 Use a full workflow rerun after a failure. Partial reruns cannot reuse receipts from an earlier
 attempt. Run `npm run lint:ci` and `npm run test:ci` for graph validation, negative mutations,
@@ -216,7 +222,18 @@ a PR.
 
 The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.yml` workflow on a weekly schedule. It downloads each pinned GPG key, installer, and CLI archive, compares SHA-256 hashes against the canonical pin files listed below, and queries upstream Helm repositories for chart version drift.
 
-Findings are written to `binary-freshness-results.sarif` with per-rule `helpUri` values pointing at the appropriate remediation script.
+Findings are written to `binary-freshness-results.sarif` with per-rule `helpUri` values pointing at the appropriate remediation script. The check distinguishes integrity failures from advisory chart drift and unavailable upstream lookups:
+
+| Result | SARIF | Scanner exit | Workflow effect |
+|--------|-------|--------------|-----------------|
+| Clean | No findings | `0` | Success after SARIF upload |
+| Confirmed binary hash mismatch | Warning, `hash-mismatch` | `1` | Failure; SARIF still uploads |
+| Chart version drift | Warning, `version-drift` | `0` | Success with visible alert |
+| Binary download or chart lookup unavailable | Warning, `download-failure` or `lookup-failure` | `0` | Success with visible alert |
+| Scanner setup or report error | SARIF may be absent | `2` | Failure |
+| SARIF ingestion error | Upload step fails | Scanner exit unchanged | Failure |
+
+A successful HTTP response is not sufficient evidence for a binary mismatch: the scanner rejects JSON/HTML responses and malformed ZIP/GZIP bodies before hashing. In September 2026 the pinned NGC CLI 3.41.4 URL returned a changing JSON status response rather than the expected ZIP archive. Do not replace the NGC SHA-256 pin with the hash of that response. Obtain and independently verify the ZIP through NVIDIA's supported download path before changing the pin.
 
 The `Test-HveCoreFreshness.ps1` script runs weekly through `check-hve-core-freshness.yml`. Each derived file declares a baseline. `release` files compare the **upstream** blob SHA at `HVE_CORE_DERIVED_FILES_REF` with the resolved newest non-draft release. `source-header` files compare the revision recorded in their header with a resolved upstream `main` revision. This reports relevant upstream changes before they appear in a release.
 
@@ -253,7 +270,9 @@ All other references to these pins are read-only consumers:
 
 Run `scripts/update-chart-hashes.sh` locally after bumping any pinned Helm chart version. The script runs `helm pull` for each chart, computes the SHA-256, and rewrites the matching `VAR="${VAR:-...}"` line in `infrastructure/setup/defaults.conf` so the runtime default stays in sync with the upstream digest. Commit the resulting `defaults.conf` diff alongside the chart-version bump.
 
-Binary pins in `.devcontainer/devcontainer.json` are updated by hand when the weekly freshness check flags drift; the validator's SARIF output links to the exact file and pin to change.
+Freshness alone does not establish chart digest, paired OSMO image, or deployed GPU compatibility. Keep the GPU Operator and OSMO chart defaults until a coordinated chart-and-hash update passes deployment compatibility validation.
+
+Binary pins in `.devcontainer/devcontainer.json` require the actual artifact and an independently verified SHA-256 before a manual update. The validator's SARIF output identifies the file and pin to investigate; a download-failure alert does not justify a hash change.
 
 ## 🧪 Tests
 

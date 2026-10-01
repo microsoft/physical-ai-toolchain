@@ -172,6 +172,11 @@ textarea:focus-visible,
   vertical-align: middle;
 }
 
+/* Keep menu visibility synchronized with disclosure state for native keyboard navigation. */
+.navbar__item.dropdown > .dropdown__menu {
+  transition: none !important;
+}
+
 html[data-theme='dark'] .navbar {
   background-color: #1f1f1f;
 }
@@ -188,6 +193,15 @@ html[data-theme='dark'] .navbar {
 .menu__link--active:not(.menu__link--sublist) {
   font-weight: 600;
   background-color: var(--ms-learn-section-bg);
+}
+
+/* The theme clamps sidebar labels to two lines with boosted specificity, which hides text under text resize and spacing. */
+.menu__link [class*='linkLabel_'],
+.menu__link [class*='categoryLinkLabel_'] {
+  display: block !important;
+  overflow: visible !important;
+  line-clamp: none !important;
+  -webkit-line-clamp: unset !important;
 }
 
 /* ================================================================

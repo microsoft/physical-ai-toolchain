@@ -33,8 +33,7 @@ permissions:
   contents: read
 
 jobs:
-  # Extract the unique, digest-pinned external base images from every Dockerfile.
-  # Stage aliases and ARG/scratch bases carry no @sha256 digest and are excluded.
+  # Bind digest-pinned external bases to stable source lanes before scanning.
   discover:
     name: Discover Base Images
     runs-on: ubuntu-latest
@@ -52,26 +51,27 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Extract digest-pinned base images
+      - name: Extract source-bound scan lanes
         id: extract
         run: |
           set -euo pipefail
-          if ! images="$(bash scripts/security/discover-base-images.sh)"; then
-            echo "::error::Failed to discover digest-pinned base images"
+          if ! images="$(bash scripts/security/discover-base-images.sh --matrix)"; then
+            echo "::error::Failed to resolve source-bound scan lanes"
             exit 1
           fi
-          echo "Discovered base images:"
-          echo "$images"
-          if [[ -z "$images" ]]; then
+          count=$(jq 'length' <<< "$images")
+          echo "Discovered $count source-bound scan lanes"
+          if [[ "$count" -eq 0 ]]; then
             echo "::error::Selected container scan has no digest-pinned images"
             exit 1
           fi
           matrix='[]'
-          while IFS= read -r image; do
+          while IFS= read -r row; do
+            image=$(jq -r '.image' <<< "$row")
             shard=$(bash scripts/security/image-slug.sh "$image")
-            matrix=$(jq -c --arg image "$image" --arg shard "$shard" '. + [{image:$image,shard:$shard}]' <<< "$matrix")
-          done <<< "$images"
-          count=$(jq 'length' <<< "$matrix")
+            matrix=$(jq -c --argjson row "$row" --arg shard "$shard" '. + [$row + {shard:$shard}]' <<< "$matrix")
+          done < <(jq -c '.[]' <<< "$images")
+          wait "$!"
           shards=$(jq -c '[.[].shard]' <<< "$matrix")
           targets=$(jq -c 'map({key:.shard,value:.image}) | from_entries' <<< "$matrix")
           if [[ "$(jq 'length' <<< "$targets")" != "$count" ]]; then
@@ -150,7 +150,7 @@ jobs:
         continue-on-error: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
         with:
           sarif_file: logs/container/${{ matrix.shard }}.sarif
-          category: trivy-image-${{ matrix.shard }}
+          category: ${{ matrix.category }}
 
       - name: Publish image execution evidence
         id: outcome

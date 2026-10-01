@@ -1,6 +1,9 @@
 ---
 title: Azure Storage Architecture
-description: Storage account roles, container layouts, and data paths for AzureML system data and robotics datasets and checkpoints.
+description: Storage layout, naming conventions, and lifecycle policies for robotics datasets and model checkpoints in Azure Blob Storage and ADLS Gen2.
+author: Microsoft Robotics-AI Team
+ms.date: 2026-09-23
+ms.topic: reference
 ---
 
 Storage architecture for robotics data across two Azure Storage accounts: an ML workspace storage account for AzureML system data, and an optional ADLS Gen2 data lake for domain data (datasets, model checkpoints).
@@ -208,6 +211,7 @@ Lifecycle policies do NOT automatically rehydrate blobs.
 import re
 from pathlib import Path
 
+
 def validate_blob_path(blob_name: str, data_type: str) -> bool:
     """Validate blob path follows naming conventions."""
     patterns = {
@@ -221,6 +225,7 @@ def validate_blob_path(blob_name: str, data_type: str) -> bool:
         raise ValueError(f"Unknown data type: {data_type}")
 
     return bool(re.match(patterns[data_type], blob_name))
+
 
 # Example usage
 assert validate_blob_path("raw/robot-01/2026-03-05/episode-001.mcap", "raw")
@@ -320,4 +325,5 @@ az storage account management-policy show \
 
 ---
 
-🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction,
+then carefully refined by our team of discerning human reviewers.

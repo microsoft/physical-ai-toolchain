@@ -95,10 +95,17 @@ function verifyWorkflowReceipt(lane, needs, contract, owner, context, artifacts)
   const innerNeeds = {};
   for (const [job, metadata] of Object.entries(spec.jobs)) {
     let selected = true;
-    if (metadata.if && !metadata.discovery) {
-      const input = metadata.if.match(/^inputs\.(\w+)$/)?.[1];
-      requireEvidence(input && contract.smokeInputs[input], 'Unverified child selection');
-      selected = owner === 'main' || contract.smokeInputs[input].some(selector => needs.changes?.outputs?.[selector] === 'true');
+    const condition = String(metadata.if ?? '').replace(/^\s*\$\{\{\s*|\s*\}\}\s*$/g, '').trim();
+    if (condition && condition !== 'always()' && !metadata.discovery) {
+      if (workflow === 'accessibility-evidence' && job === 'product-evidence') {
+        requireEvidence(['pr', 'main'].includes(owner) &&
+          condition === "inputs.run-product-evidence == true || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+        'Unverified child selection');
+      } else {
+        const input = condition.match(/^inputs\.(\w+)$/)?.[1];
+        requireEvidence(input && contract.smokeInputs[input], 'Unverified child selection');
+        selected = owner === 'main' || contract.smokeInputs[input].some(selector => needs.changes?.outputs?.[selector] === 'true');
+      }
     }
     if (metadata.discovery) {
       const discovery = metadata.discovery;

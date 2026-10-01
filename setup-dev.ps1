@@ -197,9 +197,9 @@ Write-Info 'All required tools found'
 
 Write-Section 'UV Package Manager Setup'
 
-$UvVersion = '0.12.8'
-# SHA-256 for https://astral.sh/uv/0.12.8/install.ps1.
-$UvInstallerSha256 = 'c1c357b2945c4eb31f3380a6c0cb1c371f18b3c0d1856073f82d17cc52c892cb'
+$UvVersion = '0.12.20'
+# SHA-256 for https://astral.sh/uv/0.12.20/install.ps1.
+$UvInstallerSha256 = '7bd4af2878060e1dfda3b864cbbdaee1280dca166422084361a4478670278e20'
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Install-Uv `
@@ -335,11 +335,16 @@ if (Test-Path $IsaacLabDir) {
 else {
     Write-Info 'Cloning Isaac Lab for intellisense/Pylance support...'
     New-Item -ItemType Directory -Path (Join-Path $ScriptDir 'external') -Force | Out-Null
+    $IsaacLabCommit = 'ffff603eafc6b74264a5261cc0183d6a65390d78'
     git clone 'https://github.com/isaac-sim/IsaacLab.git' $IsaacLabDir
     if ($LASTEXITCODE -ne 0) {
         Write-Error "git clone failed (exit code $LASTEXITCODE)"
     }
-    Write-Info 'Isaac Lab cloned successfully'
+    git -C $IsaacLabDir checkout --quiet $IsaacLabCommit
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Isaac Lab checkout failed (exit code $LASTEXITCODE)"
+    }
+    Write-Info "Isaac Lab cloned successfully (pinned to $IsaacLabCommit)"
 }
 
 Write-Section 'hve-core Check'

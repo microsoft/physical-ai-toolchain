@@ -53,14 +53,14 @@ shared/ci/smoke-import.sh rl --mode cpu
 
 ## 🧪 Domains
 
-| Domain        | Python | Runtime image                           | CPU smoke | Runtime-image smoke |
-|---------------|--------|-----------------------------------------|-----------|---------------------|
-| `rl`          | 3.11   | Isaac Lab (`DEFAULT_ISAAC_LAB_IMAGE`)   | yes       | yes                 |
-| `il`          | 3.12   | PyTorch (`lerobot-train.yaml` default)  | yes       | yes                 |
-| `vla`         | 3.12   | PyTorch (`DEFAULT_LEROBOT_TRAIN_IMAGE`) | yes       | yes                 |
-| `evaluation`  | 3.12   | PyTorch (`evaluate.yaml`)               | yes       | yes                 |
-| `vlm-judge`   | 3.12   | none                                    | yes       | no                  |
-| `osmo-replay` | 3.11   | Python (`replay-azureml.yaml`)          | yes       | yes                 |
+| Domain        | Python | Runtime image                             | CPU smoke | Runtime-image smoke |
+|---------------|--------|-------------------------------------------|-----------|---------------------|
+| `rl`          | 3.12   | Isaac Lab 3.0 (`DEFAULT_ISAAC_LAB_IMAGE`) | yes       | yes                 |
+| `il`          | 3.12   | PyTorch (`lerobot-train.yaml` default)    | yes       | yes                 |
+| `vla`         | 3.12   | PyTorch (`DEFAULT_LEROBOT_TRAIN_IMAGE`)   | yes       | yes                 |
+| `evaluation`  | 3.12   | PyTorch (`evaluate.yaml`)                 | yes       | yes                 |
+| `vlm-judge`   | 3.12   | none                                      | yes       | no                  |
+| `osmo-replay` | 3.11   | Python (`replay-azureml.yaml`)            | yes       | yes                 |
 
 Image references come from their source of truth: `scripts/lib/common.sh` for `rl` and `vla`, `training/il/workflows/osmo/lerobot-train.yaml` for `il`, `evaluation/sil/workflows/azureml/components/evaluate.yaml` for `evaluation`, and `workflows/osmo/replay-azureml.yaml` for `osmo-replay`.
 

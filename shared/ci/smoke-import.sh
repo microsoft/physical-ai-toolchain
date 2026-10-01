@@ -18,8 +18,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../..
 source "$REPO_ROOT/scripts/lib/common.sh"
 
 # Pinned uv for in-container bootstrap, mirroring training/rl/scripts/setup_isaac_runtime.sh.
-UV_VERSION="0.12.8"
-UV_SHA256="2e2b37e9811e17675a9e70bed5e1a58fc8c0388be63d751d72cc735188c149ff"
+UV_VERSION="0.12.20"
+UV_SHA256="6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f"
 
 show_help() {
     cat << EOF
@@ -28,7 +28,7 @@ Usage: $(basename "$0") DOMAIN [OPTIONS]
 Install a domain's locked dependencies and import it, GPU-free.
 
 DOMAIN:
-    rl            Reinforcement learning (training/rl), Python 3.11
+    rl            Reinforcement learning (training/rl), Python 3.12
     il            Imitation learning / LeRobot (training/il/lerobot), Python 3.12
     vla           Vision-language-action / LeRobot (training/vla/lerobot), Python 3.12
     evaluation    Software-in-the-loop evaluation (evaluation), Python 3.12
@@ -78,7 +78,7 @@ declare -a export_args probe
 case "$domain" in
     rl)
         project="training/rl"
-        py_version="3.11"
+        py_version="3.12"
         # Import the heavy framework stack (the #809 ABI surface) plus the
         # first-party entrypoint. launch.py defers Isaac/skrl imports, so a bare
         # module import would not exercise the ABI the gate exists to catch.
@@ -209,6 +209,9 @@ smoke_image() {
     section "Runtime-image import smoke: ${domain}"
 
     local python_exec runtime_project="$project"
+    local isaac_provided_re='^(torch|torchvision|triton|cuda-bindings|cuda-pathfinder|cuda-toolkit|nvidia-(cu|nccl|nvjitlink|nvshmem|nvtx)[a-z0-9.-]*)=='
+    local -a install_args
+    local runtime_site_packages
     if [[ "$domain" == "il" || "$domain" == "vla" || "$domain" == "evaluation" ]]; then
         # Published PyTorch images ship Python 3.11; LeRobot needs >= 3.12.
         # Provision 3.12 in a venv, exactly as the production entry scripts do.
@@ -233,10 +236,20 @@ smoke_image() {
         python_exec="/isaac-sim/kit/python/bin/python3"
         [[ -x "$python_exec" ]] || python_exec="python3"
         export UV_PYTHON="$python_exec"
-        # Mirror production (training/rl/scripts/train.sh): install the committed
-        # lock with --no-deps onto the real interpreter.
+        if [[ -w "$($python_exec -c 'import site; print(site.getsitepackages()[0])')" ]]; then
+            install_args=(--no-cache-dir --no-deps --reinstall --system --requirement -)
+        else
+            runtime_site_packages="/tmp/smoke-runtime-site-packages-${domain}"
+            rm -rf "$runtime_site_packages"
+            mkdir -p "$runtime_site_packages"
+            export PYTHONPATH="${runtime_site_packages}:${PYTHONPATH:-}"
+            install_args=(--no-cache-dir --no-deps --reinstall --target "$runtime_site_packages" --requirement -)
+        fi
+
+        # Preserve the container's matched Torch/CUDA stack, as in production.
         uv export --frozen --no-hashes --no-emit-project --project "$project" \
-            | uv pip install --no-cache-dir --no-deps --system --requirement -
+            | grep -Ev "$isaac_provided_re" \
+            | uv pip install "${install_args[@]}"
     fi
 
     run_probe "$python_exec"
