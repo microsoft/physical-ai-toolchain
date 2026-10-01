@@ -1,0 +1,46 @@
+name: Public Dependency Feeds
+
+on:
+  workflow_call:
+    inputs:
+      soft-fail:
+        description: 'Prevent validation failures from failing the workflow'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  public-dependency-feeds:
+    name: Validate Public Dependency Feeds
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create logs directory
+        run: New-Item -ItemType Directory -Force -Path logs | Out-Null
+
+      - name: Validate public dependency feeds
+        id: check
+        run: ./scripts/security/Test-PublicDependencyFeeds.ps1 -FailOnViolation
+        continue-on-error: ${{ inputs.soft-fail }}
+
+      - name: Upload validation report
+        if: always()
+        continue-on-error: ${{ steps.check.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: public-dependency-feeds-results
+          path: logs/public-dependency-feeds-results.json
+          retention-days: 30
