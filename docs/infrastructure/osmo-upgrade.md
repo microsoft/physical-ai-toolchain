@@ -68,6 +68,7 @@ Review `<bundle>/osmo-platforms.yaml` before you continue:
 - The values replace the database config. Add or remove pools, platforms, and pod templates to match the node pools you run.
 - Create a Kubernetes Secret in `osmo-control-plane` for each secret reference that `export` reports, or remove the settings that use it.
 - The 6.3 chart's default pool sets `common_pod_template`. Check that the `default` pool keeps the templates you intend.
+- Helm merges these values over `infrastructure/setup/values/osmo-control-plane.yaml`: maps merge, and lists replace. That file's `default_user` template mounts `/dev/shm` sized by `{{USER_SHM_SIZE}}`, so give every pool a `USER_SHM_SIZE` default. If the export defines `default_user` containers, add the `dshm` volume mount to them.
 
 Take a 6.2 restore point, then install 6.3 and verify it:
 
