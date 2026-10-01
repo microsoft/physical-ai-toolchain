@@ -31,7 +31,9 @@ main() {
     return 0
   fi
 
-  mapfile -d '' -t files < <(git ls-files -z '*Dockerfile*' '*Containerfile*')
+  while IFS= read -r -d '' file; do
+    files+=("${file}")
+  done < <(git ls-files -z '*Dockerfile*' '*Containerfile*')
   wait "$!" || return 1
 
   local image_pattern='^([A-Za-z0-9.-]+(:[0-9]+)?/)?[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$'
@@ -41,7 +43,7 @@ main() {
     while IFS= read -r line || [[ -n "${line}" ]]; do
       line="${line%$'\r'}"
       read -r instruction ref remainder <<< "${line}"
-      if [[ "${instruction^^}" == FROM ]]; then
+      if [[ "${instruction}" == FROM ]]; then
         if [[ "${ref}" == --platform=* ]]; then
           read -r ref remainder <<< "${remainder}"
         fi
