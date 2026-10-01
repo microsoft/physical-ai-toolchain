@@ -358,8 +358,9 @@ if [[ "$purge_postgres" == "true" ]]; then
 
         # pgroll keeps migration state in its own schema, a versioned view schema per
         # migration, and DDL event triggers whose functions live in the pgroll schema.
+        # Use named dollar quotes: Kubernetes collapses $$ to $ in container args.
         # shellcheck disable=SC2016  # SQL dollar quoting, not shell expansion
-        drop_sql='SET client_min_messages TO WARNING; DO $$ DECLARE version_schema text; BEGIN IF to_regclass($q$pgroll.migrations$q$) IS NOT NULL THEN FOR version_schema IN SELECT DISTINCT schema || $q$_$q$ || name FROM pgroll.migrations LOOP EXECUTE format($q$DROP SCHEMA IF EXISTS %I CASCADE$q$, version_schema); END LOOP; END IF; END $$; DROP SCHEMA IF EXISTS pgroll CASCADE; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO PUBLIC;'
+        drop_sql='SET client_min_messages TO WARNING; DO $purge$ DECLARE version_schema text; BEGIN IF to_regclass($q$pgroll.migrations$q$) IS NOT NULL THEN FOR version_schema IN SELECT DISTINCT schema || $q$_$q$ || name FROM pgroll.migrations LOOP EXECUTE format($q$DROP SCHEMA IF EXISTS %I CASCADE$q$, version_schema); END LOOP; END IF; END $purge$; DROP SCHEMA IF EXISTS pgroll CASCADE; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO PUBLIC;'
 
         kubectl delete pod osmo-purge-db -n default --ignore-not-found >/dev/null 2>&1
         kubectl create secret generic osmo-purge-db -n default \
