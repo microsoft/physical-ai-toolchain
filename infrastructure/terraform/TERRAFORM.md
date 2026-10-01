@@ -2,7 +2,7 @@
 title: Robotics Blueprint
 description: "Deploys robotics infrastructure with NVIDIA GPU support, KAI Scheduler, and optional Azure Machine Learning integration."
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-30
+ms.date: 2026-10-01
 ms.topic: reference
 ---
 
