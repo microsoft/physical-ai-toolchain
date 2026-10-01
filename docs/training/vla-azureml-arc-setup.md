@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Azure ML Arc VLA Setup and Operations
 description: Prepare an Ubuntu K3s GPU host, connect it through Azure Arc, attach it to Azure ML, and run PI 0.5 VLA training
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-30
+ms.date: 2026-10-01
 ms.topic: how-to
 keywords:
   - vla
@@ -288,6 +288,64 @@ kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" \
 ```
 
 Confirm that the `gpu` InstanceType requests exactly one GPU and fits the host's allocatable capacity.
+
+### Add a High-Memory GPU InstanceType
+
+Create a separate InstanceType when a calibration trial exits with code `137`
+after exhausting its pod memory limit. Do not enlarge the shared `gpu` type in
+place because that changes the resource contract for every job that uses it.
+
+Measure allocatable memory and current non-workload use before choosing values:
+
+```bash
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" \
+  get node <node-name> \
+  -o jsonpath='{.status.allocatable.memory}{" allocatable\n"}'
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" \
+  top node <node-name>
+```
+
+Kubernetes schedules against `requests.memory`, while the container can grow to
+`limits.memory`. Set the request near expected steady-state use. Keep the limit
+below allocatable memory minus the operating system, K3s, Azure ML services, and
+other active workloads. A limit equal to total host memory can trigger node-wide
+memory pressure instead of containing the training process.
+
+Add the new type to the ignored environment manifest. This 8 GiB request and
+12 GiB limit is an example for a single-GPU host with at least 20 GiB allocatable
+memory; size other hosts from their live measurements:
+
+```yaml
+apiVersion: amlarc.azureml.com/v1alpha1
+kind: InstanceType
+metadata:
+  name: gpu-high-memory
+spec:
+  nodeSelector:
+    accelerator: nvidia
+    kubernetes.io/hostname: <node-name>
+  resources:
+    requests:
+      cpu: "2"
+      memory: "8Gi"
+    limits:
+      cpu: "4"
+      memory: "12Gi"
+      nvidia.com/gpu: 1
+```
+
+Apply and verify the type while no Azure ML workload is running:
+
+```bash
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" \
+  apply -f "infrastructure/setup/generated/<environment>/azureml-instance-types.yaml"
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" \
+  get instancetype gpu-high-memory -o yaml
+```
+
+Select `gpu-high-memory` only for jobs that require the larger boundary. Raising
+pod memory can prevent a trial-level exit `137`; it does not resolve Azure ML
+pipeline orchestration failures that occur before Kubernetes creates a pod.
 
 ## Attach the Arc Cluster to Azure ML
 
