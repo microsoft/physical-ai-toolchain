@@ -323,7 +323,9 @@ test('SearchPage recovers from a no-result query without duplicate announcements
 
   const status = page.locator('[id^="search-results-status-"]');
   const query = page.locator('input[name="q"]');
-  await expect(status).toHaveText(`${await page.locator('article[class*="searchResultItem"]').count()} documents found`);
+  const initialResults = page.locator('article[class*="searchResultItem"]');
+  await expect(initialResults.first()).toBeVisible();
+  await expect(status).toHaveText(`${await initialResults.count()} documents found`);
 
   await query.fill('98765432101234567890');
   await expect(status).toHaveText('No documents found');
@@ -343,6 +345,7 @@ test('tiers disclosure toggles, traverses, and closes without trapping focus', e
   await page.goto(siteRoute('/documentation/'));
   await expectPageReady(page);
   const trigger = page.locator('.navbar__item.dropdown > a').filter({ hasText: labelData.labelRegistry.tiers });
+  const firstTier = page.locator('.navbar__item.dropdown .dropdown__menu a').first();
   await expect(trigger).toHaveRole('button');
   await expect(trigger).toHaveAttribute('aria-haspopup', 'true');
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
@@ -351,28 +354,101 @@ test('tiers disclosure toggles, traverses, and closes without trapping focus', e
   await page.keyboard.press('Enter');
   await expect(trigger).toHaveAttribute('aria-expanded', 'true');
   await expect(trigger).toBeFocused();
+  await expect(firstTier).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await expect(firstTier).toBeHidden();
   await page.keyboard.press('Enter');
   await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  await expect(firstTier).toBeVisible();
 
-  const firstTier = page.locator('.navbar__item.dropdown .dropdown__menu a').first();
   await page.keyboard.press('Tab');
   await expect(firstTier).toBeFocused();
+  const expandedState = await page.locator('.navbar__item.dropdown .dropdown__menu').evaluate((menu) => {
+    const style = getComputedStyle(menu);
+    return {
+      transition: style.transitionProperty,
+      opacity: style.opacity,
+      visibility: style.visibility,
+      displayed: style.display !== 'none',
+      links: Array.from(menu.querySelectorAll<HTMLAnchorElement>('a')).map((link) => ({
+        tabIndex: link.tabIndex,
+        hidden: Boolean(link.closest('[hidden]')),
+        inert: Boolean(link.closest('[inert]')),
+        visibility: getComputedStyle(link).visibility,
+        rendered: link.getClientRects().length > 0,
+      })),
+    };
+  });
+  expect(expandedState).toEqual({
+    transition: 'none',
+    opacity: '1',
+    visibility: 'visible',
+    displayed: true,
+    links: labelData.tierNavigation.map(() => ({
+      tabIndex: 0,
+      hidden: false,
+      inert: false,
+      visibility: 'visible',
+      rendered: true,
+    })),
+  });
   await expect(trigger).toHaveAttribute('aria-expanded', 'true');
   await page.keyboard.press('Shift+Tab');
   await expect(trigger).toBeFocused();
 
   await page.locator('a.navbar__brand').focus();
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await expect(firstTier).toBeHidden();
 
   await trigger.focus();
   await page.keyboard.press('Enter');
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  await expect(firstTier).toBeVisible();
   await page.keyboard.press('Tab');
+  await expect(firstTier).toBeFocused();
   await page.keyboard.press('Enter');
   await expectPageReady(page);
   expect(new URL(page.url()).pathname).toBe(`/physical-ai-toolchain${labelData.tierNavigation[0].route}`);
   await expect(page.locator('main')).toBeFocused();
+});
+
+test('Space-opened tiers support native forward and backward Tab traversal', async ({ page }) => {
+  await page.goto(siteRoute('/documentation/'));
+  await expectPageReady(page);
+  const dropdown = page.locator('.navbar__item.dropdown').filter({ hasText: labelData.labelRegistry.tiers });
+  const trigger = dropdown.locator(':scope > a');
+  const tierLinks = dropdown.locator('.dropdown__menu a');
+  await expect(tierLinks).toHaveCount(labelData.tierNavigation.length);
+
+  await trigger.focus();
+  await page.keyboard.press('Space');
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Space');
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await page.keyboard.press('Space');
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+
+  for (let index = 0; index < labelData.tierNavigation.length; index += 1) {
+    await page.keyboard.press('Tab');
+    await expect(tierLinks.nth(index)).toBeFocused();
+    await expect(tierLinks.nth(index)).toBeVisible();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  }
+  for (let index = labelData.tierNavigation.length - 2; index >= 0; index -= 1) {
+    await page.keyboard.press('Shift+Tab');
+    await expect(tierLinks.nth(index)).toBeFocused();
+  }
+  await page.keyboard.press('Shift+Tab');
+  await expect(trigger).toBeFocused();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+
+  for (let index = 0; index <= labelData.tierNavigation.length; index += 1) {
+    await page.keyboard.press('Tab');
+  }
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await expect(dropdown.locator('.dropdown__menu')).toBeHidden();
+  expect(await dropdown.evaluate((element) => element.contains(document.activeElement))).toBe(false);
 });
 
 test('responsive navigation opens, activates a tier, and closes without trapping focus', evidence('dcs04-responsive-nav', [
@@ -401,8 +477,9 @@ test('responsive navigation opens, activates a tier, and closes without trapping
   const tierLink = sidebar.locator('a.menu__link').filter({ hasText: labelData.tierNavigation[0].label }).first();
   await tierLink.focus();
   await page.keyboard.press('Enter');
+  const tierPath = `/physical-ai-toolchain${labelData.tierNavigation[0].route}`;
+  await expect(page).toHaveURL((url) => url.pathname === tierPath);
   await expectPageReady(page);
-  expect(new URL(page.url()).pathname).toBe(`/physical-ai-toolchain${labelData.tierNavigation[0].route}`);
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(sidebar).toBeHidden();
   await expect(page.locator('main')).toBeFocused();

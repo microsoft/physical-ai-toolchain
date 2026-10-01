@@ -25,8 +25,7 @@ permissions:
   contents: read
 
 jobs:
-  # Extract the unique, digest-pinned external base images from every Dockerfile.
-  # Stage aliases and ARG/scratch bases carry no @sha256 digest and are excluded.
+  # Bind digest-pinned external bases to stable source lanes before scanning.
   discover:
     name: Discover Base Images
     runs-on: ubuntu-latest
@@ -41,24 +40,18 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Extract digest-pinned base images
+      - name: Extract source-bound scan lanes
         id: extract
         run: |
           set -euo pipefail
-          if ! images="$(bash scripts/security/discover-base-images.sh)"; then
-            echo "::error::Failed to discover digest-pinned base images"
+          if ! images="$(bash scripts/security/discover-base-images.sh --matrix)"; then
+            echo "::error::Failed to resolve source-bound scan lanes"
             exit 1
           fi
-          echo "Discovered base images:"
-          echo "$images"
-          count=$(printf '%s' "$images" | grep -c . || true)
-          if [[ -n "$images" ]]; then
-            matrix=$(printf '%s\n' "$images" | jq -R . | jq -sc .)
-          else
-            matrix='[]'
-          fi
+          count=$(jq 'length' <<< "$images")
+          echo "Discovered $count source-bound scan lanes"
           {
-            echo "images=$matrix"
+            echo "images=$images"
             echo "count=$count"
           } >> "$GITHUB_OUTPUT"
         shell: bash
@@ -74,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: ${{ fromJSON(needs.discover.outputs.images) }}
+        include: ${{ fromJSON(needs.discover.outputs.images) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -118,4 +111,4 @@ jobs:
         continue-on-error: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
         with:
           sarif_file: trivy-${{ steps.slug.outputs.slug }}.sarif
-          category: trivy-image-${{ steps.slug.outputs.slug }}
+          category: ${{ matrix.category }}
