@@ -278,7 +278,7 @@ az k8s-extension show --name azureml-<aks-cluster> --cluster-type managedCluster
 # Expected: skipResourceValidation "true", volcanoConfigMap "volcano-scheduler-scale-from-zero"
 
 kubectl get cm -n azureml volcano-scheduler-scale-from-zero \
-  -o jsonpath='{.data.volcano-scheduler\.conf}' | grep -E 'overcommit|proportion'
+  -o jsonpath='{.data.volcano-scheduler\.conf}' | grep -E 'name: (overcommit|proportion)'
 # Expected: no output
 ```
 

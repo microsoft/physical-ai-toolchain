@@ -122,7 +122,7 @@ OSMO_VERSION="${OSMO_VERSION:-6.3.0}"
 CHART_VERSION="${CHART_VERSION:-1.3.0}"
 
 OSMO_IMAGES=(
-  service worker logger agent
+  service router web-ui worker logger agent
   backend-listener backend-worker client
   delayed-job-monitor init-container
 )
