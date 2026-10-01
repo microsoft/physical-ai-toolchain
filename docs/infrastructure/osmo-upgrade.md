@@ -204,3 +204,8 @@ After `verify` passes and you no longer need a rollback, delete the kept release
 - NVIDIA's upgrade guides at the pinned commit: [6.0 to 6.2](https://github.com/NVIDIA/OSMO/blob/07b71409e5535dabae7c897c04a86954d276f946/deployments/upgrades/6_0_to_6_2_upgrade.md) and [6.2 to 6.3](https://github.com/NVIDIA/OSMO/blob/07b71409e5535dabae7c897c04a86954d276f946/deployments/upgrades/6_2_to_6_3_upgrade.md)
 - [Cluster Setup](cluster-setup.md) for deployment scenarios and the supported OSMO version
 - [Cleanup and Destroy](cleanup.md) for `uninstall-osmo.sh` options
+
+<!-- markdownlint-disable MD036 -->
+*🤖 Crafted with precision by ✨Copilot following brilliant human instruction,
+then carefully refined by our team of discerning human reviewers.*
+<!-- markdownlint-enable MD036 -->
