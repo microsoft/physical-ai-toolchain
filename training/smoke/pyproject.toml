@@ -14,7 +14,9 @@ dependencies = [
     "idna==3.19",
     "urllib3==2.7.0",
     "cryptography==50.0.1",
-    "pyjwt==2.13.0",
+    # 2.15.0 is the first PyJWT release without open advisories
+    # (GHSA-ffc3-869f-jxw9, GHSA-42vr-xj54-vc7v).
+    "pyjwt==2.15.0",
     # marshmallow held at 3.x because azure-ai-ml imports symbols that
     # marshmallow 4.x removed. Mirror training/rl; bump together with azure-ai-ml.
     "marshmallow==3.26.2",
