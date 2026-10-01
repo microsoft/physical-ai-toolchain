@@ -194,7 +194,7 @@ const coverageBaselines = {
   'src/stores/annotation-store.ts': { statements: 77, branches: 54, functions: 75, lines: 85 },
 }
 
-// Per-file glob for a directory that skips its baselined files, matched by file name.
+// Per-file glob for a directory that skips files with coverage baselines, matched by file name.
 const outsideBaselines = (dir: string) =>
   `${dir}/**/!(${Object.keys(coverageBaselines)
     .filter((file) => file.startsWith(`${dir}/`))
