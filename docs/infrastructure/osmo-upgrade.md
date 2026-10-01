@@ -17,10 +17,10 @@ Upgrade an OSMO install that predates 6.3 to this repository's OSMO 6.3 deployme
 
 ## Choose a Path
 
-| Path      | Stages                                                            | Use when                                              |
-|-----------|-------------------------------------------------------------------|-------------------------------------------------------|
-| Keep data | `backup` → `hop-6.2` → `tokens` → `export` → `hop-6.3` → `verify` | You need existing workflow history, pools, and config |
-| Fresh     | `backup` → `reset` → `hop-6.3` → `verify`                         | You don't need the OSMO database or Redis data        |
+| Path      | Stages, in order                                                 | Use when                                              |
+|-----------|------------------------------------------------------------------|-------------------------------------------------------|
+| Keep data | `backup`, `hop-6.2`, `tokens`, `export`, `hop-6.3`, and `verify` | You need existing workflow history, pools, and config |
+| Fresh     | `backup`, `reset`, `hop-6.3`, and `verify`                       | You don't need the OSMO database or Redis data        |
 
 Both paths end on OSMO 6.3 in ConfigMap mode, where pools, platforms, pod templates, and other configs come from Helm values instead of the database. Neither path deletes the storage container or the `mek-config` ConfigMap that holds the master encryption key (MEK).
 

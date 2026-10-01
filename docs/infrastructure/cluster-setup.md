@@ -154,10 +154,10 @@ cd ../002-setup
 
 `03-deploy-osmo.sh` stops when `osmo-control-plane` holds a pre-6.3 install: separate releases of the `service`, `router`, or `web-ui` charts, or an `osmo` release on an older chart line. Upgrade those installs, from 6.0-era builds through 6.2, with `infrastructure/setup/optional/upgrade-osmo.sh`, one confirmed stage per run:
 
-| Path      | Stages                                                            |
-|-----------|-------------------------------------------------------------------|
-| Keep data | `backup` → `hop-6.2` → `tokens` → `export` → `hop-6.3` → `verify` |
-| Fresh     | `backup` → `reset` → `hop-6.3` → `verify`                         |
+| Path      | Stages, in order                                                 |
+|-----------|------------------------------------------------------------------|
+| Keep data | `backup`, `hop-6.2`, `tokens`, `export`, `hop-6.3`, and `verify` |
+| Fresh     | `backup`, `reset`, `hop-6.3`, and `verify`                       |
 
 Both paths end in ConfigMap mode, where config writes through the CLI or API return HTTP 409 and pools change through Helm values. See [OSMO Upgrade from Pre-6.3 Releases](osmo-upgrade.md) for prerequisites, the config review, HiL token renewal, and the rollback runbook.
 
