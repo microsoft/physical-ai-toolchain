@@ -3,7 +3,7 @@
 #
 # Data-keeping path: backup -> hop-6.2 -> tokens -> export -> hop-6.3 -> verify
 # Fresh path:        backup -> reset -> hop-6.3 -> verify
-# cspell:ignore fromdateiso pgroll rtrimstr schemaname slurpfile
+# cspell:ignore fromdateiso getpath pgroll rtrimstr schemaname slurpfile
 set -o errexit -o nounset -o pipefail
 umask 077
 
@@ -208,6 +208,13 @@ missing_objects() {
     jq -rn --argjson want "$1" --argjson have "$2" '
         ["pools", "platforms", "pod_templates", "backends"][] as $kind
         | ($want[$kind] - $have[$kind])[] | "\($kind): \(.)"'
+}
+
+# Print the dotted path of every masked string (two or more asterisks; a single "*" is an
+# RBAC wildcard). The exporter copies masked secrets as-is, and ConfigMap mode would load
+# them as literal values.
+masked_paths() {
+    jq -r 'paths(strings) as $p | select(getpath($p) | test("^\\*{2,}$")) | $p | map(tostring) | join(".")' "$1"
 }
 
 describe_releases() {
@@ -693,7 +700,7 @@ stage_tokens() {
 }
 
 stage_export() {
-    local name path exporter backup_configs expected actual missing bundle_values line
+    local name path exporter backup_configs expected actual missing bundle_values line masked
     require_service_url
     name="export-$(date -u +%Y%m%dT%H%M%SZ)"
     path="$backup_dir/$name"
@@ -718,6 +725,11 @@ stage_export() {
         warn "$line"
     done < <(grep '^Error fetching' "$path/export.log" || true)
     yaml_to_json "$path/osmo-configs.yaml" > "$path/osmo-configs.json"
+    masked=$(masked_paths "$path/osmo-configs.json")
+    if [[ -n "$masked" ]]; then
+        while read -r line; do warn "Masked value at $line"; done <<< "$masked"
+        warn "The exporter keeps masked secrets as asterisks. Remove those settings or replace them with secret references before hop-6.3."
+    fi
 
     section "Compare With Backup"
     backup_configs="$backup_dir/$(latest_backup)/configs"
@@ -788,7 +800,7 @@ stage_reset() {
 }
 
 stage_hop_63() {
-    local path values_json names legacy mek_owner missing values_sha line key_vault
+    local path values_json names legacy mek_owner missing values_sha line key_vault masked
     local -a deploy_command
     path=$(upgrade_path)
     values_json="$work_dir/platform-values.json"
@@ -797,6 +809,11 @@ stage_hop_63() {
     yaml_to_json "$platform_values" > "$values_json" || fatal "Can't parse $platform_values"
     jq -e '.services.configs | type == "object"' "$values_json" >/dev/null || \
         fatal "$platform_values has no services.configs mapping"
+    masked=$(masked_paths "$values_json")
+    if [[ -n "$masked" ]]; then
+        while read -r line; do error "Masked value at $line"; done <<< "$masked"
+        fatal "$platform_values contains masked secrets that ConfigMap mode would load as literal asterisks. Remove those settings or replace them with secret references."
+    fi
     names=$(values_object_names "$values_json")
     jq -rn --argjson names "$names" '$names | to_entries[] | "  \(.key): \(.value | join(", "))"'
     if [[ "$path" == "export" ]]; then

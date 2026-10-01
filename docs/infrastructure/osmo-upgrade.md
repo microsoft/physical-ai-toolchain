@@ -67,6 +67,7 @@ Review `<bundle>/osmo-platforms.yaml` before you continue:
 
 - The values replace the database config. Add or remove pools, platforms, and pod templates to match the node pools you run.
 - Create a Kubernetes Secret in `osmo-control-plane` for each secret reference that `export` reports, or remove the settings that use it.
+- The pinned exporter copies secrets that the API masks, such as storage `access_key`, `backend_images.credential.auth`, and alert tokens, as literal asterisks. ConfigMap mode would load them as real values. Remove those settings or replace them with secret references; with workload identity, storage credentials need only `endpoint`. `export` lists them, and `hop-6.3` refuses values that still contain them.
 - The 6.3 chart's default pool sets `common_pod_template`. Check that the `default` pool keeps the templates you intend.
 - Helm merges these values over `infrastructure/setup/values/osmo-control-plane.yaml`: maps merge, and lists replace. That file's `default_user` template mounts `/dev/shm` sized by `{{USER_SHM_SIZE}}`, so give every pool a `USER_SHM_SIZE` default. If the export defines `default_user` containers, add the `dshm` volume mount to them.
 
