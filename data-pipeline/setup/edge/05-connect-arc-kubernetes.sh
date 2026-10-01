@@ -28,13 +28,24 @@ OPTIONS:
     --kubeconfig PATH            Protected K3s kubeconfig (required)
     --context NAME               Explicit K3s context
     --enable-workload-identity   Enable Arc OIDC and workload identity on K3s
+    --cluster-admin-object-id ID Grant cluster-admin to an Entra user or service
+                                 principal object ID (repeatable)
+    --cluster-admin-group-id ID  Grant cluster-admin to an Entra group object ID
+                                 (repeatable)
+    --cluster-admin-signed-in-user
+                                 Grant cluster-admin to the signed-in Azure CLI user
     --config-preview             Print configuration and exit
+
+Arc cluster connect presents Entra identities to K3s by object ID, so grants use
+object IDs rather than user principal names. Each subject gets one idempotent
+ClusterRoleBinding named arc-cluster-admin-user-<id> or arc-cluster-admin-group-<id>.
 
 EXAMPLES:
     $(basename "$0") --subscription-id <id> --tenant-id <id> \
       --resource-group rg-edge --location westus2 \
       --cluster-name hil-lab-01-k3s --kubeconfig /protected/k3s.yaml \
-      --context physical-ai-edge --enable-workload-identity
+      --context physical-ai-edge --enable-workload-identity \
+      --cluster-admin-signed-in-user
 EOF
 }
 
@@ -49,6 +60,40 @@ context="$EDGE_K3S_CONTEXT"
 enable_workload_identity=false
 config_preview=false
 oidc_issuer=""
+cluster_admin_object_ids=()
+cluster_admin_group_ids=()
+cluster_admin_signed_in_user=false
+cluster_admin_subjects=()
+readonly GUID_PATTERN='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+
+# Record one "kind:object-id" cluster-admin subject after validating the ID as a GUID.
+add_cluster_admin_subject() {
+  local kind="$1" id="$2" source_option="$3" subject existing
+  [[ "$id" =~ $GUID_PATTERN ]] || fatal "$source_option requires a Microsoft Entra object ID (GUID): $id"
+  subject="${kind}:$(printf '%s' "$id" | tr '[:upper:]' '[:lower:]')"
+  for existing in ${cluster_admin_subjects[@]+"${cluster_admin_subjects[@]}"}; do
+    [[ "$existing" == "$subject" ]] && return 0
+  done
+  cluster_admin_subjects+=("$subject")
+}
+
+# Describe the requested cluster-admin subjects for the preview and summary.
+describe_cluster_admins() {
+  local parts=() subject
+  for subject in ${cluster_admin_subjects[@]+"${cluster_admin_subjects[@]}"}; do
+    parts+=("$subject")
+  done
+  if [[ "$cluster_admin_signed_in_user" == "true" && "$1" == "preview" ]]; then
+    parts+=("user:<signed-in Azure CLI user>")
+  fi
+  if (( ${#parts[@]} == 0 )); then
+    echo "none"
+  else
+    local joined
+    joined=$(printf '%s, ' "${parts[@]}")
+    echo "${joined%, }"
+  fi
+}
 
 # Apply command-line values before validating the Azure, K3s, and workload identity targets.
 while [[ $# -gt 0 ]]; do
@@ -62,6 +107,9 @@ while [[ $# -gt 0 ]]; do
     --kubeconfig)                kubeconfig="$2"; shift 2 ;;
     --context)                   context="$2"; shift 2 ;;
     --enable-workload-identity)  enable_workload_identity=true; shift ;;
+    --cluster-admin-object-id)   cluster_admin_object_ids+=("$2"); shift 2 ;;
+    --cluster-admin-group-id)    cluster_admin_group_ids+=("$2"); shift 2 ;;
+    --cluster-admin-signed-in-user) cluster_admin_signed_in_user=true; shift ;;
     --config-preview)            config_preview=true; shift ;;
     *)                           fatal "Unknown option: $1" ;;
   esac
@@ -74,6 +122,12 @@ done
 [[ -n "$location" ]] || fatal "--location is required"
 [[ -n "$cluster_name" ]] || fatal "--cluster-name is required"
 [[ -n "$kubeconfig" ]] || fatal "--kubeconfig is required"
+for object_id in ${cluster_admin_object_ids[@]+"${cluster_admin_object_ids[@]}"}; do
+  add_cluster_admin_subject user "$object_id" "--cluster-admin-object-id"
+done
+for group_id in ${cluster_admin_group_ids[@]+"${cluster_admin_group_ids[@]}"}; do
+  add_cluster_admin_subject group "$group_id" "--cluster-admin-group-id"
+done
 
 # Show the planned Arc connection and preflight behavior, then exit without contacting Azure or Kubernetes.
 if [[ "$config_preview" == "true" ]]; then
@@ -86,6 +140,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Kubeconfig" "$kubeconfig"
   print_kv "Context" "$context"
   print_kv "Workload Identity" "$enable_workload_identity"
+  print_kv "Cluster Admins" "$(describe_cluster_admins preview)"
   print_kv "Authentication" "Azure CLI session; device-code login supported"
   exit 0
 fi
@@ -125,6 +180,24 @@ else
   az "${connect_args[@]}" --output none
 fi
 
+# Grant cluster-admin to the requested Entra identities so Arc cluster connect works on first use.
+if [[ "$cluster_admin_signed_in_user" == "true" ]]; then
+  signed_in_object_id=$(az ad signed-in-user show --query id -o tsv 2>/dev/null) ||
+    fatal "Unable to resolve the signed-in Azure CLI user; sign in as a user or pass --cluster-admin-object-id"
+  add_cluster_admin_subject user "$signed_in_object_id" "--cluster-admin-signed-in-user"
+fi
+if (( ${#cluster_admin_subjects[@]} > 0 )); then
+  section "Grant Arc Cluster Admin"
+  for subject in "${cluster_admin_subjects[@]}"; do
+    subject_kind="${subject%%:*}"
+    subject_id="${subject#*:}"
+    binding_name="arc-cluster-admin-${subject_kind}-${subject_id}"
+    kubectl --kubeconfig "$kubeconfig" --context "$context" create clusterrolebinding "$binding_name" \
+      --clusterrole=cluster-admin "--${subject_kind}=${subject_id}" --dry-run=client -o yaml |
+      kubectl --kubeconfig "$kubeconfig" --context "$context" apply -f -
+  done
+fi
+
 # When requested, align K3s token settings with the Arc OIDC issuer.
 if [[ "$enable_workload_identity" == "true" ]]; then
   for ((attempt = 1; attempt <= 60; attempt++)); do
@@ -158,4 +231,5 @@ print_kv "Location" "$location"
 print_kv "Arc Kubernetes" "connected"
 print_kv "Workload Identity" "$enable_workload_identity"
 print_kv "OIDC Issuer" "${oidc_issuer:-not configured}"
+print_kv "Cluster Admins" "$(describe_cluster_admins summary)"
 info "Arc-enabled Kubernetes onboarding complete"

@@ -8,13 +8,18 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../..
 # shellcheck source=../../scripts/lib/common.sh
 source "$REPO_ROOT/scripts/lib/common.sh"
 
-# Pinned NVIDIA Kubernetes device plugin. Bare metal exposes a working NVML, so
-# the official plugin replaces the generic device plugin the WSL path needs.
-DEVICE_PLUGIN_VERSION="${DEVICE_PLUGIN_VERSION:-v0.17.4}"
-# Digest for the default DEVICE_PLUGIN_VERSION above. Kubernetes pulls by digest
-# when both tag and digest are present, so an overridden --plugin-version must come
-# with a matching --plugin-digest or the node silently runs the old pinned image.
-DEVICE_PLUGIN_DIGEST="${DEVICE_PLUGIN_DIGEST:-sha256:3c54348fe5a57e5700e7d8068e7531d2ef2d5f3ccb70c8f6bac0953432527abd}"
+# Pinned NVIDIA Kubernetes device plugin, shared through DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE
+# in scripts/lib/common.sh. Bare metal exposes a working NVML, so the official plugin
+# replaces the generic device plugin the WSL path needs.
+_default_plugin_name_tag="${DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE%@*}"
+default_plugin_version="${_default_plugin_name_tag##*:}"
+default_plugin_digest="${DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE##*@}"
+unset _default_plugin_name_tag
+DEVICE_PLUGIN_VERSION="${DEVICE_PLUGIN_VERSION:-$default_plugin_version}"
+# Kubernetes pulls by digest when both tag and digest are present, so an overridden
+# --plugin-version must come with a matching --plugin-digest or the node silently
+# runs the old pinned image.
+DEVICE_PLUGIN_DIGEST="${DEVICE_PLUGIN_DIGEST:-$default_plugin_digest}"
 
 show_help() {
   cat << EOF
@@ -59,7 +64,7 @@ done
 # A --plugin-version override without a matching --plugin-digest would pull by
 # digest (Kubernetes prefers digest over tag when both are set) and silently keep
 # the old default's image instead of the requested version.
-if [[ "$DEVICE_PLUGIN_VERSION" != "v0.17.4" && "$DEVICE_PLUGIN_DIGEST" == "sha256:3c54348fe5a57e5700e7d8068e7531d2ef2d5f3ccb70c8f6bac0953432527abd" ]]; then
+if [[ "$DEVICE_PLUGIN_VERSION" != "$default_plugin_version" && "$DEVICE_PLUGIN_DIGEST" == "$default_plugin_digest" ]]; then
   fatal "--plugin-version was overridden to $DEVICE_PLUGIN_VERSION but --plugin-digest was not; pass the matching digest with --plugin-digest to avoid pinning the new version's tag to the old default's image"
 fi
 

@@ -17,8 +17,8 @@ BeforeAll {
 
     $script:ScriptPath = (Resolve-Path (Join-Path $PSScriptRoot '../../../infrastructure/setup/scripts/gpu-grid-driver-installer/install-grid-driver.sh')).Path
     $script:ArtifactsRoot = Join-Path $PSScriptRoot '.artifacts/install-grid-driver'
-    $script:DriverFile = '/tmp/NVIDIA-Linux-x86_64-580.105.08-grid-azure.run'
-    $script:DriverUrl = 'https://download.microsoft.com/download/85beffdc-8361-4df4-a823-dcb1b230a7aa/NVIDIA-Linux-x86_64-580.105.08-grid-azure.run'
+    $script:DriverFile = '/tmp/NVIDIA-Linux-x86_64-595.91.07-grid-azure.run'
+    $script:DriverUrl = 'https://download.microsoft.com/download/a7cb6d36-3bbc-43d6-9e88-e0842e6f9ab9/NVIDIA-Linux-x86_64-595.91.07-grid-azure.run'
     $script:KernelRelease = (& bash -lc 'uname -r').Trim()
 
     New-Item -ItemType Directory -Path $script:ArtifactsRoot -Force | Out-Null
@@ -60,21 +60,22 @@ exit 0
     function New-WgetInstallerStub {
         param(
             [Parameter(Mandatory)]
-            [ValidateSet('ImmediateSuccess', 'RetryWithOpenModules')]
+            [ValidateSet('RequireOpenModules', 'AlwaysFail')]
             [string]$Mode
         )
 
-        if ($Mode -eq 'ImmediateSuccess') {
+        if ($Mode -eq 'AlwaysFail') {
             return @'
 cat <<'EOF' > "$3"
 #!/bin/bash
-exit 0
+exit 1
 EOF
 chmod +x "$3"
 exit 0
 '@
         }
 
+        # The synthetic installer succeeds only when invoked with open kernel modules.
         return @'
 cat <<'EOF' > "$3"
 #!/bin/bash
@@ -149,17 +150,17 @@ exit 0
     }
 
     Context 'when the driver must be installed' {
-        It 'downloads, verifies, installs, and validates the GRID driver' {
+        It 'downloads, verifies, and installs the GRID driver with open kernel modules' {
             $workDir = New-TestWorkDir
 
             try {
                 $result = Invoke-BashEntryScript -ScriptPath $script:ScriptPath -Stubs (Get-InstallGridDriverStubs `
                         -NvidiaSmiBody (New-NvidiaSmiSecondCallSuccessStub) `
-                        -WgetBody (New-WgetInstallerStub -Mode ImmediateSuccess)) -WorkDir $workDir
+                        -WgetBody (New-WgetInstallerStub -Mode RequireOpenModules)) -WorkDir $workDir
 
                 $result.ExitCode | Should -Be 0
+                $result.StdOut | Should -Match 'Installing GRID driver with open kernel modules'
                 $result.StdOut | Should -Match '=== GRID driver installation complete ==='
-                $result.StdOut | Should -Not -Match 'Retrying with open kernel modules'
                 $result.Calls | Should -Be @(
                     'nvidia-smi'
                     'rmmod nvidia_uvm'
@@ -187,17 +188,16 @@ exit 0
             }
         }
 
-        It 'retries with open kernel modules when the default installer mode fails' {
+        It 'stops without loading modules or marking validation when the install fails' {
             $workDir = New-TestWorkDir
 
             try {
                 $result = Invoke-BashEntryScript -ScriptPath $script:ScriptPath -Stubs (Get-InstallGridDriverStubs `
                         -NvidiaSmiBody (New-NvidiaSmiSecondCallSuccessStub) `
-                        -WgetBody (New-WgetInstallerStub -Mode RetryWithOpenModules)) -WorkDir $workDir
+                        -WgetBody (New-WgetInstallerStub -Mode AlwaysFail)) -WorkDir $workDir
 
-                $result.ExitCode | Should -Be 0
-                $result.StdOut | Should -Match 'Retrying with open kernel modules'
-                $result.StdOut | Should -Match '=== GRID driver installation complete ==='
+                $result.ExitCode | Should -Not -Be 0
+                $result.StdOut | Should -Not -Match '=== GRID driver installation complete ==='
                 $result.Calls | Should -Be @(
                     'nvidia-smi'
                     'rmmod nvidia_uvm'
@@ -209,15 +209,6 @@ exit 0
                     "apt-get install -y -qq linux-headers-$script:KernelRelease build-essential wget"
                     "wget -q -O $script:DriverFile $script:DriverUrl"
                     'sha256sum -c --quiet -'
-                    'modprobe nvidia'
-                    'modprobe nvidia-uvm'
-                    'modprobe nvidia-modeset'
-                    'nvidia-persistenced --persistence-mode'
-                    'nvidia-smi'
-                    'mkdir -p /run/nvidia/validations'
-                    'touch /run/nvidia/validations/.driver-ctr-ready'
-                    'mountpoint -q /run/nvidia/driver'
-                    'mount --bind / /run/nvidia/driver'
                 )
             }
             finally {

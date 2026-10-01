@@ -15,10 +15,16 @@ COPY --from=ghcr.io/astral-sh/uv:0.10.9@sha256:10902f58a1606787602f303954cea0996
 COPY pyproject.toml uv.lock logging.json ./
 
 # Install production dependencies and runtime feature extras into /app/.venv.
+# BACKEND_EXTRAS lists extras separated by commas or spaces. The yolo extra pulls
+# CUDA torch (about 9 GB compressed), so Azure Container Apps builds pass a
+# smaller list to fit the Consumption profile's 8 GB limit.
+ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PATH=/app/.venv/bin:$PATH
-RUN uv sync --frozen --no-dev --extra azure --extra analysis --extra export --extra auth --extra yolo
+RUN extras=""; \
+    for extra in $(echo "${BACKEND_EXTRAS}" | tr ',' ' '); do extras="${extras} --extra ${extra}"; done; \
+    uv sync --frozen --no-dev ${extras}
 
 # Copy application source
 COPY src/ ./src/
