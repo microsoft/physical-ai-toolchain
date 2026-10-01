@@ -130,6 +130,9 @@ def test_given_training_pipeline_when_parsed_then_only_training_stages_are_seria
     assert jobs["training_step"]["inputs"]["dataset"] == "${{parent.inputs.dataset}}"
     assert jobs["training_step"]["inputs"]["calibration_report"] == "${{parent.inputs.calibration_report}}"
     assert jobs["training_step"]["inputs"]["workload_contract"] == "${{parent.inputs.workload_contract}}"
+    assert jobs["training_step"]["environment_variables"] == {
+        "AZUREML_COMPUTE_USE_COMMON_RUNTIME": "true"
+    }
     assert jobs["training_step"]["resources"]["instance_type"] == "gpu-high-memory"
     assert {
         "dataset_manifest",
