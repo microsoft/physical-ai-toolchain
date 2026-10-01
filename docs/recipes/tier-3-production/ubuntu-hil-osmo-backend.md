@@ -2,7 +2,7 @@
 title: Ubuntu HiL OSMO Backend
 description: Prepare one Ubuntu T3 HiL node, optionally establish private reachability, connect it to an existing OSMO environment, and prove CPU and no-command outcomes.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-23
+ms.date: 2026-10-01
 ms.topic: tutorial
 ---
 
@@ -33,7 +33,9 @@ Manual SCP is permitted only as an out-of-band operator procedure. It must not i
 
 ## Prepare the Environment
 
-Complete these actions from a trusted environment-operator host. The existing OSMO control plane must already contain the intended backend and pool.
+Complete these actions from a trusted environment-operator host. The OSMO control plane must already contain the intended backend and pool.
+
+To add them, run `infrastructure/setup/03-deploy-osmo.sh` with `--hil-backend-name <backend>` and `--private-service-ip` set to the internal load balancer's current address, plus the options the environment was deployed with. The flag adds the backend and a CPU pool of the same name, and `--hil-pool-name` picks a different pool name. In ConfigMap mode, OSMO rebuilds its config from Helm values on every 03 run, so pass the same options each time or the backend drops out.
 
 ### Create the Exchange Secrets
 
@@ -151,6 +153,8 @@ data-pipeline/setup/hil/01-install-k3s.sh \
 data-pipeline/setup/hil/01-install-k3s.sh \
   --node-name <host>
 ```
+
+Connect the cluster to Azure Arc before the environment owner publishes, because the publisher verifies the Arc resource. Follow [Connect to Azure Arc](../../data-pipeline/edge-k3s-setup.md#connect-to-azure-arc), including a `--cluster-admin-*` grant for each operator who uses Arc cluster connect.
 
 ## Optional Private Reachability
 
@@ -337,6 +341,15 @@ data-pipeline/setup/hil/04-run-no-command-check.sh \
 The result must contain representative proposed actions, zero applied actions, `command_transport: none`, a passed negative probe, `NO_COMMAND_TRANSPORT`, and the owned local node identity. The no-command check also requires the managed-identity OSMO upload timestamp, retrieves its unique output URI with `osmo data download`, and verifies the exact result manifest.
 
 Static validation covers the repository contracts only. Run live Arc federation, runtime upload, and OSMO download validation against the target environment before treating durable output as operational.
+
+## Optional Azure ML Compute
+
+The same host can also run Azure ML training jobs:
+
+1. For GPU jobs, run `data-pipeline/setup/hil/05-enable-k3s-gpu.sh --config-preview` on the host, then run it without the flag. It checks the driver, the NVIDIA Container Toolkit, and the `nvidia` RuntimeClass, makes the NVIDIA runtime the K3s default, and installs the pinned device plugin. K3s restarts once when the runtime changes.
+2. From an operator machine, attach the Arc cluster with `infrastructure/setup/05-attach-hil-azureml-compute.sh`. See [HiL Clusters as Azure ML Computes](../../training/azureml-training.md#-hil-clusters-as-azure-ml-computes).
+
+If the workspace storage account blocks public network access, Azure ML jobs on the host reach it through its private endpoint and need the VPN from [Optional Private Reachability](#optional-private-reachability).
 
 ## Failure and Rerun Behavior
 

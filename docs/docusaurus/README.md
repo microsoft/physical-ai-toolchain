@@ -2,9 +2,11 @@
 title: Docusaurus Site Operations
 description: Install, validate, test, serve, and troubleshoot the documentation site
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-28
+ms.date: 2026-09-30
 ms.topic: how-to
 ---
+
+<!-- cspell:words dagre rjxr -->
 
 Operate the repository documentation site from the repository root or from `docs/docusaurus`.
 
@@ -27,6 +29,44 @@ npm start
 ```
 
 The site uses the `/physical-ai-toolchain/` base path.
+
+## 🔒 Mermaid Dependency Policy
+
+Keep Mermaid pinned to `11.17.2` for the prerequisite in
+[issue #1720](https://github.com/microsoft/physical-ai-toolchain/issues/1720).
+The docs-only `lodash-es: 4.18.1` override in [package.json](package.json) prevents vulnerable nested copies when
+[PR #1705](https://github.com/microsoft/physical-ai-toolchain/pull/1705) later upgrades Mermaid to 12.
+That upgrade introduces Chevrotain 11 dependencies pinned to `lodash-es@4.17.23`, affected by
+[GHSA-r5fr-rjxr-66jc](https://github.com/advisories/GHSA-r5fr-rjxr-66jc) and
+[GHSA-f23m-r3pf-42rh](https://github.com/advisories/GHSA-f23m-r3pf-42rh). Both are patched starting at `4.18.0`;
+the override uses `4.18.1`, already resolved in the Mermaid 11 lockfile. An npm refresh can therefore leave that
+lockfile unchanged. Preserve the other overrides and avoid unrelated dependency updates.
+
+[Chevrotain maintainers declined a v11 backport](https://github.com/Chevrotain/chevrotain/issues/2186).
+Do not force a Chevrotain major-version override; adopt a compatible upstream Mermaid release instead.
+Remove the `lodash-es` override only after adopting an upstream Mermaid fix, regenerating the lockfile without
+the override, and verifying that every `lodash-es` copy in the complete resolved graph is patched. A patched
+hoisted copy or a passing audit with the override still applied is not sufficient.
+
+[docusaurus.config.js](docusaurus.config.js) explicitly selects `layout: 'dagre'` and `look: 'classic'` while retaining
+the `neutral` light theme and `dark` dark theme. Keep these settings to avoid the Mermaid 12 default redesign.
+
+Before clearing the Mermaid 12 upgrade gate:
+
+1. Merge the prerequisite PR for #1720 into `main` with Mermaid still at `11.17.2`; keep #1705 draft and `blocked`
+   until that merge.
+2. Refresh #1705 against `main` and regenerate its docs lockfile with npm. Inspect the complete lockfile and run
+   `npm --prefix docs/docusaurus ls lodash-es --all` after a clean `npm --prefix docs/docusaurus ci`.
+   Verify all three formerly vulnerable Chevrotain dependency paths resolve to patched versions, with no
+   `4.17.23` copies, and confirm installation leaves the lockfile unchanged.
+3. Run `npm run validate:docs` and the existing [browser validation](#-browser-validation). Check Mermaid SVGs,
+   accessible names and descriptions, and visual presentation in both light and dark modes. Rerun these checks on
+   the refreshed upgrade; prerequisite results do not validate Mermaid 12.
+4. Confirm the supported browser policy accepts the
+   [Mermaid 12 baseline](https://github.com/mermaid-js/mermaid/releases/tag/mermaid%4012.0.0) of ES2024 and Safari 17.4+.
+   Otherwise keep the upgrade blocked. Node.js 24+ satisfies its Node.js 22.12+ requirement.
+5. Require Dependency Review, required CI checks, and review approval before removing `blocked`, marking #1705
+   ready for review, and considering its merge.
 
 ## ✅ Validation
 

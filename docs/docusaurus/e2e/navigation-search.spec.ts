@@ -323,7 +323,9 @@ test('SearchPage recovers from a no-result query without duplicate announcements
 
   const status = page.locator('[id^="search-results-status-"]');
   const query = page.locator('input[name="q"]');
-  await expect(status).toHaveText(`${await page.locator('article[class*="searchResultItem"]').count()} documents found`);
+  const initialResults = page.locator('article[class*="searchResultItem"]');
+  await expect(initialResults.first()).toBeVisible();
+  await expect(status).toHaveText(`${await initialResults.count()} documents found`);
 
   await query.fill('98765432101234567890');
   await expect(status).toHaveText('No documents found');
@@ -475,8 +477,9 @@ test('responsive navigation opens, activates a tier, and closes without trapping
   const tierLink = sidebar.locator('a.menu__link').filter({ hasText: labelData.tierNavigation[0].label }).first();
   await tierLink.focus();
   await page.keyboard.press('Enter');
+  const tierPath = `/physical-ai-toolchain${labelData.tierNavigation[0].route}`;
+  await expect(page).toHaveURL((url) => url.pathname === tierPath);
   await expectPageReady(page);
-  expect(new URL(page.url()).pathname).toBe(`/physical-ai-toolchain${labelData.tierNavigation[0].route}`);
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(sidebar).toBeHidden();
   await expect(page.locator('main')).toBeFocused();

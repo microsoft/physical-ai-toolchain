@@ -148,9 +148,19 @@ textarea:focus-visible,
    ================================================================ */
 
 .navbar {
-  height: 54px;
+  /* Override the theme's specificity-raised height so enlarged controls can wrap. */
+  height: auto !important;
+  min-height: var(--ifm-navbar-height);
   box-shadow: none;
   border-bottom: 1px solid var(--ifm-toc-border-color);
+}
+
+.navbar__items {
+  flex-wrap: wrap;
+}
+
+.navbar__brand {
+  flex-shrink: 0;
 }
 
 .navbar__logo {
@@ -285,6 +295,19 @@ html[data-theme='dark'] .navbar {
   display: flex;
   min-height: 24px;
   align-items: center;
+}
+
+/* Wrap result previews instead of truncating them so resized and reflowed text stays readable. */
+html .searchA11yWrapper [role='listbox'] [class*='suggestion_'] {
+  height: auto;
+  min-height: var(--search-local-hit-height, 56px);
+  padding-block: 6px;
+}
+
+.searchA11yWrapper [class*='hitTitle_'],
+.searchA11yWrapper [class*='hitPath_'] {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 html .searchA11yWrapper [role='listbox'] [role='option'][aria-selected='true'] {

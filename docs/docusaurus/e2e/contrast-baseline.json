@@ -107,54 +107,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<code>evaluation/sil/scripts/submit-azureml-lerobot-eval.sh</code>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "elmPartiallyObscured",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/reference"
-      ],
-      "rule": "color-contrast",
-      "signature": "06719eea59f715e2",
-      "state": "default",
-      "target": "[\"tr:nth-child(4) > td:nth-child(4) > code\"]",
-      "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
-      "html": "<code>training/il/scripts/submit-azureml-lerobot-pipeline.sh --with-register --register-model-name &lt;name&gt;</code>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "elmPartiallyObscured",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/reference"
-      ],
-      "rule": "color-contrast",
-      "signature": "0a124a53773ac950",
-      "state": "default",
-      "target": "[\"tr:nth-child(6) > td:nth-child(4) > code\"]",
-      "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<p>Each tier carries a stable ID (<code>T0</code>–<code>T5</code>) and a stage name. The two are paired everywhere:</p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -240,6 +192,30 @@
       "signature": "0d4ae2a609548a56",
       "state": "default",
       "target": "[\"foreignobject[width=\\\"200\\\"][height=\\\"68\\\"] > div > .nodeLabel > p\"]",
+      "theme": "dark"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<code>training/il/scripts/submit-azureml-lerobot-pipeline.sh</code>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "elmPartiallyObscured",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-01",
+      "routeFamilies": [
+        "/reference"
+      ],
+      "rule": "color-contrast",
+      "signature": "0d61dbb2c2015c93",
+      "state": "default",
+      "target": "[\"tr:nth-child(6) > td:nth-child(4) > code\"]",
       "theme": "dark"
     },
     {
@@ -971,6 +947,30 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
+      "html": "<code>evaluation/sil/scripts/submit-azureml-lerobot-eval.sh</code>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "elmPartiallyObscured",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-01",
+      "routeFamilies": [
+        "/reference"
+      ],
+      "rule": "color-contrast",
+      "signature": "443eae474be21887",
+      "state": "default",
+      "target": "[\"tr:nth-child(5) > td:nth-child(4) > code\"]",
+      "theme": "dark"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
       "html": "<li><code>framework: \"\"</code> → <code>framework: auto</code></li>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -1331,30 +1331,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<code>training/il/scripts/submit-azureml-lerobot-training.sh</code>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "elmPartiallyObscured",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/reference"
-      ],
-      "rule": "color-contrast",
-      "signature": "68b9651396cf23da",
-      "state": "default",
-      "target": "[\"tr:nth-child(2) > td:nth-child(4) > code\"]",
-      "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<td style=\"text-align:center\">✓</td>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -1547,30 +1523,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<code>evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh</code>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "elmPartiallyObscured",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/reference"
-      ],
-      "rule": "color-contrast",
-      "signature": "75b99131d48a426d",
-      "state": "default",
-      "target": "[\"tr:nth-child(3) > td:nth-child(4) > code\"]",
-      "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<span class=\"token plain\">┌─────────────────────────────────────────────┐</span>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -1656,6 +1608,30 @@
       "signature": "77eb02539dee4a58",
       "state": "default",
       "target": "[\"ul:nth-child(33) > li:nth-child(1)\"]",
+      "theme": "dark"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<code>training/smoke/scripts/submit-azureml-gpu-smoke.sh</code>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "elmPartiallyObscured",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-01",
+      "routeFamilies": [
+        "/reference"
+      ],
+      "rule": "color-contrast",
+      "signature": "78a8adc402826190",
+      "state": "default",
+      "target": "[\"tr:nth-child(2) > td:nth-child(4) > code\"]",
       "theme": "dark"
     },
     {
@@ -1848,6 +1824,30 @@
       "signature": "845ace7dfda9b633",
       "state": "default",
       "target": "[\"th:nth-child(4)\"]",
+      "theme": "dark"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<code>evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh</code>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "elmPartiallyObscured",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-01",
+      "routeFamilies": [
+        "/reference"
+      ],
+      "rule": "color-contrast",
+      "signature": "8b1762919b62726e",
+      "state": "default",
+      "target": "[\"tr:nth-child(4) > td:nth-child(4) > code\"]",
       "theme": "dark"
     },
     {
@@ -2267,30 +2267,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<code>training/il/scripts/submit-azureml-lerobot-pipeline.sh</code>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "elmPartiallyObscured",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/reference"
-      ],
-      "rule": "color-contrast",
-      "signature": "b2faaf8c502c9016",
-      "state": "default",
-      "target": "[\"tr:nth-child(5) > td:nth-child(4) > code\"]",
-      "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<p>Developer / CI pipeline</p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -2449,6 +2425,30 @@
       "state": "default",
       "target": "[\"table[aria-labelledby=\\\"responsibilities\\\"] > tbody > tr:nth-child(1) > td:nth-child(2)\"]",
       "theme": "light"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<code>training/il/scripts/submit-azureml-lerobot-training.sh</code>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "elmPartiallyObscured",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-01",
+      "routeFamilies": [
+        "/reference"
+      ],
+      "rule": "color-contrast",
+      "signature": "c2a6e33b95e0e8d7",
+      "state": "default",
+      "target": "[\"tr:nth-child(3) > td:nth-child(4) > code\"]",
+      "theme": "dark"
     },
     {
       "classification": "unresolved",
@@ -2976,6 +2976,30 @@
       "signature": "ec78e149529631b5",
       "state": "default",
       "target": "[\"ul:nth-child(33) > li:nth-child(2)\"]",
+      "theme": "dark"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<code>training/il/scripts/submit-azureml-lerobot-pipeline.sh --with-register --register-model-name &lt;name&gt;</code>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "elmPartiallyObscured",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-01",
+      "routeFamilies": [
+        "/reference"
+      ],
+      "rule": "color-contrast",
+      "signature": "eed42016363a5623",
+      "state": "default",
+      "target": "[\"tr:nth-child(7) > td:nth-child(4) > code\"]",
       "theme": "dark"
     },
     {
