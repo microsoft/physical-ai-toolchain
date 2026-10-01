@@ -297,6 +297,19 @@ html[data-theme='dark'] .navbar {
   align-items: center;
 }
 
+/* Wrap result previews instead of truncating them so resized and reflowed text stays readable. */
+html .searchA11yWrapper [role='listbox'] [class*='suggestion_'] {
+  height: auto;
+  min-height: var(--search-local-hit-height, 56px);
+  padding-block: 6px;
+}
+
+.searchA11yWrapper [class*='hitTitle_'],
+.searchA11yWrapper [class*='hitPath_'] {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 html .searchA11yWrapper [role='listbox'] [role='option'][aria-selected='true'] {
   color: var(--docs-search-selected-fg) !important;
   background-color: var(--docs-search-selected-bg) !important;

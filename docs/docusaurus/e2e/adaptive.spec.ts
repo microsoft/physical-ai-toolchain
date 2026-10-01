@@ -1469,20 +1469,7 @@ interface ReviewedAdaptiveException {
   readonly reentryTrigger: string;
 }
 
-const reviewedAdaptiveExceptions: readonly ReviewedAdaptiveException[] = [
-  {
-    id: 'search-hit-preview-truncated-in-reflow',
-    producer: 'layout',
-    signature: /^clipped: span\.hit(Title|Path)_/,
-    states: ['search-results-open'],
-    conditionIds: ['reflow-320', 'text-spacing-at-320', 'orientation-portrait'],
-    rationale:
-      'The local search plugin renders fixed-width single-line result previews. The complete title and path remain in the accessible name and on the destination route.',
-    owner: 'accessibility owner',
-    reentryTrigger:
-      'Qualified review of search result preview truncation, or any docusaurus-search-local upgrade.',
-  },
-];
+const reviewedAdaptiveExceptions: readonly ReviewedAdaptiveException[] = [];
 
 interface ClassifiedFinding {
   readonly conditionId: string;
