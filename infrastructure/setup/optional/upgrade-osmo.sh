@@ -432,7 +432,7 @@ next_step() {
         hop-6.2) echo "tokens" ;;
         tokens)  echo "export" ;;
         export)  echo "review $bundle_dir/osmo-platforms.yaml, then hop-6.3" ;;
-        reset)   echo "generate the bundle's osmo-platforms.yaml from Terraform node_pools, then hop-6.3" ;;
+        reset)   echo "review or generate the bundle's osmo-platforms.yaml (environment-deployment skill), then hop-6.3" ;;
         hop-6.3) echo "verify" ;;
         verify)  echo "none; delete the legacy release history once you no longer need a rollback" ;;
     esac
@@ -784,7 +784,7 @@ stage_reset() {
 
     section "Plan: Reset OSMO Data"
     echo "  Uninstall (history kept for helm rollback): $(describe_releases "$legacy")"
-    echo "  Purge: PostgreSQL database $db_name (public schema) on $pg_fqdn, and Redis {osmo}:* keys"
+    echo "  Purge: PostgreSQL database $db_name (public schema and pgroll state) on $pg_fqdn, and Redis {osmo}:* keys"
     echo "  Keep: storage container, $SECRET_MEK, secrets, namespaces, and the backend operator"
     echo "  OSMO workflow records, dataset records, and config history in the database are deleted."
     confirm_changes
