@@ -525,6 +525,20 @@ az ml job show \
   --output tsv
 ```
 
+Resolve the selected trial's run-scoped output root. Use the datastore named
+by `settings.default_datastore` when the pipeline overrides
+`workspaceblobstore`.
+
+```bash
+BEST_CALIBRATION_RUN=$(az ml job show \
+  --name "$CALIBRATION_JOB" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --query properties.best_child_run_id \
+  --output tsv)
+CALIBRATION_OUTPUT_ROOT="azureml://datastores/workspaceblobstore/paths/azureml/$BEST_CALIBRATION_RUN"
+```
+
 Submit the command-only training pipeline with the immutable selected outputs:
 
 ```bash
@@ -535,8 +549,8 @@ az ml job create \
   --set inputs.dataset.path="azureml:<dataset-data-asset>:<version>" \
   --set inputs.dataset_asset_id="azureml:<dataset-data-asset>:<version>" \
   --set inputs.dataset_repo_id="<hugging-face-dataset>" \
-  --set inputs.workload_contract.path="azureml://jobs/$CALIBRATION_JOB/outputs/workload_contract" \
-  --set inputs.calibration_report.path="azureml://jobs/$CALIBRATION_JOB/outputs/calibration_report" \
+  --set inputs.workload_contract.path="$CALIBRATION_OUTPUT_ROOT/workload_contract/" \
+  --set inputs.calibration_report.path="$CALIBRATION_OUTPUT_ROOT/calibration_report/" \
   --set inputs.pipeline_contract_fingerprint="<pipeline-contract-sha256>" \
   --set inputs.policy_type=pi05 \
   --set inputs.init_from_policy_hf_repo_id=lerobot/pi05_base \
@@ -562,7 +576,10 @@ az ml job create \
 
 Training regenerates the dataset manifest and validates that the selected
 calibration workload matches the current dataset, model, code, and runtime.
-This prevents stale sweep outputs from controlling a changed training job.
+The run-scoped datastore paths avoid unsupported cross-job
+`azureml://jobs/...` input materialization on Arc pipeline children. Workload
+validation prevents stale sweep outputs from controlling a changed training
+job.
 
 > [!IMPORTANT]
 > Validate failed-trial tolerance on the attached Arc compute before the first VLA sweep. A failed trial must leave the sweep completed with the successful trial selected and its named outputs downloadable. Stop before VLA submission if this gate fails; do not raise the InstanceType limit or broaden storage roles as a workaround.

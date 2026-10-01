@@ -83,8 +83,6 @@ jobs:
     type: command
     component: ./components/train.yaml
     compute: ${{parent.inputs.compute_train}}
-    environment_variables:
-      AZUREML_COMPUTE_USE_COMMON_RUNTIME: "true"
     resources:
       instance_type: gpu-high-memory
     inputs:

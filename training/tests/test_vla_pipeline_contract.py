@@ -21,6 +21,8 @@ _COMPONENT_ROOT = _REPO_ROOT / "training/vla/workflows/azureml/components"
 _PIPELINE = _REPO_ROOT / "training/vla/workflows/azureml/vla-training-pipeline.yaml"
 _CALIBRATION_SWEEP = _REPO_ROOT / "training/vla/workflows/azureml/vla-calibration-sweep.yaml"
 _SWEEP_SMOKE = _REPO_ROOT / "training/vla/workflows/azureml/sweep-failure-smoke.yaml"
+_VLA_README = _REPO_ROOT / "training/vla/README.md"
+_ARC_SETUP = _REPO_ROOT / "docs/training/vla-azureml-arc-setup.md"
 
 
 def _write_dataset(root: Path) -> Path:
@@ -130,9 +132,6 @@ def test_given_training_pipeline_when_parsed_then_only_training_stages_are_seria
     assert jobs["training_step"]["inputs"]["dataset"] == "${{parent.inputs.dataset}}"
     assert jobs["training_step"]["inputs"]["calibration_report"] == "${{parent.inputs.calibration_report}}"
     assert jobs["training_step"]["inputs"]["workload_contract"] == "${{parent.inputs.workload_contract}}"
-    assert jobs["training_step"]["environment_variables"] == {
-        "AZUREML_COMPUTE_USE_COMMON_RUNTIME": "true"
-    }
     assert jobs["training_step"]["resources"]["instance_type"] == "gpu-high-memory"
     assert {
         "dataset_manifest",
@@ -144,6 +143,15 @@ def test_given_training_pipeline_when_parsed_then_only_training_stages_are_seria
     assert {"promotion_policy", "model_name", "eval_episodes", "compute_evaluate", "compute_decide"}.isdisjoint(
         pipeline["inputs"]
     )
+
+
+def test_given_arc_submission_docs_when_read_then_selected_outputs_use_datastore_paths() -> None:
+    for document in (_VLA_README, _ARC_SETUP):
+        content = document.read_text(encoding="utf-8")
+
+        assert "properties.best_child_run_id" in content
+        assert "workspaceblobstore/paths/azureml/$BEST_CALIBRATION_RUN" in content
+        assert "azureml://jobs/$CALIBRATION_JOB/outputs" not in content
 
 
 def test_given_calibration_sweep_when_parsed_then_trials_are_isolated_and_outputs_are_selectable() -> None:

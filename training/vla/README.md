@@ -84,6 +84,13 @@ az ml job show \
   --workspace-name "<workspace-name>" \
   --query status --output tsv
 
+BEST_CALIBRATION_RUN=$(az ml job show \
+  --name "$CALIBRATION_JOB" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --query properties.best_child_run_id --output tsv)
+CALIBRATION_OUTPUT_ROOT="azureml://datastores/workspaceblobstore/paths/azureml/$BEST_CALIBRATION_RUN"
+
 az ml job create \
   --file training/vla/workflows/azureml/vla-training-pipeline.yaml \
   --resource-group "<workspace-resource-group>" \
@@ -91,8 +98,8 @@ az ml job create \
   --set inputs.dataset.path="azureml:ur10e-gear-pick-place-train:1" \
   --set inputs.dataset_asset_id="azureml:ur10e-gear-pick-place-train:1" \
   --set inputs.dataset_repo_id="<dataset-repository>" \
-  --set inputs.workload_contract.path="azureml://jobs/$CALIBRATION_JOB/outputs/workload_contract" \
-  --set inputs.calibration_report.path="azureml://jobs/$CALIBRATION_JOB/outputs/calibration_report" \
+  --set inputs.workload_contract.path="$CALIBRATION_OUTPUT_ROOT/workload_contract/" \
+  --set inputs.calibration_report.path="$CALIBRATION_OUTPUT_ROOT/calibration_report/" \
   --set inputs.pipeline_contract_fingerprint="<pipeline-contract-sha256>" \
   --set inputs.policy_type=pi05 \
   --set inputs.init_from_policy_hf_repo_id=lerobot/pi05_base \
@@ -112,8 +119,11 @@ az ml job create \
 Submit the training pipeline only after the calibration sweep reports
 `Completed`. The sweep runs candidates `[1,2,4]` serially in separate
 containers and publishes the largest safe candidate's report and workload
-contract. Training regenerates the dataset manifest and rejects calibration
-evidence that does not match the current dataset, model, code, and runtime.
+contract. Arc pipeline children consume the selected trial's concrete,
+run-scoped datastore folders because cross-job `azureml://jobs/...` inputs do
+not materialize on this compute target. Training regenerates the dataset
+manifest and rejects calibration evidence that does not match the current
+dataset, model, code, and runtime.
 
 The pipeline requires a full Git commit. The checked-in entrypoint downloads the
 snapshot after installing the locked runtime, validates `config.json` and the
