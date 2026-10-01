@@ -20,7 +20,7 @@ resource "azurerm_storage_account" "main" {
   access_tier                     = "Hot"
   min_tls_version                 = "TLS1_2"
   shared_access_key_enabled       = var.should_enable_storage_shared_access_key
-  public_network_access_enabled   = var.should_enable_public_network_access
+  public_network_access_enabled   = local.public_network_access.storage_account
   allow_nested_items_to_be_public = false
 
   blob_properties {
@@ -69,7 +69,7 @@ resource "azurerm_storage_account" "data_lake" {
   min_tls_version                 = "TLS1_2"
   is_hns_enabled                  = true
   shared_access_key_enabled       = var.should_enable_storage_shared_access_key
-  public_network_access_enabled   = var.should_enable_public_network_access
+  public_network_access_enabled   = local.public_network_access.data_lake_storage_account
   allow_nested_items_to_be_public = false
 
   blob_properties {
