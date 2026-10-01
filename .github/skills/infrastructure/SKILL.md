@@ -74,10 +74,10 @@ kubectl cluster-info
 cd infrastructure/setup
 ./01-deploy-robotics-charts.sh
 ./02-deploy-azureml-extension.sh
-./03-deploy-osmo.sh
+./03-deploy-osmo.sh --private-service-ip <unused-aks-subnet-ip>
 ```
 
-Scripts must run in numeric order. Each supports `--config-preview` for dry-run output.
+Scripts must run in numeric order. Each supports `--config-preview` for dry-run output. On a new cluster, `03-deploy-osmo.sh` needs `--private-service-ip` with a free address in the AKS subnet for the internal load balancer in front of OSMO; later runs reuse that address.
 
 ## Network Mode Selection
 

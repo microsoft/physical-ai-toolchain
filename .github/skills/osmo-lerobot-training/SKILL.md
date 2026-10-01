@@ -107,27 +107,27 @@ After every successful training or inference submission, open the OSMO workflow 
 **Steps:**
 
 1. Capture the workflow ID from the submission output (the line `Workflow ID - <id>`).
-2. Construct the URL: `http://10.0.5.7/workflows/<workflow-id>`.
+2. Build the URL from the service URL used for `osmo login`: `<service-url>/workflows/<workflow-id>`. Don't rely on the `Workflow Overview` line, which can show an in-cluster address that a browser can't reach.
 3. Open it with the `open_browser_page` tool (VS Code SimpleBrowser).
 4. Tell the user that the **Logs** tab on that page streams live output per task (e.g., `lerobot-train`, `lerobot-infer`).
 
-**Example — after training submission output:**
+**Example after a training submission:**
 
 ```text
 Workflow ID - lerobot-training-31
-Workflow Overview - http://10.0.5.7/workflows/lerobot-training-31
+Workflow Overview - <service-url>/workflows/lerobot-training-31
 ```
 
-Open: `http://10.0.5.7/workflows/lerobot-training-31`
+Open: `<service-url>/workflows/lerobot-training-31`
 
-**Example — after inference submission output:**
+**Example after an inference submission:**
 
 ```text
 Workflow ID - lerobot-inference-20
-Workflow Overview - http://10.0.5.7/workflows/lerobot-inference-20
+Workflow Overview - <service-url>/workflows/lerobot-inference-20
 ```
 
-Open: `http://10.0.5.7/workflows/lerobot-inference-20`
+Open: `<service-url>/workflows/lerobot-inference-20`
 
 > The page has a **Logs** tab with per-task log streams. For training, select the `lerobot-train` task. For inference, select the `lerobot-infer` task. Use the OSMO CLI (`osmo workflow logs <id> -t <task> -n 100`) as a fallback when the browser is not reachable.
 
