@@ -31,6 +31,8 @@ Direct setup scripts for one Ubuntu T3 HiL node. The scripts reconcile local res
 
 The trusted environment owner publishes host-bound inputs to Key Vault with `infrastructure/setup/04-prepare-osmo-hil-node.sh`. The consumer validates the catalog, artifact digests, and token metadata before changing the local K3s target. Ubuntu scripts do not create remote desired state or change Key Vault networking or RBAC.
 
-`hil/05-enable-k3s-gpu.sh` needs a working NVIDIA driver (`nvidia-smi`) and the NVIDIA Container Toolkit, installed before K3s last started so K3s registered the `nvidia` RuntimeClass. It sets the default runtime through a K3s config drop-in, because pods without a runtime class, including Azure ML jobs, otherwise can't reach the GPU. K3s restarts only when that setting changes. The device plugin image is pinned by `DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE` in `scripts/lib/common.sh`.
+`hil/05-enable-k3s-gpu.sh` needs a working NVIDIA driver (`nvidia-smi`) and the NVIDIA Container Toolkit, installed before K3s last started so K3s registered the `nvidia` RuntimeClass. It sets the default runtime through a K3s config drop-in, because pods without a runtime class, including Azure ML jobs, otherwise can't reach the GPU. The device plugin image is pinned by `DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE` in `scripts/lib/common.sh`.
+
+K3s restarts only when the applied default runtime isn't already `nvidia`. Hosts installed with `hil/01-install-k3s.sh --default-runtime nvidia` get only the device plugin.
 
 See [Ubuntu Edge K3s Setup](../../docs/data-pipeline/edge-k3s-setup.md) and [Ubuntu HiL OSMO Backend](../../docs/recipes/tier-3-production/ubuntu-hil-osmo-backend.md).

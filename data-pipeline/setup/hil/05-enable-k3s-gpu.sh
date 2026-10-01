@@ -21,7 +21,9 @@ Usage: $(basename "$0") [OPTIONS]
 
 Make the NVIDIA container runtime the K3s default and install the NVIDIA device
 plugin, so pods without a runtime class, such as Azure ML jobs, can use GPUs.
-Run it on the HiL host after 01-install-k3s.sh.
+Run it on the HiL host after 01-install-k3s.sh. When K3s already uses the nvidia
+default runtime, for example after 01-install-k3s.sh --default-runtime nvidia,
+the script leaves K3s running and installs only the device plugin.
 
 Prerequisites: a working NVIDIA driver (nvidia-smi) and the NVIDIA Container
 Toolkit, installed before K3s last started so K3s registered the nvidia runtime.
@@ -72,6 +74,12 @@ kube() {
   kubectl --kubeconfig "$kubeconfig" --context "$context" "$@"
 }
 
+# K3s regenerates the containerd config on every start from its config files, so this
+# reflects the default runtime K3s actually applied.
+nvidia_is_default_runtime() {
+  sudo grep -q -E "default_runtime_name = ['\"]nvidia['\"]" "$containerd_config"
+}
+
 # Check every prerequisite so one run reports everything that's missing.
 check_names=()
 check_results=()
@@ -117,6 +125,15 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "K3s Drop-in" "$K3S_DROPIN"
   print_kv "Containerd Config" "$containerd_config"
   print_kv "Device Plugin" "$DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE"
+  runtime_state="unknown; sudo needs a password"
+  if sudo -n true 2>/dev/null; then
+    if nvidia_is_default_runtime 2>/dev/null; then
+      runtime_state="nvidia; K3s keeps running"
+    else
+      runtime_state="not nvidia; the run restarts K3s"
+    fi
+  fi
+  print_kv "Default Runtime" "$runtime_state"
   section "Prerequisites"
   print_checks
   warn "Changing the default runtime restarts K3s, which briefly interrupts the host's pods."
@@ -142,16 +159,17 @@ sudo test -f "$containerd_config" || fatal "K3s containerd config not found at $
 sudo grep -q 'nvidia-container-runtime' "$containerd_config" || \
   fatal "K3s didn't detect the NVIDIA runtime; confirm nvidia-container-runtime is on PATH and restart K3s"
 
-# K3s regenerates the containerd config on every start, so set the default runtime
-# through a K3s config drop-in. InstanceTypes can't set a runtime class, so Azure ML
-# pods only reach the GPU when nvidia is the default runtime.
-current_dropin=$(sudo cat "$K3S_DROPIN" 2>/dev/null || true)
+# InstanceTypes can't set a runtime class, so Azure ML pods only reach the GPU when
+# nvidia is the default runtime. Set it through a K3s config drop-in unless K3s already
+# applies it.
 runtime_changed=false
-if [[ "$current_dropin" == "$DROPIN_CONTENT" ]]; then
-  info "K3s drop-in already sets the nvidia default runtime"
+if nvidia_is_default_runtime; then
+  info "K3s already uses nvidia as the default runtime"
 else
-  sudo install -d -m 0755 "$K3S_DROPIN_DIR"
-  printf '%s\n' "$DROPIN_CONTENT" | sudo tee "$K3S_DROPIN" > /dev/null
+  if [[ "$(sudo cat "$K3S_DROPIN" 2>/dev/null || true)" != "$DROPIN_CONTENT" ]]; then
+    sudo install -d -m 0755 "$K3S_DROPIN_DIR"
+    printf '%s\n' "$DROPIN_CONTENT" | sudo tee "$K3S_DROPIN" > /dev/null
+  fi
   runtime_changed=true
   info "Restarting K3s to apply the default runtime..."
   sudo systemctl restart k3s
@@ -160,11 +178,8 @@ else
     sleep 3
   done
   kube wait --for=condition=Ready node --all --timeout=180s
+  nvidia_is_default_runtime || fatal "K3s didn't apply the nvidia default runtime; inspect $containerd_config"
 fi
-
-sudo grep -q "default_runtime_name = 'nvidia'" "$containerd_config" || \
-  sudo grep -q 'default_runtime_name = "nvidia"' "$containerd_config" || \
-  fatal "K3s didn't apply the nvidia default runtime; inspect $containerd_config"
 info "Containerd default runtime is nvidia"
 
 #------------------------------------------------------------------------------
