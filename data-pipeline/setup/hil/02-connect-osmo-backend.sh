@@ -110,7 +110,7 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
-require_tools az base64 helm jq kubectl osmo
+require_tools az base64 curl helm jq kubectl osmo
 identity_file=/var/lib/physical-ai-toolchain/k3s-identity.json
 
 hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir"
@@ -185,7 +185,7 @@ hil_require_local_k3s_identity "$identity_file" "$kubeconfig" "$context"
 hil_prepare_directory "$osmo_config_dir"
 export XDG_CONFIG_HOME="$osmo_config_dir"
 if ! osmo config show POOL "$pool_name" >/dev/null 2>&1; then
-  osmo login "$service_url" --method code
+  osmo_login "$service_url"
 fi
 osmo profile set pool "$pool_name" >/dev/null
 

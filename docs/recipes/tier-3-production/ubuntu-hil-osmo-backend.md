@@ -114,6 +114,7 @@ Run the same command without `--config-preview`. Omit `--vpn-input-dir` when pri
 The publisher:
 
 * Verifies the active Azure account and existing OSMO backend and pool
+* Logs in to OSMO with the device-code flow when the service has an identity provider, or with a dev login as `admin` when it doesn't, as with an OSMO deployed by `03-deploy-osmo.sh`
 * Reuses the exact catalog-pinned token and token metadata versions when they are valid and unexpired
 * Issues a new `osmo-backend` token when the catalog is absent, valid metadata has expired, or `--renew-token` is supplied
 * Preserves the generic non-secret environment-bundle allowlist
@@ -308,7 +309,7 @@ data-pipeline/setup/hil/02-connect-osmo-backend.sh \
   --vault-name <vault>
 ```
 
-The stage authenticates the end user by OSMO code login, retrieves the exact catalog-bound artifacts from Key Vault, validates them before Kubernetes mutation, creates and verifies the local `osmo-workflow` ServiceAccount workload-identity metadata, and changes only the owned local K3s target. The non-secret connection receipt records the workflow-data URI, managed-identity client ID, and isolated Azure CLI path.
+The stage logs in to OSMO the same way as the publisher, retrieves the exact catalog-bound artifacts from Key Vault, validates them before Kubernetes mutation, creates and verifies the local `osmo-workflow` ServiceAccount workload-identity metadata, and changes only the owned local K3s target. The non-secret connection receipt records the workflow-data URI, managed-identity client ID, and isolated Azure CLI path.
 
 ## Validate the Journey
 

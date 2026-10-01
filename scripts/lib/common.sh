@@ -686,6 +686,27 @@ detect_service_url() {
   echo "$url"
 }
 
+# Log in to an OSMO service with the method it supports. A service with an identity
+# provider publishes a device endpoint for code login. A service deployed without
+# authentication, as 03-deploy-osmo.sh deploys it, publishes none and accepts only a
+# dev login. Uses the caller's XDG_CONFIG_HOME, so isolated profiles stay isolated.
+# Usage: osmo_login <service-url> [dev-username]
+osmo_login() {
+  local service_url="${1:?service URL required}" dev_username="${2:-admin}"
+  local auth_url="${service_url%/}/api/auth/login"
+  local auth_config device_endpoint
+  auth_config=$(curl --fail --silent --show-error --connect-timeout 10 "$auth_url") || \
+    fatal "Unable to read the OSMO login configuration from $auth_url"
+  device_endpoint=$(jq -r '.device_endpoint // empty' <<< "$auth_config") || \
+    fatal "OSMO login configuration from $auth_url is not valid JSON"
+  if [[ -n "$device_endpoint" ]]; then
+    osmo login "$service_url" --method code
+  else
+    info "OSMO at $service_url has no identity provider; using a dev login as $dev_username"
+    osmo login "$service_url" --method dev --username "$dev_username"
+  fi
+}
+
 # Print section header
 section() {
   echo
