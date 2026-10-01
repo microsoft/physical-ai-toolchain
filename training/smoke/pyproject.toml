@@ -12,7 +12,8 @@ dependencies = [
     "azure-storage-blob==12.30.1",
     "mlflow-skinny==3.16.0",
     "idna==3.19",
-    "urllib3==2.7.0",
+    # 2.8.0 fixes GHSA-8988-9cw3-xx77, GHSA-vxq7-64xx-v4gw, and GHSA-gh4c-6fx4-qh6g.
+    "urllib3==2.8.0",
     "cryptography==50.0.1",
     # 2.15.0 is the first PyJWT release without open advisories
     # (GHSA-ffc3-869f-jxw9, GHSA-42vr-xj54-vc7v).
