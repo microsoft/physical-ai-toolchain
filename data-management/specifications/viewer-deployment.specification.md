@@ -45,23 +45,30 @@ The Terraform module in `infrastructure/terraform/modules/dataviewer/` provision
 | Managed Identity           | Azure RBAC for Blob Storage and Container Registry |
 | Entra ID App Registration  | OAuth authentication for the viewer                |
 
+Terraform provisions the application registration and Container Apps resources. Run `data-management/setup/deploy-dataviewer.sh` to build the images, configure frontend Easy Auth, set the backend to independent Entra JWT validation, and perform the staged browser verification gates.
+
 ## Authentication
 
-| Method         | Use Case                                            |
-|----------------|-----------------------------------------------------|
-| Entra ID (JWT) | Production deployments with organizational identity |
-| API Key        | Service-to-service communication                    |
-| Auth0          | Alternative identity provider                       |
-| None           | Local development (default)                         |
+| Method              | Use Case                                                                  |
+|---------------------|---------------------------------------------------------------------------|
+| Easy Auth and Entra | Public frontend perimeter plus independent backend delegated-token checks |
+| API key             | Service-to-service communication                                          |
+| Auth0               | Alternative JWT identity provider                                         |
+| Disabled            | Loopback-only local development                                           |
+
+Authenticated Azure deployments use two controls. Container Apps Easy Auth protects the public frontend and starts the server-directed sign-in flow. The frontend then requests the `access_as_user` delegated scope through MSAL, and the backend independently validates the token signature, issuer, audience, expiry, subject, scope, and route-specific roles. The backend does not trust client-supplied platform principal headers.
 
 ## Configuration
 
 Runtime behavior is controlled by environment variables on the backend container:
 
-| Variable                  | Description                                                  |
-|---------------------------|--------------------------------------------------------------|
-| `STORAGE_TYPE`            | `local` or `azure`                                           |
-| `AZURE_STORAGE_ACCOUNT`   | Storage account name (when `STORAGE_TYPE=azure`)             |
-| `AZURE_STORAGE_CONTAINER` | Blob container name                                          |
-| `CORS_ORIGINS`            | Allowed frontend origins                                     |
-| `AUTH_PROVIDER`           | Authentication provider (`entra`, `auth0`, `apikey`, `none`) |
+| Variable                     | Description                                                  |
+|------------------------------|--------------------------------------------------------------|
+| `STORAGE_TYPE`               | `local` or `azure`                                           |
+| `AZURE_STORAGE_ACCOUNT`      | Storage account name (when `STORAGE_TYPE=azure`)             |
+| `AZURE_STORAGE_CONTAINER`    | Blob container name                                          |
+| `CORS_ORIGINS`               | Allowed frontend origins                                     |
+| `DATAVIEWER_AUTH_DISABLED`   | `true` only for loopback local development                   |
+| `DATAVIEWER_AUTH_PROVIDER`   | `azure_ad`, `auth0`, or `apikey`                             |
+| `DATAVIEWER_AZURE_TENANT_ID` | Entra tenant used for issuer and signing-key validation      |
+| `DATAVIEWER_AZURE_CLIENT_ID` | API application ID used for token audience validation        |

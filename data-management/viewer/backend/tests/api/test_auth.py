@@ -267,64 +267,6 @@ class TestApiKeyProvider:
 
 
 # ============================================================================
-# EasyAuthProvider unit tests
-# ============================================================================
-
-
-class TestEasyAuthProvider:
-    async def test_authenticate_valid_principal(self):
-        import base64
-        import json
-        from unittest.mock import MagicMock
-
-        from src.api.auth import EasyAuthProvider
-
-        provider = EasyAuthProvider()
-        claims = {
-            "claims": [
-                {"typ": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", "val": "user-123"},
-                {"typ": "name", "val": "Test User"},
-                {"typ": "roles", "val": "Dataviewer.Admin"},
-            ]
-        }
-        encoded = base64.b64encode(json.dumps(claims).encode()).decode()
-        request = MagicMock()
-        request.headers = {"X-MS-CLIENT-PRINCIPAL": encoded}
-        result = await provider.authenticate(request)
-        assert result is not None
-        assert result["auth_method"] == "easy_auth"
-        assert "Dataviewer.Admin" in result["roles"]
-
-    async def test_authenticate_missing_header(self):
-        from unittest.mock import MagicMock
-
-        from src.api.auth import EasyAuthProvider
-
-        provider = EasyAuthProvider()
-        request = MagicMock()
-        request.headers = {}
-        result = await provider.authenticate(request)
-        assert result is None
-
-    async def test_authenticate_invalid_base64(self):
-        from unittest.mock import MagicMock
-
-        from src.api.auth import EasyAuthProvider
-
-        provider = EasyAuthProvider()
-        request = MagicMock()
-        request.headers = {"X-MS-CLIENT-PRINCIPAL": "not-valid-base64!!!"}
-        result = await provider.authenticate(request)
-        assert result is None
-
-    def test_www_authenticate_header(self):
-        from src.api.auth import EasyAuthProvider
-
-        provider = EasyAuthProvider()
-        assert "EasyAuth" in provider.www_authenticate
-
-
-# ============================================================================
 # generate_csrf_token
 # ============================================================================
 
