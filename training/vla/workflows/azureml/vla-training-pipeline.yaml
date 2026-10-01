@@ -2,7 +2,7 @@ $schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
 type: pipeline
 display_name: VLA Training Pipeline
 experiment_name: vla-training-pipeline
-description: Validate data, calibrate, train, and finalize an immutable VLA candidate.
+description: Validate data, train from selected calibration evidence, and finalize an immutable VLA candidate.
 
 settings:
   default_datastore: azureml:workspaceblobstore
@@ -16,6 +16,10 @@ inputs:
     type: uri_folder
   dataset_asset_id: azureml:placeholder-dataset:1
   dataset_repo_id: placeholder/dataset
+  workload_contract:
+    type: uri_folder
+  calibration_report:
+    type: uri_folder
   policy_type: placeholder
   init_from_policy_hf_repo_id: placeholder/model
   init_from_policy_hf_revision: 0000000000000000000000000000000000000000
@@ -27,8 +31,6 @@ inputs:
   gradient_checkpointing: "false"
   use_imagenet_stats: "false"
   rename_map_b64: none
-  headroom_fraction: 0.1
-  probe_timeout_seconds: 3600
   training_steps: 2
   save_freq: 1
   log_freq: 1
@@ -45,18 +47,11 @@ inputs:
   hf_key_vault_url: none
   hf_token_secret_name: none
   compute_preflight: azureml:placeholder
-  compute_calibrate: azureml:placeholder
   compute_train: azureml:placeholder
   compute_finalize: azureml:placeholder
 
 outputs:
   dataset_manifest:
-    type: uri_folder
-    mode: upload
-  workload_contract:
-    type: uri_folder
-    mode: upload
-  calibration_report:
     type: uri_folder
     mode: upload
   checkpoints:
@@ -84,67 +79,18 @@ jobs:
     outputs:
       dataset_manifest: ${{parent.outputs.dataset_manifest}}
 
-  calibration_step:
-    type: sweep
-    compute: ${{parent.inputs.compute_calibrate}}
-    identity:
-      type: managed_identity
-    resources:
-      instance_type: gpu
-    sampling_algorithm: grid
-    search_space:
-      micro_batch_size:
-        type: choice
-        values: [1, 2, 4]
-    objective:
-      goal: maximize
-      primary_metric: safe_micro_batch_size
-    limits:
-      max_total_trials: 3
-      max_concurrent_trials: 1
-      trial_timeout: 3600
-    inputs:
-      dataset: ${{parent.inputs.dataset}}
-      dataset_manifest: ${{parent.jobs.preflight_step.outputs.dataset_manifest}}
-      dataset_asset_id: ${{parent.inputs.dataset_asset_id}}
-      adapter_name: ${{parent.inputs.adapter_name}}
-      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
-      policy_type: ${{parent.inputs.policy_type}}
-      mixed_precision: ${{parent.inputs.mixed_precision}}
-      policy_dtype: ${{parent.inputs.policy_dtype}}
-      init_from_policy_hf_repo_id: ${{parent.inputs.init_from_policy_hf_repo_id}}
-      init_from_policy_hf_revision: ${{parent.inputs.init_from_policy_hf_revision}}
-      train_expert_only: ${{parent.inputs.train_expert_only}}
-      gradient_checkpointing: ${{parent.inputs.gradient_checkpointing}}
-      use_imagenet_stats: ${{parent.inputs.use_imagenet_stats}}
-      rename_map_b64: ${{parent.inputs.rename_map_b64}}
-      headroom_fraction: ${{parent.inputs.headroom_fraction}}
-      probe_timeout_seconds: ${{parent.inputs.probe_timeout_seconds}}
-      code_repository: ${{parent.inputs.code_repository}}
-      code_revision: ${{parent.inputs.code_revision}}
-      compute_target: ${{parent.inputs.compute_calibrate}}
-      azure_client_id: ${{parent.inputs.azure_client_id}}
-      hf_key_vault_url: ${{parent.inputs.hf_key_vault_url}}
-      hf_token_secret_name: ${{parent.inputs.hf_token_secret_name}}
-      runtime_image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
-      micro_batch_size: ${{search_space.micro_batch_size}}
-    outputs:
-      workload_contract: ${{parent.outputs.workload_contract}}
-      calibration_report: ${{parent.outputs.calibration_report}}
-    trial: ./components/calibrate.yaml
-
   training_step:
     type: command
     component: ./components/train.yaml
     compute: ${{parent.inputs.compute_train}}
     resources:
-      instance_type: gpu
+      instance_type: gpu-high-memory
     inputs:
       dataset: ${{parent.inputs.dataset}}
       dataset_manifest: ${{parent.jobs.preflight_step.outputs.dataset_manifest}}
       dataset_asset_id: ${{parent.inputs.dataset_asset_id}}
-      calibration_report: ${{parent.jobs.calibration_step.outputs.calibration_report}}
-      workload_contract: ${{parent.jobs.calibration_step.outputs.workload_contract}}
+      calibration_report: ${{parent.inputs.calibration_report}}
+      workload_contract: ${{parent.inputs.workload_contract}}
       adapter_name: ${{parent.inputs.adapter_name}}
       dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
       policy_type: ${{parent.inputs.policy_type}}

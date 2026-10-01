@@ -76,7 +76,7 @@ case "${mode}" in
       AZURE_ML_OUTPUT_workload_contract AZURE_ML_OUTPUT_calibration_report
 
     dataset_mount=$(environment_value AZURE_ML_INPUT_dataset)
-    dataset_manifest_dir=$(environment_value AZURE_ML_INPUT_dataset_manifest)
+    dataset_manifest_dir=$(mktemp -d)
     DATASET_MANIFEST="${dataset_manifest_dir}/dataset.json"
     export AZURE_ML_INPUT_dataset_asset_0="${dataset_mount}"
     export DATASET_ASSET_COUNT=1
@@ -85,7 +85,7 @@ case "${mode}" in
       --dataset "${dataset_mount}" \
       --asset-id "${DATASET_ASSET_ID}" \
       --dataset-repo-id "${DATASET_REPO_ID}" \
-      --verify-manifest "${DATASET_MANIFEST}"
+      --manifest-output "${dataset_manifest_dir}"
     export CALIBRATION_MODE=true
     CALIBRATION_WORKLOAD_OUTPUT_DIR=$(environment_value AZURE_ML_OUTPUT_workload_contract)
     CALIBRATION_OUTPUT_DIR=$(environment_value AZURE_ML_OUTPUT_calibration_report)

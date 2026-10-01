@@ -25,7 +25,8 @@ vla/
 │   └── submit-osmo-lerobot-vla-fine-tuning.sh   # GR00T submission to OSMO
 ├── workflows/
 │   ├── azureml/
-│   │   └── vla-training-pipeline.yaml            # VLA training pipeline
+│   │   ├── vla-calibration-sweep.yaml             # Isolated batch-size selection
+│   │   └── vla-training-pipeline.yaml             # VLA training pipeline
 │   └── osmo/
 │       └── groot-train.yaml                     # OSMO GR00T fine-tuning workflow
 └── README.md
@@ -43,7 +44,9 @@ The LeRobot PI adapter rejects values outside `pi0|pi0_fast|pi05` before trainin
 
 ## 🚀 Quick Start
 
-Submit a versioned Azure ML dataset to the training pipeline. Use immutable dataset, model, and code revisions:
+Submit a versioned Azure ML dataset to the standalone calibration sweep, then
+pass the selected outputs to the training pipeline. Use immutable dataset,
+model, and code revisions.
 
 Before the first calibration sweep on an Arc compute target, run the
 [sweep failure-isolation smoke test](../../docs/training/vla-azureml-arc-setup.md#validate-sweep-failure-isolation).
@@ -52,6 +55,34 @@ publishes the successful trial output.
 
 ```bash
 CODE_REVISION=$(git rev-parse HEAD)
+COMPUTE="azureml:<compute-name>"
+
+CALIBRATION_JOB=$(az ml job create \
+  --file training/vla/workflows/azureml/vla-calibration-sweep.yaml \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --set compute="$COMPUTE" \
+  --set inputs.compute_target="$COMPUTE" \
+  --set inputs.dataset.path="azureml:ur10e-gear-pick-place-train:1" \
+  --set inputs.dataset_asset_id="azureml:ur10e-gear-pick-place-train:1" \
+  --set inputs.dataset_repo_id="<dataset-repository>" \
+  --set inputs.policy_type=pi05 \
+  --set inputs.init_from_policy_hf_repo_id=lerobot/pi05_base \
+  --set inputs.init_from_policy_hf_revision=b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba \
+  --set inputs.adapter_name=lerobot-pi \
+  --set inputs.code_repository=https://github.com/microsoft/physical-ai-toolchain.git \
+  --set inputs.code_revision="$CODE_REVISION" \
+  --set inputs.policy_dtype=bfloat16 \
+  --set inputs.gradient_checkpointing=true \
+  --set inputs.hf_key_vault_url="<key-vault-url>" \
+  --set inputs.hf_token_secret_name="<secret-name>" \
+  --query name --output tsv)
+
+az ml job show \
+  --name "$CALIBRATION_JOB" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --query status --output tsv
 
 az ml job create \
   --file training/vla/workflows/azureml/vla-training-pipeline.yaml \
@@ -60,6 +91,8 @@ az ml job create \
   --set inputs.dataset.path="azureml:ur10e-gear-pick-place-train:1" \
   --set inputs.dataset_asset_id="azureml:ur10e-gear-pick-place-train:1" \
   --set inputs.dataset_repo_id="<dataset-repository>" \
+  --set inputs.workload_contract.path="azureml://jobs/$CALIBRATION_JOB/outputs/workload_contract" \
+  --set inputs.calibration_report.path="azureml://jobs/$CALIBRATION_JOB/outputs/calibration_report" \
   --set inputs.pipeline_contract_fingerprint="<pipeline-contract-sha256>" \
   --set inputs.policy_type=pi05 \
   --set inputs.init_from_policy_hf_repo_id=lerobot/pi05_base \
@@ -70,12 +103,17 @@ az ml job create \
   --set inputs.policy_dtype=bfloat16 \
   --set inputs.gradient_checkpointing=true \
   --set inputs.compute_preflight="azureml:<compute-name>" \
-  --set inputs.compute_calibrate="azureml:<compute-name>" \
   --set inputs.compute_train="azureml:<compute-name>" \
   --set inputs.compute_finalize="azureml:<compute-name>" \
   --set inputs.hf_key_vault_url="<key-vault-url>" \
   --set inputs.hf_token_secret_name="<secret-name>"
 ```
+
+Submit the training pipeline only after the calibration sweep reports
+`Completed`. The sweep runs candidates `[1,2,4]` serially in separate
+containers and publishes the largest safe candidate's report and workload
+contract. Training regenerates the dataset manifest and rejects calibration
+evidence that does not match the current dataset, model, code, and runtime.
 
 The pipeline requires a full Git commit. The checked-in entrypoint downloads the
 snapshot after installing the locked runtime, validates `config.json` and the

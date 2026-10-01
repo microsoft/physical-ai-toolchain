@@ -19,6 +19,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ENTRYPOINT = _REPO_ROOT / "training/vla/scripts/azureml-component-entry.sh"
 _COMPONENT_ROOT = _REPO_ROOT / "training/vla/workflows/azureml/components"
 _PIPELINE = _REPO_ROOT / "training/vla/workflows/azureml/vla-training-pipeline.yaml"
+_CALIBRATION_SWEEP = _REPO_ROOT / "training/vla/workflows/azureml/vla-calibration-sweep.yaml"
 _SWEEP_SMOKE = _REPO_ROOT / "training/vla/workflows/azureml/sweep-failure-smoke.yaml"
 
 
@@ -101,13 +102,21 @@ def test_given_training_component_when_parsed_then_registration_is_absent() -> N
     assert "training_record" in component["outputs"]
 
 
+def test_given_calibration_entrypoint_when_parsed_then_trial_creates_its_manifest() -> None:
+    entrypoint = _ENTRYPOINT.read_text(encoding="utf-8")
+    calibrate_mode = entrypoint.split("  calibrate)\n", maxsplit=1)[1].split("  train)\n", maxsplit=1)[0]
+
+    assert "dataset_manifest_dir=$(mktemp -d)" in calibrate_mode
+    assert '--manifest-output "${dataset_manifest_dir}"' in calibrate_mode
+    assert "AZURE_ML_INPUT_dataset_manifest" not in calibrate_mode
+
+
 def test_given_training_pipeline_when_parsed_then_only_training_stages_are_serialized() -> None:
     pipeline = yaml.safe_load(_PIPELINE.read_text(encoding="utf-8"))
     jobs = pipeline["jobs"]
 
     assert list(jobs) == [
         "preflight_step",
-        "calibration_step",
         "training_step",
         "finalize_step",
     ]
@@ -115,24 +124,15 @@ def test_given_training_pipeline_when_parsed_then_only_training_stages_are_seria
     assert pipeline["identity"] == {"type": "managed_identity"}
     assert "register_checkpoint" not in pipeline["inputs"]
     assert "dataset_revision" not in pipeline["inputs"]
-    assert "candidate_batch_sizes" not in pipeline["inputs"]
+    assert {"workload_contract", "calibration_report"} <= set(pipeline["inputs"])
+    assert {"candidate_batch_sizes", "compute_calibrate"}.isdisjoint(pipeline["inputs"])
     assert all("compute" in job for job in jobs.values())
-    calibration = jobs["calibration_step"]
-    assert calibration["type"] == "sweep"
-    assert calibration["sampling_algorithm"] == "grid"
-    assert calibration["search_space"]["micro_batch_size"] == {"type": "choice", "values": [1, 2, 4]}
-    assert calibration["objective"] == {"goal": "maximize", "primary_metric": "safe_micro_batch_size"}
-    assert calibration["limits"]["max_total_trials"] == 3
-    assert calibration["limits"]["max_concurrent_trials"] == 1
-    assert calibration["resources"]["instance_type"] == "gpu"
-    assert calibration["trial"] == "./components/calibrate.yaml"
-    assert calibration["inputs"]["micro_batch_size"] == "${{search_space.micro_batch_size}}"
-    assert calibration["inputs"]["dataset"] == "${{parent.inputs.dataset}}"
     assert jobs["training_step"]["inputs"]["dataset"] == "${{parent.inputs.dataset}}"
+    assert jobs["training_step"]["inputs"]["calibration_report"] == "${{parent.inputs.calibration_report}}"
+    assert jobs["training_step"]["inputs"]["workload_contract"] == "${{parent.inputs.workload_contract}}"
+    assert jobs["training_step"]["resources"]["instance_type"] == "gpu-high-memory"
     assert {
         "dataset_manifest",
-        "workload_contract",
-        "calibration_report",
         "checkpoints",
         "training_record",
         "candidate",
@@ -143,8 +143,24 @@ def test_given_training_pipeline_when_parsed_then_only_training_stages_are_seria
     )
 
 
+def test_given_calibration_sweep_when_parsed_then_trials_are_isolated_and_outputs_are_selectable() -> None:
+    sweep = yaml.safe_load(_CALIBRATION_SWEEP.read_text(encoding="utf-8"))
+
+    assert sweep["type"] == "sweep"
+    assert sweep["sampling_algorithm"] == "grid"
+    assert sweep["search_space"]["micro_batch_size"] == {"type": "choice", "values": [1, 2, 4]}
+    assert sweep["objective"] == {"goal": "maximize", "primary_metric": "safe_micro_batch_size"}
+    assert sweep["limits"]["max_total_trials"] == 3
+    assert sweep["limits"]["max_concurrent_trials"] == 1
+    assert sweep["resources"]["instance_type"] == "gpu-high-memory"
+    assert sweep["trial"]["resources"]["instance_type"] == "gpu-high-memory"
+    assert sweep["trial"]["code"] == "../../.."
+    assert "${{search_space.micro_batch_size}}" in sweep["trial"]["command"]
+    assert set(sweep["outputs"]) == {"workload_contract", "calibration_report"}
+
+
 def test_given_training_components_when_parsed_then_code_assets_are_training_scoped() -> None:
-    components = ("preflight.yaml", "calibrate.yaml", "train.yaml", "finalize.yaml")
+    components = ("preflight.yaml", "train.yaml", "finalize.yaml")
 
     for component_name in components:
         component = yaml.safe_load((_COMPONENT_ROOT / component_name).read_text(encoding="utf-8"))

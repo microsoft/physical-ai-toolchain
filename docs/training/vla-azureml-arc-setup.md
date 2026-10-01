@@ -471,18 +471,63 @@ az ml job download \
 
 Confirm that the downloaded output contains `result.json` with `"selected": true`. Stop before VLA submission if the parent fails or the successful output is unavailable.
 
-## Submit PI 0.5 Training
+## Calibrate and Submit PI 0.5 Training
 
 Connect the operator workstation to the environment's point-to-site VPN when workspace storage uses private endpoints. Store `HF_TOKEN` in an ignored local environment file or retrieve it from an approved secret store; never pass a real token in tracked YAML.
 
-Preview the validated conservative configuration:
+Submit the standalone calibration sweep with the immutable workload inputs:
 
 ```bash
 CODE_REVISION=$(git rev-parse HEAD)
+COMPUTE="azureml:<compute-name>"
 RENAME_MAP_B64=$(printf '%s' \
   '{"observation.images.d435":"observation.images.base_0_rgb","observation.images.d405":"observation.images.left_wrist_0_rgb"}' |
   base64 --wrap=0)
 
+CALIBRATION_JOB=$(az ml job create \
+  --file training/vla/workflows/azureml/vla-calibration-sweep.yaml \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --set compute="$COMPUTE" \
+  --set inputs.compute_target="$COMPUTE" \
+  --set inputs.dataset.path="azureml:<dataset-data-asset>:<version>" \
+  --set inputs.dataset_asset_id="azureml:<dataset-data-asset>:<version>" \
+  --set inputs.dataset_repo_id="<hugging-face-dataset>" \
+  --set inputs.policy_type=pi05 \
+  --set inputs.init_from_policy_hf_repo_id=lerobot/pi05_base \
+  --set inputs.init_from_policy_hf_revision=b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba \
+  --set inputs.adapter_name=lerobot-pi \
+  --set inputs.policy_dtype=bfloat16 \
+  --set inputs.code_repository=https://github.com/microsoft/physical-ai-toolchain.git \
+  --set inputs.code_revision="$CODE_REVISION" \
+  --set inputs.train_expert_only=true \
+  --set inputs.gradient_checkpointing=true \
+  --set inputs.rename_map_b64="$RENAME_MAP_B64" \
+  --set inputs.hf_key_vault_url="<key-vault-url>" \
+  --set inputs.hf_token_secret_name="<secret-name>" \
+  --query name --output tsv)
+```
+
+The sweep evaluates candidates `[1,2,4]` serially in separate containers. Each
+candidate runs one real optimizer step and logs `safe_micro_batch_size` only
+after its calibration report retains the configured CUDA headroom. The sweep
+publishes the largest safe trial's workload contract and calibration report.
+Model and data-loader initialization repeat for every candidate.
+
+Wait until the root sweep reports `Completed`:
+
+```bash
+az ml job show \
+  --name "$CALIBRATION_JOB" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --query status \
+  --output tsv
+```
+
+Submit the command-only training pipeline with the immutable selected outputs:
+
+```bash
 az ml job create \
   --file training/vla/workflows/azureml/vla-training-pipeline.yaml \
   --resource-group "<workspace-resource-group>" \
@@ -490,7 +535,8 @@ az ml job create \
   --set inputs.dataset.path="azureml:<dataset-data-asset>:<version>" \
   --set inputs.dataset_asset_id="azureml:<dataset-data-asset>:<version>" \
   --set inputs.dataset_repo_id="<hugging-face-dataset>" \
-  --set inputs.dataset_revision="<dataset-commit-sha>" \
+  --set inputs.workload_contract.path="azureml://jobs/$CALIBRATION_JOB/outputs/workload_contract" \
+  --set inputs.calibration_report.path="azureml://jobs/$CALIBRATION_JOB/outputs/calibration_report" \
   --set inputs.pipeline_contract_fingerprint="<pipeline-contract-sha256>" \
   --set inputs.policy_type=pi05 \
   --set inputs.init_from_policy_hf_repo_id=lerobot/pi05_base \
@@ -504,8 +550,9 @@ az ml job create \
   --set inputs.rename_map_b64="$RENAME_MAP_B64" \
   --set inputs.training_steps=40000 \
   --set inputs.save_freq=1000 \
-  --set inputs.compute_calibrate="azureml:<compute-name>" \
-  --set inputs.compute_train="azureml:<compute-name>" \
+  --set inputs.compute_preflight="$COMPUTE" \
+  --set inputs.compute_train="$COMPUTE" \
+  --set inputs.compute_finalize="$COMPUTE" \
   --set inputs.subscription_id="<workspace-subscription-id>" \
   --set inputs.resource_group="<workspace-resource-group>" \
   --set inputs.workspace_name="<workspace-name>" \
@@ -513,14 +560,16 @@ az ml job create \
   --set inputs.hf_token_secret_name="<secret-name>"
 ```
 
-Review the pinned dataset and model revisions, code revision, compute target, candidate batch sizes, training duration, camera mapping, and Key Vault reference before submission. The checked-in pipeline evaluates candidates `[1,2,4]` with `max_total_trials: 3`. Azure CLI does not preserve list types when overriding a nested sweep choice, so change the checked-in choice values and matching trial limit together when a different candidate set is required.
-
-Calibration uses a serial Azure ML grid sweep. Each candidate starts in a separate execution container, runs one real optimizer step, and logs `safe_micro_batch_size` only after its calibration report retains the configured CUDA headroom. The sweep selects the largest safe candidate and passes that trial's workload contract and calibration report directly to training. Model and data-loader initialization repeat for every candidate.
+Training regenerates the dataset manifest and validates that the selected
+calibration workload matches the current dataset, model, code, and runtime.
+This prevents stale sweep outputs from controlling a changed training job.
 
 > [!IMPORTANT]
 > Validate failed-trial tolerance on the attached Arc compute before the first VLA sweep. A failed trial must leave the sweep completed with the successful trial selected and its named outputs downloadable. Stop before VLA submission if this gate fails; do not raise the InstanceType limit or broaden storage roles as a workaround.
 
-Azure CLI prints the accepted pipeline name and portal URL. If the command is interrupted before it prints the job name, check the Azure ML jobs page before resubmitting.
+Azure CLI prints each accepted job name and portal URL. If a command is
+interrupted before it prints the job name, check the Azure ML jobs page before
+resubmitting.
 
 ## Monitor Azure ML
 

@@ -14,7 +14,7 @@ import yaml
 from training.vla.scripts import calibrate_vla
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_CALIBRATION_COMPONENT = _REPO_ROOT / "training/vla/workflows/azureml/components/calibrate.yaml"
+_CALIBRATION_SWEEP = _REPO_ROOT / "training/vla/workflows/azureml/vla-calibration-sweep.yaml"
 _PIPELINE = _REPO_ROOT / "training/vla/workflows/azureml/vla-training-pipeline.yaml"
 
 
@@ -378,17 +378,13 @@ def test_given_unexpected_probe_exit_when_candidate_runs_then_calibration_fails(
         )
 
 
-def test_given_calibration_contract_when_parsed_then_only_secret_coordinates_are_wired() -> None:
-    component = yaml.safe_load(_CALIBRATION_COMPONENT.read_text(encoding="utf-8"))
-    pipeline = yaml.safe_load(_PIPELINE.read_text(encoding="utf-8"))
-    calibration_inputs = pipeline["jobs"]["calibration_step"]["inputs"]
+def test_given_calibration_sweep_when_parsed_then_only_secret_coordinates_are_wired() -> None:
+    sweep = yaml.safe_load(_CALIBRATION_SWEEP.read_text(encoding="utf-8"))
+    command = sweep["trial"]["command"]
 
-    assert component["inputs"]["micro_batch_size"]["type"] == "integer"
-    assert component["command"].startswith("env AZUREML_PARAMETER_adapter_name=")
-    assert "${{inputs.micro_batch_size}}" in component["command"]
-    assert "CALIBRATION_SWEEP_TRIAL=true" in component["command"]
+    assert command.startswith("env AZUREML_PARAMETER_adapter_name=")
+    assert "${{search_space.micro_batch_size}}" in command
+    assert "CALIBRATION_SWEEP_TRIAL=true" in command
     expected = {"azure_client_id", "hf_key_vault_url", "hf_token_secret_name"}
-    assert expected <= set(component["inputs"])
-    assert expected <= set(calibration_inputs)
-    assert "hf_token" not in component["inputs"]
-    assert "hf_token" not in calibration_inputs
+    assert expected <= set(sweep["inputs"])
+    assert "hf_token" not in sweep["inputs"]
