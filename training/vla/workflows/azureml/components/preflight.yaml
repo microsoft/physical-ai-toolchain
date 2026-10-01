@@ -5,7 +5,7 @@ display_name: VLA Dataset Preflight
 version: "1"
 description: Validate a versioned mounted LeRobot dataset without copying payload data.
 
-code: ../../../../..
+code: ../../../..
 
 inputs:
   dataset:
@@ -29,7 +29,7 @@ environment:
   image: mcr.microsoft.com/azureml/openmpi5.0-ubuntu24.04:latest
 
 command: >-
-  python training/vla/scripts/preflight_dataset.py
+  python vla/scripts/preflight_dataset.py
   --dataset ${{inputs.dataset}}
   --asset-id ${{inputs.dataset_asset_id}}
   --dataset-repo-id ${{inputs.dataset_repo_id}}

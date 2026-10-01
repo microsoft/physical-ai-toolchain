@@ -1,8 +1,8 @@
 $schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
 type: pipeline
-display_name: VLA Evidence Pipeline
+display_name: VLA Training Pipeline
 experiment_name: vla-training-pipeline
-description: Validate data, calibrate, train, finalize, evaluate, and decide VLA promotion readiness.
+description: Validate data, calibrate, train, and finalize an immutable VLA candidate.
 
 settings:
   default_datastore: azureml:workspaceblobstore
@@ -16,9 +16,6 @@ inputs:
     type: uri_folder
   dataset_asset_id: azureml:placeholder-dataset:1
   dataset_repo_id: placeholder/dataset
-  promotion_policy:
-    type: uri_file
-  model_name: placeholder-model
   policy_type: placeholder
   init_from_policy_hf_repo_id: placeholder/model
   init_from_policy_hf_revision: 0000000000000000000000000000000000000000
@@ -35,8 +32,7 @@ inputs:
   training_steps: 2
   save_freq: 1
   log_freq: 1
-  eval_episodes: 10
-  job_name: vla-evidence-pipeline
+  job_name: vla-training-pipeline
   output_dir: /workspace/outputs/train
   mixed_precision: bf16
   policy_dtype: none
@@ -52,8 +48,6 @@ inputs:
   compute_calibrate: azureml:placeholder
   compute_train: azureml:placeholder
   compute_finalize: azureml:placeholder
-  compute_evaluate: azureml:placeholder
-  compute_decide: azureml:placeholder
 
 outputs:
   dataset_manifest:
@@ -75,15 +69,6 @@ outputs:
     type: uri_folder
     mode: upload
   candidate_manifest:
-    type: uri_folder
-    mode: upload
-  evaluation:
-    type: uri_folder
-    mode: upload
-  policy:
-    type: uri_folder
-    mode: upload
-  decision:
     type: uri_folder
     mode: upload
 
@@ -209,46 +194,8 @@ jobs:
       candidate: ${{parent.outputs.candidate}}
       candidate_manifest: ${{parent.outputs.candidate_manifest}}
 
-  evaluate_step:
-    type: command
-    component: ./components/evaluate.yaml
-    compute: ${{parent.inputs.compute_evaluate}}
-    resources:
-      instance_type: gpu
-    inputs:
-      candidate: ${{parent.jobs.finalize_step.outputs.candidate}}
-      candidate_manifest: ${{parent.jobs.finalize_step.outputs.candidate_manifest}}
-      training_record: ${{parent.jobs.training_step.outputs.training_record}}
-      dataset: ${{parent.inputs.dataset}}
-      dataset_manifest: ${{parent.jobs.preflight_step.outputs.dataset_manifest}}
-      dataset_asset_id: ${{parent.inputs.dataset_asset_id}}
-      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
-      policy_type: ${{parent.inputs.policy_type}}
-      eval_episodes: ${{parent.inputs.eval_episodes}}
-      job_name: ${{parent.inputs.job_name}}
-    outputs:
-      evaluation: ${{parent.outputs.evaluation}}
-    identity:
-      type: managed_identity
-
-  decide_step:
-    type: command
-    component: ./components/decide.yaml
-    compute: ${{parent.inputs.compute_decide}}
-    identity:
-      type: managed_identity
-    inputs:
-      candidate_manifest: ${{parent.jobs.finalize_step.outputs.candidate_manifest}}
-      training_record: ${{parent.jobs.training_step.outputs.training_record}}
-      evaluation: ${{parent.jobs.evaluate_step.outputs.evaluation}}
-      promotion_policy: ${{parent.inputs.promotion_policy}}
-      model_name: ${{parent.inputs.model_name}}
-    outputs:
-      decision: ${{parent.outputs.decision}}
-      policy: ${{parent.outputs.policy}}
-
 tags:
   framework: lerobot
-  lifecycle_stage: evidence-pipeline
+  lifecycle_stage: training
   pipeline_contract_fingerprint: ${{parent.inputs.pipeline_contract_fingerprint}}
   code_revision: ${{parent.inputs.code_revision}}

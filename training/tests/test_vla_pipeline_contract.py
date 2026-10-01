@@ -101,25 +101,7 @@ def test_given_training_component_when_parsed_then_registration_is_absent() -> N
     assert "training_record" in component["outputs"]
 
 
-def test_given_evaluation_component_when_parsed_then_finalized_evidence_is_required() -> None:
-    component = yaml.safe_load((_COMPONENT_ROOT / "evaluate.yaml").read_text(encoding="utf-8"))
-
-    assert {
-        "candidate",
-        "candidate_manifest",
-        "training_record",
-        "dataset",
-        "dataset_manifest",
-        "dataset_asset_id",
-    } <= set(component["inputs"])
-    assert set(component["outputs"]) == {"evaluation"}
-    assert component["inputs"]["candidate"]["mode"] == "ro_mount"
-    assert "training/vla/lerobot" in component["command"]
-    assert 'REGISTER_MODEL="none"' in component["command"]
-    assert "find " not in component["command"]
-
-
-def test_given_evidence_pipeline_when_parsed_then_six_stages_are_serialized() -> None:
+def test_given_training_pipeline_when_parsed_then_only_training_stages_are_serialized() -> None:
     pipeline = yaml.safe_load(_PIPELINE.read_text(encoding="utf-8"))
     jobs = pipeline["jobs"]
 
@@ -128,8 +110,6 @@ def test_given_evidence_pipeline_when_parsed_then_six_stages_are_serialized() ->
         "calibration_step",
         "training_step",
         "finalize_step",
-        "evaluate_step",
-        "decide_step",
     ]
     assert pipeline["settings"]["continue_on_step_failure"] is False
     assert pipeline["identity"] == {"type": "managed_identity"}
@@ -149,9 +129,6 @@ def test_given_evidence_pipeline_when_parsed_then_six_stages_are_serialized() ->
     assert calibration["inputs"]["micro_batch_size"] == "${{search_space.micro_batch_size}}"
     assert calibration["inputs"]["dataset"] == "${{parent.inputs.dataset}}"
     assert jobs["training_step"]["inputs"]["dataset"] == "${{parent.inputs.dataset}}"
-    assert jobs["evaluate_step"]["inputs"]["dataset"] == "${{parent.inputs.dataset}}"
-    assert jobs["evaluate_step"]["inputs"]["candidate"] == "${{parent.jobs.finalize_step.outputs.candidate}}"
-    assert jobs["decide_step"]["inputs"]["evaluation"] == "${{parent.jobs.evaluate_step.outputs.evaluation}}"
     assert {
         "dataset_manifest",
         "workload_contract",
@@ -160,10 +137,18 @@ def test_given_evidence_pipeline_when_parsed_then_six_stages_are_serialized() ->
         "training_record",
         "candidate",
         "candidate_manifest",
-        "evaluation",
-        "policy",
-        "decision",
     } == set(pipeline["outputs"])
+    assert {"promotion_policy", "model_name", "eval_episodes", "compute_evaluate", "compute_decide"}.isdisjoint(
+        pipeline["inputs"]
+    )
+
+
+def test_given_training_components_when_parsed_then_code_assets_are_training_scoped() -> None:
+    components = ("preflight.yaml", "calibrate.yaml", "train.yaml", "finalize.yaml")
+
+    for component_name in components:
+        component = yaml.safe_load((_COMPONENT_ROOT / component_name).read_text(encoding="utf-8"))
+        assert component["code"] == "../../../.."
 
 
 def test_given_sweep_smoke_when_parsed_then_failure_is_isolated_and_success_is_selectable() -> None:

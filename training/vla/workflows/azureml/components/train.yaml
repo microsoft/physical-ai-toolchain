@@ -5,7 +5,7 @@ display_name: VLA Training from Calibration
 version: "1"
 description: Train a VLA policy using a workload-bound calibration recommendation.
 
-code: ../../../../..
+code: ../../../..
 
 inputs:
   dataset:
@@ -108,4 +108,4 @@ outputs:
 environment:
   image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
 
-command: bash training/vla/scripts/azureml-component-entry.sh train
+command: bash vla/scripts/azureml-component-entry.sh train

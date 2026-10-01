@@ -1,6 +1,6 @@
 # VLA Training
 
-Vision-Language-Action (VLA) training for `pi0`, `pi0_fast`, and `pi05` policies via `lerobot[dataset,pi]`. Azure ML runs a six-stage evidence pipeline before a separate guarded promotion pipeline can register an approved candidate.
+Vision-Language-Action (VLA) training for `pi0`, `pi0_fast`, and `pi05` policies via `lerobot[dataset,pi]`. Azure ML validates data, calibrates batch size, trains the policy, and finalizes an immutable candidate.
 NVIDIA GR00T fine-tuning runs through OSMO using the same lifecycle domain.
 
 ## 📁 Directory Structure
@@ -22,13 +22,10 @@ vla/
 │   │   └── download_blob.py                     # Azure Blob dataset downloader
 │   ├── azureml-component-entry.sh                # Shared Azure ML component launcher
 │   ├── calibrate_vla.py                          # Isolated micro-batch calibration
-│   ├── decide_promotion.py                       # Evidence-based promotion decision
-│   ├── guarded_register.py                       # Guarded model registration
 │   └── submit-osmo-lerobot-vla-fine-tuning.sh   # GR00T submission to OSMO
 ├── workflows/
 │   ├── azureml/
-│   │   ├── vla-training-pipeline.yaml            # Six-stage evidence pipeline
-│   │   └── vla-promotion-pipeline.yaml           # Guarded registration pipeline
+│   │   └── vla-training-pipeline.yaml            # VLA training pipeline
 │   └── osmo/
 │       └── groot-train.yaml                     # OSMO GR00T fine-tuning workflow
 └── README.md
@@ -46,7 +43,7 @@ The LeRobot PI adapter rejects values outside `pi0|pi0_fast|pi05` before trainin
 
 ## 🚀 Quick Start
 
-Submit a versioned Azure ML dataset and promotion policy to the evidence pipeline. Use immutable dataset, model, and code revisions:
+Submit a versioned Azure ML dataset to the training pipeline. Use immutable dataset, model, and code revisions:
 
 ```bash
 CODE_REVISION=$(git rev-parse HEAD)
@@ -58,8 +55,6 @@ az ml job create \
   --set inputs.dataset.path="azureml:ur10e-gear-pick-place-train:1" \
   --set inputs.dataset_asset_id="azureml:ur10e-gear-pick-place-train:1" \
   --set inputs.dataset_repo_id="<dataset-repository>" \
-  --set inputs.promotion_policy.path="azureml:<promotion-policy>:<version>" \
-  --set inputs.model_name=pi05-ur10e \
   --set inputs.pipeline_contract_fingerprint="<pipeline-contract-sha256>" \
   --set inputs.policy_type=pi05 \
   --set inputs.init_from_policy_hf_repo_id=lerobot/pi05_base \
@@ -73,8 +68,6 @@ az ml job create \
   --set inputs.compute_calibrate="azureml:<compute-name>" \
   --set inputs.compute_train="azureml:<compute-name>" \
   --set inputs.compute_finalize="azureml:<compute-name>" \
-  --set inputs.compute_evaluate="azureml:<compute-name>" \
-  --set inputs.compute_decide="azureml:<compute-name>" \
   --set inputs.hf_key_vault_url="<key-vault-url>" \
   --set inputs.hf_token_secret_name="<secret-name>"
 ```
@@ -98,11 +91,8 @@ run. See [VLA Full-Run Troubleshooting](../../docs/training/vla-full-run-trouble
 for the failure chronology, diagnostic signatures, unsuccessful mitigations,
 and validated recovery configuration.
 
-The evidence pipeline runs preflight, calibration, training, finalization,
-evaluation, and promotion decision stages. Submit
-`vla-promotion-pipeline.yaml` only after reviewing an approved decision; its
-guarded registration step revalidates the evidence lineage before publishing a
-model version.
+The pipeline ends after finalizing the candidate and its lineage manifest. Evaluation,
+deployment gating, and model registration remain separate lifecycle concerns.
 
 ## 🧪 End-to-End Test
 

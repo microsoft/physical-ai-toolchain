@@ -49,7 +49,6 @@ class RecordKind(StrEnum):
     CANDIDATE = "candidate"
     EVALUATION = "evaluation"
     INCIDENT = "incident"
-    PROMOTION = "promotion"
 
 
 _REQUIRED_FIELDS: dict[RecordKind, tuple[str, ...]] = {
@@ -100,20 +99,6 @@ _REQUIRED_FIELDS: dict[RecordKind, tuple[str, ...]] = {
         "evaluation_output",
     ),
     RecordKind.INCIDENT: ("stage", "category", "terminal_state", "retry_count"),
-    RecordKind.PROMOTION: (
-        "model_name",
-        "training_fingerprint",
-        "candidate_fingerprint",
-        "evaluation_fingerprint",
-        "policy_fingerprint",
-        "status",
-        "reasons",
-        "evidence_job",
-        "producer_identity",
-        "pipeline_contract_fingerprint",
-        "code_revision",
-        "immutable_inputs",
-    ),
 }
 
 
@@ -148,56 +133,11 @@ def calibration_workload_fingerprint(workload: Mapping[str, Any]) -> str:
     return sha256_bytes(canonical_json(workload).encode("utf-8"))
 
 
-def promotion_policy_fingerprint(policy: Mapping[str, Any]) -> str:
-    """Validate and fingerprint a promotion threshold policy."""
-    validate_promotion_policy(policy)
-    return sha256_bytes(canonical_json(policy).encode("utf-8"))
-
-
 def dataset_identity_fingerprint(record: Mapping[str, Any]) -> str:
     """Fingerprint immutable dataset identity fields independently of record creation time."""
     validate_record(record, RecordKind.DATASET)
     identity = {key: value for key, value in record.items() if key != "created_at"}
     return sha256_bytes(canonical_json(identity).encode("utf-8"))
-
-
-def validate_promotion_policy(policy: Mapping[str, Any]) -> None:
-    """Validate promotion thresholds and trusted evidence-producer constraints."""
-    _reject_secret_fields(policy, "policy")
-    _reject_non_finite_numbers(policy, "policy")
-    if policy.get("schema_version") != SCHEMA_VERSION:
-        raise ContractError(f"policy.schema_version must equal {SCHEMA_VERSION}")
-
-    minimum_episodes = policy.get("minimum_episodes")
-    if not isinstance(minimum_episodes, int) or isinstance(minimum_episodes, bool) or minimum_episodes < 1:
-        raise ContractError("policy.minimum_episodes must be a positive integer")
-
-    metric_rules = policy.get("metric_rules")
-    if not isinstance(metric_rules, Mapping) or not metric_rules:
-        raise ContractError("policy.metric_rules must be a non-empty object")
-    for metric_name, rule in metric_rules.items():
-        if not isinstance(metric_name, str) or not metric_name.strip():
-            raise ContractError("policy.metric_rules keys must be non-empty strings")
-        if not isinstance(rule, Mapping):
-            raise ContractError(f"policy.metric_rules.{metric_name} must be an object")
-        if rule.get("operator") not in {"lte", "gte"}:
-            raise ContractError(f"policy.metric_rules.{metric_name}.operator must be lte or gte")
-        limit = rule.get("limit")
-        if not isinstance(limit, (int, float)) or isinstance(limit, bool) or not math.isfinite(limit):
-            raise ContractError(f"policy.metric_rules.{metric_name}.limit must be finite")
-
-    baseline = policy.get("baseline")
-    if baseline is not None:
-        if not isinstance(baseline, Mapping):
-            raise ContractError("policy.baseline must be an object")
-        _require_string(baseline, "asset_id")
-        _require_sha256(baseline, "fingerprint")
-
-    _require_string(policy, "allowed_producer_identity")
-    _require_sha256(policy, "pipeline_contract_fingerprint")
-    revision = _require_string(policy, "code_revision")
-    if not _FULL_COMMIT_PATTERN.fullmatch(revision):
-        raise ContractError("policy.code_revision must be a full lowercase 40-character Git commit")
 
 
 def validate_calibration_workload(workload: Mapping[str, Any]) -> None:
@@ -364,7 +304,6 @@ def validate_record(record: Mapping[str, Any], expected_kind: RecordKind | None 
         RecordKind.CANDIDATE: _validate_candidate,
         RecordKind.EVALUATION: _validate_evaluation,
         RecordKind.INCIDENT: _validate_incident,
-        RecordKind.PROMOTION: _validate_promotion,
     }
     validators[kind](record)
 
@@ -622,35 +561,6 @@ def _validate_incident(record: Mapping[str, Any]) -> None:
         raise ContractError("retry_count must be a non-negative integer")
 
 
-def _validate_promotion(record: Mapping[str, Any]) -> None:
-    _require_string(record, "model_name")
-    _require_sha256(record, "training_fingerprint")
-    _require_sha256(record, "candidate_fingerprint")
-    _require_sha256(record, "evaluation_fingerprint")
-    _require_sha256(record, "policy_fingerprint")
-    if record.get("status") not in {"passed", "failed", "inconclusive"}:
-        raise ContractError("promotion status must be passed, failed, or inconclusive")
-    reasons = _require_string_sequence(record, "reasons")
-    if record["status"] == "passed" and reasons:
-        raise ContractError("passed promotion must not contain reasons")
-    if record["status"] != "passed" and not reasons:
-        raise ContractError("non-passed promotion requires at least one reason")
-    _require_string(record, "evidence_job")
-    _require_string(record, "producer_identity")
-    _require_sha256(record, "pipeline_contract_fingerprint")
-    revision = _require_string(record, "code_revision")
-    if not _FULL_COMMIT_PATTERN.fullmatch(revision):
-        raise ContractError("code_revision must be a full lowercase 40-character Git commit")
-    immutable_inputs = _require_mapping(record, "immutable_inputs")
-    expected_inputs = {"candidate", "candidate_manifest", "evaluation", "policy", "decision"}
-    if set(immutable_inputs) != expected_inputs:
-        raise ContractError(
-            "immutable_inputs must contain candidate, candidate_manifest, evaluation, policy, and decision"
-        )
-    for name in sorted(expected_inputs):
-        _require_azureml_job_output(immutable_inputs, name)
-
-
 def _require_azureml_asset_id(record: Mapping[str, Any], field: str) -> str:
     value = _require_string(record, field)
     if not _AZUREML_ASSET_PATTERN.fullmatch(value):
@@ -786,27 +696,6 @@ def _run_self_check() -> None:
             "category": "network",
             "terminal_state": "failed",
             "retry_count": 1,
-        },
-        {
-            **_base_record(RecordKind.PROMOTION),
-            "model_name": "pi05-candidate",
-            "training_fingerprint": digest,
-            "candidate_fingerprint": digest,
-            "evaluation_fingerprint": digest,
-            "policy_fingerprint": digest,
-            "status": "passed",
-            "reasons": [],
-            "evidence_job": "run-1",
-            "producer_identity": "trusted-identity",
-            "pipeline_contract_fingerprint": digest,
-            "code_revision": commit,
-            "immutable_inputs": {
-                "candidate": f"{output_prefix}/candidate",
-                "candidate_manifest": f"{output_prefix}/candidate_manifest",
-                "evaluation": f"{output_prefix}/evaluation",
-                "policy": f"{output_prefix}/policy",
-                "decision": f"{output_prefix}/decision",
-            },
         },
     ]
     for record in records:

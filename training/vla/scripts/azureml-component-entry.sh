@@ -9,7 +9,11 @@ if [[ -z "${mode}" ]]; then
 fi
 shift
 
-shared_train_entry="${VLA_SHARED_TRAIN_ENTRY:-training/il/scripts/lerobot/azureml-train-entry.sh}"
+training_root="training"
+if [[ ! -d "${training_root}/vla" ]]; then
+  training_root="."
+fi
+shared_train_entry="${VLA_SHARED_TRAIN_ENTRY:-${training_root}/il/scripts/lerobot/azureml-train-entry.sh}"
 
 require_environment_variables() {
   local name
@@ -36,7 +40,7 @@ export_parameter() {
   fi
 }
 
-export LEROBOT_PROJECT="training/vla/lerobot"
+export LEROBOT_PROJECT="${training_root}/vla/lerobot"
 
 case "${mode}" in
   calibrate)
@@ -77,7 +81,7 @@ case "${mode}" in
     export AZURE_ML_INPUT_dataset_asset_0="${dataset_mount}"
     export DATASET_ASSET_COUNT=1
     export DATASET_MANIFEST
-    python3 training/vla/scripts/preflight_dataset.py \
+    python3 "${training_root}/vla/scripts/preflight_dataset.py" \
       --dataset "${dataset_mount}" \
       --asset-id "${DATASET_ASSET_ID}" \
       --dataset-repo-id "${DATASET_REPO_ID}" \
@@ -139,7 +143,7 @@ case "${mode}" in
     export DATASET_ASSET_COUNT=1
     export AZURE_ML_OUTPUT_CHECKPOINTS TRAINING_CHECKPOINT_OUTPUT TRAINING_RECORD_OUTPUT
     export CALIBRATION_REPORT_DIR CALIBRATION_WORKLOAD_CONTRACT DATASET_MANIFEST
-    python3 training/vla/scripts/preflight_dataset.py \
+    python3 "${training_root}/vla/scripts/preflight_dataset.py" \
       --dataset "${dataset_mount}" \
       --asset-id "${DATASET_ASSET_ID}" \
       --dataset-repo-id "${DATASET_REPO_ID}" \
@@ -155,7 +159,7 @@ export VLA_MODEL_ADAPTER="${ADAPTER_NAME}"
 bash "${shared_train_entry}"
 
 if [[ "${mode}" == "train" ]]; then
-  python3 training/vla/scripts/write_training_record.py \
+  python3 "${training_root}/vla/scripts/write_training_record.py" \
     --checkpoints "${TRAINING_CHECKPOINT_OUTPUT}" \
     --workload-contract "${CALIBRATION_WORKLOAD_CONTRACT}" \
     --dataset-manifest "${DATASET_MANIFEST}" \

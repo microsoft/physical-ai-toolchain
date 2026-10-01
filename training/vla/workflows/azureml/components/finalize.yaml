@@ -5,7 +5,7 @@ display_name: VLA Candidate Finalization
 version: "1"
 description: Select and fingerprint one adapter-valid VLA policy candidate.
 
-code: ../../../../..
+code: ../../../..
 
 inputs:
   checkpoints:
@@ -34,7 +34,7 @@ environment:
   image: mcr.microsoft.com/azureml/openmpi5.0-ubuntu24.04:latest
 
 command: >-
-  python training/vla/scripts/finalize_candidate.py
+  python vla/scripts/finalize_candidate.py
   --checkpoints ${{inputs.checkpoints}}
   --training-record ${{inputs.training_record}}
   --dataset-manifest ${{inputs.dataset_manifest}}

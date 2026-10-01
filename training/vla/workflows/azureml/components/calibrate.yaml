@@ -5,7 +5,7 @@ display_name: VLA Calibration
 version: "2"
 description: Measure VLA CUDA memory through isolated one-step optimizer probes.
 
-code: ../../../../..
+code: ../../../..
 
 inputs:
   dataset:
@@ -111,4 +111,4 @@ command: >-
   AZURE_ML_OUTPUT_workload_contract='${{outputs.workload_contract}}'
   AZURE_ML_OUTPUT_calibration_report='${{outputs.calibration_report}}'
   CALIBRATION_SWEEP_TRIAL=true
-  bash training/vla/scripts/azureml-component-entry.sh calibrate
+  bash vla/scripts/azureml-component-entry.sh calibrate
