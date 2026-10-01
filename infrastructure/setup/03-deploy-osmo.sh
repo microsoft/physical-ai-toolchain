@@ -66,6 +66,7 @@ OPTIONS:
     --mek-config-file PATH  Use existing MEK config file
     --service-url URL       OSMO control plane URL (default: auto-detect)
     --private-service-ip IP Stable RFC1918 frontend IP for the internal LoadBalancer
+                            (required on first install; later runs reuse it)
     --hil-backend-name NAME Add an external HiL backend and CPU pool
     --hil-pool-name NAME    HiL pool name (default: backend name)
     --hil-workflow-namespace NAME
@@ -262,7 +263,7 @@ if [[ "$config_preview" == "true" ]]; then
     print_kv "Image Manifest" "${image_manifest:-not used}"
     print_kv "Auth Mode" "workload-identity"
     print_kv "Backend Name" "$backend_name"
-    print_kv "Private Service IP" "${private_service_ip:-<required for HiL>}"
+    print_kv "Private Service IP" "${private_service_ip:-<existing LoadBalancer address; required on first install>}"
     print_kv "HiL Backend" "${hil_backend_name:-not configured}"
     print_kv "HiL Pool" "${hil_pool_name:-not configured}"
     print_kv "Backend" "$([[ $skip_backend == true ]] && echo 'skipped' || echo 'deployed')"
