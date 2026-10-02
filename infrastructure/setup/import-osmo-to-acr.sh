@@ -25,7 +25,7 @@ Every imported tag is locked against writes and deletes. The script then writes
 osmo-images.json to the bundle directory and, when the bundle has deployment.json,
 records the manifest there.
 
-Locked tags are reused; chart tags are checked against the pinned SHA-256 first.
+Tags with writes disabled are reused; chart tags are checked against the pinned SHA-256 first.
 Unlocked tags are refreshed from the source. Use the manifest with
 03-deploy-osmo.sh --use-acr --image-manifest and with 04-prepare-osmo-hil-node.sh.
 
@@ -112,7 +112,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Chart Target" "helm/$OSMO_SERVICE_CHART, helm/$OSMO_BACKEND_CHART ($chart_version)"
   print_kv "Service Chart SHA" "$OSMO_SERVICE_CHART_SHA256"
   print_kv "Backend Chart SHA" "$OSMO_BACKEND_CHART_SHA256"
-  print_kv "Tag Policy" "reuse locked tags, refresh unlocked tags, lock every tag"
+  print_kv "Tag Policy" "reuse tags with writes disabled, refresh writable tags, lock every tag"
   print_kv "Image Manifest" "$manifest_file"
   print_kv "Deployment Metadata" "$([[ -f $deployment_file ]] && echo "update $deployment_file" || echo 'not present; nothing to update')"
   exit 0
@@ -149,11 +149,10 @@ acr_tag_exists() {
     --query "contains(@, '$tag')" -o tsv)" == "true" ]]
 }
 
-acr_tag_locked() {
-  local image="$1" attributes
-  attributes=$(az acr repository show --name "$acr_name" --image "$image" \
-    --query '[changeableAttributes.writeEnabled,changeableAttributes.deleteEnabled]' -o json)
-  jq -e '.[0] == false and .[1] == false' <<< "$attributes" >/dev/null
+acr_tag_write_locked() {
+  local image="$1"
+  az acr repository show --name "$acr_name" --image "$image" \
+    --query changeableAttributes.writeEnabled -o json | jq -e '. == false' >/dev/null
 }
 
 lock_acr_tag() {
@@ -174,7 +173,9 @@ for component in "${OSMO_IMAGE_COMPONENTS[@]}"; do
   source_image="$OSMO_SOURCE_REGISTRY/$component:$image_version"
   import_args=(--name "$acr_name" --source "$source_image" --image "$repository:$image_version" --output none)
   if acr_tag_exists "$repository" "$image_version"; then
-    if acr_tag_locked "$repository:$image_version"; then
+    # A tag with writes disabled can't have changed since it was locked; finish the lock and reuse it.
+    if acr_tag_write_locked "$repository:$image_version"; then
+      lock_acr_tag "$repository:$image_version"
       info "Reusing locked $repository:$image_version"
       images_reused=$((images_reused + 1))
       continue
@@ -203,12 +204,13 @@ charts_reused=0
 for entry in "${chart_entries[@]}"; do
   IFS='|' read -r chart expected_sha <<< "$entry"
   repository="helm/$chart"
-  if acr_tag_exists "$repository" "$chart_version" && acr_tag_locked "$repository:$chart_version"; then
+  if acr_tag_exists "$repository" "$chart_version" && acr_tag_write_locked "$repository:$chart_version"; then
     helm pull "oci://$login_server/$repository" --version "$chart_version" \
       --destination "$work_dir/acr-$chart" >/dev/null || fatal "Unable to pull $repository:$chart_version from $acr_name"
     actual_sha=$(calculate_sha256 "$(find_latest_chart_archive "$work_dir/acr-$chart")")
     [[ "$actual_sha" == "$expected_sha" ]] || \
       fatal "Locked $repository:$chart_version in $acr_name doesn't match the pinned SHA-256 ($actual_sha); investigate before unlocking it"
+    lock_acr_tag "$repository:$chart_version"
     info "Reusing locked $repository:$chart_version (SHA-256 verified)"
     charts_reused=$((charts_reused + 1))
     continue
