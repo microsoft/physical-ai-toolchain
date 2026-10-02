@@ -2,7 +2,7 @@
 title: Private DNS for OSMO UI
 description: Private DNS zone for OSMO UI hostname resolution on the internal load balancer
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-31
+ms.date: 2026-10-01
 ms.topic: how-to
 keywords:
   - dns
@@ -10,7 +10,7 @@ keywords:
   - osmo
 ---
 
-Private DNS zone for OSMO UI hostname resolution. Maps the OSMO UI hostname to the internal LoadBalancer IP for access through VPN.
+Private DNS zone for OSMO UI hostname resolution. Maps the OSMO UI hostname to the internal load balancer in front of the OSMO gateway, for access through VPN.
 
 > [!NOTE]
 > Complete DNS configuration and resolution flow details are in the [Private DNS Configuration](../../../docs/infrastructure/dns.md) guide.
@@ -18,10 +18,10 @@ Private DNS zone for OSMO UI hostname resolution. Maps the OSMO UI hostname to t
 ## 🚀 Quick Start
 
 ```bash
-# Get the OSMO UI LoadBalancer IP
-kubectl get svc -n osmo-control-plane osmo-gateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+# Get the IP of the internal load balancer in front of OSMO
+kubectl get svc azureml-ingress-nginx-internal-lb -n azureml -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 
-# Deploy DNS zone with the LoadBalancer IP
+# Deploy the DNS zone with that IP
 cd infrastructure/terraform/dns
 terraform init && terraform apply -var="osmo_loadbalancer_ip=<IP_FROM_ABOVE>"
 ```
