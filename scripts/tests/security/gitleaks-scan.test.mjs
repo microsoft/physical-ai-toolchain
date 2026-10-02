@@ -3,7 +3,6 @@
 
 import assert from 'node:assert/strict';
 import childProcess, { spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -63,12 +62,17 @@ function repository(t) {
 }
 
 function syntheticFinding() {
-  return `api_${'key'} = "${randomBytes(32).toString('hex')}"\n`;
+  // Fixed high-entropy input avoids random collisions with scanner allowlists.
+  return `api_${'key'} = "${'0123456789abcdef'.repeat(4)}"\n`;
 }
 
 function runScan(repo, options = {}) {
   return scan({ ...repo, binary, expectedRevision: repo.git('rev-parse', 'HEAD'), ...options });
 }
+
+test('positive fixture is deterministic', () => {
+  assert.equal(syntheticFinding(), syntheticFinding(), 'Positive fixture must be repeatable');
+});
 
 test('scope excludes unrelated branches, remote refs and tags without suppressions', t => {
   const repo = repository(t);
