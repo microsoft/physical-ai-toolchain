@@ -244,3 +244,7 @@ GPU VM costs vary by region. Use [Azure Pricing Calculator](https://azure.micros
 * [Contributing Guide](README.md) - Prerequisites, workflow, commit messages
 * [Cost Considerations](cost-considerations.md) - Detailed cost tracking and budgeting
 * [Infrastructure Style](infrastructure-style.md) - Terraform and shell conventions
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

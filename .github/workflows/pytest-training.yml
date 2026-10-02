@@ -9,6 +9,23 @@ name: Pytest Training
         required: false
         default: false
         type: boolean
+    outputs:
+      work-status:
+        value: ${{ jobs.pytest-training.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.pytest-training.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.pytest-training.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.pytest-training.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.pytest-training.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.pytest-training.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.pytest-training.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.pytest-training.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -17,6 +34,16 @@ jobs:
   pytest-training:
     name: Pytest Training
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
       id-token: write
@@ -38,11 +65,14 @@ jobs:
           checksum: '6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f'
 
       - name: Install dependencies
+        id: install
         run: uv sync --frozen --group dev
 
       - name: Run pytest
+        id: test
         run: >-
           uv run --frozen pytest -o addopts="" training/tests -v
+          --junitxml=logs/pytest-training-results.xml
           --cov=training
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-training.xml
@@ -68,3 +98,13 @@ jobs:
           verbose: true
           flags: pytest-training
           name: pytest-training-coverage
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: pytest-training
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["install","test"]'
+          reports: '[{"path":"logs/pytest-training-results.xml","kind":"junit"}]'

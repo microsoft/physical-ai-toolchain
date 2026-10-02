@@ -18,6 +18,23 @@ on:
         required: false
         default: pull-request
         type: string
+    outputs:
+      work-status:
+        value: ${{ jobs.aggregate.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.aggregate.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.aggregate.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.aggregate.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.aggregate.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.aggregate.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.aggregate.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.aggregate.outputs.first-failure }}
   workflow_dispatch:
     inputs:
       evidence-cadence:
@@ -46,6 +63,7 @@ jobs:
   evidence:
     name: Contracts, Provenance and Evidence
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -65,12 +83,14 @@ jobs:
           node-version: '24'
 
       - name: Prepare evidence directories
+        id: prepare
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p artifacts/accessibility/ci logs
 
       - name: Acquire reviewed HVE accessibility harness
+        id: hve-acquire
         shell: bash
         run: |
           set -euo pipefail
@@ -112,12 +132,14 @@ jobs:
             > artifacts/accessibility/ci/hve-provenance.json
 
       - name: Verify system Chrome
+        id: chrome
         shell: bash
         run: |
           set -euo pipefail
           google-chrome --version | tee artifacts/accessibility/ci/chrome-version.txt
 
       - name: Run HVE accessibility self-tests
+        id: hve-self-tests
         shell: bash
         run: |
           set -euo pipefail
@@ -126,10 +148,11 @@ jobs:
           uv sync --project "$skill_root" --frozen
           (
             cd "$skill_root"
-            uv run --frozen pytest -q
+            uv run --frozen pytest -q --junitxml="$GITHUB_WORKSPACE/logs/accessibility-hve-python.xml"
           )
 
       - name: Validate project evidence contracts
+        id: evidence-contracts
         shell: bash
         env:
           HVE_SKILL_ROOT: ${{ runner.temp }}/hve-core/.github/skills/accessibility/accessibility
@@ -157,6 +180,7 @@ jobs:
             > artifacts/accessibility/ci/github-source-summary.json
 
       - name: Upload Python coverage artifact
+        id: coverage-artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -165,8 +189,58 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Retain accessibility contract evidence
+        id: contract-artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: accessibility-contract-evidence-${{ github.run_id }}
+          path: |
+            artifacts/accessibility/
+            logs/accessibility-evidence-tests.xml
+            logs/accessibility-hve-python.xml
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish contract execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: accessibility-evidence
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["prepare","hve-acquire","chrome","hve-self-tests","evidence-contracts","coverage-artifact","contract-artifact"]'
+          reports: >-
+            [{"path":"logs/accessibility-hve-python.xml","kind":"junit"},
+            {"path":"logs/accessibility-evidence-tests.xml","kind":"junit"},
+            {"path":"logs/coverage-accessibility.xml","kind":"file"}]
+
+  product-evidence:
+    name: Deterministic Product Evidence
+    needs: evidence
+    if: ${{ inputs.run-product-evidence == true || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: '3.12'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
       - name: Run deterministic product evidence
-        if: ${{ inputs.run-product-evidence == true || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        id: product-evidence
         shell: bash
         working-directory: data-management/viewer/frontend
         run: |
@@ -205,7 +279,63 @@ jobs:
                   raise SystemExit(f"Viewer manifest {case['testId']} has unknown criteria: {sorted(unknown)}")
           PY
 
+      - name: Retain product evidence
+        id: product-artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: accessibility-product-evidence-${{ github.run_id }}
+          path: artifacts/accessibility/current/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish product execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: accessibility-evidence
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["product-evidence","product-artifact"]'
+          reports: '[{"path":"artifacts/accessibility/current/playwright-results.xml","kind":"junit"}]'
+
+  publish-evidence:
+    name: Collect and Publish Accessibility Evidence
+    needs: [evidence, product-evidence]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: '3.12'
+
+      - name: Collect contract evidence
+        id: collect-contracts
+        if: always()
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: accessibility-contract-evidence-${{ github.run_id }}
+          path: .
+
+      - name: Collect product evidence
+        id: collect-product
+        if: ${{ always() && (inputs.run-product-evidence == true || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: accessibility-product-evidence-${{ github.run_id }}
+          path: artifacts/accessibility/current/
+
       - name: Validate generated evidence bundle
+        id: validate-bundle
         if: ${{ inputs.validate-generated-bundle == true }}
         shell: bash
         run: |
@@ -216,7 +346,53 @@ jobs:
             --repository-root . \
             > artifacts/accessibility/current/evidence-summary.json
 
+      - name: Verify selected evidence collection
+        id: verify-collection
+        if: always()
+        shell: bash
+        env:
+          PRODUCT_SELECTED: ${{ inputs.run-product-evidence == true || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+          PRODUCT_COLLECTION: ${{ steps.collect-product.outcome }}
+          VALIDATE_BUNDLE: ${{ inputs.validate-generated-bundle == true }}
+          BUNDLE_VALIDATION: ${{ steps.validate-bundle.outcome }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { inspectReport } from './scripts/ci/publish-outcome.mjs';
+
+          const paths = [
+            'artifacts/accessibility/ci/hve-provenance.json',
+            'artifacts/accessibility/ci/contract-preview.json',
+            'artifacts/accessibility/ci/github-source-summary.json',
+          ];
+          if (process.env.PRODUCT_SELECTED === 'true') {
+            if (process.env.PRODUCT_COLLECTION !== 'success') {
+              throw new Error('Selected product evidence was not collected');
+            }
+            const report = inspectReport('.', {
+              path: 'artifacts/accessibility/current/playwright-results.xml', kind: 'junit',
+            });
+            if (!report.successful) throw new Error('Collected product tests failed');
+            paths.push('artifacts/accessibility/current/viewer-evidence-manifest.json');
+          }
+          if (process.env.VALIDATE_BUNDLE === 'true') {
+            if (process.env.BUNDLE_VALIDATION !== 'success') {
+              throw new Error('Selected bundle validation did not succeed');
+            }
+            paths.push('artifacts/accessibility/current/evidence-summary.json');
+          }
+          const results = paths.map(path => {
+            const bytes = readFileSync(path);
+            JSON.parse(bytes.toString('utf8'));
+            return { path, sha256: createHash('sha256').update(bytes).digest('hex') };
+          });
+          writeFileSync('artifacts/accessibility/ci/collection-summary.json',
+            JSON.stringify({ summary: { total: results.length, errors: 0 }, results }));
+          NODE
+
       - name: Upload accessibility evidence
+        id: evidence-artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -224,18 +400,32 @@ jobs:
           path: |
             artifacts/accessibility/
             logs/accessibility-evidence-tests.xml
+            logs/accessibility-hve-python.xml
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Publish collection execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: accessibility-evidence
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["collect-contracts","verify-collection","evidence-artifact"]'
+          reports: '[{"path":"artifacts/accessibility/ci/collection-summary.json","kind":"json"}]'
 
   accessibility-python-codecov:
     name: Accessibility Python Codecov Upload
     needs: evidence
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: read
       id-token: write
+    outputs:
+      download-outcome: ${{ steps.coverage-download.outcome }}
+      upload-outcome: ${{ steps.codecov.outcome }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -243,12 +433,14 @@ jobs:
           persist-credentials: false
 
       - name: Download Python coverage artifact
+        id: coverage-download
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: pytest-accessibility-coverage-xml
           path: coverage
 
       - name: Upload Python coverage to Codecov
+        id: codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: coverage/coverage-accessibility.xml
@@ -257,6 +449,77 @@ jobs:
           fail_ci_if_error: true
           flags: pytest-accessibility
           name: pytest-accessibility-coverage
+
+  coverage-result:
+    name: Verify Accessibility Coverage Publication
+    needs: accessibility-python-codecov
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify coverage publication
+        id: coverage-upload
+        shell: bash
+        env:
+          JOB_RESULT: ${{ needs.accessibility-python-codecov.result }}
+          DOWNLOAD_OUTCOME: ${{ needs.accessibility-python-codecov.outputs.download-outcome }}
+          UPLOAD_OUTCOME: ${{ needs.accessibility-python-codecov.outputs.upload-outcome }}
+        run: |
+          test "$JOB_RESULT" = success &&
+            test "$DOWNLOAD_OUTCOME" = success &&
+            test "$UPLOAD_OUTCOME" = success
+
+      - name: Publish coverage execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: accessibility-evidence
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["coverage-upload"]'
+          reports: '[]'
+
+  aggregate:
+    name: Aggregate Accessibility Execution Evidence
+    needs: [evidence, product-evidence, publish-evidence, coverage-result]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Aggregate execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: accessibility-evidence
+          needs-json: ${{ toJSON(needs) }}
+          expected-shards: >-
+            {"evidence":["default"],
+            "product-evidence":${{ (inputs.run-product-evidence == true || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["default"]' || '[]' }},
+            "publish-evidence":["default"],"coverage-result":["default"]}
 
   scheduled-docusaurus:
     name: Cadenced Docusaurus Evidence

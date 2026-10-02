@@ -23,6 +23,15 @@ on:
         required: false
         type: string
         default: '2fdd81b8d21ff1498cd559af0dcc5d155835f84600db06d3923e217124fc735a'
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.terraform-docs-check.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.terraform-docs-check.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.terraform-docs-check.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.terraform-docs-check.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.terraform-docs-check.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.terraform-docs-check.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.terraform-docs-check.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.terraform-docs-check.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -35,6 +44,16 @@ jobs:
   terraform-docs-check:
     name: Terraform Docs Check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -70,6 +89,7 @@ jobs:
           terraform-docs --version
 
       - name: Run terraform-docs check
+        id: docs
         continue-on-error: ${{ inputs.soft-fail }}
         run: |
           $params = @{}
@@ -85,3 +105,14 @@ jobs:
           name: terraform-docs-check-results
           path: logs/terraform-docs-check-results.json
           retention-days: 30
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: terraform-docs-check
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["docs"]'
+          reports: '[{"path":"logs/terraform-docs-check-results.json","kind":"json"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

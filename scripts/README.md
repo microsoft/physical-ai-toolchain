@@ -2,7 +2,7 @@
 title: Scripts
 description: CI/CD scripts, shared libraries, linting, security, and Pester tests for the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-28
+ms.date: 2026-10-01
 ms.topic: reference
 keywords:
   - scripts
@@ -55,6 +55,67 @@ CI bootstrap and release automation.
 | `ci/New-SignedReleaseTag.ps1`         | Create a signed release tag                             |
 | `ci/New-SigningArtifacts.ps1`         | Generate release signing artifacts                      |
 | `ci/Update-ChangelogMsDate.ps1`       | Refresh changelog metadata dates                        |
+
+### Required validation gates
+
+`ci/ci-contract.json` declares lane ownership, selection, permissions, operation identities,
+required reports, matrix shards, and reusable output bindings. `ci/select-checks.mjs` compares
+the PR event base to the tested merge SHA and publishes explicit selection reasons.
+Selected PR lanes and every main lane disable inner changed-file filtering.
+Execution bindings pin each required `run` scalar by SHA-256 and each action by its `uses`
+path (without the `@` ref) and the SHA-256 of `JSON.stringify` of its parsed `with` mapping.
+The dependency pinning and SHA staleness lanes enforce action ref pinning, so Dependabot
+action bumps do not require contract edits.
+Review operation changes before updating these hashes; do not regenerate them to dismiss
+unexplained workflow drift.
+
+| Status         | Required-gate behavior                                                        |
+|----------------|-------------------------------------------------------------------------------|
+| `success`      | Require all expected operations, valid reports, counts, and artifact identity |
+| `failure`      | Block the aggregate and report the first failed or missing operation          |
+| `cancelled`    | Block the aggregate; report cancellation separately from validation failure   |
+| `planned-skip` | Accept only a lane excluded by verified PR selection                          |
+| Missing        | Block the aggregate; a green job result alone is not execution evidence       |
+
+GitHub omits empty job outputs. An absent `first-failure` value is accepted only with otherwise
+valid success or verified planned-skip evidence; required status, count, and artifact fields
+must remain present.
+
+`.github/actions/ci-outcome` validates actual step outcomes and suite-specific reports before
+publishing receipts. Matrix aggregates require the complete expected job/shard inventory and
+current run ID, attempt, and commit SHA. Test counts exclude skipped cases. Summary JSON and
+Markdown retain comparison SHAs, selection reasons, operation/test counts, first failures,
+tool versions, and artifact links without copying arbitrary step outputs.
+Summaries revalidate mandatory output receipts and raw child reports from the current attempt
+and reconcile their counts with exposed workflow outputs. Missing, duplicate, stale, or
+contradictory mandatory evidence blocks the gate even when GitHub retains earlier successful
+job outputs. Missing advisory receipts produce warnings without blocking required checks.
+
+Receipt readers validate and read the same open file descriptor, reject linked or replaced
+receipt files, and close descriptors on success and failure. CodeQL SARIF evidence uses the
+native `CodeQL` driver name; keep the workflow report declaration and canonical contract aligned.
+PowerShell workflow steps pass named switches through hashtable splatting rather than arrays
+of flag-shaped strings.
+
+`pr-validation-summary` remains the stable required check. `main-validation-summary` evaluates
+full execution before `release-please` can start. Markdown links, Terraform tests, Terraform
+documentation freshness, OSV, and Terraform security remain advisory and visible in summaries.
+Container findings are advisory; container discovery, scanning, and report publication remain
+required execution. Only superseded PR runs cancel automatically; main and release runs do not.
+Summaries consume the workflow cancellation context even when no child started. A cancelled
+or superseded run never produces a successful release gate.
+
+Accessibility validation participates in both required summaries. The Docusaurus accessibility
+collector retains its 90-minute budget for provenance checks, browser collection, and evidence
+composition; it is not a build-only job. Scheduled Docusaurus calls remain excluded from PR and
+main execution inventories. Documentation deployment consumes verified accessibility promotion
+artifacts independently of the release-please gate.
+
+Use a full workflow rerun after a failure. Partial reruns cannot reuse receipts from an earlier
+attempt. Run `npm run lint:ci` and `npm run test:ci` for graph validation, negative mutations,
+report-adapter tests, and the existing 80% line/branch/function coverage gate.
+Local validation does not verify hosted PR checks, branch protection, or post-merge execution;
+verify those separately without treating a local green result as hosted evidence.
 
 ## 🔍 Linting Scripts
 

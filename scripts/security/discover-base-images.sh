@@ -9,7 +9,8 @@ show_help() {
 }
 
 main() {
-  local mode=refs repo_root map_file files occurrences refs file line ordinal ref
+  local mode=refs repo_root map_file file line ordinal ref instruction remainder
+  local -a files=() occurrences=() refs=()
   case "${1:-}" in
     '') ;;
     --matrix) mode=matrix ;;
@@ -30,37 +31,36 @@ main() {
     return 0
   fi
 
-  files="$(mktemp)"
-  occurrences="$(mktemp)"
-  refs="$(mktemp)"
-  # Capture local paths before the function returns.
-  # shellcheck disable=SC2064
-  trap "rm -f -- $(printf '%q ' "${files}" "${occurrences}" "${refs}")" EXIT
-  git ls-files -z '*Dockerfile*' '*Containerfile*' > "${files}"
-
-  # The dollar sign is part of the template-detection regex.
-  # shellcheck disable=SC2016
-  local image_pattern='([A-Za-z0-9.-]+(:[0-9]+)?/)?[A-Za-z0-9._/-]+(:[A-Za-z0-9._${}-]+)?@sha256:[0-9a-f]{64}'
-  shopt -s nocasematch
   while IFS= read -r -d '' file; do
+    files+=("${file}")
+  done < <(git ls-files -z '*Dockerfile*' '*Containerfile*')
+  wait "$!" || return 1
+
+  local image_pattern='^([A-Za-z0-9.-]+(:[0-9]+)?/)?[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$'
+  shopt -s nocasematch
+  for file in "${files[@]}"; do
     ordinal=0
     while IFS= read -r line || [[ -n "${line}" ]]; do
-      if [[ "${line}" =~ ^[[:space:]]*FROM[[:space:]] ]]; then
-        if [[ "${line}" =~ ${image_pattern} ]]; then
-          ref="${BASH_REMATCH[0]}"
-          if [[ "${ref}" != *'$'* && "${ref}" != *'{'* && "${ref}" != *'}'* ]]; then
-            printf '%s\0%s\0%s\0' "${file}" "${ordinal}" "${ref}" >> "${occurrences}"
-            printf '%s\n' "${ref}" >> "${refs}"
-          fi
+      line="${line%$'\r'}"
+      read -r instruction ref remainder <<< "${line}"
+      if [[ "${instruction}" == FROM ]]; then
+        if [[ "${ref}" == --platform=* ]]; then
+          read -r ref remainder <<< "${remainder}"
+        fi
+        if [[ "${ref}" =~ ${image_pattern} ]]; then
+          occurrences+=("${file}" "${ordinal}" "${ref}")
+          refs+=("${ref}")
         fi
         ((ordinal += 1))
       fi
-    done < "${file}"
-  done < "${files}"
+    done < "${file}" || return 1
+  done
 
   if [[ "${mode}" == refs ]]; then
-    sort -u "${refs}"
-    return
+    if (( ${#refs[@]} > 0 )); then
+      printf '%s\n' "${refs[@]}" | sort -u
+    fi
+    return 0
   fi
 
   if [[ ! -f "${map_file}" ]]; then
@@ -68,7 +68,8 @@ main() {
     return 1
   fi
   # cspell:ignore slurpfile
-  jq -cen --rawfile tracked "${files}" --rawfile occurrences "${occurrences}" \
+  jq -cen --rawfile tracked <(printf '%s\0' "${files[@]}") \
+    --rawfile occurrences <(if (( ${#occurrences[@]} > 0 )); then printf '%s\0' "${occurrences[@]}"; fi) \
     --slurpfile config "${map_file}" '
     def reject($message): error("Invalid scan lane map: " + $message);
     def keys_are($names): type == "object" and (keys == ($names | sort));

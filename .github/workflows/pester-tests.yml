@@ -12,12 +12,29 @@ on:
         description: 'Whether to run only tests for changed files'
         required: false
         type: boolean
-        default: true
+        default: false
       code-coverage:
         description: 'Whether to collect code coverage'
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status:
+        value: ${{ jobs.aggregate.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.aggregate.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.aggregate.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.aggregate.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.aggregate.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.aggregate.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.aggregate.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.aggregate.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -30,10 +47,10 @@ jobs:
   pester:
     name: PowerShell Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        # Single OS for now; expand when cross-platform coverage is needed
         os: [ubuntu-latest]
     permissions:
       contents: read
@@ -49,11 +66,13 @@ jobs:
         run: New-Item -ItemType Directory -Force -Path logs | Out-Null
 
       - name: Install Pester
+        id: install-pester
         run: |
           Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -SkipPublisherCheck -Scope CurrentUser
           Import-Module Pester -RequiredVersion 5.7.1
 
       - name: Install PowerShell-Yaml
+        id: install-yaml
         run: |
           Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Force -SkipPublisherCheck -Scope CurrentUser
 
@@ -72,6 +91,9 @@ jobs:
 
           # Get changed PowerShell files
           $changedFiles = git diff --name-only $baseRef -- '*.ps1' '*.psm1' '*.psd1' 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to select Pester tests from the Git comparison'
+          }
           if (-not $changedFiles) {
             Write-Host "No PowerShell files changed"
             Set-CIOutput -Name 'has-changes' -Value 'false'
@@ -157,15 +179,16 @@ jobs:
           try {
             $config = & scripts/tests/pester.config.ps1 -CI @configParams
             $config.Run.Exit = $false
+            $config.TestResult.OutputPath = Join-Path $workspaceRoot 'logs/pester-results-${{ matrix.os }}.xml'
             $result = Invoke-Pester -Configuration $config
 
             # Re-import CIHelpers — Pester module isolation unloads it during test execution
             Import-Module $ciHelpersPath -Force
 
-            if ($result.FailedCount -gt 0) {
+            if ($result.Result -ne 'Passed' -or $result.PassedCount -eq 0) {
               $env:PESTER_FAILED = 'true'
               Set-CIOutput -Name 'pester-failed' -Value 'true'
-              Write-Warning "$($result.FailedCount) test(s) failed"
+              Write-Warning "Pester result: $($result.Result); $($result.PassedCount) passed, $($result.FailedCount) failed"
               exit 1
             }
             else {
@@ -186,7 +209,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pester-results-${{ matrix.os }}
-          path: logs/pester-results.xml
+          path: logs/pester-results-${{ matrix.os }}.xml
           retention-days: 30
 
       - name: Upload Coverage Report
@@ -209,8 +232,13 @@ jobs:
           fail_ci_if_error: false
 
       - name: Coverage Threshold Check
-        if: matrix.os == 'ubuntu-latest' && inputs.code-coverage && always() && steps.pester.outcome != 'skipped'
+        id: coverage-policy
+        if: always()
         run: |
+          if ('${{ inputs.code-coverage }}' -ne 'true' -or '${{ matrix.os }}' -ne 'ubuntu-latest') {
+            Write-Host 'Coverage is not requested for this shard'
+            exit 0
+          }
           if (Test-Path logs/coverage-pester.xml) {
             [xml]$coverage = Get-Content logs/coverage-pester.xml
             $lineRate = $coverage.report.counter |
@@ -236,19 +264,49 @@ jobs:
             }
           }
           else {
-            Write-Warning "Coverage report not found at logs/coverage.xml"
+            throw 'Coverage report not found at logs/coverage-pester.xml'
           }
 
-      - name: Check results
-        if: always() && steps.pester.outcome != 'skipped'
-        run: |
-          $failed = '${{ steps.pester.outputs.pester-failed }}'
-          $softFail = '${{ inputs.soft-fail }}'
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: pester-tests
+          shard: ${{ matrix.os }}
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["install-pester","install-yaml","pester","coverage-policy"]'
+          reports: '[{"path":"logs/pester-results-${{ matrix.os }}.xml","kind":"nunit"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}
 
-          if ($failed -eq 'true' -and $softFail -ne 'true') {
-            Write-Error "Pester tests failed. Review test results artifact for details."
-            exit 1
-          }
-          elseif ($failed -eq 'true') {
-            Write-Warning "Pester tests failed but soft-fail is enabled"
-          }
+  aggregate:
+    name: Aggregate Pester tests
+    if: always()
+    needs: pester
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Aggregate execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: pester-tests
+          needs-json: ${{ toJSON(needs) }}
+          expected-shards: '{"pester":["ubuntu-latest"]}'
+          fail-on-error: ${{ !inputs.soft-fail }}
