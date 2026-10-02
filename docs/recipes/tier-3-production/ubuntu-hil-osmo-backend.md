@@ -2,7 +2,7 @@
 title: Ubuntu HiL OSMO Backend
 description: Prepare one Ubuntu T3 HiL node, optionally establish private reachability, connect it to an existing OSMO environment, and prove CPU and no-command outcomes.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-01
+ms.date: 2026-10-02
 ms.topic: tutorial
 ---
 
@@ -210,7 +210,7 @@ sudo usermod -aG himds "$USER"
 
 The Arc agent gives tokens only to root and members of the `himds` group, so start a new login session after adding yourself. The environment owner then gives the server's identity the roles this recipe describes for the Ubuntu identity, plus Storage Blob Data Contributor or AcrPull when host tools need storage or registry access. Read its principal ID with `az connectedmachine show --name <host> --resource-group <arc-resource-group> --query identity.principalId`.
 
-Pass `--managed-identity` to `02-connect-osmo-backend.sh` and to the VPN scripts so they sign in as the server's identity. Pods on the cluster don't use this identity; they reach Azure through workload identity, such as the federated credential the publisher creates for `osmo-workflow`.
+Pass `--managed-identity` to `02-connect-osmo-backend.sh` and to the VPN scripts so they sign in as the server's identity. A script reuses a saved Azure CLI session only when it's the same kind of identity, so switching between a device code and the managed identity signs in again. Pods on the cluster don't use this identity; they reach Azure through workload identity, such as the federated credential the publisher creates for `osmo-workflow`.
 
 ## Optional Private Reachability
 

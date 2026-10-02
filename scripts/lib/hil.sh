@@ -62,25 +62,44 @@ hil_key_vault_secret_not_found() {
   grep -Eq '(^|[[:space:]])\(SecretNotFound\)([[:space:]]|$)' "$error_file"
 }
 
+# Succeed when an `az account show` document is the requested kind of identity in the expected
+# tenant and subscription. Azure CLI names a system-assigned managed identity session
+# systemAssignedIdentity with type servicePrincipal, and a device-code session has type user.
+hil_azure_account_matches() {
+  local account="${1:-}" tenant_id="${2:?tenant ID required}" subscription_id="${3:?subscription ID required}"
+  local use_managed_identity="${4:-false}" managed=false
+
+  [[ "$use_managed_identity" == "true" ]] && managed=true
+  jq -e --arg tenant "$tenant_id" --arg subscription "$subscription_id" --argjson managed "$managed" '
+    ((.tenantId // "") | ascii_downcase) == ($tenant | ascii_downcase) and
+    ((.id // "") | ascii_downcase) == ($subscription | ascii_downcase) and
+    (if $managed
+     then .user.type == "servicePrincipal" and .user.name == "systemAssignedIdentity"
+     else .user.type == "user"
+     end)
+  ' <<< "$account" >/dev/null 2>&1
+}
+
 hil_login_azure() {
   local tenant_id="${1:?tenant ID required}" subscription_id="${2:?subscription ID required}"
-  local config_dir="${3:?Azure config directory required}" use_managed_identity="${4:-false}" account
+  local config_dir="${3:?Azure config directory required}" use_managed_identity="${4:-false}" account expected
 
   hil_prepare_directory "$config_dir"
   export AZURE_CONFIG_DIR="$config_dir"
+  # Reuse a saved session only when it's the requested identity, so switching between device code
+  # and the managed identity always signs in again.
   account=$(az account show --output json 2>/dev/null || true)
-  if jq -e --arg tenant "$tenant_id" --arg subscription "$subscription_id" '
-      ((.tenantId // "") | ascii_downcase) == ($tenant | ascii_downcase) and
-      ((.id // "") | ascii_downcase) == ($subscription | ascii_downcase)
-    ' <<< "$account" >/dev/null 2>&1; then
+  if hil_azure_account_matches "$account" "$tenant_id" "$subscription_id" "$use_managed_identity"; then
     return
   fi
   az account clear >/dev/null 2>&1 || true
   if [[ "$use_managed_identity" == "true" ]]; then
+    expected="the host's system-assigned managed identity"
     # An Arc-enabled server's identity issues tokens only to root and members of the himds group.
     az login --identity --allow-no-subscriptions --output none || \
       fatal "Managed identity sign-in failed. Connect the host with 03-connect-arc-server.sh, add your user to the himds group, and start a new login session."
   else
+    expected="a user account"
     az login --use-device-code --tenant "$tenant_id" --allow-no-subscriptions --output none
   fi
   az account set --subscription "$subscription_id" || \
@@ -88,6 +107,8 @@ hil_login_azure() {
   account=$(az account show --output json)
   jq -e --arg tenant "$tenant_id" '((.tenantId // "") | ascii_downcase) == ($tenant | ascii_downcase)' \
     <<< "$account" >/dev/null || fatal "The signed-in identity belongs to a different tenant than $tenant_id"
+  hil_azure_account_matches "$account" "$tenant_id" "$subscription_id" "$use_managed_identity" || \
+    fatal "Azure CLI signed in as $(jq -r '"\(.user.name // "unknown") (\(.user.type // "unknown"))"' <<< "$account"), not $expected"
 }
 
 hil_validate_catalog() {
