@@ -34,6 +34,7 @@ OPTIONS:
     --context NAME                Local K3s context (default: $EDGE_K3S_CONTEXT)
     --input-dir DIR               Protected local artifact directory
     --azure-config-dir DIR        Isolated Azure CLI state directory
+    --managed-identity            Sign in as the host's Arc-enabled server identity, not device code
     --osmo-config-dir DIR         Isolated OSMO client profile directory
     --connection-file PATH        Non-secret successful-connection receipt
     --config-preview              Print configuration and exit
@@ -53,6 +54,7 @@ kubeconfig="${HIL_KUBECONFIG:-${XDG_DATA_HOME:-$HOME/.local/share}/physical-ai-t
 context="$EDGE_K3S_CONTEXT"
 input_dir=""
 azure_config_dir=""
+use_managed_identity=false
 osmo_config_dir=""
 connection_file=""
 config_preview=false
@@ -69,6 +71,7 @@ while [[ $# -gt 0 ]]; do
     --context)            context="$2"; shift 2 ;;
     --input-dir)          input_dir="$2"; shift 2 ;;
     --azure-config-dir)   azure_config_dir="$2"; shift 2 ;;
+    --managed-identity)   use_managed_identity=true; shift ;;
     --osmo-config-dir)    osmo_config_dir="$2"; shift 2 ;;
     --connection-file)    connection_file="$2"; shift 2 ;;
     --config-preview)     config_preview=true; shift ;;
@@ -95,6 +98,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Milestone" "connected"
   print_kv "Environment" "$environment"
   print_kv "Host" "$host_name"
+  print_kv "Azure Sign-in" "$([[ "$use_managed_identity" == "true" ]] && echo 'managed identity' || echo 'device code')"
   print_kv "Tenant" "$tenant_id"
   print_kv "Subscription" "$subscription_id"
   print_kv "Key Vault" "$vault_name"
@@ -113,7 +117,7 @@ fi
 require_tools az base64 curl helm jq kubectl osmo
 identity_file=/var/lib/physical-ai-toolchain/k3s-identity.json
 
-hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir"
+hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir" "$use_managed_identity"
 
 hil_fetch_artifacts "$catalog_secret" "$environment" "$host_name" \
   "$tenant_id" "$subscription_id" "$vault_name" "$input_dir" \

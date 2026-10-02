@@ -157,6 +157,30 @@ data-pipeline/setup/hil/01-install-k3s.sh \
 
 Connect the cluster to Azure Arc before the environment owner publishes, because the publisher verifies the Arc resource. Follow [Connect to Azure Arc](../../data-pipeline/edge-k3s-setup.md#connect-to-azure-arc), including a `--cluster-admin-*` grant for each operator who uses Arc cluster connect.
 
+<!-- cspell:ignore himds connectedmachine -->
+
+### Use the Host's Managed Identity
+
+The host scripts that read Key Vault sign in to Azure with a device code, as the person running them. To give the host its own identity instead, connect it as an Arc-enabled server, which creates a system-assigned managed identity for the machine:
+
+```bash
+data-pipeline/setup/edge/03-connect-arc-server.sh \
+  --subscription-id <subscription-id> --tenant-id <tenant-id> \
+  --resource-group <arc-resource-group> --location <azure-region> \
+  --server-name <host> --config-preview
+
+data-pipeline/setup/edge/03-connect-arc-server.sh \
+  --subscription-id <subscription-id> --tenant-id <tenant-id> \
+  --resource-group <arc-resource-group> --location <azure-region> \
+  --server-name <host>
+
+sudo usermod -aG himds "$USER"
+```
+
+The Arc agent gives tokens only to root and members of the `himds` group, so start a new login session after adding yourself. The environment owner then gives the server's identity the roles this recipe describes for the Ubuntu identity, plus Storage Blob Data Contributor or AcrPull when host tools need storage or registry access. Read its principal ID with `az connectedmachine show --name <host> --resource-group <arc-resource-group> --query identity.principalId`.
+
+Pass `--managed-identity` to `02-connect-osmo-backend.sh` and to the VPN scripts so they sign in as the server's identity. Pods on the cluster don't use this identity; they reach Azure through workload identity, such as the federated credential the publisher creates for `osmo-workflow`.
+
 ## Optional Private Reachability
 
 Run this branch only when the approved OSMO endpoint or private Key Vault requires private routing.

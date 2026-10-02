@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shared protected-transfer helpers for direct HiL setup scripts.
-# cspell:ignore fromdateiso
+# cspell:ignore fromdateiso himds
 
 hil_require_name() {
   local label="${1:?label required}" value="${2:?value required}"
@@ -64,7 +64,7 @@ hil_key_vault_secret_not_found() {
 
 hil_login_azure() {
   local tenant_id="${1:?tenant ID required}" subscription_id="${2:?subscription ID required}"
-  local config_dir="${3:?Azure config directory required}" account
+  local config_dir="${3:?Azure config directory required}" use_managed_identity="${4:-false}" account
 
   hil_prepare_directory "$config_dir"
   export AZURE_CONFIG_DIR="$config_dir"
@@ -76,8 +76,18 @@ hil_login_azure() {
     return
   fi
   az account clear >/dev/null 2>&1 || true
-  az login --use-device-code --tenant "$tenant_id" --allow-no-subscriptions --output none
-  az account set --subscription "$subscription_id"
+  if [[ "$use_managed_identity" == "true" ]]; then
+    # An Arc-enabled server's identity issues tokens only to root and members of the himds group.
+    az login --identity --allow-no-subscriptions --output none || \
+      fatal "Managed identity sign-in failed. Connect the host with 03-connect-arc-server.sh, add your user to the himds group, and start a new login session."
+  else
+    az login --use-device-code --tenant "$tenant_id" --allow-no-subscriptions --output none
+  fi
+  az account set --subscription "$subscription_id" || \
+    fatal "The signed-in identity can't use subscription $subscription_id; grant it roles there first"
+  account=$(az account show --output json)
+  jq -e --arg tenant "$tenant_id" '((.tenantId // "") | ascii_downcase) == ($tenant | ascii_downcase)' \
+    <<< "$account" >/dev/null || fatal "The signed-in identity belongs to a different tenant than $tenant_id"
 }
 
 hil_validate_catalog() {
