@@ -2,11 +2,17 @@
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: MIT
 # Launch detached Physical AI cloud E2E test attempts and expose a Copilot tracking handle.
-# cspell:ignore amlcompute azureml chdir finalizers finetune junitxml nodepool nohup pids pytest toplevel worktree
+# cspell:ignore amlcompute azureml chdir finalizers finetune junitxml keepalive microsoftonline nodepool nohup pids pytest toplevel worktree
 set -o errexit -o nounset -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/run-e2e-tests.sh"
+SKILL_REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null ||
+    (cd "$SCRIPT_DIR/../../../.." && pwd))"
+# shellcheck source=../../../../scripts/lib/common.sh
+source "$SKILL_REPO_ROOT/scripts/lib/common.sh"
+# shellcheck source=lib/handle-state.sh
+source "$SCRIPT_DIR/lib/handle-state.sh"
 DEFAULT_TESTS=()
 KNOWN_TESTS=()
 TESTS=()
@@ -61,6 +67,7 @@ is_known_test() {
 load_handle_tests() {
     local handle="$1" test_name
 
+    validate_handle_directory "$handle" || return
     [[ -f "$handle/tests.txt" ]] || return 0
     TESTS=()
     while IFS= read -r test_name; do
@@ -173,8 +180,7 @@ write_attempt_command() {
 run_one() {
     local handle="$1" test_name="$2" test_dir attempt attempt_dir command_file output_log return_code status
 
-    # shellcheck disable=SC1091
-    source "$handle/config.env"
+    load_handle_config "$handle" || return
     discover_tests "$REPO_ROOT" || return
     is_known_test "$test_name" || {
         printf 'Unknown E2E test: %s\n' "$test_name" >&2
@@ -190,6 +196,7 @@ run_one() {
     printf '%s\n' "$$" >"$test_dir/pid"
     write_status "$test_dir/status" "RUNNING"
     write_status "$attempt_dir/status" "RUNNING"
+    append_handle_event "$handle" "attempt" "running" "$test_name attempt $attempt"
 
     command_file="$attempt_dir/command.sh"
     output_log="$attempt_dir/output.log"
@@ -225,17 +232,17 @@ run_one() {
     write_status "$attempt_dir/status" "$status"
     write_status "$test_dir/status" "$status"
     printf '%s\n' "$status" >"$attempt_dir/result"
+    append_handle_event "$handle" "attempt" "$status" "$test_name attempt $attempt"
     [[ "$status" == "PASSED" ]]
 }
 
 start_one() {
     local handle="$1" test_name="$2" test_dir pid status KUBECONFIG=""
-    [[ -f "$handle/config.env" ]] || {
+    [[ -f "$handle/config.json" ]] || {
         printf 'Invalid E2E handle: %s\n' "$handle" >&2
         return 2
     }
-    # shellcheck disable=SC1091
-    source "$handle/config.env"
+    load_handle_config "$handle" || return
     discover_tests "$REPO_ROOT" || return
     is_known_test "$test_name" || {
         printf 'Unknown E2E test: %s\n' "$test_name" >&2
@@ -258,6 +265,9 @@ start_one() {
         >"$test_dir/launcher.log" 2>&1 < /dev/null &
     pid=$!
     printf '%s\n' "$pid" >"$test_dir/pid"
+    record_process_identity "$pid" "$test_dir/process.json" "test-attempt" ||
+        warn "Could not record process identity for $test_name"
+    append_handle_event "$handle" "attempt-launch" "started" "$test_name"
 }
 
 print_latest_command() {
@@ -281,7 +291,7 @@ print_latest_command() {
 
 resubmit_one() {
     local handle="$1" test_name="$2" osmo_endpoint
-    [[ -f "$handle/config.env" ]] || {
+    [[ -f "$handle/config.json" ]] || {
         printf 'Invalid E2E handle: %s\n' "$handle" >&2
         return 2
     }
@@ -291,8 +301,7 @@ resubmit_one() {
         return 2
     }
     if [[ "$test_name" == test_e2e_osmo_* ]]; then
-        # shellcheck disable=SC1091
-        source "$handle/config.env"
+        load_handle_config "$handle" || return
         osmo_endpoint="${OSMO_SERVICE_URL:-}"
         if [[ -z "$osmo_endpoint" ]]; then
             ensure_gateway "$handle"
@@ -307,22 +316,20 @@ resubmit_one() {
     fi
     start_one "$handle" "$test_name"
     print_latest_command "$handle" "$test_name"
+    append_handle_event "$handle" "resubmit" "started" "$test_name"
     printf 'RESUBMITTED\t%s\n' "$test_name"
     printf 'HANDLE\t%s\n' "$handle"
     printf 'STATUS_COMMAND\t%s --status %s\n' "$SCRIPT_PATH" "$handle"
 }
 
 gateway_keepalive() {
-    local handle="$1" port_forward_pid=""
-    # shellcheck disable=SC1091
-    source "$handle/config.env"
+    local handle="$1" port_forward_pid="" port_forward_identity
+    port_forward_identity="$handle/osmo-gateway-port-forward.json"
+    load_handle_config "$handle" || return
 
     # shellcheck disable=SC2329
     stop_port_forward() {
-        if [[ -n "$port_forward_pid" ]] && kill -0 "$port_forward_pid" 2>/dev/null; then
-            kill "$port_forward_pid"
-            wait "$port_forward_pid" 2>/dev/null || true
-        fi
+        stop_recorded_process "$port_forward_identity" "osmo-port-forward" || true
         exit 0
     }
     trap stop_port_forward TERM INT
@@ -331,24 +338,29 @@ gateway_keepalive() {
         kubectl port-forward "svc/osmo-gateway" "${OSMO_GATEWAY_PORT}:80" -n osmo-control-plane \
             >>"$handle/osmo-gateway.log" 2>&1 &
         port_forward_pid=$!
-        printf '%s\n' "$port_forward_pid" >"$handle/osmo-gateway-port-forward.pid"
+        record_process_identity "$port_forward_pid" "$port_forward_identity" "osmo-port-forward" ||
+            fatal "Could not record OSMO port-forward process identity"
+        append_handle_event "$handle" "osmo-port-forward" "started" "PID $port_forward_pid"
         wait "$port_forward_pid" || true
+        rm -f "$port_forward_identity"
+        append_handle_event "$handle" "osmo-port-forward" "stopped" "PID $port_forward_pid"
         sleep 2
     done
 }
 
 ensure_gateway() {
-    local handle="$1" gateway_pid=""
-    # shellcheck disable=SC1091
-    source "$handle/config.env"
-    if [[ -f "$handle/osmo-gateway.pid" ]]; then
-        gateway_pid=$(cat "$handle/osmo-gateway.pid")
-    fi
-    if [[ -z "$gateway_pid" ]] || ! kill -0 "$gateway_pid" 2>/dev/null; then
+    local handle="$1" gateway_pid="" gateway_identity
+    gateway_identity="$handle/osmo-gateway.json"
+    load_handle_config "$handle" || return
+    if recorded_process_matches "$gateway_identity" "osmo-gateway"; then
+        gateway_pid=$(jq -r '.pid' "$gateway_identity")
+    else
         nohup "$SCRIPT_PATH" --gateway-keepalive "$handle" \
             >"$handle/osmo-gateway-launcher.log" 2>&1 < /dev/null &
         gateway_pid=$!
-        printf '%s\n' "$gateway_pid" >"$handle/osmo-gateway.pid"
+        record_process_identity "$gateway_pid" "$gateway_identity" "osmo-gateway" ||
+            fatal "Could not record OSMO gateway process identity"
+        append_handle_event "$handle" "osmo-gateway" "started" "PID $gateway_pid"
     fi
     for _ in {1..30}; do
         curl -fsS -o /dev/null "http://localhost:${OSMO_GATEWAY_PORT}" && return 0
@@ -359,11 +371,8 @@ ensure_gateway() {
 }
 
 cleanup_handle() {
-    local handle="$1" gateway_pid="" port_forward_pid="" test_name status
-    [[ -d "$handle" ]] || {
-        printf 'E2E handle does not exist: %s\n' "$handle" >&2
-        return 2
-    }
+    local handle="$1" test_name status
+    validate_handle_directory "$handle" || return
     load_handle_tests "$handle" || return
     for test_name in "${TESTS[@]}"; do
         status=$(cat "$handle/$test_name/status" 2>/dev/null || printf 'PENDING')
@@ -373,19 +382,9 @@ cleanup_handle() {
                 return 1
             }
     done
-    if [[ -f "$handle/osmo-gateway.pid" ]]; then
-        gateway_pid=$(cat "$handle/osmo-gateway.pid")
-    fi
-    if [[ -n "$gateway_pid" ]] && kill -0 "$gateway_pid" 2>/dev/null; then
-        kill "$gateway_pid"
-        wait "$gateway_pid" 2>/dev/null || true
-    fi
-    if [[ -f "$handle/osmo-gateway-port-forward.pid" ]]; then
-        port_forward_pid=$(cat "$handle/osmo-gateway-port-forward.pid")
-    fi
-    if [[ -n "$port_forward_pid" ]] && kill -0 "$port_forward_pid" 2>/dev/null; then
-        kill "$port_forward_pid"
-    fi
+    stop_recorded_process "$handle/osmo-gateway-port-forward.json" "osmo-port-forward" || true
+    stop_recorded_process "$handle/osmo-gateway.json" "osmo-gateway" || true
+    append_handle_event "$handle" "cleanup" "completed"
     printf 'CLEANED\t%s\n' "$handle"
 }
 
@@ -444,9 +443,6 @@ fi
     printf 'Run from a physical-ai-toolchain worktree or pass --repo-root.\n' >&2
     exit 1
 }
-
-# shellcheck disable=SC1091
-source "$REPO_ROOT/scripts/lib/common.sh"
 
 show_help() {
     cat <<EOF
@@ -635,33 +631,8 @@ done
 printf '%s\n' "${TESTS[@]}" >"$handle/tests.txt"
 connect_aks "$resource_group" "$aks_cluster" "$handle/kubeconfig" "$aks_cluster"
 export KUBECONFIG="$handle/kubeconfig"
-{
-    printf 'REPO_ROOT=%q\n' "$REPO_ROOT"
-    printf 'ARM_SUBSCRIPTION_ID=%q\n' "$ARM_SUBSCRIPTION_ID"
-    printf 'AZURE_RESOURCE_GROUP=%q\n' "$AZURE_RESOURCE_GROUP"
-    printf 'AKS_CLUSTER_NAME=%q\n' "$AKS_CLUSTER_NAME"
-    printf 'AZUREML_WORKSPACE_NAME=%q\n' "$AZUREML_WORKSPACE_NAME"
-    printf 'AZUREML_COMPUTE=%q\n' "$AZUREML_COMPUTE"
-    printf 'AZURE_STORAGE_ACCOUNT_NAME=%q\n' "$AZURE_STORAGE_ACCOUNT_NAME"
-    printf 'E2E_VLA_STORAGE_ACCOUNT=%q\n' "$E2E_VLA_STORAGE_ACCOUNT"
-    printf 'KUBECONFIG=%q\n' "$KUBECONFIG"
-    printf 'XDG_CONFIG_HOME=%q\n' "$XDG_CONFIG_HOME"
-    printf 'OSMO_GATEWAY_PORT=%q\n' "$OSMO_GATEWAY_PORT"
-    if [[ -n "${REQUESTS_CA_BUNDLE:-}" ]]; then
-        printf 'REQUESTS_CA_BUNDLE=%q\n' "$REQUESTS_CA_BUNDLE"
-    fi
-    if [[ -n "${E2E_PYTHON:-}" ]]; then
-        printf 'E2E_PYTHON=%q\n' "$E2E_PYTHON"
-    fi
-    if [[ -n "${OSMO_SERVICE_URL:-}" ]]; then
-        printf 'OSMO_SERVICE_URL=%q\n' "$OSMO_SERVICE_URL"
-    fi
-    printf 'WATCHDOG_SECONDS=%q\n' "$WATCHDOG_SECONDS"
-    printf 'export REPO_ROOT ARM_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP AKS_CLUSTER_NAME\n'
-    printf 'export AZUREML_WORKSPACE_NAME AZUREML_COMPUTE AZURE_STORAGE_ACCOUNT_NAME\n'
-    printf 'export E2E_VLA_STORAGE_ACCOUNT KUBECONFIG XDG_CONFIG_HOME OSMO_GATEWAY_PORT REQUESTS_CA_BUNDLE E2E_PYTHON OSMO_SERVICE_URL WATCHDOG_SECONDS\n'
-} >"$handle/config.env"
-chmod 600 "$handle/config.env"
+write_handle_config "$handle"
+append_handle_event "$handle" "handle" "created"
 printf '%s\n' "$tf_output" >"$handle/terraform-output.json"
 printf '%s\n' "$live_node_pools" >"$handle/live-node-pools.json"
 printf '%s\n' "$aml_compute" >"$handle/azureml-compute.json"
@@ -678,6 +649,32 @@ chmod 600 "$handle/terraform-output.json" "$handle/live-node-pools.json" "$handl
     printf 'STORAGE_ACCOUNT\t%s\n' "$storage_account"
     printf 'TESTS\t%s\n' "$(printf '%s\n' "${TESTS[@]}" | paste -sd, -)"
 } >"$handle/manifest.tsv"
+manifest_json="$handle/manifest.json"
+jq -n \
+    --arg started_at "$(date -u +%FT%TZ)" \
+    --arg repository "$REPO_ROOT" \
+    --arg terraform_directory "$terraform_dir" \
+    --arg subscription "$subscription_id" \
+    --arg resource_group "$resource_group" \
+    --arg aks_cluster "$aks_cluster" \
+    --arg azureml_workspace "$workspace" \
+    --arg azureml_compute "$compute" \
+    --arg storage_account "$storage_account" \
+    --arg tests "$(printf '%s\n' "${TESTS[@]}" | paste -sd, -)" \
+    '{
+        schemaVersion: 1,
+        startedAt: $started_at,
+        repository: $repository,
+        terraformDirectory: $terraform_directory,
+        subscription: $subscription,
+        resourceGroup: $resource_group,
+        aksCluster: $aks_cluster,
+        azuremlWorkspace: $azureml_workspace,
+        azuremlCompute: $azureml_compute,
+        storageAccount: $storage_account,
+        tests: ($tests | split(","))
+    }' >"$manifest_json"
+chmod 600 "$manifest_json" "$handle/manifest.tsv"
 printf 'TIMESTAMP\tTEST\tATTEMPT\tPID\tCOMMAND_FILE\tOUTPUT_LOG\n' >"$handle/commands.tsv"
 
 if [[ "$needs_osmo" == "true" ]]; then

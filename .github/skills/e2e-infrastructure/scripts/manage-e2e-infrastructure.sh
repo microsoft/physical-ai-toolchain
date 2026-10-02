@@ -2,6 +2,7 @@
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: MIT
 # Deploy or undeploy the complete Physical AI E2E test infrastructure.
+# cspell:ignore machinelearningservices softdeleted tfvar timespec undeployment
 set -o errexit -o nounset -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,6 +10,10 @@ DEFAULT_REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null 
     (cd "$SCRIPT_DIR/../../../.." && pwd))"
 # shellcheck source=../../../../scripts/lib/common.sh
 source "$DEFAULT_REPO_ROOT/scripts/lib/common.sh"
+# shellcheck source=lib/operation-state.sh
+source "$SCRIPT_DIR/lib/operation-state.sh"
+# shellcheck source=lib/terraform-operations.sh
+source "$SCRIPT_DIR/lib/terraform-operations.sh"
 
 DUMMY_HUGGINGFACE_TOKEN="invalid-e2e-token"
 TFVARS_TEMPLATE="$SCRIPT_DIR/../templates/terraform.tfvars.example"
@@ -26,6 +31,8 @@ OPTIONS:
     --automation-principal-object-id ID
                             Optional managed identity granted Contributor on
                             the E2E resource group
+    --confirm-resource-group NAME
+                            Exact resource group required for undeploy
     --delete-after-hours COUNT
                             Resource expiry interval (default: 14)
     --delete-after-tag NAME Resource expiry tag (default: physical-ai-delete-after)
@@ -52,6 +59,7 @@ action=""
 repo_root="$DEFAULT_REPO_ROOT"
 max_attempts=3
 automation_principal_object_id="${E2E_AUTOMATION_PRINCIPAL_OBJECT_ID:-}"
+confirm_resource_group=""
 delete_after_hours="${E2E_DELETE_AFTER_HOURS:-14}"
 delete_after_tag="${E2E_DELETE_AFTER_TAG:-physical-ai-delete-after}"
 config_preview=false
@@ -90,6 +98,11 @@ while [[ $# -gt 0 ]]; do
     --automation-principal-object-id)
         [[ $# -ge 2 ]] || fatal "--automation-principal-object-id requires a value"
         automation_principal_object_id="$2"
+        shift 2
+        ;;
+    --confirm-resource-group)
+        [[ $# -ge 2 ]] || fatal "--confirm-resource-group requires a value"
+        confirm_resource_group="$2"
         shift 2
         ;;
     --delete-after-hours)
@@ -161,6 +174,9 @@ deploy_tags_json=""
 osmo_tunnel_pid=""
 osmo_tunnel_log=""
 cleanup() {
+    local exit_code="$?"
+    set +o errexit
+    finalize_operation_evidence "$exit_code"
     if [[ -n "$osmo_tunnel_pid" ]] && kill -0 "$osmo_tunnel_pid" 2>/dev/null; then
         kill "$osmo_tunnel_pid"
         wait "$osmo_tunnel_pid" 2>/dev/null || true
@@ -172,6 +188,7 @@ cleanup() {
         rm -f "$tfvars"
     fi
     [[ -z "$lock_dir" ]] || rmdir "$lock_dir"
+    return "$exit_code"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -571,18 +588,7 @@ forget_prevent_destroy_resources() {
         while IFS= read -r resource_address; do
             [[ -z "$resource_address" ]] || resource_addresses+=("$resource_address")
         done < <(
-            jq -rs '
-                [
-                    .[] |
-                    select(
-                        .type == "diagnostic" and
-                        .diagnostic.summary == "Instance cannot be destroyed"
-                    ) |
-                    .diagnostic.detail |
-                    capture("^Resource (?<address>[^ ]+) has\\s+lifecycle\\.prevent_destroy set").address
-                ] |
-                unique[]
-            ' "$plan_file"
+            extract_prevent_destroy_addresses "$plan_file"
         )
 
         if [[ ${#resource_addresses[@]} -eq 0 ]]; then
@@ -604,42 +610,14 @@ forget_prevent_destroy_resources() {
     fatal "Terraform destroy preflight still found prevent_destroy resources after 10 attempts"
 }
 
-run_terraform_with_retries() {
+terraform_operation_attempt() {
     local operation="$1"
-    local attempt
 
-    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
-        info "Terraform $operation attempt $attempt of $max_attempts"
-        if run_terraform_command "$operation" -auto-approve -input=false -var-file=terraform.tfvars; then
-            return
-        fi
-        if [[ "$attempt" -lt "$max_attempts" ]]; then
-            if [[ "$operation" == "apply" ]]; then
-                reconcile_failed_managed_redis
-            fi
-            warn "Terraform $operation failed; retrying the same state and configuration in $((attempt * 30)) seconds"
-            sleep "$((attempt * 30))"
-        fi
-    done
-
-    fatal "Terraform $operation failed after $max_attempts attempts"
-}
-
-run_terraform_plan_with_retries() {
-    local attempt
-
-    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
-        info "Terraform plan attempt $attempt of $max_attempts"
-        if run_terraform_command plan -input=false -var-file=terraform.tfvars; then
-            return
-        fi
-        if [[ "$attempt" -lt "$max_attempts" ]]; then
-            warn "Terraform plan failed; retrying in $((attempt * 30)) seconds"
-            sleep "$((attempt * 30))"
-        fi
-    done
-
-    fatal "Terraform plan failed after $max_attempts attempts"
+    if [[ "$operation" == "plan" ]]; then
+        run_terraform_command plan -input=false -var-file=terraform.tfvars
+    else
+        run_terraform_command "$operation" -auto-approve -input=false -var-file=terraform.tfvars
+    fi
 }
 
 verify_resume_instance() {
@@ -851,6 +829,7 @@ deploy() {
     local state_count selected_instance setup_script osmo_private_ip resource_group group_exists
 
     terraform -chdir="$tf_dir" init -input=false
+    record_operation_event "deploy" "validating"
     state_count=$(terraform_state_count)
     prepare_deploy_tags
 
@@ -884,8 +863,8 @@ deploy() {
 
     configure_resource_group
     reconcile_failed_managed_redis
-    run_terraform_plan_with_retries
-    run_terraform_with_retries apply
+    run_terraform_operation_with_retries plan
+    run_terraform_operation_with_retries apply
     verify_deployment_outputs
     osmo_private_ip=$(select_osmo_private_ip)
     info "Selected OSMO private service IP: $osmo_private_ip"
@@ -922,6 +901,7 @@ deploy() {
 
     verify_deployment_outputs
     verify_platform "$osmo_private_ip"
+    record_operation_event "deploy" "completed" "instance $selected_instance"
     info "E2E infrastructure deployment completed for instance $selected_instance"
 }
 
@@ -987,6 +967,8 @@ undeploy() {
         return
     fi
 
+    require_undeploy_confirmation "$resource_group_name"
+    record_operation_event "undeploy" "started" "$resource_group_name"
     mkdir -p "$(dirname "$destroy_context")"
     jq -n \
         --arg environment "$environment_name" \
@@ -1001,7 +983,7 @@ undeploy() {
     if [[ "$state_count" -gt 0 ]]; then
         forget_undeletable_key_vault_secrets
         forget_prevent_destroy_resources
-        run_terraform_with_retries destroy
+        run_terraform_operation_with_retries destroy
     fi
     [[ "$(terraform_state_count)" -eq 0 ]] || fatal "Terraform state is not empty after destroy"
     if [[ -n "$resource_group_name" ]]; then
@@ -1011,6 +993,7 @@ undeploy() {
                 --name "$resource_group_name" \
                 --yes \
                 --only-show-errors
+            record_operation_event "resource-group-delete" "submitted" "$resource_group_name"
         fi
         [[ "$(az group exists --name "$resource_group_name" --output tsv --only-show-errors)" == "false" ]] ||
             fatal "Resource group still exists after deletion"
@@ -1050,6 +1033,7 @@ undeploy() {
     fi
     rm -f "$destroy_context"
 
+    record_operation_event "undeploy" "completed" "$resource_group_name"
     info "E2E infrastructure undeployment completed for instance $instance"
 }
 
@@ -1057,6 +1041,7 @@ ensure_tfvars
 resource_prefix=$(read_tfvar resource_prefix)
 environment=$(read_tfvar environment)
 location=$(read_tfvar location)
+initialize_operation_evidence
 
 case "$action" in
 deploy)

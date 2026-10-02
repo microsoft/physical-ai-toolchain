@@ -1,9 +1,10 @@
 ---
 name: e2e-tests
 description: "Autonomously launch, monitor, retry, and report all Physical AI cloud E2E tests across independent Azure ML and OSMO GPU infrastructure."
+compatibility: "Linux with Bash 4+, jq, pytest, Azure CLI, Terraform, kubectl, OSMO CLI, and GNU timeout."
 ---
 
-<!-- cspell:ignore amlcompute azureml chdir finalizers finetune nodepool pytest -->
+<!-- cspell:ignore amlcompute azureml chdir finalizers finetune nodepool pythonhosted pytest worktree -->
 
 # Cloud E2E Tests
 
@@ -29,7 +30,9 @@ Execute the workflow autonomously. Do not ask the user to run commands, monitor 
 7. Continue until the handle reports `PASSED`. Never alter Terraform or node-pool configuration to work around unavailable GPU capacity.
 8. Report each test's commands, attempts, cloud job or workflow identifiers, durations, and final state. Run handle cleanup after all tests reach terminal states.
 
-Each handle owns an `XDG_CONFIG_HOME` under its run directory. OSMO reads and rewrites `login.yaml` in that directory, so every launch, detached attempt, resubmission, and diagnostic command must source the handle's `config.env`. Never use the global `~/.config/osmo/login.yaml` while an E2E handle is active; concurrent deployments would redirect each other's CLI commands.
+Each handle owns an `XDG_CONFIG_HOME` under its run directory. OSMO reads and rewrites `login.yaml` in that directory, so every launch, detached attempt, resubmission, and diagnostic command must load the handle's non-executable `config.json`.
+
+The launcher accepts only a handle directory owned by the current user with mode `700`; private configuration and process records must be owned by the current user with mode `600` and must not be symbolic links. Never use the global `~/.config/osmo/login.yaml` while an E2E handle is active; concurrent deployments would redirect each other's CLI commands.
 
 ## Local Dependency Bootstrap
 
@@ -46,7 +49,7 @@ Do not treat a direct `files.pythonhosted.org` connection failure as a cloud-tes
 
 `tests/e2e/test_e2e_aml_vla_pi0_training.py` requires `HF_TOKEN` with access to the gated `google/paligemma-3b-pt-224` model. Export the token before a default full run or before selecting that test explicitly. The requirement does not apply when an explicit subset omits tests marked `requires_hf_token`.
 
-Never write the token to `config.env`, `command.sh`, logs, manifests, or chat output. Preserve it only in the process environment. A missing or empty token is a non-retryable client-side setup failure: the test must fail before Azure fixture resolution, dataset staging, or job submission.
+Never write the token to `config.json`, `command.sh`, logs, manifests, or chat output. Preserve it only in the process environment. A missing or empty token is a non-retryable client-side setup failure: the test must fail before Azure fixture resolution, dataset staging, or job submission.
 
 ## Required Terraform Outputs
 
@@ -123,8 +126,10 @@ The handle contains all data needed to investigate and reproduce an attempt:
 
 | Path                          | Content                                                                               |
 |-------------------------------|---------------------------------------------------------------------------------------|
-| `config.env`                  | Shell-escaped Terraform-resolved environment used by every attempt                    |
-| `manifest.tsv`                | Handle creation metadata                                                              |
+| `config.json`                 | Non-executable Terraform-resolved environment used by every attempt                   |
+| `manifest.json`               | Structured handle creation metadata                                                   |
+| `manifest.tsv`                | Human-readable handle creation metadata                                               |
+| `events.jsonl`                | Timestamped handle, launch, attempt, resubmission, gateway, and cleanup events        |
 | `tests.txt`                   | Ordered tests selected for this handle                                                |
 | `terraform-output.json`       | Terraform outputs validated before launch                                             |
 | `live-node-pools.json`        | AKS pool state validated before launch                                                |
@@ -138,6 +143,7 @@ The handle contains all data needed to investigate and reproduce an attempt:
 | `<test>/attempt-N/pytest.xml` | Isolated pytest result                                                                |
 | `<test>/attempt-N/exit-code`  | Process exit code                                                                     |
 | `<test>/attempt-N/status`     | Attempt classification                                                                |
+| `<test>/process.json`         | PID, role, command, and process start time used to prevent PID-reuse signalling       |
 
 Use `command.sh` as the authoritative record. Do not reconstruct commands from chat history or partial logs.
 

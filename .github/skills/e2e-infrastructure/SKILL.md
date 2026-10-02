@@ -1,9 +1,10 @@
 ---
 name: e2e-infrastructure
 description: "Deploy or undeploy the complete Physical AI E2E test infrastructure, including Terraform, robotics charts, Azure ML, and OSMO."
+compatibility: "Linux with Bash 4+, Azure CLI, Terraform, kubectl, Helm, jq, envsubst, Python 3, and OSMO CLI."
 ---
 
-<!-- cspell:ignore tfvars -->
+<!-- cspell:ignore tfvars undeploying worktree -->
 
 # E2E Test Infrastructure
 
@@ -30,7 +31,9 @@ Use the bundled Bash driver for both interactive and Azure Automation Hybrid Run
 
 ```bash
 bash "$DRIVER" deploy --repo-root "$REPO_ROOT"
-bash "$DRIVER" undeploy --repo-root "$REPO_ROOT"
+bash "$DRIVER" undeploy \
+  --repo-root "$REPO_ROOT" \
+  --confirm-resource-group <terraform-resolved-resource-group>
 ```
 
 Create `infrastructure/terraform/terraform.tfvars` before deployment to override the bundled E2E defaults. When the file is absent, the driver copies `templates/terraform.tfvars.example` and selects an unused instance.
@@ -42,10 +45,13 @@ Optional deployment controls:
 | `--automation-principal-object-id` | `E2E_AUTOMATION_PRINCIPAL_OBJECT_ID` | Empty                      | Grant one managed identity Contributor on the resource group              |
 | `--delete-after-hours`             | `E2E_DELETE_AFTER_HOURS`             | `14`                       | Calculate the resource expiry timestamp                                   |
 | `--delete-after-tag`               | `E2E_DELETE_AFTER_TAG`               | `physical-ai-delete-after` | Name the expiry tag applied to the resource group and Terraform resources |
+| `--confirm-resource-group`         | None                                 | Empty                      | Exact Terraform-resolved resource group required for undeploy             |
 
 The worker must provide Bash, Azure CLI, Terraform, kubectl, Helm, jq, OSMO CLI, access to this checkout, and an authenticated Azure CLI session. For managed identity authentication, run `az login --identity` before the driver.
 
-When Copilot invokes the driver, request one confirmation for the complete deploy or undeploy operation. The confirmed driver owns the complete sequence, including bounded Terraform retries and ordered setup scripts; do not request confirmations between its internal steps.
+When Copilot invokes the driver, request one confirmation for the complete deploy or undeploy operation. For undeploy, pass the exact resource-group name resolved from Terraform state or the saved destroy context through `--confirm-resource-group`; the driver rejects missing or mismatched values before changing state or deleting resources.
+
+The confirmed driver owns the complete sequence, including bounded Terraform retries and ordered setup scripts; do not request confirmations between its internal steps.
 
 The driver:
 
@@ -61,6 +67,7 @@ The driver:
 9. Verifies Terraform outputs, live Azure resource IDs, Helm releases, Azure ML extension and compute state, and Kubernetes readiness; then logs the OSMO CLI into the private gateway directly or through a temporary Kubernetes tunnel, selects the default pool, ensures the generic `huggingface` credential exists, and lists one workflow as a smoke test.
 10. Supports deterministic undeploy from local Terraform state, including partial deployments, destroy retries, resource-group-wide soft-delete purging, and targeted kubeconfig cleanup.
 11. Uses an exclusive Terraform-directory lock so concurrent Automation jobs cannot share the same state or variable file.
+12. Writes timestamped JSONL events and a terminal JSON summary under `infrastructure/setup/generated/<environment>/e2e-operations/<operation-id>/`.
 
 Use `--config-preview` for read-only resolution:
 
@@ -136,6 +143,8 @@ This is the sole exception to the general prohibition on switching regions. It m
 
 Undeploy requires non-empty local Terraform state for its first invocation and never discovers a destroy target by enumerating Azure resources. It captures available Terraform outputs under `infrastructure/setup/generated/<environment>/` before making changes and reuses that context when resuming cleanup after Terraform state becomes empty.
 
+Before any state removal, destroy, purge, or resource-group deletion, `--confirm-resource-group` must exactly match `rg-<resource_prefix>-<environment>-<instance>` and any Terraform-resolved resource-group name.
+
 Before destroy, the driver removes E2E resources protected by `prevent_destroy` from Terraform state so the final resource-group deletion retains responsibility for those resources. It also removes ARM-plane Key Vault secret children because that resource API does not support `DELETE`. The driver destroys the remaining state with bounded retries, verifies that state is empty, purges soft-deleted Azure ML workspaces retained in the group, and deletes the externally managed resource group.
 
 The driver checks the Terraform-resolved Key Vault again after resource-group deletion to handle delayed soft deletion, purging it when Azure reports that exact vault as deleted. Missing outputs are permitted for partial failed deployments. It removes only the captured AKS kubeconfig and generated destroy context; it retains `terraform.tfvars` and empty Terraform state.
@@ -147,3 +156,4 @@ The driver checks the Terraform-resolved Key Vault again after resource-group de
 - Do not switch region, SKU, variable file, workspace, or checkout except for the regional capacity fallback above.
 - Treat setup-script and verification failures as deployment failures.
 - Never print Terraform-sensitive outputs, credentials, or generated secrets.
+- Preserve each operation's `events.jsonl` and `summary.json` as the sanitized retry, target, and outcome record.

@@ -12,11 +12,13 @@ import { parse as parseYaml } from 'yaml';
 import { evaluateChecks, requiredLanes } from '../../ci/evaluate-checks.mjs';
 import { comparePaths, loadContract, parseChangedPaths, selectChecks, selectionOutputs } from '../../ci/select-checks.mjs';
 import { readWorkflowGraph, validateWorkflows } from '../../ci/validate-workflows.mjs';
+import { validateSkillPackages } from '../../ci/validate-skills.mjs';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const selectorPath = join(root, 'scripts/ci/select-checks.mjs');
 const evaluatorPath = join(root, 'scripts/ci/evaluate-checks.mjs');
 const validatorPath = join(root, 'scripts/ci/validate-workflows.mjs');
+const skillValidatorPath = join(root, 'scripts/ci/validate-skills.mjs');
 const contract = loadContract();
 const graph = readWorkflowGraph(root);
 const allSelectors = [
@@ -38,6 +40,45 @@ const smokePath = '.github/workflows/smoke-cpu.yml';
 const weeklyPath = '.github/workflows/weekly-validation.yml';
 const summaryId = 'pr-validation-summary';
 const unknownSha = '0'.repeat(40);
+
+test('skill packages: repository packages satisfy the contract', () => {
+  assert.deepEqual(validateSkillPackages(root), []);
+});
+
+test('skill packages: reject mismatched names, unsupported fields and missing local links', t => {
+  const temporaryRoot = temporaryDirectory(t);
+  const skillRoot = join(temporaryRoot, '.github', 'skills', 'sample-skill');
+  mkdirSync(skillRoot, { recursive: true });
+  writeFileSync(join(skillRoot, 'SKILL.md'), [
+    '---',
+    'name: wrong-name',
+    'description: ""',
+    'unexpected: true',
+    '---',
+    '',
+    '# Sample',
+    '',
+    '[Missing](scripts/missing.sh)',
+    '',
+  ].join('\n'));
+
+  const errors = validateSkillPackages(temporaryRoot);
+  assert.ok(errors.some(error => error.includes("name 'wrong-name' must match directory 'sample-skill'")));
+  assert.ok(errors.some(error => error.includes("unsupported frontmatter field 'unexpected'")));
+  assert.ok(errors.some(error => error.includes('description must be a non-empty string')));
+  assert.ok(errors.some(error => error.includes('local link does not exist')));
+});
+
+test('skill packages: CLI reports invalid repositories', t => {
+  const temporaryRoot = temporaryDirectory(t);
+  const result = spawnSync(process.execPath, [skillValidatorPath, temporaryRoot], {
+    cwd: root,
+    env: nodeEnvironment,
+    encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /skills directory does not exist/);
+});
 
 for (const owner of [prPath, mainPath]) {
   for (const jobId of ['accessibility-evidence', 'docusaurus-tests']) {
