@@ -401,6 +401,9 @@ if [[ -n "${CALIBRATION_REPORT_DIR:-}" || -n "${CALIBRATION_WORKLOAD_CONTRACT:-}
     -- \
     "${train_args[@]}")
   export BATCH_SIZE="${batch_size}"
+  if [[ -n "${RESOLVED_BATCH_SIZE_OUTPUT:-}" ]]; then
+    printf '%s\n' "${BATCH_SIZE}" >"${RESOLVED_BATCH_SIZE_OUTPUT}"
+  fi
   echo "[CALIBRATION] Validated recommended micro-batch size: ${BATCH_SIZE}"
 fi
 

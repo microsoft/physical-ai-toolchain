@@ -136,6 +136,7 @@ case "${mode}" in
     TRAINING_CHECKPOINT_OUTPUT=$(environment_value AZURE_ML_OUTPUT_checkpoints)
     AZURE_ML_OUTPUT_CHECKPOINTS="${TRAINING_CHECKPOINT_OUTPUT}"
     TRAINING_RECORD_OUTPUT=$(environment_value AZURE_ML_OUTPUT_training_record)
+    RESOLVED_BATCH_SIZE_OUTPUT=$(mktemp)
     CALIBRATION_REPORT_DIR=$(environment_value AZURE_ML_INPUT_calibration_report)
     CALIBRATION_WORKLOAD_CONTRACT="$(environment_value AZURE_ML_INPUT_workload_contract)/workload.json"
     dataset_mount=$(environment_value AZURE_ML_INPUT_dataset)
@@ -143,6 +144,7 @@ case "${mode}" in
     export AZURE_ML_INPUT_dataset_asset_0="${dataset_mount}"
     export DATASET_ASSET_COUNT=1
     export AZURE_ML_OUTPUT_CHECKPOINTS TRAINING_CHECKPOINT_OUTPUT TRAINING_RECORD_OUTPUT
+    export RESOLVED_BATCH_SIZE_OUTPUT
     export CALIBRATION_REPORT_DIR CALIBRATION_WORKLOAD_CONTRACT DATASET_MANIFEST
     python3 "${training_root}/vla/scripts/preflight_dataset.py" \
       --dataset "${dataset_mount}" \
@@ -160,6 +162,12 @@ export VLA_MODEL_ADAPTER="${ADAPTER_NAME}"
 bash "${shared_train_entry}"
 
 if [[ "${mode}" == "train" ]]; then
+  BATCH_SIZE=$(<"${RESOLVED_BATCH_SIZE_OUTPUT}")
+  [[ "${BATCH_SIZE}" =~ ^[1-9][0-9]*$ ]] || {
+    echo "ERROR: training did not publish a valid resolved batch size" >&2
+    exit 1
+  }
+  export BATCH_SIZE
   python3 "${training_root}/vla/scripts/write_training_record.py" \
     --checkpoints "${TRAINING_CHECKPOINT_OUTPUT}" \
     --workload-contract "${CALIBRATION_WORKLOAD_CONTRACT}" \

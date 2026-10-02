@@ -235,6 +235,7 @@ def test_given_successful_trainer_when_entrypoint_returns_then_run_record_exists
     trainer = tmp_path / "trainer.sh"
     trainer.write_text(
         '#!/usr/bin/env bash\nset -euo pipefail\nmkdir -p "${AZURE_ML_OUTPUT_CHECKPOINTS}/last/pretrained_model"\n'
+        'printf \'4\\n\' >"${RESOLVED_BATCH_SIZE_OUTPUT}"\n'
         'printf \'{"type":"policy"}\\n\' >"${AZURE_ML_OUTPUT_CHECKPOINTS}/last/pretrained_model/config.json"\n'
         'printf model >"${AZURE_ML_OUTPUT_CHECKPOINTS}/last/pretrained_model/model.safetensors"\n',
         encoding="utf-8",
@@ -245,7 +246,9 @@ def test_given_successful_trainer_when_entrypoint_returns_then_run_record_exists
     result = subprocess.run(["bash", str(_ENTRYPOINT), "train"], cwd=_REPO_ROOT, env=environment, check=False)
 
     assert result.returncode == 0
-    assert load_record(training_record / "training-record.json", RecordKind.RUN)["run_id"] == "evidence-job"
+    record = load_record(training_record / "training-record.json", RecordKind.RUN)
+    assert record["run_id"] == "evidence-job"
+    assert record["effective_batch"]["micro_batch_per_rank"] == 4
     assert (tmp_path / "candidate/model.safetensors").is_file()
     assert (tmp_path / "candidate-manifest/candidate-manifest.json").is_file()
 
