@@ -82,6 +82,11 @@ fi
 # shellcheck disable=SC1091
 source /etc/os-release
 
+case "$VERSION_ID" in
+  22.04|24.04) ;;
+  *) warn "Ubuntu $VERSION_ID is outside the supported 22.04 and 24.04 host baseline" ;;
+esac
+
 require_tools apt-get sudo
 work_dir=$(mktemp -d)
 cleanup() {

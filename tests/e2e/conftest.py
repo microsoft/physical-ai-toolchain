@@ -275,7 +275,7 @@ def storage_account(repo_root: Path) -> str:
 
 
 @pytest.fixture(scope="session")
-def aml_compute_target(repo_root: Path, aml_workspace: AzureMLWorkspace) -> None:
+def aml_compute_target(repo_root: Path, aml_workspace: AzureMLWorkspace) -> str:
     """
     Ensures AML compute target is available, skipping tests if not.
     The compute target name is determined by the AZUREML_COMPUTE env var or Terraform outputs.
@@ -314,6 +314,7 @@ def aml_compute_target(repo_root: Path, aml_workspace: AzureMLWorkspace) -> None
     provisioning_state = payload.get("provisioning_state")
     if isinstance(provisioning_state, str) and provisioning_state.lower() != "succeeded":
         pytest.skip(f"AzureML compute target is not ready: {compute_name} ({provisioning_state})")
+    return compute_name
 
 
 @pytest.fixture(scope="session")

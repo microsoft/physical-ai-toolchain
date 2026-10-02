@@ -252,7 +252,7 @@ describe('authored document inventory', () => {
     expect(discovery.sidebarItems).toHaveLength(10)
     expect(validateSidebarOwnership(discovery.documents, discovery.sidebarItems)).toEqual([])
     expect(validateTierRoutes(discovery.documents, labelData.tierNavigation)).toEqual([])
-    expect(discovery.documents).toHaveLength(85)
+    expect(discovery.documents).toHaveLength(87)
     const sourceRoutes = new Set(discovery.documents.map(({ route }) => route))
     const builtRoutes = collectBuiltRoutes()
     expect(builtRoutes.filter((route) => !sourceRoutes.has(route))).toEqual([
@@ -260,7 +260,7 @@ describe('authored document inventory', () => {
       '/accessibility/screen-reader-calibration',
       '/search',
     ])
-    expect(collectSearchRoutes(searchIndex, discovery.baseUrl)).toHaveLength(85)
+    expect(collectSearchRoutes(searchIndex, discovery.baseUrl)).toHaveLength(87)
     expect(
       validateRouteSets(
         discovery.documents,

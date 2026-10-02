@@ -11,7 +11,9 @@ if [ "$GPU_OFFLOAD_GPU_ENABLED" != "true" ]; then
 fi
 
 if [ "$GPU_OFFLOAD_RUNTIME" = "k3s" ]; then
-  scripts/configure-k3s-nvidia.sh --context "$GPU_OFFLOAD_KUBE_CONTEXT"
+  scripts/configure-k3s-nvidia.sh \
+    --context "$GPU_OFFLOAD_KUBE_CONTEXT" \
+    --platform "$GPU_OFFLOAD_PLATFORM"
   exit 0
 fi
 

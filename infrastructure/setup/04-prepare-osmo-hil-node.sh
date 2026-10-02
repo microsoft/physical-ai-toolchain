@@ -658,12 +658,22 @@ add_published_file osmo_artifacts "$work_dir/osmo-artifacts.json" \
   "${environment}-${host_name}-osmo-artifacts" application/json
 
 if [[ -n "$vpn_input_dir" ]]; then
+  require_tools terraform
   require_protected_directory "$vpn_input_dir"
   for file in vpn.json VpnSettings.xml VpnServerRoot.pem ClientRoot.pem; do
     require_protected_file "$vpn_input_dir/$file"
     hil_reject_private_key_material "$vpn_input_dir/$file"
   done
-  jq -e --arg environment "$environment" --arg host "$host_name" '
+  tf_output=$(read_terraform_outputs "$tf_dir")
+  expected_dns_server=$(tf_require "$tf_output" "dns_server_ip.value" "DNS Private Resolver address")
+  required_dns_zones=$(jq -ce '
+    [.private_dns_zones.value | to_entries[] |
+      if .key == "key_vault" then "vault.azure.net"
+      else (.value.name | sub("^privatelink\\."; ""))
+      end] | unique | sort
+  ' <<< "$tf_output") || fatal "Private DNS zones not found in Terraform outputs"
+  jq -e --arg environment "$environment" --arg host "$host_name" \
+    --arg dns_server "$expected_dns_server" --argjson required_dns_zones "$required_dns_zones" '
     ((keys - ["schema_version", "kind", "environment", "host_name", "gateway", "p2s_cidr",
       "private_routes", "private_dns", "public_dns_canary"]) | length) == 0 and
     .schema_version == 1 and .kind == "physical-ai-vpn-inputs" and
@@ -671,14 +681,15 @@ if [[ -n "$vpn_input_dir" ]]; then
     (.gateway | type == "string" and length > 0) and
     (.p2s_cidr | type == "string" and length > 0) and
     (.private_routes | type == "array" and length > 0) and
-    ((.private_dns.server // "") == "" or
-      ((.private_dns | keys | sort) == (["probes", "server", "zones"] | sort) and
-       (.private_dns.zones | type == "array" and length > 0) and
-       all(.private_dns.zones[]; test("^[A-Za-z0-9.-]+$")) and
-       (.private_dns.probes | type == "array" and length > 0) and
-       all(.private_dns.probes[];
-         (keys | sort) == (["expected_cidr", "host"] | sort) and
-         (.host | test("^[A-Za-z0-9.-]+$")) and (.expected_cidr | type == "string"))))
+    ((.private_dns | keys | sort) == (["probes", "server", "zones"] | sort) and
+     .private_dns.server == $dns_server and
+     (.private_dns.zones | type == "array" and length > 0) and
+     all(.private_dns.zones[]; test("^[A-Za-z0-9.-]+$")) and
+     (($required_dns_zones - .private_dns.zones) | length == 0) and
+     (.private_dns.probes | type == "array" and length > 0) and
+     all(.private_dns.probes[];
+       (keys | sort) == (["expected_cidr", "host"] | sort) and
+       (.host | test("^[A-Za-z0-9.-]+$")) and (.expected_cidr | type == "string")))
   ' "$vpn_input_dir/vpn.json" >/dev/null || fatal "VPN input metadata does not match the environment and host"
   grep -Fq "<VpnServer>$(jq -r '.gateway' "$vpn_input_dir/vpn.json")</VpnServer>" \
     "$vpn_input_dir/VpnSettings.xml" || fatal "VPN settings do not match the published gateway"
