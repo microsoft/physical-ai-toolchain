@@ -92,15 +92,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Report disk usage before smoke
-        run: df -h /
-
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh rl
-
-      - name: Report disk usage after smoke
-        if: always()
-        run: df -h /
 
   image-smoke-il:
     name: Runtime-Image Smoke (il)
@@ -115,15 +108,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Report disk usage before smoke
-        run: df -h /
-
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh il
-
-      - name: Report disk usage after smoke
-        if: always()
-        run: df -h /
 
   image-smoke-evaluation:
     name: Runtime-Image Smoke (evaluation)
@@ -138,15 +124,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Report disk usage before smoke
-        run: df -h /
-
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh evaluation
-
-      - name: Report disk usage after smoke
-        if: always()
-        run: df -h /
 
   image-smoke-vla:
     name: Runtime-Image Smoke (vla)
@@ -161,15 +140,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Report disk usage before smoke
-        run: df -h /
-
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh vla
-
-      - name: Report disk usage after smoke
-        if: always()
-        run: df -h /
 
   image-smoke-osmo-replay:
     name: Runtime-Image Smoke (osmo-replay)
@@ -184,15 +156,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Report disk usage before smoke
-        run: df -h /
-
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh osmo-replay
-
-      - name: Report disk usage after smoke
-        if: always()
-        run: df -h /
 
   # Docker compose smoke: build the dataviewer images on their pinned bases,
   # start the stack, and wait for both services to report healthy. Path-gated by
