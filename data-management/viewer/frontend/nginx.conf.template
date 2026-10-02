@@ -5,6 +5,17 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # style-src 'unsafe-inline' is required because Radix UI's portal-based
+    # positioning primitives and recharts SVG rendering set inline `style`
+    # attributes at runtime; nonce/hash-based CSP would require replacing
+    # those libraries. Accepted as a residual risk.
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self' https://login.microsoftonline.com; frame-src 'self' https://login.microsoftonline.com" always;
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()" always;
+
     # Container Apps internal DNS; forces per-request resolution via variables
     resolver ${NGINX_RESOLVER} valid=10s;
 
@@ -28,6 +39,17 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
+        # Strip the backend's own security headers so only nginx's canonical
+        # add_header values reach the client; otherwise both sets are sent,
+        # producing duplicate/conflicting headers (e.g. two different
+        # Permissions-Policy values).
+        proxy_hide_header X-Content-Type-Options;
+        proxy_hide_header X-Frame-Options;
+        proxy_hide_header Referrer-Policy;
+        proxy_hide_header Permissions-Policy;
+        proxy_hide_header Cross-Origin-Opener-Policy;
+        proxy_hide_header Content-Security-Policy;
+
         # Support large video file streaming
         proxy_buffering off;
         proxy_read_timeout 300s;
@@ -41,6 +63,15 @@ server {
         proxy_pass $backend_health;
         proxy_http_version 1.1;
         proxy_set_header Host ${NGINX_BACKEND_HOST};
+
+        # See /api/ above: strip the backend's own security headers to avoid
+        # duplicate/conflicting headers with nginx's canonical add_header values.
+        proxy_hide_header X-Content-Type-Options;
+        proxy_hide_header X-Frame-Options;
+        proxy_hide_header Referrer-Policy;
+        proxy_hide_header Permissions-Policy;
+        proxy_hide_header Cross-Origin-Opener-Policy;
+        proxy_hide_header Content-Security-Policy;
     }
 
     # SPA fallback: all other routes served by index.html
