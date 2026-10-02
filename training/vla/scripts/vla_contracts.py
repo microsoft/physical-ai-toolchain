@@ -47,8 +47,6 @@ class RecordKind(StrEnum):
     APPROVAL = "approval"
     RUN = "run"
     CANDIDATE = "candidate"
-    EVALUATION = "evaluation"
-    INCIDENT = "incident"
 
 
 _REQUIRED_FIELDS: dict[RecordKind, tuple[str, ...]] = {
@@ -86,19 +84,6 @@ _REQUIRED_FIELDS: dict[RecordKind, tuple[str, ...]] = {
         "candidate_output",
         "manifest_output",
     ),
-    RecordKind.EVALUATION: (
-        "evaluation_id",
-        "run_fingerprint",
-        "candidate_fingerprint",
-        "dataset_fingerprint",
-        "status",
-        "outputs_complete",
-        "episodes_requested",
-        "episodes_evaluated",
-        "reasons",
-        "evaluation_output",
-    ),
-    RecordKind.INCIDENT: ("stage", "category", "terminal_state", "retry_count"),
 }
 
 
@@ -302,8 +287,6 @@ def validate_record(record: Mapping[str, Any], expected_kind: RecordKind | None 
         RecordKind.APPROVAL: _validate_approval,
         RecordKind.RUN: _validate_run,
         RecordKind.CANDIDATE: _validate_candidate,
-        RecordKind.EVALUATION: _validate_evaluation,
-        RecordKind.INCIDENT: _validate_incident,
     }
     validators[kind](record)
 
@@ -527,40 +510,6 @@ def _validate_candidate(record: Mapping[str, Any]) -> None:
     _require_azureml_job_output(record, "manifest_output")
 
 
-def _validate_evaluation(record: Mapping[str, Any]) -> None:
-    _require_string(record, "evaluation_id")
-    _require_sha256(record, "run_fingerprint")
-    _require_sha256(record, "candidate_fingerprint")
-    _require_sha256(record, "dataset_fingerprint")
-    if record.get("status") not in {"complete", "inconclusive"}:
-        raise ContractError("evaluation status must be complete or inconclusive")
-    if not isinstance(record.get("outputs_complete"), bool):
-        raise ContractError("outputs_complete must be a boolean")
-    episodes_requested = record.get("episodes_requested")
-    episodes_evaluated = record.get("episodes_evaluated")
-    if not isinstance(episodes_requested, int) or isinstance(episodes_requested, bool) or episodes_requested < 1:
-        raise ContractError("episodes_requested must be a positive integer")
-    if not isinstance(episodes_evaluated, int) or isinstance(episodes_evaluated, bool) or episodes_evaluated < 0:
-        raise ContractError("episodes_evaluated must be a non-negative integer")
-    if episodes_evaluated > episodes_requested:
-        raise ContractError("episodes_evaluated cannot exceed episodes_requested")
-    reasons = _require_string_sequence(record, "reasons")
-    if record["status"] == "complete":
-        if not record["outputs_complete"] or episodes_evaluated != episodes_requested or reasons:
-            raise ContractError("complete evaluation requires usable complete outputs and no reasons")
-    elif not reasons:
-        raise ContractError("inconclusive evaluation requires at least one reason")
-    _require_azureml_job_output(record, "evaluation_output")
-
-
-def _validate_incident(record: Mapping[str, Any]) -> None:
-    _require_string(record, "stage")
-    _require_string(record, "category")
-    _require_string(record, "terminal_state")
-    if not isinstance(record.get("retry_count"), int) or record["retry_count"] < 0:
-        raise ContractError("retry_count must be a non-negative integer")
-
-
 def _require_azureml_asset_id(record: Mapping[str, Any], field: str) -> str:
     value = _require_string(record, field)
     if not _AZUREML_ASSET_PATTERN.fullmatch(value):
@@ -572,13 +521,6 @@ def _require_azureml_job_output(record: Mapping[str, Any], field: str) -> str:
     value = _require_string(record, field)
     if not _AZUREML_JOB_OUTPUT_PATTERN.fullmatch(value):
         raise ContractError(f"{field} must be an immutable Azure ML job output reference")
-    return value
-
-
-def _require_string_sequence(record: Mapping[str, Any], field: str) -> list[str]:
-    value = record.get(field)
-    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
-        raise ContractError(f"{field} must be an array of non-empty strings")
     return value
 
 
@@ -676,26 +618,6 @@ def _run_self_check() -> None:
             "evidence_job": "run-1",
             "candidate_output": f"{output_prefix}/candidate",
             "manifest_output": f"{output_prefix}/candidate_manifest",
-        },
-        {
-            **_base_record(RecordKind.EVALUATION),
-            "evaluation_id": "eval-1",
-            "run_fingerprint": digest,
-            "candidate_fingerprint": digest,
-            "dataset_fingerprint": digest,
-            "status": "complete",
-            "outputs_complete": True,
-            "episodes_requested": 1,
-            "episodes_evaluated": 1,
-            "reasons": [],
-            "evaluation_output": f"{output_prefix}/evaluation",
-        },
-        {
-            **_base_record(RecordKind.INCIDENT),
-            "stage": "delivery",
-            "category": "network",
-            "terminal_state": "failed",
-            "retry_count": 1,
         },
     ]
     for record in records:

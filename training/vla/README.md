@@ -153,19 +153,15 @@ deployment gating, and model registration remain separate lifecycle concerns.
 
 ## 🧪 End-to-End Test
 
-The Azure ML pi0 E2E test initializes pi0 from the gated
-[`google/paligemma-3b-pt-224`](https://huggingface.co/google/paligemma-3b-pt-224)
-backbone. Accept the model access conditions on Hugging Face, then export a read token
-authorized for the model before running the test:
+The Azure ML VLA E2E test registers a synthetic LeRobot dataset, runs the
+calibration sweep with SmolVLA, binds the selected trial to a two-step training
+pipeline, and checks that the training record uses the recommended micro-batch.
+SmolVLA does not need a Hugging Face token. Calibration and training check out
+the current `HEAD` commit, so push it before running the test:
 
 ```bash
-export HF_TOKEN="$(cat /secure/path/to/hf-token)"
-uv run pytest -o addopts='' -vv -s -m e2e tests/e2e/test_e2e_aml_vla_pi0_training.py
+uv run pytest -o addopts='' -vv -s -m e2e tests/e2e/test_e2e_aml_vla_training.py
 ```
-
-Pytest fails during client-side setup before resolving Azure fixtures or submitting a
-job when `HF_TOKEN` is unset or empty. Other E2E tests require this variable only when
-they carry the `requires_hf_token` marker.
 
 ## 🚀 GR00T-N1.5 Fine-Tuning
 

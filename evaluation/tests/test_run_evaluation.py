@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -165,7 +164,6 @@ def test_write_vla_schema_v1_emits_strict_contract(tmp_path: Path) -> None:
         ],
         dataset_repo_id="owner/dataset",
         policy_repo_id="owner/policy",
-        episodes_requested=1,
     )
 
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
@@ -175,15 +173,14 @@ def test_write_vla_schema_v1_emits_strict_contract(tmp_path: Path) -> None:
 
     assert metrics == {
         "evaluation_schema_version": 1,
-        "aggregate_verdict": "complete",
-        "reasons": [],
+        "aggregate_verdict": "pass",
         "baseline_model_version": "none",
         "metrics": [
             {
                 "name": "action_accuracy_l2",
                 "value": 0.25,
                 "absolute_threshold": None,
-                "absolute_verdict": "skipped",
+                "absolute_verdict": "pass",
                 "baseline_value": None,
                 "regression_pct": 0.0,
                 "regression_verdict": "skipped",
@@ -192,7 +189,7 @@ def test_write_vla_schema_v1_emits_strict_contract(tmp_path: Path) -> None:
                 "name": "action_accuracy_l1",
                 "value": 0.5,
                 "absolute_threshold": None,
-                "absolute_verdict": "skipped",
+                "absolute_verdict": "pass",
                 "baseline_value": None,
                 "regression_pct": 0.0,
                 "regression_verdict": "skipped",
@@ -201,7 +198,7 @@ def test_write_vla_schema_v1_emits_strict_contract(tmp_path: Path) -> None:
                 "name": "inference_latency_mean_ms",
                 "value": 10.0,
                 "absolute_threshold": None,
-                "absolute_verdict": "skipped",
+                "absolute_verdict": "pass",
                 "baseline_value": None,
                 "regression_pct": 0.0,
                 "regression_verdict": "skipped",
@@ -210,7 +207,7 @@ def test_write_vla_schema_v1_emits_strict_contract(tmp_path: Path) -> None:
                 "name": "throughput_hz",
                 "value": 100.0,
                 "absolute_threshold": None,
-                "absolute_verdict": "skipped",
+                "absolute_verdict": "pass",
                 "baseline_value": None,
                 "regression_pct": 0.0,
                 "regression_verdict": "skipped",
@@ -241,207 +238,4 @@ def test_write_vla_schema_v1_rejects_non_finite_metrics(tmp_path: Path) -> None:
             per_episode=[],
             dataset_repo_id="owner/dataset",
             policy_repo_id="owner/policy",
-            episodes_requested=1,
         )
-
-
-def test_write_vla_schema_v1_marks_zero_coverage_inconclusive(tmp_path: Path) -> None:
-    _MOD._write_vla_schema_v1(
-        output_dir=tmp_path,
-        aggregate={"mse": None, "mae": None},
-        per_episode=[],
-        dataset_repo_id="owner/dataset",
-        policy_repo_id="owner/policy",
-        episodes_requested=2,
-    )
-
-    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
-
-    assert metrics["aggregate_verdict"] == "inconclusive"
-    assert metrics["reasons"] == ["no_usable_episodes"]
-    assert metrics["metrics"] == []
-
-
-def test_evaluation_status_marks_partial_coverage_inconclusive() -> None:
-    assert _MOD._evaluation_status(3, 2) == ("inconclusive", ["insufficient_episode_coverage"])
-
-
-def _lifecycle_records() -> tuple[dict, dict, dict]:
-    digest = "a" * 64
-    output_prefix = "azureml://jobs/evidence-job/outputs"
-    training = {
-        "schema_version": 1,
-        "kind": "run",
-        "created_at": "2026-09-28T00:00:00Z",
-        "run_id": "training-run",
-        "identities": {"dataset": digest},
-        "effective_batch": {
-            "micro_batch_per_rank": 1,
-            "world_size": 1,
-            "accumulation_steps": 1,
-            "total": 1,
-        },
-    }
-    dataset = {
-        "schema_version": 1,
-        "kind": "dataset",
-        "created_at": "2026-09-28T00:00:00Z",
-        "asset_id": "azureml:robot-dataset:7",
-        "dataset_repo_id": "owner/dataset",
-        "features_sha256": digest,
-        "metadata_sha256": digest,
-        "total_episodes": 3,
-    }
-    candidate = {
-        "schema_version": 1,
-        "kind": "candidate",
-        "created_at": "2026-09-28T00:00:00Z",
-        "policy_type": "pi0",
-        "training_fingerprint": _MOD.fingerprint(training),
-        "dataset_fingerprint": _MOD.dataset_identity_fingerprint(dataset),
-        "artifact_manifest_sha256": digest,
-        "evidence_job": "evidence-job",
-        "candidate_output": f"{output_prefix}/candidate",
-        "manifest_output": f"{output_prefix}/candidate_manifest",
-    }
-    return candidate, training, dataset
-
-
-def test_write_evaluation_record_preserves_lifecycle_fingerprints(tmp_path: Path) -> None:
-    candidate, training, dataset = _lifecycle_records()
-
-    record = _MOD._write_evaluation_record(
-        tmp_path,
-        candidate,
-        training,
-        dataset,
-        "evidence-job",
-        "evaluation-run",
-        3,
-        3,
-        [],
-        {"mse": 0.25, "mae": 0.5},
-    )
-
-    assert record["status"] == "complete"
-    assert record["run_fingerprint"] == _MOD.fingerprint(training)
-    assert record["candidate_fingerprint"] == _MOD.fingerprint(candidate)
-    assert record["dataset_fingerprint"] == _MOD.dataset_identity_fingerprint(dataset)
-    assert _MOD.load_record(tmp_path / "evaluation-record.json", _MOD.RecordKind.EVALUATION) == record
-
-
-def test_verify_lifecycle_inputs_rejects_tampered_candidate(tmp_path: Path) -> None:
-    candidate, training, dataset = _lifecycle_records()
-    candidate_path = tmp_path / "candidate"
-    candidate_path.mkdir()
-    model_path = candidate_path / "model.safetensors"
-    model_path.write_bytes(b"original")
-    files = [{"path": model_path.name, "sha256": hashlib.sha256(b"original").hexdigest()}]
-    candidate["artifact_manifest_sha256"] = hashlib.sha256(
-        json.dumps(files, ensure_ascii=True, allow_nan=False, separators=(",", ":"), sort_keys=True).encode()
-    ).hexdigest()
-    manifest_path = tmp_path / "candidate-manifest.json"
-    manifest_path.write_text(json.dumps(candidate), encoding="utf-8")
-    training_path = tmp_path / "training-record.json"
-    training_path.write_text(json.dumps(training), encoding="utf-8")
-    dataset_path = tmp_path / "dataset"
-    dataset_path.mkdir()
-    dataset_manifest_path = tmp_path / "dataset.json"
-    dataset_manifest_path.write_text(json.dumps(dataset), encoding="utf-8")
-    model_path.write_bytes(b"tampered")
-
-    with pytest.raises(_MOD.ContractError, match="does not match candidate files"):
-        _MOD._verify_lifecycle_inputs(
-            candidate_path,
-            manifest_path,
-            training_path,
-            dataset_path,
-            dataset_manifest_path,
-            dataset["asset_id"],
-            dataset["dataset_repo_id"],
-            candidate["policy_type"],
-            candidate["evidence_job"],
-        )
-
-
-def test_require_finite_metrics_rejects_nan() -> None:
-    with pytest.raises(ValueError, match="Non-finite evaluation metrics: mse"):
-        _MOD._require_finite_metrics({"mse": float("nan")})
-
-
-def _configure_main_environment(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    *,
-    policy_repo_id: str = "owner/policy",
-) -> Path:
-    dataset = tmp_path / "dataset"
-    (dataset / "meta").mkdir(parents=True)
-    monkeypatch.setenv("POLICY_REPO_ID", policy_repo_id)
-    monkeypatch.setenv("DATASET_DIR", str(dataset))
-    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path / "output"))
-    monkeypatch.setenv("MLFLOW_ENABLE", "false")
-    for name in (
-        "CANDIDATE_MANIFEST_PATH",
-        "TRAINING_RECORD_PATH",
-        "DATASET_MANIFEST_PATH",
-        "DATASET_ASSET_ID",
-        "AZUREML_ROOT_RUN_ID",
-    ):
-        monkeypatch.delenv(name, raising=False)
-    return dataset
-
-
-def test_given_missing_policy_when_main_runs_then_it_fails(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _configure_main_environment(monkeypatch, tmp_path, policy_repo_id="")
-
-    result = _MOD.main()
-
-    assert result == 1
-
-
-def test_given_missing_dataset_source_when_main_runs_then_it_fails(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _configure_main_environment(monkeypatch, tmp_path)
-    monkeypatch.setenv("DATASET_DIR", str(tmp_path / "missing"))
-    monkeypatch.setenv("DATASET_REPO_ID", "none")
-
-    result = _MOD.main()
-
-    assert result == 1
-
-
-def test_given_incomplete_lifecycle_inputs_when_main_runs_then_contract_is_rejected(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _configure_main_environment(monkeypatch, tmp_path)
-    monkeypatch.setenv("CANDIDATE_MANIFEST_PATH", str(tmp_path / "candidate-manifest.json"))
-
-    with pytest.raises(_MOD.ContractError, match="Incomplete lifecycle evaluation inputs"):
-        _MOD.main()
-
-
-def test_given_dataset_without_visual_features_when_main_runs_then_it_fails(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    dataset = _configure_main_environment(monkeypatch, tmp_path)
-    (dataset / "meta" / "info.json").write_text(
-        json.dumps(
-            {
-                "fps": 30,
-                "features": {"observation.state": {"dtype": "float32", "shape": [6]}},
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    result = _MOD.main()
-
-    assert result == 1

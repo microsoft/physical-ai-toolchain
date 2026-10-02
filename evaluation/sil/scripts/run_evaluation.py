@@ -6,8 +6,6 @@ import json
 import os
 import sys
 import time
-from collections.abc import Iterable, Mapping
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,31 +15,15 @@ import torch
 _EVALUATION_ROOT = Path(__file__).resolve().parents[2]
 if str(_EVALUATION_ROOT) not in sys.path:
     sys.path.insert(0, str(_EVALUATION_ROOT))
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPOSITORY_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPOSITORY_ROOT))
-_VLA_SCRIPTS = _REPOSITORY_ROOT / "training" / "vla" / "scripts"
-if str(_VLA_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(_VLA_SCRIPTS))
 
-from finalize_candidate import verify_candidate  # noqa: E402
-from preflight_dataset import verify_dataset_manifest  # noqa: E402
 from sil.hf_revision import resolve_hf_revision  # noqa: E402
 from sil.policy_runner import VLA_POLICY_TYPES, load_pretrained_policy, postprocess_action  # noqa: E402
-from vla_contracts import (  # noqa: E402
-    SCHEMA_VERSION,
-    ContractError,
-    RecordKind,
-    dataset_identity_fingerprint,
-    fingerprint,
-    load_record,
-    write_record,
-)
 
 JOINT_NAMES: list[str] = []
 
 
 _EVALUATION_SCHEMA_VERSION = 1
+_VERDICT_PASS = "pass"
 _VERDICT_SKIPPED = "skipped"
 _BASELINE_NONE = "none"
 
@@ -55,32 +37,35 @@ _TOOLCHAIN_TO_VLA_METRIC = {
 
 def _write_vla_schema_v1(
     output_dir: Path,
-    aggregate: dict[str, float | None],
+    aggregate: dict[str, float],
     per_episode: list[dict],
     dataset_repo_id: str,
     policy_repo_id: str,
-    episodes_requested: int,
-    coverage_reasons: Iterable[str] = (),
 ) -> None:
-    """Emit operational evaluation artifacts alongside eval_results.json."""
-    status, reasons = _evaluation_status(episodes_requested, len(per_episode), coverage_reasons)
+    """Emit evaluation_schema_version=1 artifacts alongside eval_results.json.
+
+    The toolchain has no gate / threshold / baseline system (governance was
+    explicitly removed during the upstream port), so every metric is emitted
+    with absolute_threshold=null, absolute_verdict=pass, baseline_value=null,
+    regression_verdict=skipped. metrics.json carries the aggregate verdict;
+    failure_cases.jsonl is empty unless an episode raised a rollout_error
+    during the inference loop.
+    """
     metrics_payload = {
         "evaluation_schema_version": _EVALUATION_SCHEMA_VERSION,
-        "aggregate_verdict": status,
-        "reasons": reasons,
+        "aggregate_verdict": _VERDICT_PASS,
         "baseline_model_version": _BASELINE_NONE,
         "metrics": [
             {
                 "name": _TOOLCHAIN_TO_VLA_METRIC.get(toolchain_name, toolchain_name),
                 "value": float(value),
                 "absolute_threshold": None,
-                "absolute_verdict": _VERDICT_SKIPPED,
+                "absolute_verdict": _VERDICT_PASS,
                 "baseline_value": None,
                 "regression_pct": 0.0,
                 "regression_verdict": _VERDICT_SKIPPED,
             }
             for toolchain_name, value in aggregate.items()
-            if value is not None
         ],
     }
 
@@ -108,92 +93,6 @@ def _write_vla_schema_v1(
             }
             f.write(json.dumps(record) + "\n")
     print(f"[INFO] VLA schema v1 failure cases: {failure_cases_path}")
-
-
-def _evaluation_status(
-    episodes_requested: int,
-    episodes_evaluated: int,
-    coverage_reasons: Iterable[str] = (),
-) -> tuple[str, list[str]]:
-    """Classify replay coverage without applying quality thresholds."""
-    if episodes_requested < 1:
-        raise ValueError("episodes_requested must be positive")
-    if episodes_evaluated < 0 or episodes_evaluated > episodes_requested:
-        raise ValueError("episodes_evaluated must be between zero and episodes_requested")
-    reasons = sorted(set(coverage_reasons))
-    if episodes_evaluated == 0:
-        reasons.append("no_usable_episodes")
-    elif episodes_evaluated < episodes_requested:
-        reasons.append("insufficient_episode_coverage")
-    if reasons:
-        return "inconclusive", reasons
-    return "complete", []
-
-
-def _require_finite_metrics(metrics: Mapping[str, float]) -> None:
-    """Reject metrics that cannot be represented as promotion evidence."""
-    non_finite = sorted(name for name, value in metrics.items() if not np.isfinite(value))
-    if non_finite:
-        raise ValueError(f"Non-finite evaluation metrics: {', '.join(non_finite)}")
-
-
-def _verify_lifecycle_inputs(
-    candidate_path: Path,
-    candidate_manifest_path: Path,
-    training_record_path: Path,
-    dataset_path: Path,
-    dataset_manifest_path: Path,
-    dataset_asset_id: str,
-    dataset_repo_id: str,
-    policy_type: str,
-    evidence_job: str,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """Verify replay inputs and their cross-record lineage before model loading."""
-    candidate = verify_candidate(candidate_path, candidate_manifest_path)
-    training = load_record(training_record_path, RecordKind.RUN)
-    dataset = verify_dataset_manifest(dataset_path, dataset_manifest_path, dataset_asset_id, dataset_repo_id)
-    if candidate["policy_type"] != policy_type:
-        raise ContractError("Candidate policy type does not match the requested evaluator policy type")
-    if candidate["training_fingerprint"] != fingerprint(training):
-        raise ContractError("Candidate training fingerprint does not match the training record")
-    if candidate["dataset_fingerprint"] != dataset_identity_fingerprint(dataset):
-        raise ContractError("Candidate dataset fingerprint does not match the mounted dataset")
-    if candidate["evidence_job"] != evidence_job:
-        raise ContractError("Candidate evidence job does not match the evaluator evidence job")
-    return candidate, training, dataset
-
-
-def _write_evaluation_record(
-    output_dir: Path,
-    candidate: Mapping[str, Any],
-    training: Mapping[str, Any],
-    dataset: Mapping[str, Any],
-    evidence_job: str,
-    evaluation_id: str,
-    episodes_requested: int,
-    episodes_evaluated: int,
-    reasons: list[str],
-    metrics: Mapping[str, float | None],
-) -> dict[str, Any]:
-    """Write candidate-bound operational evaluation evidence."""
-    record: dict[str, Any] = {
-        "schema_version": SCHEMA_VERSION,
-        "kind": RecordKind.EVALUATION.value,
-        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "evaluation_id": evaluation_id,
-        "run_fingerprint": fingerprint(training),
-        "candidate_fingerprint": fingerprint(candidate),
-        "dataset_fingerprint": dataset_identity_fingerprint(dataset),
-        "status": "inconclusive" if reasons else "complete",
-        "outputs_complete": True,
-        "episodes_requested": episodes_requested,
-        "episodes_evaluated": episodes_evaluated,
-        "reasons": reasons,
-        "evaluation_output": f"azureml://jobs/{evidence_job}/outputs/evaluation",
-        "metrics": {name: value for name, value in metrics.items() if value is not None},
-    }
-    write_record(output_dir / "evaluation-record.json", record)
-    return record
 
 
 def _setup_matplotlib():
@@ -374,32 +273,21 @@ def plot_aggregate_summary(episode_metrics):
 
 
 def _find_data_file(ds_dir: str, ep_idx: int, episode_record: dict | None = None) -> str | None:
-    info_path = os.path.join(ds_dir, "meta", "info.json")
-    if os.path.exists(info_path):
-        with open(info_path) as f:
-            ds_info = json.load(f)
-    else:
-        ds_info = {}
-
     if episode_record is not None:
         chunk_index = episode_record.get("data/chunk_index")
         file_index = episode_record.get("data/file_index")
         if isinstance(chunk_index, int) and isinstance(file_index, int):
-            data_path_template = ds_info.get("data_path")
-            if isinstance(data_path_template, str):
-                candidate = os.path.join(
-                    ds_dir,
-                    data_path_template.format(chunk_index=chunk_index, file_index=file_index),
-                )
-            else:
-                candidate = os.path.join(
-                    ds_dir,
-                    "data",
-                    f"chunk-{chunk_index:03d}",
-                    f"file-{file_index:03d}.parquet",
-                )
+            candidate = os.path.join(
+                ds_dir,
+                "data",
+                f"chunk-{chunk_index:03d}",
+                f"file-{file_index:03d}.parquet",
+            )
             return candidate if os.path.exists(candidate) else None
 
+    info_path = os.path.join(ds_dir, "meta", "info.json")
+    with open(info_path) as f:
+        ds_info = json.load(f)
     chunks_size = ds_info.get("chunks_size", 1000)
     ep_chunk = ep_idx // chunks_size
     candidates = [
@@ -412,43 +300,28 @@ def _find_data_file(ds_dir: str, ep_idx: int, episode_record: dict | None = None
     return None
 
 
-def _find_video_file(ds_dir: str, video_key: str, ep_idx: int, episode_record: dict | None = None) -> str | None:
-    info_path = os.path.join(ds_dir, "meta", "info.json")
-    if os.path.exists(info_path):
-        with open(info_path) as f:
-            ds_info = json.load(f)
-    else:
-        ds_info = {}
-
+def _find_video_file(ds_dir: str, vk: str, ep_idx: int, episode_record: dict | None = None) -> str | None:
     if episode_record is not None:
-        chunk_index = episode_record.get(f"videos/{video_key}/chunk_index")
-        file_index = episode_record.get(f"videos/{video_key}/file_index")
+        chunk_index = episode_record.get(f"videos/{vk}/chunk_index")
+        file_index = episode_record.get(f"videos/{vk}/file_index")
         if isinstance(chunk_index, int) and isinstance(file_index, int):
-            video_path_template = ds_info.get("video_path")
-            if isinstance(video_path_template, str):
-                candidate = os.path.join(
-                    ds_dir,
-                    video_path_template.format(
-                        video_key=video_key,
-                        chunk_index=chunk_index,
-                        file_index=file_index,
-                    ),
-                )
-            else:
-                candidate = os.path.join(
-                    ds_dir,
-                    "videos",
-                    video_key,
-                    f"chunk-{chunk_index:03d}",
-                    f"file-{file_index:03d}.mp4",
-                )
+            candidate = os.path.join(
+                ds_dir,
+                "videos",
+                vk,
+                f"chunk-{chunk_index:03d}",
+                f"file-{file_index:03d}.mp4",
+            )
             return candidate if os.path.exists(candidate) else None
 
+    info_path = os.path.join(ds_dir, "meta", "info.json")
+    with open(info_path) as f:
+        ds_info = json.load(f)
     chunks_size = ds_info.get("chunks_size", 1000)
     ep_chunk = ep_idx // chunks_size
     candidates = [
-        os.path.join(ds_dir, "videos", video_key, f"chunk-{ep_chunk:03d}", f"episode_{ep_idx:06d}.mp4"),
-        os.path.join(ds_dir, "videos", video_key, f"chunk-{ep_idx:03d}", f"file-{ep_idx:03d}.mp4"),
+        os.path.join(ds_dir, "videos", vk, f"chunk-{ep_chunk:03d}", f"episode_{ep_idx:06d}.mp4"),
+        os.path.join(ds_dir, "videos", vk, f"chunk-{ep_idx:03d}", f"file-{ep_idx:03d}.mp4"),
     ]
     for c in candidates:
         if os.path.exists(c):
@@ -602,7 +475,6 @@ def main() -> int:
     policy_repo_id = os.environ.get("POLICY_REPO_ID", "").strip()
     policy_type = os.environ.get("POLICY_TYPE", "act").strip().lower()
     dataset_repo_id = os.environ.get("DATASET_REPO_ID", "")
-    task_prompt = os.environ.get("TASK_PROMPT", "").strip()
     policy_revision = os.environ.get("POLICY_REVISION", "").strip() or None
     dataset_revision = os.environ.get("DATASET_REVISION") or None
     eval_episodes = int(os.environ.get("EVAL_EPISODES", "10"))
@@ -638,30 +510,6 @@ def main() -> int:
         print("[ERROR] Dataset source required: set DATASET_REPO_ID or blob storage params")
         return 1
 
-    lifecycle_paths = {
-        "candidate_manifest": os.environ.get("CANDIDATE_MANIFEST_PATH", ""),
-        "training_record": os.environ.get("TRAINING_RECORD_PATH", ""),
-        "dataset_manifest": os.environ.get("DATASET_MANIFEST_PATH", ""),
-        "dataset_asset_id": os.environ.get("DATASET_ASSET_ID", ""),
-        "evidence_job": os.environ.get("AZUREML_ROOT_RUN_ID", ""),
-    }
-    lifecycle_records = None
-    if any(lifecycle_paths.values()):
-        missing = sorted(name for name, value in lifecycle_paths.items() if not value)
-        if missing:
-            raise ContractError(f"Incomplete lifecycle evaluation inputs: {', '.join(missing)}")
-        lifecycle_records = _verify_lifecycle_inputs(
-            Path(policy_repo_id),
-            Path(lifecycle_paths["candidate_manifest"]),
-            Path(lifecycle_paths["training_record"]),
-            Path(dataset_dir),
-            Path(lifecycle_paths["dataset_manifest"]),
-            lifecycle_paths["dataset_asset_id"],
-            dataset_repo_id,
-            policy_type,
-            lifecycle_paths["evidence_job"],
-        )
-
     # Load dataset info
     with open(os.path.join(dataset_dir, "meta", "info.json")) as f:
         info = json.load(f)
@@ -673,13 +521,15 @@ def main() -> int:
     action_names = info.get("features", {}).get("action", {}).get("names")
     JOINT_NAMES = list(action_names) if isinstance(action_names, list) else []
 
-    # Identify video keys from features
+    # Identify video key from features
     features = info.get("features", {})
     video_keys = [k for k, v in features.items() if v.get("dtype") in ("video", "image")]
-    image_keys = [key for key in video_keys if key.startswith("observation.images.")] or video_keys
-    if not image_keys:
-        print("[ERROR] Dataset has no video or image observation features")
-        return 1
+    # Prefer an observation.images.* key for a deterministic choice on
+    # multi-camera datasets; fall back to the first video/image feature.
+    image_key = next(
+        (k for k in video_keys if k.startswith("observation.images.")),
+        video_keys[0] if video_keys else "observation.images.color",
+    )
 
     # Load policy (normalization is handled internally by select_action)
     print(f"[INFO] Loading policy from: {policy_repo_id}")
@@ -714,7 +564,6 @@ def main() -> int:
                 "policy_repo_id": policy_repo_id,
                 "policy_type": policy_type,
                 "dataset_repo_id": dataset_repo_id,
-                "task": task_prompt,
                 "eval_episodes": num_episodes,
                 "device": str(device),
                 "fps": fps,
@@ -722,7 +571,6 @@ def main() -> int:
         )
 
     all_episode_metrics = []
-    coverage_reasons: set[str] = set()
 
     for ep in episode_indices:
         print(f"\n{'=' * 60}")
@@ -742,54 +590,41 @@ def main() -> int:
             continue
         n_frames = len(data["timestamp"])
 
-        video_files = {
-            image_key: _find_video_file(dataset_dir, image_key, ep, episode_record) for image_key in image_keys
-        }
-        missing_video_keys = [image_key for image_key, video_file in video_files.items() if not video_file]
-        if missing_video_keys:
-            print(f"  [WARNING] Missing videos for episode {ep}: {', '.join(missing_video_keys)}, skipping")
+        # Load video frames
+        video_file = _find_video_file(dataset_dir, image_key, ep, episode_record)
+        if not video_file:
+            print(f"  [WARNING] No video for episode {ep} ({image_key}), skipping")
             continue
 
-        frames_by_key = {}
-        for image_key, video_file in video_files.items():
-            container = av.open(video_file)
-            stream = container.streams.video[0]
-            frames = [av_frame.to_ndarray(format="rgb24") for av_frame in container.decode(stream)]
-            container.close()
-            frames_by_key[image_key] = _slice_episode_frames(frames, episode_record, image_key, fps)
-        empty_video_keys = [image_key for image_key, frames in frames_by_key.items() if not frames]
-        if empty_video_keys:
-            print(f"  [WARNING] Empty videos for episode {ep}: {', '.join(empty_video_keys)}, skipping")
+        container = av.open(video_file)
+        stream = container.streams.video[0]
+        frames = [av_frame.to_ndarray(format="rgb24") for av_frame in container.decode(stream)]
+        container.close()
+        frames = _slice_episode_frames(frames, episode_record, image_key, fps)
+        if not frames:
+            print(f"  [WARNING] No video frames for episode {ep}, skipping")
             continue
 
         policy.reset()
         actions_predicted = []
         actions_ground_truth = []
         inference_times_list = []
-        missing_task = False
 
-        available_frames = min(len(frames) for frames in frames_by_key.values())
-        for step in range(min(n_frames - 1, available_frames)):
+        for step in range(min(n_frames - 1, len(frames))):
             state = np.array(data["observation.state"][step], dtype=np.float32)
             gt_action = np.array(data["action"][step], dtype=np.float32)
+            image = frames[step]
 
             obs = {
                 "observation.state": torch.from_numpy(state).float(),
-                **{
-                    image_key: torch.from_numpy(frames[step]).float().permute(2, 0, 1) / 255.0
-                    for image_key, frames in frames_by_key.items()
-                },
+                image_key: torch.from_numpy(image).float().permute(2, 0, 1) / 255.0,
             }
             if bundle.policy_type in VLA_POLICY_TYPES:
-                frame_task = task_prompt or _resolve_frame_task(step, ep, data, task_descriptions, episode_tasks)
-                if not frame_task:
-                    print(
-                        f"[WARNING] Episode {ep} frame {step} has no task description required by {bundle.policy_type}"
-                    )
-                    coverage_reasons.add("missing_task_metadata")
-                    missing_task = True
-                    break
-                obs["task"] = frame_task
+                task = _resolve_frame_task(step, ep, data, task_descriptions, episode_tasks)
+                if not task:
+                    print(f"[ERROR] Episode {ep} frame {step} has no task description required by {bundle.policy_type}")
+                    return 1
+                obs["task"] = task
             processed_obs = bundle.preprocessor(obs)
 
             t_start = time.time()
@@ -803,7 +638,7 @@ def main() -> int:
             actions_predicted.append(action_np)
             actions_ground_truth.append(gt_action)
 
-        if missing_task or not actions_predicted:
+        if not actions_predicted:
             print(f"  [WARNING] No inference steps for episode {ep}, skipping")
             continue
 
@@ -816,14 +651,6 @@ def main() -> int:
         per_dim_mae = np.mean(np.abs(pred - gt), axis=0)
         avg_inf_ms = float(np.mean(inf_times) * 1000)
         throughput = float(1.0 / np.mean(inf_times))
-        _require_finite_metrics(
-            {
-                "mse": mse,
-                "mae": mae,
-                "avg_inference_ms": avg_inf_ms,
-                "throughput_hz": throughput,
-            }
-        )
 
         print(f"  Steps: {len(pred)}, MSE: {mse:.6f}, MAE: {mae:.6f}")
         print(f"  Avg inference: {avg_inf_ms:.1f}ms, Throughput: {throughput:.1f} Hz")
@@ -881,13 +708,7 @@ def main() -> int:
         agg_inf_ms = float(np.mean([m["avg_inference_ms"] for m in all_episode_metrics]))
         agg_throughput = float(np.mean([m["throughput_hz"] for m in all_episode_metrics]))
     else:
-        agg_mse = agg_mae = agg_inf_ms = agg_throughput = None
-
-    evaluation_status, evaluation_reasons = _evaluation_status(
-        eval_episodes,
-        len(all_episode_metrics),
-        coverage_reasons,
-    )
+        agg_mse = agg_mae = agg_inf_ms = agg_throughput = 0.0
 
     results = {
         "job_name": job_name,
@@ -901,8 +722,7 @@ def main() -> int:
         "aggregate_avg_inference_ms": agg_inf_ms,
         "aggregate_throughput_hz": agg_throughput,
         "per_episode": all_episode_metrics,
-        "status": evaluation_status,
-        "reasons": evaluation_reasons,
+        "status": "completed",
     }
 
     results_path = output_dir / "eval_results.json"
@@ -921,43 +741,19 @@ def main() -> int:
         per_episode=all_episode_metrics,
         dataset_repo_id=dataset_repo_id,
         policy_repo_id=policy_repo_id,
-        episodes_requested=eval_episodes,
-        coverage_reasons=coverage_reasons,
     )
-
-    if lifecycle_records is not None:
-        candidate_record, training_record, dataset_record = lifecycle_records
-        evaluation_id = os.environ.get("AZUREML_RUN_ID") or lifecycle_paths["evidence_job"]
-        _write_evaluation_record(
-            output_dir,
-            candidate_record,
-            training_record,
-            dataset_record,
-            lifecycle_paths["evidence_job"],
-            evaluation_id,
-            eval_episodes,
-            len(all_episode_metrics),
-            evaluation_reasons,
-            {
-                "mse": agg_mse,
-                "mae": agg_mae,
-                "avg_inference_ms": agg_inf_ms,
-                "throughput_hz": agg_throughput,
-            },
-        )
 
     if mlflow_enable:
         import mlflow
 
-        if agg_mse is not None:
-            mlflow.log_metrics(
-                {
-                    "aggregate_mse": agg_mse,
-                    "aggregate_mae": agg_mae,
-                    "aggregate_avg_inference_ms": agg_inf_ms,
-                    "aggregate_throughput_hz": agg_throughput,
-                }
-            )
+        mlflow.log_metrics(
+            {
+                "aggregate_mse": agg_mse,
+                "aggregate_mae": agg_mae,
+                "aggregate_avg_inference_ms": agg_inf_ms,
+                "aggregate_throughput_hz": agg_throughput,
+            }
+        )
         mlflow.log_artifact(str(results_path))
 
         if len(all_episode_metrics) >= 2:

@@ -30,9 +30,6 @@ COMMON_LIFECYCLE_FIELDS = frozenset(
         "approval",
         "run",
         "candidate",
-        "evaluation",
-        "incident",
-        "promotion",
     }
 )
 

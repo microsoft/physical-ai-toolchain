@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import tempfile
@@ -96,7 +95,7 @@ def _model_versions(payload: Any) -> list[int]:
     return versions
 
 
-def list_aml_model_versions(repo_root: Path, aml_workspace: AzureMLWorkspace, model_name: str) -> list[int]:
+def _list_model_versions(repo_root: Path, aml_workspace: AzureMLWorkspace, model_name: str) -> list[int]:
     """List concrete integer versions registered under an AzureML model name."""
     result = run_command(
         [
@@ -133,7 +132,7 @@ def resolve_registered_model(
     returned version is the single concrete version that run produced — this avoids
     the mutable ``latest`` alias entirely.
     """
-    versions = list_aml_model_versions(repo_root, aml_workspace, model_name)
+    versions = _list_model_versions(repo_root, aml_workspace, model_name)
     if not versions:
         raise AssertionError(f"Training run registered no versions under AzureML model {model_name!r}")
     version = str(max(versions))
@@ -179,7 +178,7 @@ def assert_registered_model_has_artifacts(
 
 def archive_all_model_versions(repo_root: Path, aml_workspace: AzureMLWorkspace, model_name: str) -> None:
     """Archive every registered version of an AzureML model (best-effort cleanup)."""
-    for version in list_aml_model_versions(repo_root, aml_workspace, model_name):
+    for version in _list_model_versions(repo_root, aml_workspace, model_name):
         archive_aml_asset(repo_root, aml_workspace, "model", model_name, str(version))
 
 
@@ -390,62 +389,15 @@ def _aml_job_from_create_payload(
     return AzureMLJob(name=job_name, workspace=aml_workspace, experiment_name=experiment_name, handle=handle)
 
 
-def submit_aml_vla_pipeline(
+def _submit_aml_job_file(
     repo_root: Path,
     aml_workspace: AzureMLWorkspace,
     *,
-    dataset_asset: str,
-    dataset_repo_id: str,
-    promotion_policy: Path,
-    model_name: str,
-    compute_target: str,
-    source_model_revision: str,
-    pipeline_contract_fingerprint: str,
-    code_revision: str,
-    training_steps: int,
-    eval_episodes: int,
+    job_file: Path,
+    overrides: Mapping[str, str],
+    experiment_name: str,
+    description: str,
 ) -> AzureMLJob:
-    experiment_name = e2e_name("vla-pi0-pipeline-e2e-aml")
-    instance_type = os.environ.get("E2E_AML_INSTANCE_TYPE", "")
-    log_e2e(
-        "Submitting AzureML VLA evidence pipeline "
-        f"for dataset={dataset_asset}, training_steps={training_steps}, eval_episodes={eval_episodes}, "
-        f"experiment={experiment_name}, instance_type={instance_type or '<managed-compute>'}"
-    )
-    compute_reference = compute_target if compute_target.startswith("azureml:") else f"azureml:{compute_target}"
-    pipeline_path = repo_root / "training/vla/workflows/azureml/vla-training-pipeline.yaml"
-    overrides = {
-        "inputs.dataset.path": dataset_asset,
-        "inputs.dataset_asset_id": dataset_asset,
-        "inputs.dataset_repo_id": dataset_repo_id,
-        "inputs.promotion_policy.path": str(promotion_policy),
-        "inputs.model_name": model_name,
-        "inputs.policy_type": "pi0",
-        "inputs.init_from_policy_hf_repo_id": "lerobot/pi0_base",
-        "inputs.init_from_policy_hf_revision": source_model_revision,
-        "inputs.adapter_name": "lerobot-pi",
-        "inputs.code_repository": "microsoft/physical-ai-toolchain",
-        "inputs.code_revision": code_revision,
-        "inputs.pipeline_contract_fingerprint": pipeline_contract_fingerprint,
-        "inputs.train_expert_only": "true",
-        "inputs.training_steps": str(training_steps),
-        "inputs.save_freq": "1",
-        "inputs.log_freq": "1",
-        "inputs.eval_episodes": str(eval_episodes),
-        "inputs.job_name": experiment_name,
-        "inputs.subscription_id": aml_workspace.subscription_id,
-        "inputs.resource_group": aml_workspace.resource_group,
-        "inputs.workspace_name": aml_workspace.workspace_name,
-        "inputs.hf_key_vault_url": os.environ.get("HF_KEY_VAULT_URL", "none"),
-        "inputs.hf_token_secret_name": os.environ.get("HF_TOKEN_SECRET_NAME", "none"),
-        "inputs.compute_preflight": compute_reference,
-        "inputs.compute_calibrate": compute_reference,
-        "inputs.compute_train": compute_reference,
-        "inputs.compute_finalize": compute_reference,
-        "inputs.compute_evaluate": compute_reference,
-        "inputs.compute_decide": compute_reference,
-        "experiment_name": experiment_name,
-    }
     result = run_command(
         [
             "az",
@@ -453,7 +405,7 @@ def submit_aml_vla_pipeline(
             "job",
             "create",
             "--file",
-            str(pipeline_path),
+            str(job_file),
             "--set",
             *(f"{key}={value}" for key, value in overrides.items()),
             *aml_workspace_args(aml_workspace),
@@ -463,27 +415,109 @@ def submit_aml_vla_pipeline(
         cwd=repo_root,
     )
     if result.returncode != 0:
-        raise AssertionError(f"AzureML VLA evidence pipeline submission failed\n\n{format_command_failure(result)}")
+        raise AssertionError(f"{description} submission failed\n\n{format_command_failure(result)}")
 
     return _aml_job_from_create_payload(
         repo_root,
         aml_workspace,
         result=result,
         experiment_name=experiment_name,
-        description="AzureML VLA evidence pipeline",
+        description=description,
     )
 
 
-def resolve_aml_job_output_uri(job: AzureMLJob, repo_root: Path, output_name: str) -> str:
-    """Resolve one declared output to its immutable AzureML job-output URI."""
-    payload = fetch_aml_job_payload(job, repo_root)
-    outputs = payload.get("outputs")
-    properties = payload.get("properties")
-    if not isinstance(outputs, Mapping) and isinstance(properties, Mapping):
-        outputs = properties.get("outputs")
-    if not isinstance(outputs, Mapping) or output_name not in outputs:
-        raise AssertionError(f"AzureML job {job.name!r} has no named output {output_name!r}")
-    return f"azureml://jobs/{job.name}/outputs/{output_name}"
+def _vla_common_overrides(vla_inputs: Mapping[str, str]) -> dict[str, str]:
+    return {f"inputs.{key}": value for key, value in vla_inputs.items()}
+
+
+def submit_aml_vla_calibration_sweep(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    compute_target: str,
+    vla_inputs: Mapping[str, str],
+    headroom_fraction: float,
+) -> AzureMLJob:
+    """Submit the standalone VLA calibration sweep."""
+    experiment_name = e2e_name("vla-calibration-e2e-aml")
+    compute_reference = compute_target if compute_target.startswith("azureml:") else f"azureml:{compute_target}"
+    log_e2e(f"Submitting AzureML VLA calibration sweep for experiment={experiment_name}")
+    overrides = {
+        "compute": compute_reference,
+        "experiment_name": experiment_name,
+        "inputs.compute_target": compute_reference,
+        "inputs.headroom_fraction": str(headroom_fraction),
+        **_vla_common_overrides(vla_inputs),
+    }
+    return _submit_aml_job_file(
+        repo_root,
+        aml_workspace,
+        job_file=repo_root / "training/vla/workflows/azureml/vla-calibration-sweep.yaml",
+        overrides=overrides,
+        experiment_name=experiment_name,
+        description="AzureML VLA calibration sweep",
+    )
+
+
+def resolve_aml_sweep_best_child(job: AzureMLJob, repo_root: Path) -> AzureMLJob:
+    """Resolve the selected trial of a completed Azure ML sweep."""
+    properties = fetch_aml_job_payload(job, repo_root).get("properties")
+    best_child = properties.get("best_child_run_id") if isinstance(properties, Mapping) else None
+    if not isinstance(best_child, str) or not best_child:
+        raise AssertionError(f"AzureML sweep {job.name!r} reported no best_child_run_id")
+    log_e2e(f"AzureML sweep {job.name} selected trial {best_child}")
+    return AzureMLJob(
+        name=best_child,
+        workspace=job.workspace,
+        experiment_name=job.experiment_name,
+        is_terminal=True,
+        terminal_status="Completed",
+    )
+
+
+def submit_aml_vla_pipeline(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    compute_target: str,
+    vla_inputs: Mapping[str, str],
+    calibration_trial: AzureMLJob,
+    pipeline_contract_fingerprint: str,
+    training_steps: int,
+) -> AzureMLJob:
+    """Submit the VLA training pipeline bound to one calibration trial's outputs."""
+    experiment_name = e2e_name("vla-training-e2e-aml")
+    compute_reference = compute_target if compute_target.startswith("azureml:") else f"azureml:{compute_target}"
+    calibration_root = f"azureml://datastores/workspaceblobstore/paths/azureml/{calibration_trial.name}"
+    log_e2e(
+        "Submitting AzureML VLA training pipeline "
+        f"for calibration_trial={calibration_trial.name}, training_steps={training_steps}, "
+        f"experiment={experiment_name}"
+    )
+    overrides = {
+        "experiment_name": experiment_name,
+        "inputs.workload_contract.path": f"{calibration_root}/workload_contract/",
+        "inputs.calibration_report.path": f"{calibration_root}/calibration_report/",
+        "inputs.pipeline_contract_fingerprint": pipeline_contract_fingerprint,
+        "inputs.training_steps": str(training_steps),
+        "inputs.save_freq": "1",
+        "inputs.log_freq": "1",
+        "inputs.job_name": experiment_name,
+        "inputs.subscription_id": aml_workspace.subscription_id,
+        "inputs.resource_group": aml_workspace.resource_group,
+        "inputs.workspace_name": aml_workspace.workspace_name,
+        "inputs.compute_preflight": compute_reference,
+        "inputs.compute_train": compute_reference,
+        **_vla_common_overrides(vla_inputs),
+    }
+    return _submit_aml_job_file(
+        repo_root,
+        aml_workspace,
+        job_file=repo_root / "training/vla/workflows/azureml/vla-training-pipeline.yaml",
+        overrides=overrides,
+        experiment_name=experiment_name,
+        description="AzureML VLA training pipeline",
+    )
 
 
 def download_aml_job_output(job: AzureMLJob, repo_root: Path, output_name: str, download_path: Path) -> None:
@@ -508,70 +542,6 @@ def download_aml_job_output(job: AzureMLJob, repo_root: Path, output_name: str, 
         raise AssertionError(
             f"Unable to download AzureML job {job.name!r} output {output_name!r}\n\n{format_command_failure(result)}"
         )
-
-
-def submit_aml_vla_promotion(
-    repo_root: Path,
-    aml_workspace: AzureMLWorkspace,
-    *,
-    evidence_job: AzureMLJob,
-    model_name: str,
-    compute_target: str,
-    producer_identity: str,
-    pipeline_contract_fingerprint: str,
-    code_revision: str,
-    input_overrides: Mapping[str, str] | None = None,
-) -> AzureMLJob:
-    """Submit guarded registration using exact outputs from one evidence job."""
-    experiment_name = e2e_name("vla-promotion-e2e-aml")
-    output_names = ("candidate", "candidate_manifest", "evaluation", "policy", "decision")
-    overrides = {
-        f"inputs.{output_name}.path": resolve_aml_job_output_uri(evidence_job, repo_root, output_name)
-        for output_name in output_names
-    }
-    overrides.update(
-        {
-            "inputs.model_name": model_name,
-            "inputs.evidence_job": evidence_job.name,
-            "inputs.producer_identity": producer_identity,
-            "inputs.pipeline_contract_fingerprint": pipeline_contract_fingerprint,
-            "inputs.code_revision": code_revision,
-            "inputs.subscription_id": aml_workspace.subscription_id,
-            "inputs.resource_group": aml_workspace.resource_group,
-            "inputs.workspace_name": aml_workspace.workspace_name,
-            "inputs.compute_register": compute_target
-            if compute_target.startswith("azureml:")
-            else f"azureml:{compute_target}",
-            "experiment_name": experiment_name,
-        }
-    )
-    overrides.update(input_overrides or {})
-    result = run_command(
-        [
-            "az",
-            "ml",
-            "job",
-            "create",
-            "--file",
-            str(repo_root / "training/vla/workflows/azureml/vla-promotion-pipeline.yaml"),
-            "--set",
-            *(f"{key}={value}" for key, value in overrides.items()),
-            *aml_workspace_args(aml_workspace),
-            "--output",
-            "json",
-        ],
-        cwd=repo_root,
-    )
-    if result.returncode != 0:
-        raise AssertionError(f"AzureML VLA promotion submission failed\n\n{format_command_failure(result)}")
-
-    return _aml_job_from_create_payload(
-        repo_root,
-        aml_workspace,
-        result=result,
-        experiment_name=experiment_name,
-        description="AzureML VLA promotion",
-    )
 
 
 _AML_LEROBOT_EVAL_MODEL_ENV = "E2E_AML_LEROBOT_EVAL_MODEL"
@@ -999,27 +969,6 @@ def wait_until_aml_completed(
     )
     _mark_job_terminal(job, terminal_status)
     log_e2e(f"AzureML job {job.name} completed successfully")
-
-
-def wait_until_aml_failed(
-    job: AzureMLJob,
-    repo_root: Path,
-    *,
-    timeout_minutes: int,
-    poll_interval_seconds: int,
-) -> None:
-    """Wait for an Azure ML job whose expected outcome is denial."""
-    terminal_status = wait_for_status(
-        lambda: _aml_status(fetch_aml_job_payload(job, repo_root)),
-        goal_description=f"AzureML job {job.name} to reject invalid promotion evidence",
-        timeout_minutes=timeout_minutes,
-        poll_interval_seconds=poll_interval_seconds,
-        success_statuses=AML_FAILURE_STATES,
-        failure_statuses={"Completed"},
-        status_log_prefix="Denial poll status",
-    )
-    _mark_job_terminal(job, terminal_status)
-    log_e2e(f"AzureML job {job.name} denied promotion with status={terminal_status}")
 
 
 def fetch_aml_job_logs(job: AzureMLJob, repo_root: Path) -> str:

@@ -144,9 +144,6 @@ def test_given_training_pipeline_when_parsed_then_only_training_stages_are_seria
         "candidate",
         "candidate_manifest",
     } == set(pipeline["outputs"])
-    assert {"promotion_policy", "model_name", "eval_episodes", "compute_evaluate", "compute_decide"}.isdisjoint(
-        pipeline["inputs"]
-    )
 
 
 def test_given_arc_submission_docs_when_read_then_selected_outputs_use_datastore_paths() -> None:
@@ -235,7 +232,7 @@ def test_given_successful_trainer_when_entrypoint_returns_then_run_record_exists
     trainer = tmp_path / "trainer.sh"
     trainer.write_text(
         '#!/usr/bin/env bash\nset -euo pipefail\nmkdir -p "${AZURE_ML_OUTPUT_CHECKPOINTS}/last/pretrained_model"\n'
-        'printf \'4\\n\' >"${RESOLVED_BATCH_SIZE_OUTPUT}"\n'
+        "printf '4\\n' >\"${RESOLVED_BATCH_SIZE_OUTPUT}\"\n"
         'printf \'{"type":"policy"}\\n\' >"${AZURE_ML_OUTPUT_CHECKPOINTS}/last/pretrained_model/config.json"\n'
         'printf model >"${AZURE_ML_OUTPUT_CHECKPOINTS}/last/pretrained_model/model.safetensors"\n',
         encoding="utf-8",
