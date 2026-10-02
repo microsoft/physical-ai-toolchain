@@ -183,7 +183,9 @@ The deployment consumes this file through `02-deploy-azureml-extension.sh --inst
 
 ### 8. Generate the immutable ACR image manifest
 
-Generate `osmo-images.json` only when OSMO images are mirrored to ACR. Mirroring writes to the registry, so it isn't part of discovery. With the user's confirmation, `infrastructure/setup/import-osmo-to-acr.sh` imports and locks the pinned images and charts, writes this file, and records it in an existing `deployment.json`. To describe images that are already mirrored, use this component allowlist:
+Generate `osmo-images.json` only when OSMO images are mirrored to ACR. Mirroring writes to the registry, so it isn't part of discovery. With the user's confirmation, `infrastructure/setup/import-osmo-to-acr.sh` imports and locks the pinned images and charts, writes this file, and records it with the registry and OSMO versions in an existing `deployment.json`. It stops before importing when a value already in `deployment.json` differs.
+
+To describe images that are already mirrored, use this component allowlist:
 
 - `agent`
 - `backend-listener`

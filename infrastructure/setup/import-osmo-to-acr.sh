@@ -22,8 +22,9 @@ Usage: $(basename "$0") (--environment NAME | --bundle-dir DIR) [OPTIONS]
 Import the pinned OSMO images from $OSMO_SOURCE_REGISTRY and the OSMO service and
 backend-operator charts from the NGC Helm repository into the environment's ACR.
 Every imported tag is locked against writes and deletes. The script then writes
-osmo-images.json to the bundle directory and, when the bundle has deployment.json,
-records the manifest there.
+osmo-images.json to the bundle directory. When the bundle has deployment.json, it
+records the manifest, registry, and OSMO image and chart versions there. A field
+that's already set must match this import, or the script stops before importing.
 
 Tags with writes disabled are reused; chart tags are checked against the pinned SHA-256 first.
 Unlocked tags are refreshed from the source. Use the manifest with
@@ -123,13 +124,22 @@ az account show >/dev/null 2>&1 || fatal "Azure CLI is not authenticated; run 'a
 login_server=$(az acr show --name "$acr_name" --query loginServer -o tsv)
 [[ -n "$login_server" ]] || fatal "Unable to read the login server for $acr_name"
 
+# deployment.json fields that must describe this import. Each one may be empty, which the
+# import fills in, or already set to the same value.
+deployment_pins=$(jq -n --arg acr "$acr_name" --arg login "$login_server" \
+  --arg image "$image_version" --arg chart "$chart_version" '
+  {acr_name: $acr, acr_login_server: $login, osmo_image_version: $image, osmo_chart_version: $chart}
+')
+# shellcheck disable=SC2016  # jq filter
+deployment_conflicts_jq='def conflicts($pins): . as $doc | [$pins | to_entries[]
+  | select(($doc[.key] // "") as $value | $value != "" and $value != .value)
+  | "\(.key) is \($doc[.key]), not \(.value)"];'
+
 if [[ -f "$deployment_file" ]]; then
   [[ ! -L "$deployment_file" ]] || fatal "deployment.json must not be a symlink: $deployment_file"
-  jq -e --arg login "$login_server" --arg version "$image_version" '
-    ((.acr_login_server // "") as $value | $value == "" or $value == $login) and
-    ((.osmo_image_version // "") as $value | $value == "" or $value == $version)
-  ' "$deployment_file" >/dev/null || \
-    fatal "deployment.json names a different registry or OSMO image version than this import"
+  conflicts=$(jq -r --argjson pins "$deployment_pins" "$deployment_conflicts_jq"' conflicts($pins) | join("; ")' \
+    "$deployment_file") || fatal "Unable to read $deployment_file"
+  [[ -z "$conflicts" ]] || fatal "deployment.json doesn't match this import: $conflicts"
 fi
 
 work_dir=$(mktemp -d)
@@ -248,16 +258,17 @@ deployment_status="not present"
 if [[ -f "$deployment_file" ]]; then
   manifest_sha=$(calculate_sha256 "$manifest_file")
   deployment_tmp=$(mktemp "$bundle_dir/.deployment.XXXXXX")
-  jq --arg sha "$manifest_sha" --arg acr "$acr_name" --arg login "$login_server" \
-    --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
-    .artifacts.osmo_images = {file: "osmo-images.json", sha256: $sha} |
-    .generated_at = $now |
-    (if (.acr_name // "") == "" then .acr_name = $acr else . end) |
-    (if (.acr_login_server // "") == "" then .acr_login_server = $login else . end)
-  ' "$deployment_file" > "$deployment_tmp"
+  # Check the pinned fields again in the same pass that writes them, then swap the file in one rename.
+  jq --argjson pins "$deployment_pins" --arg sha "$manifest_sha" \
+    --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$deployment_conflicts_jq"'
+    conflicts($pins) as $conflicts |
+    if ($conflicts | length) > 0 then error("deployment.json changed during the import: " + ($conflicts | join("; ")))
+    else . + $pins | .artifacts.osmo_images = {file: "osmo-images.json", sha256: $sha} | .generated_at = $now
+    end
+  ' "$deployment_file" > "$deployment_tmp" || fatal "Unable to update $deployment_file"
   chmod 0644 "$deployment_tmp"
   mv "$deployment_tmp" "$deployment_file"
-  deployment_status="osmo_images recorded"
+  deployment_status="manifest, registry, and versions recorded"
 fi
 
 #------------------------------------------------------------------------------

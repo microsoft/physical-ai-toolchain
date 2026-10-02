@@ -2,7 +2,7 @@
 title: Cluster Setup
 description: AKS cluster configuration with NVIDIA GPU operator, KAI Scheduler, and AzureML extension
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-01
+ms.date: 2026-10-02
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -41,7 +41,7 @@ Generate environment-specific deployment details with the `environment-deploymen
 
 The bundle contains non-secret metadata and generated manifests. It never contains Terraform state, kubeconfigs, OSMO profiles, tokens, registry credentials, or VPN credentials.
 
-To pull OSMO from the environment's ACR, import the pinned images and charts first. The script locks every imported tag, writes `osmo-images.json` to the bundle, and records it in `deployment.json`:
+To pull OSMO from the environment's ACR, import the pinned images and charts first. The script locks every imported tag and writes `osmo-images.json` to the bundle. It records the manifest, registry, and OSMO versions in `deployment.json`, and stops before importing if a value already there names a different registry or version:
 
 ```bash
 ./import-osmo-to-acr.sh --environment <environment> --config-preview
