@@ -184,14 +184,16 @@ record_process_identity() {
 
 recorded_process_matches() {
     local identity_file="$1" expected_role="$2"
-    local pid role expected_command expected_started live_command live_started
+    local schema_version pid role expected_command expected_started live_command live_started
 
     [[ -f "$identity_file" && ! -L "$identity_file" ]] || return 1
     validate_private_file "$identity_file" "Process identity" || return
+    schema_version=$(jq -er '.schemaVersion | select(. == 1)' "$identity_file") || return 2
     pid=$(jq -er '.pid | select(type == "number")' "$identity_file") || return 2
     role=$(jq -er '.role | select(type == "string")' "$identity_file") || return 2
     expected_command=$(jq -er '.command | select(type == "string")' "$identity_file") || return 2
     expected_started=$(jq -er '.started | select(type == "string")' "$identity_file") || return 2
+    [[ "$schema_version" == "1" ]] || return 2
     [[ "$role" == "$expected_role" ]] || return 1
     kill -0 "$pid" 2>/dev/null || return 1
     live_command=$(ps -p "$pid" -o command= 2>/dev/null | sed -E 's/^[[:space:]]+//')
@@ -199,16 +201,48 @@ recorded_process_matches() {
     [[ "$live_command" == "$expected_command" && "$live_started" == "$expected_started" ]]
 }
 
+classify_recorded_process() {
+    local identity_file="$1" expected_role="$2" fallback_pid="${3:-}"
+    local schema_version pid role expected_command expected_started live_command live_started
+
+    if [[ ! -f "$identity_file" || -L "$identity_file" ]]; then
+        if [[ "$fallback_pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$fallback_pid" 2>/dev/null; then
+            return 2
+        fi
+        return 1
+    fi
+    validate_private_file "$identity_file" "Process identity" || return 2
+    schema_version=$(jq -er '.schemaVersion | select(. == 1)' "$identity_file") || return 2
+    pid=$(jq -er '.pid | select(type == "number" and . > 0)' "$identity_file") || return 2
+    role=$(jq -er '.role | select(type == "string")' "$identity_file") || return 2
+    expected_command=$(jq -er '.command | select(type == "string" and length > 0)' "$identity_file") || return 2
+    expected_started=$(jq -er '.started | select(type == "string" and length > 0)' "$identity_file") || return 2
+    [[ "$schema_version" == "1" && "$role" == "$expected_role" ]] || return 2
+
+    if [[ "$fallback_pid" =~ ^[1-9][0-9]*$ && "$fallback_pid" != "$pid" ]] &&
+        kill -0 "$fallback_pid" 2>/dev/null; then
+        return 2
+    fi
+    kill -0 "$pid" 2>/dev/null || return 1
+    live_command=$(ps -p "$pid" -o command= 2>/dev/null | sed -E 's/^[[:space:]]+//')
+    live_started=$(ps -p "$pid" -o lstart= 2>/dev/null | sed -E 's/^[[:space:]]+//')
+    [[ -n "$live_command" && -n "$live_started" ]] || return 2
+    [[ "$live_command" == "$expected_command" && "$live_started" == "$expected_started" ]] || return 2
+    return 0
+}
+
 stop_recorded_process() {
     local identity_file="$1" expected_role="$2"
-    local pid role expected_command expected_started live_command live_started
+    local schema_version pid role expected_command expected_started live_command live_started
 
     [[ -f "$identity_file" && ! -L "$identity_file" ]] || return 0
     validate_private_file "$identity_file" "Process identity" || return
+    schema_version=$(jq -er '.schemaVersion | select(. == 1)' "$identity_file") || return 2
     pid=$(jq -er '.pid | select(type == "number")' "$identity_file") || return 2
     role=$(jq -er '.role | select(type == "string")' "$identity_file") || return 2
     expected_command=$(jq -er '.command | select(type == "string")' "$identity_file") || return 2
     expected_started=$(jq -er '.started | select(type == "string")' "$identity_file") || return 2
+    [[ "$schema_version" == "1" ]] || return 2
     [[ "$role" == "$expected_role" ]] || {
         warn "Refusing to stop PID $pid because its recorded role is '$role', not '$expected_role'"
         return 1

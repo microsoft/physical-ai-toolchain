@@ -178,6 +178,8 @@ After every test is terminal:
 "$DRIVER" --cleanup "$E2E_HANDLE"
 ```
 
+Cleanup verifies the exact recorded process identity for attempts left in `STARTING` or `RUNNING`. It refuses cleanup for a matching live attempt or any live PID whose identity cannot be verified. A dead stale attempt is marked `INTERRUPTED`, including its latest attempt result, before cleanup continues.
+
 ## Test Discovery
 
 The launcher runs `pytest --collect-only` over `tests/e2e` and derives the available E2E modules from every test marked `e2e`. The default selection includes the complete collected set, including tests with additional prerequisite markers such as `requires_hf_token`.
@@ -207,7 +209,7 @@ After concurrent OSMO submissions return gateway 503/504 responses, serialize re
 
 - A pytest skip is `FAILED_SETUP_SKIP`, never a pass.
 - A failure outside the retry classification is `FAILED` and requires investigation.
-- Never resubmit a test while its state is `STARTING` or `RUNNING`.
+- Never resubmit a test while its state is `STARTING` or `RUNNING`. Use cleanup to recover a dead stale attempt before resubmitting it.
 - Do not delete staged data manually; pytest finalizers own cleanup.
 - Do not change GPU SKUs, regions, autoscaling limits, Terraform state, or node pools to make a test pass.
 - Preserve every attempt log and XML result under the handle.

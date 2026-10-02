@@ -741,9 +741,100 @@ def test_e2e_runner_rejects_invalid_handle_test_name(tmp_path: Path) -> None:
     assert "invalid test name" in result.stderr
 
 
-def test_e2e_runner_cleanup_rejects_active_attempt(tmp_path: Path) -> None:
+def _record_process_identity(process: subprocess.Popen[str], identity: Path) -> None:
+    subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"; record_process_identity "$2" "$3" test-attempt',
+            "record-process",
+            str(TESTS_SKILL / "scripts" / "lib" / "handle-state.sh"),
+            str(process.pid),
+            str(identity),
+        ],
+        check=True,
+    )
+
+
+@pytest.mark.parametrize("status", ["STARTING", "RUNNING"])
+def test_e2e_runner_cleanup_rejects_active_attempt(tmp_path: Path, status: str) -> None:
+    script = TESTS_SKILL / "scripts" / "run-e2e-tests.sh"
+    handle = _create_handle(tmp_path, {"test_e2e_sample": status})
+    process = subprocess.Popen(["sleep", "30"], text=True)
+    test_dir = handle / "test_e2e_sample"
+    try:
+        (test_dir / "pid").write_text(f"{process.pid}\n", encoding="utf-8")
+        _record_process_identity(process, test_dir / "process.json")
+
+        result = subprocess.run(
+            ["bash", str(script), "--cleanup", str(handle)],
+            check=False,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert f"Cannot clean up while test_e2e_sample is {status}" in result.stderr
+    finally:
+        process.terminate()
+        process.wait()
+
+
+@pytest.mark.parametrize("status", ["STARTING", "RUNNING"])
+def test_e2e_runner_cleanup_recovers_dead_stale_attempt(tmp_path: Path, status: str) -> None:
+    script = TESTS_SKILL / "scripts" / "run-e2e-tests.sh"
+    handle = _create_handle(tmp_path, {"test_e2e_sample": status})
+    test_dir = handle / "test_e2e_sample"
+    attempt_dir = test_dir / "attempt-1"
+    (test_dir / "pid").write_text("999999\n", encoding="utf-8")
+    (attempt_dir / "status").write_text(f"{status}\n", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(script), "--cleanup", str(handle)],
+        check=True,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert f"CLEANED\t{handle}" in result.stdout
+    assert (test_dir / "status").read_text(encoding="utf-8") == "INTERRUPTED\n"
+    assert (attempt_dir / "status").read_text(encoding="utf-8") == "INTERRUPTED\n"
+    assert (attempt_dir / "result").read_text(encoding="utf-8") == "INTERRUPTED\n"
+    events = (handle / "events.jsonl").read_text(encoding="utf-8")
+    assert f"stale {status} state" in events
+
+
+def test_e2e_runner_cleanup_rejects_unverified_live_pid(tmp_path: Path) -> None:
     script = TESTS_SKILL / "scripts" / "run-e2e-tests.sh"
     handle = _create_handle(tmp_path, {"test_e2e_sample": "RUNNING"})
+    process = subprocess.Popen(["sleep", "30"], text=True)
+    try:
+        test_dir = handle / "test_e2e_sample"
+        (test_dir / "pid").write_text(f"{process.pid}\n", encoding="utf-8")
+
+        result = subprocess.run(
+            ["bash", str(script), "--cleanup", str(handle)],
+            check=False,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert "live or invalid process identity" in result.stderr
+        assert (test_dir / "status").read_text(encoding="utf-8") == "RUNNING\n"
+    finally:
+        process.terminate()
+        process.wait()
+
+
+def test_e2e_runner_cleanup_rejects_invalid_recorded_pid(tmp_path: Path) -> None:
+    script = TESTS_SKILL / "scripts" / "run-e2e-tests.sh"
+    handle = _create_handle(tmp_path, {"test_e2e_sample": "RUNNING"})
+    test_dir = handle / "test_e2e_sample"
+    (test_dir / "pid").write_text("not-a-pid\n", encoding="utf-8")
 
     result = subprocess.run(
         ["bash", str(script), "--cleanup", str(handle)],
@@ -754,7 +845,38 @@ def test_e2e_runner_cleanup_rejects_active_attempt(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
-    assert "Cannot clean up while test_e2e_sample is RUNNING" in result.stderr
+    assert "invalid recorded PID" in result.stderr
+    assert (test_dir / "status").read_text(encoding="utf-8") == "RUNNING\n"
+
+
+def test_e2e_runner_cleanup_rejects_mismatched_live_identity(tmp_path: Path) -> None:
+    script = TESTS_SKILL / "scripts" / "run-e2e-tests.sh"
+    handle = _create_handle(tmp_path, {"test_e2e_sample": "RUNNING"})
+    process = subprocess.Popen(["sleep", "30"], text=True)
+    try:
+        test_dir = handle / "test_e2e_sample"
+        (test_dir / "pid").write_text(f"{process.pid}\n", encoding="utf-8")
+        identity = test_dir / "process.json"
+        _record_process_identity(process, identity)
+        payload = json.loads(identity.read_text(encoding="utf-8"))
+        payload["command"] = "not-the-live-command"
+        identity.write_text(json.dumps(payload), encoding="utf-8")
+        identity.chmod(0o600)
+
+        result = subprocess.run(
+            ["bash", str(script), "--cleanup", str(handle)],
+            check=False,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert "live or invalid process identity" in result.stderr
+        assert (test_dir / "status").read_text(encoding="utf-8") == "RUNNING\n"
+    finally:
+        process.terminate()
+        process.wait()
 
 
 def test_e2e_runner_cleanup_accepts_terminal_attempts(tmp_path: Path) -> None:

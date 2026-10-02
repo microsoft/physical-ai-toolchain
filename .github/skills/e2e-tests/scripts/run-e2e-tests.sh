@@ -371,16 +371,40 @@ ensure_gateway() {
 }
 
 cleanup_handle() {
-    local handle="$1" test_name status
+    local handle="$1" test_name status attempt process_identity pid_file pid process_state
     validate_handle_directory "$handle" || return
     load_handle_tests "$handle" || return
     for test_name in "${TESTS[@]}"; do
         status=$(cat "$handle/$test_name/status" 2>/dev/null || printf 'PENDING')
-        [[ "$status" != "STARTING" && "$status" != "RUNNING" ]] ||
-            {
-                printf 'Cannot clean up while %s is %s\n' "$test_name" "$status" >&2
+        if [[ "$status" == "STARTING" || "$status" == "RUNNING" ]]; then
+            process_identity="$handle/$test_name/process.json"
+            pid_file="$handle/$test_name/pid"
+            pid=$(cat "$pid_file" 2>/dev/null || true)
+            if [[ -e "$pid_file" && ! "$pid" =~ ^[1-9][0-9]*$ ]]; then
+                printf 'Cannot clean up while %s has an invalid recorded PID\n' "$test_name" >&2
                 return 1
-            }
+            fi
+            process_state=0
+            classify_recorded_process "$process_identity" "test-attempt" "$pid" || process_state=$?
+            case "$process_state" in
+                0)
+                    printf 'Cannot clean up while %s is %s\n' "$test_name" "$status" >&2
+                    return 1
+                    ;;
+                2)
+                    printf 'Cannot clean up while %s has a live or invalid process identity\n' \
+                        "$test_name" >&2
+                    return 1
+                    ;;
+            esac
+            write_status "$handle/$test_name/status" "INTERRUPTED"
+            attempt=$(cat "$handle/$test_name/latest-attempt" 2>/dev/null || true)
+            if [[ -n "$attempt" && -d "$handle/$test_name/attempt-$attempt" ]]; then
+                write_status "$handle/$test_name/attempt-$attempt/status" "INTERRUPTED"
+                printf '%s\n' "INTERRUPTED" >"$handle/$test_name/attempt-$attempt/result"
+            fi
+            append_handle_event "$handle" "attempt" "interrupted" "$test_name stale $status state"
+        fi
     done
     stop_recorded_process "$handle/osmo-gateway-port-forward.json" "osmo-port-forward" || true
     stop_recorded_process "$handle/osmo-gateway.json" "osmo-gateway" || true
