@@ -18,6 +18,7 @@ Usage: $(basename "$0") --environment NAME --host-name NAME [OPTIONS]
 
 Verify an existing OSMO backend and pool, reuse or issue one service token, and publish
 the exact host-bound HiL artifact catalog to pre-created Key Vault secrets.
+Create those secrets and the registry config with prepare-osmo-hil-exchange.sh.
 This script does not create remote desired state or change Key Vault networking or RBAC.
 
 OPTIONS:

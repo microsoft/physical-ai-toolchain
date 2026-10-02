@@ -33,13 +33,46 @@ Manual SCP is permitted only as an out-of-band operator procedure. It must not i
 
 ## Prepare the Environment
 
-Complete these actions from a trusted environment-operator host. The OSMO control plane must already contain the intended backend and pool.
+Complete these actions from a trusted environment-operator host. They apply only to hosts that join OSMO; a host that only runs Azure ML jobs skips them and follows [Optional Azure ML Compute](#optional-azure-ml-compute). The OSMO control plane must already contain the intended backend and pool.
 
 To add them, run `infrastructure/setup/03-deploy-osmo.sh` with `--hil-backend-name <backend>` and `--private-service-ip` set to the internal load balancer's current address, plus the options the environment was deployed with. The flag adds the backend and a CPU pool of the same name, and `--hil-pool-name` picks a different pool name. In ConfigMap mode, OSMO rebuilds its config from Helm values on every 03 run, so pass the same options each time or the backend drops out.
 
+### Import OSMO into ACR
+
+The publisher, `04-prepare-osmo-hil-node.sh`, binds each host to OSMO images in the environment's container registry, pinned by digest. Generate the non-secret environment bundle under `infrastructure/setup/generated/<environment>/` with the `environment-deployment` skill, import the pinned images and charts, which adds `osmo-images.json` to the bundle, then upload the bundle:
+
+```bash
+infrastructure/setup/import-osmo-to-acr.sh --environment <environment> --config-preview
+infrastructure/setup/import-osmo-to-acr.sh --environment <environment>
+infrastructure/setup/upload-environment-bundle.sh --environment <environment>
+```
+
+The import locks every tag it creates and reuses locked tags on later runs. See [Workload Identity + Private ACR](../../infrastructure/cluster-setup.md#workload-identity--private-acr-air-gapped) for what it imports.
+
 ### Create the Exchange Secrets
 
-Pre-create the exact secret resources before assigning roles. Use these names, where `<environment>` and `<host>` use lowercase letters, numbers, and hyphens:
+The host reads its inputs from exact Key Vault secrets. Create them, and the pull-only registry config the publisher needs, with the exchange script:
+
+```bash
+infrastructure/setup/prepare-osmo-hil-exchange.sh \
+  --environment <environment> \
+  --host-name <host> \
+  --registry-config-file <protected-pull-config> \
+  --token-expiry <yyyy-mm-dd> \
+  --config-preview
+```
+
+Run it again without `--config-preview`. The script:
+
+* Stops unless the bundle secrets `<environment>-deployment` and `<environment>-osmo-images` exist
+* Creates each missing host secret in the table below with a placeholder value, adds the four VPN secrets with `--with-vpn`, and leaves existing secrets alone
+* Leaves the catalog to the publisher, which rejects a catalog it didn't write
+* Creates an ACR token on the registry named in the image manifest and writes a Docker config with one registry entry and mode `0600`
+* Never overwrites a registry config it didn't write, and never prints the password
+
+The token uses the built-in `_repositories_pull` scope map, which can pull from every repository in the registry. HiL workflow pods pull their own images with the same credential, so a narrower map blocks any image outside it. To narrow it anyway, pass `--scope-map` with your own scope map.
+
+The secret names follow this table, where `<environment>` and `<host>` use lowercase letters, numbers, and hyphens:
 
 | Secret                                     | Ubuntu access                     | Content owner                              |
 |--------------------------------------------|-----------------------------------|--------------------------------------------|
@@ -59,27 +92,23 @@ Pre-create the exact secret resources before assigning roles. Use these names, w
 
 Use Key Vault Secrets User only on each named inbound secret. Use Key Vault Secrets Officer only on the host-specific CSR secret. Verify the Ubuntu identity has no direct or inherited vault-wide data-plane role before onboarding.
 
-Role assignment remains a manual environment-owner operation. The following shape scopes an assignment to one secret resource:
+To grant these roles, add `--assignee-object-id <object-id>` to the exchange script. `--assignee-principal-type` defaults to `User`; use `ServicePrincipal` for a managed identity. The script skips assignments that already exist and warns when the identity holds a Key Vault data role on the vault or above. The catalog doesn't exist until the first publication, so rerun the script after it to grant that role. New assignments can take a few minutes to apply.
+
+To assign a role by hand, scope it to the secret's Azure resource ID. The `id` that `az keyvault secret show` returns is a vault URL and doesn't work as a scope:
 
 ```bash
-SECRET_ID="$(az keyvault secret show \
-  --vault-name <vault> \
-  --name <exact-secret-name> \
-  --query id \
-  --output tsv)"
+VAULT_ID="$(az keyvault show --name <vault> --query id --output tsv)"
 
 az role assignment create \
   --assignee-object-id <ubuntu-user-object-id> \
   --assignee-principal-type User \
   --role 'Key Vault Secrets User' \
-  --scope "$SECRET_ID"
+  --scope "$VAULT_ID/secrets/<exact-secret-name>"
 ```
-
-Use `Key Vault Secrets Officer` only for the host-specific CSR secret. Review direct and inherited assignments separately before continuing.
 
 ### Publish the Host-Bound Artifacts
 
-Generate the non-secret environment bundle under `infrastructure/setup/generated/<environment>/` with the `environment-deployment` skill. Prepare a protected pull-only registry configuration and, when VPN is required, a protected directory containing `vpn.json`, `VpnSettings.xml`, `VpnServerRoot.pem`, and `ClientRoot.pem`.
+Pass the bundle from [Import OSMO into ACR](#import-osmo-into-acr) as `--bundle-dir` and the registry config from the exchange script as `--registry-config-file`. When VPN is required, also prepare a protected directory containing `vpn.json`, `VpnSettings.xml`, `VpnServerRoot.pem`, and `ClientRoot.pem`.
 
 When `vpn.json` configures private DNS, use exactly `server`, `zones`, and `probes`. Each probe is an object such as `{"host":"vault.example","expected_cidr":"10.0.0.0/16"}`. The VPN connection rejects answers outside the expected private CIDR.
 
@@ -110,6 +139,8 @@ infrastructure/setup/04-prepare-osmo-hil-node.sh \
 ```
 
 Run the same command without `--config-preview`. Omit `--vpn-input-dir` when private routing is unnecessary.
+
+The registry password expires at the end of the exchange script's `--token-expiry` day, so give the publisher the same date. To renew both credentials, rerun the exchange script with a new date and `--renew-registry-password`, run the publisher with that date and `--renew-token`, then rerun `02-connect-osmo-backend.sh` on the host.
 
 The publisher:
 

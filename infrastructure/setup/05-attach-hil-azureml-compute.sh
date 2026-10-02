@@ -341,25 +341,12 @@ principal_id=$(az ml compute show --name "$compute_name" --resource-group "$work
   --workspace-name "$workspace_name" --query identity.principal_id -o tsv)
 [[ -n "$principal_id" ]] || fatal "Compute $compute_name has no system-assigned identity"
 
-ensure_role_assignment() {
-  local role="$1" scope="$2" existing
-  existing=$(az role assignment list --assignee "$principal_id" --role "$role" --scope "$scope" \
-    --query "length(@)" -o tsv)
-  if [[ "$existing" != "0" ]]; then
-    info "$role already granted on ${scope##*/}"
-    return 0
-  fi
-  info "Granting $role on ${scope##*/}..."
-  az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal \
-    --role "$role" --scope "$scope" --output none
-}
-
-ensure_role_assignment "$AML_DATA_SCIENTIST_ROLE" "$workspace_id"
-ensure_role_assignment "$STORAGE_BLOB_CONTRIBUTOR_ROLE" "$workspace_storage_id"
+ensure_role_assignment "$principal_id" ServicePrincipal "$AML_DATA_SCIENTIST_ROLE" "$workspace_id"
+ensure_role_assignment "$principal_id" ServicePrincipal "$STORAGE_BLOB_CONTRIBUTOR_ROLE" "$workspace_storage_id"
 compute_roles="$AML_DATA_SCIENTIST_ROLE, $STORAGE_BLOB_CONTRIBUTOR_ROLE"
 # Jobs pull images from the workspace registry with the compute identity.
 if [[ -n "$workspace_registry_id" ]]; then
-  ensure_role_assignment "$ACR_PULL_ROLE" "$workspace_registry_id"
+  ensure_role_assignment "$principal_id" ServicePrincipal "$ACR_PULL_ROLE" "$workspace_registry_id"
   compute_roles+=", $ACR_PULL_ROLE"
 fi
 storage_public_access=$(az storage account show --ids "$workspace_storage_id" \

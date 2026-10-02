@@ -285,6 +285,23 @@ stage_and_upload_code() {
   echo "$uri"
 }
 
+# Grant a role unless the principal already holds it at the scope. Matching by object ID
+# avoids a Microsoft Graph lookup for managed identities.
+# Usage: ensure_role_assignment <object-id> <User|Group|ServicePrincipal> <role> <scope>
+ensure_role_assignment() {
+  local principal_id="${1:?principal object ID required}" principal_type="${2:?principal type required}"
+  local role="${3:?role required}" scope="${4:?scope required}" existing
+  existing=$(az role assignment list --scope "$scope" --role "$role" \
+    --query "length([?principalId=='$principal_id'])" -o tsv)
+  if [[ "$existing" != "0" ]]; then
+    info "$role already granted on ${scope##*/}"
+    return 0
+  fi
+  info "Granting $role on ${scope##*/}..."
+  az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type "$principal_type" \
+    --role "$role" --scope "$scope" --output none
+}
+
 # Ensure Azure CLI extension is installed
 require_az_extension() {
   local ext="${1:?extension name required}"
