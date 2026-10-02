@@ -51,13 +51,17 @@ output "gpu_node_pool_subnets" {
 }
 
 output "node_pools" {
-  description = "GPU node pool configurations for OSMO pool and pod template generation"
+  description = "GPU node pool configurations for OSMO pool, pod template, and Azure ML InstanceType generation. A pool with should_enable_auto_scaling false and node_count 0 is parked and can't run workloads."
   value = {
     for key, pool in var.node_pools : key => {
-      vm_size     = pool.vm_size
-      node_taints = pool.node_taints
-      priority    = pool.priority
-      node_labels = pool.node_labels
+      vm_size                    = pool.vm_size
+      node_taints                = pool.node_taints
+      priority                   = pool.priority
+      node_labels                = pool.node_labels
+      should_enable_auto_scaling = pool.should_enable_auto_scaling
+      node_count                 = pool.node_count
+      min_count                  = pool.min_count
+      max_count                  = pool.max_count
     }
   }
 }

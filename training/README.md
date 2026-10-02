@@ -15,6 +15,9 @@ training/
 ├── vla/                               # Vision-Language-Action training
 │   ├── scripts/                       # Calibration and training entry points
 │   └── workflows/                     # Azure ML and OSMO workflows
+├── smoke/                             # Azure ML GPU smoke test
+│   ├── scripts/                       # Smoke test, job entry point, and submission script
+│   └── workflows/                     # AzureML job definition
 ├── packaging/                         # Model export (ONNX, TensorRT)
 │   └── scripts/                       # Export tooling
 ├── pipelines/                         # End-to-end training pipelines
@@ -51,6 +54,8 @@ Training jobs submit via Azure ML or OSMO. Each approach has dedicated submissio
 | RL       | `rl/scripts/submit-azureml-training.sh`                               | `rl/scripts/submit-osmo-training.sh`          |
 | IL       | `il/scripts/submit-azureml-lerobot-training.sh`                       | `il/scripts/submit-osmo-lerobot-training.sh`  |
 | VLA      | [Calibration sweep, then training pipeline](vla/README.md#-quick-start) | `vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh` |
+
+Before a first training run on a new GPU target, run `smoke/scripts/submit-azureml-gpu-smoke.sh --instance-type <name> --stream`. It proves the GPU and the services training depends on. See [Smoke-Test a GPU Target](../docs/training/azureml-training.md#-smoke-test-a-gpu-target).
 
 > [!TIP]
 > Mirror completed OSMO runs to Azure ML for model versioning. See [Azure ML Mirror](../infrastructure/setup/README.md#️-azure-ml-mirror-optional) in the cluster setup guide.

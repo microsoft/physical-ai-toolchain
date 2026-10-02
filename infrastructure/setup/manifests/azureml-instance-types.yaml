@@ -48,7 +48,8 @@ spec:
 ---
 # Multi-GPU single-node pods. Pod-level nvidia.com/gpu limit must match the
 # accelerate --num_processes value; the node VM SKU caps the maximum (e.g.,
-# Standard_NC128ds_xl_RTXPRO6000BSE_v6 exposes 4 GPUs per node).
+# Standard_NC96ads_A100_v4 exposes 4 GPUs per node, and
+# Standard_NC288ds_xl_RTXPRO6000BSE_v6 exposes 2).
 apiVersion: amlarc.azureml.com/v1alpha1
 kind: InstanceType
 metadata:

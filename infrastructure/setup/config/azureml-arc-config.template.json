@@ -1,0 +1,12 @@
+{
+  "enableTraining": "true",
+  "enableInference": "false",
+  "clusterPurpose": "DevTest",
+  "amloperator.skipResourceValidation": "${SKIP_RESOURCE_VALIDATION}",
+  "installNvidiaDevicePlugin": "false",
+  "installDcgmExporter": "false",
+  "installVolcano": "true",
+  "nginxIngress.enabled": "false",
+  "relayserver.enabled": "true",
+  "servicebus.enabled": "false"
+}

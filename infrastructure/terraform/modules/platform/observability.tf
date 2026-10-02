@@ -23,8 +23,8 @@ resource "azurerm_log_analytics_workspace" "main" {
   resource_group_name            = var.resource_group.name
   sku                            = "PerGB2018"
   retention_in_days              = 30
-  internet_ingestion_access_type = var.should_enable_public_network_access ? "Enabled" : "Disabled"
-  internet_query_access_type     = var.should_enable_public_network_access ? "Enabled" : "Disabled"
+  internet_ingestion_access_type = local.public_network_access.log_analytics ? "Enabled" : "Disabled"
+  internet_query_access_type     = local.public_network_access.log_analytics ? "Enabled" : "Disabled"
 }
 
 // ============================================================
@@ -37,8 +37,8 @@ resource "azurerm_application_insights" "main" {
   resource_group_name        = var.resource_group.name
   workspace_id               = azurerm_log_analytics_workspace.main.id
   application_type           = "other"
-  internet_ingestion_enabled = var.should_enable_public_network_access
-  internet_query_enabled     = var.should_enable_public_network_access
+  internet_ingestion_enabled = local.public_network_access.application_insights
+  internet_query_enabled     = local.public_network_access.application_insights
 }
 
 // ============================================================
@@ -51,7 +51,7 @@ resource "azurerm_monitor_workspace" "main" {
   name                          = "azmon-${local.resource_name_suffix}"
   location                      = var.resource_group.location
   resource_group_name           = var.resource_group.name
-  public_network_access_enabled = var.should_enable_public_network_access
+  public_network_access_enabled = local.public_network_access.monitor_workspace
 }
 
 // ============================================================
@@ -66,7 +66,7 @@ resource "azurerm_dashboard_grafana" "main" {
   resource_group_name               = var.resource_group.name
   api_key_enabled                   = true
   deterministic_outbound_ip_enabled = false
-  public_network_access_enabled     = var.should_enable_public_network_access
+  public_network_access_enabled     = local.public_network_access.grafana
   grafana_major_version             = var.grafana_major_version
   sku                               = "Standard"
   zone_redundancy_enabled           = false
@@ -94,7 +94,7 @@ resource "azurerm_monitor_data_collection_endpoint" "main" {
   location                      = var.resource_group.location
   resource_group_name           = var.resource_group.name
   kind                          = "Linux"
-  public_network_access_enabled = var.should_enable_public_network_access
+  public_network_access_enabled = local.public_network_access.data_collection_endpoint
 }
 
 // ============================================================
