@@ -59,6 +59,30 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
+      "html": "<p>Test writer compression<br>or reduce publisher rate</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "imgNode",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/data-pipeline"
+      ],
+      "rule": "color-contrast",
+      "signature": "032956fb1eaa6c1e",
+      "state": "default",
+      "target": "[\"#mermaid-svg-flowchart-D-5 > .label[transform=\\\"translate(-60, -58)\\\"] > foreignobject[height=\\\"116\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
+      "theme": "dark"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
       "html": "<span class=\"token plain\"> ┌────────────────────────┐</span>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -73,30 +97,6 @@
       "state": "default",
       "target": "[\".language-text > .codeBlockLines > .token-line:nth-child(21) > .plain.token\"]",
       "theme": "light"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
-      "html": "<p>Primary observation?</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/data-pipeline"
-      ],
-      "rule": "color-contrast",
-      "signature": "05d8d06f1fd18942",
-      "state": "default",
-      "target": "[\"foreignobject[width=\\\"151.171875\\\"] > div > .nodeLabel > p\"]",
-      "theme": "dark"
     },
     {
       "classification": "unresolved",
@@ -168,30 +168,6 @@
       "signature": "0d3300df1208395e",
       "state": "default",
       "target": "[\"table[aria-labelledby=\\\"component-inventory\\\"] > tbody > tr:nth-child(5) > td:nth-child(3)\"]",
-      "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
-      "html": "<p>Recording problem detected</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-19",
-      "routeFamilies": [
-        "/data-pipeline"
-      ],
-      "rule": "color-contrast",
-      "signature": "0d4ae2a609548a56",
-      "state": "default",
-      "target": "[\"foreignobject[width=\\\"200\\\"][height=\\\"68\\\"] > div > .nodeLabel > p\"]",
       "theme": "dark"
     },
     {
@@ -371,20 +347,20 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>AML Studio</p>",
+      "html": "<p>Test split sizes against<br>the upload workflow</p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
       "reason": "imgNode",
       "reviewBy": null,
-      "reviewedOn": "2026-09-28",
+      "reviewedOn": "2026-10-02",
       "routeFamilies": [
-        "/osmo-proxy"
+        "/data-pipeline"
       ],
       "rule": "color-contrast",
-      "signature": "1ab8f1c9db54b336",
+      "signature": "1b1e22e6ae43957a",
       "state": "default",
-      "target": "[\"foreignobject[width=\\\"82.125\\\"] > div > .nodeLabel > p\"]",
-      "theme": "light"
+      "target": "[\"#mermaid-svg-flowchart-I-15 > .label[transform=\\\"translate(-60, -58)\\\"] > foreignobject[height=\\\"116\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
+      "theme": "dark"
     },
     {
       "classification": "unresolved",
@@ -419,20 +395,20 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Test a faster codec or level<br>or reduce input volume</p>",
+      "html": "<p>osmo_proxy.py<br>(AML command job, runs inside AKS pod)</p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
+      "reason": "elmPartiallyObscuring",
       "reviewBy": null,
-      "reviewedOn": "2026-09-28",
+      "reviewedOn": "2026-10-02",
       "routeFamilies": [
-        "/data-pipeline"
+        "/osmo-proxy"
       ],
       "rule": "color-contrast",
-      "signature": "1f6e61bc5f694a2e",
+      "signature": "1fe5d80dc2672f2b",
       "state": "default",
-      "target": "[\"foreignobject[width=\\\"190.3125\\\"] > div > .nodeLabel > p\"]",
-      "theme": "light"
+      "target": "[\"#mermaid-svg-flowchart-B-1 > .label[transform=\\\"translate(-60, -58)\\\"] > foreignobject[height=\\\"116\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
+      "theme": "dark"
     },
     {
       "classification": "unresolved",
@@ -491,30 +467,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Test writer compression<br>or reduce publisher rate</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/data-pipeline"
-      ],
-      "rule": "color-contrast",
-      "signature": "2484208345ce0c26",
-      "state": "default",
-      "target": "[\"foreignobject[width=\\\"168.984375\\\"] > div > .nodeLabel > p\"]",
-      "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<span class=\"token plain\">│ │ └─────────┬─────────┘ │</span>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -528,6 +480,30 @@
       "signature": "24ade38ebdc0e201",
       "state": "default",
       "target": "[\".language-text > .codeBlockLines > .token-line:nth-child(11) > .plain.token\"]",
+      "theme": "light"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<p>Developer / CI pipeline</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "imgNode",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/osmo-proxy"
+      ],
+      "rule": "color-contrast",
+      "signature": "25ded03d2d2ccdba",
+      "state": "default",
+      "target": "[\"foreignobject[height=\\\"68\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
       "theme": "light"
     },
     {
@@ -635,6 +611,30 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
+      "html": "<p>AML Studio</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "imgNode",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/osmo-proxy"
+      ],
+      "rule": "color-contrast",
+      "signature": "2aac6eb9b944e2ec",
+      "state": "default",
+      "target": "[\"foreignobject[height=\\\"44\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
+      "theme": "light"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
       "html": "<td>Local K3s or Ubuntu mutation</td>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -659,54 +659,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Primary observation?</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/data-pipeline"
-      ],
-      "rule": "color-contrast",
-      "signature": "2addc2b26816e63c",
-      "state": "default",
-      "target": "[\"foreignobject[width=\\\"151.171875\\\"] > div > .nodeLabel > p\"]",
-      "theme": "light"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
-      "html": "<p>OSMO<br>(KAI scheduling, NIM lifecycle)</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-19",
-      "routeFamilies": [
-        "/osmo-proxy"
-      ],
-      "rule": "color-contrast",
-      "signature": "2b4624b5e4765ba8",
-      "state": "default",
-      "target": "[\"#mermaid-svg-flowchart-C-3 > .label[transform=\\\"translate(-100, -46)\\\"] > foreignobject[height=\\\"92\\\"][width=\\\"200\\\"] > div > .nodeLabel > p\"]",
-      "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<td style=\"text-align:center\">✓</td>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -720,6 +672,54 @@
       "signature": "2cbc667fca5a8f0a",
       "state": "default",
       "target": "[\"table[aria-labelledby=\\\"scenario-comparison\\\"] > tbody > tr:nth-child(3) > td:nth-child(3)\"]",
+      "theme": "dark"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<p>Recording problem detected</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "imgNode",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/data-pipeline"
+      ],
+      "rule": "color-contrast",
+      "signature": "2eb3188d289b1ac5",
+      "state": "default",
+      "target": "[\"foreignobject[height=\\\"92\\\"] > div > .nodeLabel > p\"]",
+      "theme": "light"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<p>Do not treat bag splitting<br>as a flush control</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "imgNode",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/data-pipeline"
+      ],
+      "rule": "color-contrast",
+      "signature": "2ede74e7896ac087",
+      "state": "default",
+      "target": "[\"#mermaid-svg-flowchart-G-11 > .label[transform=\\\"translate(-60, -58)\\\"] > foreignobject[height=\\\"116\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
       "theme": "dark"
     },
     {
@@ -803,54 +803,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Test writer compression<br>or reduce publisher rate</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/data-pipeline"
-      ],
-      "rule": "color-contrast",
-      "signature": "345d8221fad94c17",
-      "state": "default",
-      "target": "[\"foreignobject[width=\\\"168.984375\\\"] > div > .nodeLabel > p\"]",
-      "theme": "light"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
-      "html": "<p>Transfer completed files</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/data-pipeline"
-      ],
-      "rule": "color-contrast",
-      "signature": "35c2ccf25a67517d",
-      "state": "default",
-      "target": "[\"foreignobject[width=\\\"170.140625\\\"] > div > .nodeLabel > p\"]",
-      "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<td><code>infrastructure/setup/defaults.conf</code> → <code>OSMO_CHART_VERSION</code></td>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -899,30 +851,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Measure sustained disk throughput<br>and cache behavior</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/data-pipeline"
-      ],
-      "rule": "color-contrast",
-      "signature": "3f9787c443f67e6c",
-      "state": "default",
-      "target": "[\"foreignobject[height=\\\"92\\\"] > div > .nodeLabel > p\"]",
-      "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<td>Binds backend, pool, local node, K3s target, and OSMO profile</td>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -937,6 +865,30 @@
       "state": "default",
       "target": "[\"table[aria-labelledby=\\\"prerequisites\\\"] > tbody > tr:nth-child(4) > td:nth-child(2)\"]",
       "theme": "dark"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<p>OSMO<br>(KAI scheduling, NIM lifecycle)</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "imgNode",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/osmo-proxy"
+      ],
+      "rule": "color-contrast",
+      "signature": "43ffeaedd9fcd202",
+      "state": "default",
+      "target": "[\"#mermaid-svg-flowchart-C-3 > .label[transform=\\\"translate(-60, -58)\\\"] > foreignobject[height=\\\"116\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
+      "theme": "light"
     },
     {
       "classification": "unresolved",
@@ -1019,19 +971,19 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Test a faster codec or level<br>or reduce input volume</p>",
+      "html": "<p>Measure sustained disk throughput<br>and cache behavior</p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
+      "reason": "elmPartiallyObscuring",
       "reviewBy": null,
-      "reviewedOn": "2026-09-28",
+      "reviewedOn": "2026-10-02",
       "routeFamilies": [
         "/data-pipeline"
       ],
       "rule": "color-contrast",
-      "signature": "4d1c9d6acd577d64",
+      "signature": "4db6e139f58a3d99",
       "state": "default",
-      "target": "[\"foreignobject[width=\\\"190.3125\\\"] > div > .nodeLabel > p\"]",
+      "target": "[\"foreignobject[height=\\\"140\\\"] > div > .nodeLabel > p\"]",
       "theme": "dark"
     },
     {
@@ -1057,6 +1009,54 @@
       "state": "default",
       "target": "[\".language-text > .codeBlockLines > .token-line:nth-child(7) > .plain.token\"]",
       "theme": "dark"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<p>Measure sustained disk throughput<br>and cache behavior</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "elmPartiallyObscuring",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/data-pipeline"
+      ],
+      "rule": "color-contrast",
+      "signature": "557ff34b0c6a57b9",
+      "state": "default",
+      "target": "[\"foreignobject[height=\\\"140\\\"] > div > .nodeLabel > p\"]",
+      "theme": "light"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<p>Do not treat bag splitting<br>as a flush control</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "imgNode",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/data-pipeline"
+      ],
+      "rule": "color-contrast",
+      "signature": "5593815ff3fd48df",
+      "state": "default",
+      "target": "[\"#mermaid-svg-flowchart-G-11 > .label[transform=\\\"translate(-60, -58)\\\"] > foreignobject[height=\\\"116\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
+      "theme": "light"
     },
     {
       "classification": "unresolved",
@@ -1128,30 +1128,6 @@
       "signature": "59c6692683ec0f77",
       "state": "default",
       "target": "[\"table[aria-labelledby=\\\"component-inventory\\\"] > tbody > tr:nth-child(4) > td:nth-child(3)\"]",
-      "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
-      "html": "<p>AML Studio</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/osmo-proxy"
-      ],
-      "rule": "color-contrast",
-      "signature": "5d453ce5947465d7",
-      "state": "default",
-      "target": "[\"foreignobject[width=\\\"82.125\\\"] > div > .nodeLabel > p\"]",
       "theme": "dark"
     },
     {
@@ -1283,6 +1259,30 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
+      "html": "<p>Recording problem detected</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "imgNode",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/data-pipeline"
+      ],
+      "rule": "color-contrast",
+      "signature": "64634b302dd9449c",
+      "state": "default",
+      "target": "[\"foreignobject[height=\\\"92\\\"] > div > .nodeLabel > p\"]",
+      "theme": "dark"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
       "html": "<p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -1355,19 +1355,19 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>osmo_proxy.py<br>(AML command job, runs inside AKS pod)</p>",
+      "html": "<p>Transfer completed files</p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
       "reason": "imgNode",
       "reviewBy": null,
-      "reviewedOn": "2026-09-28",
+      "reviewedOn": "2026-10-02",
       "routeFamilies": [
-        "/osmo-proxy"
+        "/data-pipeline"
       ],
       "rule": "color-contrast",
-      "signature": "69318b31c3243afc",
+      "signature": "697ddafc7479b8b8",
       "state": "default",
-      "target": "[\"#mermaid-svg-flowchart-B-1 > .label[transform=\\\"translate(-100, -46)\\\"] > foreignobject[height=\\\"92\\\"][width=\\\"200\\\"] > div > .nodeLabel > p\"]",
+      "target": "[\"#mermaid-svg-flowchart-H-13 > .label[transform=\\\"translate(-60, -34)\\\"] > foreignobject[height=\\\"68\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
       "theme": "dark"
     },
     {
@@ -1379,20 +1379,20 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Do not treat bag splitting<br>as a flush control</p>",
+      "html": "<p>Measure bag rate</p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
       "reason": "imgNode",
       "reviewBy": null,
-      "reviewedOn": "2026-09-28",
+      "reviewedOn": "2026-10-02",
       "routeFamilies": [
         "/data-pipeline"
       ],
       "rule": "color-contrast",
-      "signature": "69d509b1d02c49fa",
+      "signature": "6997bbeb8a0e4ad8",
       "state": "default",
-      "target": "[\"foreignobject[width=\\\"173.4375\\\"] > div > .nodeLabel > p\"]",
-      "theme": "dark"
+      "target": "[\"#mermaid-svg-flowchart-C-3 > .label[transform=\\\"translate(-60, -34)\\\"] > foreignobject[height=\\\"68\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
+      "theme": "light"
     },
     {
       "classification": "unresolved",
@@ -1499,20 +1499,20 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>osmo_proxy.py<br>(AML command job, runs inside AKS pod)</p>",
+      "html": "<p>Primary observation?</p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
       "reason": "imgNode",
       "reviewBy": null,
-      "reviewedOn": "2026-09-28",
+      "reviewedOn": "2026-10-02",
       "routeFamilies": [
-        "/osmo-proxy"
+        "/data-pipeline"
       ],
       "rule": "color-contrast",
-      "signature": "7049de51658a6632",
+      "signature": "714df65a3edd222e",
       "state": "default",
-      "target": "[\"#mermaid-svg-flowchart-B-1 > .label[transform=\\\"translate(-100, -46)\\\"] > foreignobject[height=\\\"92\\\"][width=\\\"200\\\"] > div > .nodeLabel > p\"]",
-      "theme": "light"
+      "target": "[\"#mermaid-svg-flowchart-B-1 > .label[transform=\\\"translate(-60, -34)\\\"] > foreignobject[height=\\\"68\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
+      "theme": "dark"
     },
     {
       "classification": "unresolved",
@@ -1571,30 +1571,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Developer / CI pipeline</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/osmo-proxy"
-      ],
-      "rule": "color-contrast",
-      "signature": "7648082c81384211",
-      "state": "default",
-      "target": "[\"foreignobject[width=\\\"161.875\\\"] > div > .nodeLabel > p\"]",
-      "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<li><code>task: \"\"</code> → <code>task: auto</code></li>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -1609,6 +1585,30 @@
       "state": "default",
       "target": "[\"ul:nth-child(33) > li:nth-child(1)\"]",
       "theme": "dark"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<p>osmo_proxy.py<br>(AML command job, runs inside AKS pod)</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "elmPartiallyObscuring",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/osmo-proxy"
+      ],
+      "rule": "color-contrast",
+      "signature": "78642457b050deba",
+      "state": "default",
+      "target": "[\"#mermaid-svg-flowchart-B-1 > .label[transform=\\\"translate(-60, -58)\\\"] > foreignobject[height=\\\"116\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
+      "theme": "light"
     },
     {
       "classification": "unresolved",
@@ -1763,30 +1763,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Transfer completed files</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/data-pipeline"
-      ],
-      "rule": "color-contrast",
-      "signature": "820f77f9e6b56453",
-      "state": "default",
-      "target": "[\"foreignobject[width=\\\"170.140625\\\"] > div > .nodeLabel > p\"]",
-      "theme": "light"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<span class=\"token plain\">│ │ └─────────┬─────────┘ │</span>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -1907,30 +1883,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Test split sizes against<br>the upload workflow</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/data-pipeline"
-      ],
-      "rule": "color-contrast",
-      "signature": "931e0367d72d36e6",
-      "state": "default",
-      "target": "[\"foreignobject[width=\\\"159.1875\\\"] > div > .nodeLabel > p\"]",
-      "theme": "light"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<code>submit-azureml-lerobot-training.sh</code>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -1992,54 +1944,6 @@
       "signature": "95e08969ab07226e",
       "state": "default",
       "target": "[\"table[aria-labelledby=\\\"-prerequisites\\\"] > tbody > tr:nth-child(4) > td:nth-child(2)\"]",
-      "theme": "light"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
-      "html": "<p>Test split sizes against<br>the upload workflow</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/data-pipeline"
-      ],
-      "rule": "color-contrast",
-      "signature": "95eb68f25a491c1f",
-      "state": "default",
-      "target": "[\"foreignobject[width=\\\"159.1875\\\"] > div > .nodeLabel > p\"]",
-      "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
-      "html": "<p>Do not treat bag splitting<br>as a flush control</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/data-pipeline"
-      ],
-      "rule": "color-contrast",
-      "signature": "968e6afcb6fcbc00",
-      "state": "default",
-      "target": "[\"foreignobject[width=\\\"173.4375\\\"] > div > .nodeLabel > p\"]",
       "theme": "light"
     },
     {
@@ -2137,6 +2041,30 @@
       "state": "default",
       "target": "[\"p:nth-child(7)\"]",
       "theme": "light"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<p>AML Studio</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "imgNode",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/osmo-proxy"
+      ],
+      "rule": "color-contrast",
+      "signature": "a5910357f20964de",
+      "state": "default",
+      "target": "[\"foreignobject[height=\\\"44\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
+      "theme": "dark"
     },
     {
       "classification": "unresolved",
@@ -2267,30 +2195,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Developer / CI pipeline</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/osmo-proxy"
-      ],
-      "rule": "color-contrast",
-      "signature": "b4dcf59da1a13cdb",
-      "state": "default",
-      "target": "[\"foreignobject[width=\\\"161.875\\\"] > div > .nodeLabel > p\"]",
-      "theme": "light"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<td>GitHub Actions permission scopes and OSSF Scorecard exceptions</td>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -2352,6 +2256,30 @@
       "signature": "bb1649b2a43b205c",
       "state": "default",
       "target": "[\"table[aria-labelledby=\\\"component-inventory\\\"] > tbody > tr:nth-child(4) > td:nth-child(3)\"]",
+      "theme": "light"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<p>Transfer completed files</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "imgNode",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/data-pipeline"
+      ],
+      "rule": "color-contrast",
+      "signature": "bcd4875f0b0e04ce",
+      "state": "default",
+      "target": "[\"#mermaid-svg-flowchart-H-13 > .label[transform=\\\"translate(-60, -34)\\\"] > foreignobject[height=\\\"68\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
       "theme": "light"
     },
     {
@@ -2531,19 +2459,19 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>OSMO<br>(KAI scheduling, NIM lifecycle)</p>",
+      "html": "<p>Test writer compression<br>or reduce publisher rate</p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
       "reason": "imgNode",
       "reviewBy": null,
-      "reviewedOn": "2026-09-19",
+      "reviewedOn": "2026-10-02",
       "routeFamilies": [
-        "/osmo-proxy"
+        "/data-pipeline"
       ],
       "rule": "color-contrast",
-      "signature": "c745a457fffe2ed1",
+      "signature": "cb1ff586770f24ed",
       "state": "default",
-      "target": "[\"#mermaid-svg-flowchart-C-3 > .label[transform=\\\"translate(-100, -46)\\\"] > foreignobject[height=\\\"92\\\"][width=\\\"200\\\"] > div > .nodeLabel > p\"]",
+      "target": "[\"#mermaid-svg-flowchart-D-5 > .label[transform=\\\"translate(-60, -58)\\\"] > foreignobject[height=\\\"116\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
       "theme": "light"
     },
     {
@@ -2568,6 +2496,30 @@
       "signature": "cb9fee2f4872b685",
       "state": "default",
       "target": "[\".markdown-alert.markdown-alert-warning[dir=\\\"auto\\\"]:nth-child(4) > p:nth-child(2)\"]",
+      "theme": "light"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<p>Test split sizes against<br>the upload workflow</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "imgNode",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/data-pipeline"
+      ],
+      "rule": "color-contrast",
+      "signature": "ccd3c50f5c885b8e",
+      "state": "default",
+      "target": "[\"#mermaid-svg-flowchart-I-15 > .label[transform=\\\"translate(-60, -58)\\\"] > foreignobject[height=\\\"116\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
       "theme": "light"
     },
     {
@@ -2699,19 +2651,19 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Measure sustained disk throughput<br>and cache behavior</p>",
+      "html": "<p>Test a faster codec or level<br>or reduce input volume</p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
       "reason": "imgNode",
       "reviewBy": null,
-      "reviewedOn": "2026-09-28",
+      "reviewedOn": "2026-10-02",
       "routeFamilies": [
         "/data-pipeline"
       ],
       "rule": "color-contrast",
-      "signature": "d8713474f420e8e1",
+      "signature": "d8dff76e1e1d119b",
       "state": "default",
-      "target": "[\"foreignobject[height=\\\"92\\\"] > div > .nodeLabel > p\"]",
+      "target": "[\"#mermaid-svg-flowchart-E-7 > .label[transform=\\\"translate(-60, -58)\\\"] > foreignobject[height=\\\"116\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
       "theme": "light"
     },
     {
@@ -2795,6 +2747,30 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
+      "html": "<p>OSMO<br>(KAI scheduling, NIM lifecycle)</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "imgNode",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/osmo-proxy"
+      ],
+      "rule": "color-contrast",
+      "signature": "d9b06d85af407d6c",
+      "state": "default",
+      "target": "[\"#mermaid-svg-flowchart-C-3 > .label[transform=\\\"translate(-60, -58)\\\"] > foreignobject[height=\\\"116\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
+      "theme": "dark"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
       "html": "<td>Current <code>osmo_loadbalancer_ip</code> and any DNS variable overrides</td>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -2808,6 +2784,30 @@
       "signature": "de188c965a840924",
       "state": "default",
       "target": "[\"tr:nth-child(3) > td:nth-child(3)\"]",
+      "theme": "light"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<p>Primary observation?</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "imgNode",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/data-pipeline"
+      ],
+      "rule": "color-contrast",
+      "signature": "dfe4093be417d40b",
+      "state": "default",
+      "target": "[\"#mermaid-svg-flowchart-B-1 > .label[transform=\\\"translate(-60, -34)\\\"] > foreignobject[height=\\\"68\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
       "theme": "light"
     },
     {
@@ -2915,30 +2915,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Measure bag rate</p>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "imgNode",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/data-pipeline"
-      ],
-      "rule": "color-contrast",
-      "signature": "e9b7408860942a9b",
-      "state": "default",
-      "target": "[\"foreignobject[width=\\\"125.40625\\\"] > div > .nodeLabel > p\"]",
-      "theme": "light"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<span class=\"token plain\"> ▼</span>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -3011,19 +2987,19 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Measure bag rate</p>",
+      "html": "<p>Developer / CI pipeline</p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
       "reason": "imgNode",
       "reviewBy": null,
-      "reviewedOn": "2026-09-28",
+      "reviewedOn": "2026-10-02",
       "routeFamilies": [
-        "/data-pipeline"
+        "/osmo-proxy"
       ],
       "rule": "color-contrast",
-      "signature": "f3b61eb3e02ad9e4",
+      "signature": "f1495c0cd99949bb",
       "state": "default",
-      "target": "[\"foreignobject[width=\\\"125.40625\\\"] > div > .nodeLabel > p\"]",
+      "target": "[\"foreignobject[height=\\\"68\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
       "theme": "dark"
     },
     {
@@ -3035,20 +3011,20 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<p>Recording problem detected</p>",
+      "html": "<p>Test a faster codec or level<br>or reduce input volume</p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
       "reason": "imgNode",
       "reviewBy": null,
-      "reviewedOn": "2026-09-19",
+      "reviewedOn": "2026-10-02",
       "routeFamilies": [
         "/data-pipeline"
       ],
       "rule": "color-contrast",
-      "signature": "f654213da59b2fb0",
+      "signature": "f3decbce800eeec9",
       "state": "default",
-      "target": "[\"foreignobject[width=\\\"200\\\"][height=\\\"68\\\"] > div > .nodeLabel > p\"]",
-      "theme": "light"
+      "target": "[\"#mermaid-svg-flowchart-E-7 > .label[transform=\\\"translate(-60, -58)\\\"] > foreignobject[height=\\\"116\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
+      "theme": "dark"
     },
     {
       "classification": "unresolved",
@@ -3097,6 +3073,30 @@
       "state": "default",
       "target": "[\"table[aria-labelledby=\\\"architecture\\\"] > tbody > tr:nth-child(3) > td:nth-child(3)\"]",
       "theme": "light"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
+      "html": "<p>Measure bag rate</p>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "imgNode",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-02",
+      "routeFamilies": [
+        "/data-pipeline"
+      ],
+      "rule": "color-contrast",
+      "signature": "fb0e2a1004f781ff",
+      "state": "default",
+      "target": "[\"#mermaid-svg-flowchart-C-3 > .label[transform=\\\"translate(-60, -34)\\\"] > foreignobject[height=\\\"68\\\"][width=\\\"120\\\"] > div > .nodeLabel > p\"]",
+      "theme": "dark"
     },
     {
       "classification": "unresolved",
