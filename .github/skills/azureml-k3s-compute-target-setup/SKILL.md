@@ -9,15 +9,15 @@ Set up K3s on an Ubuntu host with an NVIDIA GPU, connect the host and cluster to
 
 ## Prerequisites
 
-| Requirement                                                                                                  | Purpose                                                                                             |
-|--------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
-| Ubuntu host with an NVIDIA GPU and driver installed                                                          | K3s workload target                                                                                 |
-| Existing Arc resource group, subscription ID, tenant ID                                                      | `azcmagent` and `connectedk8s` registration targets                                                 |
-| Azure ML workspace deployed by this repository's Terraform, with its outputs on the workstation              | `05-attach-hil-azureml-compute.sh` reads the workspace from those outputs                           |
-| Contributor on the Arc cluster's resource group, and rights to assign roles on the workspace and its storage | The attach creates an Azure Relay and grants the compute identity access                            |
-| `az` CLI with `connectedk8s`, `k8s-extension`, `ml`, and `ssh` extensions                                    | Arc and Azure ML operations, and remote access to the host                                          |
-| NVIDIA Container Toolkit installed on the host                                                               | Provides the `nvidia-container-runtime` binary K3s detects                                          |
-| HuggingFace account with access to any gated base model                                                      | Required only when warm-starting from a gated repository (for example `google/paligemma-3b-pt-224`) |
+| Requirement                                                                                                                           | Purpose                                                                                             |
+|---------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| Ubuntu host with an NVIDIA GPU and driver installed                                                                                   | K3s workload target                                                                                 |
+| Existing Arc resource group, subscription ID, tenant ID                                                                               | `azcmagent` and `connectedk8s` registration targets                                                 |
+| Azure ML workspace deployed by this repository's Terraform, with its outputs on the workstation                                       | `05-attach-hil-azureml-compute.sh` reads the workspace from those outputs                           |
+| Contributor on the Arc cluster's resource group, and rights to assign roles on the workspace, its storage, and its container registry | The attach creates an Azure Relay and grants the compute identity access                            |
+| `az` CLI with `connectedk8s`, `k8s-extension`, `ml`, and `ssh` extensions                                                             | Arc and Azure ML operations, and remote access to the host                                          |
+| NVIDIA Container Toolkit installed on the host                                                                                        | Provides the `nvidia-container-runtime` binary K3s detects                                          |
+| HuggingFace account with access to any gated base model                                                                               | Required only when warm-starting from a gated repository (for example `google/paligemma-3b-pt-224`) |
 
 ## Choose Where Each Command Runs
 
@@ -153,7 +153,7 @@ The script:
 1. Installs a training-only Azure ML extension from [azureml-arc-config.template.json](../../../infrastructure/setup/config/azureml-arc-config.template.json), with the extension's own device plugin and DCGM exporter off, or updates only the settings that differ on an existing extension.
 2. Waits for the `InstanceType` CRD and applies [azureml-instance-types-hil.yaml](../../../infrastructure/setup/manifests/azureml-instance-types-hil.yaml) through Arc cluster connect: `defaultinstancetype` for CPU jobs and `gpu` for one GPU. The `gpu` type has no node selector, so the node needs no label.
 3. Attaches the cluster as a Kubernetes compute with a system-assigned identity in the `azureml` namespace.
-4. Grants that identity AzureML Data Scientist on the workspace and Storage Blob Data Contributor on its storage account.
+4. Grants that identity AzureML Data Scientist on the workspace, Storage Blob Data Contributor on its storage account, and AcrPull on its container registry, so jobs can pull images from it.
 
 Compute names are 16 characters at most, and the default, `k8s-<cluster>`, is truncated, so pass `--compute-name`. `--require-gpu` stops before any change unless a node reports allocatable `nvidia.com/gpu`. For InstanceTypes that request more GPUs, pass your own manifest with `--instance-types-manifest`, and request only what the node advertises.
 
