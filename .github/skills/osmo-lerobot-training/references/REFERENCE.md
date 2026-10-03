@@ -29,7 +29,7 @@ scripts/submit-osmo-lerobot-training.sh \
   --steps 50000 \
   -r my-model-name
 
-# Larger batch for RTX PRO 6000 (48GB VRAM)
+# Larger batch for RTX PRO 6000 (96GB VRAM per whole GPU)
 scripts/submit-osmo-lerobot-training.sh \
   -d my-robot-dataset \
   --from-blob \
@@ -411,7 +411,7 @@ Older checkpoints may have incompatible `config.json` fields or missing normaliz
 | `ImportError: patch_info_paths`        | Payload missing training fixes                      | Ensure `training/il/` is on a branch with dataset conversion code |
 | VM eviction during training            | Spot GPU preempted                                  | Checkpoints already registered survive; resubmit job               |
 | MLflow connection timeout              | Token refresh failure                               | Check `MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES`                      |
-| OOM during training                    | Batch size too large for GPU                        | 32 for 24GB (A10), 64 for 48GB (RTX PRO 6000)                      |
+| OOM during training                    | Batch size too large for GPU                        | 32 for 24GB (A10), 64 for 48GB or more (RTX PRO 6000)              |
 
 ## Troubleshooting
 
