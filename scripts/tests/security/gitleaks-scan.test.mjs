@@ -61,9 +61,11 @@ function repository(t) {
   return { cwd, env, git, write, commit, base, reportPath: join(cwd, 'logs', 'scan.sarif') };
 }
 
+// Fixed high-entropy input avoids random collisions with scanner allowlists.
+const fixtureHex = '0123456789abcdef'.repeat(4);
+
 function syntheticFinding() {
-  // Fixed high-entropy input avoids random collisions with scanner allowlists.
-  return `api_${'key'} = "${'0123456789abcdef'.repeat(4)}"\n`;
+  return `api_${'key'} = "${fixtureHex}"\n`;
 }
 
 function runScan(repo, options = {}) {
@@ -121,7 +123,7 @@ for (const operation of ['present', 'deleted', 'renamed', 'second-parent', 'merg
     assert.equal(result.exitCode, 1);
     assert.equal(result.scannerExitCode, 1);
     assert.ok(result.findings > 0);
-    assert.ok(!JSON.stringify(result).includes(candidate), 'Result must not echo fixture contents');
+    assert.ok(!JSON.stringify(result).includes(fixtureHex), 'Result must not echo fixture contents');
   });
 }
 
