@@ -103,6 +103,7 @@ Security scanning and dependency management scripts.
 | `security/Test-BinaryFreshness.ps1`        | Validate pinned binary hashes and Helm chart versions; emits SARIF for GitHub Security tab    |
 | `security/Modules/PinnedToolVersions.psm1` | Provide pin discovery functions for binary freshness checks                                   |
 | `security/Test-HveCoreFreshness.ps1`       | Check hve-core-derived files against their reviewed release or source-header baselines        |
+| `security/Test-PublicDependencyFeeds.ps1`  | Reject private or non-canonical package sources in committed dependency metadata               |
 | `security/zap-to-sarif.py`                 | Convert ZAP results to SARIF format                                                           |
 | `security/gitleaks-scan.mjs`               | Scan tested-revision history and report explicit secret-scan outcomes                         |
 | `update-chart-hashes.sh`                   | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
