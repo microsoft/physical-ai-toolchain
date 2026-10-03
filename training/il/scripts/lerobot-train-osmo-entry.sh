@@ -35,7 +35,7 @@ apt-get install -y -qq --no-install-recommends "${APT_PACKAGES[@]}"
 # ephemeral container and portable across Debian, conda, and
 # PyTorch base images regardless of where the marker file lives.
 echo "Installing UV package manager..."
-pip install --quiet --break-system-packages uv==0.7.12
+pip install --quiet --break-system-packages uv==0.12.8
 
 echo "Creating Python 3.12 environment..."
 uv python install 3.12

@@ -106,7 +106,7 @@ When you need to update a tool managed by this manifest (e.g. bumping ORAS to a 
 > [!WARNING]
 > Do not attempt to update these tools directly in shell scripts. The CI pinning scanner will flag mismatches if download URLs point to one version while checking against another, but the canonical version and hash live in `tool-checksums.json`.
 
-Other developer-tool versions are pinned at their bootstrap assignment sites. The binary freshness workflow discovers supported literal assignments in tracked shell, PowerShell, JSON, and JSONC files and requires replicated pins to remain consistent. See [`scripts/README.md`](pathname://../../scripts/README.md#-where-pins-live).
+Other developer-tool versions are pinned at their bootstrap assignment sites. The binary freshness workflow discovers supported literal assignments in tracked shell, PowerShell, YAML, JSON, and JSONC files, as well as version- and digest-pinned container images in Dockerfiles, and requires replicated pins to remain consistent. See [`scripts/README.md`](pathname://../../scripts/README.md#-where-pins-live).
 
 ## Manual Update Process
 

@@ -9,7 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # uv binary from its official image, pinned by digest for OSSF Scorecard.
-COPY --from=ghcr.io/astral-sh/uv:0.10.9@sha256:10902f58a1606787602f303954cea099626a4adb02acbac4c69920fe9d278f82 /uv /uvx /bin/
+FROM ghcr.io/astral-sh/uv:0.12.8@sha256:d1cbaeadc234fe19c0d93daabcf5e98738cd93c6d1dd4918ef6aa30735feb23a AS uv
+COPY --from=uv /uv /uvx /bin/
 
 # Copy dependency manifests and runtime logging configuration
 COPY pyproject.toml uv.lock logging.json ./

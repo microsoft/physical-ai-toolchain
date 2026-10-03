@@ -40,7 +40,7 @@ apt-get install -y -qq --no-install-recommends "${APT_PACKAGES[@]}"
 # (externally-managed-environment), which is safe in this ephemeral container
 # and portable across Debian, conda, and PyTorch base images.
 echo "Installing UV package manager..."
-pip install --quiet --break-system-packages uv==0.7.12
+pip install --quiet --break-system-packages uv==0.12.8
 
 # LeRobot requires Python >= 3.12; the base image ships 3.11. Create a
 # dedicated 3.12 venv (uv downloads the interpreter) for the frozen LeRobot
