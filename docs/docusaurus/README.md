@@ -2,7 +2,7 @@
 title: Docusaurus Site Operations
 description: Install, validate, test, serve, and troubleshoot the documentation site
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-30
+ms.date: 2026-10-01
 ms.topic: how-to
 ---
 
@@ -108,6 +108,17 @@ representative keyboard, search, adaptive, table, and Mermaid journeys, and craw
 Keyboard tests wait for rendered disclosure visibility as well as `aria-expanded` before traversing links.
 Mobile navigation tests also wait for the background to become inert before checking focus containment.
 Use these observable states rather than fixed delays; keep the subsequent keyboard-focus assertions.
+
+Page readiness does not wait for network idle. `expectPageReady` waits for hydration, a canonical link that matches
+the address bar, loaded fonts, one visible `main` landmark, and the Mermaid diagram count recorded for the route in
+`build/mermaid-routes.json`. On the search page with a query, it also waits for the announced result count. The
+canonical check proves a client-side route has rendered, because Docusaurus keeps the previous page on screen until
+the next one loads. Give any new client-rendered widget its own explicit readiness condition.
+
+The exhaustive crawl remains one test with one evidence record. It visits two route states at a time, each in a fresh
+browser context, so storage, theme, and instrumentation never carry between visits. Healthy visits close quietly;
+failing visits keep a screenshot, and retried runs record a trace. If the collector is interrupted, it stops
+scheduling, closes open contexts, and marks unfinished states as blocking findings.
 
 Browser evidence is written to these ignored paths:
 
