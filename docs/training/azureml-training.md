@@ -3,7 +3,7 @@ sidebar_position: 2
 title: Azure ML Training Workflows
 description: Submit Isaac Lab and LeRobot training jobs to Azure Machine Learning
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-10-01
 ms.topic: how-to
 keywords:
   - azure ml
@@ -31,6 +31,7 @@ Selected RL, LeRobot, and software-in-the-loop (SiL) examples, not an exhaustive
 | `train.yaml`               | Isaac Lab SKRL training    | `training/rl/scripts/submit-azureml-training.sh`               |
 | `isaaclab-evaluation.yaml` | Isaac Lab evaluation       | `evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh` |
 | `lerobot-train.yaml`       | LeRobot behavioral cloning | `training/il/scripts/submit-azureml-lerobot-training.sh`       |
+| `gpu-smoke.yaml`           | GPU target smoke test      | `training/smoke/scripts/submit-azureml-gpu-smoke.sh`           |
 
 ## ⚙️ Isaac Lab Training Parameters
 
@@ -63,8 +64,8 @@ LeRobot training on Azure ML supports single-node multi-GPU execution via [Huggi
 
 Both AzureML compute backends are supported. GPU count is determined by the backend:
 
-- **AzureML managed compute (`AmlCompute`):** GPU count visible to the job container equals the cluster's VM SKU GPU count (e.g., `Standard_NC48ads_A100_v4` → 2, `Standard_NC96ads_A100_v4` → 4). Pass `--compute <cluster-name>` (matching an entry in `aml_compute_clusters`).
-- **AzureML-on-Kubernetes (Arc-attached AKS):** GPU count visible to the job container is the `InstanceType` CRD's `nvidia.com/gpu: N` request. `gpu2`/`gpuspot2`/`gpu4`/`gpuspot4` are shipped in `infrastructure/setup/manifests/azureml-instance-types.yaml` and require a node SKU with at least `N` GPUs (e.g., `Standard_NC128ds_xl_RTXPRO6000BSE_v6` for `N=4`).
+- On Azure ML managed compute (`AmlCompute`), the job container sees every GPU on the cluster's VM size: 2 on `Standard_NC48ads_A100_v4` and 4 on `Standard_NC96ads_A100_v4`. Pass `--compute <cluster-name>` with a cluster from `aml_compute_clusters`.
+- On Arc-attached AKS (Azure ML on Kubernetes), the job container sees the number of GPUs its `InstanceType` requests with `nvidia.com/gpu: N`. `infrastructure/setup/manifests/azureml-instance-types.yaml` ships `gpu2`, `gpuspot2`, `gpu4`, and `gpuspot4`, which need a node size with at least `N` GPUs, such as `Standard_NC96ads_A100_v4` for `N=4` or `Standard_NC288ds_xl_RTXPRO6000BSE_v6` for `N=2`.
 
 Managed compute example:
 
@@ -132,6 +133,73 @@ LeRobot training:
   --policy-type act
 ```
 
+## 🩺 Smoke-Test a GPU Target
+
+Before you commit GPU time to training, prove that an InstanceType gets a working GPU and that the services training depends on are reachable from inside a job:
+
+```bash
+./training/smoke/scripts/submit-azureml-gpu-smoke.sh --instance-type <instance-type> --stream
+```
+
+Pass the InstanceType for the GPU pool you want to test. The default, `gpuspot`, selects on `accelerator: nvidia` and can't wake a pool at zero, so test those pools with an InstanceType that selects by `agentpool` (see [Select GPU pools by `agentpool`](#select-gpu-pools-by-agentpool)).
+
+The job trains a small model for 200 steps on one GPU, which takes a few minutes. It runs these checks, and a failure in one doesn't stop the others:
+
+| Check              | Passes when                                                                                           |
+|--------------------|-------------------------------------------------------------------------------------------------------|
+| `device`           | PyTorch sees a CUDA device (it records the GPU, driver, and CUDA versions)                            |
+| `matmul`           | A timed half-precision matmul matches a float64 reference                                             |
+| `azure_workspace`  | The job identity gets a token, reads the workspace, and configures MLflow tracking                    |
+| `mlflow_run`       | The job attaches to its Azure ML MLflow run and logs parameters                                       |
+| `training`         | A small network trains on the GPU and its loss falls below half the starting loss                     |
+| `mlflow_metrics`   | Every per-step loss metric reads back from MLflow                                                     |
+| `checkpoints`      | Periodic checkpoints exist in the `checkpoints` output, and the final one reloads intact              |
+| `mlflow_artifacts` | The final checkpoint uploads as an MLflow artifact and downloads back intact through its `runs:/` URI |
+| `storage`          | The identity uploads a checkpoint to the Terraform storage account; the test blob is then deleted     |
+| `model_registry`   | The final checkpoint registers as a `custom_model` and reads back                                     |
+
+The `mlflow_artifacts` check downloads rather than lists, because MLflow 3 lists `runs:/` paths through a logged-model search that Azure ML's MLflow endpoint doesn't implement (HTTP 404). Downloads through `runs:/` URIs, which training uses to resume from checkpoints, work.
+
+With `--stream`, the script waits for the job, downloads its `checkpoints` output, and prints each check's result from `smoke-summary.json`. It exits non-zero unless the job completed and every check passed. Checks that depend on a failed check are reported as skipped, so start with the first failure.
+
+Each run leaves a job and its MLflow run in the `gpu-smoke` experiment and a new `gpu-smoke-test` model version. Pass `--skip-register-model` to skip the registry check, or `--storage-account ""` to skip the storage check.
+
+The image is PyTorch with CUDA 12.4, which runs on NVIDIA driver 550 and newer. That includes the GRID drivers AKS installs on A10 nodes. Training images built for CUDA 13 need driver 580 or newer, so a passing smoke test doesn't prove those images run on an older driver.
+
+## 🔌 HiL Clusters as Azure ML Computes
+
+An Arc-connected K3s HiL host can run Azure ML training jobs as its own Kubernetes compute. Preview, then run the attach from an operator machine that has the Terraform outputs:
+
+```bash
+./infrastructure/setup/05-attach-hil-azureml-compute.sh \
+  --arc-cluster-resource-id <arc-resource-id> \
+  --compute-name <compute-name> \
+  --config-preview
+
+./infrastructure/setup/05-attach-hil-azureml-compute.sh \
+  --arc-cluster-resource-id <arc-resource-id> \
+  --compute-name <compute-name> \
+  --require-gpu
+```
+
+The script:
+
+1. Installs a training-only Azure ML extension on the Arc cluster from `infrastructure/setup/config/azureml-arc-config.template.json`, or updates only the settings that differ on an existing one.
+2. Applies InstanceTypes through Arc cluster connect, using a temporary kubeconfig it removes when it exits. The default `infrastructure/setup/manifests/azureml-instance-types-hil.yaml` defines `defaultinstancetype` for CPU jobs and `gpu` for one GPU; pass an environment manifest with `--instance-types-manifest`.
+3. Attaches the cluster as a Kubernetes compute with a system-assigned identity in the `azureml` namespace.
+4. Grants that identity AzureML Data Scientist on the workspace, Storage Blob Data Contributor on the workspace storage, and AcrPull on the workspace container registry, so jobs can pull images from it.
+
+Before you run it:
+
+- Connect the cluster to Arc with `data-pipeline/setup/edge/05-connect-arc-kubernetes.sh --cluster-admin-signed-in-user`, so Arc cluster connect accepts your identity.
+- For GPU jobs, run `data-pipeline/setup/hil/05-enable-k3s-gpu.sh` on the host first. InstanceTypes can't set a runtime class, so the NVIDIA runtime must be the K3s default. `--require-gpu` stops the attach until the node reports `nvidia.com/gpu`.
+- You need Contributor on the Arc cluster's resource group and rights to assign roles on the workspace, its storage, and its container registry.
+- Compute names are 16 characters at most. The default, `k8s-<cluster>`, is truncated, so pass `--compute-name`.
+
+The extension creates an Azure Relay namespace and hybrid connection in the Arc cluster's resource group. Don't modify them, because the compute depends on them. If the workspace storage account blocks public network access (`should_enable_public_network_access = false`, or `storage_account = false` in `public_network_access_overrides`), the host needs the HiL VPN with private DNS before its jobs can read or write data.
+
+Submit to the HiL compute like any other, for example `training/smoke/scripts/submit-azureml-gpu-smoke.sh --compute <compute-name> --instance-type gpu --stream`.
+
 ## 💾 Checkpoint Management
 
 | Mode           | Behavior                                   |
@@ -151,7 +219,7 @@ LeRobot training:
 
 ## 🛌 Scale-from-zero GPU Pools
 
-The SiL module's default GPU pool uses `min_count = 0`; the root deployment's default GPU pool uses `min_count = 1`. Check the effective `node_pools` configuration before assuming scale-to-zero. For a pool configured to reach zero, the setup script overrides two scheduler checks and the Terraform pool definition supplies a static GPU label, as described below.
+The SiL module's default GPU pool uses `min_count = 0`; the root deployment's default GPU pool uses `min_count = 1`. Check the effective `node_pools` configuration before assuming scale-to-zero. For a pool configured to reach zero, the setup script overrides two scheduler checks, and the pool's InstanceTypes must select it by `agentpool`, as described below.
 
 ### `aml-operator` resource validation
 
@@ -161,37 +229,60 @@ The Azure ML Kubernetes extension installs `aml-operator`, which runs a pre-flig
 
 With the chart default `amloperator.skipResourceValidation: false`, the operator fails the job immediately with `Code: 9` ("Invalid instance type. The instance type defined resource requirement has exceeded the node size") whenever the target GPU pool is at zero. No Pod is created, kube-scheduler is never invoked, and the cluster autoscaler never observes a pending Pod to scale up against.
 
-Result: a permanent deadlock — you cannot submit the job that would cause the GPU resource to become available.
+The result is a deadlock: the job that would bring up a GPU node can't be submitted.
 
-`02-deploy-azureml-extension.sh` sets the flag to `true` by default. Override with `--enforce-resource-validation` on fixed-capacity clusters where you want misconfigured InstanceTypes to fail fast at submission rather than producing Pods stuck in `Pending`.
+`02-deploy-azureml-extension.sh` sets `amloperator.skipResourceValidation=true` by default, both when it installs the extension and on reruns against an existing extension whose live setting differs. Extensions installed before the script managed this setting keep the chart default until you rerun it. Override with `--enforce-resource-validation` on fixed-capacity clusters where you want misconfigured InstanceTypes to fail fast at submission rather than producing Pods stuck in `Pending`.
 
 Trade-off when enabled (the default): a typo in an `InstanceType` (e.g. `nvidia.com/gpu: 8` on a 4-GPU SKU) manifests as `FailedScheduling` events on a long-Pending Pod instead of an immediate job failure. Diagnose with `kubectl describe pod`.
 
-### Static `accelerator=nvidia` node label
+### Select GPU pools by `agentpool`
 
-The InstanceTypes installed by `02-deploy-azureml-extension.sh` (`gpuspot`, `gpu`, `gpuspot2`, …) select on `accelerator: nvidia`. That label is normally applied at runtime by NFD / GPU Operator on already-running GPU nodes. When the pool is at zero, the cluster autoscaler builds a synthetic node template from **static** AKS-side labels only (transmitted to it via VMSS tags) and never sees `accelerator=nvidia` — so it concludes that scaling the pool up would not satisfy the pending Pod, and refuses.
+The default InstanceTypes in [`infrastructure/setup/manifests/azureml-instance-types.yaml`](../../infrastructure/setup/manifests/azureml-instance-types.yaml) (`gpuspot`, `gpu`, `gpuspot2`, `gpu2`, `gpuspot4`, and `gpu4`) select on `accelerator: nvidia`. AKS sets that label on GPU nodes when they join the cluster, so these InstanceTypes match running GPU nodes. For current GPU sizes, they can't wake a pool at zero.
 
-The fix is to declare the label statically on every GPU pool via Terraform:
+When a pool is at zero, the cluster autoscaler builds a node template from the pool's VMSS. The template carries the pool's `agentpool` label, but it predicts `accelerator=nvidia` only for older GPU sizes (K80 through A100), not for A10, H100, or RTX PRO 6000 sizes. The autoscaler then concludes that a new node wouldn't satisfy the pending Pod, and doesn't scale up.
 
-```hcl
-node_labels = {
-  accelerator = "nvidia"
-}
+You can't declare the label yourself: AKS reserves `accelerator` and rejects it in `node_labels` with `NodeLabelKeyNotAllowed`, and the Terraform module rejects it at plan time.
+
+For pools that scale from zero, apply InstanceTypes that select the pool by name:
+
+```yaml
+nodeSelector:
+  agentpool: <pool key>
+  kubernetes.azure.com/scalesetpriority: spot # Spot pools only
 ```
 
-Already wired into the default `gpu` pool in `infrastructure/terraform/variables.tf` and `infrastructure/terraform/modules/sil/variables.tf`. Any custom GPU pool added via `node_pools` in `terraform.tfvars` must include the same label. NFD and the static label coexist without conflict.
+The environment deployment bundle generates InstanceTypes this way from Terraform outputs. Apply them with `02-deploy-azureml-extension.sh --instance-types-manifest`.
 
 ### Volcano enqueue-time capacity gate
 
 The Azure ML extension installs Volcano with `overcommit` and `proportion` plugins in the third tier of its scheduler config. Both implement Volcano's `JobEnqueueable` interface and gate the `enqueue` action against currently-Ready cluster capacity (`proportion`: `requested ≤ queue.Allocated + queue.Free`; `overcommit`: `requested ≤ total × overcommit-factor`).
 
-On a cluster whose GPU pools sit at `count = 0`, the GPU capacity term is `0 × 1.2 = 0`, so every GPU PodGroup fails enqueue and stays in phase `Pending` forever. Because Volcano only creates the underlying Pod once the PodGroup reaches `Inqueue`, no Pending Pod ever appears in kube-scheduler's queue — and without a Pending Pod, the AKS cluster autoscaler has nothing to scale up against.
+On a cluster whose GPU pools sit at `count = 0`, the GPU capacity term is `0 × 1.2 = 0`, so every GPU PodGroup fails enqueue and stays in phase `Pending` forever. Volcano creates the underlying Pod only after the PodGroup reaches `Inqueue`, so no Pending Pod ever appears in kube-scheduler's queue. Without a Pending Pod, the AKS cluster autoscaler has nothing to scale up against.
 
-`02-deploy-azureml-extension.sh` patches `volcano-scheduler-configmap` with [`infrastructure/setup/manifests/volcano-scheduler-config-scale-from-zero.conf`](../../infrastructure/setup/manifests/volcano-scheduler-config-scale-from-zero.conf) (both plugins removed from tier 3) and restarts `volcano-scheduler` after extension install. Gang scheduling is preserved because the `gang` plugin still gates the `allocate` action — multi-pod jobs continue to wait for `minAvailable` before any task starts.
+`02-deploy-azureml-extension.sh` creates the `volcano-scheduler-scale-from-zero` configmap in the `azureml` namespace from [`infrastructure/setup/manifests/volcano-scheduler-config-scale-from-zero.conf`](../../infrastructure/setup/manifests/volcano-scheduler-config-scale-from-zero.conf) (both plugins removed from tier 3). It then points the extension at that configmap through the `volcanoScheduler.schedulerConfigMap` extension setting.
 
-Override with `--enforce-volcano-capacity-check` on multi-tenant clusters where queue-level capacity fairness must be enforced at submit time. Scale-from-zero will then be impossible without keeping at least one GPU node warm (`min_count ≥ 1`).
+Gang scheduling still works because the `gang` plugin gates the `allocate` action: multi-pod jobs wait for `minAvailable` before any task starts.
+
+The extension upgrades itself automatically, and each upgrade restores the chart's own `volcano-scheduler-configmap`, so an in-place edit of that configmap doesn't last. Extension settings do persist across upgrades. Reruns update only the settings that differ from the live extension, and restart `volcano-scheduler` when only the configmap content changed. `cleanup/uninstall-azureml-extension.sh` deletes the `azureml` namespace, which removes the configmap.
+
+Override with `--enforce-volcano-capacity-check` on multi-tenant clusters where queue-level capacity fairness must be enforced at submit time. It resets `volcanoScheduler.schedulerConfigMap` to the chart's config. Scale-from-zero will then be impossible without keeping at least one GPU node warm (`min_count ≥ 1`).
 
 ### Verifying scale-up
+
+Confirm the extension settings and the scheduler config first:
+
+```bash
+az k8s-extension show --name azureml-<aks-cluster> --cluster-type managedClusters \
+  --cluster-name <aks-cluster> --resource-group <resource-group> \
+  --query 'configurationSettings.{skipResourceValidation: "amloperator.skipResourceValidation", volcanoConfigMap: "volcanoScheduler.schedulerConfigMap"}'
+# Expected: skipResourceValidation "true", volcanoConfigMap "volcano-scheduler-scale-from-zero"
+
+kubectl get cm -n azureml volcano-scheduler-scale-from-zero \
+  -o jsonpath='{.data.volcano-scheduler\.conf}' | grep -E 'name: (overcommit|proportion)'
+# Expected: no output
+```
+
+Then submit a job and follow the autoscaler:
 
 ```bash
 # Submit a job, then watch the autoscaler decision.
@@ -203,9 +294,9 @@ kubectl -n kube-system get cm cluster-autoscaler-status -o jsonpath='{.data.stat
 
 If `scaleUp.status` stays `NoActivity` after submission, walk the three layers in order:
 
-1. `kubectl -n azureml logs deploy/aml-operator` — look for `"resource validation failed"` (operator layer).
-2. `kubectl get podgroup -n azureml` — phase `Pending` with `Unschedulable: resource in cluster is overused` is the Volcano enqueue gate.
-3. `kubectl describe pod -n azureml <worker>` — `FailedScheduling: 0/N nodes are available, ... node(s) didn't match Pod's node affinity/selector` is the missing-label layer.
+1. Run `kubectl -n azureml logs deploy/aml-operator`. A `"resource validation failed"` message means the operator rejected the job.
+2. Run `kubectl get podgroup -n azureml`. Phase `Pending` with `Unschedulable: resource in cluster is overused` means the Volcano enqueue gate is holding the job.
+3. Run `kubectl describe pod -n azureml <worker>`. `FailedScheduling: 0/N nodes are available, ... node(s) didn't match Pod's node affinity/selector` means no node or node template matches the InstanceType's selector. See [Select GPU pools by `agentpool`](#select-gpu-pools-by-agentpool).
 
 ## 📚 Related Documentation
 

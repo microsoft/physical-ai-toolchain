@@ -20,7 +20,7 @@ resource "azurerm_container_registry" "main" {
   sku                           = "Premium"
   admin_enabled                 = false
   anonymous_pull_enabled        = false
-  public_network_access_enabled = var.should_enable_public_network_access
+  public_network_access_enabled = local.public_network_access.acr
 }
 
 // ============================================================

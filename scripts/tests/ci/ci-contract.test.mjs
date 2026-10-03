@@ -5,9 +5,10 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, matchesGlob } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 import { evaluateChecks, requiredLanes } from '../../ci/evaluate-checks.mjs';
 import { comparePaths, loadContract, parseChangedPaths, selectChecks, selectionOutputs } from '../../ci/select-checks.mjs';
 import { readWorkflowGraph, validateWorkflows } from '../../ci/validate-workflows.mjs';
@@ -61,6 +62,122 @@ test('reusable permissions: skipped scheduled callers still require upstream per
     message.includes('scheduled-docusaurus') && message.includes('callee permission id-token: write')));
 });
 const nodeEnvironment = { ...process.env, NODE_DISABLE_COMPILE_CACHE: '1' };
+
+const rootTestModules = [
+  'tests/test_accessibility_evidence.py', 'tests/test_accessibility_promotion.py',
+  'tests/test_e2e_polling.py', 'tests/test_redis_tls_client.py', 'tests/test_future_contract.py',
+];
+const retainedCoverageSources = [
+  'tests/fuzz_harness.py', 'training/utils/metrics.py',
+  'data-management/viewer/backend/src/api/validation.py', 'scripts/accessibility/evidence_gate.py',
+];
+
+test('coverage boundary: root collection retains test modules, harness and product sources', () => {
+  const manifest = readFileSync(join(root, 'pyproject.toml'), 'utf8');
+  const run = manifest.split('[tool.coverage.run]')[1]?.split('[tool.coverage.report]')[0];
+  assert.ok(run, 'Missing coverage run configuration');
+  const omit = run.match(/^omit = \[([\s\S]*?)^\]/m);
+  assert.ok(omit, 'Missing coverage run omissions');
+  const patterns = [...omit[1].matchAll(/^\s*"([^"]+)"/gm)].map(match => match[1]);
+  assert.equal(patterns.includes('tests/test_*.py'), false, 'Root test modules must remain coverage sources');
+  for (const path of rootTestModules) {
+    assert.equal(patterns.some(pattern => matchesGlob(path, pattern)), false, `Test module was omitted: ${path}`);
+  }
+  for (const path of retainedCoverageSources) {
+    assert.equal(patterns.some(pattern => matchesGlob(path, pattern)), false, `Source was omitted: ${path}`);
+  }
+});
+
+test('coverage boundary: Codecov retains root test modules, fuzz and product coverage', () => {
+  const config = parseYaml(readFileSync(join(root, 'codecov.yml'), 'utf8'));
+  assert.equal(config.ignore.includes('tests/test_*.py'), false, 'Codecov must retain root test-module coverage');
+  for (const path of rootTestModules) {
+    assert.equal(config.ignore.some(pattern => matchesGlob(path, pattern)), false, `Test module was ignored: ${path}`);
+  }
+  for (const path of retainedCoverageSources) {
+    assert.equal(config.ignore.some(pattern => matchesGlob(path, pattern)), false, `Source was ignored: ${path}`);
+  }
+  assert.deepEqual(config.flags['pytest-fuzz'].paths, ['tests/', 'data-management/viewer/backend/src/', 'training/']);
+  assert.deepEqual(config.component_management.individual_components.find(item => item.component_id === 'fuzz-suite').paths,
+    ['tests/fuzz_harness.py', 'tests/fuzz-corpus/**']);
+});
+
+test('coverage boundary: fuzz workflow retains test selection and all measured source directories', () => {
+  const steps = graph['.github/workflows/fuzz-regression-tests.yml'].jobs['fuzz-regression'].steps;
+  const run = steps.find(step => step.name === 'Run fuzz regression tests').run;
+  assert.match(run, /pytest -o addopts="" tests\/fuzz_harness\.py\s/);
+  assert.deepEqual([...run.matchAll(/--cov=([^\s]+)/g)].map(match => match[1]),
+    ['tests', 'data-management/viewer/backend/src', 'training']);
+  const upload = steps.find(step => step.name === 'Upload coverage to Codecov');
+  assert.equal(upload.with.flags, 'pytest-fuzz');
+  assert.equal(upload.with.files, 'logs/coverage-fuzz.xml');
+});
+
+test('accessibility coverage: exact report upload isolates OIDC and fails closed', () => {
+  const workflow = graph['.github/workflows/accessibility-evidence.yml'];
+  const verify = candidate => {
+    const producer = candidate.jobs.evidence;
+    assert.deepEqual(producer.permissions, { contents: 'read' });
+    const artifacts = producer.steps.filter(step => step.name === 'Upload Python coverage artifact');
+    assert.equal(artifacts.length, 1, 'Expected one dedicated Python coverage artifact');
+    const artifact = artifacts[0];
+    assert.match(artifact.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/);
+    assert.equal(artifact.if, 'always()');
+    assert.equal(artifact['continue-on-error'], undefined);
+    assert.deepEqual(artifact.with, {
+      name: 'pytest-accessibility-coverage-xml', path: 'logs/coverage-accessibility.xml',
+      'if-no-files-found': 'error', 'retention-days': 30,
+    });
+    const uploader = candidate.jobs['accessibility-python-codecov'];
+    assert.ok(uploader, 'Missing dedicated Python coverage uploader');
+    assert.equal(uploader.needs, 'evidence');
+    assert.equal(uploader.if, 'always()');
+    assert.equal(uploader['continue-on-error'], undefined);
+    assert.deepEqual(uploader.permissions, { contents: 'read', 'id-token': 'write' });
+    assert.equal(uploader.steps.length, 3);
+    const [checkout, download, upload] = uploader.steps;
+    assert.match(checkout.uses, /^actions\/checkout@[a-f0-9]{40}$/);
+    assert.deepEqual(checkout.with, { 'persist-credentials': false });
+    assert.match(download.uses, /^actions\/download-artifact@[a-f0-9]{40}$/);
+    assert.deepEqual(download.with, { name: 'pytest-accessibility-coverage-xml', path: 'coverage' });
+    assert.match(upload.uses, /^codecov\/codecov-action@[a-f0-9]{40}$/);
+    assert.deepEqual(upload.with, {
+      files: 'coverage/coverage-accessibility.xml', disable_search: true, use_oidc: true,
+      fail_ci_if_error: true, flags: 'pytest-accessibility', name: 'pytest-accessibility-coverage',
+    });
+    for (const step of uploader.steps) {
+      assert.equal(step.if, undefined);
+      assert.equal(step['continue-on-error'], undefined);
+      assert.equal(step.run, undefined);
+    }
+  };
+  verify(workflow);
+  for (const mutate of [
+    candidate => { candidate.jobs.evidence.steps.find(step => step.name === 'Upload Python coverage artifact').with['if-no-files-found'] = 'warn'; },
+    candidate => { delete candidate.jobs['accessibility-python-codecov'].permissions['id-token']; },
+    candidate => { candidate.jobs['accessibility-python-codecov'].steps[1].with.name = 'other-report'; },
+    candidate => { candidate.jobs['accessibility-python-codecov'].steps[2].with.files = 'other.xml'; },
+    candidate => { candidate.jobs['accessibility-python-codecov'].steps[2].with.flags = 'pytest-fuzz'; },
+    candidate => { candidate.jobs['accessibility-python-codecov'].steps[2].with.fail_ci_if_error = false; },
+  ]) {
+    const candidate = structuredClone(workflow);
+    mutate(candidate);
+    assert.throws(() => verify(candidate), assert.AssertionError);
+  }
+});
+
+test('accessibility coverage: flag retains test and product measurements without new gates', () => {
+  const config = parseYaml(readFileSync(join(root, 'codecov.yml'), 'utf8'));
+  const paths = [
+    'scripts/accessibility/', 'tests/test_accessibility_evidence.py', 'tests/test_accessibility_promotion.py',
+  ];
+  assert.deepEqual(config.flags['pytest-accessibility'], { paths, carryforward: true });
+  assert.equal(config.coverage.status.project['pytest-accessibility'], undefined);
+  assert.equal(config.component_management.individual_components.some(item => item.component_id === 'pytest-accessibility'), false);
+  for (const path of [...rootTestModules, ...retainedCoverageSources, 'scripts/accessibility/promotion.py']) {
+    assert.equal(config.ignore.some(pattern => matchesGlob(path, pattern)), false, `Coverage was ignored: ${path}`);
+  }
+});
 
 test('gitleaks: tested-revision helper and native regressions own scan and summary policy', () => {
   const workflow = graph['.github/workflows/gitleaks-scan.yml'];

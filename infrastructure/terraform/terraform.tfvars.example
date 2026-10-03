@@ -18,16 +18,34 @@ should_create_resource_group = true
 system_node_pool_vm_size    = "Standard_D8ds_v5"
 system_node_pool_node_count = 1
 
+// Per-resource public network access; unset keys follow should_enable_public_network_access.
+// Keys: acr, azureml_workspace, key_vault, storage_account, data_lake_storage_account, postgresql,
+// redis, log_analytics, application_insights, grafana, monitor_workspace, data_collection_endpoint
+// public_network_access_overrides = {
+//   storage_account = false
+// }
+
+// AKS SKU tier and support plan (defaults: Standard, KubernetesOfficial).
+// Long-term support requires Premium.
+// aks_sku_tier     = "Premium"
+// aks_support_plan = "AKSLongTermSupport"
+
 // GPU Node Pools
 //
 // gpu_driver options:
-//   "Install" - AKS installs the NVIDIA datacenter driver on the node
+//   "Install" - AKS installs the NVIDIA driver for the VM size, including the
+//               GRID driver that RTX PRO 6000 sizes need
 //   "None"    - No AKS-managed driver; use GPU Operator or custom installation
 //
 // node_labels: Kubernetes labels applied to nodes at provisioning time.
-//   Set nvidia.com/gpu.deploy.driver=false on vGPU nodes (RTX PRO 6000) to
-//   skip GPU Operator driver management. The GRID driver DaemonSet in
-//   infrastructure/setup/manifests/gpu-grid-driver-installer.yaml handles these nodes.
+//   Set nvidia.com/gpu.deploy.driver=false only on RTX PRO 6000 pools created with
+//   gpu_driver = "None". It skips GPU Operator driver management and hands the nodes
+//   to the fallback GRID driver DaemonSet in
+//   infrastructure/setup/manifests/gpu-grid-driver-installer.yaml.
+//
+// To keep a pool defined without nodes, for example while its quota is pending, set
+// should_enable_auto_scaling = false and node_count = 0. See
+// docs/infrastructure/manage-node-pools.md.
 
 // Single GPU pool (Spot A10 — simplest configuration)
 node_pools = {
@@ -48,22 +66,20 @@ node_pools = {
   }
 }
 
-// Multi-GPU pool example (RTX PRO 6000 + H100):
+// Multi-GPU pool example (RTX PRO 6000 + H100). Each NC144ds_xl node uses 144 vCPUs
+// of RTX PRO 6000 quota, plus one more node's worth for an upgrade surge:
 //
 // node_pools = {
 //   rtxprogpu = {
-//     vm_size                 = "Standard_NC128ds_xl_RTXPRO6000BSE_v6"
-//     subnet_address_prefixes = ["10.0.7.0/24"]
-//     node_taints             = ["nvidia.com/gpu:NoSchedule"]
-//     gpu_driver              = "None"
-//     node_labels = {
-//       "nvidia.com/gpu.deploy.driver" = "false"
-//     }
+//     vm_size                    = "Standard_NC144ds_xl_RTXPRO6000BSE_v6"
+//     subnet_address_prefixes    = ["10.0.7.0/24"]
+//     node_taints                = ["nvidia.com/gpu:NoSchedule"]
+//     gpu_driver                 = "Install"
 //     priority                   = "Regular"
 //     should_enable_auto_scaling = true
 //     min_count                  = 1
-//     max_count           = 1
-//     zones               = []
+//     max_count                  = 1
+//     zones                      = []
 //   }
 //   h100gpu = {
 //     vm_size                 = "Standard_NC40ads_H100_v5"
@@ -173,3 +189,14 @@ aml_compute_clusters = {}
 // VM Subnet
 // If you plan to add a Virtual Machine with Isaac Sim we need to enable the creating of the subnet
 // should_create_vm_subnet = true
+
+// Dataviewer (Azure Container Apps)
+// Deploys the dataviewer backend and frontend in a delegated subnet. After apply, run
+// data-management/setup/deploy-dataviewer.sh to build and roll out the images.
+// Pick a subnet that doesn't overlap node pool subnets.
+// should_deploy_dataviewer = true
+// dataviewer_config = {
+//   subnet_address_prefix  = "10.0.16.0/21"
+//   should_enable_internal = true   // VNet-only access through the VPN
+//   should_deploy_auth     = false  // Entra ID app registration for public access
+// }

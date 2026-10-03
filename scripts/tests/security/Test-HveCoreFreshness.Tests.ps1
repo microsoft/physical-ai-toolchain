@@ -41,18 +41,20 @@ Describe 'DerivedFiles configuration' -Tag 'Unit' {
             'scripts/linting/Modules/FrontmatterValidation.psm1|release'
             'scripts/security/Test-WorkflowPermissions.ps1|source-header'
             'scripts/security/Test-DangerousWorkflow.ps1|source-header'
+            'scripts/security/Test-PublicDependencyFeeds.ps1|source-header'
         )
         $actual = @($script:DerivedFiles | ForEach-Object { "$($_.Path)|$($_.Baseline)" })
 
         $actual | Should -Be $expected
     }
 
-    It 'Tracks both security linters with source-header baselines' {
+    It 'Tracks security linters with source-header baselines' {
         $sourceFiles = @($script:DerivedFiles | Where-Object { $_.Baseline -eq 'source-header' })
 
-        $sourceFiles.Count | Should -Be 2
+        $sourceFiles.Count | Should -Be 3
         $sourceFiles.Path | Should -Contain 'scripts/security/Test-WorkflowPermissions.ps1'
         $sourceFiles.Path | Should -Contain 'scripts/security/Test-DangerousWorkflow.ps1'
+        $sourceFiles.Path | Should -Contain 'scripts/security/Test-PublicDependencyFeeds.ps1'
     }
 
     It 'Parses the provenance header of every source-header entry' {
@@ -872,7 +874,7 @@ Describe 'Invoke-HveCoreFreshnessCheck' -Tag 'Unit' {
         $result.DriftCount | Should -Be 0
         $result.ErrorCount | Should -Be 0
         @($result.Files).Count | Should -Be $script:DerivedFiles.Count
-        @($result.Files | Where-Object { $_.Baseline -eq 'source-header' }).Count | Should -Be 2
+        @($result.Files | Where-Object { $_.Baseline -eq 'source-header' }).Count | Should -Be 3
     }
 
     It 'Records a file-level error and continues checking remaining files' {

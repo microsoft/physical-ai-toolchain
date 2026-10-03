@@ -494,6 +494,132 @@ UV_VERSION="0.12.8"
         @($roundTrip[0].Pins.File | Sort-Object) | Should -Be @('first.sh', 'second.sh')
         @($roundTrip[0].Pins.Version | Sort-Object) | Should -Be @('0.11.21', '0.12.8')
     }
+
+    It 'Extracts a configured GitHub Action input from YAML workflows' {
+        @'
+jobs:
+  test:
+    steps:
+      - name: Set up uv
+        uses: astral-sh/setup-uv@0123456789abcdef # v10.2.0
+        with:
+          version: '0.12.8'
+      - uses: astral-sh/setup-uv@fedcba9876543210
+        with:
+          "version": v0.12.8
+      - name: Set up uv with reordered keys
+        with:
+          'version': "0.12.8" # Binary version
+        env:
+          UV_CACHE_DIR: /tmp/uv-cache
+        uses: astral-sh/setup-uv@abcdef0123456789
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'workflow.yml')
+
+        $pins = Get-PinnedToolVersionAssignments `
+            @script:Parameters `
+            -Files @('workflow.yml') `
+            -GitHubAction 'astral-sh/setup-uv' `
+            -GitHubActionInput 'version'
+
+        $pins.Count | Should -Be 1
+        $pins[0].File | Should -Be 'workflow.yml'
+        $pins[0].Version | Should -Be '0.12.8'
+    }
+
+    It 'Ignores unrelated workflow actions and missing configured inputs' {
+        @'
+jobs:
+  test:
+    steps:
+      - uses: actions/setup-python@0123456789abcdef
+        with:
+          version: '0.12.8'
+      - uses: astral-sh/setup-uv@fedcba9876543210
+        with:
+          enable-cache: true
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'workflow.yaml')
+
+        $pins = Get-PinnedToolVersionAssignments `
+            @script:Parameters `
+            -Files @('workflow.yaml') `
+            -GitHubAction 'astral-sh/setup-uv' `
+            -GitHubActionInput 'version'
+
+        $pins.Count | Should -Be 0
+    }
+
+    It 'Rejects a dynamic configured GitHub Action input' {
+        @'
+jobs:
+  test:
+    steps:
+      - uses: astral-sh/setup-uv@0123456789abcdef
+        with:
+          "version": ${{ inputs.uv-version }}
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'workflow.yml')
+
+        {
+            Get-PinnedToolVersionAssignments `
+                @script:Parameters `
+                -Files @('workflow.yml') `
+                -GitHubAction 'astral-sh/setup-uv' `
+                -GitHubActionInput 'version'
+        } | Should -Throw "*value is not a supported literal version*"
+    }
+
+    It 'Ignores action-like text inside YAML block scalars' {
+        @'
+jobs:
+  test:
+    steps:
+      - run: |
+          uses: astral-sh/setup-uv@not-a-real-step
+          with:
+            version: '9.9.9'
+      - uses: astral-sh/setup-uv@0123456789abcdef
+        with:
+          version: '0.12.8'
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'workflow.yml')
+
+        $pins = Get-PinnedToolVersionAssignments `
+            @script:Parameters `
+            -Files @('workflow.yml') `
+            -GitHubAction 'astral-sh/setup-uv' `
+            -GitHubActionInput 'version'
+
+        $pins.Count | Should -Be 1
+        $pins[0].Version | Should -Be '0.12.8'
+    }
+
+    It 'Fails closed when a monitored workflow is malformed' {
+        @'
+jobs:
+  test:
+    steps:
+      - uses: astral-sh/setup-uv@0123456789abcdef
+       with:
+          version: '0.12.8'
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'workflow.yml')
+
+        {
+            Get-PinnedToolVersionAssignments `
+                @script:Parameters `
+                -Files @('workflow.yml') `
+                -GitHubAction 'astral-sh/setup-uv' `
+                -GitHubActionInput 'version'
+        } | Should -Throw "*Could not parse 'workflow.yml' as YAML*"
+    }
+
+    It 'Requires both GitHub Action parameters' {
+        'steps: []' | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'workflow.yml')
+
+        {
+            Get-PinnedToolVersionAssignments `
+                @script:Parameters `
+                -Files @('workflow.yml') `
+                -GitHubAction 'astral-sh/setup-uv'
+        } | Should -Throw '*must be provided together*'
+    }
 }
 
 Describe 'Get-PinCandidateFiles' -Tag 'Unit' {
@@ -516,7 +642,7 @@ Describe 'Get-PinCandidateFiles' -Tag 'Unit' {
     It 'Returns every supported tracked source extension' {
         $repoRoot = Join-Path $TestDrive 'extensions'
         New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null
-        foreach ($file in @('pin.sh', 'pin.ps1', 'pin.json', 'pin.jsonc', 'ignored.yml')) {
+        foreach ($file in @('pin.sh', 'pin.ps1', 'pin.json', 'pin.jsonc', 'pin.yml', 'pin.yaml', 'ignored.txt')) {
             'content' | Set-Content -LiteralPath (Join-Path $repoRoot $file)
         }
         git -C $repoRoot init --quiet
@@ -524,7 +650,8 @@ Describe 'Get-PinCandidateFiles' -Tag 'Unit' {
 
         $files = Get-PinCandidateFiles -RepoRoot $repoRoot
 
-        @($files | Sort-Object) | Should -Be @('pin.json', 'pin.jsonc', 'pin.ps1', 'pin.sh')
+        @($files | Sort-Object) |
+            Should -Be @('pin.json', 'pin.jsonc', 'pin.ps1', 'pin.sh', 'pin.yaml', 'pin.yml')
     }
 
     It 'Throws when no candidate files are tracked' {
@@ -556,6 +683,8 @@ Describe 'Repository pin discovery' -Tag 'Integration' {
         $pins = Get-PinnedToolVersionAssignments `
             -ShellVariable 'UV_VERSION' `
             -PowerShellVariable 'UvVersion' `
+            -GitHubAction 'astral-sh/setup-uv' `
+            -GitHubActionInput 'version' `
             -Files $files `
             -RepoRoot $repoRoot
 
@@ -563,7 +692,193 @@ Describe 'Repository pin discovery' -Tag 'Integration' {
         @($pins.File) | Should -Contain 'shared/ci/smoke-import.sh'
         @($pins.File) | Should -Contain 'training/rl/scripts/setup_isaac_runtime.sh'
         @($pins.File) | Should -Contain 'infrastructure/setup/optional/isaac-sim-vm/scripts/install-dev-deps.sh'
+        @($pins.File) | Should -Contain '.github/workflows/python-lint.yml'
+        @($pins.File | Where-Object { $_ -like '.github/workflows/*' }).Count | Should -Be 15
         @($pins.Version | Sort-Object -Unique).Count | Should -Be 1
+    }
+}
+
+Describe 'ConvertFrom-GitHubReleasePage' -Tag 'Unit' {
+    It 'Retains the stable predecessor from a later API page' {
+        $firstPage = @(
+            [pscustomobject]@{
+                tag_name     = '0.12.20'
+                published_at = '2026-09-28T05:00:00Z'
+                draft        = $false
+                prerelease   = $false
+            }
+        )
+        $firstPage += 1..19 | ForEach-Object {
+            [pscustomobject]@{
+                tag_name     = "0.13.0-beta.$_"
+                published_at = '2026-09-27T05:00:00Z'
+                draft        = $false
+                prerelease   = $true
+            }
+        }
+        $secondPage = @(
+            [pscustomobject]@{
+                tag_name     = '0.12.19'
+                published_at = '2026-09-18T05:00:00Z'
+                draft        = $false
+                prerelease   = $false
+            }
+        )
+
+        $releases = @(ConvertFrom-GitHubReleasePage -Pages @($firstPage, $secondPage))
+        $result = Get-EligibleToolRelease `
+            -Releases $releases `
+            -Now ([datetimeoffset]'2026-09-29T05:00:00Z') `
+            -QuarantineDays 7
+
+        $releases.Count | Should -Be 21
+        $result.LatestVersion | Should -Be '0.12.20'
+        $result.EligibleVersion | Should -Be '0.12.19'
+    }
+}
+
+Describe 'Get-EligibleToolRelease' -Tag 'Unit' {
+    BeforeAll {
+        $script:Now = [datetimeoffset]'2026-09-29T05:00:00Z'
+    }
+
+    It 'Quarantines the newest stable release before seven days' {
+        $releases = @(
+            [pscustomobject]@{
+                tag_name     = 'v2.14.0'
+                published_at = '2026-09-24T11:27:54Z'
+                draft        = $false
+                prerelease   = $false
+            }
+            [pscustomobject]@{
+                tag_name     = 'v2.13.2'
+                published_at = '2026-09-10T10:00:00Z'
+                draft        = $false
+                prerelease   = $false
+            }
+        )
+
+        $result = Get-EligibleToolRelease -Releases $releases -Now $script:Now -QuarantineDays 7
+
+        $result.LatestVersion | Should -Be '2.14.0'
+        $result.EligibleVersion | Should -Be '2.13.2'
+        $result.QuarantineEndsAt | Should -Be ([datetimeoffset]'2026-10-01T11:27:54Z')
+        $result.IsQuarantined | Should -BeTrue
+    }
+
+    It 'Uses the newest stable release at the seven-day boundary' {
+        $releases = @(
+            [pscustomobject]@{
+                tag_name     = '0.12.20'
+                published_at = '2026-09-22T05:00:00Z'
+                draft        = $false
+                prerelease   = $false
+            }
+            [pscustomobject]@{
+                tag_name     = '0.12.19'
+                published_at = '2026-09-20T05:00:00Z'
+                draft        = $false
+                prerelease   = $false
+            }
+        )
+
+        $result = Get-EligibleToolRelease -Releases $releases -Now $script:Now -QuarantineDays 7
+
+        $result.EligibleVersion | Should -Be '0.12.20'
+        $result.IsQuarantined | Should -BeFalse
+    }
+
+    It 'Filters draft and prerelease entries before selecting releases' {
+        $releases = @(
+            [pscustomobject]@{
+                tag_name     = '0.13.0-beta.1'
+                published_at = '2026-09-10T05:00:00Z'
+                draft        = $false
+                prerelease   = $true
+            }
+            [pscustomobject]@{
+                tag_name     = '0.12.21'
+                published_at = '2026-09-09T05:00:00Z'
+                draft        = $true
+                prerelease   = $false
+            }
+            [pscustomobject]@{
+                tag_name     = '0.12.20'
+                published_at = '2026-09-28T05:00:00Z'
+                draft        = $false
+                prerelease   = $false
+            }
+            [pscustomobject]@{
+                tag_name     = '0.12.19'
+                published_at = '2026-09-18T05:00:00Z'
+                draft        = $false
+                prerelease   = $false
+            }
+        )
+
+        $result = Get-EligibleToolRelease -Releases $releases -Now $script:Now -QuarantineDays 7
+
+        $result.LatestVersion | Should -Be '0.12.20'
+        $result.EligibleVersion | Should -Be '0.12.19'
+    }
+
+    It 'Fails closed when a quarantined release has no predecessor' {
+        $releases = @(
+            [pscustomobject]@{
+                tag_name     = '0.12.20'
+                published_at = '2026-09-28T05:00:00Z'
+                draft        = $false
+                prerelease   = $false
+            }
+        )
+
+        {
+            Get-EligibleToolRelease -Releases $releases -Now $script:Now -QuarantineDays 7
+        } | Should -Throw '*no preceding stable release*'
+    }
+
+    It 'Fails closed when required release metadata is missing' {
+        $releases = @(
+            [pscustomobject]@{
+                tag_name     = '0.12.20'
+                published_at = '2026-09-28T05:00:00Z'
+                draft        = $false
+            }
+        )
+
+        {
+            Get-EligibleToolRelease -Releases $releases -Now $script:Now -QuarantineDays 7
+        } | Should -Throw '*must include tag_name, published_at, draft, and prerelease*'
+    }
+
+    It 'Fails closed when a release timestamp is malformed' {
+        $releases = @(
+            [pscustomobject]@{
+                tag_name     = '0.12.20'
+                published_at = 'not-a-timestamp'
+                draft        = $false
+                prerelease   = $false
+            }
+        )
+
+        {
+            Get-EligibleToolRelease -Releases $releases -Now $script:Now -QuarantineDays 7
+        } | Should -Throw '*invalid published_at timestamp*'
+    }
+
+    It 'Fails closed when a stable release tag is not semantic' {
+        $releases = @(
+            [pscustomobject]@{
+                tag_name     = 'latest'
+                published_at = '2026-09-20T05:00:00Z'
+                draft        = $false
+                prerelease   = $false
+            }
+        )
+
+        {
+            Get-EligibleToolRelease -Releases $releases -Now $script:Now -QuarantineDays 7
+        } | Should -Throw '*not a supported semantic version*'
     }
 }
 

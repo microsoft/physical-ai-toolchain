@@ -1,4 +1,5 @@
 // @ts-check
+// cspell:words dagre
 import { themes as prismThemes } from 'prism-react-renderer';
 import remarkGithubAlert from 'remark-github-blockquote-alert';
 
@@ -196,6 +197,7 @@ const config = {
       },
       mermaid: {
         theme: { light: 'neutral', dark: 'dark' },
+        options: { layout: 'dagre', look: 'classic' },
       },
     }),
 };

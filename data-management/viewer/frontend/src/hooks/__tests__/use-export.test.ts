@@ -235,6 +235,18 @@ describe('useExport', () => {
     expect(result.current.previewStats).toBeNull()
   })
 
+  it('cancels an active export when unmounted', () => {
+    const { result, unmount } = renderHook(() => useExport({ datasetId: 'ds-1' }))
+
+    act(() => {
+      result.current.startExport(sampleRequest)
+    })
+
+    unmount()
+
+    expect(mockCancel).toHaveBeenCalledTimes(1)
+  })
+
   it('does not throw when stream callbacks fire after the consumer unmounts', () => {
     const { result, unmount } = renderHook(() => useExport({ datasetId: 'ds-1' }))
 
