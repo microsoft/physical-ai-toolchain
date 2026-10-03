@@ -2,7 +2,7 @@
 title: CI Smoke Scripts
 description: GPU-free import smoke scripts for training and evaluation domains, runnable locally and in CI.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-23
+ms.date: 2026-10-02
 ---
 
 GPU-free import smoke checks that catch syntax, import, dependency-resolution, and interpreter/ABI regressions before they reach a GPU job. The same scripts run in CI (`.github/workflows/smoke-cpu.yml`) and locally.
@@ -39,7 +39,7 @@ shared/ci/smoke-image.sh osmo-replay               # runtime-image smoke (Python
 shared/ci/smoke-import.sh rl --mode cpu
 ```
 
-`smoke-image.sh` mounts the repository at `/workspace` and runs `smoke-import.sh <domain> --mode <mode>` inside a linux/amd64 container: a lightweight uv image for `--mode cpu`, the domain's production image for `--mode image`. CI runs the CPU smoke directly on its linux runners and calls `smoke-image.sh` for the runtime-image depth after a free-disk-space step.
+`smoke-image.sh` mounts the repository at `/workspace` and runs `smoke-import.sh <domain> --mode <mode>` inside a linux/amd64 container: a lightweight uv image for `--mode cpu`, the domain's production image for `--mode image`. CI runs the CPU smoke directly on its linux runners and calls `smoke-image.sh` for the runtime-image depth.
 
 > [!NOTE]
 > The runtime images are multi-gigabyte. The first `--mode image` run pulls the image; expect several minutes and ensure free disk.

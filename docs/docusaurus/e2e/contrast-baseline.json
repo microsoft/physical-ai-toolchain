@@ -1547,30 +1547,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<code>data-management/viewer/</code>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "elmPartiallyObscuring",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/security"
-      ],
-      "rule": "color-contrast",
-      "signature": "7617909cbf41a64d",
-      "state": "default",
-      "target": "[\"p:nth-child(5) > code\"]",
-      "theme": "light"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<p>Developer / CI pipeline</p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -2713,30 +2689,6 @@
       "state": "default",
       "target": "[\"foreignobject[height=\\\"92\\\"] > div > .nodeLabel > p\"]",
       "theme": "light"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
-      "html": "<code>data-management/viewer/</code>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "elmPartiallyObscuring",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/security"
-      ],
-      "rule": "color-contrast",
-      "signature": "d8fc658ed184ca8c",
-      "state": "default",
-      "target": "[\"p:nth-child(5) > code\"]",
-      "theme": "dark"
     },
     {
       "classification": "unresolved",
