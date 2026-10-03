@@ -4,7 +4,7 @@ title: Infrastructure Deployment
 slug: infrastructure-deployment
 description: Terraform configuration and deployment for AKS, Azure ML, storage, and OSMO backend services
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-30
+ms.date: 2026-10-03
 ms.topic: how-to
 keywords:
   - terraform
@@ -145,6 +145,7 @@ Enable managed identity for OSMO services (recommended for production):
 osmo_config = {
   should_enable_identity   = true
   should_federate_identity = true
+  should_create_secret     = true
   control_plane_namespace  = "osmo-control-plane"
   operator_namespace       = "osmo-operator"
   workflows_namespace      = "osmo-workflows"
@@ -155,9 +156,9 @@ See [variables.tf](https://github.com/microsoft/physical-ai-toolchain/blob/main/
 
 ## 🔗 Related
 
-- [Infrastructure Reference](infrastructure-reference.md) — architecture, modules, outputs, troubleshooting
-- [VPN Gateway](vpn.md) — point-to-site VPN for private cluster access
-- [Cleanup and Destroy](cleanup.md) — resource teardown procedures
+- [Infrastructure Reference](infrastructure-reference.md): architecture, modules, outputs, troubleshooting
+- [VPN Gateway](vpn.md): point-to-site VPN for private cluster access
+- [Cleanup and Destroy](cleanup.md): resource teardown procedures
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

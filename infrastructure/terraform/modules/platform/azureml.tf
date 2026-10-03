@@ -23,7 +23,7 @@ resource "azurerm_machine_learning_workspace" "main" {
   key_vault_id                  = azurerm_key_vault.main.id
   storage_account_id            = azurerm_storage_account.main.id
   container_registry_id         = azurerm_container_registry.main.id
-  public_network_access_enabled = var.should_enable_public_network_access
+  public_network_access_enabled = local.public_network_access.azureml_workspace
   v1_legacy_mode_enabled        = false
   storage_account_access_type   = var.should_enable_storage_shared_access_key ? "AccessKey" : "Identity"
   sku_name                      = "Basic"

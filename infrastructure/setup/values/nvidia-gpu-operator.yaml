@@ -1,5 +1,5 @@
 # NVIDIA GPU Operator Helm values for Azure AKS
-# Mixed GPU node pool configuration. See docs/gpu-configuration.md for architecture details.
+# Mixed GPU node pool configuration. See docs/reference/gpu-configuration.md for architecture details.
 
 # Operator settings
 operator:
@@ -20,8 +20,10 @@ daemonsets:
       value: spot
       effect: NoSchedule
 
-# Driver for H100 nodes; RTX PRO 6000 uses GRID DaemonSet (see docs/gpu-configuration.md).
-# Proprietary kernel modules required for Azure vGPU.
+# Operator-managed driver for pools with gpu_driver = "None", such as H100. The operator
+# skips nodes with an AKS-installed driver (gpu_driver = "Install", including RTX PRO 6000)
+# and nodes labeled nvidia.com/gpu.deploy.driver=false, which use the GRID driver DaemonSet
+# fallback (see docs/reference/gpu-configuration.md).
 driver:
   enabled: true
   kernelModuleType: proprietary
@@ -75,7 +77,7 @@ dcgmExporter:
       value: spot
       effect: NoSchedule
 
-# MIG strategy: single required for RTX PRO 6000 vGPU (see docs/gpu-configuration.md).
+# MIG strategy: single required for RTX PRO 6000 vGPU (see docs/reference/gpu-configuration.md).
 mig:
   strategy: single
 

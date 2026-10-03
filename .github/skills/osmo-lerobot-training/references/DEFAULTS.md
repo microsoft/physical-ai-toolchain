@@ -44,7 +44,7 @@ estimated_speed: ~2 steps/sec
 notes: Default GPU for OSMO spot instances
 ```
 
-### RTX PRO 6000 (48GB VRAM)
+### RTX PRO 6000 (96GB VRAM per whole GPU)
 
 Higher throughput with larger batch sizes.
 
@@ -57,7 +57,9 @@ estimated_speed: ~4 steps/sec
 notes: |
   Requires mig.strategy: single in GPU operator config.
   Azure vGPU host enables MIG; strategy: none causes CUDA_ERROR_NO_DEVICE.
-  NVIDIA GPU Operator driver deployment must be disabled (Azure GRID drivers pre-installed).
+  Azure GRID driver is pre-installed by AKS (gpu_driver = Install) or the GRID DaemonSet fallback;
+  the GPU Operator skips its own driver on these nodes.
+  Fractional sizes have 48GB (NC72ds_xl) or 24GB (NC36ds_xl); use batch_size 32 on 24GB.
 ```
 
 ### H100 (80GB VRAM)
