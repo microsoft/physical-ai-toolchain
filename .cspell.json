@@ -39,6 +39,8 @@
 		"fixpoint",
 		"freqs",
 		"fstring",
+		"getegid",
+		"geteuid",
 		"getparam",
 		"getserverlabel",
 		"getfixturevalue",

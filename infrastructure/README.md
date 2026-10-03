@@ -81,10 +81,10 @@ az aks get-credentials --resource-group <rg> --name <aks>
 cd infrastructure/setup
 ./01-deploy-robotics-charts.sh
 ./02-deploy-azureml-extension.sh
-./03-deploy-osmo.sh
+./03-deploy-osmo.sh --private-service-ip <unused-aks-subnet-ip>
 ```
 
-`03-deploy-osmo.sh` deploys the unified OSMO chart and backend configuration. Each script supports `--config-preview` to print configuration without making changes.
+`03-deploy-osmo.sh` deploys the unified OSMO chart and backend configuration. On a new cluster, it needs `--private-service-ip` with a free address in the AKS subnet for the internal load balancer in front of OSMO; later runs reuse that address. Each script supports `--config-preview` to print configuration without making changes.
 
 ## 🌐 Network Modes
 

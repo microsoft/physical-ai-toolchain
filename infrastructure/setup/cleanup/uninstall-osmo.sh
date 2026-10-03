@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Uninstall OSMO control plane and backend operator, clean up resources
+# cspell:ignore pgroll regclass
 #
 # Prerequisites:
 #   - AKS cluster accessible (kubectl configured)
@@ -38,7 +39,7 @@ OPTIONS:
     --backend-name NAME     Backend identifier (default: default)
     --delete-container      Delete the storage container (destructive)
     --container-name NAME   Blob container name (default: osmo)
-    --purge-postgres        Drop all OSMO tables from PostgreSQL (destructive)
+    --purge-postgres        Drop all OSMO tables and pgroll state from PostgreSQL (destructive)
     --purge-redis           Flush OSMO keys from Redis (destructive)
     --purge-all             Enable all purge/delete options (destructive)
     --db-name NAME          PostgreSQL database name (default: osmo)
@@ -68,7 +69,7 @@ purge_redis=false
 db_name="osmo"
 use_local_osmo=false
 config_preview=false
-postgres_image="postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94"
+postgres_image="$POSTGRES_CLIENT_IMAGE"
 python_image="python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea"
 redis_tls_client=$(<"$SCRIPT_DIR/redis_tls_client.py")
 
@@ -353,9 +354,13 @@ fi
 if [[ "$purge_postgres" == "true" ]]; then
     section "Purge PostgreSQL Data"
 
-        warn "Dropping all tables from database '$db_name' (public schema)..."
+        warn "Dropping all tables from database '$db_name' (public schema) and its pgroll migration state..."
 
-        drop_sql="SET client_min_messages TO WARNING; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO PUBLIC;"
+        # pgroll keeps migration state in its own schema, a versioned view schema per
+        # migration, and DDL event triggers whose functions live in the pgroll schema.
+        # Use named dollar quotes: Kubernetes collapses $$ to $ in container args.
+        # shellcheck disable=SC2016  # SQL dollar quoting, not shell expansion
+        drop_sql='SET client_min_messages TO WARNING; DO $purge$ DECLARE version_schema text; BEGIN IF to_regclass($q$pgroll.migrations$q$) IS NOT NULL THEN FOR version_schema IN SELECT DISTINCT schema || $q$_$q$ || name FROM pgroll.migrations LOOP EXECUTE format($q$DROP SCHEMA IF EXISTS %I CASCADE$q$, version_schema); END LOOP; END IF; END $purge$; DROP SCHEMA IF EXISTS pgroll CASCADE; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO PUBLIC;'
 
         kubectl delete pod osmo-purge-db -n default --ignore-not-found >/dev/null 2>&1
         kubectl create secret generic osmo-purge-db -n default \
@@ -385,7 +390,7 @@ if [[ "$purge_postgres" == "true" ]]; then
         ' | kubectl apply -f - >/dev/null
     if kubectl wait pod/osmo-purge-db -n default \
         --for=jsonpath='{.status.phase}'=Succeeded --timeout=120s >/dev/null 2>&1; then
-        info "PostgreSQL public schema dropped and recreated"
+        info "PostgreSQL public schema recreated; pgroll state removed"
     else
         kubectl logs pod/osmo-purge-db -n default >&2 || true
         fatal "Failed to drop PostgreSQL schema"
@@ -472,14 +477,16 @@ if [[ "$skip_backend" == "false" ]]; then
     fi
 fi
 
-if kubectl get namespace "$NS_OSMO_CONTROL_PLANE" &>/dev/null; then
+if [[ "$skip_k8s_cleanup" == "true" ]]; then
+    info "Namespaces kept (--skip-k8s-cleanup)"
+elif kubectl get namespace "$NS_OSMO_CONTROL_PLANE" &>/dev/null; then
     error "$NS_OSMO_CONTROL_PLANE namespace still exists"
     verification_failed=true
 else
     info "$NS_OSMO_CONTROL_PLANE namespace removed"
 fi
 
-if [[ "$skip_backend" == "false" ]]; then
+if [[ "$skip_backend" == "false" && "$skip_k8s_cleanup" == "false" ]]; then
     for ns in "$NS_OSMO_OPERATOR" "$NS_OSMO_WORKFLOWS"; do
         if kubectl get namespace "$ns" &>/dev/null; then
             error "$ns namespace still exists"

@@ -38,6 +38,7 @@
   "dependencyGroups": {
     "python": ["^(pyproject\\.toml|uv\\.lock)$", "^tests/(conftest\\.py|__init__\\.py|fixtures/)"],
     "images": ["^shared/ci/", "^scripts/lib/common\\.sh$", "(^|/)defaults\\.conf$"],
+    "container-scan": ["Dockerfile|Containerfile", "^scripts/security/(discover-base-images|image-slug)\\.sh$", "^scripts/security/container-scan-lanes\\.json$"],
     "viewer": ["^data-management/viewer/(pyproject\\.toml|uv\\.lock|package(-lock)?\\.json|docker-compose[^/]*|Dockerfile[^/]*)$"],
     "gpu": ["^gpu-offload/(pyproject\\.toml|uv\\.lock|mise\\.toml|\\.env\\.example)$"]
   },
@@ -59,8 +60,8 @@
     "accessibility": { "patterns": ["^\\.github/(accessibility/|ISSUE_TEMPLATE/|CODEOWNERS$|agents/dataviewer-developer\\.agent\\.md$)", "^scripts/accessibility/", "^tests/test_accessibility_(evidence|promotion)\\.py$", "^(data-management/viewer|data-pipeline|evaluation|training|infrastructure|fleet-deployment|fleet-intelligence)/", "^(setup-dev\\.sh|README\\.md|SUPPORT\\.md|docs/contributing/accessibility\\.md)$"], "groups": [] },
     "fuzz": { "patterns": ["^tests/", "^data-management/viewer/backend/", "^training/"], "groups": ["python"] },
     "docusaurus": { "patterns": ["^docs/", "^[^/]+\\.md$", "^\\.github/accessibility/", "^scripts/accessibility/", "^tests/test_accessibility_(evidence|promotion)\\.py$"], "groups": [] },
-    "pester": { "patterns": ["\\.(ps1|psm1|psd1)$"], "groups": [] },
-    "containers": { "patterns": ["(^|/)(Dockerfile|Containerfile)[^/]*$", "^scripts/security/(discover-base-images|image-slug)\\.sh$"], "groups": ["images"] }
+    "pester": { "patterns": ["\\.(ps1|psm1|psd1)$"], "groups": ["container-scan"] },
+    "containers": { "patterns": [], "groups": ["images", "container-scan"] }
   },
   "cpuSmoke": { "workflow": ".github/workflows/smoke-cpu.yml", "job": "import-smoke", "domains": ["rl", "il", "vla", "evaluation", "vlm-judge", "osmo-replay"] },
   "smokeInputs": { "rl": ["rl"], "il": ["il"], "vla": ["vla"], "evaluation": ["evaluation"], "osmo_replay": ["osmo_replay"], "dataviewer": ["dv_backend", "dv_frontend"] },
@@ -80,6 +81,7 @@
     { "id": "markdown-link-check", "classification": "mandatory", "owners": { "pr": "markdown-link-check", "main": "markdown-link-check" }, "target": "markdown-link-check.yml", "selector": "always", "outcomeSchema": "required", "permissionProfile": "read", "softFailPolicy": { "pr": true, "main": true } },
     { "id": "dependency-review", "classification": "mandatory", "owners": { "pr": "dependency-review" }, "target": "dependency-review.yml", "selector": "always", "outcomeSchema": "required", "permissionProfile": "dependency-review" },
     { "id": "dependency-pinning", "classification": "mandatory", "owners": { "pr": "dependency-pinning", "main": "dependency-pinning" }, "target": "dependency-pinning-scan.yml", "selector": "always", "outcomeSchema": "required", "permissionProfile": "security", "softFailPolicy": { "pr": false, "main": false } },
+    { "id": "public-dependency-feeds", "classification": "mandatory", "owners": { "pr": "public-dependency-feeds", "main": "public-dependency-feeds" }, "target": "public-dependency-feeds.yml", "selector": "always", "outcomeSchema": "required", "permissionProfile": "read", "softFailPolicy": { "pr": false, "main": false } },
     { "id": "osv-scanner", "classification": "advisory", "owners": { "pr": "osv-scanner" }, "inlineException": "Advisory OSV action, excluded from required results", "selector": "always", "outcomeSchema": "advisory", "permissionProfile": "security" },
     { "id": "container-scan", "classification": "mandatory", "owners": { "pr": "container-scan", "main": "container-scan" }, "target": "container-scan.yml", "selector": "containers", "outcomeSchema": "required", "permissionProfile": "security", "softFailPolicy": { "pr": true, "main": true } },
     { "id": "pester-tests", "classification": "mandatory", "owners": { "pr": "pester-tests", "main": "pester-tests" }, "target": "pester-tests.yml", "selector": "pester", "outcomeSchema": "required", "permissionProfile": "coverage", "softFailPolicy": { "pr": false, "main": false } },
