@@ -20,6 +20,12 @@ locals {
   resource_name_suffix = "${var.resource_prefix}-${var.environment}-${var.instance}"
   pe_enabled           = var.should_enable_private_endpoint
 
+  // Public network access per resource; overrides fall back to the global flag
+  public_network_access = {
+    for key in ["acr", "azureml_workspace", "key_vault", "storage_account", "data_lake_storage_account", "postgresql", "redis", "log_analytics", "application_insights", "grafana", "monitor_workspace", "data_collection_endpoint"] :
+    key => lookup(var.public_network_access_overrides, key, var.should_enable_public_network_access)
+  }
+
   // Base DNS zones required for all services (without AKS or monitor zones)
   base_dns_zones = {
     key_vault         = "privatelink.vaultcore.azure.net"

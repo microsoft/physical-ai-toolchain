@@ -1,0 +1,33 @@
+# Instructional Azure ML InstanceTypes for a single-node HiL K3s cluster.
+# 05-attach-hil-azureml-compute.sh applies this file by default. Keep
+# environment-specific manifests in the gitignored environment bundle and pass
+# them with --instance-types-manifest.
+#
+# The gpu type needs allocatable nvidia.com/gpu on the node. Enable it on the
+# host with data-pipeline/setup/hil/05-enable-k3s-gpu.sh before running GPU jobs.
+apiVersion: amlarc.azureml.com/v1alpha1
+kind: InstanceType
+metadata:
+  name: defaultinstancetype
+spec:
+  resources:
+    requests:
+      cpu: "1"
+      memory: "4Gi"
+    limits:
+      cpu: "2"
+      memory: "8Gi"
+---
+apiVersion: amlarc.azureml.com/v1alpha1
+kind: InstanceType
+metadata:
+  name: gpu
+spec:
+  resources:
+    requests:
+      cpu: "4"
+      memory: "16Gi"
+    limits:
+      cpu: "8"
+      memory: "32Gi"
+      nvidia.com/gpu: 1

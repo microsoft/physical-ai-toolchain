@@ -4,7 +4,7 @@ description: >-
   Inventory and reference for GitHub Copilot agents, instructions, prompts,
   and skills configured in this repository.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-09-30
 ms.topic: reference
 keywords:
   - copilot
@@ -22,30 +22,31 @@ The cloud-agent setup workflow provisions the RPI skill suite at runtime.
 
 ## 📋 Artifact Inventory
 
-| Type        | Name                       | Description                                         | Path                                                              |
-|-------------|----------------------------|-----------------------------------------------------|-------------------------------------------------------------------|
-| Agent       | Dataviewer Developer       | Interactive dataset analysis and tool development   | `.github/agents/dataviewer-developer.agent.md`                    |
-| Agent       | OSMO Training Manager      | LeRobot training lifecycle on OSMO with Azure ML    | `.github/agents/osmo-training-manager.agent.md`                   |
-| Agent       | Dependabot PR Reviewer     | Dependency update review                            | `.github/agents/dependabot-pr-reviewer.agent.md`                  |
-| Agent       | Agentic Workflows          | GitHub agentic workflow authoring                   | `.github/agents/agentic-workflows.agent.md`                       |
-| Instruction | Commit Messages            | Conventional Commits format for all commit messages | `.github/instructions/commit-message.instructions.md`             |
-| Instruction | Dataviewer                 | Coding standards for dataviewer development         | `.github/instructions/dataviewer.instructions.md`                 |
-| Instruction | Docs Style and Conventions | Writing standards for all markdown files            | `.github/instructions/docs-style-and-conventions.instructions.md` |
-| Instruction | RPI Tracking               | Shared RPI working-artifact conventions             | `.github/instructions/hve-core/copilot-tracking.instructions.md`  |
-| Instruction | Shell Scripts              | Implementation standards for bash scripts           | `.github/instructions/shell-scripts.instructions.md`              |
-| Prompt      | `/chatlog`                 | Create and maintain conversation logs               | `.github/prompts/chatlog.prompt.md`                               |
-| Prompt      | `/check-training-status`   | Monitor OSMO training job progress                  | `.github/prompts/check-training-status.prompt.md`                 |
-| Prompt      | `/start-dataviewer`        | Launch Dataset Analysis Tool                        | `.github/prompts/start-dataviewer.prompt.md`                      |
-| Prompt      | `/dataviewer-annotate`     | Annotate dataset episodes                           | `.github/prompts/dataviewer-annotate.prompt.md`                   |
-| Prompt      | `/submit-lerobot-training` | Submit LeRobot training job to OSMO                 | `.github/prompts/submit-lerobot-training.prompt.md`               |
-| Skill       | dataviewer                 | Dataset browsing, annotation, and export            | `.github/skills/dataviewer/SKILL.md`                              |
-| Skill       | environment-deployment     | Generate and consume environment deployment bundles | `.github/skills/environment-deployment/SKILL.md`                  |
-| Skill       | fleet-deployment           | Deploy trained policies through fleet GitOps        | `.github/skills/fleet-deployment/SKILL.md`                        |
-| Skill       | fleet-intelligence         | Monitor fleet telemetry and drift                   | `.github/skills/fleet-intelligence/SKILL.md`                      |
-| Skill       | infrastructure             | Deploy and manage Azure infrastructure              | `.github/skills/infrastructure/SKILL.md`                          |
-| Skill       | osmo-lerobot-training      | Training submission, monitoring, and analysis       | `.github/skills/osmo-lerobot-training/SKILL.md`                   |
-| Skill       | synthetic-data             | Generate synthetic robotics training data           | `.github/skills/synthetic-data/SKILL.md`                          |
-| Skill       | rpi-*                      | Cloud-agent research, plan, implement, review       | `.github/skills/rpi-*/` (runtime-provisioned, gitignored)         |
+| Type        | Name                             | Description                                         | Path                                                              |
+|-------------|----------------------------------|-----------------------------------------------------|-------------------------------------------------------------------|
+| Agent       | Dataviewer Developer             | Interactive dataset analysis and tool development   | `.github/agents/dataviewer-developer.agent.md`                    |
+| Agent       | OSMO Training Manager            | LeRobot training lifecycle on OSMO with Azure ML    | `.github/agents/osmo-training-manager.agent.md`                   |
+| Agent       | Dependabot PR Reviewer           | Dependency update review                            | `.github/agents/dependabot-pr-reviewer.agent.md`                  |
+| Agent       | Agentic Workflows                | GitHub agentic workflow authoring                   | `.github/agents/agentic-workflows.agent.md`                       |
+| Instruction | Commit Messages                  | Conventional Commits format for all commit messages | `.github/instructions/commit-message.instructions.md`             |
+| Instruction | Dataviewer                       | Coding standards for dataviewer development         | `.github/instructions/dataviewer.instructions.md`                 |
+| Instruction | Docs Style and Conventions       | Writing standards for all markdown files            | `.github/instructions/docs-style-and-conventions.instructions.md` |
+| Instruction | RPI Tracking                     | Shared RPI working-artifact conventions             | `.github/instructions/hve-core/copilot-tracking.instructions.md`  |
+| Instruction | Shell Scripts                    | Implementation standards for bash scripts           | `.github/instructions/shell-scripts.instructions.md`              |
+| Prompt      | `/chatlog`                       | Create and maintain conversation logs               | `.github/prompts/chatlog.prompt.md`                               |
+| Prompt      | `/check-training-status`         | Monitor OSMO training job progress                  | `.github/prompts/check-training-status.prompt.md`                 |
+| Prompt      | `/start-dataviewer`              | Launch Dataset Analysis Tool                        | `.github/prompts/start-dataviewer.prompt.md`                      |
+| Prompt      | `/dataviewer-annotate`           | Annotate dataset episodes                           | `.github/prompts/dataviewer-annotate.prompt.md`                   |
+| Prompt      | `/submit-lerobot-training`       | Submit LeRobot training job to OSMO                 | `.github/prompts/submit-lerobot-training.prompt.md`               |
+| Skill       | azureml-k3s-compute-target-setup | Attach an Arc-connected K3s GPU cluster to Azure ML | `.github/skills/azureml-k3s-compute-target-setup/SKILL.md`        |
+| Skill       | dataviewer                       | Dataset browsing, annotation, and export            | `.github/skills/dataviewer/SKILL.md`                              |
+| Skill       | environment-deployment           | Generate and consume environment deployment bundles | `.github/skills/environment-deployment/SKILL.md`                  |
+| Skill       | fleet-deployment                 | Deploy trained policies through fleet GitOps        | `.github/skills/fleet-deployment/SKILL.md`                        |
+| Skill       | fleet-intelligence               | Monitor fleet telemetry and drift                   | `.github/skills/fleet-intelligence/SKILL.md`                      |
+| Skill       | infrastructure                   | Deploy and manage Azure infrastructure              | `.github/skills/infrastructure/SKILL.md`                          |
+| Skill       | osmo-lerobot-training            | Training submission, monitoring, and analysis       | `.github/skills/osmo-lerobot-training/SKILL.md`                   |
+| Skill       | synthetic-data                   | Generate synthetic robotics training data           | `.github/skills/synthetic-data/SKILL.md`                          |
+| Skill       | rpi-*                            | Cloud-agent research, plan, implement, review       | `.github/skills/rpi-*/` (runtime-provisioned, gitignored)         |
 
 ## 🔗 Quick Reference
 

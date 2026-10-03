@@ -19,4 +19,7 @@ locals {
 
   // Private endpoint configuration
   pe_enabled = var.should_enable_private_endpoint
+
+  // Node pools that own a subnet; entries with subnet_pool_key use their owner's subnet
+  subnet_owner_node_pools = { for key, pool in var.node_pools : key => pool if pool.subnet_pool_key == null }
 }

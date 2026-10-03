@@ -26,5 +26,6 @@ software-in-the-loop (SiL) evaluation, not an exhaustive inventory of VLA workfl
 
 * `training/rl/scripts/submit-azureml-training.sh`
 * `training/il/scripts/submit-azureml-lerobot-training.sh`
+* `training/smoke/scripts/submit-azureml-gpu-smoke.sh`
 * `evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh`
 * `evaluation/sil/scripts/submit-azureml-lerobot-eval.sh`

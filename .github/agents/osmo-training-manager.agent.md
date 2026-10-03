@@ -55,7 +55,7 @@ Submit a LeRobot training workflow to OSMO using the submission script.
 4. Determine training parameters from user input. Apply defaults for unspecified values:
    - Policy type: `act`
    - Training steps: `100000`
-   - Batch size: `32` (64 for 48GB GPUs like RTX PRO 6000)
+   - Batch size: `32` (64 for GPUs with 48GB or more, such as RTX PRO 6000)
    - Learning rate: `1e-4`
    - Save frequency: `10000`
    - Validation split: disabled (`--no-val-split`) for blob datasets
