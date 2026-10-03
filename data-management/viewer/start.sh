@@ -308,7 +308,7 @@ start_backend() {
         fi
     elif [[ "${should_install_vlm_judge}" == "true" ]]; then
         log_info "Ensuring VLM judge package dependencies are installed..."
-        (cd "${BACKEND_DIR}" && uv sync "${backend_sync_args[@]}")
+        (cd "${BACKEND_DIR}" && uv sync --inexact "${backend_sync_args[@]}")
         # shellcheck source=/dev/null
         (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${vlm_judge_package_spec}")
     fi
