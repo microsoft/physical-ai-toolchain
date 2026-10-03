@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -46,6 +48,35 @@ TEST_DATASET_PATH = os.environ.get(
 TEST_DATASET_ID = os.environ.get("TEST_DATASET_ID", "lerobot")
 
 
+@pytest.fixture
+def accepted_dataset_path(tmp_path: Path) -> Path:
+    """Create an accepted dataset descriptor with matching artifact hashes."""
+    dataset_path = tmp_path / "accepted-dataset"
+    dataset_path.mkdir()
+    artifacts = {}
+    for name, content in {
+        "capture_provenance": b'{"profile_id":"profile-alpha"}',
+        "export_validation": b'{"status":"pass"}',
+    }.items():
+        filename = f"{name.replace('_', '-')}.json"
+        (dataset_path / filename).write_bytes(content)
+        artifacts[name] = {"file": filename, "sha256": hashlib.sha256(content).hexdigest()}
+    descriptor = {
+        "schema_version": 1,
+        "dataset_id": dataset_path.name,
+        "output_adapter_id": "lerobot_v3",
+        "output_adapter_version": "0.6.0",
+        "viewer_adapter_id": "dataviewer_v1",
+        "profile_id": "profile-alpha",
+        "profile_sha256": "a" * 64,
+        "capture_features": [{"feature_id": "state-alpha", "kind": "observation_state"}],
+        "sensors": [{"sensor_id": "view-alpha", "media_kind": "rgb"}],
+        "artifacts": artifacts,
+    }
+    (dataset_path / "accepted-dataset.json").write_text(json.dumps(descriptor), encoding="utf-8")
+    return dataset_path
+
+
 def _write_accessibility_episode(path: Path, *, length: int, phase: float) -> None:
     """Write one deterministic synthetic HDF5 episode."""
     h5py = pytest.importorskip("h5py")
@@ -87,11 +118,26 @@ def accessibility_dataset_path(tmp_path_factory: pytest.TempPathFactory) -> Path
 
 
 @pytest.fixture(autouse=True, scope="session")
-def disable_auth_for_tests():
-    """Disable authentication and CSRF checks for all tests."""
+def configure_test_environment(tmp_path_factory: pytest.TempPathFactory):
+    """Configure authentication and writable local storage for tests."""
+    previous_data_dir = os.environ.get("DATA_DIR")
     os.environ["DATAVIEWER_AUTH_DISABLED"] = "true"
+    os.environ["DATA_DIR"] = str(tmp_path_factory.mktemp("default-datasets"))
+
+    import src.api.config as config_mod
+    import src.api.main as main_mod
+
+    previous_config = main_mod._config
+    config_mod._app_config = None
+    main_mod._config = config_mod.load_config()
     yield
     os.environ.pop("DATAVIEWER_AUTH_DISABLED", None)
+    if previous_data_dir is None:
+        os.environ.pop("DATA_DIR", None)
+    else:
+        os.environ["DATA_DIR"] = previous_data_dir
+    config_mod._app_config = None
+    main_mod._config = previous_config
 
 
 @pytest.fixture(scope="session")
@@ -124,9 +170,9 @@ def client(test_dataset_path):
     ds_mod._dataset_service = None
     ann_mod._annotation_service = None
 
-    from src.api.main import app
+    import src.api.main as main_mod
 
-    with TestClient(app) as c:
+    with TestClient(main_mod.app) as c:
         yield c
 
     config_mod._app_config = None

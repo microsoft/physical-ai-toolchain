@@ -65,9 +65,10 @@ jobs:
           persist-credentials: false
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
-          version: '0.12.8'
+          version: '0.12.20'
+          checksum: '6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f'
 
       - name: Verify uv bootstrap recovery
         if: matrix.domain == 'rl'
@@ -91,11 +92,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6  # v2.0.0
-        with:
-          tool-cache: true
-
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh rl
 
@@ -111,11 +107,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6  # v2.0.0
-        with:
-          tool-cache: true
 
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh il
@@ -133,11 +124,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6  # v2.0.0
-        with:
-          tool-cache: true
-
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh evaluation
 
@@ -153,11 +139,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6  # v2.0.0
-        with:
-          tool-cache: true
 
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh vla

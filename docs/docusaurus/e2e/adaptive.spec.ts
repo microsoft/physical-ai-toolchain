@@ -269,6 +269,48 @@ test('forced colors preserve active and focus cues', evidence('dcs11-forced-colo
   expect(new Set(descendantColors).size).toBe(1);
 });
 
+for (const colorScheme of ['light', 'dark'] as const) {
+  for (const width of [320, 390, 420, 421, 1280]) {
+    test(`navbar height matches the theme at normal text size: ${width}px ${colorScheme}`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 844 });
+      await page.emulateMedia({ colorScheme });
+      await page.goto(siteRoute(representativeRoutes.article));
+      await expectPageReady(page);
+      await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
+      await page.evaluate(() => document.fonts.ready);
+
+      const heights = await page.locator('.navbar').evaluate((navbar) => {
+        const probe = document.createElement('div');
+        probe.style.cssText = 'position: absolute; visibility: hidden; width: 0; height: var(--ifm-navbar-height); padding: 0; border: 0;';
+        navbar.appendChild(probe);
+        const theme = probe.getBoundingClientRect().height;
+        probe.remove();
+        return { theme, navbar: navbar.getBoundingClientRect().height };
+      });
+
+      let sidebarBrand: number | null = null;
+      if (width <= 996) {
+        await openMobileNavigation(page);
+        await settleAnimations(page);
+        const brand = page.locator('.navbar-sidebar__brand');
+        await expect(brand).toBeVisible();
+        sidebarBrand = await brand.evaluate((element) => element.getBoundingClientRect().height);
+      }
+      await testInfo.attach('navbar-heights', {
+        body: JSON.stringify({ width, colorScheme, ...heights, sidebarBrand }, null, 2),
+        contentType: 'application/json',
+      });
+
+      expect(Number.isFinite(heights.theme)).toBe(true);
+      expect(heights.theme).toBeGreaterThan(0);
+      expect(Math.abs(heights.navbar - heights.theme), 'navbar versus theme height').toBeLessThanOrEqual(0.5);
+      if (sidebarBrand !== null) {
+        expect(Math.abs(sidebarBrand - heights.theme), 'sidebar brand versus theme height').toBeLessThanOrEqual(0.5);
+      }
+    });
+  }
+}
+
 test('mobile navigation contains keyboard focus and restores the toggle on close', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(siteRoute('/'));
@@ -277,6 +319,9 @@ test('mobile navigation contains keyboard focus and restores the toggle on close
   await menuButton.focus();
   await menuButton.press('Enter');
   await expect(menuButton).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('.navbar-sidebar')).toBeVisible();
+  await expect(page.locator('main')).toHaveAttribute('inert', '');
+  await expect(page.locator('footer')).toHaveAttribute('inert', '');
   let focusEnteredSidebar = false;
   for (let index = 0; index < 3 && !focusEnteredSidebar; index += 1) {
     await page.keyboard.press('Tab');
@@ -285,9 +330,6 @@ test('mobile navigation contains keyboard focus and restores the toggle on close
     );
   }
   expect(focusEnteredSidebar).toBe(true);
-
-  await expect(page.locator('main')).toHaveAttribute('inert', '');
-  await expect(page.locator('footer')).toHaveAttribute('inert', '');
 
   const sidebarControls = page.locator([
     '.navbar-sidebar__brand a:visible',
@@ -1469,46 +1511,7 @@ interface ReviewedAdaptiveException {
   readonly reentryTrigger: string;
 }
 
-const desktopTemplateStateIds = [
-  'home',
-  'documentation-hub',
-  'article',
-  'search',
-  'not-found',
-  'table-and-alert',
-  'task-list',
-  'mermaid-chunking',
-  'mermaid-osmo-proxy',
-  'desktop-navigation-open',
-  'search-results-open',
-];
-
-const reviewedAdaptiveExceptions: readonly ReviewedAdaptiveException[] = [
-  {
-    id: 'navbar-title-truncated-under-text-only-resize',
-    producer: 'layout',
-    signature: /^clipped: b\.navbar__title\.text--truncate/,
-    states: desktopTemplateStateIds,
-    conditionIds: ['text-resize-200'],
-    rationale:
-      'Text-only 200 percent scaling keeps the desktop navbar breakpoint, so the Infima text--truncate site title collapses to an ellipsis. The accessible name and document title keep the full text.',
-    owner: 'accessibility owner',
-    reentryTrigger:
-      'Qualified real browser zoom evidence for SC 1.4.4, or any navbar, breakpoint, or title styling change.',
-  },
-  {
-    id: 'search-hit-preview-truncated-in-reflow',
-    producer: 'layout',
-    signature: /^clipped: span\.hit(Title|Path)_/,
-    states: ['search-results-open'],
-    conditionIds: ['reflow-320', 'text-spacing-at-320'],
-    rationale:
-      'The local search plugin renders fixed-width single-line result previews. The complete title and path remain in the accessible name and on the destination route.',
-    owner: 'accessibility owner',
-    reentryTrigger:
-      'Qualified review of search result preview truncation, or any docusaurus-search-local upgrade.',
-  },
-];
+const reviewedAdaptiveExceptions: readonly ReviewedAdaptiveException[] = [];
 
 interface ClassifiedFinding {
   readonly conditionId: string;

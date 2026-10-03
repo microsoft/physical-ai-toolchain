@@ -20,18 +20,23 @@ unset _common_sh_dir _env_local
 # scripts/update-image-digests.sh.
 #
 # derive_azureml_environment_version_from_image() below derives AzureML environment
-# versions from the checked-in Isaac Lab and LeRobot defaults. update-image-digests.sh
-# keeps the direct-submit workflow pins synchronized with those defaults.
-DEFAULT_ISAAC_LAB_IMAGE="${DEFAULT_ISAAC_LAB_IMAGE:-nvcr.io/nvidia/isaac-lab:2.3.2@sha256:388dbc806f48359a964cb9f807feb226da95d0a107f470fdcad9780ea10fe6f2}"
+# versions from the checked-in Isaac Lab, LeRobot, and GPU smoke test defaults.
+# update-image-digests.sh keeps the direct-submit workflow pins synchronized with them.
+DEFAULT_ISAAC_LAB_IMAGE="${DEFAULT_ISAAC_LAB_IMAGE:-nvcr.io/nvidia/isaac-lab:3.0.0-beta2-post1@sha256:ae9c938a16df856effad6dab92115ee0dce2a8813f56847eeeccbebc008d02c4}"
 DEFAULT_LEROBOT_TRAIN_IMAGE="${DEFAULT_LEROBOT_TRAIN_IMAGE:-pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407}"
 DEFAULT_LEROBOT_EVAL_IMAGE="${DEFAULT_LEROBOT_EVAL_IMAGE:-pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407}"
 DEFAULT_GROOT_IMAGE="${DEFAULT_GROOT_IMAGE:-pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel@sha256:0cf3402e946b7c384ba943ee05c90b4c5a4a05227923921f2b0918c011cfaf56}"
+# CUDA 12.4 runs on NVIDIA driver 550 and newer, including AKS-managed GRID drivers.
+DEFAULT_AZUREML_SMOKE_IMAGE="${DEFAULT_AZUREML_SMOKE_IMAGE:-pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime@sha256:77f17f843507062875ce8be2a6f76aa6aa3df7f9ef1e31d9d7432f4b0f563dee}"
+# NVIDIA Kubernetes device plugin for K3s hosts that expose GPUs without the GPU Operator.
+DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE="${DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE:-nvcr.io/nvidia/k8s-device-plugin:v0.17.4@sha256:3c54348fe5a57e5700e7d8068e7531d2ef2d5f3ccb70c8f6bac0953432527abd}"
 # isaac-lab tag, available to callers that need the tag without the digest.
 _isaac_ref="${DEFAULT_ISAAC_LAB_IMAGE%@*}"
 DEFAULT_ISAAC_LAB_IMAGE_VERSION="${DEFAULT_ISAAC_LAB_IMAGE_VERSION:-${_isaac_ref##*:}}"
 unset _isaac_ref
 export DEFAULT_ISAAC_LAB_IMAGE DEFAULT_ISAAC_LAB_IMAGE_VERSION
-export DEFAULT_LEROBOT_TRAIN_IMAGE DEFAULT_LEROBOT_EVAL_IMAGE DEFAULT_GROOT_IMAGE
+export DEFAULT_LEROBOT_TRAIN_IMAGE DEFAULT_LEROBOT_EVAL_IMAGE DEFAULT_GROOT_IMAGE DEFAULT_AZUREML_SMOKE_IMAGE
+export DEFAULT_NVIDIA_DEVICE_PLUGIN_IMAGE
 
 # Logging functions with color support (NO_COLOR standard: https://no-color.org)
 if [[ -z "${NO_COLOR+x}" ]]; then
@@ -278,6 +283,23 @@ stage_and_upload_code() {
 
   rm -rf "$tmp"
   echo "$uri"
+}
+
+# Grant a role unless the principal already holds it at the scope. Matching by object ID
+# avoids a Microsoft Graph lookup for managed identities.
+# Usage: ensure_role_assignment <object-id> <User|Group|ServicePrincipal> <role> <scope>
+ensure_role_assignment() {
+  local principal_id="${1:?principal object ID required}" principal_type="${2:?principal type required}"
+  local role="${3:?role required}" scope="${4:?scope required}" existing
+  existing=$(az role assignment list --scope "$scope" --role "$role" \
+    --query "length([?principalId=='$principal_id'])" -o tsv)
+  if [[ "$existing" != "0" ]]; then
+    info "$role already granted on ${scope##*/}"
+    return 0
+  fi
+  info "Granting $role on ${scope##*/}..."
+  az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type "$principal_type" \
+    --role "$role" --scope "$scope" --output none
 }
 
 # Ensure Azure CLI extension is installed
@@ -681,6 +703,27 @@ detect_service_url() {
   echo "$url"
 }
 
+# Log in to an OSMO service with the method it supports. A service with an identity
+# provider publishes a device endpoint for code login. A service deployed without
+# authentication, as 03-deploy-osmo.sh deploys it, publishes none and accepts only a
+# dev login. Uses the caller's XDG_CONFIG_HOME, so isolated profiles stay isolated.
+# Usage: osmo_login <service-url> [dev-username]
+osmo_login() {
+  local service_url="${1:?service URL required}" dev_username="${2:-admin}"
+  local auth_url="${service_url%/}/api/auth/login"
+  local auth_config device_endpoint
+  auth_config=$(curl --fail --silent --show-error --connect-timeout 10 "$auth_url") || \
+    fatal "Unable to read the OSMO login configuration from $auth_url"
+  device_endpoint=$(jq -r '.device_endpoint // empty' <<< "$auth_config") || \
+    fatal "OSMO login configuration from $auth_url is not valid JSON"
+  if [[ -n "$device_endpoint" ]]; then
+    osmo login "$service_url" --method code
+  else
+    info "OSMO at $service_url has no identity provider; using a dev login as $dev_username"
+    osmo login "$service_url" --method dev --username "$dev_username"
+  fi
+}
+
 # Print section header
 section() {
   echo
@@ -781,6 +824,23 @@ require_protected_file() {
 # // ===================================================================
 # OSMO Preflight Validation
 # // ===================================================================
+
+# List installed pre-6.3 OSMO releases as "<release>\t<chart>" lines: separate service, router,
+# or web-ui chart releases, or an osmo release on an older chart line than the pinned one.
+# Releases uninstalled with --keep-history own no resources and are skipped.
+# Usage: osmo_legacy_releases <namespace> <pinned-chart-version>
+osmo_legacy_releases() {
+  local namespace="${1:?namespace required}" pinned="${2:?pinned chart version required}"
+  helm list --all -n "$namespace" -o json | jq -r --arg pinned "$pinned" '
+    def minor_line: capture("^(?<major>[0-9]+)\\.(?<minor>[0-9]+)") | [(.major | tonumber), (.minor | tonumber)];
+    .[] | select(.status != "uninstalled")
+    | (.chart | capture("^(?<name>.+)-(?<version>[0-9]+\\.[0-9]+\\.[0-9]+.*)$")) as $chart
+    | select(
+        (.name != "osmo" and ($chart.name | IN("service", "router", "web-ui")))
+        or (.name == "osmo" and (($chart.version | minor_line) < ($pinned | minor_line)))
+      )
+    | "\(.name)\t\(.chart)"'
+}
 
 is_prerelease_tag() {
   local tag="${1:?image tag required}"

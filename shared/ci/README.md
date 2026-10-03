@@ -2,7 +2,7 @@
 title: CI Smoke Scripts
 description: GPU-free import smoke scripts for training and evaluation domains, runnable locally and in CI.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-23
+ms.date: 2026-10-02
 ---
 
 GPU-free import smoke checks that catch syntax, import, dependency-resolution, and interpreter/ABI regressions before they reach a GPU job. The same scripts run in CI (`.github/workflows/smoke-cpu.yml`) and locally.
@@ -39,7 +39,7 @@ shared/ci/smoke-image.sh osmo-replay               # runtime-image smoke (Python
 shared/ci/smoke-import.sh rl --mode cpu
 ```
 
-`smoke-image.sh` mounts the repository at `/workspace` and runs `smoke-import.sh <domain> --mode <mode>` inside a linux/amd64 container: a lightweight uv image for `--mode cpu`, the domain's production image for `--mode image`. CI runs the CPU smoke directly on its linux runners and calls `smoke-image.sh` for the runtime-image depth after a free-disk-space step.
+`smoke-image.sh` mounts the repository at `/workspace` and runs `smoke-import.sh <domain> --mode <mode>` inside a linux/amd64 container: a lightweight uv image for `--mode cpu`, the domain's production image for `--mode image`. CI runs the CPU smoke directly on its linux runners and calls `smoke-image.sh` for the runtime-image depth.
 
 > [!NOTE]
 > The runtime images are multi-gigabyte. The first `--mode image` run pulls the image; expect several minutes and ensure free disk.
@@ -53,14 +53,14 @@ shared/ci/smoke-import.sh rl --mode cpu
 
 ## 🧪 Domains
 
-| Domain        | Python | Runtime image                           | CPU smoke | Runtime-image smoke |
-|---------------|--------|-----------------------------------------|-----------|---------------------|
-| `rl`          | 3.11   | Isaac Lab (`DEFAULT_ISAAC_LAB_IMAGE`)   | yes       | yes                 |
-| `il`          | 3.12   | PyTorch (`lerobot-train.yaml` default)  | yes       | yes                 |
-| `vla`         | 3.12   | PyTorch (`DEFAULT_LEROBOT_TRAIN_IMAGE`) | yes       | yes                 |
-| `evaluation`  | 3.12   | PyTorch (`evaluate.yaml`)               | yes       | yes                 |
-| `vlm-judge`   | 3.12   | none                                    | yes       | no                  |
-| `osmo-replay` | 3.11   | Python (`replay-azureml.yaml`)          | yes       | yes                 |
+| Domain        | Python | Runtime image                             | CPU smoke | Runtime-image smoke |
+|---------------|--------|-------------------------------------------|-----------|---------------------|
+| `rl`          | 3.12   | Isaac Lab 3.0 (`DEFAULT_ISAAC_LAB_IMAGE`) | yes       | yes                 |
+| `il`          | 3.12   | PyTorch (`lerobot-train.yaml` default)    | yes       | yes                 |
+| `vla`         | 3.12   | PyTorch (`DEFAULT_LEROBOT_TRAIN_IMAGE`)   | yes       | yes                 |
+| `evaluation`  | 3.12   | PyTorch (`evaluate.yaml`)                 | yes       | yes                 |
+| `vlm-judge`   | 3.12   | none                                      | yes       | no                  |
+| `osmo-replay` | 3.11   | Python (`replay-azureml.yaml`)            | yes       | yes                 |
 
 Image references come from their source of truth: `scripts/lib/common.sh` for `rl` and `vla`, `training/il/workflows/osmo/lerobot-train.yaml` for `il`, `evaluation/sil/workflows/azureml/components/evaluate.yaml` for `evaluation`, and `workflows/osmo/replay-azureml.yaml` for `osmo-replay`.
 

@@ -2,7 +2,7 @@
 title: Cluster Setup
 description: AKS cluster configuration with NVIDIA GPU operator, KAI Scheduler, and AzureML extension
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-23
+ms.date: 2026-10-03
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -21,19 +21,34 @@ AKS cluster configuration for robotics workloads. Deploys NVIDIA GPU operator, K
 
 Each script writes AKS credentials to an isolated kubeconfig and requires an explicit context for Kubernetes and Helm operations.
 
+The AzureML extension enables training and batch scoring. Real-time inference support and the `azureml-fe` inference router are disabled. The extension-managed nginx ingress controller remains enabled for OSMO routing. Reruns compare the live configuration and update only settings that differ; Azure can retain inactive inference settings from an earlier installation because configuration updates merge stored settings.
+
 Deployment order:
 
-1. `./01-deploy-robotics-charts.sh` — GPU Operator, KAI Scheduler
-2. `./02-deploy-azureml-extension.sh` — AzureML K8s extension, compute attach
-3. `./03-deploy-osmo.sh` — OSMO control plane and backend operator
+1. `./01-deploy-robotics-charts.sh`: GPU Operator, KAI Scheduler
+2. `./02-deploy-azureml-extension.sh`: training-only AzureML K8s extension, compute attach
+3. `./03-deploy-osmo.sh`: OSMO control plane and backend operator
 
-After an existing OSMO backend and pool are ready, a trusted environment owner uses `./04-prepare-osmo-hil-node.sh` to publish exact host-bound inputs. The Ubuntu path deploys only the local backend resources.
+On a new cluster, `03-deploy-osmo.sh` needs `--private-service-ip` with a free address in the AKS subnet for the internal load balancer in front of OSMO. Later runs reuse that address. See [Cluster Setup](../../docs/infrastructure/cluster-setup.md#-deployment-scenarios).
+
+`03-deploy-osmo.sh` stops on OSMO installs that predate 6.3. Upgrade them with `optional/upgrade-osmo.sh`, one confirmed stage per run. See [OSMO Upgrade from Pre-6.3 Releases](../../docs/infrastructure/osmo-upgrade.md).
+
+To run Azure ML training jobs on an Arc-connected HiL cluster, an operator runs `./05-attach-hil-azureml-compute.sh`. See [HiL Clusters as Azure ML Computes](../../docs/training/azureml-training.md#-hil-clusters-as-azure-ml-computes).
+
+After an existing OSMO backend and pool are ready, a trusted environment owner uses `./04-prepare-osmo-hil-node.sh` to publish exact host-bound inputs, after `./prepare-osmo-hil-exchange.sh` creates the Key Vault secrets and registry credential it expects. The Ubuntu path deploys only the local backend resources. A HiL host that only runs Azure ML jobs needs `05-attach-hil-azureml-compute.sh` and none of the OSMO steps.
 
 ## 📦 Environment Bundles
 
 Generate environment-specific deployment details with the `environment-deployment` agent skill. The skill reads Terraform outputs and uses available Azure CLI, kubectl, Helm, and OSMO read-only commands to create a validated bundle under the gitignored `infrastructure/setup/generated/<environment>/` directory.
 
 The bundle contains non-secret metadata and generated manifests. It never contains Terraform state, kubeconfigs, OSMO profiles, tokens, registry credentials, or VPN credentials.
+
+To pull OSMO from the environment's ACR, import the pinned images and charts first. The script locks every imported tag and writes `osmo-images.json` to the bundle. It records the manifest, registry, and OSMO versions in `deployment.json`, and stops before importing if a value already there names a different registry or version:
+
+```bash
+./import-osmo-to-acr.sh --environment <environment> --config-preview
+./import-osmo-to-acr.sh --environment <environment>
+```
 
 Run each deployment preview with explicit generated inputs:
 
@@ -57,6 +72,19 @@ Upload the allowlisted bundle to Key Vault from the trusted deployment host:
 ```
 
 The generic bundle remains non-secret. Credentials, registry access, and public VPN exchange material use a separate host-bound HiL catalog rather than widening this allowlist.
+
+Before a host's first publication, create its exchange secrets and a pull-only registry config. Keep the config in a protected directory outside the repository:
+
+```bash
+./prepare-osmo-hil-exchange.sh \
+  --environment <environment> \
+  --host-name <host> \
+  --registry-config-file <protected-pull-config> \
+  --token-expiry <yyyy-mm-dd> \
+  --config-preview
+```
+
+Add `--assignee-object-id` to grant the host identity Key Vault roles on each exchange secret, and rerun it after the first publication to grant the catalog. See [Ubuntu HiL OSMO Backend](../../docs/recipes/tier-3-production/ubuntu-hil-osmo-backend.md#create-the-exchange-secrets).
 
 Prepare the exact catalog from a trusted environment-operator host:
 

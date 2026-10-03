@@ -34,6 +34,7 @@ jobs:
       shared_ci: ${{ steps.filter.outputs.shared_ci }}
       dv_backend: ${{ steps.filter.outputs.dv_backend }}
       dv_frontend: ${{ steps.filter.outputs.dv_frontend }}
+      accessibility: ${{ steps.filter.outputs.accessibility }}
       fuzz: ${{ steps.filter.outputs.fuzz }}
       docusaurus: ${{ steps.filter.outputs.docusaurus }}
       pester: ${{ steps.filter.outputs.pester }}
@@ -182,6 +183,15 @@ jobs:
       upload-sarif: true
       exclude-paths: 'scripts/tests/Fixtures/**,shared/ci/tests/Fixtures/**'
 
+  # Canonical public dependency source enforcement
+  public-dependency-feeds:
+    name: Public Dependency Feeds
+    uses: ./.github/workflows/public-dependency-feeds.yml
+    with:
+      soft-fail: false
+    permissions:
+      contents: read
+
   # OSV-Scanner: advisory-only vulnerability scan across manifests using
   # osv-scanner.toml. The scan step uses continue-on-error so the job always
   # reports success (green) even when vulnerabilities are found; findings still
@@ -254,6 +264,18 @@ jobs:
       contents: read
       id-token: write
 
+  # Accessibility contracts and deterministic product and bundle evidence.
+  accessibility-evidence:
+    name: Accessibility Evidence
+    needs: changes
+    if: needs.changes.outputs.accessibility == 'true'
+    uses: ./.github/workflows/accessibility-evidence.yml
+    with:
+      run-product-evidence: true
+    permissions:
+      contents: read
+      id-token: write
+
   # Docusaurus documentation site tests and build verification
   docusaurus-tests:
     name: Docusaurus Tests
@@ -264,6 +286,7 @@ jobs:
       soft-fail: false
     permissions:
       contents: read
+      id-token: write
 
   # Pytest: training component
   pytest-training:
@@ -508,8 +531,10 @@ jobs:
       - markdown-link-check
       - dependency-review
       - dependency-pinning
+      - public-dependency-feeds
       - pester-tests
       - dataviewer-frontend-tests
+      - accessibility-evidence
       - docusaurus-tests
       - pytest-training
       - pytest-dm-tools

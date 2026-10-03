@@ -148,9 +148,19 @@ textarea:focus-visible,
    ================================================================ */
 
 .navbar {
-  height: 54px;
+  /* Override the theme's specificity-raised height so enlarged controls can wrap. */
+  height: auto !important;
+  min-height: var(--ifm-navbar-height);
   box-shadow: none;
   border-bottom: 1px solid var(--ifm-toc-border-color);
+}
+
+.navbar__items {
+  flex-wrap: wrap;
+}
+
+.navbar__brand {
+  flex-shrink: 0;
 }
 
 .navbar__logo {
@@ -172,6 +182,11 @@ textarea:focus-visible,
   vertical-align: middle;
 }
 
+/* Keep menu visibility synchronized with disclosure state for native keyboard navigation. */
+.navbar__item.dropdown > .dropdown__menu {
+  transition: none !important;
+}
+
 html[data-theme='dark'] .navbar {
   background-color: #1f1f1f;
 }
@@ -188,6 +203,15 @@ html[data-theme='dark'] .navbar {
 .menu__link--active:not(.menu__link--sublist) {
   font-weight: 600;
   background-color: var(--ms-learn-section-bg);
+}
+
+/* The theme clamps sidebar labels to two lines with boosted specificity, which hides text under text resize and spacing. */
+.menu__link [class*='linkLabel_'],
+.menu__link [class*='categoryLinkLabel_'] {
+  display: block !important;
+  overflow: visible !important;
+  line-clamp: none !important;
+  -webkit-line-clamp: unset !important;
 }
 
 /* ================================================================
@@ -271,6 +295,19 @@ html[data-theme='dark'] .navbar {
   display: flex;
   min-height: 24px;
   align-items: center;
+}
+
+/* Wrap result previews instead of truncating them so resized and reflowed text stays readable. */
+html .searchA11yWrapper [role='listbox'] [class*='suggestion_'] {
+  height: auto;
+  min-height: var(--search-local-hit-height, 56px);
+  padding-block: 6px;
+}
+
+.searchA11yWrapper [class*='hitTitle_'],
+.searchA11yWrapper [class*='hitPath_'] {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 html .searchA11yWrapper [role='listbox'] [role='option'][aria-selected='true'] {
@@ -429,8 +466,6 @@ html[data-theme='dark'] .docusaurus-mermaid-container .edgeLabel p {
 
 @media (max-width: 420px) {
   .navbar {
-    height: auto;
-    min-height: 54px;
     padding-inline: 0.75rem;
   }
 

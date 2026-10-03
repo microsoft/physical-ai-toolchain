@@ -81,6 +81,21 @@ class DatasetInfo(BaseModel):
     tasks: list[TaskInfo] = Field(default_factory=list, description="Available tasks")
 
 
+class AcceptedDatasetContract(BaseModel):
+    """Dataset adapter identities and verified capture artifact digests."""
+
+    dataset_id: str
+    output_adapter_id: str
+    output_adapter_version: str
+    viewer_adapter_id: str
+    profile_id: str
+    profile_sha256: str
+    capture_provenance_sha256: str
+    export_validation_sha256: str
+    capture_features: list[dict[str, object]]
+    sensors: list[dict[str, object]]
+
+
 # ============================================================================
 # Episode Types
 # ============================================================================
@@ -147,44 +162,6 @@ class EpisodeData(BaseModel):
         description="Named variables available for trajectory plots",
     )
     trajectory_data: list[TrajectoryPoint] = Field(default_factory=list, description="Trajectory data points")
-
-
-# ============================================================================
-# Curriculum Types
-# ============================================================================
-
-
-class CurriculumCriteria(BaseModel):
-    """Criteria for filtering episodes into a curriculum stage."""
-
-    min_quality_score: int | None = Field(default=None, ge=1, le=5, description="Minimum quality score")
-    task_completeness: list[str] | None = Field(default=None, description="Task completeness ratings to include")
-    exclude_flags: list[str] | None = Field(default=None, description="Trajectory flags to exclude")
-    max_anomaly_count: int | None = Field(default=None, ge=0, description="Maximum anomalies allowed")
-
-
-class CurriculumStage(BaseModel):
-    """Single stage in a training curriculum."""
-
-    name: str = Field(description="Stage name")
-    episode_indices: list[int] = Field(default_factory=list, description="Episode indices in this stage")
-    criteria: CurriculumCriteria = Field(default_factory=CurriculumCriteria, description="Selection criteria")
-
-
-class CurriculumStrategy(str):
-    """Curriculum ordering strategy."""
-
-    DIFFICULTY_ASCENDING = "difficulty-ascending"
-    QUALITY_DESCENDING = "quality-descending"
-    BALANCED = "balanced"
-
-
-class CurriculumDefinition(BaseModel):
-    """Complete curriculum definition."""
-
-    name: str = Field(description="Curriculum name")
-    strategy: str = Field(default="balanced", description="Ordering strategy")
-    stages: list[CurriculumStage] = Field(default_factory=list, description="Curriculum stages")
 
 
 # ============================================================================

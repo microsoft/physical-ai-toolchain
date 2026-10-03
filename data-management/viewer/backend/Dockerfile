@@ -11,14 +11,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 # uv binary from its official image, pinned by digest for OSSF Scorecard.
 COPY --from=ghcr.io/astral-sh/uv:0.10.9@sha256:10902f58a1606787602f303954cea099626a4adb02acbac4c69920fe9d278f82 /uv /uvx /bin/
 
-# Copy dependency manifests
-COPY pyproject.toml uv.lock ./
+# Copy dependency manifests and runtime logging configuration
+COPY pyproject.toml uv.lock logging.json ./
 
 # Install production dependencies and runtime feature extras into /app/.venv.
+# BACKEND_EXTRAS lists extras separated by commas or spaces. The yolo extra pulls
+# CUDA torch (about 9 GB compressed), so Azure Container Apps builds pass a
+# smaller list to fit the Consumption profile's 8 GB limit.
+ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PATH=/app/.venv/bin:$PATH
-RUN uv sync --frozen --no-dev --extra azure --extra analysis --extra export --extra auth --extra yolo
+RUN extras=""; \
+    for extra in $(echo "${BACKEND_EXTRAS}" | tr ',' ' '); do extras="${extras} --extra ${extra}"; done; \
+    uv sync --frozen --no-dev ${extras}
 
 # Copy application source
 COPY src/ ./src/
@@ -34,6 +40,7 @@ EXPOSE 8000
 # BACKEND_HOST=0.0.0.0 binds to all interfaces (required in containers)
 ENV BACKEND_HOST=0.0.0.0 \
     BACKEND_PORT=8000 \
+    LOG_LEVEL=info \
     STORAGE_BACKEND=local \
     DATA_DIR=/data \
     DETECTION_MODELS_DIR=/models
@@ -42,4 +49,4 @@ ENV BACKEND_HOST=0.0.0.0 \
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${BACKEND_PORT}/health')"
 
-CMD ["sh", "-c", "uvicorn src.api.main:app --host ${BACKEND_HOST} --port ${BACKEND_PORT}"]
+CMD ["sh", "-c", "uvicorn src.api.main:app --log-config logging.json --log-level ${LOG_LEVEL} --host ${BACKEND_HOST} --port ${BACKEND_PORT}"]

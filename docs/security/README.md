@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Security Documentation
 description: Index of security documentation including threat model and deployment security guide
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-02
+ms.date: 2026-09-28
 ms.topic: overview
 keywords:
   - security
@@ -48,14 +48,15 @@ The [security guide](../operations/security-guide.md) documents:
 
 Automated security and freshness checks that run on GitHub Actions schedules and publish findings to the Security tab.
 
-| Script                                                                                                                                                 | Workflow                                                            | Purpose                                                                                                                                                                                         |
-|--------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [`scripts/security/Modules/PinnedToolVersions.psm1`](../../scripts/security/Modules/PinnedToolVersions.psm1)                                            | `check-binary-freshness.yml`, `check-binary-integrity.yml`          | Provide literal tool version discovery across tracked shell, PowerShell, JSON, and JSONC files                                                                                                  |
-| [`scripts/security/Test-BinaryFreshness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-BinaryFreshness.ps1)   | `check-binary-integrity.yml`                                        | Verify pinned binary SHA-256 hashes and detect Helm chart version drift (SARIF output)                                                                                                          |
-| [`scripts/security/Test-DependencyPinning.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-DependencyPinning.ps1) | `dependency-pinning-scan.yml`                                       | Validate exact pins for GitHub Actions, packages, inline pip/uv installs, workflow container images, and AzureML environment assets (Dockerfile base images: OpenSSF Scorecard)                  |
-| [`scripts/security/Test-SHAStaleness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-SHAStaleness.ps1)         | `sha-staleness-check.yml`                                           | Detect SHA pins that have drifted behind upstream release tags                                                                                                                                  |
-| [`scripts/update-chart-hashes.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-chart-hashes.sh)                         | Run manually after chart bumps                                      | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf`                                                                                                   |
-| [`scripts/update-image-digests.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-image-digests.sh)                       | `check-image-digest-freshness.yml` (weekly); manual after tag bumps | Detect registry digest drift and refresh `@sha256` pins and derived AzureML environment versions across tracked non-Dockerfile surfaces; excludes gh-aw lock files and test artifacts          |
+| Script                                                                                                                                                            | Workflow                                                            | Purpose                                                                                                                                                                               |
+|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`scripts/security/Modules/PinnedToolVersions.psm1`](../../scripts/security/Modules/PinnedToolVersions.psm1)                                                      | `check-binary-freshness.yml`, `check-binary-integrity.yml`          | Provide literal tool version discovery across tracked shell, PowerShell, JSON, and JSONC files                                                                                        |
+| [`scripts/security/Test-BinaryFreshness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-BinaryFreshness.ps1)             | `check-binary-integrity.yml`                                        | Verify pinned binary SHA-256 hashes and detect Helm chart version drift (SARIF output)                                                                                                |
+| [`scripts/security/Test-DependencyPinning.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-DependencyPinning.ps1)         | `dependency-pinning-scan.yml`                                       | Validate exact pins for GitHub Actions, packages, inline pip/uv installs, workflow container images, and AzureML environment assets (Dockerfile base images: OpenSSF Scorecard)       |
+| [`scripts/security/Test-PublicDependencyFeeds.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-PublicDependencyFeeds.ps1) | `public-dependency-feeds.yml`                                       | Reject private mirrors, non-canonical registries, credentialed package URLs, and weak npm lockfile integrity metadata                                                                 |
+| [`scripts/security/Test-SHAStaleness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-SHAStaleness.ps1)                   | `sha-staleness-check.yml`                                           | Detect SHA pins that have drifted behind upstream release tags                                                                                                                        |
+| [`scripts/update-chart-hashes.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-chart-hashes.sh)                                   | Run manually after chart bumps                                      | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf`                                                                                         |
+| [`scripts/update-image-digests.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-image-digests.sh)                                 | `check-image-digest-freshness.yml` (weekly); manual after tag bumps | Detect registry digest drift and refresh `@sha256` pins and derived AzureML environment versions across tracked non-Dockerfile surfaces; excludes gh-aw lock files and test artifacts |
 
 Script parameters vary by check: `Test-BinaryFreshness.ps1` uses `-SarifFile` and `-ConfigPreview`, `Test-DependencyPinning.ps1` uses `-Format sarif -OutputPath <path>`, `Test-SHAStaleness.ps1` uses `-OutputFormat` and `-OutputPath`, and `update-image-digests.sh` uses `--check --sarif-output <path>`.
 
@@ -80,6 +81,22 @@ Under the `docker` type, the scanner flags workflow-YAML `image:` references tha
 Under the `azureml-environments` type, AzureML `environment:` asset references require an explicit version; labels and unversioned references are mutable and rejected. Repository policy also rejects the ambiguous explicit version name `latest`; use a digest-derived version. Refresh digest and environment pins with `scripts/update-image-digests.sh`. To exempt an intentional non-pin, add a `# pinning-ignore` comment on the `image:` or `environment:` line, or on the line directly above it.
 
 Under the `workflow-npm-commands` type, the scanner flags `npm install`, `npm i`, `npm update`, and `npm install-test` (and the `npm.cmd` shim) in workflow and composite-action `run:` steps, requiring `npm ci` for reproducible installs from the lockfile. Indentation-aware parsing confines detection to `run:` block content, so npm in step names, keys, or comments is not flagged. Add a `# pinning-ignore` comment on or directly above the command line to exempt an intentional non-`ci` install.
+
+## 🔍 Container Scan Categories
+
+The [container scan workflow](../../.github/workflows/container-scan.yml) scans digest-pinned external `FROM` references from tracked `Dockerfile` and `Containerfile` sources. [The lane map](../../scripts/security/container-scan-lanes.json) binds each logical scan role to source slots. The `trivy-image-<lane-id>` category remains stable when its image tag or digest changes; the SARIF filename still uses a full-reference hash to distinguish concrete images.
+
+SARIF fingerprints also affect alert continuity, so a stable category does not guarantee unchanged alert IDs.
+
+Each map entry has an `id` and a nonempty `sources` array of `{ "path": "...", "from": 0 }` objects. `path` is a tracked repository-relative file path, and `from` is the zero-based ordinal of **every** case-insensitive `FROM` statement in that file, including internal stages and ARG-templated stages. The map does not copy tags or digests.
+
+### Add or Update a Lane
+
+1. Add the digest-pinned external base-image reference to a tracked source file and identify its `path` and `from` ordinal.
+2. Add a map entry with a unique lowercase kebab-case `id` for a new scan role. If the exact image reference already belongs to a lane, add the source slot to that lane instead; one exact reference cannot belong to multiple lanes.
+3. Run `bash scripts/security/discover-base-images.sh --matrix` from the repository root. Check the returned `lane`, `image`, and `category` entries against the intended scan roles.
+
+Repeat validation after moving or reordering a base-image source and update its bindings. The helper rejects unmapped, stale, duplicate, or ambiguous bindings rather than omitting a scan. Retain the lane ID when a source moves without changing its role. If two sources assigned to one lane diverge, review the roles and give a distinct role a new ID; do not select one reference arbitrarily.
 
 ## 🔗 Related Resources
 
