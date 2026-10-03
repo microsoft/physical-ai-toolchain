@@ -12,8 +12,8 @@ BeforeAll {
     @'
       - name: Bootstrap hve-core RPI skills
         env:
-          # microsoft/hve-core derived-files release: hve-core-v3.2.2 (2026-03-23)
-          HVE_CORE_DERIVED_FILES_REF: e69486a5f809ede45c63c0a31358c12912bd5168
+          # microsoft/hve-core derived-files release: hve-core-v3.3.101 (2026-04-25)
+          HVE_CORE_DERIVED_FILES_REF: 0d4452b33c2409d03315019dae0d34e468641dfb
         run: echo bootstrap
 '@ | Set-Content -Path $script:SetupPath -Encoding utf8
 
@@ -86,8 +86,8 @@ Describe 'DerivedFiles configuration' -Tag 'Unit' {
 Describe 'Get-PinnedHveCoreRef' -Tag 'Unit' {
     It 'Extracts the pinned SHA and release tag' {
         $ref = Get-PinnedHveCoreRef -Path $script:SetupPath
-        $ref.Sha | Should -Be 'e69486a5f809ede45c63c0a31358c12912bd5168'
-        $ref.Tag | Should -Be 'hve-core-v3.2.2'
+        $ref.Sha | Should -Be '0d4452b33c2409d03315019dae0d34e468641dfb'
+        $ref.Tag | Should -Be 'hve-core-v3.3.101'
     }
 
     It 'Returns null for a missing file' {
@@ -107,13 +107,13 @@ Describe 'Get-PinnedHveCoreRef' -Tag 'Unit' {
         @"
 env:
   RPI_SKILLS_REF: $($script:ResolvedRpiSha)
-  # microsoft/hve-core derived-files release: hve-core-v3.2.2
-  HVE_CORE_DERIVED_FILES_REF: e69486a5f809ede45c63c0a31358c12912bd5168
+  # microsoft/hve-core derived-files release: hve-core-v3.3.101
+  HVE_CORE_DERIVED_FILES_REF: 0d4452b33c2409d03315019dae0d34e468641dfb
 "@ | Set-Content -Path $p -Encoding utf8
 
         $ref = Get-PinnedHveCoreRef -Path $p
 
-        $ref.Sha | Should -Be 'e69486a5f809ede45c63c0a31358c12912bd5168'
+        $ref.Sha | Should -Be '0d4452b33c2409d03315019dae0d34e468641dfb'
     }
 
     It 'Rejects a shortened or suffixed HVE_CORE_DERIVED_FILES_REF' {
