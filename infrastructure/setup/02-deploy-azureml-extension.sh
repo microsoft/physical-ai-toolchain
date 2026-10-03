@@ -11,6 +11,7 @@ source "$SCRIPT_DIR/defaults.conf"
 
 CONFIG_DIR="$SCRIPT_DIR/config"
 MANIFESTS_DIR="$SCRIPT_DIR/manifests"
+readonly VOLCANO_SCALE_FROM_ZERO_CONFIGMAP="volcano-scheduler-scale-from-zero"
 
 show_help() {
   cat << EOF
@@ -28,7 +29,8 @@ OPTIONS:
                   InstanceType manifest (default: manifests/azureml-instance-types.yaml)
     --fast-prod               Set cluster purpose to FastProd with HA inference router
     --enforce-resource-validation
-                              Enforce aml-operator resource validation (default: disabled).
+                              Enforce aml-operator resource validation (default: disabled,
+                              amloperator.skipResourceValidation=true).
                               Disabled is required for scale-to-zero GPU node pools; otherwise
                               the operator refuses jobs whose InstanceType exceeds the largest
                               currently-Ready node, blocking the autoscaler from ever scaling
@@ -41,10 +43,16 @@ OPTIONS:
                               enqueue PodGroups whose requests exceed currently-Ready cluster
                               capacity, blocking the AKS autoscaler from ever seeing a Pending
                               Pod. Enable only on multi-tenant clusters where queue-level
-                              capacity fairness must be enforced at submit time.
+                              capacity fairness must be enforced at submit time. By default the
+                              extension reads the $VOLCANO_SCALE_FROM_ZERO_CONFIGMAP
+                              configmap; this option resets it to the chart's config.
     --skip-attach             Skip attaching cluster as compute target
     --skip-instance-types     Skip creating GPU instance types
     --config-preview          Print configuration and exit
+
+Both scale-from-zero choices are extension settings. Reruns compare them with the
+live extension and update only the keys that differ, including on extensions
+installed before these settings existed.
 
 EXAMPLES:
     $(basename "$0")
@@ -90,6 +98,11 @@ done
 
 require_tools az terraform kubectl jq envsubst
 
+desired_volcano_configmap=""
+if [[ "$install_volcano" == "true" && "$enforce_volcano_capacity_check" == "false" ]]; then
+  desired_volcano_configmap="$VOLCANO_SCALE_FROM_ZERO_CONFIGMAP"
+fi
+
 #------------------------------------------------------------------------------
 # Gather Configuration
 #------------------------------------------------------------------------------
@@ -124,6 +137,8 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Cluster Purpose" "$cluster_purpose"
   print_kv "Skip Resource Validation" "$skip_resource_validation"
   print_kv "Enforce Volcano Capacity Check" "$enforce_volcano_capacity_check"
+  print_kv "Volcano Config Map" "${desired_volcano_configmap:-chart default}"
+  print_kv "Extension Settings" "Compared with the live extension at run time"
   print_kv "ML Workspace" "${ml_workspace:-<not configured>}"
   print_kv "ML Identity" "${ml_identity_name:-<not configured>}"
   print_kv "Instance Types" "$instance_types_manifest"
@@ -187,47 +202,78 @@ else
 fi
 
 #------------------------------------------------------------------------------
-# Configure Volcano Scheduler for Scale-from-Zero
+# Reconcile AzureML Extension Settings
 #------------------------------------------------------------------------------
-# The AzureML extension ships a Volcano config whose enqueue-time overcommit
-# and proportion plugins block PodGroups whose requests exceed currently-Ready
-# cluster capacity. That deadlocks scale-from-zero GPU pools because the Pod
-# is never created, so the AKS autoscaler never sees a Pending Pod. Replace
-# the configmap with a permissive enqueue config (proportion/overcommit
-# removed; gang scheduling preserved at allocate) and restart the scheduler.
-# Opt out with --enforce-volcano-capacity-check on multi-tenant clusters.
+# Scale-from-zero GPU pools need two extension settings:
+# - amloperator.skipResourceValidation=true, so the operator admits jobs whose
+#   InstanceType exceeds the largest currently-Ready node instead of failing them.
+# - volcanoScheduler.schedulerConfigMap naming a dedicated configmap whose enqueue
+#   config drops the overcommit and proportion checks (gang scheduling stays at
+#   allocate), so the autoscaler sees Pending pods.
+# Extension settings survive the extension's automatic Helm upgrades, which
+# restore chart-owned configmaps. New and existing extensions converge here, and
+# the update names only the keys that differ.
+section "Reconcile AzureML Extension Settings"
 
-if [[ "$install_volcano" == "true" && "$enforce_volcano_capacity_check" == "false" ]]; then
-  section "Configure Volcano Scheduler for Scale-from-Zero"
+settings_updated="none"
+volcano_configmap_changed=false
 
+if [[ -n "$desired_volcano_configmap" ]]; then
   volcano_cfg_src="$MANIFESTS_DIR/volcano-scheduler-config-scale-from-zero.conf"
   [[ -f "$volcano_cfg_src" ]] || fatal "Volcano scheduler config not found: $volcano_cfg_src"
-
-  info "Waiting for volcano-scheduler-configmap to exist..."
-  retries=30
-  while ! kubectl get cm -n "$NS_AZUREML" volcano-scheduler-configmap &>/dev/null; do
-    (( --retries > 0 )) || fatal "volcano-scheduler-configmap did not appear within 5 minutes; cannot deliver scale-from-zero"
-    sleep 10
-  done
-
-  info "Applying scale-from-zero Volcano scheduler config (server-side apply, field-manager=hex-azureml-volcano-patch)..."
-  # Server-side apply with a dedicated field manager + --force-conflicts:
-  # registers ownership of data.volcano-scheduler.conf so subsequent
-  # Helm-driven extension upgrades observe a conflict and leave our patch in
-  # place instead of silently reverting it. Other fields (labels, annotations,
-  # Helm metadata) stay owned by the AzureML extension Helm release.
-  kubectl create configmap volcano-scheduler-configmap \
+  ensure_namespace "$kubeconfig" "$context" "$NS_AZUREML"
+  info "Applying configmap $desired_volcano_configmap..."
+  configmap_apply_output=$(kubectl create configmap "$desired_volcano_configmap" \
     -n "$NS_AZUREML" \
     --from-file=volcano-scheduler.conf="$volcano_cfg_src" \
-    --dry-run=client -o yaml \
-    | kubectl apply --server-side --field-manager=hex-azureml-volcano-patch --force-conflicts -f -
+    --dry-run=client -o yaml | kubectl apply -f -)
+  echo "$configmap_apply_output"
+  [[ "$configmap_apply_output" == *" unchanged" ]] || volcano_configmap_changed=true
+fi
 
+current_settings=$(az k8s-extension show --name "$extension_name" --cluster-type managedClusters \
+  --cluster-name "$cluster" --resource-group "$rg" --query configurationSettings -o json)
+current_skip_resource_validation=$(jq -r '.["amloperator.skipResourceValidation"] // ""' <<< "$current_settings")
+current_volcano_configmap=$(jq -r '.["volcanoScheduler.schedulerConfigMap"] // ""' <<< "$current_settings")
+
+settings_patch='{}'
+if [[ "$current_skip_resource_validation" != "$skip_resource_validation" ]]; then
+  settings_patch=$(jq -c --arg value "$skip_resource_validation" \
+    '. + {"amloperator.skipResourceValidation": $value}' <<< "$settings_patch")
+fi
+if [[ "$install_volcano" == "true" && "$current_volcano_configmap" != "$desired_volcano_configmap" ]]; then
+  settings_patch=$(jq -c --arg value "$desired_volcano_configmap" \
+    '. + {"volcanoScheduler.schedulerConfigMap": $value}' <<< "$settings_patch")
+fi
+
+if [[ "$settings_patch" == "{}" ]]; then
+  info "Extension settings already match"
+else
+  # A settings file carries empty values, which reset a key to the chart default.
+  settings_file="$CONFIG_DIR/out/azureml-extension-settings-update.json"
+  printf '%s\n' "$settings_patch" > "$settings_file"
+  settings_updated=$(jq -r 'to_entries | map("\(.key)=\(.value)") | join(", ")' "$settings_file")
+  info "Updating extension settings: $settings_updated"
+  az k8s-extension update \
+    --name "$extension_name" \
+    --cluster-type managedClusters \
+    --cluster-name "$cluster" \
+    --resource-group "$rg" \
+    --config-file "$settings_file" \
+    --yes \
+    --output none
+fi
+
+# The extension update rolls the Volcano pods when it changes the configmap
+# reference; otherwise restart them so a changed configmap takes effect.
+if [[ "$volcano_configmap_changed" == "true" ]] && \
+    ! jq -e 'has("volcanoScheduler.schedulerConfigMap")' <<< "$settings_patch" >/dev/null; then
   if kubectl get deploy -n "$NS_AZUREML" volcano-scheduler &>/dev/null; then
-    info "Restarting volcano-scheduler to pick up new config..."
+    info "Restarting volcano-scheduler to pick up the updated config..."
     kubectl rollout restart -n "$NS_AZUREML" deploy/volcano-scheduler
     kubectl rollout status -n "$NS_AZUREML" deploy/volcano-scheduler --timeout=2m
   else
-    warn "volcano-scheduler deployment not found; configmap will be picked up on next start"
+    warn "volcano-scheduler deployment not found; the configmap is read on next start"
   fi
 fi
 
@@ -330,6 +376,8 @@ print_kv "Compute" "$compute_name"
 print_kv "Purpose" "$cluster_purpose"
 print_kv "Skip Resource Validation" "$skip_resource_validation"
 print_kv "Enforce Volcano Capacity Check" "$enforce_volcano_capacity_check"
+print_kv "Volcano Config Map" "${desired_volcano_configmap:-chart default}"
+print_kv "Settings Updated" "$settings_updated"
 print_kv "ML Workspace" "${ml_workspace:-<not configured>}"
 print_kv "Instance Types" "$instance_types_manifest"
 echo

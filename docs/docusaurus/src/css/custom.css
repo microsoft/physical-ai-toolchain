@@ -466,8 +466,6 @@ html[data-theme='dark'] .docusaurus-mermaid-container .edgeLabel p {
 
 @media (max-width: 420px) {
   .navbar {
-    height: auto;
-    min-height: 54px;
     padding-inline: 0.75rem;
   }
 
