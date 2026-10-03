@@ -17,7 +17,10 @@ BeforeAll {
     Mock Write-Host {}
     Mock Write-CIAnnotation {} -ModuleName CIHelpers
 
-    $script:RepoWorkflowsPath = Join-Path $PSScriptRoot '../../../.github/workflows'
+    $script:RepoWorkflowPaths = @(
+        (Join-Path $PSScriptRoot '../../../.github/workflows')
+        (Join-Path $PSScriptRoot '../../../.github/actions')
+    )
 
     function Invoke-DangerousWorkflowFixture {
         param(
@@ -641,9 +644,9 @@ jobs:
 }
 
 Describe 'Repository dangerous workflow invariant' -Tag 'Unit' {
-    It 'No workflow in .github/workflows contains a dangerous pattern' {
+    It 'No workflow or composite action contains a dangerous pattern' {
         $outputPath = Join-Path $TestDrive 'repo-dangerous.json'
-        $exitCode = Invoke-DangerousWorkflowCheck -Path $script:RepoWorkflowsPath -Format json -OutputPath $outputPath -FailOnViolation
+        $exitCode = Invoke-DangerousWorkflowCheck -Path $script:RepoWorkflowPaths -Format json -OutputPath $outputPath -FailOnViolation
 
         $exitCode | Should -Be 0
         $report = Get-JsonReport -Path $outputPath

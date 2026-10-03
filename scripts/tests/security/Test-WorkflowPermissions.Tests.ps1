@@ -15,6 +15,22 @@ BeforeAll {
 
     $script:FixturesPath = Join-Path $PSScriptRoot '../Fixtures/Workflows'
     $script:RepoWorkflowsPath = Join-Path $PSScriptRoot '../../../.github/workflows'
+
+    function New-PermissionsWorkflowFixture {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$Name,
+
+            [Parameter(Mandatory = $true)]
+            [string]$Content
+        )
+
+        $directory = Join-Path $TestDrive $Name
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        $filePath = Join-Path $directory 'workflow.yml'
+        Set-Content -Path $filePath -Value $Content -Encoding utf8
+        return $filePath
+    }
 }
 
 AfterAll {
@@ -34,6 +50,217 @@ Describe 'Test-WorkflowPermissions' -Tag 'Unit' {
             $result.Name | Should -Be 'build'
             $result.Line | Should -Be 7
             $result.Metadata.Job | Should -Be 'build'
+        }
+    }
+
+    Context 'Four-state classification matrix' {
+        It 'Treats absent workflow and job permissions as a file-level violation' {
+            $filePath = New-PermissionsWorkflowFixture -Name 'matrix-absent' -Content @'
+name: Missing Permissions
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+'@
+
+            $result = @(Test-WorkflowPermissions -FilePath $filePath)
+
+            $result | Should -HaveCount 1
+            $result[0].ViolationType | Should -Be 'MissingPermissions'
+        }
+
+        It 'Treats empty workflow permissions and absent job permissions as compliant' {
+            $filePath = New-PermissionsWorkflowFixture -Name 'matrix-empty' -Content @'
+name: Empty Permissions
+on: push
+permissions: {}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+'@
+
+            @(Test-WorkflowPermissions -FilePath $filePath) | Should -HaveCount 0
+        }
+
+        It 'Treats populated workflow permissions and absent job permissions as a job violation' {
+            $filePath = New-PermissionsWorkflowFixture -Name 'matrix-inherited' -Content @'
+name: Inherited Permissions
+on: push
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+'@
+
+            $result = @(Test-WorkflowPermissions -FilePath $filePath)
+
+            $result | Should -HaveCount 1
+            $result[0].ViolationType | Should -Be 'MissingJobPermissions'
+            $result[0].Name | Should -Be 'build'
+            $result[0].Line | Should -Be 6
+        }
+
+        It 'Ignores a same-named key before the jobs block when reporting the job line' {
+            $filePath = New-PermissionsWorkflowFixture -Name 'duplicate-key-before-jobs' -Content @'
+name: Duplicate Key Before Jobs
+on:
+  workflow_call:
+    outputs:
+      build:
+        description: A key that shares the job name
+        value: ${{ jobs.build.outputs.result }}
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+'@
+
+            $result = @(Test-WorkflowPermissions -FilePath $filePath)
+            $rawLines = @((Get-Content -Path $filePath -Raw) -split "\r?\n")
+
+            $result | Should -HaveCount 1
+            $rawLines[$result[0].Line - 1] | Should -Match '^\s{2}build\s*:'
+        }
+
+        It 'Treats populated workflow and explicit job permissions as compliant' {
+            $filePath = New-PermissionsWorkflowFixture -Name 'matrix-explicit' -Content @'
+name: Explicit Job Permissions
+on: push
+permissions:
+  contents: read
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+'@
+
+            @(Test-WorkflowPermissions -FilePath $filePath) | Should -HaveCount 0
+        }
+    }
+
+    Context 'Permissions value shapes' {
+        It 'Treats a null-valued permissions block as empty' {
+            $filePath = New-PermissionsWorkflowFixture -Name 'null-permissions' -Content @'
+name: Null Permissions
+on: push
+permissions:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+'@
+
+            @(Test-WorkflowPermissions -FilePath $filePath) | Should -HaveCount 0
+        }
+
+        It 'Treats flow-style populated permissions as populated' {
+            $filePath = New-PermissionsWorkflowFixture -Name 'flow-populated-permissions' -Content @'
+name: Flow Populated Permissions
+on: push
+permissions: { contents: read }
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+'@
+
+            $result = @(Test-WorkflowPermissions -FilePath $filePath)
+
+            $result | Should -HaveCount 1
+            $result[0].ViolationType | Should -Be 'MissingJobPermissions'
+        }
+
+        It 'Treats scalar read-all permissions as populated' {
+            $filePath = New-PermissionsWorkflowFixture -Name 'scalar-permissions' -Content @'
+name: Scalar Permissions
+on: push
+permissions: read-all
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+'@
+
+            $result = @(Test-WorkflowPermissions -FilePath $filePath)
+
+            $result | Should -HaveCount 1
+            $result[0].ViolationType | Should -Be 'MissingJobPermissions'
+        }
+
+        It 'Enumerates jobs indented with four spaces' {
+            $filePath = New-PermissionsWorkflowFixture -Name 'four-space-jobs' -Content @'
+name: Four Space Jobs
+on: push
+permissions:
+    contents: read
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo hello
+'@
+
+            $result = @(Test-WorkflowPermissions -FilePath $filePath)
+
+            $result | Should -HaveCount 1
+            $result[0].Name | Should -Be 'build'
+        }
+    }
+
+    Context 'Parser edge cases' {
+        It 'Does not count a step-level permissions key as a job declaration' {
+            $filePath = New-PermissionsWorkflowFixture -Name 'nested-permissions-key' -Content @'
+name: Nested Permissions Key
+on: push
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Render config
+        with:
+          permissions: read-all
+        run: echo hello
+'@
+
+            $result = @(Test-WorkflowPermissions -FilePath $filePath)
+
+            $result | Should -HaveCount 1
+            $result[0].ViolationType | Should -Be 'MissingJobPermissions'
+            $result[0].Name | Should -Be 'build'
+        }
+
+        It 'Returns no violations for malformed YAML without throwing' {
+            $filePath = New-PermissionsWorkflowFixture -Name 'malformed' -Content @'
+name: Malformed
+on: push
+permissions:
+  contents: read
+jobs:
+  build:
+   - this is not a mapping
+     and: [unclosed
+'@
+
+            { Test-WorkflowPermissions -FilePath $filePath } | Should -Not -Throw
+            @(Test-WorkflowPermissions -FilePath $filePath) | Should -HaveCount 0
         }
     }
 
