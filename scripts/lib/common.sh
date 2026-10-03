@@ -285,6 +285,23 @@ stage_and_upload_code() {
   echo "$uri"
 }
 
+# Grant a role unless the principal already holds it at the scope. Matching by object ID
+# avoids a Microsoft Graph lookup for managed identities.
+# Usage: ensure_role_assignment <object-id> <User|Group|ServicePrincipal> <role> <scope>
+ensure_role_assignment() {
+  local principal_id="${1:?principal object ID required}" principal_type="${2:?principal type required}"
+  local role="${3:?role required}" scope="${4:?scope required}" existing
+  existing=$(az role assignment list --scope "$scope" --role "$role" \
+    --query "length([?principalId=='$principal_id'])" -o tsv)
+  if [[ "$existing" != "0" ]]; then
+    info "$role already granted on ${scope##*/}"
+    return 0
+  fi
+  info "Granting $role on ${scope##*/}..."
+  az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type "$principal_type" \
+    --role "$role" --scope "$scope" --output none
+}
+
 # Ensure Azure CLI extension is installed
 require_az_extension() {
   local ext="${1:?extension name required}"
@@ -684,6 +701,27 @@ detect_service_url() {
     url="http://${lb_ip}"
   fi
   echo "$url"
+}
+
+# Log in to an OSMO service with the method it supports. A service with an identity
+# provider publishes a device endpoint for code login. A service deployed without
+# authentication, as 03-deploy-osmo.sh deploys it, publishes none and accepts only a
+# dev login. Uses the caller's XDG_CONFIG_HOME, so isolated profiles stay isolated.
+# Usage: osmo_login <service-url> [dev-username]
+osmo_login() {
+  local service_url="${1:?service URL required}" dev_username="${2:-admin}"
+  local auth_url="${service_url%/}/api/auth/login"
+  local auth_config device_endpoint
+  auth_config=$(curl --fail --silent --show-error --connect-timeout 10 "$auth_url") || \
+    fatal "Unable to read the OSMO login configuration from $auth_url"
+  device_endpoint=$(jq -r '.device_endpoint // empty' <<< "$auth_config") || \
+    fatal "OSMO login configuration from $auth_url is not valid JSON"
+  if [[ -n "$device_endpoint" ]]; then
+    osmo login "$service_url" --method code
+  else
+    info "OSMO at $service_url has no identity provider; using a dev login as $dev_username"
+    osmo login "$service_url" --method dev --username "$dev_username"
+  fi
 }
 
 # Print section header

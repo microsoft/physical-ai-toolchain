@@ -14,6 +14,7 @@ CONFIG_DIR="$SCRIPT_DIR/config"
 MANIFESTS_DIR="$SCRIPT_DIR/manifests"
 AML_DATA_SCIENTIST_ROLE="AzureML Data Scientist"
 STORAGE_BLOB_CONTRIBUTOR_ROLE="Storage Blob Data Contributor"
+ACR_PULL_ROLE="AcrPull"
 
 show_help() {
   cat << EOF
@@ -43,7 +44,7 @@ PREREQUISITES:
     - Contributor on the Arc cluster's resource group (the extension creates the relay)
     - Kubernetes RBAC for your identity on the HiL cluster, for example from
       data-pipeline/setup/edge/05-connect-arc-kubernetes.sh --cluster-admin-signed-in-user
-    - Rights to assign roles on the workspace and its storage account
+    - Rights to assign roles on the workspace, its storage account, and its container registry
 
 EXAMPLES:
     $(basename "$0") --arc-cluster-resource-id <arc-resource-id> --config-preview
@@ -129,7 +130,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Instance Types" "$instance_types_manifest"
   print_kv "Require GPU" "$require_gpu"
   print_kv "Proxy Port" "$proxy_port"
-  print_kv "Compute Roles" "$AML_DATA_SCIENTIST_ROLE (workspace), $STORAGE_BLOB_CONTRIBUTOR_ROLE (workspace storage)"
+  print_kv "Compute Roles" "$AML_DATA_SCIENTIST_ROLE (workspace), $STORAGE_BLOB_CONTRIBUTOR_ROLE (workspace storage), $ACR_PULL_ROLE (workspace registry, when it has one)"
   info "Config preview mode — exiting without contacting Azure or Kubernetes."
   exit 0
 fi
@@ -149,9 +150,10 @@ connectivity_status=$(jq -r '.connectivityStatus // "Unknown"' <<< "$arc_cluster
   fatal "Arc cluster $arc_cluster_name is $connectivity_status; bring it online before attaching"
 info "Arc cluster $arc_cluster_name is Connected ($(jq -r '.distribution // "unknown"' <<< "$arc_cluster_json"))"
 
-workspace_storage_id=$(az ml workspace show --name "$workspace_name" --resource-group "$workspace_rg" \
-  --query storage_account -o tsv)
+workspace_json=$(az ml workspace show --name "$workspace_name" --resource-group "$workspace_rg" -o json)
+workspace_storage_id=$(jq -r '.storage_account // empty' <<< "$workspace_json")
 [[ -n "$workspace_storage_id" ]] || fatal "Couldn't read the storage account of workspace $workspace_name"
+workspace_registry_id=$(jq -r '.container_registry // empty' <<< "$workspace_json")
 
 #------------------------------------------------------------------------------
 # Open Arc Cluster Connect
@@ -339,21 +341,16 @@ principal_id=$(az ml compute show --name "$compute_name" --resource-group "$work
   --workspace-name "$workspace_name" --query identity.principal_id -o tsv)
 [[ -n "$principal_id" ]] || fatal "Compute $compute_name has no system-assigned identity"
 
-ensure_role_assignment() {
-  local role="$1" scope="$2" existing
-  existing=$(az role assignment list --assignee "$principal_id" --role "$role" --scope "$scope" \
-    --query "length(@)" -o tsv)
-  if [[ "$existing" != "0" ]]; then
-    info "$role already granted on ${scope##*/}"
-    return 0
-  fi
-  info "Granting $role on ${scope##*/}..."
-  az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal \
-    --role "$role" --scope "$scope" --output none
-}
-
-ensure_role_assignment "$AML_DATA_SCIENTIST_ROLE" "$workspace_id"
-ensure_role_assignment "$STORAGE_BLOB_CONTRIBUTOR_ROLE" "$workspace_storage_id"
+ensure_role_assignment "$principal_id" ServicePrincipal "$AML_DATA_SCIENTIST_ROLE" "$workspace_id"
+ensure_role_assignment "$principal_id" ServicePrincipal "$STORAGE_BLOB_CONTRIBUTOR_ROLE" "$workspace_storage_id"
+compute_roles="$AML_DATA_SCIENTIST_ROLE, $STORAGE_BLOB_CONTRIBUTOR_ROLE"
+# Jobs pull images from the workspace registry with the compute identity.
+if [[ -n "$workspace_registry_id" ]]; then
+  ensure_role_assignment "$principal_id" ServicePrincipal "$ACR_PULL_ROLE" "$workspace_registry_id"
+  compute_roles+=", $ACR_PULL_ROLE"
+fi
+storage_public_access=$(az storage account show --ids "$workspace_storage_id" \
+  --query publicNetworkAccess -o tsv 2>/dev/null || true)
 
 #------------------------------------------------------------------------------
 # Summary
@@ -365,7 +362,9 @@ print_kv "Settings Updated" "$settings_updated"
 print_kv "Instance Types" "$instance_types"
 print_kv "Allocatable GPUs" "$allocatable_gpus"
 print_kv "Compute" "$compute_name ($compute_status)"
-print_kv "Compute Roles" "$AML_DATA_SCIENTIST_ROLE, $STORAGE_BLOB_CONTRIBUTOR_ROLE"
+print_kv "Compute Roles" "$compute_roles"
 print_kv "Workspace" "$workspace_name"
-info "Jobs on this compute reach workspace storage over its private endpoint, so the host needs the HiL VPN with private DNS."
+if [[ "$storage_public_access" == "Disabled" ]]; then
+  info "Workspace storage accepts only private traffic, so the host needs the HiL VPN with private DNS before jobs can read or write data."
+fi
 info "Azure ML HiL compute attach complete"
