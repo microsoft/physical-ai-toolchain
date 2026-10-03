@@ -4,7 +4,9 @@ on:
   pull_request:
     paths:
       - '.github/workflows/**'
-      - '.github/workflows/workflow-permissions-scan.yml'
+      - '.github/actions/**'
+      - 'scripts/security/**'
+      - 'scripts/lib/Modules/CIHelpers.psm1'
   workflow_call:
     inputs:
       soft-fail:
@@ -47,4 +49,4 @@ jobs:
           DANGEROUS_WORKFLOW_SOFT_FAIL: ${{ inputs.soft-fail }}
         run: |
           $failOnViolation = $env:DANGEROUS_WORKFLOW_SOFT_FAIL -ne 'true'
-          ./scripts/security/Test-DangerousWorkflow.ps1 -Path .github/workflows -Format console -FailOnViolation:$failOnViolation
+          ./scripts/security/Test-DangerousWorkflow.ps1 -Format console -FailOnViolation:$failOnViolation

@@ -35,6 +35,7 @@ class DependencyViolation {
         - VersionMismatch: Version comment does not match resolved SHA
         - MissingVersionComment: SHA pinned but no version comment present
         - MissingPermissions: Workflow file lacks required permissions declarations
+        - MissingJobPermissions: Workflow job inherits a populated workflow-level grant
         - Empty string: Default or unclassified violation
     #>
 
@@ -45,7 +46,7 @@ class DependencyViolation {
     [string]$Version
     [string]$CurrentRef
     [string]$Severity
-    [ValidateSet('Unpinned', 'Stale', 'VersionMismatch', 'MissingVersionComment', 'MissingPermissions', '')]
+    [ValidateSet('Unpinned', 'Stale', 'VersionMismatch', 'MissingVersionComment', 'MissingPermissions', 'MissingJobPermissions', '')]
     [string]$ViolationType
     [string]$Description
     [string]$Remediation
@@ -129,7 +130,7 @@ class ComplianceReport {
     [hashtable] ToHashtable() {
         return @{
             ScanPath             = $this.ScanPath
-            Timestamp            = $this.Timestamp.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+            Timestamp            = $this.Timestamp.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ')
             TotalFiles           = $this.TotalFiles
             ScannedFiles         = $this.ScannedFiles
             TotalDependencies    = $this.TotalDependencies
