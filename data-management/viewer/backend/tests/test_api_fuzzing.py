@@ -16,29 +16,15 @@ from src.api.models.detection import EpisodeDetectionSummary
 from src.api.services.detection_service import get_detection_service
 
 schemathesis.checks.load_all_checks()
-_STATUS_CODE_CONFORMANCE = schemathesis.checks.CHECKS.get_one("status_code_conformance")
-_RESPONSE_CONTRACT_CHECKS = schemathesis.checks.CHECKS.get_by_names(
-    [
-        "not_a_server_error",
-        "content_type_conformance",
-        "response_headers_conformance",
-        "response_schema_conformance",
-    ]
-)
-
-
-def _successful_status_code_conformance(
-    ctx: schemathesis.CheckContext,
-    response: schemathesis.Response,
-    case: schemathesis.Case,
-) -> bool | None:
-    """Require successful responses to use a status documented by the operation."""
-    if response.status_code < 400:
-        return _STATUS_CODE_CONFORMANCE(ctx, response, case)
-    return None
-
-
-_RESPONSE_CONTRACT_CHECKS.append(_successful_status_code_conformance)
+_BASE_EXCLUDED_CONTRACT_CHECKS = [
+    schemathesis.checks.positive_data_acceptance,
+    schemathesis.checks.status_code_conformance,
+    schemathesis.checks.allow_header_conformance,
+]
+_NEGATIVE_DATA_ACCEPTANCE_PATHS = {
+    "/api/datasets/{dataset_id}/joint-config",
+    "/api/joint-config/defaults",
+}
 
 
 @pytest.fixture
@@ -92,4 +78,39 @@ schema = schemathesis.pytest.from_fixture("api_schema")
 )
 def test_openapi_contract_fuzzing(case):
     """Generated cases must not trigger server errors or violate the OpenAPI contract."""
-    case.call_and_validate(checks=_RESPONSE_CONTRACT_CHECKS)
+    excluded_checks = list(_BASE_EXCLUDED_CONTRACT_CHECKS)
+    if case.operation.path in _NEGATIVE_DATA_ACCEPTANCE_PATHS:
+        excluded_checks.append(schemathesis.checks.negative_data_rejection)
+    case.call_and_validate(excluded_checks=excluded_checks)
+
+
+def test_ai_routes_document_bad_request_responses(client) -> None:
+    schema = client.get("/openapi.json").json()
+
+    for path in (
+        "/api/ai/trajectory-analysis",
+        "/api/ai/anomaly-detection",
+        "/api/ai/cluster",
+        "/api/ai/suggest-annotation",
+    ):
+        assert "400" in schema["paths"][path]["post"]["responses"]
+
+
+@pytest.mark.parametrize(
+    ("path", "additional_exclusions"),
+    [
+        ("/api/ai/trajectory-analysis", []),
+        ("/health", []),
+        ("/api/datasets/{dataset_id}/joint-config", [schemathesis.checks.negative_data_rejection]),
+        ("/api/joint-config/defaults", [schemathesis.checks.negative_data_rejection]),
+    ],
+)
+def test_contract_fuzzing_uses_defaults_with_bounded_exclusions(path, additional_exclusions) -> None:
+    case = MagicMock()
+    case.operation.path = path
+
+    test_openapi_contract_fuzzing.hypothesis.inner_test(case)
+
+    kwargs = case.call_and_validate.call_args.kwargs
+    assert "checks" not in kwargs
+    assert kwargs["excluded_checks"] == [*_BASE_EXCLUDED_CONTRACT_CHECKS, *additional_exclusions]

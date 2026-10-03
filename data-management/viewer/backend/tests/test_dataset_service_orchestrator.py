@@ -105,7 +105,20 @@ def _trajectory_point(frame: int = 0) -> TrajectoryPoint:
 class TestDatasetDiscovery:
     pytestmark = pytest.mark.asyncio
 
-    async def test_list_datasets_builds_blob_metadata_for_supported_formats(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("raw_names", "expected_names"),
+        [
+            ([["joint_a", "joint_b"]], ["joint_a", "joint_b"]),
+            ({"first": "joint_a", "second": 2}, ["joint_a", "2"]),
+            (7, ["7"]),
+        ],
+    )
+    async def test_list_datasets_builds_blob_metadata_for_supported_formats(
+        self,
+        tmp_path: Path,
+        raw_names: object,
+        expected_names: list[str],
+    ) -> None:
         provider = _make_provider(
             scan_all_dataset_ids=AsyncMock(
                 return_value={
@@ -122,7 +135,7 @@ class TestDatasetDiscovery:
                         "observation.state": {
                             "dtype": "float32",
                             "shape": [2],
-                            "names": [["joint_a", "joint_b"]],
+                            "names": raw_names,
                         },
                         "action": {},
                     },
@@ -138,7 +151,7 @@ class TestDatasetDiscovery:
         assert datasets["robot--run"].name == "robot--run (so100)"
         assert datasets["robot--run"].total_episodes == 12
         assert datasets["robot--run"].fps == 24.0
-        assert datasets["robot--run"].features["observation.state"].names == ["joint_a", "joint_b"]
+        assert datasets["robot--run"].features["observation.state"].names == expected_names
         assert datasets["robot--run"].features["action"].dtype == "unknown"
         assert datasets["archive--session"].name == "session"
         assert datasets["archive--session"].group == "archive"

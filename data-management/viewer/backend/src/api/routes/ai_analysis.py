@@ -71,6 +71,12 @@ class TrajectoryData(BaseModel):
     )
 
 
+class ErrorResponse(BaseModel):
+    """HTTP error response."""
+
+    detail: str
+
+
 class TrajectoryMetricsResponse(BaseModel):
     """Response with computed trajectory metrics."""
 
@@ -193,6 +199,7 @@ class AnnotationSuggestion(BaseModel):
 @router.post(
     "/trajectory-analysis",
     response_model=TrajectoryMetricsResponse,
+    responses={400: {"model": ErrorResponse}},
     dependencies=[Depends(require_csrf_token)],
 )
 async def analyze_trajectory(data: TrajectoryData) -> TrajectoryMetricsResponse:
@@ -224,6 +231,7 @@ async def analyze_trajectory(data: TrajectoryData) -> TrajectoryMetricsResponse:
 @router.post(
     "/anomaly-detection",
     response_model=AnomalyDetectionResponse,
+    responses={400: {"model": ErrorResponse}},
     dependencies=[Depends(require_csrf_token)],
 )
 async def detect_anomalies(request: AnomalyDetectionRequest) -> AnomalyDetectionResponse:
@@ -274,6 +282,7 @@ async def detect_anomalies(request: AnomalyDetectionRequest) -> AnomalyDetection
 @router.post(
     "/cluster",
     response_model=ClusterResponse,
+    responses={400: {"model": ErrorResponse}},
     dependencies=[Depends(require_csrf_token)],
 )
 async def cluster_episodes(request: ClusterRequest) -> ClusterResponse:
@@ -312,6 +321,7 @@ async def cluster_episodes(request: ClusterRequest) -> ClusterResponse:
 @router.post(
     "/suggest-annotation",
     response_model=AnnotationSuggestion,
+    responses={400: {"model": ErrorResponse}},
     dependencies=[Depends(require_csrf_token)],
 )
 async def suggest_annotation(request: SuggestAnnotationRequest) -> AnnotationSuggestion:

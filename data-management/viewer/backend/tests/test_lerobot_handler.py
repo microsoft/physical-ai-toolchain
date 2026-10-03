@@ -391,6 +391,31 @@ class TestVideoAndFrames:
         run_ffmpeg.assert_called_once()
         assert run_ffmpeg.call_args.args[0][-1] == "-"
 
+    def test_replaces_corrupt_cached_clip(self, monkeypatch, tmp_path):
+        handler, _ = _configured_handler(monkeypatch, tmp_path, video_window=(0.0, 1.0))
+        cached_clip = tmp_path / "meta" / "videos" / _CAMERA / "episode_000000.mp4"
+        cached_clip.parent.mkdir(parents=True)
+        cached_clip.write_bytes(b"corrupt")
+        commands: list[list[str]] = []
+
+        def run_ffmpeg(command, *, capture_output, timeout):
+            commands.append(command)
+            if command[-1] == "-":
+                return subprocess.CompletedProcess(command, returncode=1, stdout=b"", stderr=b"invalid")
+            Path(command[-1]).write_bytes(b"replacement")
+            return subprocess.CompletedProcess(command, returncode=0, stdout=b"", stderr=b"")
+
+        monkeypatch.setitem(
+            sys.modules,
+            "imageio_ffmpeg",
+            SimpleNamespace(get_ffmpeg_exe=lambda: "/fake/ffmpeg"),
+        )
+        monkeypatch.setattr(handler_module.subprocess, "run", run_ffmpeg)
+
+        assert handler.get_video_path("dataset", 0, _CAMERA) == str(cached_clip)
+        assert cached_clip.read_bytes() == b"replacement"
+        assert [command[-1] for command in commands] == ["-", str(cached_clip.with_suffix(".tmp.mp4"))]
+
     def test_returns_source_when_clip_generation_fails(self, monkeypatch, tmp_path):
         handler, loader = _configured_handler(monkeypatch, tmp_path, video_window=(0.0, 1.0))
         monkeypatch.setitem(
