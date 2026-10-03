@@ -625,7 +625,43 @@ function Publish-CIArtifact {
     }
 }
 
+function Get-StandardTimestamp {
+    <#
+    .SYNOPSIS
+    Returns the current UTC time as an ISO 8601 string.
+
+    .DESCRIPTION
+    Returns the current UTC time formatted with the round-trip specifier ("o"),
+    producing a timezone-unambiguous timestamp ending in Z.
+
+    .OUTPUTS
+    System.String - UTC timestamp in ISO 8601 round-trip format ending in Z.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    return (Get-Date).ToUniversalTime().ToString('o')
+}
+
+function Get-StandardTimestampPattern {
+    <#
+    .SYNOPSIS
+    Returns the regex pattern that matches Get-StandardTimestamp output.
+
+    .OUTPUTS
+    System.String - Anchored regex pattern for ISO 8601 UTC timestamps.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    return '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z$'
+}
+
 Export-ModuleMember -Function @(
+    'Get-StandardTimestamp',
+    'Get-StandardTimestampPattern',
     'ConvertTo-GitHubActionsEscaped',
     'ConvertTo-AzureDevOpsEscaped',
     'Get-CIPlatform',

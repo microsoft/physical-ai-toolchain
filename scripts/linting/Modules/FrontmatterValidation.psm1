@@ -6,6 +6,8 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+Import-Module (Join-Path $PSScriptRoot '../../lib/Modules/CIHelpers.psm1')
+
 #region Classes
 
 class ValidationIssue {
@@ -134,6 +136,7 @@ class ValidationSummary {
 
     [hashtable] ToHashtable() {
         return @{
+            Timestamp     = Get-StandardTimestamp
             TotalFiles    = $this.TotalFiles
             PassedFiles   = $this.PassedFiles
             FailedFiles   = $this.FailedFiles
@@ -697,6 +700,11 @@ function Test-SingleFileFrontmatter {
         }
 
         if ($result.HasErrors) {
+            return $result
+        }
+
+        if (-not (Get-Command -Name 'ConvertFrom-Yaml' -ErrorAction SilentlyContinue)) {
+            $result.AddError('dependency', 'ConvertFrom-Yaml cmdlet not found. Install powershell-yaml module: Install-Module -Name PowerShell-Yaml -RequiredVersion 0.4.12 -Force -Scope CurrentUser')
             return $result
         }
 
