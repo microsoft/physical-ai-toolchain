@@ -31,7 +31,7 @@
     "@mdx-js/react": "3.1.1",
     "clsx": "2.1.1",
     "docusaurus-plugin-image-zoom": "3.0.1",
-    "mermaid": "11.17.2",
+    "mermaid": "12.1.0",
     "prism-react-renderer": "2.4.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -65,7 +65,6 @@
     "express": "5.2.1",
     "follow-redirects": "1.16.0",
     "lodash": "4.18.1",
-    "lodash-es": "4.18.1",
     "path-to-regexp": "1.9.0",
     "router": {
       "path-to-regexp": "8.4.2"
