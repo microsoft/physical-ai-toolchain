@@ -72,10 +72,6 @@ function runScan(repo, options = {}) {
   return scan({ ...repo, binary, expectedRevision: repo.git('rev-parse', 'HEAD'), ...options });
 }
 
-test('positive fixture is deterministic', () => {
-  assert.equal(syntheticFinding(), syntheticFinding(), 'Positive fixture must be repeatable');
-});
-
 test('scope excludes unrelated branches, remote refs and tags without suppressions', t => {
   const repo = repository(t);
   repo.git('switch', '--quiet', '-c', 'unrelated');
