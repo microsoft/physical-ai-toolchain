@@ -111,7 +111,7 @@ jobs:
 
       - name: Presync dataviewer backend Python (dev + analysis + hdf5 + export + auth)
         working-directory: data-management/viewer/backend
-        run: uv sync --frozen --extra dev --extra analysis --extra hdf5 --extra export --extra auth
+        run: uv sync --frozen --group dev --extra analysis --extra hdf5 --extra export --extra auth
 
       - name: Presync evaluation Python dev group
         working-directory: evaluation
@@ -129,8 +129,8 @@ jobs:
       - name: Bootstrap hve-core RPI skills
         env:
           GH_TOKEN: ${{ github.token }}
-          # microsoft/hve-core derived-files release: hve-core-v3.2.2 (2026-03-23)
-          HVE_CORE_DERIVED_FILES_REF: e69486a5f809ede45c63c0a31358c12912bd5168
+          # microsoft/hve-core derived-files release: hve-core-v3.3.101 (2026-04-25)
+          HVE_CORE_DERIVED_FILES_REF: 0d4452b33c2409d03315019dae0d34e468641dfb
           RPI_SKILLS_REF: 130ab64338bb77e912e603693672c31f14bc60c6
         run: |
           skills=(

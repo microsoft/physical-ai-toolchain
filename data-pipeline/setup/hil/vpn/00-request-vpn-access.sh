@@ -32,6 +32,7 @@ OPTIONS:
     --input-dir DIR             Protected local public-input directory
     --request-dir DIR           Protected local private-key and CSR directory
     --azure-config-dir DIR      Isolated Azure CLI state directory
+    --managed-identity          Sign in as the host's Arc-enabled server identity, not device code
     --config-preview            Print configuration and exit
 
 EXAMPLES:
@@ -48,6 +49,7 @@ vault_name=""
 input_dir=""
 request_dir=""
 azure_config_dir=""
+use_managed_identity=false
 config_preview=false
 
 # Apply command-line values before deriving paths and validating the VPN request target.
@@ -62,6 +64,7 @@ while [[ $# -gt 0 ]]; do
     --input-dir)         input_dir="$2"; shift 2 ;;
     --request-dir)       request_dir="$2"; shift 2 ;;
     --azure-config-dir)  azure_config_dir="$2"; shift 2 ;;
+    --managed-identity)  use_managed_identity=true; shift ;;
     --config-preview)    config_preview=true; shift ;;
     *)                   fatal "Unknown option: $1" ;;
   esac
@@ -86,6 +89,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Milestone" "reachable: VPN request"
   print_kv "Environment" "$environment"
   print_kv "Host" "$host_name"
+  print_kv "Azure Sign-in" "$([[ "$use_managed_identity" == "true" ]] && echo 'managed identity' || echo 'device code')"
   print_kv "Tenant" "$tenant_id"
   print_kv "Subscription" "$subscription_id"
   print_kv "Key Vault" "$vault_name"
@@ -99,7 +103,7 @@ if [[ "$config_preview" == "true" ]]; then
 fi
 
 require_tools az jq openssl
-hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir"
+hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir" "$use_managed_identity"
 
 hil_fetch_artifacts "$catalog_secret" "$environment" "$host_name" \
   "$tenant_id" "$subscription_id" "$vault_name" "$input_dir" \

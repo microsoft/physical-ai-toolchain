@@ -27,7 +27,7 @@ OPTIONS:
     --compute-name NAME       Compute target name (default: k8s-<suffix>)
     --instance-types-manifest PATH
                   InstanceType manifest (default: manifests/azureml-instance-types.yaml)
-    --fast-prod               Set cluster purpose to FastProd with HA inference router
+    --fast-prod               Set cluster purpose to FastProd
     --enforce-resource-validation
                               Enforce aml-operator resource validation (default: disabled,
                               amloperator.skipResourceValidation=true).
@@ -50,9 +50,9 @@ OPTIONS:
     --skip-instance-types     Skip creating GPU instance types
     --config-preview          Print configuration and exit
 
-Both scale-from-zero choices are extension settings. Reruns compare them with the
-live extension and update only the keys that differ, including on extensions
-installed before these settings existed.
+The deployment-profile and scale-from-zero choices are extension settings.
+Reruns compare them with the live extension and update only the keys that differ,
+including on extensions installed before these settings existed.
 
 EXAMPLES:
     $(basename "$0")
@@ -68,8 +68,6 @@ context=""
 compute_name=""
 instance_types_manifest="$MANIFESTS_DIR/azureml-instance-types.yaml"
 cluster_purpose="DevTest"
-inference_ha="false"
-allow_insecure="true"
 install_volcano="true"
 install_prom_op="false"
 skip_resource_validation="true"
@@ -86,7 +84,7 @@ while [[ $# -gt 0 ]]; do
     --context)                       context="$2"; shift 2 ;;
     --compute-name)                  compute_name="$2"; shift 2 ;;
     --instance-types-manifest)       instance_types_manifest="$2"; shift 2 ;;
-    --fast-prod)                     cluster_purpose="FastProd"; inference_ha="true"; allow_insecure="false"; shift ;;
+    --fast-prod)                     cluster_purpose="FastProd"; shift ;;
     --enforce-resource-validation)   skip_resource_validation="false"; shift ;;
     --enforce-volcano-capacity-check) enforce_volcano_capacity_check=true; shift ;;
     --skip-attach)                   skip_attach=true; shift ;;
@@ -135,6 +133,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Extension Name" "$extension_name"
   print_kv "Compute Name" "$compute_name"
   print_kv "Cluster Purpose" "$cluster_purpose"
+  print_kv "Nginx Ingress" "Enabled for OSMO"
   print_kv "Skip Resource Validation" "$skip_resource_validation"
   print_kv "Enforce Volcano Capacity Check" "$enforce_volcano_capacity_check"
   print_kv "Volcano Config Map" "${desired_volcano_configmap:-chart default}"
@@ -174,8 +173,6 @@ connect_aks "$rg" "$cluster" "$kubeconfig" "$context"
 #------------------------------------------------------------------------------
 section "Install AzureML Extension"
 
-export INFERENCE_ROUTER_HA="$inference_ha"
-export ALLOW_INSECURE_CONNECTIONS="$allow_insecure"
 export CLUSTER_PURPOSE="$cluster_purpose"
 export INSTALL_VOLCANO="$install_volcano"
 export INSTALL_PROM_OP="$install_prom_op"
@@ -204,7 +201,10 @@ fi
 #------------------------------------------------------------------------------
 # Reconcile AzureML Extension Settings
 #------------------------------------------------------------------------------
-# Scale-from-zero GPU pools need two extension settings:
+# The repository deployment profile requires these extension settings:
+# - enableInference=false, so the extension does not deploy azureml-fe.
+# - nginxIngress.enabled=true, so OSMO can use the extension-managed ingress.
+# Scale-from-zero GPU pools also need two settings:
 # - amloperator.skipResourceValidation=true, so the operator admits jobs whose
 #   InstanceType exceeds the largest currently-Ready node instead of failing them.
 # - volcanoScheduler.schedulerConfigMap naming a dedicated configmap whose enqueue
@@ -233,10 +233,22 @@ fi
 
 current_settings=$(az k8s-extension show --name "$extension_name" --cluster-type managedClusters \
   --cluster-name "$cluster" --resource-group "$rg" --query configurationSettings -o json)
+desired_enable_inference=$(jq -r '.enableInference' "$CONFIG_DIR/out/azureml-aks-config.json")
+desired_nginx_ingress=$(jq -r '.["nginxIngress.enabled"]' "$CONFIG_DIR/out/azureml-aks-config.json")
+current_enable_inference=$(jq -r '.enableInference // ""' <<< "$current_settings")
+current_nginx_ingress=$(jq -r '.["nginxIngress.enabled"] // ""' <<< "$current_settings")
 current_skip_resource_validation=$(jq -r '.["amloperator.skipResourceValidation"] // ""' <<< "$current_settings")
 current_volcano_configmap=$(jq -r '.["volcanoScheduler.schedulerConfigMap"] // ""' <<< "$current_settings")
 
 settings_patch='{}'
+if [[ "$current_enable_inference" != "$desired_enable_inference" ]]; then
+  settings_patch=$(jq -c --arg value "$desired_enable_inference" \
+    '. + {"enableInference": $value}' <<< "$settings_patch")
+fi
+if [[ "$current_nginx_ingress" != "$desired_nginx_ingress" ]]; then
+  settings_patch=$(jq -c --arg value "$desired_nginx_ingress" \
+    '. + {"nginxIngress.enabled": $value}' <<< "$settings_patch")
+fi
 if [[ "$current_skip_resource_validation" != "$skip_resource_validation" ]]; then
   settings_patch=$(jq -c --arg value "$skip_resource_validation" \
     '. + {"amloperator.skipResourceValidation": $value}' <<< "$settings_patch")
