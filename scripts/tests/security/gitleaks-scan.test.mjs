@@ -61,7 +61,7 @@ function repository(t) {
   return { cwd, env, git, write, commit, base, reportPath: join(cwd, 'logs', 'scan.sarif') };
 }
 
-// Fixed high-entropy input avoids random collisions with scanner allowlists.
+// Random hex can contain generic-api-key stopwords such as dead or feed, which suppress the finding.
 const fixtureHex = '0123456789abcdef'.repeat(4);
 
 function syntheticFinding() {
