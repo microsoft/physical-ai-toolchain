@@ -225,6 +225,7 @@ class TestCsrfProtection:
 
 
 class TestApiKeyProvider:
+    @pytest.mark.asyncio
     async def test_authenticate_valid_key(self):
         from unittest.mock import MagicMock
 
@@ -237,6 +238,7 @@ class TestApiKeyProvider:
         assert result is not None
         assert result["auth_method"] == "apikey"
 
+    @pytest.mark.asyncio
     async def test_authenticate_wrong_key(self):
         from unittest.mock import MagicMock
 
@@ -248,6 +250,7 @@ class TestApiKeyProvider:
         result = await provider.authenticate(request)
         assert result is None
 
+    @pytest.mark.asyncio
     async def test_authenticate_missing_key(self):
         from unittest.mock import MagicMock
 
@@ -272,6 +275,7 @@ class TestApiKeyProvider:
 
 
 class TestEasyAuthProvider:
+    @pytest.mark.asyncio
     async def test_authenticate_valid_principal(self):
         import base64
         import json
@@ -295,6 +299,7 @@ class TestEasyAuthProvider:
         assert result["auth_method"] == "easy_auth"
         assert "Dataviewer.Admin" in result["roles"]
 
+    @pytest.mark.asyncio
     async def test_authenticate_missing_header(self):
         from unittest.mock import MagicMock
 
@@ -306,6 +311,7 @@ class TestEasyAuthProvider:
         result = await provider.authenticate(request)
         assert result is None
 
+    @pytest.mark.asyncio
     async def test_authenticate_invalid_base64(self):
         from unittest.mock import MagicMock
 
