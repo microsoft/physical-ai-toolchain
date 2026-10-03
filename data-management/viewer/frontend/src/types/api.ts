@@ -229,45 +229,6 @@ export interface AnnotationSummary {
 }
 
 // ============================================================================
-// Curriculum Types
-// ============================================================================
-
-/** Criteria for filtering episodes into a curriculum stage */
-export interface CurriculumCriteria {
-  /** Minimum quality score to include */
-  minQualityScore?: number
-  /** Task completeness ratings to include */
-  taskCompleteness?: TaskCompletenessRating[]
-  /** Trajectory flags to exclude */
-  excludeFlags?: TrajectoryFlag[]
-  /** Maximum number of anomalies allowed */
-  maxAnomalyCount?: number
-}
-
-/** Single stage in a training curriculum */
-export interface CurriculumStage {
-  /** Stage name */
-  name: string
-  /** Episode indices in this stage */
-  episodeIndices: number[]
-  /** Criteria used to select episodes */
-  criteria: CurriculumCriteria
-}
-
-/** Curriculum ordering strategy */
-export type CurriculumStrategy = 'difficulty-ascending' | 'quality-descending' | 'balanced'
-
-/** Complete curriculum definition */
-export interface CurriculumDefinition {
-  /** Curriculum name */
-  name: string
-  /** Ordering strategy */
-  strategy: CurriculumStrategy
-  /** Curriculum stages */
-  stages: CurriculumStage[]
-}
-
-// ============================================================================
 // API Request/Response Types
 // ============================================================================
 
@@ -295,27 +256,6 @@ export interface AutoAnalysisRequest {
   datasetId: string
   /** Episode index */
   episodeIndex: number
-}
-
-/** Request to generate a curriculum */
-export interface GenerateCurriculumRequest {
-  /** Dataset ID */
-  datasetId: string
-  /** Curriculum definition */
-  curriculum: CurriculumDefinition
-}
-
-/** Curriculum export format */
-export type ExportFormat = 'json' | 'indices' | 'parquet'
-
-/** Request to export a curriculum */
-export interface ExportCurriculumRequest {
-  /** Dataset ID */
-  datasetId: string
-  /** Curriculum to export */
-  curriculum: CurriculumDefinition
-  /** Export format */
-  format: ExportFormat
 }
 
 // ============================================================================

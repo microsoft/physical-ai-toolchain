@@ -31,6 +31,7 @@ describe('AnnotationWorkspace diagnostics', () => {
     render(<AnnotationWorkspace diagnosticsVisible />)
 
     expect(screen.getByTestId('dataviewer-diagnostics-panel')).toBeInTheDocument()
+    expect(screen.getByTestId('dataviewer-diagnostics-panel')).toBeVisible()
   })
 
   it('keeps the workspace header actions free of the diagnostics toggle', () => {

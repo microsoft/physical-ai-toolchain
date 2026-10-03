@@ -2,7 +2,7 @@
 title: Ubuntu HiL Host and K3s Setup
 description: Prepare Ubuntu and install one owned local K3s compute plane for the progressive T3 HiL journey.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-23
+ms.date: 2026-09-29
 ms.topic: how-to
 ---
 
@@ -62,6 +62,36 @@ The script:
 * Verifies the explicit context, node identity, version, and readiness
 
 Rerunning the same target verifies owned state. A changed or foreign target stops before mutation.
+
+## Connect to Azure Arc
+
+Connect K3s to Azure Arc when the environment attaches the host as an OSMO backend or an Azure ML compute. Sign in with Azure CLI, then preview the connection:
+
+```bash
+data-pipeline/setup/edge/05-connect-arc-kubernetes.sh \
+  --subscription-id <subscription-id> \
+  --tenant-id <tenant-id> \
+  --resource-group <arc-resource-group> \
+  --location <azure-region> \
+  --cluster-name <arc-cluster-name> \
+  --kubeconfig <protected-k3s-kubeconfig> \
+  --cluster-admin-signed-in-user \
+  --config-preview
+```
+
+Run the same command without `--config-preview`. Add `--enable-workload-identity` when OSMO workloads on the host use Arc workload identity; that option restarts K3s once.
+
+Arc cluster connect (`az connectedk8s proxy`) authenticates operators with Microsoft Entra ID, but K3s authorizes each request with its own RBAC. Grant access while connecting so the first proxy session works:
+
+| Option                           | Grants `cluster-admin` to                               |
+|----------------------------------|---------------------------------------------------------|
+| `--cluster-admin-signed-in-user` | The signed-in Azure CLI user                            |
+| `--cluster-admin-object-id <id>` | A Microsoft Entra user or service principal; repeatable |
+| `--cluster-admin-group-id <id>`  | Members of a Microsoft Entra group; repeatable          |
+
+Arc presents identities by object ID, including guest accounts, so the grants take object IDs rather than user principal names. Each subject gets one ClusterRoleBinding named `arc-cluster-admin-user-<id>` or `arc-cluster-admin-group-<id>`, and reruns leave existing bindings unchanged.
+
+Operators also need the Azure Arc Enabled Kubernetes Cluster User Role on the Arc resource to open the proxy. For read-only access, bind the built-in `view` ClusterRole plus a ClusterRole that can read nodes instead of granting `cluster-admin`.
 
 ## Choose Reachability
 

@@ -10,15 +10,18 @@
     Detects dangerous patterns in GitHub Actions workflows.
 
 .DESCRIPTION
-    Scans GitHub Actions workflow YAML files for two classes of dangerous pattern:
+    Scans GitHub Actions workflow YAML and composite action metadata for three
+    classes of dangerous pattern:
 
     - Template injection: direct interpolation of attacker-controllable GitHub event
       values into run or github-script execution contexts.
+    - Caller-controlled input interpolation: direct interpolation of a non-boolean
+      workflow or composite-action input into a code execution context.
     - Untrusted checkout: workflows triggered by 'pull_request_target' that check out
       the pull-request head ref, executing untrusted code in a privileged context.
 
     Adapted from microsoft/hve-core scripts/security/Test-DangerousWorkflow.ps1
-    as of commit b70237d08d5caf6918b9de9952a243a8588b92dc.
+    as of commit a146d8d01ad1e38f82d5d8eebb7fa8d1d88c4092.
 
     Local divergences from upstream (each marked inline with a '# LOCAL' comment):
 
@@ -35,7 +38,9 @@
     mechanical diff.
 
 .PARAMETER Path
-    Directory containing workflow YAML files. Defaults to '.github/workflows'.
+    Directories containing workflow YAML or composite action metadata. Defaults to
+    '.github/workflows' and '.github/actions'. A directory supplied explicitly must
+    exist; a default directory that is absent is skipped.
 
 .PARAMETER Format
     Output format: 'console', 'json', or 'sarif'. Defaults to 'console'.
@@ -54,7 +59,7 @@
     ./scripts/security/Test-DangerousWorkflow.ps1 -FailOnViolation -Format sarif
 
 .LINK
-    https://github.com/microsoft/hve-core/blob/b70237d08d5caf6918b9de9952a243a8588b92dc/scripts/security/Test-DangerousWorkflow.ps1
+    https://github.com/microsoft/hve-core/blob/a146d8d01ad1e38f82d5d8eebb7fa8d1d88c4092/scripts/security/Test-DangerousWorkflow.ps1
 #>
 
 using module ./Modules/SecurityClasses.psm1
@@ -62,7 +67,7 @@ using module ./Modules/SecurityClasses.psm1
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [string]$Path = '.github/workflows',
+    [string[]]$Path = @('.github/workflows', '.github/actions'),
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('json', 'sarif', 'console')]
@@ -117,11 +122,23 @@ function Get-WorkflowFiles {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [string]$ScanPath
+        [string[]]$ScanPath,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipMissing
     )
 
-    $resolvedPath = Resolve-Path -Path $ScanPath -ErrorAction Stop
-    return Get-ChildItem -Path $resolvedPath -File -Recurse | Where-Object { $_.Extension -in '.yml', '.yaml' } | Sort-Object -Property FullName
+    $files = @()
+    foreach ($root in $ScanPath) {
+        if ($SkipMissing -and -not (Test-Path -LiteralPath $root)) {
+            continue
+        }
+
+        $resolvedPath = Resolve-Path -Path $root -ErrorAction Stop
+        $files += @(Get-ChildItem -Path $resolvedPath -File -Recurse | Where-Object { $_.Extension -in '.yml', '.yaml' })
+    }
+
+    return @($files | Sort-Object -Property FullName -Unique)
 }
 
 function Get-ExpressionMatches {
@@ -136,7 +153,9 @@ function Get-ExpressionMatches {
         return @()
     }
 
-    $expressionMatchList = [System.Text.RegularExpressions.Regex]::Matches($Text, '\$\{\{\s*(.*?)\s*\}\}')
+    # Singleline lets the capture cross newlines. GitHub accepts an expression whose body
+    # is split across lines, and without this option such an expression is never matched.
+    $expressionMatchList = [System.Text.RegularExpressions.Regex]::Matches($Text, '\$\{\{\s*(.*?)\s*\}\}', [System.Text.RegularExpressions.RegexOptions]::Singleline)
     return @($expressionMatchList | ForEach-Object { $_.Groups[1].Value.Trim() })
 }
 
@@ -272,6 +291,121 @@ function Test-IsUntrustedCheckoutRef {
     return $false
 }
 
+function Get-WorkflowInputType {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        $Workflow
+    )
+
+    # Keys are compared case-insensitively, matching how the inputs context resolves names.
+    $declaredTypes = @{}
+
+    if ($null -eq $Workflow) {
+        return $declaredTypes
+    }
+
+    # Action metadata declares inputs at the document root and its schema has no type
+    # field, so every composite action input is reported as untyped.
+    if ($Workflow -is [System.Collections.IDictionary] -and $Workflow['runs']) {
+        $actionInputs = $Workflow['inputs']
+        if ($actionInputs -is [System.Collections.IDictionary]) {
+            foreach ($actionInput in $actionInputs.GetEnumerator()) {
+                $declaredTypes[[string]$actionInput.Key] = 'untyped'
+            }
+        }
+    }
+
+    # A bare 'on:' key parses as the boolean true, so probe both spellings.
+    $triggerNode = $null
+    if ($Workflow -is [System.Collections.IDictionary]) {
+        foreach ($key in @($Workflow.Keys)) {
+            if ("$key" -eq 'on' -or "$key" -eq 'True') {
+                $triggerNode = $Workflow[$key]
+                break
+            }
+        }
+    }
+    elseif ($Workflow.PSObject.Properties.Name -contains 'on') {
+        $triggerNode = $Workflow.on
+    }
+
+    if ($triggerNode -isnot [System.Collections.IDictionary]) {
+        return $declaredTypes
+    }
+
+    foreach ($trigger in @('workflow_call', 'workflow_dispatch')) {
+        if (-not $triggerNode.Contains($trigger)) {
+            continue
+        }
+
+        $triggerBody = $triggerNode[$trigger]
+        if ($triggerBody -isnot [System.Collections.IDictionary]) {
+            continue
+        }
+
+        $inputsNode = $triggerBody['inputs']
+        if ($inputsNode -isnot [System.Collections.IDictionary]) {
+            continue
+        }
+
+        foreach ($inputEntry in $inputsNode.GetEnumerator()) {
+            $inputName = [string]$inputEntry.Key
+            $declaredType = 'unspecified'
+            $inputSpec = $inputEntry.Value
+            if ($inputSpec -is [System.Collections.IDictionary] -and $inputSpec['type']) {
+                $declaredType = ([string]$inputSpec['type']).Trim().ToLowerInvariant()
+            }
+
+            # One name declared on two triggers keeps its non-boolean type so the gate fails closed.
+            if ($declaredTypes.ContainsKey($inputName) -and $declaredTypes[$inputName] -ne 'boolean') {
+                continue
+            }
+
+            $declaredTypes[$inputName] = $declaredType
+        }
+    }
+
+    return $declaredTypes
+}
+
+function Get-InputReference {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$Expression
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Expression)) {
+        return @()
+    }
+
+    $normalizedExpression = ConvertTo-NormalizedExpression -Expression $Expression
+
+    # The inputs context and the github.event.inputs payload carry the same
+    # caller-supplied value, so both spellings resolve to the same input name.
+    $referencePatterns = @(
+        '(?<![A-Za-z0-9_.-])inputs\.([A-Za-z0-9_-]+)'
+        'github\.event\.inputs\.([A-Za-z0-9_-]+)'
+    )
+
+    $names = [System.Collections.Generic.List[string]]::new()
+    foreach ($pattern in $referencePatterns) {
+        foreach ($referenceMatch in [System.Text.RegularExpressions.Regex]::Matches($normalizedExpression, $pattern)) {
+            $name = $referenceMatch.Groups[1].Value
+            if (-not $names.Contains($name)) {
+                $names.Add($name)
+            }
+        }
+    }
+    return @($names)
+}
+
 function Find-NextMatchingLine {
     [CmdletBinding()]
     param(
@@ -316,6 +450,13 @@ function ConvertTo-DangerousWorkflowSarif {
             name                 = 'DangerousWorkflowUntrustedCheckout'
             shortDescription     = @{ text = 'Pull-request head code is checked out in a pull_request_target context' }
             fullDescription      = @{ text = 'Workflows triggered by pull_request_target should not check out and execute the untrusted pull-request head ref in the privileged base context.' }
+            defaultConfiguration = @{ level = 'error' }
+        }
+        @{
+            id                   = 'dangerous-workflow/direct-input-interpolation'
+            name                 = 'DangerousWorkflowDirectInputInterpolation'
+            shortDescription     = @{ text = 'Caller-controlled workflow inputs are interpolated into code execution contexts' }
+            fullDescription      = @{ text = 'Caller-controlled workflow_call or workflow_dispatch inputs should reach run or script blocks through a step-level env mapping rather than through expression interpolation. Only inputs declared with type boolean are exempt.' }
             defaultConfiguration = @{ level = 'error' }
         }
     )
@@ -406,7 +547,7 @@ function Invoke-DangerousWorkflowCheck {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $false)]
-        [string]$Path = '.github/workflows',
+        [string[]]$Path = @('.github/workflows', '.github/actions'),
 
         [Parameter(Mandatory = $false)]
         [ValidateSet('json', 'sarif', 'console')]
@@ -420,7 +561,7 @@ function Invoke-DangerousWorkflowCheck {
     )
 
     Write-SecurityLog 'Starting dangerous workflow validation' -Level Info -CIAnnotation
-    Write-SecurityLog "Scanning: $Path" -Level Info
+    Write-SecurityLog "Scanning: $($Path -join ', ')" -Level Info
 
     if (-not (Get-Command ConvertFrom-Yaml -ErrorAction SilentlyContinue)) {
         Write-SecurityLog 'PowerShell-Yaml module not found; cannot scan for dangerous workflow patterns. Install with: Install-Module powershell-yaml' -Level Error -CIAnnotation
@@ -436,14 +577,14 @@ function Invoke-DangerousWorkflowCheck {
         }
     }
 
-    $resolvedPath = Resolve-Path -Path $Path -ErrorAction Stop
-    Write-SecurityLog "Resolved path: $resolvedPath" -Level Info
-
-    $workflowFiles = Get-WorkflowFiles -ScanPath $Path
+    # An explicitly supplied root must exist. A default root that is absent is skipped so
+    # the scan still runs in a repository with no composite actions.
+    $skipMissing = -not $PSBoundParameters.ContainsKey('Path')
+    $workflowFiles = Get-WorkflowFiles -ScanPath $Path -SkipMissing:$skipMissing
     $totalFiles = @($workflowFiles).Count
     Write-SecurityLog "Found $totalFiles workflow file(s)" -Level Info
 
-    $report = [ComplianceReport]::new($Path)
+    $report = [ComplianceReport]::new($Path -join ', ')
     $report.TotalFiles = $totalFiles
     $report.ScannedFiles = $totalFiles
     $report.TotalDependencies = $totalFiles
@@ -476,14 +617,29 @@ function Invoke-DangerousWorkflowCheck {
             continue
         }
 
-        $jobsNode = Get-NodeMember -Node $yaml -Key 'jobs'
+        $jobsNode = $null
+        if ($yaml -is [System.Collections.IDictionary]) {
+            if ($yaml.Contains('jobs')) {
+                $jobsNode = $yaml['jobs']
+            }
+            elseif ($yaml['runs'] -is [System.Collections.IDictionary] -and "$($yaml['runs']['using'])" -eq 'composite') {
+                # Composite action metadata carries its steps under runs.steps. Present them
+                # as a single pseudo-job so both rules apply to the same step loop.
+                $jobsNode = [ordered]@{ runs = $yaml['runs'] }
+            }
+        }
+        elseif ($yaml.PSObject.Properties.Name -contains 'jobs') {
+            $jobsNode = $yaml.jobs
+        }
         if ($null -eq $jobsNode) {
             continue
         }
 
         $hasPullRequestTarget = Test-HasPullRequestTargetTrigger -Yaml $yaml
+        $declaredInputTypes = Get-WorkflowInputType -Workflow $yaml
 
         $injectionSearchIndex = 0
+        $inputSearchIndex = 0
         foreach ($jobEntry in $jobsNode.GetEnumerator()) {
             $jobName = [string]$jobEntry.Key
             $jobObject = $jobEntry.Value
@@ -548,7 +704,8 @@ function Invoke-DangerousWorkflowCheck {
                                 $injectionSearchIndex = $lineNumber
                             }
 
-                            $violation = New-DangerousWorkflowViolation -File $relativePath -Line $lineNumber -RuleId 'dangerous-workflow/template-injection' -Description "Untrusted expression '$expression' is interpolated into a code execution context in job '$jobName' step '$stepName'." -Remediation 'Avoid directly interpolating untrusted GitHub event or workflow-output values into shell or script blocks.' -JobName $jobName -StepName $stepName
+                            $reportedExpression = $expression -replace '\s+', ' '
+                            $violation = New-DangerousWorkflowViolation -File $relativePath -Line $lineNumber -RuleId 'dangerous-workflow/template-injection' -Description "Untrusted expression '$reportedExpression' is interpolated into a code execution context in job '$jobName' step '$stepName'." -Remediation 'Avoid directly interpolating untrusted GitHub event or workflow-output values into shell or script blocks.' -JobName $jobName -StepName $stepName
                             $violations += $violation
                             break
                         }
@@ -575,6 +732,50 @@ function Invoke-DangerousWorkflowCheck {
                     }
                 }
                 # LOCAL (end): untrusted pull_request_target checkout rule.
+
+                foreach ($candidate in $codeCandidates) {
+                    $inputViolationRaised = $false
+                    foreach ($expression in Get-ExpressionMatches -Text $candidate.Text) {
+                        foreach ($inputName in Get-InputReference -Expression $expression) {
+                            $declaredType = 'undeclared'
+                            if ($declaredInputTypes.ContainsKey($inputName)) {
+                                $declaredType = [string]$declaredInputTypes[$inputName]
+                            }
+
+                            # A boolean input resolves to the literal true or false, so it carries
+                            # no shell metacharacters. Every other type, including an unresolvable
+                            # one, is treated as command-bearing.
+                            if ($declaredType -eq 'boolean') {
+                                continue
+                            }
+
+                            $exprPattern = '\$\{\{\s*' + [regex]::Escape($expression) + '\s*\}\}'
+                            $lineNumber = Find-NextMatchingLine -Lines $rawLines -Pattern $exprPattern -StartIndex $inputSearchIndex
+                            if ($lineNumber -eq 0) {
+                                $lineNumber = Find-NextMatchingLine -Lines $rawLines -Pattern $exprPattern -StartIndex 0
+                            }
+                            if ($lineNumber -eq 0) {
+                                $headerPattern = if ($candidate.Kind -eq 'script') { '^\s*script:\s*' } else { '^\s*run:\s*' }
+                                $lineNumber = Find-NextMatchingLine -Lines $rawLines -Pattern $headerPattern -StartIndex 0
+                            }
+                            if ($lineNumber -eq 0) {
+                                $lineNumber = 1
+                            }
+                            else {
+                                $inputSearchIndex = $lineNumber
+                            }
+
+                            $violation = New-DangerousWorkflowViolation -File $relativePath -Line $lineNumber -RuleId 'dangerous-workflow/direct-input-interpolation' -Description "Caller-controlled input 'inputs.$inputName' (type $declaredType) is interpolated into a code execution context in job '$jobName' step '$stepName'." -Remediation "Map the input to a step-level env: variable (INPUT_$(($inputName -replace '[^A-Za-z0-9]', '_').ToUpperInvariant())) and read the native shell variable inside the run block." -JobName $jobName -StepName $stepName
+                            $violations += $violation
+                            $inputViolationRaised = $true
+                            break
+                        }
+
+                        if ($inputViolationRaised) {
+                            break
+                        }
+                    }
+                }
 
                 $stepIndex++
             }

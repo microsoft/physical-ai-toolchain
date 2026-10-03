@@ -318,6 +318,7 @@ test('SearchPage recovers from a no-result query without duplicate announcements
   await expect(search).toHaveAttribute('aria-autocomplete');
   await search.fill('training');
   await page.getByRole('listbox').getByRole('option', { name: 'See all results' }).click();
+  await page.waitForURL((url) => url.searchParams.get('q') === 'training');
   await expectPageReady(page);
   expect(new URL(page.url()).searchParams.get('q')).toBe('training');
 
@@ -408,6 +409,7 @@ test('tiers disclosure toggles, traverses, and closes without trapping focus', e
   await page.keyboard.press('Tab');
   await expect(firstTier).toBeFocused();
   await page.keyboard.press('Enter');
+  await page.waitForURL((url) => url.pathname === `/physical-ai-toolchain${labelData.tierNavigation[0].route}`);
   await expectPageReady(page);
   expect(new URL(page.url()).pathname).toBe(`/physical-ai-toolchain${labelData.tierNavigation[0].route}`);
   await expect(page.locator('main')).toBeFocused();
@@ -505,6 +507,7 @@ test('browse and read process reaches an article and returns through site naviga
   const gettingStarted = page.getByRole('link', { name: 'Getting Started' }).first();
   const gettingStartedHref = await gettingStarted.getAttribute('href');
   await gettingStarted.click();
+  await page.waitForURL((url) => url.pathname === gettingStartedHref);
   await expectPageReady(page);
   expect(new URL(page.url()).pathname).toBe(gettingStartedHref);
   await expect(page.locator('main')).toBeFocused();
@@ -513,6 +516,7 @@ test('browse and read process reaches an article and returns through site naviga
   const quickstart = sidebar.getByRole('link', { name: labelData.labelRegistry.quickstart });
   const quickstartHref = await quickstart.getAttribute('href');
   await quickstart.click();
+  await page.waitForURL((url) => url.pathname === quickstartHref);
   await expectPageReady(page);
   expect(new URL(page.url()).pathname).toBe(quickstartHref);
   await expect(page.locator('main')).toBeFocused();
@@ -528,12 +532,14 @@ test('browse and read process reaches an article and returns through site naviga
   const nextHref = await nextLink.getAttribute('href');
   await nextLink.focus();
   await page.keyboard.press('Enter');
+  await page.waitForURL((url) => url.pathname === nextHref);
   await expectPageReady(page);
   expect(new URL(page.url()).pathname).toBe(nextHref);
   await expect(page.locator('main')).toBeFocused();
 
   const breadcrumbs = page.getByRole('navigation', { name: 'Breadcrumbs' });
   await breadcrumbs.getByRole('link', { name: 'Home page' }).click();
+  await page.waitForURL((url) => url.pathname === '/physical-ai-toolchain/');
   await expectPageReady(page);
   expect(new URL(page.url()).pathname).toBe('/physical-ai-toolchain/');
   await expect(page.locator('main')).toBeFocused();

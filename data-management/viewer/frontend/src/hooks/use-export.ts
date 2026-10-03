@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
   createExportStream,
@@ -37,6 +37,14 @@ export function useExport({ datasetId }: UseExportOptions): UseExportReturn {
   const [isLoadingPreview, setIsLoadingPreview] = useState(false)
 
   const cancelRef = useRef<(() => void) | null>(null)
+
+  useEffect(
+    () => () => {
+      cancelRef.current?.()
+      cancelRef.current = null
+    },
+    [],
+  )
 
   const startExport = useCallback(
     (request: ExportRequestWithEdits) => {
