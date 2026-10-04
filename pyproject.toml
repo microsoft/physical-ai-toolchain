@@ -14,9 +14,9 @@ packages = ["training/rl"]
 
 [dependency-groups]
 dev = [
-    "hypothesis==6.168.0",
+    "hypothesis==6.168.1",
     "numpy==2.5.3",
-    "ruff==0.16.8",
+    "ruff==0.16.9",
     "pyarrow==25.0.1",
     "imageio==2.37.4",
     "imageio-ffmpeg==0.6.0",

@@ -7,11 +7,11 @@ requires-python = "==3.11.*"
 dependencies = [
     "azure-core==1.41.0",
     "azure-identity==1.25.3",
-    "azure-ai-ml==1.34.1",
+    "azure-ai-ml==1.35.0",
     "azureml-mlflow==1.62.0.post6",
-    "azure-storage-blob==12.30.1",
-    "mlflow-skinny==3.16.0",
-    "idna==3.19",
+    "azure-storage-blob==12.30.3",
+    "mlflow-skinny==3.16.1",
+    "idna==3.20",
     # 2.8.0 fixes GHSA-8988-9cw3-xx77, GHSA-vxq7-64xx-v4gw, and GHSA-gh4c-6fx4-qh6g.
     "urllib3==2.8.0",
     "cryptography==50.0.1",
@@ -23,7 +23,7 @@ dependencies = [
     "marshmallow==3.26.2",
     # starlette pulled transitively by mlflow-skinny; mirror the training/rl
     # security pin (GHSA-wqp7-x3pw-xc5r, GHSA-x746-7m8f-x49c, GHSA-82w8-qh3p-5jfq).
-    "starlette==1.6.0",
+    "starlette==1.7.0",
 ]
 
 [tool.uv]
@@ -34,13 +34,13 @@ environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 # constraint that required it is lifted. Mirrors training/rl.
 override-dependencies = [
     # azureml-mlflow caps mlflow-skinny below the version training validates.
-    "mlflow-skinny==3.16.0",
+    "mlflow-skinny==3.16.1",
     # azureml-mlflow caps azure-storage-blob below the download retry fix.
-    "azure-storage-blob==12.30.1",
+    "azure-storage-blob==12.30.3",
     # azureml-mlflow caps cryptography below 49.0.0; 48.0.1 is the security
     # floor for GHSA-537c-gmf6-5ccf.
     "cryptography==50.0.1",
-    "starlette==1.6.0",
+    "starlette==1.7.0",
 ]
 package = false
 
