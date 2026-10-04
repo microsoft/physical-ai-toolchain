@@ -17,6 +17,7 @@ Every committed dependency manifest and lockfile resolves from a canonical publi
 * Keep every npm lockfile `integrity` value on `sha512`. Internal mirrors can omit `dist.integrity` and publish only `dist.shasum`, which makes npm record a weaker `sha1` value.
 * Keep `resolved` and `integrity` on every installed npm lockfile entry, and a `sha256` or stronger hash on every `uv.lock` artifact.
 * Keep the committed `.npmrc` files (repository root and `docs/docusaurus/`) and the `pypi` default `[[tool.uv.index]]` in each uv project. They stop user-level configuration from redirecting resolution. Environment variables still override them for a single command.
+* Keep `replace-registry-host=always` and `save-exact=true` in both `.npmrc` files: npm fetches every lockfile tarball from the configured registry, and `npm install` saves the exact versions the pinning check requires.
 * Use public ecosystem sources for other package managers, including PyPI, the public PyTorch index, GitHub releases, NuGet Gallery, PowerShell Gallery, crates.io, and the Go module proxy.
 * Run `npm run lint:public-dependency-feeds` after changing dependency metadata.
 * When machine or enterprise configuration redirects a package manager through an internal mirror, override it with the canonical public registry while generating committed lockfiles.
