@@ -18,6 +18,13 @@
     as of commit a146d8d01ad1e38f82d5d8eebb7fa8d1d88c4092. The PowerShell
     requirement is lowered from 7.4 to this repository's 7.0 standard.
 
+    Local adaptations: npm and Python lock and index URLs must use their own
+    ecosystem's hosts without ports or query strings; npm lockfiles are parsed
+    and every installed entry needs a resolved URL and sha512 integrity; uv.lock
+    artifacts need sha256 or stronger hashes; TLS, lockfile, and credential
+    settings are rejected; diagnostics never echo source values; scanner
+    errors exit 2.
+
 .PARAMETER RepoRoot
     Repository root to scan. Defaults to the root containing this script.
 
@@ -85,10 +92,10 @@ function Test-DependencySourceLine {
             return $Line -match '^\s*(?:@[^:]+:)?registry\s*='
         }
         '^uv\.lock$' {
-            return $Line -match '\b(?:registry|url)\s*='
+            return $Line -match '\b(?:registry|url|index|git)\s*='
         }
         '^pyproject\.toml$' {
-            return $Line -match '\b(?:index-url|extra-index-url|registry|url)\s*='
+            return $Line -match '\b(?:index-url|extra-index-url|registry|url|git)\s*='
         }
         '^requirements.*\.txt$' {
             return $Line -match '(?:https?|git\+https)://'
@@ -97,6 +104,137 @@ function Test-DependencySourceLine {
             return $false
         }
     }
+}
+
+function Get-InsecureSettingRule {
+    <#
+    .SYNOPSIS
+        Detects package-manager settings that weaken TLS, lockfiles, or commit credentials.
+    .OUTPUTS
+        [pscustomobject] with rule and reason, or $null.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$LeafName,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Line
+    )
+
+    $insecure = [pscustomobject]@{ rule = 'insecure-setting'; reason = 'package-manager settings must not disable TLS verification or lockfile integrity' }
+    switch -Regex ($LeafName) {
+        '^\.npmrc$' {
+            if ($Line -match '^\s*[#;]' -or $Line -notmatch '^\s*(?<key>[^=]+?)\s*=\s*(?<value>.*?)\s*$') {
+                return $null
+            }
+            $key = $Matches['key'].ToLowerInvariant()
+            $value = $Matches['value'].Trim('"''').ToLowerInvariant()
+            if ($key -match '(^|:)(_auth|_authtoken|_password|username|password|certfile|keyfile)$') {
+                return [pscustomobject]@{ rule = 'credential-setting'; reason = 'npm credentials must not be committed' }
+            }
+            if (($key -eq 'strict-ssl' -and $value -eq 'false') -or
+                ($key -eq 'package-lock' -and $value -eq 'false') -or
+                ($key -eq 'omit-lockfile-registry-resolved' -and $value -eq 'true')) {
+                return $insecure
+            }
+        }
+        '^pyproject\.toml$' {
+            if ($Line -match '^\s*(?:allow-insecure-host|trusted-host)\s*=') {
+                return $insecure
+            }
+        }
+        '^requirements.*\.txt$' {
+            if ($Line -match '(^|\s)--trusted-host\b') {
+                return $insecure
+            }
+        }
+    }
+    return $null
+}
+
+function Test-NpmLockIntegrity {
+    <#
+    .SYNOPSIS
+        Validates that every installed npm lockfile entry has a resolved URL and sha512 integrity.
+    .OUTPUTS
+        [pscustomobject] with checked entry count and findings (line, rule, reason).
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$Lines
+    )
+
+    $findings = [System.Collections.Generic.List[object]]::new()
+    $checked = 0
+    try {
+        $lock = ($Lines -join "`n") | ConvertFrom-Json -AsHashtable
+    }
+    catch {
+        $lock = $null
+    }
+
+    if ($lock -isnot [System.Collections.IDictionary]) {
+        $findings.Add([pscustomobject]@{ line = 0; rule = 'npm-lock-parse'; reason = 'npm lockfile must be valid JSON' }) | Out-Null
+        return [pscustomobject]@{ checked = $checked; findings = $findings }
+    }
+
+    $version = $lock['lockfileVersion']
+    $packages = $lock['packages']
+    if (($version -isnot [long] -and $version -isnot [int]) -or $version -lt 2 -or $packages -isnot [System.Collections.IDictionary]) {
+        $findings.Add([pscustomobject]@{ line = 0; rule = 'npm-lock-version'; reason = 'npm lockfile must use lockfileVersion 2 or later with a packages map' }) | Out-Null
+        return [pscustomobject]@{ checked = $checked; findings = $findings }
+    }
+
+    $keyLines = @{}
+    for ($index = 0; $index -lt $Lines.Count; $index++) {
+        $keyMatch = [regex]::Match($Lines[$index], '^\s*"(?<key>[^"]*node_modules/[^"]*)"\s*:\s*\{')
+        if ($keyMatch.Success -and -not $keyLines.ContainsKey($keyMatch.Groups['key'].Value)) {
+            $keyLines[$keyMatch.Groups['key'].Value] = $index + 1
+        }
+    }
+
+    foreach ($entry in $packages.GetEnumerator()) {
+        if ($entry.Key -notmatch '(^|/)node_modules/') {
+            continue
+        }
+        $line = if ($keyLines.ContainsKey($entry.Key)) { $keyLines[$entry.Key] } else { 0 }
+        $package = $entry.Value
+        if ($package -isnot [System.Collections.IDictionary]) {
+            $findings.Add([pscustomobject]@{ line = $line; rule = 'npm-lock-parse'; reason = 'npm lockfile package entries must be objects' }) | Out-Null
+            continue
+        }
+        # Workspace links and bundled dependencies are covered by their owning entry.
+        if ($package['link'] -eq $true -or $package['inBundle'] -eq $true) {
+            continue
+        }
+
+        $checked++
+        $resolved = $package['resolved']
+        if ($resolved -isnot [string] -or [string]::IsNullOrWhiteSpace($resolved)) {
+            $findings.Add([pscustomobject]@{ line = $line; rule = 'npm-resolved-missing'; reason = 'npm lockfile entries must record a resolved registry URL' }) | Out-Null
+        }
+        elseif ($resolved -notmatch '^(?:git\+)?https?://') {
+            $findings.Add([pscustomobject]@{ line = $line; rule = 'url-scheme'; reason = 'dependency sources must use HTTPS' }) | Out-Null
+        }
+
+        $integrity = $package['integrity']
+        $tokens = if ($integrity -is [string]) { @($integrity -split '\s+' | Where-Object { $_ }) } else { @() }
+        if ($tokens.Count -eq 0) {
+            $findings.Add([pscustomobject]@{ line = $line; rule = 'npm-integrity-missing'; reason = 'npm lockfile entries must record sha512 integrity' }) | Out-Null
+        }
+        elseif (@($tokens | Where-Object { $_ -notmatch '^sha512-[A-Za-z0-9+/]+={0,2}$' }).Count -gt 0) {
+            $findings.Add([pscustomobject]@{ line = $line; rule = 'npm-integrity-weak'; reason = 'lockfile integrity must use sha512' }) | Out-Null
+        }
+    }
+
+    return [pscustomobject]@{ checked = $checked; findings = $findings }
 }
 
 function Invoke-PublicDependencyFeedScan {
@@ -136,10 +274,24 @@ function Invoke-PublicDependencyFeedScan {
         'www.nuget.org',
         'www.powershellgallery.com'
     )
+    $npmHosts = @('registry.npmjs.org')
+    $pythonHosts = @('download-r2.pytorch.org', 'download.pytorch.org', 'files.pythonhosted.org', 'pypi.org')
+    $npmLockNames = @('package-lock.json', 'npm-shrinkwrap.json')
 
     $pathPattern = '(^|/)(package\.json|package-lock\.json|npm-shrinkwrap\.json|uv\.lock|pyproject\.toml|requirements[^/]*\.txt|\.npmrc)$'
     $violations = [System.Collections.Generic.List[object]]::new()
     $sourceCount = 0
+
+    # Violations never carry source values so credentials in URLs cannot leak into logs.
+    $addViolation = {
+        param([string]$File, [int]$Line, [string]$Rule, [string]$Reason)
+        $violations.Add([pscustomobject]@{
+                file   = $File
+                line   = $Line
+                rule   = $Rule
+                reason = $Reason
+            }) | Out-Null
+    }
 
     $trackedFiles = @(& git -C $RepoRoot ls-files --cached --others --exclude-standard | Where-Object {
             $_ -match $pathPattern
@@ -154,84 +306,85 @@ function Invoke-PublicDependencyFeedScan {
             continue
         }
 
+        $leafName = Split-Path -Leaf $relativePath
         $lines = @(Get-Content -LiteralPath $fullPath)
+        $isNpmLock = $leafName -in $npmLockNames
+        $ecosystemHosts = switch -Regex ($leafName) {
+            '^(package-lock|npm-shrinkwrap)\.json$' { $npmHosts }
+            '^(uv\.lock|pyproject\.toml)$' { $pythonHosts }
+            default { $null }
+        }
+
+        if ($isNpmLock) {
+            $lockResult = Test-NpmLockIntegrity -Lines $lines
+            $sourceCount += $lockResult.checked
+            foreach ($finding in $lockResult.findings) {
+                & $addViolation $relativePath $finding.line $finding.rule $finding.reason
+            }
+        }
+
         for ($index = 0; $index -lt $lines.Count; $index++) {
             $line = $lines[$index]
+            $lineNumber = $index + 1
+
+            $setting = Get-InsecureSettingRule -LeafName $leafName -Line $line
+            if ($setting) {
+                & $addViolation $relativePath $lineNumber $setting.rule $setting.reason
+            }
+
             if (-not (Test-DependencySourceLine -Path $relativePath -Line $line)) {
                 continue
             }
 
-            $urls = @([regex]::Matches($line, '(?:git\+)?https?://[^\s"''<>\)\],]+') | ForEach-Object {
+            $urls = @([regex]::Matches($line, '[A-Za-z][A-Za-z0-9+.-]*://[^\s"''<>\)\],]+') | ForEach-Object {
                     $_.Value -replace '^git\+', ''
                 })
 
-            $leafName = Split-Path -Leaf $relativePath
-
-            if ($leafName -in @('package-lock.json', 'npm-shrinkwrap.json')) {
-                $integrityMatch = [regex]::Match($line, '"integrity"\s*:\s*"(?<algorithm>[^-"]+)-')
-                if ($integrityMatch.Success) {
-                    $sourceCount++
-                    $algorithm = $integrityMatch.Groups['algorithm'].Value.ToLowerInvariant()
-                    if ($algorithm -ne 'sha512') {
-                        $violations.Add([pscustomobject]@{
-                                file   = $relativePath
-                                line   = $index + 1
-                                source = $line.Trim()
-                                reason = "lockfile integrity must use sha512, found '$algorithm'"
-                            }) | Out-Null
-                    }
+            if ($leafName -eq 'uv.lock' -and $line -match '\burl\s*=' -and $line -notmatch '^\s*source\s*=') {
+                $sourceCount++
+                if ($line -notmatch 'hash\s*=\s*"(?:sha256:[0-9a-f]{64}|sha384:[0-9a-f]{96}|sha512:[0-9a-f]{128})"') {
+                    & $addViolation $relativePath $lineNumber 'uv-hash-invalid' 'uv.lock artifacts must carry a sha256 or stronger hash'
                 }
             }
 
             $isNpmRegistryDeclaration = $leafName -eq '.npmrc' -or ($leafName -eq 'package.json' -and $line -match '"registry"\s*:')
             if ($isNpmRegistryDeclaration -and $urls.Count -eq 0) {
-                $violations.Add([pscustomobject]@{
-                        file   = $relativePath
-                        line   = $index + 1
-                        source = $line.Trim()
-                        reason = 'npm registry values must be literal public HTTPS URLs'
-                    }) | Out-Null
+                & $addViolation $relativePath $lineNumber 'npm-registry-nonliteral' 'npm registry values must be literal public HTTPS URLs'
                 continue
             }
 
+            $hostSet = if ($isNpmRegistryDeclaration) { $npmHosts } elseif ($ecosystemHosts) { $ecosystemHosts } else { $allowedHosts }
+            $rejectQuery = $isNpmLock -or $isNpmRegistryDeclaration -or $null -ne $ecosystemHosts
+
             foreach ($url in $urls) {
                 $sourceCount++
-                try {
-                    $uri = [uri]$url
-                }
-                catch {
-                    $violations.Add([pscustomobject]@{
-                            file   = $relativePath
-                            line   = $index + 1
-                            source = $url
-                            reason = 'dependency source URL is invalid'
-                        }) | Out-Null
+                $uri = $null
+                if (-not [uri]::TryCreate($url, [UriKind]::Absolute, [ref]$uri)) {
+                    & $addViolation $relativePath $lineNumber 'url-invalid' 'dependency source URL is invalid'
                     continue
                 }
 
-                $reason = if ($uri.Scheme -ne 'https') {
-                    'dependency sources must use HTTPS'
+                $finding = if ($uri.Scheme -ne 'https') {
+                    @('url-scheme', 'dependency sources must use HTTPS')
                 }
                 elseif (-not [string]::IsNullOrEmpty($uri.UserInfo)) {
-                    'dependency source URLs must not contain credentials'
+                    @('url-credentials', 'dependency source URLs must not contain credentials')
                 }
-                elseif ($isNpmRegistryDeclaration -and $uri.Host.ToLowerInvariant() -ne 'registry.npmjs.org') {
-                    'npm registry declarations must use https://registry.npmjs.org/'
+                elseif (-not $uri.IsDefaultPort) {
+                    @('url-port', 'dependency source URLs must use the default HTTPS port')
                 }
-                elseif ($uri.Host.ToLowerInvariant() -notin $allowedHosts) {
-                    "dependency source host '$($uri.Host)' is not an approved public registry"
+                elseif ($rejectQuery -and -not [string]::IsNullOrEmpty($uri.Query)) {
+                    @('url-query', 'registry and lockfile URLs must not carry query strings')
                 }
-                else {
-                    $null
+                elseif ($isNpmRegistryDeclaration -and $uri.Host.ToLowerInvariant() -notin $npmHosts) {
+                    @('npm-registry-not-canonical', 'npm registry declarations must use https://registry.npmjs.org/')
+                }
+                elseif ($uri.Host.ToLowerInvariant() -notin $hostSet) {
+                    @('host-not-approved', 'dependency source host is not an approved public registry for this file type')
                 }
 
-                if ($reason) {
-                    $violations.Add([pscustomobject]@{
-                            file   = $relativePath
-                            line   = $index + 1
-                            source = $url
-                            reason = $reason
-                        }) | Out-Null
+                if ($finding) {
+                    & $addViolation $relativePath $lineNumber $finding[0] $finding[1]
                 }
             }
         }
@@ -267,8 +420,7 @@ if ($MyInvocation.InvocationName -ne '.') {
         if ($result.violationCount -gt 0) {
             Write-Host 'Dependency feed policy violations:' -ForegroundColor Red
             foreach ($violation in $result.violations) {
-                Write-Host ("  {0}:{1} {2}" -f $violation.file, $violation.line, $violation.reason) -ForegroundColor Red
-                Write-Host ("    {0}" -f $violation.source) -ForegroundColor DarkGray
+                Write-Host ("  {0}:{1} [{2}] {3}" -f $violation.file, $violation.line, $violation.rule, $violation.reason) -ForegroundColor Red
             }
             Write-Host "Results: $OutputPath" -ForegroundColor Yellow
             if ($FailOnViolation) {
@@ -284,7 +436,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     }
     catch {
         Write-Error -ErrorAction Continue "Test-PublicDependencyFeeds failed: $($_.Exception.Message)"
-        exit 1
+        exit 2
     }
 }
 
