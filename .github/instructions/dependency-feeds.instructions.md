@@ -26,6 +26,8 @@ Every committed dependency manifest and lockfile resolves from a canonical publi
 
 Do not commit dependency source URLs pointing at private or organization-scoped artifact feeds, corporate or machine-level package proxies, authenticated URLs, or URLs carrying registry credentials, ports, or query strings. Do not commit lockfile entries whose `integrity` value uses an algorithm weaker than `sha512`.
 
+Npm dependency fields in `package.json` (`dependencies`, `devDependencies`, `optionalDependencies`, `peerDependencies`, `overrides`, `resolutions`) must use registry versions, `npm:` aliases, or local `file:` and `workspace:` specs. Git, `github:`, and tarball URL specs are rejected. Metadata such as `homepage` and `bugs` may link anywhere but must not embed credentials.
+
 Do not commit settings that weaken transport or lockfile integrity: `.npmrc` `strict-ssl=false`, `package-lock=false`, `omit-lockfile-registry-resolved=true`, or auth keys; uv `allow-insecure-host`; pip `--trusted-host`.
 
 ## Restricted Networks

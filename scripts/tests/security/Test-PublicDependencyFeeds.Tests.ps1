@@ -35,10 +35,8 @@ BeforeAll {
 
 Describe 'Test-DependencySourceLine' -Tag 'Unit' {
     It 'Returns <Expected> for <Path>' -ForEach @(
-        @{ Path = 'package.json'; Line = '"registry": "https://registry.npmjs.org/"'; Expected = $true }
-        @{ Path = 'package.json'; Line = '"tool": "https://github.com/example/tool.git"'; Expected = $true }
-        @{ Path = 'package.json'; Line = '"tool": "git+https://github.com/example/tool.git"'; Expected = $true }
-        @{ Path = 'package.json'; Line = '"tool": "1.0.0"'; Expected = $false }
+        @{ Path = 'package.json'; Line = '"registry": "https://registry.npmjs.org/"'; Expected = $false }
+        @{ Path = 'package.json'; Line = '"homepage": "https://docs.example.com/"'; Expected = $false }
         @{ Path = 'package-lock.json'; Line = '"resolved": "https://registry.npmjs.org/tool/-/tool-1.0.0.tgz"'; Expected = $true }
         @{ Path = 'npm-shrinkwrap.json'; Line = '"integrity": "sha512-value"'; Expected = $true }
         @{ Path = '.npmrc'; Line = '@scope:registry=https://registry.npmjs.org/'; Expected = $true }
@@ -71,7 +69,7 @@ Describe 'Invoke-PublicDependencyFeedScan' -Tag 'Unit' {
         New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null
 
         { Invoke-PublicDependencyFeedScan -RepoRoot $repoRoot } |
-            Should -Throw 'git ls-files failed while discovering dependency metadata.'
+        Should -Throw 'git ls-files failed while discovering dependency metadata.'
     }
 
     It 'Reports <Reason> for <FileName>' -ForEach @(
@@ -208,11 +206,11 @@ Describe 'Invoke-PublicDependencyFeedScan' -Tag 'Unit' {
                 name            = 'fixture'
                 lockfileVersion = 3
                 packages        = @{
-                    ''                                    = @{ name = 'fixture'; workspaces = @('frontend') }
-                    'frontend'                            = @{ name = 'frontend'; version = '0.1.0' }
-                    'node_modules/frontend'               = @{ resolved = 'frontend'; link = $true }
-                    'node_modules/tool'                   = @{ version = '1.0.0'; resolved = $script:NpmTarball; integrity = $script:Sha512 }
-                    'node_modules/tool/node_modules/dep'  = @{ version = '1.0.0'; inBundle = $true }
+                    ''                                   = @{ name = 'fixture'; workspaces = @('frontend') }
+                    'frontend'                           = @{ name = 'frontend'; version = '0.1.0' }
+                    'node_modules/frontend'              = @{ resolved = 'frontend'; link = $true }
+                    'node_modules/tool'                  = @{ version = '1.0.0'; resolved = $script:NpmTarball; integrity = $script:Sha512 }
+                    'node_modules/tool/node_modules/dep' = @{ version = '1.0.0'; inBundle = $true }
                 }
             } | ConvertTo-Json -Depth 5
             $uvLock = @(
@@ -249,6 +247,75 @@ Describe 'Invoke-PublicDependencyFeedScan' -Tag 'Unit' {
             $result = Invoke-PublicDependencyFeedScan -RepoRoot $repoRoot
 
             $result.violations | Should -BeNullOrEmpty
+        }
+
+        It 'Reports a git+ssh lockfile entry once' {
+            $repoRoot = Join-Path $TestDrive 'lock-git-ssh'
+            $lock = @{
+                lockfileVersion = 3
+                packages        = @{
+                    'node_modules/tool' = @{ version = '1.0.0'; resolved = 'git+ssh://git@github.com/example/tool.git#abc'; integrity = $script:Sha512 }
+                }
+            } | ConvertTo-Json -Depth 5
+            New-PublicFeedTestRepository -Path $repoRoot -Files @{ 'package-lock.json' = $lock }
+
+            $result = Invoke-PublicDependencyFeedScan -RepoRoot $repoRoot
+
+            $result.violationCount | Should -Be 1
+            $result.violations[0].rule | Should -Be 'url-scheme'
+        }
+    }
+
+    Context 'when package.json declares dependencies and metadata' {
+        It 'Accepts metadata URLs on any host and registry dependency specs' {
+            $repoRoot = Join-Path $TestDrive 'manifest-metadata'
+            $manifest = @{
+                name            = 'fixture'
+                homepage        = 'https://docs.example.com/fixture'
+                bugs            = @{ url = 'https://issues.example.com/fixture' }
+                repository      = @{ type = 'git'; url = 'git+https://git.example.com/org/fixture.git' }
+                funding         = @(@{ type = 'custom'; url = 'https://donate.example.com/' })
+                dependencies    = @{ tool = '1.2.3'; alias = 'npm:@scope/tool@1.2.3'; local = 'file:../local' }
+                devDependencies = @{ member = 'workspace:*' }
+                publishConfig   = @{ registry = 'https://registry.npmjs.org/' }
+            } | ConvertTo-Json -Depth 5
+            New-PublicFeedTestRepository -Path $repoRoot -Files @{ 'package.json' = $manifest }
+
+            $result = Invoke-PublicDependencyFeedScan -RepoRoot $repoRoot
+
+            $result.violations | Should -BeNullOrEmpty
+            $result.sourcesValidated | Should -Be 4
+        }
+
+        It 'Reports <Rule> for <Name>' -ForEach @(
+            @{ Name = 'github shorthand dependency'; Rule = 'npm-spec-not-registry'; Manifest = @{ dependencies = @{ tool = 'github:example/tool' } } }
+            @{ Name = 'bare owner/repo dependency'; Rule = 'npm-spec-not-registry'; Manifest = @{ dependencies = @{ tool = 'example/tool#main' } } }
+            @{ Name = 'scp-style git dependency'; Rule = 'npm-spec-not-registry'; Manifest = @{ dependencies = @{ tool = 'git@git.example.com:org/tool.git' } } }
+            @{ Name = 'git+ssh dependency'; Rule = 'url-scheme'; Manifest = @{ devDependencies = @{ tool = 'git+ssh://git@github.com/example/tool.git' } } }
+            @{ Name = 'private-host tarball dependency'; Rule = 'host-not-approved'; Manifest = @{ dependencies = @{ tool = 'https://private-feed.example.com/tool-1.0.0.tgz' } } }
+            @{ Name = 'git+https dependency on github'; Rule = 'host-not-approved'; Manifest = @{ optionalDependencies = @{ tool = 'git+https://github.com/example/tool.git' } } }
+            @{ Name = 'nested override to git+ssh'; Rule = 'url-scheme'; Manifest = @{ overrides = @{ parent = @{ tool = 'git+ssh://git@github.com/example/tool.git' } } } }
+            @{ Name = 'private publish registry'; Rule = 'npm-registry-not-canonical'; Manifest = @{ publishConfig = @{ registry = 'https://private-feed.example.com/npm/' } } }
+            @{ Name = 'nonliteral publish registry'; Rule = 'npm-registry-nonliteral'; Manifest = @{ publishConfig = @{ registry = '${NPM_REGISTRY}' } } }
+            @{ Name = 'credentials in metadata URL'; Rule = 'url-credentials'; Manifest = @{ repository = @{ url = 'https://user:token@github.com/example/tool.git' } } }
+        ) {
+            $repoRoot = Join-Path $TestDrive ([IO.Path]::GetRandomFileName())
+            New-PublicFeedTestRepository -Path $repoRoot -Files @{ 'package.json' = ($Manifest | ConvertTo-Json -Depth 5) }
+
+            $result = Invoke-PublicDependencyFeedScan -RepoRoot $repoRoot
+
+            $result.violationCount | Should -Be 1
+            $result.violations[0].rule | Should -Be $Rule
+            $result.violations[0].line | Should -BeGreaterThan 0
+        }
+
+        It 'Reports an unparseable package.json' {
+            $repoRoot = Join-Path $TestDrive 'manifest-invalid'
+            New-PublicFeedTestRepository -Path $repoRoot -Files @{ 'package.json' = '{ "dependencies": {' }
+
+            $result = Invoke-PublicDependencyFeedScan -RepoRoot $repoRoot
+
+            $result.violations.rule | Should -Be 'npm-manifest-parse'
         }
     }
 }

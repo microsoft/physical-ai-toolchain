@@ -21,9 +21,10 @@
     Local adaptations: npm and Python lock and index URLs must use their own
     ecosystem's hosts without ports or query strings; npm lockfiles are parsed
     and every installed entry needs a resolved URL and sha512 integrity; uv.lock
-    artifacts need sha256 or stronger hashes; TLS, lockfile, and credential
-    settings are rejected; diagnostics never echo source values; scanner
-    errors exit 2.
+    artifacts need sha256 or stronger hashes; package.json is parsed so only
+    dependency fields must resolve from the npm registry; TLS, lockfile, and
+    credential settings are rejected; diagnostics never echo source values;
+    scanner errors exit 2.
 
 .PARAMETER RepoRoot
     Repository root to scan. Defaults to the root containing this script.
@@ -82,9 +83,6 @@ function Test-DependencySourceLine {
 
     $leafName = Split-Path -Leaf $Path
     switch -Regex ($leafName) {
-        '^package\.json$' {
-            return $Line -match '"registry"\s*:' -or $Line -match '"[^"\r\n]+"\s*:\s*"(?:git\+)?https?://'
-        }
         '^(package-lock|npm-shrinkwrap)\.json$' {
             return $Line -match '"resolved"\s*:' -or $Line -match '"integrity"\s*:'
         }
@@ -220,7 +218,8 @@ function Test-NpmLockIntegrity {
         if ($resolved -isnot [string] -or [string]::IsNullOrWhiteSpace($resolved)) {
             $findings.Add([pscustomobject]@{ line = $line; rule = 'npm-resolved-missing'; reason = 'npm lockfile entries must record a resolved registry URL' }) | Out-Null
         }
-        elseif ($resolved -notmatch '^(?:git\+)?https?://') {
+        elseif ($resolved -notmatch '^[A-Za-z][A-Za-z0-9+.-]*://') {
+            # URL-shaped values are validated by the line scan; this catches shorthands such as github:owner/repo.
             $findings.Add([pscustomobject]@{ line = $line; rule = 'url-scheme'; reason = 'dependency sources must use HTTPS' }) | Out-Null
         }
 
@@ -231,6 +230,183 @@ function Test-NpmLockIntegrity {
         }
         elseif (@($tokens | Where-Object { $_ -notmatch '^sha512-[A-Za-z0-9+/]+={0,2}$' }).Count -gt 0) {
             $findings.Add([pscustomobject]@{ line = $line; rule = 'npm-integrity-weak'; reason = 'lockfile integrity must use sha512' }) | Out-Null
+        }
+    }
+
+    return [pscustomobject]@{ checked = $checked; findings = $findings }
+}
+
+function Get-SourceUrlFinding {
+    <#
+    .SYNOPSIS
+        Validates one dependency source URL against transport, credential, and host rules.
+    .OUTPUTS
+        [pscustomobject] with rule and reason, or $null.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Url,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$HostSet,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$RejectQuery,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$NpmRegistryDeclaration
+    )
+
+    $uri = $null
+    if (-not [uri]::TryCreate(($Url -replace '^git\+', ''), [UriKind]::Absolute, [ref]$uri)) {
+        return [pscustomobject]@{ rule = 'url-invalid'; reason = 'dependency source URL is invalid' }
+    }
+
+    $finding = if ($uri.Scheme -ne 'https') {
+        @('url-scheme', 'dependency sources must use HTTPS')
+    }
+    elseif (-not [string]::IsNullOrEmpty($uri.UserInfo)) {
+        @('url-credentials', 'dependency source URLs must not contain credentials')
+    }
+    elseif (-not $uri.IsDefaultPort) {
+        @('url-port', 'dependency source URLs must use the default HTTPS port')
+    }
+    elseif ($RejectQuery -and -not [string]::IsNullOrEmpty($uri.Query)) {
+        @('url-query', 'registry and lockfile URLs must not carry query strings')
+    }
+    elseif ($NpmRegistryDeclaration -and $uri.Host.ToLowerInvariant() -notin $HostSet) {
+        @('npm-registry-not-canonical', 'npm registry declarations must use https://registry.npmjs.org/')
+    }
+    elseif ($uri.Host.ToLowerInvariant() -notin $HostSet) {
+        @('host-not-approved', 'dependency source host is not an approved public registry for this file type')
+    }
+
+    if ($finding) {
+        return [pscustomobject]@{ rule = $finding[0]; reason = $finding[1] }
+    }
+    return $null
+}
+
+function Get-NpmManifestFindings {
+    <#
+    .SYNOPSIS
+        Validates package.json dependency specs and registry settings while ignoring metadata URLs.
+    .OUTPUTS
+        [pscustomobject] with checked spec count and findings (line, rule, reason).
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$Lines,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$NpmHosts
+    )
+
+    $findings = [System.Collections.Generic.List[object]]::new()
+    $checked = 0
+    try {
+        $manifest = ($Lines -join "`n") | ConvertFrom-Json -AsHashtable
+    }
+    catch {
+        $manifest = $null
+    }
+
+    if ($manifest -isnot [System.Collections.IDictionary]) {
+        $findings.Add([pscustomobject]@{ line = 0; rule = 'npm-manifest-parse'; reason = 'package.json must be a valid JSON object' }) | Out-Null
+        return [pscustomobject]@{ checked = $checked; findings = $findings }
+    }
+
+    $findLine = {
+        param([string]$Key, [string]$Value)
+        $pattern = '^\s*"' + [regex]::Escape($Key) + '"\s*:\s*"' + [regex]::Escape($Value) + '"'
+        for ($index = 0; $index -lt $Lines.Count; $index++) {
+            if ($Lines[$index] -match $pattern) {
+                return $index + 1
+            }
+        }
+        return 0
+    }
+
+    $dependencyFields = @('dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'resolutions', 'overrides')
+    $specs = [System.Collections.Generic.List[object]]::new()
+    $pending = [System.Collections.Generic.Stack[object]]::new()
+    foreach ($field in $dependencyFields) {
+        if ($manifest[$field] -is [System.Collections.IDictionary]) {
+            $pending.Push($manifest[$field])
+        }
+    }
+    # Overrides nest package names to any depth.
+    while ($pending.Count -gt 0) {
+        foreach ($entry in $pending.Pop().GetEnumerator()) {
+            if ($entry.Value -is [string]) {
+                $specs.Add([pscustomobject]@{ name = [string]$entry.Key; spec = $entry.Value }) | Out-Null
+            }
+            elseif ($entry.Value -is [System.Collections.IDictionary]) {
+                $pending.Push($entry.Value)
+            }
+        }
+    }
+
+    foreach ($item in $specs) {
+        $checked++
+        $line = & $findLine $item.name $item.spec
+        $spec = $item.spec.Trim() -replace '^npm:@?[^@]+@?', ''
+        if ($spec -match '^[A-Za-z][A-Za-z0-9+.-]*://') {
+            $finding = Get-SourceUrlFinding -Url $spec -HostSet $NpmHosts -RejectQuery
+            if ($finding) {
+                $findings.Add([pscustomobject]@{ line = $line; rule = $finding.rule; reason = $finding.reason }) | Out-Null
+            }
+        }
+        elseif ($spec -match '^(?:github|gitlab|bitbucket|gist|git)[:+]' -or
+            $spec -match '^[^@\s/:]+@[^\s/:]+:' -or
+            $spec -match '^[A-Za-z0-9][\w.-]*/[\w.-]+(?:#.*)?$') {
+            $findings.Add([pscustomobject]@{ line = $line; rule = 'npm-spec-not-registry'; reason = 'npm dependencies must resolve from the public npm registry' }) | Out-Null
+        }
+    }
+
+    $publishConfig = $manifest['publishConfig']
+    if ($publishConfig -is [System.Collections.IDictionary] -and $publishConfig.Contains('registry')) {
+        $registry = [string]$publishConfig['registry']
+        $line = & $findLine 'registry' $registry
+        $finding = if ($registry -notmatch '^[A-Za-z][A-Za-z0-9+.-]*://') {
+            [pscustomobject]@{ rule = 'npm-registry-nonliteral'; reason = 'npm registry values must be literal public HTTPS URLs' }
+        }
+        else {
+            Get-SourceUrlFinding -Url $registry -HostSet $NpmHosts -RejectQuery -NpmRegistryDeclaration
+        }
+        if ($finding) {
+            $findings.Add([pscustomobject]@{ line = $line; rule = $finding.rule; reason = $finding.reason }) | Out-Null
+        }
+    }
+
+    # Metadata URLs such as homepage and bugs may use any host but must not embed credentials.
+    $metadata = [System.Collections.Generic.Stack[object]]::new()
+    foreach ($entry in $manifest.GetEnumerator()) {
+        if ($entry.Key -notin $dependencyFields -and $entry.Key -ne 'publishConfig') {
+            $metadata.Push($entry)
+        }
+    }
+    while ($metadata.Count -gt 0) {
+        $entry = $metadata.Pop()
+        if ($entry.Value -is [System.Collections.IDictionary]) {
+            foreach ($child in $entry.Value.GetEnumerator()) { $metadata.Push($child) }
+        }
+        elseif ($entry.Value -is [System.Collections.IList]) {
+            foreach ($item in $entry.Value) { $metadata.Push([pscustomobject]@{ Key = $entry.Key; Value = $item }) }
+        }
+        elseif ($entry.Value -is [string]) {
+            $uri = $null
+            if ([uri]::TryCreate(($entry.Value -replace '^git\+', ''), [UriKind]::Absolute, [ref]$uri) -and
+                -not [string]::IsNullOrEmpty($uri.UserInfo)) {
+                $line = & $findLine $entry.Key $entry.Value
+                $findings.Add([pscustomobject]@{ line = $line; rule = 'url-credentials'; reason = 'dependency source URLs must not contain credentials' }) | Out-Null
+            }
         }
     }
 
@@ -323,6 +499,15 @@ function Invoke-PublicDependencyFeedScan {
             }
         }
 
+        if ($leafName -eq 'package.json') {
+            $manifestResult = Get-NpmManifestFindings -Lines $lines -NpmHosts $npmHosts
+            $sourceCount += $manifestResult.checked
+            foreach ($finding in $manifestResult.findings) {
+                & $addViolation $relativePath $finding.line $finding.rule $finding.reason
+            }
+            continue
+        }
+
         for ($index = 0; $index -lt $lines.Count; $index++) {
             $line = $lines[$index]
             $lineNumber = $index + 1
@@ -347,7 +532,7 @@ function Invoke-PublicDependencyFeedScan {
                 }
             }
 
-            $isNpmRegistryDeclaration = $leafName -eq '.npmrc' -or ($leafName -eq 'package.json' -and $line -match '"registry"\s*:')
+            $isNpmRegistryDeclaration = $leafName -eq '.npmrc'
             if ($isNpmRegistryDeclaration -and $urls.Count -eq 0) {
                 & $addViolation $relativePath $lineNumber 'npm-registry-nonliteral' 'npm registry values must be literal public HTTPS URLs'
                 continue
@@ -358,33 +543,9 @@ function Invoke-PublicDependencyFeedScan {
 
             foreach ($url in $urls) {
                 $sourceCount++
-                $uri = $null
-                if (-not [uri]::TryCreate($url, [UriKind]::Absolute, [ref]$uri)) {
-                    & $addViolation $relativePath $lineNumber 'url-invalid' 'dependency source URL is invalid'
-                    continue
-                }
-
-                $finding = if ($uri.Scheme -ne 'https') {
-                    @('url-scheme', 'dependency sources must use HTTPS')
-                }
-                elseif (-not [string]::IsNullOrEmpty($uri.UserInfo)) {
-                    @('url-credentials', 'dependency source URLs must not contain credentials')
-                }
-                elseif (-not $uri.IsDefaultPort) {
-                    @('url-port', 'dependency source URLs must use the default HTTPS port')
-                }
-                elseif ($rejectQuery -and -not [string]::IsNullOrEmpty($uri.Query)) {
-                    @('url-query', 'registry and lockfile URLs must not carry query strings')
-                }
-                elseif ($isNpmRegistryDeclaration -and $uri.Host.ToLowerInvariant() -notin $npmHosts) {
-                    @('npm-registry-not-canonical', 'npm registry declarations must use https://registry.npmjs.org/')
-                }
-                elseif ($uri.Host.ToLowerInvariant() -notin $hostSet) {
-                    @('host-not-approved', 'dependency source host is not an approved public registry for this file type')
-                }
-
+                $finding = Get-SourceUrlFinding -Url $url -HostSet $hostSet -RejectQuery:$rejectQuery -NpmRegistryDeclaration:$isNpmRegistryDeclaration
                 if ($finding) {
-                    & $addViolation $relativePath $lineNumber $finding[0] $finding[1]
+                    & $addViolation $relativePath $lineNumber $finding.rule $finding.reason
                 }
             }
         }
