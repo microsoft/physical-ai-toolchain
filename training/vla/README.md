@@ -96,6 +96,9 @@ Pytest fails during client-side setup before resolving Azure fixtures or submitt
 job when `HF_TOKEN` is unset or empty. Other E2E tests require this variable only when
 they carry the `requires_hf_token` marker.
 
+Dependabot verification runs this test as the `aml-vla-pi0` check in the `vla` category. See
+[Verifying Dependabot Updates](../../docs/contributing/dependabot-verification.md).
+
 ## 🚀 GR00T-N1.5 Fine-Tuning
 
 GR00T-N1.5-3B is NVIDIA's vision-language-action foundation model for robot manipulation. Fine-tuning is submitted via the VLA submission script:

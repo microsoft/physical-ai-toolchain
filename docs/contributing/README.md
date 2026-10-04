@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Contributing to Physical AI Toolchain
 description: Guide for contributing including prerequisites, deployment validation, and style conventions
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-22
+ms.date: 2026-10-04
 ms.topic: how-to
 keywords:
   - azure
@@ -30,20 +30,21 @@ Contributions can include:
 
 ## 📖 Contributing Guides
 
-| Guide                                                     | Description                                                      |
-|-----------------------------------------------------------|------------------------------------------------------------------|
-| [Prerequisites](prerequisites.md)                         | Required tools, Azure access, NGC credentials, build commands    |
-| [Contribution Workflow](contribution-workflow.md)         | Bug reports, feature requests, first contributions               |
-| [Pull Request Process](pull-request-process.md)           | PR workflow, review process, update procedures                   |
-| [Infrastructure Style](infrastructure-style.md)           | Terraform conventions, shell script standards, copyright headers |
-| [Deployment Validation](deployment-validation.md)         | Validation levels, testing templates, cost optimization          |
-| [Cost Considerations](cost-considerations.md)             | Component costs, budgeting, regional pricing                     |
-| [Security Review](security-review.md)                     | Security checklist, credential handling, dependency updates      |
-| [Accessibility](accessibility.md)                         | Accessibility scope, documentation and CLI output guidelines     |
-| [Updating External Components](component-updates.md)      | Process for updating reused externally-maintained components     |
-| [Documentation Maintenance](documentation-maintenance.md) | Update triggers, ownership, review criteria, freshness policy    |
-| [Fuzzing and Property-Based Testing](fuzzing.md)          | Fuzz targets, property tests, Hypothesis and fast-check patterns |
-| [Roadmap](ROADMAP.md)                                     | 12-month project roadmap, priorities, and success metrics        |
+| Guide                                                      | Description                                                                 |
+|------------------------------------------------------------|-----------------------------------------------------------------------------|
+| [Prerequisites](prerequisites.md)                          | Required tools, Azure access, NGC credentials, build commands               |
+| [Contribution Workflow](contribution-workflow.md)          | Bug reports, feature requests, first contributions                          |
+| [Pull Request Process](pull-request-process.md)            | PR workflow, review process, update procedures                              |
+| [Infrastructure Style](infrastructure-style.md)            | Terraform conventions, shell script standards, copyright headers            |
+| [Deployment Validation](deployment-validation.md)          | Validation levels, testing templates, cost optimization                     |
+| [Cost Considerations](cost-considerations.md)              | Component costs, budgeting, regional pricing                                |
+| [Security Review](security-review.md)                      | Security checklist, credential handling, dependency updates                 |
+| [Accessibility](accessibility.md)                          | Accessibility scope, documentation and CLI output guidelines                |
+| [Updating External Components](component-updates.md)       | Process for updating reused externally-maintained components                |
+| [Verifying Dependabot Updates](dependabot-verification.md) | Verification categories, CPU and GPU tiers, and commands for Dependabot PRs |
+| [Documentation Maintenance](documentation-maintenance.md)  | Update triggers, ownership, review criteria, freshness policy               |
+| [Fuzzing and Property-Based Testing](fuzzing.md)           | Fuzz targets, property tests, Hypothesis and fast-check patterns            |
+| [Roadmap](ROADMAP.md)                                      | 12-month project roadmap, priorities, and success metrics                   |
 
 ### Quick Reference
 
@@ -56,6 +57,7 @@ Contributions can include:
 | Any PR                     | [Cost Considerations](cost-considerations.md) for testing budget                                        |
 | Accessibility requirements | Follow [Accessibility](accessibility.md) for docs, CLI output, and the dataviewer UI                    |
 | Documentation policy       | [Documentation Maintenance](documentation-maintenance.md)                                               |
+| Dependabot pull requests   | [Verifying Dependabot Updates](dependabot-verification.md)                                              |
 
 ## 📋 Prerequisites
 

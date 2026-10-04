@@ -3,7 +3,7 @@ sidebar_position: 8
 title: Deployment Validation Guide
 description: Validation levels, testing templates, and cost optimization for contribution testing
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-22
+ms.date: 2026-10-04
 ms.topic: how-to
 ---
 
@@ -66,6 +66,8 @@ terraform show tfplan
 * Attach plan output (redact sensitive information)
 
 **When to use:** Terraform changes (modules, variables, resources).
+
+For provider or module version bumps, `infrastructure/terraform/scripts/compare-plans.sh` plans the base and head refs read-only against your deployed state and reports only the differences. See [Verifying Dependabot Updates](dependabot-verification.md).
 
 **Cost:** $0 (plan only, no deployment)
 
@@ -131,6 +133,8 @@ Run these RL submission examples from the repository root after deploying and co
 * Cost: GPU VM time and storage costs
 
 **When to use:** Training scripts, workflow templates, AzureML/OSMO integration changes.
+
+To verify a dependency update to a training runtime, run the Azure ML checks for its category from [Verifying Dependabot Updates](dependabot-verification.md) rather than a full training run.
 
 **Cost:** Variable (depends on training duration and GPU SKU)
 
