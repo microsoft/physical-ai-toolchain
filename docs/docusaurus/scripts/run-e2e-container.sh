@@ -45,19 +45,23 @@ EXAMPLES:
 EOF
 }
 
-# Print sorted failure fingerprints from a report directory: failing Playwright
-# tests (project, file, title, normalized first error line) and non-accepted
-# contrast-ledger signatures.
+# Print sorted failure fingerprints from a report directory: run-level Playwright
+# errors (such as a web server that fails to start), a run in which no test
+# executed, failing tests (project, file, title, normalized first error line),
+# and non-accepted contrast-ledger signatures.
 failure_fingerprints() {
   local results="$1/playwright-results.json" ledger="$1/contrast-ledger.json"
   {
     if [[ -f "$results" ]]; then
       jq -r '
+        def normalize: gsub("\u001b\\[[0-9;]*m"; "") | split("\n")[0] | gsub("[0-9]+"; "N") | .[0:160];
+        [ (.errors // [])[] | "error|\((.message // "unknown error") | normalize)" ],
+        (if ((.stats.expected // 0) + (.stats.unexpected // 0) + (.stats.flaky // 0)) == 0
+          then ["report|no tests ran"] else [] end),
         [ .. | objects | select(has("specs")) | .specs[]? as $spec
           | ($spec.tests // [])[] | select(.status == "unexpected")
           | ([.results[]?.error?.message // empty] | last // "") as $message
-          | ($message | gsub("\u001b\\[[0-9;]*m"; "") | split("\n")[0] | gsub("[0-9]+"; "N") | .[0:160]) as $error
-          | "test|\(.projectName)|\($spec.file)|\($spec.title)|\($error)"
+          | "test|\(.projectName)|\($spec.file)|\($spec.title)|\($message | normalize)"
         ] | .[]' "$results"
     else
       echo "report|missing playwright-results.json"
@@ -150,6 +154,9 @@ fi
 
 snapshot_root="$(mktemp -d "${TMPDIR:-/tmp}/docs-e2e.XXXXXX")"
 trap 'rm -rf "$snapshot_root"' EXIT
+# Exit through the EXIT trap when interrupted, including a TERM sent to the whole process group.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Run the docs e2e suite for one ref and copy its reports to $output_dir/<label>.
 run_snapshot() {

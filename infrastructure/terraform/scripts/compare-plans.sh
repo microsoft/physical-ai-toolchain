@@ -137,6 +137,9 @@ var_file="$(cd "$(dirname "$var_file")" && pwd)/$(basename "$var_file")"
 umask 077
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/compare-plans.XXXXXX")"
 trap 'rm -rf "$work_dir"' EXIT
+# Exit through the EXIT trap when interrupted so plan files never outlive the run.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 mkdir -p "$output_dir" "$work_dir/plugin-cache"
 export TF_PLUGIN_CACHE_DIR="$work_dir/plugin-cache" TF_IN_AUTOMATION=1 TF_INPUT=0 CHECKPOINT_DISABLE=1
 

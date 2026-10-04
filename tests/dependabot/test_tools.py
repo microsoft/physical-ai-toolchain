@@ -10,7 +10,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -53,7 +55,11 @@ def _playwright_report(failures: list[Failure]) -> dict[str, object]:
                 ],
             }
         )
-    return {"suites": [{"title": "root", "specs": [], "suites": [{"title": "nested", "specs": specs}]}]}
+    return {
+        "suites": [{"title": "root", "specs": [], "suites": [{"title": "nested", "specs": specs}]}],
+        "errors": [],
+        "stats": {"expected": 1, "unexpected": len(failures), "flaky": 0, "skipped": 0},
+    }
 
 
 def _ledger(assessments: list[tuple[str, str]]) -> dict[str, object]:
@@ -182,6 +188,39 @@ def test_a_missing_head_report_is_a_failure(tmp_path: Path) -> None:
 
 
 @requires_bash_and_jq
+def test_a_run_level_error_without_tests_is_a_new_failure(tmp_path: Path) -> None:
+    head = tmp_path / "head"
+    head.mkdir()
+    report = {
+        "suites": [],
+        "errors": [{"message": "Error: Process from config.webServer exited early.\nTypeError: pathRegexp.match"}],
+        "stats": {"expected": 0, "unexpected": 0, "flaky": 0, "skipped": 0},
+    }
+    (head / "playwright-results.json").write_text(json.dumps(report), encoding="utf-8")
+    base = _write_reports(tmp_path / "base", [_CONTRAST_FAILURE], [("unresolved", "sig-b")])
+
+    result = _compare(head, base)
+
+    assert result.returncode == 1
+    assert "error|Error: Process from config.webServer exited early." in result.stderr
+    assert "report|no tests ran" in result.stderr
+
+
+@requires_bash_and_jq
+def test_a_run_where_no_test_executed_is_a_new_failure(tmp_path: Path) -> None:
+    head = tmp_path / "head"
+    head.mkdir()
+    report = {"suites": [], "errors": [], "stats": {"expected": 0, "unexpected": 0, "flaky": 0, "skipped": 12}}
+    (head / "playwright-results.json").write_text(json.dumps(report), encoding="utf-8")
+    base = _write_reports(tmp_path / "base", [_CONTRAST_FAILURE])
+
+    result = _compare(head, base)
+
+    assert result.returncode == 1
+    assert "report|no tests ran" in result.stderr
+
+
+@requires_bash_and_jq
 def test_config_preview_needs_no_docker(tmp_path: Path) -> None:
     result = subprocess.run(
         ["bash", str(DOCS_E2E_SCRIPT), "--config-preview", "--compare-base", "HEAD", "--output-dir", str(tmp_path)],
@@ -226,6 +265,7 @@ case "${args[0]}" in
       if [[ "$arg" == -out=* ]]; then echo plan > "${arg#-out=}"; fi
     done
     echo "Plan: 1 to add, 0 to change, 0 to destroy."
+    sleep "${FAKE_TERRAFORM_SLEEP:-0}"
     exit 2
     ;;
   show)
@@ -295,7 +335,10 @@ def _local_stack_files(repo: Path) -> dict[str, str]:
     }
 
 
-def _run_compare(tmp_path: Path, repo: Path, *, head_extra: str = "") -> subprocess.CompletedProcess[str]:
+def _compare_command(
+    tmp_path: Path, *, head_extra: str = "", sleep_seconds: int = 0
+) -> tuple[list[str], dict[str, str]]:
+    """Install the fake terraform and plan outputs, then return the compare command and environment."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     fake = bin_dir / "terraform"
@@ -312,26 +355,26 @@ def _run_compare(tmp_path: Path, repo: Path, *, head_extra: str = "") -> subproc
         "FAKE_PLAN_DIR": str(tmp_path),
         "TMPDIR": str(scratch),
         "NO_COLOR": "1",
+        "FAKE_TERRAFORM_SLEEP": str(sleep_seconds),
     }
-    return subprocess.run(
-        [
-            "bash",
-            str(COMPARE_PLANS_SCRIPT),
-            "--base",
-            "base",
-            "--head",
-            "HEAD",
-            "--stack",
-            "root",
-            "--output-dir",
-            str(tmp_path / "out"),
-        ],
-        cwd=repo,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    command = [
+        "bash",
+        str(COMPARE_PLANS_SCRIPT),
+        "--base",
+        "base",
+        "--head",
+        "HEAD",
+        "--stack",
+        "root",
+        "--output-dir",
+        str(tmp_path / "out"),
+    ]
+    return command, env
+
+
+def _run_compare(tmp_path: Path, repo: Path, *, head_extra: str = "") -> subprocess.CompletedProcess[str]:
+    command, env = _compare_command(tmp_path, head_extra=head_extra)
+    return subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, check=False)
 
 
 @requires_terraform_tooling
@@ -388,3 +431,28 @@ def test_compare_plans_is_not_run_without_state(tmp_path: Path) -> None:
     assert result.returncode == 3
     assert "not run" in result.stderr
     assert not (tmp_path / "terraform.log").exists()
+
+
+@requires_terraform_tooling
+def test_compare_plans_cleans_up_when_its_process_group_is_terminated(tmp_path: Path) -> None:
+    repo = _terraform_repo(tmp_path)
+    command, env = _compare_command(tmp_path, sleep_seconds=30)
+    log = tmp_path / "terraform.log"
+    process = subprocess.Popen(
+        command, cwd=repo, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
+    )
+    try:
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and not (log.exists() and "\tplan " in log.read_text(encoding="utf-8")):
+            time.sleep(0.1)
+        time.sleep(0.3)
+        assert any((tmp_path / "scratch").iterdir()), "the run should hold a temporary directory mid-plan"
+
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=20)
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+
+    assert process.returncode == 143
+    assert list((tmp_path / "scratch").iterdir()) == []
