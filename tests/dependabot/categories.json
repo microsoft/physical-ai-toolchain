@@ -937,6 +937,7 @@
           "gpu": true,
           "optional": false,
           "description": "Azure ML skrl training, registration, and Isaac Lab evaluation on a GPU node.",
+          "timeout_minutes": 150,
           "pytest": "tests/e2e/test_e2e_aml_rl_lifecycle.py::test_aml_rl_lifecycle_e2e",
           "requires": [
             "az"
@@ -1071,6 +1072,7 @@
           "gpu": true,
           "optional": false,
           "description": "Azure ML LeRobot training, registration, and evaluation on a GPU node.",
+          "timeout_minutes": 150,
           "pytest": "tests/e2e/test_e2e_aml_il_lifecycle.py::test_aml_il_lifecycle_e2e",
           "requires": [
             "az"
@@ -1083,6 +1085,7 @@
           "gpu": true,
           "optional": false,
           "description": "Azure ML LeRobot pipeline (preprocess, train, evaluate) on a GPU node.",
+          "timeout_minutes": 120,
           "pytest": "tests/e2e/test_e2e_aml_il_pipeline.py::test_aml_il_pipeline_e2e[diffusion-without-register]",
           "requires": [
             "az"
@@ -1177,6 +1180,7 @@
           "gpu": true,
           "optional": false,
           "description": "Azure ML pi0 training, registration, and evaluation on a GPU node.",
+          "timeout_minutes": 180,
           "pytest": "tests/e2e/test_e2e_aml_vla_pi0_training.py::test_aml_vla_pi0_lifecycle_e2e",
           "requires": [
             "az"
@@ -1251,6 +1255,7 @@
           "gpu": true,
           "optional": false,
           "description": "Azure ML GPU job: device, training loop, MLflow, checkpoints, storage, and model registry checks.",
+          "timeout_minutes": 120,
           "pytest": "tests/e2e/test_e2e_aml_gpu_smoke.py::test_aml_gpu_smoke_e2e",
           "requires": [
             "az"
@@ -1390,6 +1395,7 @@
           "gpu": true,
           "optional": false,
           "description": "Azure ML LeRobot pipeline with the register component on a GPU node.",
+          "timeout_minutes": 120,
           "pytest": "tests/e2e/test_e2e_aml_il_pipeline.py::test_aml_il_pipeline_e2e[act-with-register]",
           "requires": [
             "az"
@@ -1402,6 +1408,7 @@
           "gpu": false,
           "optional": true,
           "description": "Azure ML proxy job that submits and mirrors an OSMO workflow.",
+          "timeout_minutes": 90,
           "pytest": "tests/e2e/test_e2e_aml_osmo_proxy.py::test_aml_osmo_proxy_e2e",
           "requires": [
             "az",
@@ -1707,6 +1714,7 @@
           "gpu": false,
           "optional": false,
           "description": "Read-only plan comparison of the root stack against deployed state.",
+          "timeout_minutes": 60,
           "command": [
             "bash",
             "infrastructure/terraform/scripts/compare-plans.sh",
@@ -1736,6 +1744,7 @@
           "gpu": false,
           "optional": true,
           "description": "Read-only plan comparison of the vpn stack against deployed state.",
+          "timeout_minutes": 60,
           "command": [
             "bash",
             "infrastructure/terraform/scripts/compare-plans.sh",
@@ -1765,6 +1774,7 @@
           "gpu": false,
           "optional": true,
           "description": "Read-only plan comparison of the automation stack against deployed state.",
+          "timeout_minutes": 60,
           "command": [
             "bash",
             "infrastructure/terraform/scripts/compare-plans.sh",
@@ -1794,6 +1804,7 @@
           "gpu": false,
           "optional": true,
           "description": "Read-only plan comparison of the dns stack against deployed state.",
+          "timeout_minutes": 60,
           "command": [
             "bash",
             "infrastructure/terraform/scripts/compare-plans.sh",

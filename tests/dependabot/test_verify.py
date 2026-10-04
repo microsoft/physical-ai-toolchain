@@ -8,7 +8,9 @@ result mapping, and summaries are tested without network, Docker, or Azure.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -22,8 +24,10 @@ from tests.dependabot.verify import (
     EXIT_USAGE,
     Check,
     CheckResult,
+    CheckTimeoutError,
     ExecutionRequest,
     UsageError,
+    default_executor,
     junit_outcome,
     load_manifest,
     overall_result,
@@ -188,6 +192,17 @@ def test_missing_junit_report_is_a_failure(tmp_path: Path) -> None:
     assert junit_outcome(tmp_path / "missing.xml")[0] == "failed"
 
 
+def test_a_failure_and_teardown_error_count_as_one_failed_test(tmp_path: Path) -> None:
+    body = (
+        '<testcase classname="tests.e2e.test_x" name="test_x[a]">'
+        '<failure message="AssertionError: job never started&#10;details"/></testcase>'
+        '<testcase classname="tests.e2e.test_x" name="test_x[a]">'
+        '<error message="failed on teardown with &quot;AssertionError: cleanup timed out&quot;"/></testcase>'
+    )
+
+    assert junit_outcome(_junit(tmp_path, body)) == ("failed", "1 test(s) failed: AssertionError: job never started")
+
+
 def _run(check: Check, repo: Path, executor: FakeExecutor) -> CheckResult:
     return run_check(
         check,
@@ -328,6 +343,95 @@ def test_pytest_checks_read_junit_and_skip_means_not_run(git_repo: Path) -> None
 
     assert result.status == "not-run"
     assert "unreachable" in (result.reason or "")
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_seconds"),
+    [
+        ({"timeout_minutes": 2}, 120),
+        ({"tier": "environment", "command": (), "pytest": "tests/e2e/x.py::test_x", "timeout_minutes": 3}, 180),
+    ],
+    ids=["command", "pytest"],
+)
+def test_time_limits_reach_the_executor_and_a_timeout_fails_the_check(
+    git_repo: Path, overrides: dict[str, object], expected_seconds: int
+) -> None:
+    requests: list[ExecutionRequest] = []
+
+    def executor(request: ExecutionRequest) -> int:
+        requests.append(request)
+        raise CheckTimeoutError("timed out after 2 minutes")
+
+    result = run_check(
+        _check(**overrides),
+        repo_root=git_repo,
+        run_dir=git_repo / "logs" / "run",
+        env={},
+        values={"base_ref": "HEAD", "run_dir": "x"},
+        executor=executor,
+    )
+
+    assert requests[0].timeout_seconds == expected_seconds
+    assert result.status == "failed"
+    assert result.reason == "timed out after 2 minutes"
+
+
+def test_checks_without_a_time_limit_wait_indefinitely(git_repo: Path) -> None:
+    executor = FakeExecutor()
+
+    _run(_check(), git_repo, executor)
+
+    assert executor.requests[0].timeout_seconds is None
+
+
+def _wait_until_gone(pid: int, timeout_seconds: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _nested_scripts(tmp_path: Path, inner_body: str) -> tuple[str, ...]:
+    inner = tmp_path / "inner.sh"
+    inner.write_text(inner_body, encoding="utf-8")
+    outer = tmp_path / "outer.sh"
+    outer.write_text(f'bash "{inner}"\n', encoding="utf-8")
+    return ("bash", str(outer))
+
+
+def test_time_limit_interrupts_every_process_so_cleanup_runs(tmp_path: Path) -> None:
+    marker = tmp_path / "cleaned"
+    argv = _nested_scripts(tmp_path, "trap 'echo cleaned > \"$MARKER\"; exit 130' INT\nsleep 30\n")
+    log_path = tmp_path / "check.log"
+    request = ExecutionRequest(argv, tmp_path, {**os.environ, "MARKER": str(marker)}, log_path, timeout_seconds=1)
+
+    started = time.monotonic()
+    with pytest.raises(CheckTimeoutError, match="timed out after"):
+        default_executor(request)
+
+    assert time.monotonic() - started < 15
+    assert marker.read_text(encoding="utf-8").strip() == "cleaned"
+    assert "Time limit" in log_path.read_text(encoding="utf-8")
+
+
+def test_time_limit_kills_processes_that_ignore_the_interrupt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(verify, "STOP_GRACE_SECONDS", 1)
+    pid_file = tmp_path / "inner.pid"
+    argv = _nested_scripts(tmp_path, "trap '' INT\necho $$ > \"$PID_FILE\"\nsleep 30\n")
+    request = ExecutionRequest(
+        argv, tmp_path, {**os.environ, "PID_FILE": str(pid_file)}, tmp_path / "check.log", timeout_seconds=1
+    )
+
+    started = time.monotonic()
+    with pytest.raises(CheckTimeoutError):
+        default_executor(request)
+
+    assert time.monotonic() - started < 15
+    assert _wait_until_gone(int(pid_file.read_text(encoding="utf-8")))
 
 
 def test_preflight_reports_missing_tools_platforms_and_variables() -> None:

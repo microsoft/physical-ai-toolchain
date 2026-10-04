@@ -76,6 +76,8 @@ The bundle fills `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZUREML_WORKS
 
 Before submitting anything, the runner checks that `az` is signed in to the environment's subscription. If the AKS cluster behind the compute target is stopped, the Azure ML checks report `not-run`; start the cluster and rerun. Environment checks run one at a time, and they upload your working tree to Azure ML, including uncommitted changes, so commit first and don't run builds at the same time.
 
+Each environment check stops at its `timeout_minutes` limit. The runner interrupts it, waits up to 15 minutes for the test to cancel its jobs and archive its models, and reports it `failed`.
+
 ## 📊 Results
 
 Each run writes `summary.json` and `summary.md`, plus one log per check, to `logs/dependabot/<run-id>/` (gitignored). The summary records the commit and whether the tree had uncommitted changes. Environment-tier logs contain Azure ML Studio links and resource names, so share only the `summary.md` status table, with resource names removed from its reasons.
@@ -83,7 +85,7 @@ Each run writes `summary.json` and `summary.md`, plus one log per check, to `log
 | Status    | Meaning                                                                     |
 |-----------|-----------------------------------------------------------------------------|
 | `passed`  | The check ran and succeeded                                                 |
-| `failed`  | The check ran and failed, or its category setup failed                      |
+| `failed`  | The check ran and failed, timed out, or its category setup failed           |
 | `not-run` | A tool, variable, or reachable environment was missing, or the test skipped |
 | `skipped` | An optional check that wasn't requested                                     |
 

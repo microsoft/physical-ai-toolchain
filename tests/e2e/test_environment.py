@@ -3,7 +3,8 @@
 These cover the bundle loader in ``tests/e2e/_environment.py`` and the conftest resolution
 helpers that the Azure ML fixtures call, using synthetic bundles only. They prove that a
 selected ``E2E_ENVIRONMENT`` never consults local Terraform state, fails loudly when a
-required value is missing, and that a stopped AKS cluster behind the compute target is detected.
+required value is missing, that a stopped AKS cluster behind the compute target is detected,
+and that job cleanup can't hang on a cancel request or skip archiving test models.
 """
 
 # cspell:ignore amlcompute
@@ -11,13 +12,15 @@ required value is missing, and that a stopped AKS cluster behind the compute tar
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from tests.e2e import conftest
+from tests.e2e import _aml, conftest
 from tests.e2e._environment import (
     BUNDLE_DIR_VAR,
     ENVIRONMENT_VAR,
@@ -351,3 +354,57 @@ def test_unknown_aks_power_state_does_not_block(monkeypatch: pytest.MonkeyPatch)
     _record_az(monkeypatch, "", returncode=1)
 
     assert conftest._attached_aks_power_state({"type": "kubernetes", "resource_id": _AKS_ID}, Path(".")) is None
+
+
+def _sample_job() -> _aml.AzureMLJob:
+    return _aml.AzureMLJob("sample-job", _aml.AzureMLWorkspace("sub", "rg-sample", "mlw-sample"), "sample")
+
+
+def _wait_until_gone(pid: int, timeout_seconds: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_a_hung_cancel_request_is_stopped_with_its_child_processes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_az = bin_dir / "az"
+    fake_az.write_text('#!/usr/bin/env bash\nsleep 30 &\necho $! > "$CHILD_PID_FILE"\nwait\n', encoding="utf-8")
+    fake_az.chmod(0o755)
+    child_pid_file = tmp_path / "child.pid"
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("CHILD_PID_FILE", str(child_pid_file))
+    monkeypatch.setattr(_aml, "AML_CANCEL_TIMEOUT_SECONDS", 1)
+
+    started = time.monotonic()
+    _aml.cancel_aml_job(_sample_job(), tmp_path)
+
+    assert time.monotonic() - started < 10
+    assert _wait_until_gone(int(child_pid_file.read_text(encoding="utf-8")))
+
+
+def test_cleanup_archives_models_when_the_job_never_stops(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    archived: list[str] = []
+
+    def never_terminal(*args: object, **kwargs: object) -> str:
+        raise AssertionError("Timed out waiting for cleanup; last status was 'NotStarted'")
+
+    monkeypatch.setattr(_aml, "cancel_aml_job", lambda job, repo_root: None)
+    monkeypatch.setattr(_aml, "wait_for_status", never_terminal)
+    monkeypatch.setattr(
+        _aml, "archive_all_model_versions", lambda repo_root, workspace, model_name: archived.append(model_name)
+    )
+    job = _sample_job()
+
+    with pytest.raises(AssertionError, match="NotStarted"):
+        _aml.cleanup_aml_job_and_model_versions(job, tmp_path, job.workspace, "sample-model")
+
+    assert archived == ["sample-model"]

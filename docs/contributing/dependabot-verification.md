@@ -86,6 +86,8 @@ Before submitting, the runner confirms that the Azure CLI is signed in to the bu
 
 Jobs run one at a time with unique names, and their test models are archived afterward. Each job holds a GPU node for several minutes or more, so run only the categories a pull request touches. The pi0 check needs `HF_TOKEN` with access to the gated base model, and `E2E_AML_INSTANCE_TYPE` targets a specific GPU instance type. Don't run local builds while a job uploads its snapshot.
 
+Each environment check has a time limit, set by `timeout_minutes` in the manifest, so a hung Azure call can't stall the run. When a check runs past its limit, the runner interrupts it and gives the test up to 15 minutes to cancel its jobs and archive its models before stopping it. The check then reports `failed` with a `timed out` reason.
+
 The read-only Terraform comparison plans the root stack at the base and head refs against your local state and reports only resource addresses, actions, and changed attribute names. It never applies. The vpn, automation, and dns stacks are opt-in.
 
 ## Read the Results
@@ -95,7 +97,7 @@ Each run writes `summary.json`, `summary.md`, and one log per check to `logs/dep
 | Status    | Meaning                                                                         |
 |-----------|---------------------------------------------------------------------------------|
 | `passed`  | The check ran and succeeded                                                     |
-| `failed`  | The check ran and failed, or its category setup failed                          |
+| `failed`  | The check ran and failed, timed out, or its category setup failed               |
 | `not-run` | A tool, variable, or reachable environment was missing, or the test was skipped |
 | `skipped` | An optional check that wasn't requested                                         |
 

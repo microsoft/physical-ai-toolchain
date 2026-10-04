@@ -126,8 +126,10 @@ def test_shared_check_ids_must_repeat_identically() -> None:
         (lambda check: check.update(tier="gpu"), "tier"),
         (lambda check: check.update(pytest="tests/e2e/x.py::test_x"), "exactly one"),
         (lambda check: check.update(unknown=True), "unknown keys"),
+        (lambda check: check.update(timeout_minutes=0), "timeout_minutes must be a positive integer"),
+        (lambda check: check.update(timeout_minutes=True), "timeout_minutes must be a positive integer"),
     ],
-    ids=["missing-description", "bad-tier", "command-and-pytest", "unknown-key"],
+    ids=["missing-description", "bad-tier", "command-and-pytest", "unknown-key", "zero-timeout", "boolean-timeout"],
 )
 def test_malformed_checks_are_rejected(mutation: Callable[[dict[str, object]], object], message: str) -> None:
     mutated = json.loads(json.dumps(RAW_MANIFEST))
@@ -214,6 +216,12 @@ def test_cpu_checks_never_submit_jobs() -> None:
         if check.tier == "cpu":
             assert not check.pytest, check.id
             assert check.gpu is False, check.id
+
+
+def test_environment_checks_declare_a_time_limit() -> None:
+    for check in ALL_CHECKS.values():
+        if check.tier == "environment":
+            assert check.timeout_minutes, check.id
 
 
 @pytest.mark.parametrize("doc", CATEGORY_DOCS, ids=lambda path: path.name)

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
+import signal
 import subprocess
 import tempfile
 from collections.abc import Mapping
@@ -27,6 +29,7 @@ from tests.e2e._common import (
 
 AML_STARTED_STATES = {"Running", "Finalizing", "Completed"}
 AML_FAILURE_STATES = {"Canceled", "Cancelled", "Failed", "NotResponding"}
+AML_CANCEL_TIMEOUT_SECONDS = 180
 
 
 @dataclass
@@ -1043,6 +1046,25 @@ def assert_job_snapshot_contains_only_training(job: AzureMLJob, repo_root: Path)
     )
 
 
+def _run_with_time_limit(
+    args: list[str], *, cwd: Path, timeout_seconds: float
+) -> subprocess.CompletedProcess[str] | None:
+    """Run a command in its own session; stop the session and return None if it outlives the limit."""
+    process = subprocess.Popen(
+        args, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except BaseException as error:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.communicate()
+        if isinstance(error, subprocess.TimeoutExpired):
+            return None
+        raise
+    return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
+
+
 def cancel_aml_job(job: AzureMLJob, repo_root: Path) -> None:
     if job.is_terminal:
         log_e2e(f"Skipping cancel for AzureML job {job.name}; terminal status={job.terminal_status}")
@@ -1050,7 +1072,9 @@ def cancel_aml_job(job: AzureMLJob, repo_root: Path) -> None:
 
     log_e2e(f"Cancelling AzureML job {job.name}")
 
-    run_command(
+    # The CLI waits for the service to finish cancelling, which never happens for a job the
+    # pipeline service didn't accept, so bound the wait; the accepted request still applies.
+    result = _run_with_time_limit(
         [
             "az",
             "ml",
@@ -1066,7 +1090,13 @@ def cancel_aml_job(job: AzureMLJob, repo_root: Path) -> None:
             job.name,
         ],
         cwd=repo_root,
+        timeout_seconds=AML_CANCEL_TIMEOUT_SECONDS,
     )
+    if result is None:
+        log_e2e(
+            f"Cancel request for AzureML job {job.name} did not return within "
+            f"{AML_CANCEL_TIMEOUT_SECONDS}s; continuing cleanup"
+        )
 
 
 def cleanup_aml_job_and_model_versions(
@@ -1075,17 +1105,18 @@ def cleanup_aml_job_and_model_versions(
     aml_workspace: AzureMLWorkspace,
     model_name: str,
 ) -> None:
-    """Cancel an AzureML job before archiving every model version it registered."""
+    """Cancel an AzureML job, then archive every model version it registered, even if it never stops."""
     cancel_aml_job(job, repo_root)
-    if not job.is_terminal:
-        terminal_status = wait_for_status(
-            lambda: _aml_status(fetch_aml_job_payload(job, repo_root)),
-            goal_description=f"AzureML job {job.name} cleanup",
-            timeout_minutes=10,
-            poll_interval_seconds=15,
-            success_statuses={"Completed", *AML_FAILURE_STATES},
-            status_log_prefix="Cleanup poll status",
-        )
-        _mark_job_terminal(job, terminal_status)
-
-    archive_all_model_versions(repo_root, aml_workspace, model_name)
+    try:
+        if not job.is_terminal:
+            terminal_status = wait_for_status(
+                lambda: _aml_status(fetch_aml_job_payload(job, repo_root)),
+                goal_description=f"AzureML job {job.name} cleanup",
+                timeout_minutes=10,
+                poll_interval_seconds=15,
+                success_statuses={"Completed", *AML_FAILURE_STATES},
+                status_log_prefix="Cleanup poll status",
+            )
+            _mark_job_terminal(job, terminal_status)
+    finally:
+        archive_all_model_versions(repo_root, aml_workspace, model_name)

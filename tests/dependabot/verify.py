@@ -14,17 +14,23 @@ Run from the repository root:
 
 Exit codes: 0 every selected required check passed, 1 a check failed, 2 no failures but a
 required check did not run, 64 usage error.
+
+A check that declares ``timeout_minutes`` is interrupted when it runs past that limit, so a
+hung cloud call can't stall the run. Its processes get SIGINT first, which lets e2e tests
+cancel their jobs, and anything still running after a grace period is killed.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import io
 import json
 import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -52,6 +58,8 @@ EXIT_FAILED = 1
 EXIT_INCOMPLETE = 2
 EXIT_USAGE = 64
 
+STOP_GRACE_SECONDS = 15 * 60
+
 TIERS = ("cpu", "environment")
 STATUSES = ("passed", "failed", "not-run", "skipped")
 PLACEHOLDERS = ("base_ref", "run_dir")
@@ -75,6 +83,7 @@ _CHECK_KEYS = {
     "not_run_exit_codes",
     "platforms",
     "notes",
+    "timeout_minutes",
 }
 
 
@@ -84,6 +93,10 @@ class ManifestError(ValueError):
 
 class UsageError(ValueError):
     """Raised for invalid command-line usage."""
+
+
+class CheckTimeoutError(RuntimeError):
+    """Raised after a check ran past its time limit and was stopped."""
 
 
 @dataclass(frozen=True)
@@ -107,6 +120,7 @@ class Check:
     not_run_exit_codes: tuple[int, ...] = ()
     platforms: tuple[str, ...] = ()
     notes: str = ""
+    timeout_minutes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -148,6 +162,7 @@ class ExecutionRequest:
     cwd: Path
     env: Mapping[str, str]
     log_path: Path
+    timeout_seconds: float | None = None
 
 
 Executor = Callable[[ExecutionRequest], int]
@@ -219,6 +234,11 @@ def _parse_check(raw: object, category_id: str) -> Check:
     for key in ("notes",):
         if key in raw and not isinstance(raw[key], str):
             raise ManifestError(f"{where}: {key} must be a string")
+    timeout_minutes = raw.get("timeout_minutes")
+    if timeout_minutes is not None and (
+        isinstance(timeout_minutes, bool) or not isinstance(timeout_minutes, int) or timeout_minutes <= 0
+    ):
+        raise ManifestError(f"{where}: timeout_minutes must be a positive integer")
     return Check(
         id=check_id,
         category=category_id,
@@ -239,6 +259,7 @@ def _parse_check(raw: object, category_id: str) -> Check:
         not_run_exit_codes=tuple(exit_codes),
         platforms=_string_list(raw["platforms"], f"{where} platforms") if "platforms" in raw else (),
         notes=raw.get("notes", ""),
+        timeout_minutes=timeout_minutes,
     )
 
 
@@ -496,17 +517,26 @@ def junit_outcome(junit_path: Path) -> tuple[str, str | None]:
     if not junit_path.is_file():
         return "failed", "pytest wrote no junit report"
     root = ET.parse(junit_path).getroot()
-    failed = passed = 0
+    passed = 0
+    # pytest reports a teardown error as a second testcase with the same name, so key by test.
+    failures: dict[tuple[str, str], str] = {}
     skip_messages: list[str] = []
     for case in root.iter("testcase"):
-        if case.find("failure") is not None or case.find("error") is not None:
-            failed += 1
+        problem = case.find("failure")
+        if problem is None:
+            problem = case.find("error")
+        if problem is not None:
+            message = (problem.get("message") or "").strip()
+            failures.setdefault(
+                (case.get("classname", ""), case.get("name", "")), message.splitlines()[0] if message else ""
+            )
         elif (skipped := case.find("skipped")) is not None:
             skip_messages.append(skipped.get("message", "skipped"))
         else:
             passed += 1
-    if failed:
-        return "failed", f"{failed} test(s) failed"
+    if failures:
+        first = next((message for message in failures.values() if message), "")
+        return "failed", f"{len(failures)} test(s) failed" + (f": {first[:200]}" if first else "")
     if skip_messages:
         return "not-run", "; ".join(dict.fromkeys(skip_messages))[:300]
     if passed:
@@ -516,19 +546,72 @@ def junit_outcome(junit_path: Path) -> tuple[str, str | None]:
     return "failed", "no tests ran"
 
 
+def _process_tree(root: int) -> list[int]:
+    """Return ``root`` and its live descendants, parents before children."""
+    try:
+        listing = subprocess.run(
+            ["ps", "-A", "-o", "pid=", "-o", "ppid="], capture_output=True, text=True, check=False
+        ).stdout
+    except OSError:
+        return [root]
+    children: dict[int, list[int]] = {}
+    for line in listing.splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[0].isdigit() and fields[1].isdigit():
+            children.setdefault(int(fields[1]), []).append(int(fields[0]))
+    tree = [root]
+    pending = [root]
+    while pending:
+        for child in children.get(pending.pop(), []):
+            tree.append(child)
+            pending.append(child)
+    return tree
+
+
+def _signal_tree(root: int, signum: int) -> None:
+    for pid in _process_tree(root):
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, signum)
+
+
+def stop_process_tree(process: subprocess.Popen[bytes], grace_seconds: float) -> None:
+    """Interrupt a process and its descendants, then kill whatever outlives the grace period."""
+    _signal_tree(process.pid, signal.SIGINT)
+    try:
+        process.wait(timeout=grace_seconds)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    _signal_tree(process.pid, signal.SIGKILL)
+    process.wait()
+
+
+def _format_minutes(seconds: float) -> str:
+    minutes = seconds / 60
+    return f"{minutes:g} minute{'' if minutes == 1 else 's'}"
+
+
 def default_executor(request: ExecutionRequest) -> int:
-    """Run a command with its output written to the check log."""
+    """Run a command with its output written to the check log, stopping it at its time limit."""
     request.log_path.parent.mkdir(parents=True, exist_ok=True)
     with request.log_path.open("w", encoding="utf-8") as log:
         log.write(f"$ (cd {request.cwd} && {' '.join(request.argv)})\n")
         log.flush()
         try:
-            return subprocess.run(
+            process = subprocess.Popen(
                 list(request.argv), cwd=request.cwd, env=dict(request.env), stdout=log, stderr=subprocess.STDOUT
-            ).returncode
+            )
         except FileNotFoundError as error:
             log.write(f"{error}\n")
             return 127
+        try:
+            return process.wait(timeout=request.timeout_seconds)
+        except subprocess.TimeoutExpired:
+            limit = _format_minutes(request.timeout_seconds or 0)
+            log.write(f"\n[verify] Time limit of {limit} reached; interrupting the check so it can clean up\n")
+            log.flush()
+            stop_process_tree(process, STOP_GRACE_SECONDS)
+            raise CheckTimeoutError(f"timed out after {limit}") from None
 
 
 def run_check(
@@ -546,11 +629,12 @@ def run_check(
     result.log = display_path(log_path, repo_root)
     started = time.monotonic()
     check_env = {**env, **check.set_env}
+    timeout_seconds = check.timeout_minutes * 60 if check.timeout_minutes else None
     snapshot_dir: Path | None = None
     try:
         if check.pytest:
             junit_path = run_dir / f"{check.id}.xml"
-            executor(ExecutionRequest(pytest_argv(check, junit_path), repo_root, check_env, log_path))
+            executor(ExecutionRequest(pytest_argv(check, junit_path), repo_root, check_env, log_path, timeout_seconds))
             result.status, result.reason = junit_outcome(junit_path)
             return result
         argv = substitute(check.command, values)
@@ -564,7 +648,7 @@ def run_check(
             cwd = base_dir
         else:
             cwd = base_dir / check.cwd
-        code = executor(ExecutionRequest(argv, cwd, check_env, log_path))
+        code = executor(ExecutionRequest(argv, cwd, check_env, log_path, timeout_seconds))
         if code == 0:
             result.status = "passed"
         elif code in check.not_run_exit_codes:
