@@ -181,6 +181,10 @@ Describe 'Invoke-PublicDependencyFeedScan' -Tag 'Unit' {
             @{ Name = 'npmrc auth token'; FileName = '.npmrc'; Rule = 'credential-setting'; Content = '//registry.npmjs.org/:_authToken=abc' }
             @{ Name = 'pyproject insecure host'; FileName = 'pyproject.toml'; Rule = 'insecure-setting'; Content = "[tool.uv]`nallow-insecure-host = [`"pypi.org`"]" }
             @{ Name = 'requirements trusted host'; FileName = 'requirements.txt'; Rule = 'insecure-setting'; Content = '--trusted-host pypi.org' }
+            @{ Name = 'pyproject multi-line extra-index-url'; FileName = 'pyproject.toml'; Rule = 'host-not-approved'; Content = "[tool.uv]`nextra-index-url = [`n    `"https://pypi.org/simple`",`n    `"https://private-feed.example.com/simple`",`n]" }
+            @{ Name = 'pyproject find-links'; FileName = 'pyproject.toml'; Rule = 'host-not-approved'; Content = "[tool.uv]`nfind-links = [`"https://private-feed.example.com/wheels/`"]" }
+            @{ Name = 'pyproject dependency direct URL'; FileName = 'pyproject.toml'; Rule = 'host-not-approved'; Content = "[project]`ndependencies = [`"tool @ https://private-feed.example.com/tool-1.0-py3-none-any.whl`"]" }
+            @{ Name = 'pyproject multi-line dependency group direct URL'; FileName = 'pyproject.toml'; Rule = 'url-scheme'; Content = "[dependency-groups]`ndev = [`n    `"pytest==9.0.0`",`n    `"tool @ git+ssh://git@private.example.com/tool.git`",`n]" }
         ) {
             $repoRoot = Join-Path $TestDrive ([IO.Path]::GetRandomFileName())
             $fileContent = if ($Entry) {
@@ -198,6 +202,31 @@ Describe 'Invoke-PublicDependencyFeedScan' -Tag 'Unit' {
             $result = Invoke-PublicDependencyFeedScan -RepoRoot $repoRoot
 
             $result.violations.rule | Should -Contain $Rule
+        }
+
+        It 'Accepts approved multi-line pyproject sources, local find-links, and comments' {
+            $repoRoot = Join-Path $TestDrive 'pyproject-multiline'
+            $pyproject = @(
+                '[tool.uv]'
+                'extra-index-url = ['
+                '    # mirror docs: https://private-feed.example.com/help'
+                '    "https://download.pytorch.org/whl/cu130",'
+                ']'
+                'find-links = ["./wheels"]'
+                '[project]'
+                'dependencies = ['
+                '    "torch @ https://download-r2.pytorch.org/whl/cu130/torch-2.0-cp312-none-any.whl",'
+                '    "requests==2.34.2",'
+                ']'
+                '[project.urls]'
+                'Homepage = "https://docs.example.com/"'
+            )
+            New-PublicFeedTestRepository -Path $repoRoot -Files @{ 'pyproject.toml' = $pyproject }
+
+            $result = Invoke-PublicDependencyFeedScan -RepoRoot $repoRoot
+
+            $result.violations | Should -BeNullOrEmpty
+            $result.sourcesValidated | Should -Be 2
         }
 
         It 'Accepts canonical npm, uv, and settings metadata' {

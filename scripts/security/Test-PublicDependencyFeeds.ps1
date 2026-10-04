@@ -93,7 +93,11 @@ function Test-DependencySourceLine {
             return $Line -match '\b(?:registry|url|index|git)\s*='
         }
         '^pyproject\.toml$' {
-            return $Line -match '\b(?:index-url|extra-index-url|registry|url|git)\s*='
+            if ($Line -match '^\s*#') {
+                return $false
+            }
+            return $Line -match '\b(?:index-url|extra-index-url|find-links|registry|url|git)\s*=' -or
+                $Line -match '@\s*[A-Za-z][A-Za-z0-9+.-]*://'
         }
         '^requirements.*\.txt$' {
             return $Line -match '(?:https?|git\+https)://'
@@ -484,6 +488,7 @@ function Invoke-PublicDependencyFeedScan {
 
         $leafName = Split-Path -Leaf $relativePath
         $lines = @(Get-Content -LiteralPath $fullPath)
+        $inSourceArray = $false
         $isNpmLock = $leafName -in $npmLockNames
         $ecosystemHosts = switch -Regex ($leafName) {
             '^(package-lock|npm-shrinkwrap)\.json$' { $npmHosts }
@@ -517,7 +522,22 @@ function Invoke-PublicDependencyFeedScan {
                 & $addViolation $relativePath $lineNumber $setting.rule $setting.reason
             }
 
-            if (-not (Test-DependencySourceLine -Path $relativePath -Line $line)) {
+            $isSourceLine = Test-DependencySourceLine -Path $relativePath -Line $line
+            if ($leafName -eq 'pyproject.toml') {
+                # Index and find-links arrays can place each URL on its own line.
+                if ($inSourceArray) {
+                    $isComment = $line -match '^\s*#'
+                    $isSourceLine = $isSourceLine -or -not $isComment
+                    if (-not $isComment -and $line -match '\]') {
+                        $inSourceArray = $false
+                    }
+                }
+                elseif ($line -match '^\s*(?:index-url|extra-index-url|find-links)\s*=\s*\[' -and $line -notmatch '\]') {
+                    $inSourceArray = $true
+                }
+            }
+
+            if (-not $isSourceLine) {
                 continue
             }
 
