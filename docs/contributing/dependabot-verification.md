@@ -115,12 +115,17 @@ The command exits 0 when every selected required check passed, 1 when any check 
 | GitHub Actions bumps                   | Syntax and contract checks locally; runtime behavior is proven only by CI on a pushed branch                        |
 | GPU offload                            | Local NVIDIA host through mise tasks; the SO-101 example needs the robot hardware                                   |
 | Dependency pinning                     | The scan runs as CI runs it, which currently doesn't enforce the compliance threshold                               |
+| IL pipeline checks                     | Can fail before they start when Azure ML pipeline creation times out; see the note below                            |
+
+The IL pipeline checks, `aml-il-pipeline-register` and `aml-il-pipeline-diffusion`, can fail before they start. LeRobot pipeline creation can time out at the Azure ML gateway, which leaves the pipeline `NotStarted` with no child jobs until the check's 15-minute start timeout. A `GatewayTimeout` on the pipeline's `jobs/write` in the workspace Activity Log confirms it.
+
+When this happens, no pipeline step runs, so the failure says nothing about the Dependabot update: `aml-il-lifecycle` and the `il` CPU checks still cover the LeRobot lock, and `azureml-register-import-smoke` covers the register lock. A fix is tracked as follow-up work.
 
 CI doesn't yet run the suite's own tests, the root `tests/` unit tests, or the `gpu-smoke`, `azureml-register`, and `osmo-proxy` import smokes. Run them locally until CI adopts them.
 
 ## Add a Category or Check
 
-1. Edit [categories.json](pathname://../../tests/dependabot/categories.json). Add a `cpu` command, or an `environment` pytest node from a `tests/e2e/test_e2e_aml_*` module.
+1. Edit [categories.json](pathname://../../tests/dependabot/categories.json). Add a `cpu` command, or an `environment` pytest node from a `tests/e2e/test_e2e_aml_*` module. Give every environment check a positive `timeout_minutes`, which the consistency tests require. Size it above the test's own start, completion, and cleanup deadlines; no test checks the sizing.
 2. Add any new environment check to the allowlist in [test_categories.py](pathname://../../tests/dependabot/test_categories.py).
 3. When Dependabot gains a directory, add it to a category's `dependabot` list and `paths`.
 4. Run `uv run --frozen pytest -o addopts="" tests/dependabot`. The consistency tests fail until every Dependabot entry is mapped and every referenced script, npm script, pytest node, and CI lane exists.
