@@ -1,0 +1,483 @@
+"""Hermetic tests for the Dependabot verification runner.
+
+A fake executor stands in for every command, and temporary git repositories stand in
+for the workspace, so routing, selection, preflight, container wrapping, snapshots,
+result mapping, and summaries are tested without network, Docker, or Azure.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+
+from tests.dependabot import verify
+from tests.dependabot.verify import (
+    EXIT_FAILED,
+    EXIT_INCOMPLETE,
+    EXIT_PASSED,
+    EXIT_USAGE,
+    Check,
+    CheckResult,
+    ExecutionRequest,
+    UsageError,
+    junit_outcome,
+    load_manifest,
+    overall_result,
+    resolve_output_dir,
+    route_paths,
+    run_check,
+    select_checks,
+)
+
+MANIFEST = load_manifest()
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
+
+
+@pytest.fixture
+def git_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    (repo / "infra" / "nested").mkdir(parents=True)
+    (repo / "infra" / "nested" / "main.tf").write_text("committed\n", encoding="utf-8")
+    (repo / "other.txt").write_text("not in the snapshot\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("logs/\n", encoding="utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "init")
+    return repo
+
+
+class FakeExecutor:
+    """Record execution requests and return scripted exit codes."""
+
+    def __init__(self, codes: dict[str, int] | None = None, default: int = 0) -> None:
+        self.requests: list[ExecutionRequest] = []
+        self.codes = codes or {}
+        self.default = default
+
+    def __call__(self, request: ExecutionRequest) -> int:
+        self.requests.append(request)
+        return self.codes.get(request.argv[0], self.default)
+
+
+def _check(**overrides: object) -> Check:
+    values: dict[str, object] = {
+        "id": "sample",
+        "category": "sample",
+        "tier": "cpu",
+        "gpu": False,
+        "optional": False,
+        "description": "Sample check",
+        "command": ("tool", "--flag"),
+    }
+    values.update(overrides)
+    return Check(**values)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("training/rl/uv.lock", ["rl"]),
+        ("package-lock.json", ["tooling", "dataviewer"]),
+        (".github/workflows/x.yml", ["tooling"]),
+        ("infrastructure/terraform/modules/platform/versions.tf", ["infrastructure"]),
+        ("docs/docusaurus/package.json", ["docs"]),
+        ("training/smoke/uv.lock", ["gpu-smoke"]),
+        ("workflows/azureml/osmo-proxy/uv.lock", ["workflows"]),
+        ("evaluation/vlm_judge/uv.lock", ["evaluation"]),
+    ],
+)
+def test_paths_route_to_their_categories(path: str, expected: list[str]) -> None:
+    routed, unmapped = route_paths([path], MANIFEST)
+
+    assert routed == expected
+    assert unmapped == []
+
+
+def test_unclaimed_paths_are_reported() -> None:
+    routed, unmapped = route_paths(["docs/contributing/README.md", "training/rl/uv.lock"], MANIFEST)
+
+    assert routed == ["rl"]
+    assert unmapped == ["docs/contributing/README.md"]
+
+
+def test_selection_adds_baseline_and_deduplicates_shared_checks() -> None:
+    selected, _, categories = select_checks(
+        MANIFEST, ["rl", "il"], tier="cpu", include_optional=False, include_baseline=True
+    )
+    ids = [check.id for check in selected]
+
+    assert [category.id for category in categories] == ["baseline", "rl", "il"]
+    assert ids.count("training-tests") == 1
+    assert "uv-lock-consistency" in ids
+    assert all(check.tier == "cpu" for check in selected)
+
+
+def test_selection_skips_optional_checks_unless_requested() -> None:
+    selected, skipped, _ = select_checks(MANIFEST, ["rl"], tier="cpu", include_optional=False, include_baseline=False)
+    selected_all, skipped_none, _ = select_checks(
+        MANIFEST, ["rl"], tier="cpu", include_optional=True, include_baseline=False
+    )
+
+    assert "rl-image-smoke" in {check.id for check in skipped}
+    assert "rl-image-smoke" not in {check.id for check in selected}
+    assert "rl-image-smoke" in {check.id for check in selected_all}
+    assert skipped_none == []
+
+
+def test_environment_selection_holds_only_environment_checks() -> None:
+    selected, _, _ = select_checks(
+        MANIFEST, ["gpu-smoke", "workflows"], tier="environment", include_optional=False, include_baseline=True
+    )
+
+    assert [check.id for check in selected] == ["aml-gpu-smoke", "aml-il-pipeline-register"]
+
+
+@pytest.mark.parametrize(
+    ("statuses", "expected"),
+    [
+        ([("passed", False), ("skipped", True)], ("passed", EXIT_PASSED)),
+        ([("passed", False), ("failed", True)], ("failed", EXIT_FAILED)),
+        ([("passed", False), ("not-run", False)], ("incomplete", EXIT_INCOMPLETE)),
+        ([("passed", False), ("not-run", True)], ("passed", EXIT_PASSED)),
+        ([("failed", False), ("not-run", False)], ("failed", EXIT_FAILED)),
+    ],
+)
+def test_overall_result_maps_statuses_to_exit_codes(
+    statuses: list[tuple[str, bool]], expected: tuple[str, int]
+) -> None:
+    results = [
+        CheckResult(f"c{index}", "x", "cpu", False, optional, status)
+        for index, (status, optional) in enumerate(statuses)
+    ]
+
+    assert overall_result(results) == expected
+
+
+def _junit(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "report.xml"
+    path.write_text(f'<testsuites><testsuite name="pytest">{body}</testsuite></testsuites>', encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_status"),
+    [
+        ('<testcase name="a"/>', "passed"),
+        ('<testcase name="a"><failure message="boom"/></testcase>', "failed"),
+        ('<testcase name="a"><skipped message="workspace unreachable"/></testcase>', "not-run"),
+        ("", "failed"),
+    ],
+    ids=["passed", "failed", "skipped-is-not-run", "no-tests"],
+)
+def test_junit_outcome_treats_skips_as_not_run(tmp_path: Path, body: str, expected_status: str) -> None:
+    status, reason = junit_outcome(_junit(tmp_path, body))
+
+    assert status == expected_status
+    if expected_status == "not-run":
+        assert reason == "workspace unreachable"
+
+
+def test_missing_junit_report_is_a_failure(tmp_path: Path) -> None:
+    assert junit_outcome(tmp_path / "missing.xml")[0] == "failed"
+
+
+def _run(check: Check, repo: Path, executor: FakeExecutor) -> CheckResult:
+    return run_check(
+        check,
+        repo_root=repo,
+        run_dir=repo / "logs" / "run",
+        env={},
+        values={"base_ref": "origin/main", "run_dir": str(repo / "logs" / "run")},
+        executor=executor,
+    )
+
+
+@pytest.mark.parametrize(
+    ("code", "status"),
+    [(0, "passed"), (1, "failed"), (3, "not-run"), (4, "failed")],
+)
+def test_command_exit_codes_map_to_statuses(git_repo: Path, code: int, status: str) -> None:
+    executor = FakeExecutor(default=code)
+
+    result = _run(_check(not_run_exit_codes=(3,)), git_repo, executor)
+
+    assert result.status == status
+    assert result.log == "logs/run/sample.log"
+
+
+def test_placeholders_are_substituted(git_repo: Path) -> None:
+    executor = FakeExecutor()
+
+    _run(_check(command=("tool", "--base", "{base_ref}", "--out", "{run_dir}/x")), git_repo, executor)
+
+    assert executor.requests[0].argv == ("tool", "--base", "origin/main", "--out", f"{git_repo}/logs/run/x")
+
+
+def test_container_checks_wrap_docker_off_linux_amd64(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(verify, "host_is_linux_amd64", lambda: False)
+    executor = FakeExecutor()
+    check = _check(
+        command=("bash", "-c", "uv run pytest"),
+        cwd="infra",
+        container={"image": "example/uv:tag", "platform": "linux/amd64"},
+        set_env={"FOO": "bar"},
+    )
+
+    _run(check, git_repo, executor)
+    request = executor.requests[0]
+
+    assert request.argv[:6] == ("docker", "run", "--rm", "--platform", "linux/amd64", "--entrypoint")
+    assert request.argv[6] == "bash"
+    assert request.argv[7:9] == ("-v", f"{git_repo}:/workspace")
+    assert request.argv[9:11] == ("-w", "/workspace/infra")
+    assert request.argv[11:13] == ("-e", "FOO")
+    assert request.argv[13:] == ("example/uv:tag", "-c", "uv run pytest")
+    assert request.env["FOO"] == "bar"
+
+
+def test_container_checks_run_natively_on_linux_amd64(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(verify, "host_is_linux_amd64", lambda: True)
+    executor = FakeExecutor()
+    check = _check(cwd="infra", container={"image": "example/uv:tag", "platform": "linux/amd64"})
+
+    _run(check, git_repo, executor)
+
+    assert executor.requests[0].argv == ("tool", "--flag")
+    assert executor.requests[0].cwd == git_repo / "infra"
+
+
+def test_snapshot_checks_use_committed_files_and_clean_up(git_repo: Path) -> None:
+    (git_repo / "infra" / "nested" / "main.tf").write_text("uncommitted edit\n", encoding="utf-8")
+    seen: list[tuple[Path, str, bool]] = []
+
+    def executor(request: ExecutionRequest) -> int:
+        seen.append(
+            (
+                request.cwd,
+                (request.cwd / "infra" / "nested" / "main.tf").read_text(encoding="utf-8"),
+                (request.cwd / "other.txt").exists(),
+            )
+        )
+        return 0
+
+    result = run_check(
+        _check(snapshot=("infra",)),
+        repo_root=git_repo,
+        run_dir=git_repo / "logs" / "run",
+        env={},
+        values={"base_ref": "HEAD", "run_dir": "x"},
+        executor=executor,
+    )
+
+    snapshot_root, content, has_other = seen[0]
+    assert result.status == "passed"
+    assert snapshot_root != git_repo
+    assert content == "committed\n"
+    assert has_other is False
+    assert not snapshot_root.exists()
+
+
+def test_snapshot_is_removed_when_the_command_errors(git_repo: Path) -> None:
+    roots: list[Path] = []
+
+    def executor(request: ExecutionRequest) -> int:
+        roots.append(request.cwd)
+        raise OSError("tool crashed")
+
+    result = run_check(
+        _check(snapshot=("infra",)),
+        repo_root=git_repo,
+        run_dir=git_repo / "logs" / "run",
+        env={},
+        values={"base_ref": "HEAD", "run_dir": "x"},
+        executor=executor,
+    )
+
+    assert result.status == "failed"
+    assert result.reason == "tool crashed"
+    assert not roots[0].exists()
+
+
+def test_pytest_checks_read_junit_and_skip_means_not_run(git_repo: Path) -> None:
+    def executor(request: ExecutionRequest) -> int:
+        junit = Path(request.argv[-1].split("=", 1)[1])
+        junit.parent.mkdir(parents=True, exist_ok=True)
+        junit.write_text(
+            '<testsuite><testcase name="t"><skipped message="AzureML workspace is unreachable"/>'
+            "</testcase></testsuite>",
+            encoding="utf-8",
+        )
+        return 0
+
+    check = _check(tier="environment", gpu=True, command=(), pytest="tests/e2e/test_e2e_aml_x.py::test_x")
+    result = run_check(
+        check,
+        repo_root=git_repo,
+        run_dir=git_repo / "logs" / "run",
+        env={},
+        values={"base_ref": "HEAD", "run_dir": "x"},
+        executor=executor,
+    )
+
+    assert result.status == "not-run"
+    assert "unreachable" in (result.reason or "")
+
+
+def test_preflight_reports_missing_tools_platforms_and_variables() -> None:
+    def which(tool: str) -> str | None:
+        return None if tool == "pwsh" else f"/usr/bin/{tool}"
+
+    assert verify.preflight_reason(_check(requires=("pwsh",)), {}, which=which) == "missing tools: pwsh"
+    assert verify.preflight_reason(_check(platforms=("plan9",)), {}, which=which) == "runs only on plan9"
+    assert verify.preflight_reason(_check(env=("HF_TOKEN",)), {"HF_TOKEN": " "}, which=which) == (
+        "set HF_TOKEN to run this check"
+    )
+    assert verify.preflight_reason(_check(), {}, which=which) is None
+
+
+def test_output_dir_must_be_ignored_inside_the_repository(git_repo: Path, tmp_path: Path) -> None:
+    with pytest.raises(UsageError, match="gitignored"):
+        resolve_output_dir(str(git_repo / "tracked-results"), "run", git_repo)
+
+    assert resolve_output_dir(str(git_repo / "logs" / "mine"), "run", git_repo) == git_repo / "logs" / "mine"
+    assert resolve_output_dir(str(tmp_path / "elsewhere"), "run", git_repo) == tmp_path / "elsewhere"
+    assert resolve_output_dir(None, "run", git_repo) == git_repo / "logs" / "dependabot" / "run"
+
+
+@pytest.fixture
+def tiny_manifest(tmp_path: Path) -> Iterator[Path]:
+    manifest = {
+        "schema_version": 1,
+        "base_ref": "HEAD",
+        "root_routes": [],
+        "categories": [
+            {
+                "id": "baseline",
+                "title": "Baseline",
+                "summary": "Always runs.",
+                "always": True,
+                "dependabot": [],
+                "paths": [],
+                "setup": [],
+                "notes": [],
+                "checks": [
+                    {
+                        "id": "always-ok",
+                        "tier": "cpu",
+                        "gpu": False,
+                        "optional": False,
+                        "description": "Passes.",
+                        "command": ["ok-tool"],
+                        "requires": [],
+                    }
+                ],
+            },
+            {
+                "id": "infra",
+                "title": "Infra",
+                "summary": "Infra checks.",
+                "dependabot": [{"ecosystem": "terraform", "directory": "/infra"}],
+                "paths": ["infra/"],
+                "setup": [{"command": ["setup-tool"], "cwd": "."}],
+                "notes": [],
+                "checks": [
+                    {
+                        "id": "infra-check",
+                        "tier": "cpu",
+                        "gpu": False,
+                        "optional": False,
+                        "description": "Scripted outcome.",
+                        "command": ["infra-tool"],
+                        "requires": [],
+                    },
+                    {
+                        "id": "infra-live",
+                        "tier": "environment",
+                        "gpu": True,
+                        "optional": False,
+                        "description": "Environment check.",
+                        "pytest": "tests/e2e/test_e2e_aml_x.py::test_x",
+                        "requires": [],
+                    },
+                ],
+            },
+        ],
+    }
+    path = tmp_path / "categories.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    yield path
+
+
+def test_main_runs_setup_and_checks_and_writes_the_summary(git_repo: Path, tiny_manifest: Path) -> None:
+    executor = FakeExecutor(codes={"infra-tool": 3})
+
+    code = verify.main(
+        ["--category", "infra", "--output-dir", str(git_repo / "logs" / "run")],
+        executor=executor,
+        repo_root=git_repo,
+        manifest_path=tiny_manifest,
+        environ={},
+    )
+    summary = json.loads((git_repo / "logs" / "run" / "summary.json").read_text(encoding="utf-8"))
+
+    assert code == EXIT_FAILED
+    assert [request.argv[0] for request in executor.requests] == ["setup-tool", "ok-tool", "infra-tool"]
+    assert summary["result"] == "failed"
+    assert summary["categories"] == ["baseline", "infra"]
+    assert summary["dirty"] is False
+    assert {check["id"]: check["status"] for check in summary["checks"]} == {
+        "always-ok": "passed",
+        "infra-check": "failed",
+    }
+    assert (git_repo / "logs" / "run" / "summary.md").is_file()
+
+
+def test_main_dry_run_never_executes(git_repo: Path, tiny_manifest: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    executor = FakeExecutor()
+
+    code = verify.main(
+        ["--category", "infra", "--tier", "all", "--environment", "sample", "--dry-run"],
+        executor=executor,
+        repo_root=git_repo,
+        manifest_path=tiny_manifest,
+        environ={},
+    )
+
+    assert code == EXIT_PASSED
+    assert executor.requests == []
+    output = capsys.readouterr().out
+    assert "infra-live" in output
+    assert "-m e2e" in output
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--category", "nope"],
+        ["--category", "infra", "--tier", "environment"],
+        ["--category", "infra", "--output-dir", "{repo}/tracked"],
+    ],
+    ids=["unknown-category", "environment-without-environment", "tracked-output-dir"],
+)
+def test_usage_errors_exit_64(git_repo: Path, tiny_manifest: Path, argv: list[str]) -> None:
+    code = verify.main(
+        [arg.replace("{repo}", str(git_repo)) for arg in argv],
+        executor=FakeExecutor(),
+        repo_root=git_repo,
+        manifest_path=tiny_manifest,
+        environ={},
+    )
+
+    assert code == EXIT_USAGE
+
+
+def test_main_lists_categories(capsys: pytest.CaptureFixture[str]) -> None:
+    assert verify.main(["--list"]) == EXIT_PASSED
+    assert "gpu-smoke: Azure ML GPU smoke runtime" in capsys.readouterr().out
