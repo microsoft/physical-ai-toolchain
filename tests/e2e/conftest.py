@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import time
 from dataclasses import dataclass
@@ -22,6 +23,11 @@ from tests.e2e._environment import (
 )
 
 TFVARS_FALLBACK_OUTPUT_KEYS = ("resource_group", "azureml_workspace", "aks_cluster", "storage_account")
+AKS_RESOURCE_ID = re.compile(
+    r"^/subscriptions/(?P<subscription>[^/]+)/resourceGroups/(?P<resource_group>[^/]+)"
+    r"/providers/Microsoft\.ContainerService/managedClusters/(?P<name>[^/]+)$",
+    re.IGNORECASE,
+)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -376,6 +382,47 @@ def aml_compute_target(repo_root: Path, aml_workspace: AzureMLWorkspace) -> None
     provisioning_state = payload.get("provisioning_state")
     if isinstance(provisioning_state, str) and provisioning_state.lower() != "succeeded":
         pytest.skip(f"AzureML compute target is not ready: {compute_name} ({provisioning_state})")
+
+    power_state = _attached_aks_power_state(payload, repo_root)
+    if power_state and power_state.lower() != "running":
+        pytest.skip(
+            f"AzureML compute target {compute_name} runs on an AKS cluster that is {power_state}; start it, then rerun"
+        )
+
+
+def _attached_aks_power_state(compute: dict[str, Any], repo_root: Path) -> str | None:
+    """Return the power state of the AKS cluster behind a Kubernetes compute target, or None when unknown.
+
+    A stopped cluster leaves the attached compute ``Succeeded``, so jobs would queue until they time out.
+    Arc-connected clusters and managed compute have no AKS power state and return None.
+    """
+    resource_id = compute.get("resource_id")
+    if compute.get("type") != "kubernetes" or not isinstance(resource_id, str):
+        return None
+    match = AKS_RESOURCE_ID.match(resource_id.strip())
+    if match is None:
+        return None
+
+    result = run_command(
+        [
+            "az",
+            "aks",
+            "show",
+            "--subscription",
+            match["subscription"],
+            "--resource-group",
+            match["resource_group"],
+            "--name",
+            match["name"],
+            "--query",
+            "powerState.code",
+            "-o",
+            "tsv",
+        ],
+        cwd=repo_root,
+    )
+    state = result.stdout.strip()
+    return state if result.returncode == 0 and state else None
 
 
 @pytest.fixture(scope="session")

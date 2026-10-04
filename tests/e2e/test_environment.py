@@ -2,13 +2,16 @@
 
 These cover the bundle loader in ``tests/e2e/_environment.py`` and the conftest resolution
 helpers that the Azure ML fixtures call, using synthetic bundles only. They prove that a
-selected ``E2E_ENVIRONMENT`` never consults local Terraform state and fails loudly when a
-required value is missing.
+selected ``E2E_ENVIRONMENT`` never consults local Terraform state, fails loudly when a
+required value is missing, and that a stopped AKS cluster behind the compute target is detected.
 """
+
+# cspell:ignore amlcompute
 
 from __future__ import annotations
 
 import json
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -279,3 +282,72 @@ def test_unnamed_environment_keeps_the_terraform_fallback(
     )
     assert conftest._resolve_compute_name(isolated_environment) == "k8s-tf-dev-001"
     assert conftest._resolve_storage_account(isolated_environment) == "terraform-storage"
+
+
+_AKS_ID = (
+    "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-sample"
+    "/providers/Microsoft.ContainerService/managedClusters/aks-sample-dev-001"
+)
+
+
+def _record_az(monkeypatch: pytest.MonkeyPatch, stdout: str, returncode: int = 0) -> list[list[str]]:
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], *, cwd: Path, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, returncode, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(conftest, "run_command", fake_run)
+    return calls
+
+
+def test_stopped_aks_cluster_behind_a_kubernetes_compute_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _record_az(monkeypatch, "Stopped\n")
+
+    state = conftest._attached_aks_power_state({"type": "kubernetes", "resource_id": _AKS_ID}, Path("."))
+
+    assert state == "Stopped"
+    assert calls == [
+        [
+            "az",
+            "aks",
+            "show",
+            "--subscription",
+            "00000000-0000-0000-0000-000000000000",
+            "--resource-group",
+            "rg-sample",
+            "--name",
+            "aks-sample-dev-001",
+            "--query",
+            "powerState.code",
+            "-o",
+            "tsv",
+        ]
+    ]
+
+
+@pytest.mark.parametrize(
+    "compute",
+    [
+        {"type": "amlcompute", "resource_id": _AKS_ID},
+        {
+            "type": "kubernetes",
+            "resource_id": "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Kubernetes/connectedClusters/k3s",
+        },
+        {"type": "kubernetes"},
+    ],
+    ids=["managed-compute", "arc-connected-cluster", "no-resource-id"],
+)
+def test_computes_without_an_aks_cluster_skip_the_power_check(
+    monkeypatch: pytest.MonkeyPatch, compute: dict[str, object]
+) -> None:
+    calls = _record_az(monkeypatch, "Running\n")
+
+    assert conftest._attached_aks_power_state(compute, Path(".")) is None
+    assert calls == []
+
+
+def test_unknown_aks_power_state_does_not_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    _record_az(monkeypatch, "", returncode=1)
+
+    assert conftest._attached_aks_power_state({"type": "kubernetes", "resource_id": _AKS_ID}, Path(".")) is None
