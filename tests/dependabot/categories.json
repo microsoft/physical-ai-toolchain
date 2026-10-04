@@ -1082,9 +1082,9 @@
         {
           "id": "aml-il-pipeline-diffusion",
           "tier": "environment",
-          "gpu": true,
+          "gpu": false,
           "optional": false,
-          "description": "Azure ML LeRobot pipeline (preprocess, train, evaluate) on a GPU node.",
+          "description": "Azure ML LeRobot pipeline (preprocess, train, evaluate) on the compute's default instance type, which is CPU-only on Kubernetes computes.",
           "timeout_minutes": 120,
           "pytest": "tests/e2e/test_e2e_aml_il_pipeline.py::test_aml_il_pipeline_e2e[diffusion-without-register]",
           "requires": [
@@ -1392,9 +1392,9 @@
         {
           "id": "aml-il-pipeline-register",
           "tier": "environment",
-          "gpu": true,
+          "gpu": false,
           "optional": false,
-          "description": "Azure ML LeRobot pipeline with the register component on a GPU node.",
+          "description": "Azure ML LeRobot pipeline ending in the register component, on the compute's default instance type, which is CPU-only on Kubernetes computes.",
           "timeout_minutes": 120,
           "pytest": "tests/e2e/test_e2e_aml_il_pipeline.py::test_aml_il_pipeline_e2e[act-with-register]",
           "requires": [

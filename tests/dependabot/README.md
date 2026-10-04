@@ -46,21 +46,23 @@ Add `--include-optional` for heavy checks that CI already runs on path-gated pul
 
 The `baseline` category runs with every selection. The others are selected by the Dependabot directory a change touches.
 
-| Category         | Dependabot entries                                                                  | GPU environment checks                          |
-|------------------|-------------------------------------------------------------------------------------|-------------------------------------------------|
-| `baseline`       | Every update                                                                        | None                                            |
-| `tooling`        | npm `/`, uv `/`, github-actions `/`                                                 | None                                            |
-| `dataviewer`     | npm `/` workspace, uv and docker under `data-management/viewer`                     | None                                            |
-| `docs`           | npm `/docs/docusaurus`                                                              | None                                            |
-| `data-pipeline`  | uv `/data-pipeline`                                                                 | None                                            |
-| `evaluation`     | uv `/evaluation`, `/evaluation/vlm_judge`                                           | None                                            |
-| `rl`             | uv `/training/rl`                                                                   | `aml-rl-lifecycle`                              |
-| `il`             | uv `/training/il/lerobot`                                                           | `aml-il-lifecycle`, `aml-il-pipeline-diffusion` |
-| `vla`            | uv `/training/vla/lerobot`                                                          | `aml-vla-pi0` (needs `HF_TOKEN`)                |
-| `gpu-smoke`      | uv `/training/smoke`                                                                | `aml-gpu-smoke`                                 |
-| `workflows`      | uv `/workflows/azureml/scripts`, `/workflows/azureml/osmo-proxy`, `/workflows/osmo` | `aml-il-pipeline-register`                      |
-| `gpu-offload`    | uv and docker under `gpu-offload`                                                   | None on Azure ML (uses a local NVIDIA host)     |
-| `infrastructure` | terraform root, dns, vpn, automation; gomod `infrastructure/terraform/e2e`          | `terraform-plan-compare` (read-only, no GPU)    |
+| Category         | Dependabot entries                                                                  | Environment checks                                          |
+|------------------|-------------------------------------------------------------------------------------|-------------------------------------------------------------|
+| `baseline`       | Every update                                                                        | None                                                        |
+| `tooling`        | npm `/`, uv `/`, github-actions `/`                                                 | None                                                        |
+| `dataviewer`     | npm `/` workspace, uv and docker under `data-management/viewer`                     | None                                                        |
+| `docs`           | npm `/docs/docusaurus`                                                              | None                                                        |
+| `data-pipeline`  | uv `/data-pipeline`                                                                 | None                                                        |
+| `evaluation`     | uv `/evaluation`, `/evaluation/vlm_judge`                                           | None                                                        |
+| `rl`             | uv `/training/rl`                                                                   | `aml-rl-lifecycle`                                          |
+| `il`             | uv `/training/il/lerobot`                                                           | `aml-il-lifecycle`, `aml-il-pipeline-diffusion` (CPU steps) |
+| `vla`            | uv `/training/vla/lerobot`                                                          | `aml-vla-pi0` (needs `HF_TOKEN`)                            |
+| `gpu-smoke`      | uv `/training/smoke`                                                                | `aml-gpu-smoke`                                             |
+| `workflows`      | uv `/workflows/azureml/scripts`, `/workflows/azureml/osmo-proxy`, `/workflows/osmo` | `aml-il-pipeline-register` (CPU steps)                      |
+| `gpu-offload`    | uv and docker under `gpu-offload`                                                   | None on Azure ML (uses a local NVIDIA host)                 |
+| `infrastructure` | terraform root, dns, vpn, automation; gomod `infrastructure/terraform/e2e`          | `terraform-plan-compare` (read-only, no GPU)                |
+
+Environment checks run on GPU nodes unless marked otherwise. The IL pipeline steps use the compute's default instance type, which is CPU-only on Kubernetes computes.
 
 [categories.json](categories.json) is the source of truth for every check, its command, and its prerequisites.
 

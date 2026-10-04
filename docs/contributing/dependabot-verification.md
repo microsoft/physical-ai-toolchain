@@ -47,7 +47,9 @@ Run `npm run verify:dependabot -- --list` for every check, its command, and its 
 
 ## Which Categories Need a GPU
 
-Five categories need GPU verification, because their locks load in GPU training or evaluation jobs: `rl`, `il`, `vla`, `gpu-smoke`, and the register component in `workflows`. CI has no GPU nodes, so these run as Azure ML jobs in a deployed environment. Each job installs the lock from your checkout, trains briefly, and checks the result. The RL and IL lifecycles also register a model and run the matching evaluation, and the IL pipeline's register variant exercises the register component's lock.
+Four categories need GPU verification, because their locks load in GPU training or evaluation jobs: `rl`, `il`, `vla`, and `gpu-smoke`. CI has no GPU nodes, so these run as Azure ML jobs in a deployed environment. Each job installs the lock from your checkout, trains briefly, and checks the result. The RL and IL lifecycles also register a model and run the matching evaluation.
+
+`workflows` needs the environment but not a GPU. Its register component runs as the last step of an Azure ML pipeline and writes to the model registry, which CI can't reach. Both IL pipeline checks run on the compute's default instance type, which is CPU-only on Kubernetes computes.
 
 The other categories verify on CPU. The `evaluation` lock has no runtime consumer of its own, because GPU evaluation jobs install the training locks, which the `rl` and `il` lifecycles already cover. The `infrastructure` environment check reads deployed Terraform state but runs no job and needs no GPU.
 
