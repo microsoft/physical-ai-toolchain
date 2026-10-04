@@ -90,7 +90,7 @@ The read-only Terraform comparison plans the root stack at the base and head ref
 
 ## Read the Results
 
-Each run writes `summary.json`, `summary.md`, and one log per check to `logs/dependabot/<run-id>/`, which is gitignored.
+Each run writes `summary.json`, `summary.md`, and one log per check to `logs/dependabot/<run-id>/`, which is gitignored. Environment-tier logs include Azure ML Studio links and resource names, and `summary.json` records the environment name. To share results in a pull request or issue, copy the status table from `summary.md` and remove any resource names from its reasons.
 
 | Status    | Meaning                                                                         |
 |-----------|---------------------------------------------------------------------------------|

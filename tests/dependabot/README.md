@@ -78,7 +78,7 @@ Before submitting anything, the runner checks that `az` is signed in to the envi
 
 ## 📊 Results
 
-Each run writes `summary.json` and `summary.md`, plus one log per check, to `logs/dependabot/<run-id>/` (gitignored). The summary records the commit and whether the tree had uncommitted changes.
+Each run writes `summary.json` and `summary.md`, plus one log per check, to `logs/dependabot/<run-id>/` (gitignored). The summary records the commit and whether the tree had uncommitted changes. Environment-tier logs contain Azure ML Studio links and resource names, so share only the `summary.md` status table, with resource names removed from its reasons.
 
 | Status    | Meaning                                                                     |
 |-----------|-----------------------------------------------------------------------------|
