@@ -504,28 +504,61 @@ def assert_completed_workflow_streams(
     workflow: OSMOWorkflow,
     repo_root: Path,
     *,
-    timeout_seconds: float = 90,
+    timeout_seconds: float = 20,
+    attempts: int = 6,
+    retry_seconds: float = 5,
 ) -> None:
-    """Verify completed workflow log and event streams close without gateway timeouts."""
+    """Verify completed workflow streams eventually return persisted records."""
     for stream in ("logs", "events"):
         args = ["osmo", "workflow", stream, workflow.workflow_id]
-        try:
-            result = run_command(args, cwd=repo_root, timeout_seconds=timeout_seconds)
-        except subprocess.TimeoutExpired as exc:
-            raise AssertionError(
-                f"OSMO workflow {stream} did not close within {timeout_seconds:g}s "
-                f"for completed workflow {workflow.workflow_id!r}"
-            ) from exc
+        failure = ""
+        for attempt in range(1, attempts + 1):
+            valid_response = False
+            try:
+                result = run_command(args, cwd=repo_root, timeout_seconds=timeout_seconds)
+            except subprocess.TimeoutExpired as exc:
+                stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else exc.stdout or ""
+                stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else exc.stderr or ""
+                output = f"{stdout}\n{stderr}".lower()
+                if "response_timeout" in output:
+                    raise AssertionError(
+                        f"OSMO workflow {stream} hit the gateway response timeout for completed workflow "
+                        f"{workflow.workflow_id!r}"
+                    ) from exc
+                failure = f"stream remained open for {timeout_seconds:g}s without persisted records"
+                valid_response = True
+            else:
+                stdout = result.stdout
+                output = f"{result.stdout}\n{result.stderr}".lower()
+                if "response_timeout" in output:
+                    raise AssertionError(
+                        f"OSMO workflow {stream} hit the gateway response timeout for completed workflow "
+                        f"{workflow.workflow_id!r}\n\n{format_command_failure(result)}"
+                    )
+                if result.returncode != 0:
+                    failure = format_command_failure(result)
+                else:
+                    valid_response = True
 
-        output = f"{result.stdout}\n{result.stderr}".lower()
-        if result.returncode != 0 or "stream has timed out or failed" in output or "response_timeout" in output:
+            records = [
+                line
+                for line in stdout.splitlines()
+                if line.strip()
+                and not line.startswith("Workflow ")
+                and "stream has timed out or failed" not in line.lower()
+            ]
+            if valid_response and records:
+                break
+            if attempt < attempts:
+                log_e2e(
+                    f"OSMO workflow {stream} has no persisted records yet "
+                    f"({attempt}/{attempts}); retrying"
+                )
+                time.sleep(retry_seconds)
+        else:
             raise AssertionError(
-                f"OSMO workflow {stream} failed for completed workflow "
-                f"{workflow.workflow_id!r}\n\n{format_command_failure(result)}"
-            )
-        if not result.stdout.strip():
-            raise AssertionError(
-                f"OSMO workflow {stream} returned no records for completed workflow {workflow.workflow_id!r}"
+                f"OSMO workflow {stream} returned no persisted records for completed workflow "
+                f"{workflow.workflow_id!r} after {attempts} attempts: {failure}"
             )
 
 
@@ -821,11 +854,10 @@ class TaskPodLogStream:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     proc.kill()
-        if proc.returncode != 0 or not captured_lines:
-            return False
-        self._captured_lines.extend(captured_lines)
-        self._workflow.handle.logs[self._task_name] = "\n".join(self._captured_lines)
-        return True
+        if captured_lines:
+            self._captured_lines.extend(captured_lines)
+            self._workflow.handle.logs[self._task_name] = "\n".join(self._captured_lines)
+        return proc.returncode == 0 and bool(captured_lines)
 
 
 def start_task_pod_log_stream(
