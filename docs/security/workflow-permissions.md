@@ -28,9 +28,9 @@ An empty workflow-level `permissions: {}` block grants no token scopes. Jobs tha
 
 ## 🔍 Enforced Rules
 
-| Script                                          | Rule                                                                                                                                                                       |
-|-------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `scripts/security/Test-WorkflowPermissions.ps1` | Reject workflows without top-level permissions and jobs that implicitly inherit a populated workflow-level grant.                                                         |
+| Script                                          | Rule                                                                                                                                                                         |
+|-------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `scripts/security/Test-WorkflowPermissions.ps1` | Reject workflows without top-level permissions and jobs that implicitly inherit a populated workflow-level grant.                                                            |
 | `scripts/security/Test-DangerousWorkflow.ps1`   | Reject direct interpolation of attacker-controlled event values or non-boolean inputs into `run` and `actions/github-script`, plus untrusted `pull_request_target` checkout. |
 
 Both linters run under `npm run test:ps` and standalone in `workflow-permissions-scan.yml`.

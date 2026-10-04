@@ -5,11 +5,14 @@ Provides support for loading trajectory data, images, and metadata
 from HDF5 files following the LeRobot dataset format.
 """
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
+
+from .episode_edits import SUBTASK_FILE_SUFFIX, SubtaskSegment, read_subtask_file
 
 # h5py is an optional dependency
 try:
@@ -18,6 +21,20 @@ try:
     HDF5_AVAILABLE = True
 except ImportError:
     HDF5_AVAILABLE = False
+
+
+def _attr_value(value: object) -> object:
+    """Return an HDF5 attribute as a Python value, decoding the JSON lists and objects exports write."""
+    if isinstance(value, bytes):
+        value = value.decode()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, str) and value.startswith(("[", "{")):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value
 
 
 @dataclass
@@ -142,6 +159,11 @@ class HDF5Loader:
                 return file_path
 
         raise HDF5LoaderError(f"No HDF5 file found for episode {episode_index} in {self.base_path}")
+
+    def recorded_subtasks(self, episode_index: int, length: int) -> list[SubtaskSegment]:
+        """Return the subtasks in ``<episode file stem>.subtasks.json`` beside the episode, as HDF5 exports write it."""
+        episode_file = self._find_episode_file(episode_index)
+        return read_subtask_file(episode_file.with_name(episode_file.stem + SUBTASK_FILE_SUFFIX), length)
 
     def list_episodes(self) -> list[int]:
         """
@@ -324,24 +346,14 @@ class HDF5Loader:
 
         # Load root attributes
         for key in f.attrs:
-            value = f.attrs[key]
-            if isinstance(value, bytes):
-                value = value.decode()
-            elif isinstance(value, np.ndarray):
-                value = value.tolist()
-            metadata[key] = value
+            metadata[key] = _attr_value(f.attrs[key])
 
         # Load metadata group if present
         if "metadata" in f:
             meta_group = f["metadata"]
             if isinstance(meta_group, h5py.Group):
                 for key in meta_group.attrs:
-                    value = meta_group.attrs[key]
-                    if isinstance(value, bytes):
-                        value = value.decode()
-                    elif isinstance(value, np.ndarray):
-                        value = value.tolist()
-                    metadata[key] = value
+                    metadata[key] = _attr_value(meta_group.attrs[key])
 
         return metadata
 

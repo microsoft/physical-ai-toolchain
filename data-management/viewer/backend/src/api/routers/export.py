@@ -1,8 +1,8 @@
 """
 Export API endpoints for episode data with edit operations.
 
-Provides endpoints for exporting episodes to HDF5 files with
-frame editing, removal, and sub-task annotations applied.
+Exports HDF5 sources to new HDF5 files and LeRobot v3.0 sources to a new
+LeRobot v3.0 dataset, with frame editing, removal, and sub-task annotations applied.
 """
 
 from __future__ import annotations
@@ -15,19 +15,24 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, FiniteFloat, NonNegativeInt
 
 from ..csrf import require_csrf_token
+from ..models.annotations import EpisodeAnnotationFile
+from ..services.annotation_service import AnnotationService, get_annotation_service
 from ..services.dataset_service import DatasetService, get_dataset_service
-from ..services.hdf5_exporter import (
+from ..services.episode_edits import (
     EpisodeEditOperations,
+    ExportError,
     ExportProgress,
     ExportResult,
-    HDF5Exporter,
-    HDF5ExportError,
     parse_edit_operations,
 )
+from ..services.hdf5_exporter import HDF5Exporter
+from ..services.lerobot_exporter import LeRobotExporter, admits_export
+from ..services.lerobot_language import LanguageInstruction
 from ..validation import (
     SAFE_DATASET_ID_PATTERN,
     SanitizedModel,
@@ -82,6 +87,14 @@ class FrameInsertionRequest(SanitizedModel):
     )
 
 
+class TrajectoryAdjustmentRequest(SanitizedModel):
+    """Joint-position adjustment at one frame; a set value replaces that channel's delta."""
+
+    frameIndex: NonNegativeInt = Field(..., description="Original frame index")
+    channelDeltas: dict[NonNegativeInt, FiniteFloat] | None = Field(None, description="Values added to channels")
+    channelValues: dict[NonNegativeInt, FiniteFloat] | None = Field(None, description="Values that replace channels")
+
+
 class EpisodeEditRequest(SanitizedModel):
     """Edit operations for a single episode."""
 
@@ -93,6 +106,29 @@ class EpisodeEditRequest(SanitizedModel):
     removedFrames: list[int] | None = Field(None, description="Frame indices to exclude")
     insertedFrames: list[FrameInsertionRequest] | None = Field(None, description="Interpolated frame insertions")
     subtasks: list[SubtaskRequest] | None = Field(None, description="Sub-task segments")
+    trajectoryAdjustments: list[TrajectoryAdjustmentRequest] | None = Field(
+        None, description="Joint-position adjustments exported as qpos_adjusted beside the recorded qpos"
+    )
+
+
+def _edit_operations(dataset_id: str, edit_req: EpisodeEditRequest) -> EpisodeEditOperations:
+    """Convert one episode's validated edit request into exporter edit operations."""
+    return parse_edit_operations(
+        {
+            "datasetId": dataset_id,
+            "episodeIndex": edit_req.episodeIndex,
+            "globalTransform": edit_req.globalTransform.model_dump() if edit_req.globalTransform else None,
+            "cameraTransforms": {k: v.model_dump() for k, v in edit_req.cameraTransforms.items()}
+            if edit_req.cameraTransforms
+            else None,
+            "removedFrames": edit_req.removedFrames,
+            "insertedFrames": [i.model_dump() for i in edit_req.insertedFrames] if edit_req.insertedFrames else None,
+            "subtasks": [s.model_dump() for s in edit_req.subtasks] if edit_req.subtasks is not None else None,
+            "trajectoryAdjustments": [a.model_dump() for a in edit_req.trajectoryAdjustments]
+            if edit_req.trajectoryAdjustments
+            else None,
+        }
+    )
 
 
 class ExportRequest(SanitizedModel):
@@ -102,6 +138,13 @@ class ExportRequest(SanitizedModel):
     outputPath: str = Field(..., description="Output directory path")
     applyEdits: bool = Field(True, description="Whether to apply edit operations")
     edits: dict[int, EpisodeEditRequest] | None = Field(None, description="Edit operations by episode index")
+    includeLanguageInstructions: bool = Field(
+        True,
+        description=(
+            "For LeRobot sources, write each episode's latest saved instruction as task_aug and plan rows; "
+            "send false to leave them out"
+        ),
+    )
 
 
 class ExportResultResponse(BaseModel):
@@ -111,6 +154,81 @@ class ExportResultResponse(BaseModel):
     outputFiles: list[str]
     error: str | None = None
     stats: dict[str, Any] = Field(default_factory=dict)
+
+
+def _prepare_output(service: DatasetService, dataset_id: str, dataset_path: Path, output_path: Path) -> bool:
+    """Validate the output path for the source's format and return whether the source is a LeRobot dataset.
+
+    A LeRobot export writes a new dataset, so its path must be new or empty and must neither sit inside
+    nor contain the source. What a stopped export left, a lock file or a claim, goes on to the exporter,
+    which recovers or refuses it. These checks run before anything is created; an HDF5 export creates its
+    directory.
+    """
+    if service.dataset_is_lerobot(dataset_id):
+        if output_path.is_relative_to(dataset_path) or dataset_path.is_relative_to(output_path):
+            raise HTTPException(
+                status_code=400,
+                detail="Output path must be outside the source dataset and must not contain it",
+            )
+        if not admits_export(output_path):
+            raise HTTPException(
+                status_code=400,
+                detail="Output path must be a new or empty directory for a LeRobot export",
+            )
+        return True
+    try:
+        output_path.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid output path: {e}",
+        )
+    return False
+
+
+def _latest_instruction(annotation_file: EpisodeAnnotationFile | None) -> LanguageInstruction | None:
+    """Return the most recently saved language instruction among an episode's annotations, if any."""
+    saved = [
+        annotation
+        for annotation in (annotation_file.annotations if annotation_file else [])
+        if annotation.language_instruction
+    ]
+    if not saved:
+        return None
+    latest = max(saved, key=lambda annotation: annotation.timestamp)
+    language = latest.language_instruction
+    return LanguageInstruction(
+        language.instruction,
+        tuple(language.paraphrases),
+        tuple(language.subtask_instructions),
+        latest.annotator_id,
+        latest.timestamp.isoformat(),
+    )
+
+
+async def _export_options(
+    dataset_id: str, request: ExportRequest, lerobot: bool, annotations: AnnotationService
+) -> dict[str, Any]:
+    """Return the exporter's options: parsed edits and, when requested for LeRobot, the saved instructions."""
+    edits_map = None
+    if request.applyEdits and request.edits:
+        edits_map = {index: _edit_operations(dataset_id, edit_req) for index, edit_req in request.edits.items()}
+    options: dict[str, Any] = {"episode_indices": request.episodeIndices, "edits_map": edits_map}
+    if lerobot:
+        language = {}
+        if request.includeLanguageInstructions:
+            for index in request.episodeIndices:
+                instruction = _latest_instruction(await annotations.get_annotation(dataset_id, index))
+                if instruction is not None:
+                    language[index] = instruction
+        options["language"] = language
+    return options
+
+
+def _exporter(lerobot: bool, dataset_id: str, dataset_path: Path, output_path: Path) -> HDF5Exporter | LeRobotExporter:
+    if lerobot:
+        return LeRobotExporter(dataset_path, output_path, dataset_id=dataset_id)
+    return HDF5Exporter(dataset_path, output_path)
 
 
 def _public_export_result(result: ExportResult) -> ExportResultResponse:
@@ -133,11 +251,13 @@ async def export_episodes(
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     request: ExportRequest = ...,
     service: DatasetService = Depends(get_dataset_service),
+    annotations: AnnotationService = Depends(get_annotation_service),
 ) -> ExportResultResponse:
     """
-    Export episodes to new HDF5 files with edit operations applied.
+    Export episodes with edit operations applied.
 
-    Creates new HDF5 files in the specified output directory with:
+    LeRobot v3.0 sources produce a new LeRobot dataset at the output path. HDF5 sources
+    produce new HDF5 files in the specified output directory with:
     - Frame removal applied (excluded frames are not written)
     - Image transforms applied (crop/resize)
     - Metadata JSON file with edit history
@@ -182,42 +302,12 @@ async def export_episodes(
             detail="Path traversal detected: resolved path escapes base directory",
         )
     output_path = Path(output_path_str)
-    try:
-        output_path.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid output path: {e}",
-        )
+    lerobot = _prepare_output(service, dataset_id, dataset_path, output_path)
 
     try:
-        exporter = HDF5Exporter(dataset_path, output_path)
-
-        # Parse edit operations
-        edits_map: dict[int, EpisodeEditOperations] | None = None
-        if request.applyEdits and request.edits:
-            edits_map = {}
-            for episode_idx, edit_req in request.edits.items():
-                edits_map[episode_idx] = parse_edit_operations(
-                    {
-                        "datasetId": dataset_id,
-                        "episodeIndex": edit_req.episodeIndex,
-                        "globalTransform": edit_req.globalTransform.model_dump() if edit_req.globalTransform else None,
-                        "cameraTransforms": {k: v.model_dump() for k, v in edit_req.cameraTransforms.items()}
-                        if edit_req.cameraTransforms
-                        else None,
-                        "removedFrames": edit_req.removedFrames,
-                        "insertedFrames": [i.model_dump() for i in edit_req.insertedFrames]
-                        if edit_req.insertedFrames
-                        else None,
-                        "subtasks": [s.model_dump() for s in edit_req.subtasks] if edit_req.subtasks else None,
-                    }
-                )
-
-        result = exporter.export_episodes(
-            episode_indices=request.episodeIndices,
-            edits_map=edits_map,
-        )
+        exporter = _exporter(lerobot, dataset_id, dataset_path, output_path)
+        options = await _export_options(dataset_id, request, lerobot, annotations)
+        result = await run_in_threadpool(exporter.export_episodes, **options)
 
         return _public_export_result(result)
 
@@ -226,7 +316,7 @@ async def export_episodes(
             status_code=501,
             detail=f"Export not available: {e}",
         )
-    except HDF5ExportError as e:
+    except ExportError as e:
         raise HTTPException(
             status_code=500,
             detail=f"Export failed: {e}",
@@ -238,6 +328,7 @@ async def export_episodes_stream(
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     request: ExportRequest = ...,
     service: DatasetService = Depends(get_dataset_service),
+    annotations: AnnotationService = Depends(get_annotation_service),
 ) -> StreamingResponse:
     """
     Export episodes with SSE progress streaming.
@@ -291,40 +382,12 @@ async def export_episodes_stream(
             detail="Path traversal detected: resolved path escapes base directory",
         )
     output_path = Path(output_path_str)
-    try:
-        output_path.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid output path: {e}",
-        )
+    lerobot = _prepare_output(service, dataset_id, dataset_path, output_path)
 
     async def event_generator():
         try:
-            exporter = HDF5Exporter(dataset_path, output_path)
-
-            # Parse edit operations
-            edits_map: dict[int, EpisodeEditOperations] | None = None
-            if request.applyEdits and request.edits:
-                edits_map = {}
-                for episode_idx, edit_req in request.edits.items():
-                    edits_map[episode_idx] = parse_edit_operations(
-                        {
-                            "datasetId": dataset_id,
-                            "episodeIndex": edit_req.episodeIndex,
-                            "globalTransform": edit_req.globalTransform.model_dump()
-                            if edit_req.globalTransform
-                            else None,
-                            "cameraTransforms": {k: v.model_dump() for k, v in edit_req.cameraTransforms.items()}
-                            if edit_req.cameraTransforms
-                            else None,
-                            "removedFrames": edit_req.removedFrames,
-                            "insertedFrames": [i.model_dump() for i in edit_req.insertedFrames]
-                            if edit_req.insertedFrames
-                            else None,
-                            "subtasks": [s.model_dump() for s in edit_req.subtasks] if edit_req.subtasks else None,
-                        }
-                    )
+            exporter = _exporter(lerobot, dataset_id, dataset_path, output_path)
+            options = await _export_options(dataset_id, request, lerobot, annotations)
 
             # Queue for progress updates
             progress_queue: asyncio.Queue[ExportProgress | None] = asyncio.Queue()
@@ -340,11 +403,7 @@ async def export_episodes_stream(
             loop = asyncio.get_event_loop()
             export_task = loop.run_in_executor(
                 None,
-                lambda: exporter.export_episodes(
-                    episode_indices=request.episodeIndices,
-                    edits_map=edits_map,
-                    progress_callback=progress_callback,
-                ),
+                lambda: exporter.export_episodes(**options, progress_callback=progress_callback),
             )
 
             # Stream progress updates

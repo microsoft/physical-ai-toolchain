@@ -3,15 +3,23 @@ self-hosted-runner:
 config-variables:
   - ACCESSIBILITY_REVIEWER_EVIDENCE_BRANCH
   - RELEASE_APP_ID
+  - gh_aw_default_detection_max_ai_credits
+  - gh_aw_default_max_ai_credits
+  - gh_aw_default_max_daily_ai_credits
+  - gh_aw_default_max_turns
+  - gh_aw_default_model_copilot
   - gh_aw_model_agent_copilot
   - gh_aw_model_detection_copilot
 
 # Path-specific configurations for generated lock files.
 # Lock files are produced by `gh aw compile` and contain shell scripts
 # that trigger shellcheck info/style diagnostics outside our control.
+# They also use `concurrency.queue`, which GitHub added on 2026-05-07 and
+# actionlint doesn't support yet (rhysd/actionlint#657).
 paths:
   .github/workflows/*.lock.yml:
     ignore:
       - "shellcheck reported issue in this script: SC2015:.+"
       - "shellcheck reported issue in this script: SC2086:.+"
       - "shellcheck reported issue in this script: SC2129:.+"
+      - 'unexpected key "queue" for "concurrency" section'

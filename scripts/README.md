@@ -2,7 +2,7 @@
 title: Scripts
 description: CI/CD scripts, shared libraries, linting, security, and Pester tests for the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-28
+ms.date: 2026-10-01
 ms.topic: reference
 keywords:
   - scripts
@@ -67,6 +67,7 @@ PowerShell scripts for validating code quality and documentation.
 | `Invoke-LinkLanguageCheck.ps1`      | Detect en-us language paths in URLs         |
 | `Link-Lang-Check.ps1`               | Link language checking entry point          |
 | `Markdown-Link-Check.ps1`           | Validate markdown links                     |
+| `Format-MarkdownTables.ps1`         | Format or check Markdown tables             |
 | `Invoke-YamlLint.ps1`               | YAML file validation                        |
 | `Invoke-TFLint.ps1`                 | Terraform linting                           |
 | `Invoke-TerraformValidation.ps1`    | Terraform format and validate               |
@@ -104,8 +105,8 @@ Security scanning and dependency management scripts.
 | `security/Modules/PinnedToolVersions.psm1` | Provide pin discovery functions for binary freshness checks                                   |
 | `security/Test-HveCoreFreshness.ps1`       | Check hve-core-derived files against their reviewed release or source-header baselines        |
 | `security/Test-WorkflowPermissions.ps1`    | Enforce explicit workflow and job `GITHUB_TOKEN` permissions                                  |
-| `security/Test-DangerousWorkflow.ps1`      | Detect unsafe event/input interpolation and untrusted `pull_request_target` checkouts          |
-| `security/Test-PublicDependencyFeeds.ps1`  | Reject private or non-canonical package sources in committed dependency metadata               |
+| `security/Test-DangerousWorkflow.ps1`      | Detect unsafe event/input interpolation and untrusted `pull_request_target` checkouts         |
+| `security/Test-PublicDependencyFeeds.ps1`  | Reject private or non-canonical package sources in committed dependency metadata              |
 | `security/zap-to-sarif.py`                 | Convert ZAP results to SARIF format                                                           |
 | `security/gitleaks-scan.mjs`               | Scan tested-revision history and report explicit secret-scan outcomes                         |
 | `update-chart-hashes.sh`                   | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
@@ -168,14 +169,14 @@ The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.
 
 Findings are written to `binary-freshness-results.sarif` with per-rule `helpUri` values pointing at the appropriate remediation script. The check distinguishes integrity failures from advisory chart drift and unavailable upstream lookups:
 
-| Result | SARIF | Scanner exit | Workflow effect |
-|--------|-------|--------------|-----------------|
-| Clean | No findings | `0` | Success after SARIF upload |
-| Confirmed binary hash mismatch | Warning, `hash-mismatch` | `1` | Failure; SARIF still uploads |
-| Chart version drift | Warning, `version-drift` | `0` | Success with visible alert |
-| Binary download or chart lookup unavailable | Warning, `download-failure` or `lookup-failure` | `0` | Success with visible alert |
-| Scanner setup or report error | SARIF may be absent | `2` | Failure |
-| SARIF ingestion error | Upload step fails | Scanner exit unchanged | Failure |
+| Result                                      | SARIF                                           | Scanner exit           | Workflow effect              |
+|---------------------------------------------|-------------------------------------------------|------------------------|------------------------------|
+| Clean                                       | No findings                                     | `0`                    | Success after SARIF upload   |
+| Confirmed binary hash mismatch              | Warning, `hash-mismatch`                        | `1`                    | Failure; SARIF still uploads |
+| Chart version drift                         | Warning, `version-drift`                        | `0`                    | Success with visible alert   |
+| Binary download or chart lookup unavailable | Warning, `download-failure` or `lookup-failure` | `0`                    | Success with visible alert   |
+| Scanner setup or report error               | SARIF may be absent                             | `2`                    | Failure                      |
+| SARIF ingestion error                       | Upload step fails                               | Scanner exit unchanged | Failure                      |
 
 A successful HTTP response is not sufficient evidence for a binary mismatch: the scanner rejects JSON/HTML responses and malformed ZIP/GZIP bodies before hashing. In September 2026 the pinned NGC CLI 3.41.4 URL returned a changing JSON status response rather than the expected ZIP archive. Do not replace the NGC SHA-256 pin with the hash of that response. Obtain and independently verify the ZIP through NVIDIA's supported download path before changing the pin.
 

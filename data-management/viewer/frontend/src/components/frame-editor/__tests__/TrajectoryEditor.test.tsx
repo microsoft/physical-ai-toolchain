@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useEpisodeStore, usePlaybackControls, useTrajectoryAdjustmentState } from '@/stores'
-import type { TrajectoryPoint } from '@/types/api'
+import type { TrajectoryPoint, TrajectoryVariable } from '@/types/api'
 import type { TrajectoryAdjustment } from '@/types/episode-edit'
 
 import { TrajectoryEditor } from '../TrajectoryEditor'
@@ -27,17 +27,37 @@ const mockedPlaybackControls = vi.mocked(usePlaybackControls)
 const mockedTrajectoryState = vi.mocked(useTrajectoryAdjustmentState)
 
 interface EpisodeState {
-  currentEpisode: { trajectoryData: TrajectoryPoint[] } | undefined
+  currentEpisode:
+    { trajectoryData: TrajectoryPoint[]; trajectoryVariables?: TrajectoryVariable[] } | undefined
 }
 
 type PlaybackState = ReturnType<typeof usePlaybackControls>
 type TrajectoryAdjustmentStateValue = ReturnType<typeof useTrajectoryAdjustmentState>
 
-function makeTrajectoryPoint(seed: number): TrajectoryPoint {
+const SINGLE_ARM_NAMES = ['arm_1', 'arm_2', 'arm_3', 'arm_4', 'arm_5', 'arm_6', 'gripper_1']
+
+function makeTrajectoryPoint(seed: number, channels: number): TrajectoryPoint {
   return {
     timestamp: seed,
-    jointPositions: Array.from({ length: 16 }, (_, i) => 0.1 * (i + 1) + seed),
+    jointPositions: Array.from({ length: channels }, (_, i) => 0.1 * (i + 1) + seed),
   } as TrajectoryPoint
+}
+
+/** A 7-channel single-arm joint dataset whose state channels carry the dataset's own names. */
+function singleArmEpisode(): EpisodeState['currentEpisode'] {
+  return {
+    trajectoryData: [0, 1, 2].map((seed) => makeTrajectoryPoint(seed, 7)),
+    trajectoryVariables: [
+      ...SINGLE_ARM_NAMES.map((name, index) => ({
+        key: `observation.state[${index}]`,
+        label: `State: ${name}`,
+        source: 'observation.state',
+        index,
+        kind: 'state',
+      })),
+      { key: 'action[0]', label: 'Action: arm_1', source: 'action', index: 0, kind: 'action' },
+    ],
+  }
 }
 
 function setup(
@@ -56,12 +76,7 @@ function setup(
     setPlaybackSpeed: vi.fn(),
     ...opts.playback,
   }
-  const episodeState: EpisodeState = {
-    currentEpisode: {
-      trajectoryData: [makeTrajectoryPoint(0), makeTrajectoryPoint(1), makeTrajectoryPoint(2)],
-    },
-    ...opts.episode,
-  }
+  const episodeState: EpisodeState = { currentEpisode: singleArmEpisode(), ...opts.episode }
   const trajectoryState: TrajectoryAdjustmentStateValue = {
     trajectoryAdjustments: new Map(),
     setTrajectoryAdjustment: vi.fn(),
@@ -76,6 +91,13 @@ function setup(
   mockedTrajectoryState.mockReturnValue(trajectoryState)
   return { playbackState, episodeState, trajectoryState }
 }
+
+const deltaSlider = (label: string) =>
+  screen.getByRole<HTMLInputElement>('slider', { name: `${label} delta` })
+const deltaInput = (label: string) =>
+  screen.getByRole<HTMLInputElement>('spinbutton', { name: `${label} delta` })
+const valueInput = (label: string) =>
+  screen.getByRole<HTMLInputElement>('spinbutton', { name: `${label} set value` })
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -100,143 +122,118 @@ describe('TrajectoryEditor', () => {
     expect(container.querySelector('.custom-empty')).not.toBeNull()
   })
 
-  it('renders frame indicator with current frame', () => {
-    setup({ playback: { currentFrame: 0 } })
-    render(<TrajectoryEditor />)
-    expect(screen.getByText('Frame 0')).toBeInTheDocument()
-  })
-
-  it('renders Right Arm and Left Arm sections', () => {
+  it('lists one row per state channel, labelled from the dataset state variables', () => {
     setup()
     render(<TrajectoryEditor />)
-    expect(screen.getByText('Right Arm')).toBeInTheDocument()
-    expect(screen.getByText('Left Arm')).toBeInTheDocument()
+
+    expect(screen.getAllByRole('slider')).toHaveLength(7)
+    for (const name of SINGLE_ARM_NAMES) {
+      expect(deltaSlider(name)).toBeInTheDocument()
+      expect(valueInput(name)).toBeInTheDocument()
+    }
+    expect(screen.queryByText(/Right Arm|Left Arm/)).not.toBeInTheDocument()
   })
 
-  it('renders X, Y, Z axis labels for each arm', () => {
+  it('labels channels from the joint configuration when the dataset has no names', () => {
+    setup({
+      episode: { currentEpisode: { trajectoryData: [makeTrajectoryPoint(0, 16)] } },
+    })
+    render(<TrajectoryEditor />)
+
+    expect(screen.getAllByRole('slider')).toHaveLength(16)
+    expect(deltaSlider('Right X')).toBeInTheDocument()
+    expect(deltaSlider('Left Gripper')).toBeInTheDocument()
+  })
+
+  it('says that exports keep the recorded positions and name the adjusted data for each format', () => {
     setup()
     render(<TrajectoryEditor />)
-    expect(screen.getAllByText('X')).toHaveLength(2)
-    expect(screen.getAllByText('Y')).toHaveLength(2)
-    expect(screen.getAllByText('Z')).toHaveLength(2)
+    expect(screen.getByRole('note')).toHaveTextContent(
+      'Exports keep the recorded joint positions and add these adjustments beside them, as qpos_adjusted in HDF5 or adjusted.observation.state in LeRobot, with a mask of the edited rows.',
+    )
   })
 
-  it('renders Gripper labels for both arms', () => {
-    setup()
-    render(<TrajectoryEditor />)
-    expect(screen.getAllByText('Gripper')).toHaveLength(2)
-  })
-
-  it('renders zero counter when no adjustments exist', () => {
-    setup()
-    render(<TrajectoryEditor />)
-    expect(screen.getByText('0 frame(s) modified')).toBeInTheDocument()
-  })
-
-  it('renders adjustments counter reflecting map size', () => {
+  it('renders the frame indicator and the modified-frame count', () => {
     const adjustments = new Map<number, TrajectoryAdjustment>([
-      [0, { frameIndex: 0, rightArmDelta: [0.1, 0, 0] }],
-      [3, { frameIndex: 3, leftGripperOverride: 0.5 }],
+      [0, { frameIndex: 0, channelDeltas: { 0: 0.1 } }],
+      [3, { frameIndex: 3, channelValues: { 6: 0.5 } }],
     ])
     setup({ trajectory: { trajectoryAdjustments: adjustments } })
     render(<TrajectoryEditor />)
-    expect(screen.getByText('2 frame(s) modified')).toBeInTheDocument()
-  })
 
-  it('renders "(has adjustments)" badge when current frame has an adjustment', () => {
-    const adjustments = new Map<number, TrajectoryAdjustment>([
-      [0, { frameIndex: 0, rightArmDelta: [0.1, 0, 0] }],
-    ])
-    setup({ playback: { currentFrame: 0 }, trajectory: { trajectoryAdjustments: adjustments } })
-    render(<TrajectoryEditor />)
+    expect(screen.getByText('Frame 0')).toBeInTheDocument()
+    expect(screen.getByText('2 frame(s) modified')).toBeInTheDocument()
     expect(screen.getByText('(has adjustments)')).toBeInTheDocument()
   })
 
-  it('does not render "(has adjustments)" badge when current frame has no adjustment', () => {
+  it('omits the "(has adjustments)" badge and disables Apply and Reset Frame for an unedited frame', () => {
     setup()
     render(<TrajectoryEditor />)
+
     expect(screen.queryByText('(has adjustments)')).not.toBeInTheDocument()
-  })
-
-  it('renders Apply button labelled with current frame', () => {
-    setup({ playback: { currentFrame: 2 } })
-    render(<TrajectoryEditor />)
-    expect(screen.getByRole('button', { name: /Apply to Frame 2/ })).toBeInTheDocument()
-  })
-
-  it('disables Apply and Reset Frame buttons when no changes and no adjustment', () => {
-    setup()
-    render(<TrajectoryEditor />)
-    expect(screen.getByRole('button', { name: /Apply to Frame/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Apply to Frame 0/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /Reset Frame/ })).toBeDisabled()
   })
 
-  it('enables Apply and Reset Frame buttons when current frame has an existing adjustment', () => {
-    const adjustments = new Map<number, TrajectoryAdjustment>([
-      [0, { frameIndex: 0, rightGripperOverride: 0.5 }],
-    ])
-    setup({ trajectory: { trajectoryAdjustments: adjustments } })
-    render(<TrajectoryEditor />)
-    expect(screen.getByRole('button', { name: /Apply to Frame/ })).not.toBeDisabled()
-    expect(screen.getByRole('button', { name: /Reset Frame/ })).not.toBeDisabled()
-  })
-
-  it('updates display when a range input changes and shows delta annotation', () => {
-    setup()
-    render(<TrajectoryEditor />)
-
-    const ranges = screen
-      .getAllByRole('slider')
-      .filter((el) => (el as HTMLInputElement).max === '0.5')
-    expect(ranges.length).toBeGreaterThanOrEqual(3)
-    fireEvent.change(ranges[0], { target: { value: '0.1' } })
-
-    expect(screen.getByText(/Δ: \+0.1000/)).toBeInTheDocument()
-  })
-
-  it('calls setTrajectoryAdjustment with computed payload when Apply clicked after a change', () => {
+  it('applies a channel delta to the current frame', () => {
     const { trajectoryState } = setup({ playback: { currentFrame: 1 } })
     render(<TrajectoryEditor />)
 
-    const ranges = screen
-      .getAllByRole('slider')
-      .filter((el) => (el as HTMLInputElement).max === '0.5')
-    fireEvent.change(ranges[0], { target: { value: '0.2' } })
-
+    fireEvent.change(deltaSlider('arm_1'), { target: { value: '0.2' } })
+    expect(screen.getByText(/Δ: \+0.2000/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Apply to Frame 1/ }))
 
-    expect(trajectoryState.setTrajectoryAdjustment).toHaveBeenCalledTimes(1)
-    const [frameArg, payload] = vi.mocked(trajectoryState.setTrajectoryAdjustment).mock.calls[0]
-    expect(frameArg).toBe(1)
-    expect(payload.rightArmDelta).toEqual([0.2, 0, 0])
-    expect(payload.leftArmDelta).toBeUndefined()
-    expect(payload.rightGripperOverride).toBeUndefined()
-    expect(payload.leftGripperOverride).toBeUndefined()
+    expect(trajectoryState.setTrajectoryAdjustment).toHaveBeenCalledWith(1, {
+      channelDeltas: { 0: 0.2 },
+      channelValues: undefined,
+    })
   })
 
-  it('calls removeTrajectoryAdjustment when Apply clicked with no changes but existing adjustment', async () => {
+  it('applies a set value, which replaces the delta on that channel', () => {
+    const { trajectoryState } = setup()
+    render(<TrajectoryEditor />)
+
+    fireEvent.change(deltaSlider('gripper_1'), { target: { value: '0.1' } })
+    fireEvent.change(valueInput('gripper_1'), { target: { value: '0.5' } })
+    expect(deltaSlider('gripper_1')).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: /Apply to Frame 0/ }))
+
+    expect(trajectoryState.setTrajectoryAdjustment).toHaveBeenCalledWith(0, {
+      channelDeltas: undefined,
+      channelValues: { 6: 0.5 },
+    })
+  })
+
+  it('clears a set value when its input is emptied', () => {
+    setup()
+    render(<TrajectoryEditor />)
+
+    fireEvent.change(valueInput('gripper_1'), { target: { value: '0.5' } })
+    fireEvent.change(valueInput('gripper_1'), { target: { value: '' } })
+
+    expect(deltaSlider('gripper_1')).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: /Apply to Frame 0/ })).toBeDisabled()
+  })
+
+  it('removes the frame adjustment when Apply runs with nothing left to apply', async () => {
     const user = userEvent.setup()
     const adjustments = new Map<number, TrajectoryAdjustment>([
-      [0, { frameIndex: 0, rightArmDelta: [0.1, 0, 0] }],
+      [0, { frameIndex: 0, channelDeltas: { 0: 0.1 } }],
     ])
     const { trajectoryState } = setup({ trajectory: { trajectoryAdjustments: adjustments } })
     render(<TrajectoryEditor />)
 
-    const ranges = screen
-      .getAllByRole('slider')
-      .filter((el) => (el as HTMLInputElement).max === '0.5')
-    fireEvent.change(ranges[0], { target: { value: '0' } })
-
+    fireEvent.change(deltaSlider('arm_1'), { target: { value: '0' } })
     await user.click(screen.getByRole('button', { name: /Apply to Frame/ }))
 
     expect(trajectoryState.removeTrajectoryAdjustment).toHaveBeenCalledWith(0)
     expect(trajectoryState.setTrajectoryAdjustment).not.toHaveBeenCalled()
   })
 
-  it('calls removeTrajectoryAdjustment when Reset Frame is clicked', async () => {
+  it('removes the frame adjustment when Reset Frame is clicked', async () => {
     const user = userEvent.setup()
     const adjustments = new Map<number, TrajectoryAdjustment>([
-      [0, { frameIndex: 0, rightArmDelta: [0.1, 0, 0] }],
+      [0, { frameIndex: 0, channelValues: { 6: 0.5 } }],
     ])
     const { trajectoryState } = setup({ trajectory: { trajectoryAdjustments: adjustments } })
     render(<TrajectoryEditor />)
@@ -246,7 +243,7 @@ describe('TrajectoryEditor', () => {
     expect(trajectoryState.removeTrajectoryAdjustment).toHaveBeenCalledWith(0)
   })
 
-  it('hides Clear All button when no adjustments exist', () => {
+  it('hides Clear All when no frame has adjustments', () => {
     setup()
     render(<TrajectoryEditor />)
     expect(
@@ -254,179 +251,79 @@ describe('TrajectoryEditor', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('shows Clear All button labelled with adjustment count when adjustments exist', () => {
-    const adjustments = new Map<number, TrajectoryAdjustment>([
-      [0, { frameIndex: 0, rightArmDelta: [0.1, 0, 0] }],
-      [2, { frameIndex: 2, leftGripperOverride: 0.7 }],
-    ])
-    setup({ trajectory: { trajectoryAdjustments: adjustments } })
-    render(<TrajectoryEditor />)
-    expect(
-      screen.getByRole('button', { name: /Clear All Trajectory Adjustments \(2\)/ }),
-    ).toBeInTheDocument()
-  })
-
-  it('calls clearTrajectoryAdjustments when Clear All is clicked', async () => {
+  it('clears every adjustment from the labelled Clear All button', async () => {
     const user = userEvent.setup()
     const adjustments = new Map<number, TrajectoryAdjustment>([
-      [0, { frameIndex: 0, rightArmDelta: [0.1, 0, 0] }],
+      [0, { frameIndex: 0, channelDeltas: { 0: 0.1 } }],
+      [2, { frameIndex: 2, channelValues: { 6: 0.7 } }],
     ])
     const { trajectoryState } = setup({ trajectory: { trajectoryAdjustments: adjustments } })
     render(<TrajectoryEditor />)
 
-    await user.click(screen.getByRole('button', { name: /Clear All Trajectory Adjustments/ }))
+    await user.click(screen.getByRole('button', { name: /Clear All Trajectory Adjustments \(2\)/ }))
 
     expect(trajectoryState.clearTrajectoryAdjustments).toHaveBeenCalledTimes(1)
   })
 
-  it('clamps currentFrame above trajectory length and still renders editor UI', () => {
+  it('still renders the editor when currentFrame is beyond the trajectory', () => {
     setup({ playback: { currentFrame: 999 } })
     render(<TrajectoryEditor />)
     expect(screen.getByText('Frame 999')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Apply to Frame 999/ })).toBeInTheDocument()
   })
 
-  it('updates gripper override when gripper range input changes', () => {
-    setup()
-    render(<TrajectoryEditor />)
-
-    const gripperRanges = screen
-      .getAllByRole('slider')
-      .filter((el) => (el as HTMLInputElement).max === '1')
-    expect(gripperRanges.length).toBeGreaterThanOrEqual(2)
-    fireEvent.change(gripperRanges[0], { target: { value: '0.42' } })
-
-    expect(screen.getByRole('button', { name: /Apply to Frame/ })).not.toBeDisabled()
-  })
-
-  it('applies className to root container', () => {
-    setup()
-    const { container } = render(<TrajectoryEditor className="custom-trajectory" />)
-    expect(container.querySelector('.custom-trajectory')).not.toBeNull()
-  })
-
-  it('updates left arm delta when its slider changes and shows delta annotation', () => {
-    setup()
-    render(<TrajectoryEditor />)
-
-    // Eight axis sliders total; the second batch of three drives Left Arm
-    const axisSliders = screen
-      .getAllByRole('slider')
-      .filter((el) => (el as HTMLInputElement).max === '0.5')
-    expect(axisSliders.length).toBe(6)
-    fireEvent.change(axisSliders[3], { target: { value: '-0.25' } })
-
-    expect(screen.getByText(/Δ: -0.2500/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Apply to Frame/ })).not.toBeDisabled()
-  })
-
-  it('AxisInput numeric input updates delta and Δ annotation on change', () => {
-    setup()
-    render(<TrajectoryEditor />)
-
-    const numberInputs = screen
-      .getAllByRole('spinbutton')
-      .filter((el) => (el as HTMLInputElement).step === '0.001')
-    expect(numberInputs.length).toBe(6)
-    fireEvent.change(numberInputs[1], { target: { value: '0.123' } })
-
-    expect(screen.getByText(/Δ: \+0.1230/)).toBeInTheDocument()
-  })
-
-  it('AxisInput numeric input ignores non-numeric text', () => {
-    setup()
-    render(<TrajectoryEditor />)
-
-    const numberInputs = screen
-      .getAllByRole('spinbutton')
-      .filter((el) => (el as HTMLInputElement).step === '0.001')
-    fireEvent.change(numberInputs[0], { target: { value: 'abc' } })
-
-    // type=number coerces invalid input to empty string and parseFloat returns NaN
-    expect((numberInputs[0] as HTMLInputElement).value).toBe('')
-    expect(screen.getByRole('button', { name: /Apply to Frame/ })).toBeDisabled()
-  })
-
-  it('AxisInput onBlur restores the formatted delta value after invalid input clears it', () => {
-    setup()
-    render(<TrajectoryEditor />)
-
-    const numberInputs = screen
-      .getAllByRole('spinbutton')
-      .filter((el) => (el as HTMLInputElement).step === '0.001')
-    const input = numberInputs[0] as HTMLInputElement
-    fireEvent.change(input, { target: { value: 'abc' } })
-    expect(input.value).toBe('')
-
-    fireEvent.blur(input)
-    expect(input.value).toBe('0.0000')
-  })
-
-  it('AxisInput renders existing delta when frame already has an adjustment', () => {
+  it('shows the stored delta and set value for the current frame', () => {
     const adjustments = new Map<number, TrajectoryAdjustment>([
-      [1, { frameIndex: 1, rightArmDelta: [0.25, 0, 0] }],
+      [1, { frameIndex: 1, channelDeltas: { 0: 0.25 }, channelValues: { 6: 0.75 } }],
     ])
     setup({ playback: { currentFrame: 1 }, trajectory: { trajectoryAdjustments: adjustments } })
     render(<TrajectoryEditor />)
 
-    const numberInputs = screen
-      .getAllByRole('spinbutton')
-      .filter((el) => (el as HTMLInputElement).step === '0.001')
-    expect((numberInputs[0] as HTMLInputElement).value).toBe('0.2500')
+    expect(deltaInput('arm_1').value).toBe('0.2500')
+    expect(valueInput('gripper_1').value).toBe('0.7500')
   })
 
   it('loads frame-specific adjustments when the current frame changes', () => {
     const adjustments = new Map<number, TrajectoryAdjustment>([
-      [1, { frameIndex: 1, rightArmDelta: [0.25, 0, 0] }],
+      [1, { frameIndex: 1, channelDeltas: { 0: 0.25 } }],
     ])
     const { playbackState } = setup({ trajectory: { trajectoryAdjustments: adjustments } })
     const { rerender } = render(<TrajectoryEditor />)
+    expect(deltaInput('arm_1').value).toBe('0.0000')
 
     mockedPlaybackControls.mockReturnValue({ ...playbackState, currentFrame: 1 })
     rerender(<TrajectoryEditor />)
 
-    const numberInputs = screen
-      .getAllByRole('spinbutton')
-      .filter((element) => (element as HTMLInputElement).step === '0.001')
-    expect((numberInputs[0] as HTMLInputElement).value).toBe('0.2500')
+    expect(deltaInput('arm_1').value).toBe('0.2500')
   })
 
-  it('keeps pending edits when adjustments change for another frame', () => {
+  it('keeps pending edits when another frame gains an adjustment', () => {
     const { trajectoryState } = setup()
     const { rerender } = render(<TrajectoryEditor />)
 
-    const deltaInput = () =>
-      screen
-        .getAllByRole('spinbutton')
-        .filter((element) => (element as HTMLInputElement).step === '0.001')[0] as HTMLInputElement
-    fireEvent.change(deltaInput(), { target: { value: '0.25' } })
-    expect(deltaInput().value).toBe('0.2500')
+    fireEvent.change(deltaInput('arm_1'), { target: { value: '0.25' } })
+    expect(deltaInput('arm_1').value).toBe('0.2500')
 
     // A different frame gains an adjustment, replacing the Map identity.
     mockedTrajectoryState.mockReturnValue({
       ...trajectoryState,
       trajectoryAdjustments: new Map<number, TrajectoryAdjustment>([
-        [5, { frameIndex: 5, rightArmDelta: [0.9, 0, 0] }],
+        [5, { frameIndex: 5, channelDeltas: { 0: 0.9 } }],
       ]),
     })
     rerender(<TrajectoryEditor />)
 
-    expect(deltaInput().value).toBe('0.2500')
+    expect(screen.getByText(/Δ: \+0.2500/)).toBeInTheDocument()
   })
 
   it('clears the editor inputs when all adjustments are cleared', async () => {
     const user = userEvent.setup()
     const adjustments = new Map<number, TrajectoryAdjustment>([
-      [0, { frameIndex: 0, rightArmDelta: [0.25, 0, 0] }],
+      [0, { frameIndex: 0, channelDeltas: { 0: 0.25 } }],
     ])
     const { trajectoryState } = setup({ trajectory: { trajectoryAdjustments: adjustments } })
     const { rerender } = render(<TrajectoryEditor />)
-
-    const deltaInput = () =>
-      screen
-        .getAllByRole('spinbutton')
-        .filter((element) => (element as HTMLInputElement).step === '0.001')[0] as HTMLInputElement
-    expect(deltaInput().value).toBe('0.2500')
+    expect(deltaInput('arm_1').value).toBe('0.2500')
 
     await user.click(screen.getByRole('button', { name: /Clear All Trajectory Adjustments/i }))
     expect(trajectoryState.clearTrajectoryAdjustments).toHaveBeenCalled()
@@ -434,158 +331,31 @@ describe('TrajectoryEditor', () => {
     mockedTrajectoryState.mockReturnValue({ ...trajectoryState, trajectoryAdjustments: new Map() })
     rerender(<TrajectoryEditor />)
 
-    expect(deltaInput().value).toBe('0.0000')
+    expect(deltaInput('arm_1').value).toBe('0.0000')
   })
 
-  it('ArmEditor per-arm reset button resets only the right arm delta', async () => {
+  it('ignores non-numeric delta text and restores the formatted value on blur', () => {
+    setup()
+    render(<TrajectoryEditor />)
+
+    fireEvent.change(deltaInput('arm_2'), { target: { value: 'abc' } })
+    expect(screen.getByRole('button', { name: /Apply to Frame/ })).toBeDisabled()
+
+    fireEvent.blur(deltaInput('arm_2'))
+    expect(deltaInput('arm_2').value).toBe('0.0000')
+  })
+
+  it('resets only the chosen channel from its row', async () => {
     const user = userEvent.setup()
     setup()
     render(<TrajectoryEditor />)
 
-    const axisSliders = screen
-      .getAllByRole('slider')
-      .filter((el) => (el as HTMLInputElement).max === '0.5')
-    fireEvent.change(axisSliders[0], { target: { value: '0.3' } })
-    fireEvent.change(axisSliders[3], { target: { value: '-0.2' } })
+    fireEvent.change(deltaSlider('arm_1'), { target: { value: '0.3' } })
+    fireEvent.change(deltaSlider('arm_2'), { target: { value: '-0.2' } })
+    await user.click(screen.getByRole('button', { name: 'Reset arm_1' }))
 
-    const rightHeader = screen.getByText('Right Arm').parentElement as HTMLElement
-    const resetBtn = rightHeader.querySelector('button.h-6.w-6') as HTMLButtonElement
-    expect(resetBtn).toBeTruthy()
-    await user.click(resetBtn)
-
-    // Right Arm Δ annotation gone, Left Arm Δ remains
     expect(screen.queryByText(/Δ: \+0.3000/)).not.toBeInTheDocument()
     expect(screen.getByText(/Δ: -0.2000/)).toBeInTheDocument()
-  })
-
-  it('ArmEditor per-arm reset button shows only when arm has changes', () => {
-    setup()
-    render(<TrajectoryEditor />)
-    expect(screen.queryByText('Reset Right Arm adjustments')).not.toBeInTheDocument()
-    expect(screen.queryByText('Reset Left Arm adjustments')).not.toBeInTheDocument()
-
-    const axisSliders = screen
-      .getAllByRole('slider')
-      .filter((el) => (el as HTMLInputElement).max === '0.5')
-    fireEvent.change(axisSliders[0], { target: { value: '0.1' } })
-
-    expect(screen.getByText('Reset Right Arm adjustments')).toBeInTheDocument()
-    expect(screen.queryByText('Reset Left Arm adjustments')).not.toBeInTheDocument()
-  })
-
-  it('ArmEditor gripper numeric input updates the override on valid input', () => {
-    setup()
-    render(<TrajectoryEditor />)
-
-    const gripperInputs = screen
-      .getAllByRole('spinbutton')
-      .filter((el) => (el as HTMLInputElement).step === '0.01')
-    expect(gripperInputs.length).toBe(2)
-
-    fireEvent.change(gripperInputs[0], { target: { value: '0.75' } })
-
-    expect(screen.getByRole('button', { name: /Apply to Frame/ })).not.toBeDisabled()
-  })
-
-  it('ArmEditor gripper numeric input ignores non-numeric text', () => {
-    setup()
-    render(<TrajectoryEditor />)
-
-    const gripperInputs = screen
-      .getAllByRole('spinbutton')
-      .filter((el) => (el as HTMLInputElement).step === '0.01')
-    fireEvent.change(gripperInputs[0], { target: { value: 'xyz' } })
-
-    expect((gripperInputs[0] as HTMLInputElement).value).toBe('')
-    expect(screen.getByRole('button', { name: /Apply to Frame/ })).toBeDisabled()
-  })
-
-  it('ArmEditor gripper input onBlur restores formatted value after invalid input clears it', () => {
-    setup()
-    render(<TrajectoryEditor />)
-
-    const gripperInputs = screen
-      .getAllByRole('spinbutton')
-      .filter((el) => (el as HTMLInputElement).step === '0.01')
-    const input = gripperInputs[0] as HTMLInputElement
-    const initialValue = input.value
-    fireEvent.change(input, { target: { value: 'xyz' } })
-    expect(input.value).toBe('')
-
-    fireEvent.blur(input)
-    expect(input.value).toBe(initialValue)
-  })
-
-  it('ArmEditor gripper clear button appears only when an override is set', () => {
-    setup()
-    const { container, rerender } = render(<TrajectoryEditor />)
-
-    // Initially no clear button is rendered next to the gripper inputs
-    const gripperInputsBefore = container.querySelectorAll('input[type="number"][min="0"][max="1"]')
-    expect(gripperInputsBefore.length).toBe(2)
-    const initialClearButtons = container.querySelectorAll('button.h-7.w-7')
-    expect(initialClearButtons.length).toBe(0)
-
-    const gripperSlider = screen
-      .getAllByRole('slider')
-      .find((el) => (el as HTMLInputElement).max === '1') as HTMLInputElement
-    fireEvent.change(gripperSlider, { target: { value: '0.5' } })
-
-    rerender(<TrajectoryEditor />)
-    const clearButtons = container.querySelectorAll('button.h-7.w-7')
-    expect(clearButtons.length).toBe(1)
-  })
-
-  it('ArmEditor gripper clear button click removes the override', async () => {
-    const user = userEvent.setup()
-    setup()
-    const { container } = render(<TrajectoryEditor />)
-
-    const gripperSlider = screen
-      .getAllByRole('slider')
-      .find((el) => (el as HTMLInputElement).max === '1') as HTMLInputElement
-    fireEvent.change(gripperSlider, { target: { value: '0.5' } })
-
-    const clearButton = container.querySelector('button.h-7.w-7') as HTMLButtonElement
-    expect(clearButton).toBeTruthy()
-    await user.click(clearButton)
-
-    // Apply button toggles back to disabled because no overrides remain
-    expect(screen.getByRole('button', { name: /Apply to Frame/ })).toBeDisabled()
-  })
-
-  it('renders existing right arm adjustment in the AxisInput display', () => {
-    const adjustments = new Map<number, TrajectoryAdjustment>([
-      [0, { frameIndex: 0, rightArmDelta: [0.123, -0.456, 0.789] }],
-    ])
-    setup({ trajectory: { trajectoryAdjustments: adjustments } })
-    render(<TrajectoryEditor />)
-
-    expect(screen.getByText(/Δ: \+0.1230/)).toBeInTheDocument()
-    expect(screen.getByText(/Δ: -0.4560/)).toBeInTheDocument()
-    expect(screen.getByText(/Δ: \+0.7890/)).toBeInTheDocument()
-  })
-
-  it('renders existing gripper override values from store on initial mount', () => {
-    const adjustments = new Map<number, TrajectoryAdjustment>([
-      [0, { frameIndex: 0, rightGripperOverride: 0.42, leftGripperOverride: 0.18 }],
-    ])
-    setup({ trajectory: { trajectoryAdjustments: adjustments } })
-    render(<TrajectoryEditor />)
-
-    const gripperInputs = screen
-      .getAllByRole('spinbutton')
-      .filter((el) => (el as HTMLInputElement).step === '0.01')
-    expect((gripperInputs[0] as HTMLInputElement).value).toBe('0.420')
-    expect((gripperInputs[1] as HTMLInputElement).value).toBe('0.180')
-  })
-  it('provides arm-specific names for range and numeric controls', () => {
-    setup()
-    render(<TrajectoryEditor />)
-
-    expect(screen.getByRole('slider', { name: 'Right Arm X delta' })).toBeInTheDocument()
-    expect(screen.getByRole('spinbutton', { name: 'Right Arm X delta' })).toBeInTheDocument()
-    expect(screen.getByRole('slider', { name: 'Left Arm Gripper value' })).toBeInTheDocument()
-    expect(screen.getByRole('spinbutton', { name: 'Left Arm Gripper value' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reset arm_3' })).not.toBeInTheDocument()
   })
 })

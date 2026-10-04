@@ -2,7 +2,7 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-09-23
+ms.date: 2026-10-01
 ms.topic: overview
 ---
 
@@ -23,6 +23,12 @@ A full-stack application for analyzing and annotating robotic training data from
 | Node.js | 24+                    |
 | npm     | Bundled with Node.js   |
 | uv      | Current stable release |
+| ffmpeg  | Current stable release |
+
+The backend container image installs `ffmpeg`. When you run the backend outside it, put `ffmpeg` on `PATH`:
+
+- HDF5 datasets need it, or OpenCV, to stream camera images as video. Without either, their camera video is unavailable.
+- LeRobot datasets play without it, but each episode then loads its camera's whole video file instead of the episode's clip.
 
 ## 📦 Installation
 
@@ -150,6 +156,8 @@ The cross-platform npm launcher loads backend defaults from `backend/.env.exampl
 STORAGE_BACKEND=local
 DATA_DIR=/path/to/your/datasets
 ```
+
+The backend lists every dataset folder under `DATA_DIR`, up to five levels deep, and joins nested folder names with `--` in the dataset ID. It skips folders whose names start with `.`, including an export's hidden staging folder.
 
 ### Azure Blob Storage
 
@@ -553,6 +561,8 @@ Each episode can carry a structured `LanguageInstructionAnnotation` for vision-l
 
 When a dataset task description is available, the widget seeds the instruction with `source = template` via the "Use as Instruction" button. Otherwise, "Add Instruction" creates a blank instruction with `source = human`. The source can be changed at any time through the dropdown.
 
+A LeRobot export can include the saved instruction as LeRobot `task_aug` and `plan` rows; see [Exporting edited episodes](#exporting-edited-episodes).
+
 ### Episode Analyzer
 
 The **Episode Analyzer** tab combines trajectory metrics, VLM judgments, persisted analysis, episode labels, and language instructions. The run panels and persisted record have distinct storage behavior.
@@ -586,6 +596,57 @@ The **Log-scaled** mode compresses the jerk range with `log10` and is the defaul
 The label panel shows import buttons only for analysis fields present in the dataset. Enter an optional label prefix before importing. Enable **Replace existing imported labels** to remove stale labels in the same prefix namespace before applying current values. Unsaved label edits remain in the browser while the server response is reconciled.
 
 Supported fields include object, pickup location, grasp outcome, place outcome, motion score, motion flags, and source. Free-text movement notes and instructions remain analysis data because importing them would create unbounded label sets.
+
+### Exporting edited episodes
+
+**Export** writes the current episode with its edits applied: removed and inserted frames, crop and resize, trajectory adjustments and subtasks. The source dataset is never modified, and the output path must be under the Dataviewer data directory.
+
+| Source format | Export output                                                                                            |
+|---------------|----------------------------------------------------------------------------------------------------------|
+| LeRobot v3.0  | A new LeRobot v3.0 dataset at the output path, which must be new or empty and outside the source dataset |
+| HDF5          | `episode_<index>.hdf5` files in the output directory, with `.meta.json` and `.subtasks.json` beside them |
+
+A LeRobot export locks its output directory with a hidden `.dataviewer-export.lock` file and stages the dataset in a hidden `.dataviewer-export.partial` directory inside it, so an existing empty directory, such as a mounted volume, is kept. The dataset appears once the export completes, with `meta` moved in last. While the lock is held, a second export to the same directory fails.
+
+If the backend stops partway through an export, or an export fails and can't remove what it moved, the next export to that directory cleans up first.
+Before moving anything into place, every export records the identity of each file it staged. The cleanup removes the earlier export's staging and the moved files that still match that record, and it keeps a dataset whose move finished. Anything else in the directory stays, including files added inside the earlier export's folders, and exports there fail until you remove it.
+
+LeRobot exports need a filesystem that supports file locking, such as a local disk or a Docker bind mount. On one that doesn't, the export fails and can leave an empty `.dataviewer-export.lock` behind. The export dialog reports every failure as "Export failed", and the backend log gives the reason.
+
+A LeRobot export:
+
+- keeps every recorded feature;
+- re-encodes the videos with the source's recorded encoder settings, falling back to LeRobot's defaults for any setting the source doesn't record;
+- recomputes the per-episode and dataset statistics;
+- writes subtasks as LeRobot `subtask` annotations;
+- can add saved language instructions as LeRobot `task_aug` and `plan` annotations.
+
+Removing or inserting frames renumbers `frame_index` and sets `timestamp` to `frame_index / fps`. `dataviewer-export.json` maps each output frame to its source frame and records the edits and remapped subtasks.
+
+A subtask that loses its first or last frames to the edits shrinks to the frames that remain, and one with no frames left is dropped.
+
+In a LeRobot export, each subtask becomes a row in the `language_persistent` column, with the subtask label as its text and its first frame's `timestamp`. LeRobot treats a subtask as active until the next one starts, so frames in a gap between two subtasks read as the earlier subtask; `dataviewer-export.json` keeps the exact ranges. The label becomes the annotation text, so name subtasks the way training should read them.
+
+Opening an exported dataset shows its subtasks in the subtask editor. LeRobot subtask rows run until the next one starts, as LeRobot reads them, and an HDF5 export's `.subtasks.json` keeps its exact ranges. When you export again, subtasks you left unchanged keep their recorded data, changed subtasks replace the recorded ones, and deleting every subtask removes them.
+In `dataviewer-export.json`, `subtasks` is `null` when the export kept the recorded subtasks and an empty list when it removed them. A saved draft of the episode takes precedence over the recorded subtasks.
+
+When the source already has LeRobot language annotations, the export keeps them and moves them with the edited frames, apart from rows your subtasks or language instructions replace. Clear **Include subtasks as LeRobot subtask annotations** to export without your subtask changes; recorded subtask rows stay.
+For an HDF5 source the same option reads **Include subtask metadata**, and clearing it still carries a recorded `.subtasks.json` forward to the export.
+A LeRobot export has language columns when its source has them or when an exported episode gets subtask or language-instruction rows, so clearing the subtask option alone doesn't leave them out.
+
+For a LeRobot source, **Include language instructions as LeRobot task phrasings and plan** adds each episode's most recently saved [language instruction](#language-instruction-vla-annotation):
+
+- the instruction and its paraphrases become `task_aug` rows, which LeRobot rotates `${task}` through during training;
+- the subtask instructions become one numbered `plan` row at the first frame.
+
+These rows replace the source's `task_aug` and `plan` rows for that episode, and episodes without a saved instruction keep theirs. The option is on by default in the dialog and in the export API, where `"includeLanguageInstructions": false` turns it off. `dataviewer-export.json` records whose instruction was used and when it was saved.
+
+Trajectory adjustments never replace recorded joint positions:
+
+- LeRobot exports add `adjusted.observation.state` and `adjusted.observation.state_mask` beside `observation.state`. The `adjusted.` prefix keeps them out of LeRobot policy inputs.
+- HDF5 exports add `data/qpos_adjusted` and `data/qpos_adjusted_mask` beside `data/qpos`.
+
+Each export is its own dataset. LeRobot merges datasets only when their features match, so a cropped or adjusted export doesn't merge with an unedited one.
 
 ### VLM dataset-labeling CLI
 
@@ -647,12 +708,12 @@ docker compose up --build
 
 Local storage requires write access to `DATAVIEWER_HOST_DATA_DIR` because annotations and labels are persisted atomically under each dataset directory. The backend validates create, flush, replace, and delete operations during startup and exits with the effective UID and GID when the mount is not writable.
 
-| Environment | Runtime identity |
-|-------------|------------------|
-| Docker Desktop for macOS or Windows | Uses the image-defined UID/GID 999 |
-| Rootful Docker Engine on Linux or directly inside WSL | Set `DATAVIEWER_UID` and `DATAVIEWER_GID` from `id -u` and `id -g` |
-| Rootless Docker | Set `DATAVIEWER_UID=0` and `DATAVIEWER_GID=0`; rootless UID 0 maps to the invoking host user |
-| Docker daemon with user-namespace remapping | Pre-arrange host directory ownership for the daemon's subordinate UID/GID mapping |
+| Environment                                           | Runtime identity                                                                             |
+|-------------------------------------------------------|----------------------------------------------------------------------------------------------|
+| Docker Desktop for macOS or Windows                   | Uses the image-defined UID/GID 999                                                           |
+| Rootful Docker Engine on Linux or directly inside WSL | Set `DATAVIEWER_UID` and `DATAVIEWER_GID` from `id -u` and `id -g`                           |
+| Rootless Docker                                       | Set `DATAVIEWER_UID=0` and `DATAVIEWER_GID=0`; rootless UID 0 maps to the invoking host user |
+| Docker daemon with user-namespace remapping           | Pre-arrange host directory ownership for the daemon's subordinate UID/GID mapping            |
 
 > [!WARNING]
 > Do not use the rootless UID/GID 0 override with a rootful Docker daemon. It runs the backend as host-capable container root.
@@ -767,6 +828,15 @@ npm run format       # Prettier check
 npm run format:fix   # Prettier auto-fix
 npm run build        # Production build
 ```
+
+## 🔍 Troubleshooting
+
+Error messages in the viewer leave out server details; the backend log has them.
+
+| Symptom                                                                                      | Cause and fix                                                                                                                                                                                                                                                   |
+|----------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| "Error loading episode: The episode's files couldn't be read; the backend log has the cause" | The dataset's loader couldn't read the episode's files, and the episode, detection, auto-analysis and export-preview endpoints return HTTP 500 with code `EPISODE_LOAD_FAILED`. Find the file and error in the backend log, then repair or replace the episode. |
+| An export reports "Export failed"                                                            | The backend log names the cause. Another export may be writing to the same directory, the output directory may not be new or empty, or its filesystem may not support file locking.                                                                             |
 
 ## 📖 API Documentation
 

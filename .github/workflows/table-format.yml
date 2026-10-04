@@ -35,7 +35,9 @@ jobs:
         id: table-format
         run: |
           npm run format:tables 2>&1 | Tee-Object -FilePath table-format-output.txt
-          if ($LASTEXITCODE -ne 0) {
+          $formatExitCode = $LASTEXITCODE
+          $changed = (git diff --name-only -- '*.md' 2>$null) | Where-Object { $_ }
+          if ($formatExitCode -ne 0 -or $changed) {
             'TABLE_FORMAT_FAILED=true' >> $env:GITHUB_ENV
           }
         continue-on-error: true

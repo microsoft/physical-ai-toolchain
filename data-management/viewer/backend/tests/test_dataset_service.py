@@ -272,6 +272,20 @@ class TestNestedDatasetDiscovery:
         assert "e2emanufacturing--session_a" in ids
         assert "e2emanufacturing--session_b" in ids
 
+    async def test_hidden_folders_are_not_scanned(self, tmp_path):
+        """Datasets inside folders whose names start with a dot, such as an export's claim, stay out of the list."""
+        visible = tmp_path / "group" / "session"
+        visible.mkdir(parents=True)
+        _create_minimal_hdf5(visible / "episode_0.hdf5")
+        hidden = tmp_path / "group" / ".dataviewer-export.partial" / "dataset"
+        hidden.mkdir(parents=True)
+        _create_minimal_hdf5(hidden / "episode_0.hdf5")
+
+        service = DatasetService(base_path=str(tmp_path))
+        ids = {dataset.id for dataset in await service.list_datasets()}
+
+        assert ids == {"group--session"}
+
     async def test_nested_datasets_have_group(self, tmp_path):
         """Nested datasets should have their parent folder as the group."""
         parent = tmp_path / "my_project"

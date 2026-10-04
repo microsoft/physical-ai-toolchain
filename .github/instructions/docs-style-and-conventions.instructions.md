@@ -332,7 +332,7 @@ Bump `ms.date` to today's date (YYYY-MM-DD) on every substantive edit.
 
 | Type       | Convention                  | Example                               |
 |------------|-----------------------------|---------------------------------------|
-| README     | `README.md` (uppercase)     | `infrastructure/README.md`                    |
+| README     | `README.md` (uppercase)     | `infrastructure/README.md`            |
 | Guides     | kebab-case                  | `mlflow-integration.md`               |
 | References | kebab-case with type suffix | `azureml-evaluation-job-debugging.md` |
 

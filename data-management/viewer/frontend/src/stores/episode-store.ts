@@ -14,7 +14,7 @@ interface EpisodeState {
   currentEpisode: EpisodeData | null
   /** Current episode index */
   currentIndex: number
-  /** Current dataset ID */
+  /** Dataset the current episode belongs to */
   currentDatasetId: string | null
   /** Loading state */
   isLoading: boolean
@@ -31,8 +31,8 @@ interface EpisodeState {
 interface EpisodeActions {
   /** Set the list of episodes */
   setEpisodes: (episodes: EpisodeMeta[]) => void
-  /** Set the current episode data */
-  setCurrentEpisode: (episode: EpisodeData | null) => void
+  /** Set the current episode data and the dataset it belongs to */
+  setCurrentEpisode: (episode: EpisodeData | null, datasetId?: string | null) => void
   /** Navigate to a specific episode index */
   navigateToEpisode: (index: number) => void
   /** Navigate to the next episode */
@@ -91,11 +91,12 @@ export const useEpisodeStore = create<EpisodeStore>()(
         set({ episodes, error: null }, false, 'setEpisodes')
       },
 
-      setCurrentEpisode: (episode) => {
+      setCurrentEpisode: (episode, datasetId = null) => {
         set(
           {
             currentEpisode: episode,
             currentIndex: episode?.meta.index ?? -1,
+            currentDatasetId: episode ? datasetId : null,
             currentFrame: 0,
             isPlaying: false,
           },

@@ -2,7 +2,9 @@ import { waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { clearPersistedEditDraftsForTests } from '@/lib/edit-draft-storage'
-import type { FrameInsertion } from '@/types/episode-edit'
+import { hasEditContent } from '@/stores/edit-store-helpers'
+import type { FrameInsertion, TrajectoryAdjustment } from '@/types/episode-edit'
+import { recordedSubtaskSegments } from '@/types/episode-edit'
 
 import {
   getEffectiveFrameCount,
@@ -339,7 +341,7 @@ describe('useEditStore', () => {
       useEditStore.getState().addSubtaskFromRange(10, 50)
       useEditStore.getState().insertFrame(3)
       useEditStore.getState().setTrajectoryAdjustment(7, {
-        rightArmDelta: [0.1, 0, 0],
+        channelDeltas: { 0: 0.1 },
       })
 
       expect(useEditStore.getState().isDirty).toBe(true)
@@ -356,6 +358,21 @@ describe('useEditStore', () => {
       expect(useEditStore.getState().insertedFrames.size).toBe(0)
       expect(useEditStore.getState().removedFrames.size).toBe(0)
       expect(useEditStore.getState().trajectoryAdjustments.size).toBe(0)
+    })
+
+    it('drops trajectory adjustments without per-channel fields when edits are loaded', () => {
+      const legacy = {
+        frameIndex: 0,
+        rightArmDelta: [0.1, 0, 0],
+      } as unknown as TrajectoryAdjustment
+
+      useEditStore.getState().loadEditOperations({
+        datasetId: 'ds-1',
+        episodeIndex: 0,
+        trajectoryAdjustments: [legacy, { frameIndex: 1, channelDeltas: { 0: 0.2 } }],
+      })
+
+      expect([...useEditStore.getState().trajectoryAdjustments.keys()]).toEqual([1])
     })
   })
 
@@ -375,6 +392,70 @@ describe('useEditStore', () => {
       expect(ops!.episodeIndex).toBe(3)
       expect(ops!.removedFrames).toEqual([10])
       expect(ops!.insertedFrames).toHaveLength(1)
+    })
+  })
+
+  describe('recorded subtasks', () => {
+    const recorded = recordedSubtaskSegments([
+      {
+        id: 'recorded-0',
+        label: 'Reach',
+        frameRange: [0, 4],
+        color: null,
+        source: 'recorded',
+        description: null,
+      },
+      {
+        id: 'recorded-1',
+        label: 'Grasp',
+        frameRange: [5, 11],
+        color: null,
+        source: 'recorded',
+        description: null,
+      },
+    ])
+
+    it('starts from the recorded subtasks without marking the episode edited', () => {
+      useEditStore.getState().initializeEdit('ds-1', 0, 'local', recorded)
+
+      const state = useEditStore.getState()
+      expect(state.subtasks).toEqual(recorded)
+      expect(state.isDirty).toBe(false)
+      expect(hasEditContent(state.getEditOperations()!)).toBe(false)
+    })
+
+    it('exports changed recorded subtasks, and an empty list once all are removed', () => {
+      useEditStore.getState().initializeEdit('ds-1', 0, 'local', recorded)
+
+      useEditStore.getState().updateSubtask('recorded-0', { label: 'Approach' })
+      expect(
+        useEditStore
+          .getState()
+          .getEditOperations()!
+          .subtasks?.map((s) => s.label),
+      ).toEqual(['Approach', 'Grasp'])
+
+      useEditStore.getState().removeSubtask('recorded-0')
+      useEditStore.getState().removeSubtask('recorded-1')
+      expect(useEditStore.getState().getEditOperations()!.subtasks).toEqual([])
+      expect(useEditStore.getState().isDirty).toBe(true)
+    })
+
+    it('lets a saved draft override the recorded subtasks, and keeps them when the draft has none', () => {
+      useEditStore.getState().initializeEdit('ds-1', 0, 'local', recorded)
+      useEditStore.getState().removeSubtask('recorded-0')
+      useEditStore.getState().removeSubtask('recorded-1')
+      useEditStore.getState().saveEpisodeDraft()
+      useEditStore.getState().initializeEdit('ds-1', 2, 'local', recorded)
+      useEditStore.getState().toggleFrameRemoval(3)
+      useEditStore.getState().saveEpisodeDraft()
+
+      useEditStore.getState().initializeEdit('ds-1', 0, 'local', recorded)
+      expect(useEditStore.getState().subtasks).toEqual([])
+
+      useEditStore.getState().initializeEdit('ds-1', 2, 'local', recorded)
+      expect(useEditStore.getState().subtasks).toEqual(recorded)
+      expect(useEditStore.getState().removedFrames.has(3)).toBe(true)
     })
   })
 })

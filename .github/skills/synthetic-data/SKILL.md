@@ -13,11 +13,11 @@ The Synthetic Data domain provides SDG pipelines that transform simulation-rende
 
 ## Pipeline Stages
 
-| Stage | Model | Purpose |
-|-------|-------|---------|
+| Stage    | Model               | Purpose                                            |
+|----------|---------------------|----------------------------------------------------|
 | Transfer | Cosmos Transfer 2.5 | Convert Isaac Sim renders to photorealistic images |
-| Predict | Cosmos Predict 2.5 | Generate future frame sequences from observations |
-| Reason | Cosmos Reason 2 | Assess data quality and filter training samples |
+| Predict  | Cosmos Predict 2.5  | Generate future frame sequences from observations  |
+| Reason   | Cosmos Reason 2     | Assess data quality and filter training samples    |
 
 ## Workflow Submission
 
@@ -28,22 +28,22 @@ SDG workflows can be submitted via OSMO or AzureML:
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `synthetic-data/README.md` | Domain overview and directory structure |
-| `synthetic-data/workflows/osmo/sdg-pipeline.yaml` | End-to-end OSMO SDG pipeline |
-| `synthetic-data/cosmos/configs/README.md` | Model configuration reference |
-| `synthetic-data/specifications/synthetic-data.specification.md` | SDG pipeline specification |
-| `synthetic-data/specifications/cosmos-integration.specification.md` | Cosmos model integration specification |
+| File                                                                | Purpose                                 |
+|---------------------------------------------------------------------|-----------------------------------------|
+| `synthetic-data/README.md`                                          | Domain overview and directory structure |
+| `synthetic-data/workflows/osmo/sdg-pipeline.yaml`                   | End-to-end OSMO SDG pipeline            |
+| `synthetic-data/cosmos/configs/README.md`                           | Model configuration reference           |
+| `synthetic-data/specifications/synthetic-data.specification.md`     | SDG pipeline specification              |
+| `synthetic-data/specifications/cosmos-integration.specification.md` | Cosmos model integration specification  |
 
 ## Environment Requirements
 
 All NVIDIA Cosmos containers require:
 
-| Variable | Value |
-|----------|-------|
-| `ACCEPT_EULA` | `Y` |
-| `PRIVACY_CONSENT` | `Y` |
+| Variable                     | Value |
+|------------------------------|-------|
+| `ACCEPT_EULA`                | `Y`   |
+| `PRIVACY_CONSENT`            | `Y`   |
 | `NVIDIA_DRIVER_CAPABILITIES` | `all` |
 
 ## GPU Requirements

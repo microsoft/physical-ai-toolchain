@@ -55,6 +55,8 @@ interface EditState {
   insertedFrames: Map<number, FrameInsertion>
   /** Sub-task segments */
   subtasks: SubtaskSegment[]
+  /** Subtasks recorded with the episode, which the editor starts from */
+  recordedSubtasks: SubtaskSegment[]
   /** Trajectory adjustments per frame */
   trajectoryAdjustments: Map<number, TrajectoryAdjustment>
 
@@ -77,8 +79,13 @@ interface EditState {
 }
 
 interface EditActions {
-  /** Initialize edit state for an episode */
-  initializeEdit: (datasetId: string, episodeIndex: number, principalScopeId?: string) => void
+  /** Initialize edit state for an episode, starting from the subtasks recorded with it */
+  initializeEdit: (
+    datasetId: string,
+    episodeIndex: number,
+    principalScopeId?: string,
+    recordedSubtasks?: SubtaskSegment[],
+  ) => void
   /** Load existing edit operations */
   loadEditOperations: (ops: EpisodeEditOperations) => void
 
@@ -159,6 +166,7 @@ const initialState: EditState = {
   removedFrames: new Set(),
   insertedFrames: new Map(),
   subtasks: [],
+  recordedSubtasks: [],
   trajectoryAdjustments: new Map(),
   originalState: null,
   isDirty: false,
@@ -229,9 +237,15 @@ export const useEditStore = create<EditStore>()(
       return {
         ...initialState,
 
-        initializeEdit: (datasetId, episodeIndex, principalScopeId = 'local') => {
+        initializeEdit: (
+          datasetId,
+          episodeIndex,
+          principalScopeId = 'local',
+          recordedSubtasks = [],
+        ) => {
           const draftKey = getEpisodeDraftKey(datasetId, episodeIndex)
           const savedDraft = get().savedEpisodeDrafts[draftKey]
+          set({ recordedSubtasks }, false, 'setRecordedSubtasks')
 
           if (savedDraft) {
             get().loadEditOperations(savedDraft)
@@ -246,7 +260,7 @@ export const useEditStore = create<EditStore>()(
             cameraTransforms: {},
             removedFrames: new Set<number>(),
             insertedFrames: new Map<number, FrameInsertion>(),
-            subtasks: [],
+            subtasks: structuredClone(recordedSubtasks),
             trajectoryAdjustments: new Map<number, TrajectoryAdjustment>(),
           }
 
@@ -299,9 +313,12 @@ export const useEditStore = create<EditStore>()(
           for (const ins of ops.insertedFrames ?? []) {
             insertedMap.set(ins.afterFrameIndex, ins)
           }
-          const subtasks = ops.subtasks ?? []
+          // A draft without subtasks keeps the recorded ones.
+          const subtasks = ops.subtasks ?? structuredClone(get().recordedSubtasks)
           const trajectoryAdjustments = new Map<number, TrajectoryAdjustment>()
           for (const adj of ops.trajectoryAdjustments ?? []) {
+            // Drafts saved before per-channel adjustments carry neither field; they are preview-only, so drop them.
+            if (adj.channelDeltas === undefined && adj.channelValues === undefined) continue
             trajectoryAdjustments.set(adj.frameIndex, adj)
           }
 
@@ -340,6 +357,7 @@ export const useEditStore = create<EditStore>()(
             insertedFrames: insertedMap,
             subtasks,
             trajectoryAdjustments,
+            recordedSubtasks: get().recordedSubtasks,
           })
         },
 

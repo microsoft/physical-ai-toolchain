@@ -88,7 +88,7 @@ Key fields to monitor:
 ### Workflow Status Values
 
 | Status            | Meaning                                |
-| ----------------- | -------------------------------------- |
+|-------------------|----------------------------------------|
 | `pending`         | Queued, awaiting resources             |
 | `running`         | Actively executing                     |
 | `completed`       | Finished successfully                  |
@@ -183,7 +183,7 @@ The poller:
 For manual evaluation of specific checkpoints without the poller:
 
 | Checkpoint                       | When to Evaluate                   | Purpose                                          |
-| -------------------------------- | ---------------------------------- | ------------------------------------------------ |
+|----------------------------------|------------------------------------|--------------------------------------------------|
 | First (e.g., step 10,000)        | After first `--save-freq` interval | Sanity check — policy produces non-zero actions  |
 | Mid-training (e.g., step 50,000) | ~50% completion                    | Convergence check — loss should be declining     |
 | Final (last registered version)  | After training completes           | Full evaluation — compare to earlier checkpoints |
@@ -197,7 +197,7 @@ Step-by-step Playwright navigation for the Azure ML portal. Use these patterns t
 Build portal deep-links from variables in `scripts/.env`:
 
 | Page                 | URL Pattern                                                                                                                                                                                                            |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Experiment runs list | `https://ml.azure.com/experiments/{experiment_name}?wsid=/subscriptions/{AZURE_SUBSCRIPTION_ID}/resourceGroups/{AZURE_RESOURCE_GROUP}/providers/Microsoft.MachineLearningServices/workspaces/{AZUREML_WORKSPACE_NAME}` |
 | Direct run           | `https://ml.azure.com/runs/{run_id}?wsid=/subscriptions/{AZURE_SUBSCRIPTION_ID}/resourceGroups/{AZURE_RESOURCE_GROUP}/providers/Microsoft.MachineLearningServices/workspaces/{AZUREML_WORKSPACE_NAME}`                 |
 
@@ -225,7 +225,7 @@ If the deep link does not load (portal prompts for sign-in), navigate to `https:
 Expected metrics in the Metrics pane:
 
 | Metric                | Expected Behaviour                                 |
-| --------------------- | -------------------------------------------------- |
+|-----------------------|----------------------------------------------------|
 | `train/loss`          | Rapid descent early, gradual convergence           |
 | `train/learning_rate` | Flat at `1e-04` (flag `1e-05` as misconfiguration) |
 | `train/grad_norm`     | Stable; spikes > 10 indicate instability           |
@@ -247,7 +247,7 @@ Expected metrics in the Metrics pane:
 Expected images in the Images pane:
 
 | Image                        | Content                                                          |
-| ---------------------------- | ---------------------------------------------------------------- |
+|------------------------------|------------------------------------------------------------------|
 | `episode_NNN_trajectory.png` | Per-episode action delta overlay (predicted vs ground truth)     |
 | `eval_summary.png`           | Aggregate summary panel (MSE, MAE across all evaluated episodes) |
 
@@ -301,7 +301,7 @@ history = client.get_metric_history(run_id, "train/loss")
 ### Key Metrics Logged
 
 | Metric                | Description                                   |
-| --------------------- | --------------------------------------------- |
+|-----------------------|-----------------------------------------------|
 | `train/loss`          | Training loss per step                        |
 | `train/grad_norm`     | Gradient norm                                 |
 | `train/learning_rate` | Current learning rate                         |
@@ -397,21 +397,21 @@ Older checkpoints may have incompatible `config.json` fields or missing normaliz
 
 ## Common Issues
 
-| Symptom                                | Likely Cause                                        | Resolution                                                         |
-| -------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------ |
-| `lr: 1e-05` in training logs           | LEARNING_RATE not mapped to `--policy.optimizer_lr` | Update `train.py` env_arg_map                                      |
-| `KeyError: 'chunk_index'`              | v3.0 path templates not converted                   | Verify `patch_info_paths()` runs during dataset prep               |
-| `KeyError: 'file_index'`               | Partial template fix                                | Check both `data_path` and `video_path` templates                  |
-| Video `MISSING` in verification        | Videos renamed but not moved to correct chunk dirs  | Verify video reorganization in `patch_info_paths()`                |
-| `codebase_version` warning             | Dataset marked v3.0 after conversion                | Set `info["codebase_version"] = "v2.1"`                            |
-| `CUDA_ERROR_NO_DEVICE`                 | MIG strategy misconfigured on vGPU                  | Set `mig.strategy: single` for RTX PRO 6000                        |
-| `ImportError: PolicyProcessorPipeline` | Using old inference API                             | Remove preprocessor/postprocessor, use `select_action()` directly  |
-| `DecodingError: use_peft not valid`    | Old checkpoint config.json                          | Strip `use_peft`, `pretrained_path` from config.json               |
-| `AssertionError: mean is infinity`     | Normalizer buffers missing                          | Load stats from preprocessor safetensors files                     |
+| Symptom                                | Likely Cause                                        | Resolution                                                        |
+|----------------------------------------|-----------------------------------------------------|-------------------------------------------------------------------|
+| `lr: 1e-05` in training logs           | LEARNING_RATE not mapped to `--policy.optimizer_lr` | Update `train.py` env_arg_map                                     |
+| `KeyError: 'chunk_index'`              | v3.0 path templates not converted                   | Verify `patch_info_paths()` runs during dataset prep              |
+| `KeyError: 'file_index'`               | Partial template fix                                | Check both `data_path` and `video_path` templates                 |
+| Video `MISSING` in verification        | Videos renamed but not moved to correct chunk dirs  | Verify video reorganization in `patch_info_paths()`               |
+| `codebase_version` warning             | Dataset marked v3.0 after conversion                | Set `info["codebase_version"] = "v2.1"`                           |
+| `CUDA_ERROR_NO_DEVICE`                 | MIG strategy misconfigured on vGPU                  | Set `mig.strategy: single` for RTX PRO 6000                       |
+| `ImportError: PolicyProcessorPipeline` | Using old inference API                             | Remove preprocessor/postprocessor, use `select_action()` directly |
+| `DecodingError: use_peft not valid`    | Old checkpoint config.json                          | Strip `use_peft`, `pretrained_path` from config.json              |
+| `AssertionError: mean is infinity`     | Normalizer buffers missing                          | Load stats from preprocessor safetensors files                    |
 | `ImportError: patch_info_paths`        | Payload missing training fixes                      | Ensure `training/il/` is on a branch with dataset conversion code |
-| VM eviction during training            | Spot GPU preempted                                  | Checkpoints already registered survive; resubmit job               |
-| MLflow connection timeout              | Token refresh failure                               | Check `MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES`                      |
-| OOM during training                    | Batch size too large for GPU                        | 32 for 24GB (A10), 64 for 48GB or more (RTX PRO 6000)              |
+| VM eviction during training            | Spot GPU preempted                                  | Checkpoints already registered survive; resubmit job              |
+| MLflow connection timeout              | Token refresh failure                               | Check `MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES`                     |
+| OOM during training                    | Batch size too large for GPU                        | 32 for 24GB (A10), 64 for 48GB or more (RTX PRO 6000)             |
 
 ## Troubleshooting
 

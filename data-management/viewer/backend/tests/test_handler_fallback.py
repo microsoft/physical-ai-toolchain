@@ -13,7 +13,7 @@ import pytest
 from src.api.models.datasources import DatasetInfo, EpisodeData, EpisodeMeta
 from src.api.services.dataset_service.hdf5_handler import HDF5FormatHandler
 from src.api.services.dataset_service.lerobot_handler import LeRobotFormatHandler
-from src.api.services.dataset_service.service import DatasetService
+from src.api.services.dataset_service.service import DatasetService, EpisodeLoadError
 
 
 class StubHandler:
@@ -235,6 +235,20 @@ class TestGetEpisodeHandlerChain:
         assert result is not None
         assert result.meta.length == 0
         assert result.trajectory_data == []
+
+    def test_get_episode_raises_when_the_owning_handler_cannot_load_it(self, service_with_stubs):
+        svc = service_with_stubs
+        primary = StubHandler("primary", results={"load_episode": None})
+        secondary = StubHandler("secondary")
+        primary._has_loader_ids.add("ds1")
+        svc._handlers = [primary, secondary]
+        svc._lerobot_handler = primary
+        svc._hdf5_handler = secondary
+        svc._datasets["ds1"] = DatasetInfo(id="ds1", name="ds1", total_episodes=2, fps=30.0)
+
+        with pytest.raises(EpisodeLoadError, match="Episode 1 of dataset 'ds1' could not be loaded"):
+            asyncio.run(svc.get_episode("ds1", 1))
+        assert asyncio.run(svc.get_episode("ds1", 2)) is None
 
     def test_get_episode_blob_sync_delegates_to_handler(self, tmp_path):
         """Blob sync path should delegate loader creation to the handler."""

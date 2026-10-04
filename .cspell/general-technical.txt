@@ -1699,6 +1699,7 @@ acrdev
 eeuo
 gpustat
 libsm
+libsvtav
 libvulkan
 libxext
 libxrender

@@ -34,6 +34,8 @@ Interactive agent for launching, browsing, annotating, and improving the Dataset
 
 Start the dataviewer app, optionally configuring the dataset path.
 
+If the caller supplies the URL of a Dataviewer that is already running, such as the Sim Workspace Command Center's instance in a Sim-to-Real handoff, open that URL in Step 3 and skip Steps 1 and 2. Starting another copy would put a second Dataviewer on the same data.
+
 #### Step 1: Configure Dataset Path (if provided)
 
 If the user provides a dataset path:
@@ -60,16 +62,20 @@ If no path is provided, retain the configured `DATA_DIR` or launcher default. Ch
 
 #### Step 3: Open in Browser
 
-1. Open `http://localhost:${frontendPort}` (default 5173) using `open_browser_page` to launch SimpleBrowser for the user.
-2. Load Playwright MCP tools with `tool_search_tool_regex`. Playwright runs headlessly (configured with `--headless` in `.vscode/mcp.json`) so it does not open a separate browser window.
-3. Take a `browser_snapshot` to confirm the UI loaded.
+1. Open the supplied URL, or `http://localhost:${frontendPort}` (default 5173), with `open_browser_page` so the user sees the app.
+2. Load browser automation tools: the integrated browser tools when the host provides them, otherwise the Playwright MCP tools through `tool_search_tool_regex`. Playwright MCP runs headlessly (configured with `--headless` in `.vscode/mcp.json`) so it does not open a separate browser window.
+3. Read the page with `read_page` or `browser_snapshot` to confirm the UI loaded.
 4. Report the loaded datasets and episode count to the user.
 
-Proceed to Phase 2 for interactive browsing (requires Playwright MCP tools), or Phase 3 when the user requests feature changes.
+Proceed to Phase 2 for interactive browsing (requires browser automation tools), or Phase 3 when the user requests feature changes.
 
 ### Phase 2: Interactive Browsing
 
-Use Playwright MCP tools (`mcp_playwright_browser_*`) to interact with the running dataviewer headlessly. The user sees the app in SimpleBrowser (`open_browser_page`); Playwright operates invisibly on the same URL. If Playwright MCP tools are not available, use `open_browser_page` and guide the user through manual interaction.
+Use the integrated browser tools (`read_page`, `click_element`, `type_in_page`, `run_playwright_code`, `screenshot_page`) on the page the user sees, or the Playwright MCP tools (`mcp_playwright_browser_*`) headlessly on the same URL. If neither is available, use `open_browser_page` and guide the user through manual interaction.
+The Edit Tools trajectory editor's adjustments preview on the plot. HDF5 exports keep the recorded `data/qpos` and add the adjustments beside it as `data/qpos_adjusted`, with `data/qpos_adjusted_mask` marking the edited rows.
+LeRobot v3.0 sources export to a new LeRobot dataset in a new or empty folder. `observation.state` stays as recorded, the adjustments go to `adjusted.observation.state` and its mask, and `dataviewer-export.json` maps output frames to source frames.
+Subtasks become LeRobot `subtask` rows in `language_persistent`, each starting at its first surviving frame, and recorded language annotations move with the edited frames.
+Reopened exports show their subtasks in the editor, and re-exports keep unchanged ones as recorded. The export dialog can also write each episode's latest saved language instruction as `task_aug` and `plan` rows.
 
 #### Available UI Interactions
 
@@ -82,18 +88,20 @@ Use Playwright MCP tools (`mcp_playwright_browser_*`) to interact with the runni
 - **Check console**: Monitor browser console for errors or warnings.
 - **Inspect network**: Check API calls and responses.
 
-#### Playwright Interaction Patterns
+#### Browser Interaction Patterns
 
 When the user asks to browse or inspect the app:
 
-1. Take a `browser_snapshot` to see the current accessibility tree with element refs.
-2. Perform the requested interaction using the ref from the snapshot.
-3. Wait for content to load (use `browser_wait_for` with expected text).
-4. Take a screenshot or snapshot to show the result.
+1. Read the page (`read_page` or `browser_snapshot`) to see the current accessibility tree with element refs.
+2. Perform the requested interaction using the ref from that read.
+3. Wait for content to load (`browser_wait_for` with expected text, or the same wait in `run_playwright_code`).
+4. Take a screenshot or read the page again to show the result.
 5. Report findings to the user.
 
 > [!IMPORTANT]
-> Element refs are invalidated after any page navigation or content change. Always take a fresh `browser_snapshot` before clicking or typing. Never reuse refs from a previous snapshot.
+> Element refs are invalidated after any page navigation or content change. Always read the page again before clicking or typing. Never reuse refs from an earlier read.
+
+The script examples below use Playwright MCP's `browser_evaluate`; run the same function body with `run_playwright_code` when using the integrated browser tools.
 
 For scrolling the episode sidebar:
 
@@ -171,10 +179,10 @@ Batch analysis across all episodes using Python scripts via the terminal for eff
 
 Local labels are stored at `{DATA_DIR}/{dataset_id}/meta/episode_labels.json`. Clear labels through revision-conditional API updates when requested, not by overwriting a running server's files.
 
-#### Step 4: Verify via Playwright UI
+#### Step 4: Verify in the UI
 
-1. Refresh the page with `browser_navigate`.
-2. Wait for episodes to load with `browser_wait_for`.
+1. Refresh the page with `navigate_page` or `browser_navigate`.
+2. Wait for episodes to load (`browser_wait_for`, or the same wait in `run_playwright_code`).
 3. Take a screenshot showing labeled episodes in the sidebar.
 4. Click label filter buttons to verify counts (e.g., "31 / 64 Episodes" when filtering by LEFT).
 5. Scroll through the sidebar to confirm all episodes show labels.
@@ -263,11 +271,11 @@ When the user wants confidence in the wiring before paying for inference:
 3. Pipe each dataset to its own JSONL under `outputs/vlm-judge/`.
 4. After CLI completion, open the dataviewer and Playwright-click into a sample episode to confirm the panel renders the cached payload (`cached: true` badge).
 
-#### Step 4: Verify in the UI via Playwright
+#### Step 4: Verify the Judge Panel in the UI
 
-1. `browser_snapshot` to read the Trajectory tab DOM.
-2. Either click the **Run judge** button via the snapshot ref, or use the JS fallback in the skill (find the `VLM Judge` `<h3>` and click the matching button).
-3. `browser_wait_for(text="SUCCESS")` (or `FAILURE` / `Inconclusive`) to confirm the outcome badge rendered.
+1. Read the Trajectory tab with `read_page` or `browser_snapshot`.
+2. Either click the **Run judge** button through that read's ref, or use the script fallback in the skill (find the `VLM Judge` `<h3>` and click the matching button).
+3. Wait for `SUCCESS` (or `FAILURE` / `Inconclusive`) with `browser_wait_for` or `run_playwright_code` to confirm the outcome badge rendered.
 4. Spot-check failure cases by selecting an episode you expect to fail and confirming the milestones list + failure-mode chip render.
 
 #### Step 5: Summarize

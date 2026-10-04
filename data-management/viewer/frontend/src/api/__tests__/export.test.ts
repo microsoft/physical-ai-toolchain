@@ -75,8 +75,6 @@ const baseRequest: ExportRequestWithEdits = {
   episodeIndices: [0, 1, 2],
   outputPath: '/tmp/out',
   applyEdits: true,
-  includeSubtasks: false,
-  format: 'parquet',
 }
 
 describe('exportEpisodes', () => {

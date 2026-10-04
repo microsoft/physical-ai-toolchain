@@ -2,7 +2,7 @@
 title: Contributing
 description: How to contribute to the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-10-01
 ms.topic: how-to
 keywords:
   - contributing
@@ -144,6 +144,7 @@ Run these commands to validate changes before submitting a PR:
 
 ```bash
 npm run lint:md        # Markdownlint
+npm run lint:tables    # Markdown table format check
 npm run lint:links     # Language-specific URL check
 npm run lint:toml      # Taplo format check
 npm run lint:vuln      # OSV-Scanner v2.3.8 dependency vulnerability scan
@@ -167,6 +168,7 @@ Required CI lint checks enforce warnings-as-errors. Advisory security scans are 
 | ShellCheck (lint:sh)  | Warnings + errors | .shellcheckrc                                     |
 | Python (lint:py)      | Errors block      | pyproject.toml [tool.ruff]                        |
 | TOML (lint:toml)      | Formatting blocks | taplo.toml                                        |
+| Tables (lint:tables)  | Formatting blocks | scripts/linting/Format-MarkdownTables.ps1         |
 | uv lock (lint:uvlock) | Drift blocks      | scripts/linting/Invoke-UvLockConsistencyCheck.ps1 |
 | Vulns (lint:vuln)     | Advisory in CI    | osv-scanner.toml                                  |
 | Link language check   | Errors block      | scripts/linting/Link-Lang-Check.ps1               |

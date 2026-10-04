@@ -15,7 +15,7 @@ import {
 } from '@/stores'
 import { getEffectiveFrameCount, getOriginalIndex } from '@/stores/edit-store'
 import { useLabelStore } from '@/stores/label-store'
-import { createDefaultSubtask } from '@/types/episode-edit'
+import { createDefaultSubtask, recordedSubtaskSegments } from '@/types/episode-edit'
 
 import { useAnnotationWorkspaceDiagnostics } from './useAnnotationWorkspaceDiagnostics'
 import { useAnnotationWorkspaceEpisodeActions } from './useAnnotationWorkspaceEpisodeActions'
@@ -127,7 +127,12 @@ export function useAnnotationWorkspaceShell({
         editEpisodeIndex !== newEpisodeIndex ||
         editPrincipalScopeId !== principalQuery.data.scopeId
       ) {
-        initializeEdit(newDatasetId, newEpisodeIndex, principalQuery.data.scopeId)
+        initializeEdit(
+          newDatasetId,
+          newEpisodeIndex,
+          principalQuery.data.scopeId,
+          recordedSubtaskSegments(currentEpisode.subtasks ?? []),
+        )
       }
     }
   }, [

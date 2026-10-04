@@ -4,12 +4,15 @@ import { act } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  mockInitializeEdit,
   mockRecordDiagnosticEvent,
   setupAnnotationWorkspaceTestCase,
   teardownAnnotationWorkspaceTestCase,
+  testState,
 } from '@/components/__tests__/support/annotationWorkspaceTestSupport'
 import { useAnnotationWorkspaceShell } from '@/components/annotation-workspace/useAnnotationWorkspaceShell'
 import { renderHookWithProviders } from '@/test-utils/render'
+import { SUBTASK_COLORS } from '@/types/episode-edit'
 
 describe('useAnnotationWorkspaceShell', () => {
   beforeEach(setupAnnotationWorkspaceTestCase)
@@ -47,5 +50,38 @@ describe('useAnnotationWorkspaceShell', () => {
       activeTab: 'trajectory',
       episodeIndex: 0,
     })
+  })
+
+  it('starts the edit store from the subtasks recorded with the episode', () => {
+    testState.recordedSubtasks = [
+      {
+        id: 'recorded-0',
+        label: 'Reach',
+        frameRange: [0, 4],
+        color: null,
+        source: 'recorded',
+        description: null,
+      },
+    ]
+
+    renderHookWithProviders(() => useAnnotationWorkspaceShell({}))
+
+    expect(mockInitializeEdit).toHaveBeenLastCalledWith('dataset-1', 0, 'principal-test', [
+      {
+        id: 'recorded-0',
+        label: 'Reach',
+        frameRange: [0, 4],
+        color: SUBTASK_COLORS[0],
+        source: 'recorded',
+      },
+    ])
+  })
+
+  it('starts the edit store with no subtasks when the episode records none', () => {
+    testState.recordedSubtasks = undefined
+
+    renderHookWithProviders(() => useAnnotationWorkspaceShell({}))
+
+    expect(mockInitializeEdit).toHaveBeenLastCalledWith('dataset-1', 0, 'principal-test', [])
   })
 })

@@ -45,6 +45,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # The Markdown table formatter tests need the repository's node_modules.
+      - name: Setup Node.js and install dependencies
+        uses: ./.github/actions/setup-node-deps
+
       - name: Create logs directory
         run: New-Item -ItemType Directory -Force -Path logs | Out-Null
 

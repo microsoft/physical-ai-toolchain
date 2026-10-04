@@ -26,32 +26,15 @@ interface BuildTrajectoryChartDataOptions {
 
 export function applyTrajectoryAdjustment(
   value: number,
-  jointIndex: number,
+  channelIndex: number,
   adjustment: TrajectoryAdjustment | undefined,
 ) {
-  let adjusted = value
-
-  if (!adjustment) {
-    return adjusted
+  const setValue = adjustment?.channelValues?.[channelIndex]
+  if (setValue !== undefined) {
+    return setValue
   }
 
-  if (adjustment.rightArmDelta && jointIndex >= 0 && jointIndex <= 2) {
-    adjusted += adjustment.rightArmDelta[jointIndex]
-  }
-
-  if (adjustment.leftArmDelta && jointIndex >= 8 && jointIndex <= 10) {
-    adjusted += adjustment.leftArmDelta[jointIndex - 8]
-  }
-
-  if (jointIndex === 7 && adjustment.rightGripperOverride !== undefined) {
-    adjusted = adjustment.rightGripperOverride
-  }
-
-  if (jointIndex === 15 && adjustment.leftGripperOverride !== undefined) {
-    adjusted = adjustment.leftGripperOverride
-  }
-
-  return adjusted
+  return value + (adjustment?.channelDeltas?.[channelIndex] ?? 0)
 }
 
 export function normalizeSeries(value: number, min: number, max: number) {
@@ -78,13 +61,20 @@ function normalizeSeriesValues(seriesValues: number[][]) {
 function buildNamedVariableValues(
   trajectoryData: readonly TrajectoryPointLike[],
   trajectoryVariables: readonly TrajectoryVariableLike[],
+  trajectoryAdjustments: ReadonlyMap<number, TrajectoryAdjustment>,
 ) {
-  return trajectoryData.map((point) =>
-    trajectoryVariables.map((variable) => {
-      const value = point.variables?.[variable.key]
-      return typeof value === 'number' && Number.isFinite(value) ? value : 0
-    }),
-  )
+  return trajectoryData.map((point) => {
+    const adjustment = trajectoryAdjustments.get(point.frame)
+
+    return trajectoryVariables.map((variable) => {
+      const raw = point.variables?.[variable.key]
+      const value = typeof raw === 'number' && Number.isFinite(raw) ? raw : 0
+      // State variable `index` is the same channel the raw joint-position view adjusts.
+      return variable.kind === 'state' && typeof variable.index === 'number'
+        ? applyTrajectoryAdjustment(value, variable.index, adjustment)
+        : value
+    })
+  })
 }
 
 export function buildTrajectoryChartData({
@@ -96,7 +86,7 @@ export function buildTrajectoryChartData({
 }: BuildTrajectoryChartDataOptions) {
   const shouldUseNamedVariables = !showVelocity && trajectoryVariables.length > 0
   const seriesValues = shouldUseNamedVariables
-    ? buildNamedVariableValues(trajectoryData, trajectoryVariables)
+    ? buildNamedVariableValues(trajectoryData, trajectoryVariables, trajectoryAdjustments)
     : trajectoryData.map((point) => {
         const adjustment = trajectoryAdjustments.get(point.frame)
 

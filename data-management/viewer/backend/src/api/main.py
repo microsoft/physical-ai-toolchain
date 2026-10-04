@@ -22,6 +22,7 @@ from .middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddleware
 from .rate_limiter import limiter
 from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, vlm_judge
 from .routes import ai_analysis
+from .services.dataset_service import EpisodeLoadError
 from .storage import RevisionConflictError
 from .swagger_ui import install_responsive_swagger_ui
 
@@ -155,6 +156,12 @@ async def revision_conflict_handler(_request, exc: RevisionConflictError) -> JSO
         },
         headers=headers,
     )
+
+
+@app.exception_handler(EpisodeLoadError)
+async def episode_load_error_handler(_request, exc: EpisodeLoadError) -> JSONResponse:
+    """Report an episode its dataset's handler couldn't load, rather than letting it pass as empty."""
+    return JSONResponse(status_code=500, content={"code": "EPISODE_LOAD_FAILED", "message": str(exc)})
 
 
 @app.exception_handler(Exception)

@@ -118,6 +118,34 @@ class TestLoadEpisode:
         assert "observation.images.il-camera" in ep.video_urls
 
 
+class TestRecordedSubtasks:
+    """Subtask rows recorded in ``language_persistent`` come back with the episode."""
+
+    def test_recorded_subtask_rows_come_back_as_episode_subtasks(self, tmp_path):
+        from .lerobot_sources import write_source
+        from .test_lerobot_export import _add_language, _row
+
+        source = write_source(tmp_path / "capture/lerobot")
+        rows = [
+            _row("subtask", "Reach", 0.0),
+            _row("plan", "1. Reach\n2. Grasp", 0.0),
+            _row("subtask", "", 0.5),
+            _row("subtask", "Grasp", 0.7),
+            _row("subtask", "After the last frame", 1.2),
+        ]
+        _add_language(source, {0: rows}, {})
+        handler = LeRobotFormatHandler()
+        assert handler.get_loader("capture--lerobot", source)
+
+        recorded = handler.load_episode("capture--lerobot", 0).subtasks
+
+        assert [(s.id, s.label, s.frame_range, s.color, s.source) for s in recorded] == [
+            ("recorded-0", "Reach", (0, 4), None, "recorded"),
+            ("recorded-1", "Grasp", (7, 11), None, "recorded"),
+        ]
+        assert handler.load_episode("capture--lerobot", 1).subtasks == []
+
+
 class TestGetTrajectory:
     """Test trajectory-only extraction."""
 
@@ -344,6 +372,7 @@ class FakeLREpisode:
         self.task_index = 0
         self.video_paths = {"observation.images.cam0": "/tmp/cam0.mp4"}
         self.additional_features = {}
+        self.subtasks = []
 
 
 class FakeLoader:

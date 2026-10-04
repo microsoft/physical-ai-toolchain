@@ -75,6 +75,8 @@ $script:DerivedFiles = @(
     [ordered]@{ Path = 'scripts/security/Test-WorkflowPermissions.ps1'; Baseline = 'source-header' }
     [ordered]@{ Path = 'scripts/security/Test-DangerousWorkflow.ps1'; Baseline = 'source-header' }
     [ordered]@{ Path = 'scripts/security/Test-PublicDependencyFeeds.ps1'; Baseline = 'source-header' }
+    [ordered]@{ Path = 'scripts/linting/Format-MarkdownTables.ps1'; Baseline = 'source-header' }
+    [ordered]@{ Path = 'scripts/tests/linting/Test-Format-MarkdownTables.Tests.ps1'; Baseline = 'source-header' }
 )
 
 # ============================================================

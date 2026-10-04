@@ -76,6 +76,14 @@ describe('useEpisodeStore', () => {
 
       expect(useEpisodeStore.getState().currentIndex).toBe(-1)
     })
+
+    it('records the dataset the episode belongs to', () => {
+      useEpisodeStore.getState().setCurrentEpisode(mockEpisodeData, 'dataset-a')
+      expect(useEpisodeStore.getState().currentDatasetId).toBe('dataset-a')
+
+      useEpisodeStore.getState().setCurrentEpisode(null)
+      expect(useEpisodeStore.getState().currentDatasetId).toBeNull()
+    })
   })
 
   describe('navigation', () => {

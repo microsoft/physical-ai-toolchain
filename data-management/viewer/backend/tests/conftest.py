@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -46,6 +47,15 @@ TEST_DATASET_PATH = os.environ.get(
 )
 
 TEST_DATASET_ID = os.environ.get("TEST_DATASET_ID", "lerobot")
+
+
+@pytest.fixture
+def held_locks() -> Iterator[list[int]]:
+    """Descriptors of export locks a test holds as another export would, closed when the test ends."""
+    held: list[int] = []
+    yield held
+    for fd in held:
+        os.close(fd)
 
 
 @pytest.fixture

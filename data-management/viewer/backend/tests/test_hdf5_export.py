@@ -16,12 +16,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.models.datasources import FrameInsertion
-from src.api.services.hdf5_exporter import (
+from src.api.services.episode_edits import (
     EpisodeEditOperations,
-    HDF5Exporter,
     SubtaskSegment,
+    TrajectoryAdjustment,
     parse_edit_operations,
 )
+from src.api.services.hdf5_exporter import HDF5Exporter
 
 # ============================================================================
 # Helpers
@@ -278,7 +279,11 @@ class TestParseEditOperations:
 class TestExportEpisode:
     """Integration tests for the full export pipeline."""
 
-    def test_export_single_episode_no_edits(self, exporter: HDF5Exporter, hdf5_export_dir: Path):
+    def test_export_single_episode_no_edits(
+        self, exporter: HDF5Exporter, hdf5_dataset_dir: Path, hdf5_export_dir: Path
+    ):
+        with h5py.File(hdf5_dataset_dir / "episode_000000.hdf5", "r") as f:
+            source = f["data"]["qpos"][:]
         result = exporter.export_episode(episode_index=0)
 
         assert result.success is True
@@ -291,6 +296,9 @@ class TestExportEpisode:
             assert "data" in f
             assert "qpos" in f["data"]
             assert f["data"]["qpos"].shape[0] == 10  # all frames
+            np.testing.assert_array_equal(f["data"]["qpos"][:], source)
+            assert "qpos_adjusted" not in f["data"]
+            assert "qpos_adjusted_mask" not in f["data"]
             assert "observations" in f
             assert "images" in f["observations"]
             assert "top_camera" in f["observations"]["images"]
@@ -350,6 +358,62 @@ class TestExportEpisode:
         assert len(subtasks) == 2
         assert subtasks[0]["label"] == "Reach"
 
+    def test_export_maps_subtasks_across_inserted_frames(self, exporter: HDF5Exporter, hdf5_export_dir: Path):
+        edits = EpisodeEditOperations(
+            dataset_id="test",
+            episode_index=0,
+            removed_frames={1},
+            inserted_frames=[FrameInsertion(after_frame_index=2, interpolation_factor=0.5)],
+            subtasks=[
+                SubtaskSegment(id="st-1", label="Reach", frame_range=(0, 2), color="#ff0000", source="manual"),
+                SubtaskSegment(id="st-2", label="Grasp", frame_range=(3, 9), color="#00ff00", source="manual"),
+            ],
+        )
+
+        assert exporter.export_episode(episode_index=0, edits=edits).success is True
+
+        subtasks = json.loads((hdf5_export_dir / "episode_000000.subtasks.json").read_text())
+        assert [subtask["frame_range"] for subtask in subtasks] == [[0, 1], [3, 9]]
+
+    def test_export_clamps_subtasks_to_surviving_frames(self, exporter: HDF5Exporter, hdf5_export_dir: Path):
+        edits = EpisodeEditOperations(
+            dataset_id="test",
+            episode_index=0,
+            removed_frames={0, 1, 9},
+            subtasks=[
+                SubtaskSegment(id="st-1", label="Reach", frame_range=(0, 4), color="#ff0000", source="manual"),
+                SubtaskSegment(id="st-2", label="Grasp", frame_range=(5, 20), color="#00ff00", source="manual"),
+                SubtaskSegment(id="st-3", label="Gone", frame_range=(0, 1), color="#0000ff", source="auto"),
+            ],
+        )
+
+        assert exporter.export_episode(episode_index=0, edits=edits).success is True
+
+        subtasks = json.loads((hdf5_export_dir / "episode_000000.subtasks.json").read_text())
+        assert [(subtask["label"], subtask["frame_range"]) for subtask in subtasks] == [
+            ("Reach", [0, 2]),
+            ("Grasp", [3, 6]),
+        ]
+
+    def test_recorded_subtasks_carry_forward_unless_the_edits_replace_them(
+        self, exporter: HDF5Exporter, hdf5_dataset_dir: Path, hdf5_export_dir: Path
+    ):
+        recorded = [
+            {"id": "st-1", "label": "Reach", "frame_range": [0, 4], "color": "#ff0000", "source": "manual"},
+            {"id": "st-2", "label": "Grasp", "frame_range": [5, 9], "color": "#00ff00", "source": "manual"},
+        ]
+        (hdf5_dataset_dir / "episode_000000.subtasks.json").write_text(json.dumps(recorded))
+        subtasks_path = hdf5_export_dir / "episode_000000.subtasks.json"
+
+        kept = EpisodeEditOperations(dataset_id="test", episode_index=0, removed_frames={0, 1})
+        assert exporter.export_episode(episode_index=0, edits=kept).success is True
+        carried = json.loads(subtasks_path.read_text())
+        assert [(subtask["id"], subtask["frame_range"]) for subtask in carried] == [("st-1", [0, 2]), ("st-2", [3, 7])]
+
+        removed = EpisodeEditOperations(dataset_id="test", episode_index=0, subtasks=[])
+        assert exporter.export_episode(episode_index=0, edits=removed).success is True
+        assert not subtasks_path.exists()
+
     def test_export_nonexistent_episode(self, exporter: HDF5Exporter):
         result = exporter.export_episode(episode_index=999)
 
@@ -393,6 +457,65 @@ class TestExportEpisode:
         with h5py.File(hdf5_path, "r") as f:
             # 10 original + 1 inserted = 11
             assert f["data"]["qpos"].shape[0] == 11
+
+    def test_export_with_trajectory_adjustments_adds_derived_qpos(
+        self, exporter: HDF5Exporter, hdf5_dataset_dir: Path, hdf5_export_dir: Path
+    ):
+        with h5py.File(hdf5_dataset_dir / "episode_000000.hdf5", "r") as f:
+            source = f["data"]["qpos"][:]
+        edits = EpisodeEditOperations(
+            dataset_id="test",
+            episode_index=0,
+            removed_frames={1},
+            inserted_frames=[FrameInsertion(after_frame_index=3, interpolation_factor=0.5)],
+            trajectory_adjustments=[
+                TrajectoryAdjustment(frame_index=2, channel_deltas={0: 0.5, 1: 100.0}, channel_values={1: 9.0}),
+                TrajectoryAdjustment(frame_index=4, channel_deltas={0: 1.0}),
+            ],
+        )
+
+        result = exporter.export_episode(episode_index=0, edits=edits)
+
+        assert result.success is True, result.error
+        with h5py.File(hdf5_export_dir / "episode_000000.hdf5", "r") as f:
+            qpos, adjusted, mask = (f["data"][name][:] for name in ("qpos", "qpos_adjusted", "qpos_adjusted_mask"))
+        # Exported rows: frames 0, 2 and 3, the row inserted after frame 3, then frames 4 to 9.
+        assert qpos.shape == adjusted.shape == (10, 6)
+        np.testing.assert_array_equal(qpos[[0, 1, 2]], source[[0, 2, 3]])
+        np.testing.assert_array_equal(qpos[4:], source[4:])
+        frame_2 = source[2].copy()
+        frame_2[0] += 0.5
+        frame_2[1] = 9.0
+        np.testing.assert_allclose(adjusted[1], frame_2)
+        frame_4 = source[4].copy()
+        frame_4[0] += 1.0
+        np.testing.assert_allclose(adjusted[4], frame_4)
+        assert mask.tolist() == [False, True, False, True, True, False, False, False, False, False]
+        np.testing.assert_array_equal(adjusted[~mask], qpos[~mask])
+
+        meta = json.loads((hdf5_export_dir / "episode_000000.meta.json").read_text())
+        assert meta["edits"]["adjusted_dataset"] == "data/qpos_adjusted"
+        assert meta["edits"]["trajectory_adjustments"] == [
+            {"frame_index": 2, "channel_deltas": {"0": 0.5, "1": 100.0}, "channel_values": {"1": 9.0}},
+            {"frame_index": 4, "channel_deltas": {"0": 1.0}, "channel_values": {}},
+        ]
+
+    @pytest.mark.parametrize(
+        ("adjustment", "message"),
+        [
+            (TrajectoryAdjustment(frame_index=10, channel_deltas={0: 0.5}), "frame 10"),
+            (TrajectoryAdjustment(frame_index=2, channel_values={6: 0.5}), "channel 6"),
+        ],
+    )
+    def test_export_rejects_an_adjustment_outside_the_episode(
+        self, exporter: HDF5Exporter, adjustment: TrajectoryAdjustment, message: str
+    ):
+        edits = EpisodeEditOperations(dataset_id="test", episode_index=0, trajectory_adjustments=[adjustment])
+
+        result = exporter.export_episode(episode_index=0, edits=edits)
+
+        assert result.success is False
+        assert message in result.error
 
 
 # ============================================================================

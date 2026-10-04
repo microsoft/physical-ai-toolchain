@@ -1,54 +1,75 @@
 /**
- * Trajectory editor for adjusting XYZ position data at each frame.
+ * Trajectory editor for adjusting the state vector at each frame.
  *
- * Provides controls to modify joint positions with delta adjustments
- * that are stored non-destructively in the edit store.
+ * Each state channel takes an additive delta or a set value. Adjustments are stored
+ * non-destructively in the edit store and preview on the trajectory plot. Exports keep the recorded
+ * positions and add the adjustments beside them with a mask of the edited rows: qpos_adjusted in
+ * HDF5 exports and adjusted.observation.state in LeRobot exports.
  */
 
 import { Check, RotateCcw, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
+import { resolveStateChannelLabel } from '@/components/episode-viewer/joint-constants'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { useEpisodeStore, usePlaybackControls, useTrajectoryAdjustmentState } from '@/stores'
-import type { TrajectoryPoint } from '@/types/api'
+import { useJointConfigStore } from '@/stores/joint-config-store'
 
 interface TrajectoryEditorProps {
   /** Additional CSS classes */
   className?: string
 }
 
-interface AxisInputProps {
+type ChannelRecord = Record<number, number>
+
+function withoutChannel(record: ChannelRecord, index: number): ChannelRecord {
+  return Object.fromEntries(Object.entries(record).filter(([key]) => Number(key) !== index))
+}
+
+interface ChannelEditorProps {
   label: string
-  accessibleLabel: string
   value: number
   delta: number
+  setValue: number | undefined
   onDeltaChange: (delta: number) => void
-  color: string
+  onSetValueChange: (value: number | undefined) => void
 }
 
 /**
- * Individual axis input with delta adjustment.
+ * One state channel: a delta slider and input, a set-value input, and a reset.
  */
-function AxisInput({ label, accessibleLabel, value, delta, onDeltaChange, color }: AxisInputProps) {
-  const adjustedValue = value + delta
-  // Local state for text input to allow partial typing (e.g., "-" or "0.")
-  const [inputValue, setInputValue] = useState(delta.toFixed(4))
+function ChannelEditor({
+  label,
+  value,
+  delta,
+  setValue,
+  onDeltaChange,
+  onSetValueChange,
+}: ChannelEditorProps) {
+  const isSet = setValue !== undefined
+  const hasChange = delta !== 0 || isSet
+  // Local text state allows partial typing such as "-" or "0." before a value parses.
+  const [deltaText, setDeltaText] = useState(delta.toFixed(4))
+  const [valueText, setValueText] = useState(isSet ? setValue.toFixed(4) : '')
+  // Re-sync the text only when the parsed value changes from outside the input.
+  const [syncedDelta, setSyncedDelta] = useState(delta)
+  const [syncedValue, setSyncedValue] = useState(setValue)
+  if (delta !== syncedDelta) {
+    setSyncedDelta(delta)
+    setDeltaText(delta.toFixed(4))
+  }
+  if (setValue !== syncedValue) {
+    setSyncedValue(setValue)
+    setValueText(setValue === undefined ? '' : setValue.toFixed(4))
+  }
 
-  // Sync local input when delta changes externally
-  useEffect(() => {
-    setInputValue(delta.toFixed(4))
-  }, [delta])
-
-  const handleInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const text = e.target.value
-      setInputValue(text)
-
-      const parsed = parseFloat(text)
+  const handleDeltaText = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      setDeltaText(event.target.value)
+      const parsed = parseFloat(event.target.value)
       if (!Number.isNaN(parsed)) {
         onDeltaChange(parsed)
       }
@@ -56,206 +77,99 @@ function AxisInput({ label, accessibleLabel, value, delta, onDeltaChange, color 
     [onDeltaChange],
   )
 
-  const handleInputBlur = useCallback(() => {
-    // On blur, reset to properly formatted value
-    setInputValue(delta.toFixed(4))
-  }, [delta])
-
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between">
-        <Label className={cn('text-xs font-medium', color)}>{label}</Label>
-        <span className="text-muted-foreground font-mono text-xs">{adjustedValue.toFixed(4)}</span>
-      </div>
-      <div className="flex items-center gap-2">
-        <input
-          type="range"
-          aria-label={accessibleLabel}
-          value={delta}
-          onChange={(e) => onDeltaChange(parseFloat(e.target.value))}
-          min={-0.5}
-          max={0.5}
-          step={0.001}
-          className="accent-primary h-2 flex-1"
-        />
-        <Input
-          type="number"
-          aria-label={accessibleLabel}
-          value={inputValue}
-          onChange={handleInputChange}
-          onBlur={handleInputBlur}
-          step={0.001}
-          className="h-7 w-20 font-mono text-xs"
-        />
-      </div>
-      {delta !== 0 && (
-        <div className="text-muted-foreground text-xs">
-          Original: {value.toFixed(4)} → Δ: {delta >= 0 ? '+' : ''}
-          {delta.toFixed(4)}
-        </div>
-      )}
-    </div>
-  )
-}
-
-interface ArmEditorProps {
-  title: string
-  titleColor: string
-  currentPoint: TrajectoryPoint
-  posIndices: [number, number, number]
-  gripperIndex: number
-  delta: [number, number, number] | undefined
-  gripperOverride: number | undefined
-  onDeltaChange: (delta: [number, number, number]) => void
-  onGripperChange: (value: number | undefined) => void
-  onReset: () => void
-}
-
-/**
- * Editor panel for a single arm's XYZ and gripper.
- */
-function ArmEditor({
-  title,
-  titleColor,
-  currentPoint,
-  posIndices,
-  gripperIndex,
-  delta,
-  gripperOverride,
-  onDeltaChange,
-  onGripperChange,
-  onReset,
-}: ArmEditorProps) {
-  const positions = currentPoint.jointPositions
-  const currentDelta = useMemo((): [number, number, number] => delta ?? [0, 0, 0], [delta])
-  const hasChanges = delta !== undefined || gripperOverride !== undefined
-  const currentGripperValue = gripperOverride ?? positions[gripperIndex] ?? 0
-
-  // Local state for gripper input to allow partial typing
-  const [gripperInputValue, setGripperInputValue] = useState(currentGripperValue.toFixed(3))
-
-  // Sync local input when gripper value changes externally
-  useEffect(() => {
-    setGripperInputValue(currentGripperValue.toFixed(3))
-  }, [currentGripperValue])
-
-  const handleGripperInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const text = e.target.value
-      setGripperInputValue(text)
-
-      const parsed = parseFloat(text)
+  const handleValueText = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      setValueText(event.target.value)
+      if (event.target.value.trim() === '') {
+        onSetValueChange(undefined)
+        return
+      }
+      const parsed = parseFloat(event.target.value)
       if (!Number.isNaN(parsed)) {
-        onGripperChange(parsed)
+        onSetValueChange(parsed)
       }
     },
-    [onGripperChange],
-  )
-
-  const handleGripperInputBlur = useCallback(() => {
-    setGripperInputValue(currentGripperValue.toFixed(3))
-  }, [currentGripperValue])
-
-  const handleAxisChange = useCallback(
-    (axis: 0 | 1 | 2, value: number) => {
-      const newDelta: [number, number, number] = [...currentDelta]
-      newDelta[axis] = value
-      onDeltaChange(newDelta)
-    },
-    [currentDelta, onDeltaChange],
+    [onSetValueChange],
   )
 
   return (
-    <div className="bg-muted/50 space-y-3 rounded-lg p-3">
-      <div className="flex items-center justify-between">
-        <h4 className={cn('text-sm font-medium', titleColor)}>{title}</h4>
-        {hasChanges && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={onReset}>
-                <RotateCcw className="h-3 w-3" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Reset {title} adjustments</TooltipContent>
-          </Tooltip>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <AxisInput
-          label="X"
-          accessibleLabel={title + ' X delta'}
-          value={positions[posIndices[0]] ?? 0}
-          delta={currentDelta[0]}
-          onDeltaChange={(v) => handleAxisChange(0, v)}
-          color="text-red-500"
-        />
-        <AxisInput
-          label="Y"
-          accessibleLabel={title + ' Y delta'}
-          value={positions[posIndices[1]] ?? 0}
-          delta={currentDelta[1]}
-          onDeltaChange={(v) => handleAxisChange(1, v)}
-          color="text-green-500"
-        />
-        <AxisInput
-          label="Z"
-          accessibleLabel={title + ' Z delta'}
-          value={positions[posIndices[2]] ?? 0}
-          delta={currentDelta[2]}
-          onDeltaChange={(v) => handleAxisChange(2, v)}
-          color="text-blue-500"
-        />
-      </div>
-
-      {/* Gripper override */}
-      <div className="space-y-1 border-t pt-2">
-        <div className="flex items-center justify-between">
-          <Label className="text-xs font-medium">Gripper</Label>
+    <div className="space-y-1 border-b pb-2 last:border-b-0">
+      <div className="flex items-center justify-between gap-2">
+        <Label className="truncate text-xs font-medium">{label}</Label>
+        <div className="flex items-center gap-1">
           <span className="text-muted-foreground font-mono text-xs">
-            {currentGripperValue.toFixed(4)}
+            {(isSet ? setValue : value + delta).toFixed(4)}
           </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="range"
-            aria-label={title + ' Gripper value'}
-            value={currentGripperValue}
-            onChange={(e) => onGripperChange(parseFloat(e.target.value))}
-            min={0}
-            max={1}
-            step={0.01}
-            className="accent-primary h-2 flex-1"
-          />
-          <Input
-            type="number"
-            aria-label={title + ' Gripper value'}
-            value={gripperInputValue}
-            onChange={handleGripperInputChange}
-            onBlur={handleGripperInputBlur}
-            step={0.01}
-            min={0}
-            max={1}
-            className="h-7 w-20 font-mono text-xs"
-          />
-          {gripperOverride !== undefined && (
+          {hasChange && (
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 w-7 p-0"
-              onClick={() => onGripperChange(undefined)}
+              className="h-6 w-6 p-0"
+              aria-label={`Reset ${label}`}
+              onClick={() => {
+                onDeltaChange(0)
+                onSetValueChange(undefined)
+              }}
             >
               <RotateCcw className="h-3 w-3" />
             </Button>
           )}
         </div>
       </div>
+      <input
+        type="range"
+        aria-label={`${label} delta`}
+        value={delta}
+        onChange={(event) => onDeltaChange(parseFloat(event.target.value))}
+        min={-0.5}
+        max={0.5}
+        step={0.001}
+        disabled={isSet}
+        className="accent-primary h-2 w-full"
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <div className="flex items-center gap-1 text-xs">
+          <span aria-hidden="true" className="text-muted-foreground">
+            Δ
+          </span>
+          <Input
+            type="number"
+            aria-label={`${label} delta`}
+            value={deltaText}
+            onChange={handleDeltaText}
+            onBlur={() => setDeltaText(delta.toFixed(4))}
+            step={0.001}
+            disabled={isSet}
+            className="h-7 min-w-0 px-2 font-mono text-xs md:text-xs"
+          />
+        </div>
+        <div className="flex items-center gap-1 text-xs">
+          <span aria-hidden="true" className="text-muted-foreground">
+            Set
+          </span>
+          <Input
+            type="number"
+            aria-label={`${label} set value`}
+            value={valueText}
+            onChange={handleValueText}
+            onBlur={() => setValueText(setValue === undefined ? '' : setValue.toFixed(4))}
+            step={0.001}
+            className="h-7 min-w-0 px-2 font-mono text-xs md:text-xs"
+          />
+        </div>
+      </div>
+      {hasChange && (
+        <div className="text-muted-foreground text-xs">
+          Original: {value.toFixed(4)} →{' '}
+          {isSet ? `set ${setValue.toFixed(4)}` : `Δ: ${delta >= 0 ? '+' : ''}${delta.toFixed(4)}`}
+        </div>
+      )}
     </div>
   )
 }
 
 /**
- * Trajectory editor component for adjusting XYZ positions at the current frame.
+ * Trajectory editor component for adjusting the state channels at the current frame.
  *
  * @example
  * ```tsx
@@ -285,6 +199,7 @@ interface TrajectoryEditorFrameProps extends TrajectoryEditorProps {
 
 function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFrameProps) {
   const currentEpisode = useEpisodeStore((state) => state.currentEpisode)
+  const jointConfigLabels = useJointConfigStore((state) => state.config.labels)
   const {
     trajectoryAdjustments,
     setTrajectoryAdjustment,
@@ -292,43 +207,56 @@ function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFram
     clearTrajectoryAdjustments,
   } = useTrajectoryAdjustmentState()
 
-  // Get current trajectory point
   const currentPoint = useMemo(() => {
     const trajectoryData = currentEpisode?.trajectoryData || []
     if (trajectoryData.length === 0) return null
     return trajectoryData[Math.min(currentFrame, trajectoryData.length - 1)]
   }, [currentEpisode?.trajectoryData, currentFrame])
 
-  // Get current frame adjustment
+  const stateVariables = useMemo(
+    () =>
+      (currentEpisode?.trajectoryVariables ?? []).filter((variable) => variable.kind === 'state'),
+    [currentEpisode?.trajectoryVariables],
+  )
+
+  // Channel position is the identity of a state channel; named datasets also give it a stable variable key.
+  const channels = useMemo(
+    () =>
+      (currentPoint?.jointPositions ?? []).map((value, index) => ({
+        id: stateVariables[index]?.key ?? `channel-${index}`,
+        index,
+        value,
+        label: resolveStateChannelLabel(index, stateVariables, jointConfigLabels),
+      })),
+    [currentPoint, jointConfigLabels, stateVariables],
+  )
+
   const currentAdjustment = trajectoryAdjustments.get(currentFrame)
+  const [deltas, setDeltas] = useState<ChannelRecord>(() => ({
+    ...currentAdjustment?.channelDeltas,
+  }))
+  const [values, setValues] = useState<ChannelRecord>(() => ({
+    ...currentAdjustment?.channelValues,
+  }))
 
-  // Track local state for real-time updates
-  const [rightArmDelta, setRightArmDelta] = useState<[number, number, number]>(
-    currentAdjustment?.rightArmDelta ?? [0, 0, 0],
-  )
-  const [leftArmDelta, setLeftArmDelta] = useState<[number, number, number]>(
-    currentAdjustment?.leftArmDelta ?? [0, 0, 0],
-  )
-  const [rightGripper, setRightGripper] = useState<number | undefined>(
-    currentAdjustment?.rightGripperOverride,
-  )
-  const [leftGripper, setLeftGripper] = useState<number | undefined>(
-    currentAdjustment?.leftGripperOverride,
-  )
-
-  // Check if there are any changes
-  const hasFrameChanges = useMemo(() => {
-    return (
-      rightArmDelta.some((v) => v !== 0) ||
-      leftArmDelta.some((v) => v !== 0) ||
-      rightGripper !== undefined ||
-      leftGripper !== undefined
-    )
-  }, [rightArmDelta, leftArmDelta, rightGripper, leftGripper])
-
+  const changedDeltas = Object.entries(deltas).filter(([, delta]) => delta !== 0)
+  const hasFrameChanges = changedDeltas.length > 0 || Object.keys(values).length > 0
   const hasAnyAdjustments = trajectoryAdjustments.size > 0
 
-  // Apply current changes to store
+  const setChannelDelta = useCallback((index: number, delta: number) => {
+    setDeltas((current) => ({ ...current, [index]: delta }))
+  }, [])
+
+  const setChannelValue = useCallback((index: number, value: number | undefined) => {
+    if (value === undefined) {
+      setValues((current) => withoutChannel(current, index))
+      return
+    }
+    // A set value replaces the channel's delta, so the delta is cleared rather than kept hidden.
+    setValues((current) => ({ ...current, [index]: value }))
+    setDeltas((current) => withoutChannel(current, index))
+  }, [])
+
   const handleApply = useCallback(() => {
     if (!hasFrameChanges) {
       removeTrajectoryAdjustment(currentFrame)
@@ -336,49 +264,28 @@ function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFram
     }
 
     setTrajectoryAdjustment(currentFrame, {
-      rightArmDelta: rightArmDelta.some((v) => v !== 0) ? rightArmDelta : undefined,
-      leftArmDelta: leftArmDelta.some((v) => v !== 0) ? leftArmDelta : undefined,
-      rightGripperOverride: rightGripper,
-      leftGripperOverride: leftGripper,
+      channelDeltas: changedDeltas.length > 0 ? Object.fromEntries(changedDeltas) : undefined,
+      channelValues: Object.keys(values).length > 0 ? { ...values } : undefined,
     })
   }, [
+    changedDeltas,
     currentFrame,
     hasFrameChanges,
-    rightArmDelta,
-    leftArmDelta,
-    rightGripper,
-    leftGripper,
-    setTrajectoryAdjustment,
     removeTrajectoryAdjustment,
+    setTrajectoryAdjustment,
+    values,
   ])
 
-  // Reset current frame
   const handleResetFrame = useCallback(() => {
-    setRightArmDelta([0, 0, 0])
-    setLeftArmDelta([0, 0, 0])
-    setRightGripper(undefined)
-    setLeftGripper(undefined)
+    setDeltas({})
+    setValues({})
     removeTrajectoryAdjustment(currentFrame)
   }, [currentFrame, removeTrajectoryAdjustment])
 
-  // Reset right arm only
-  const handleResetRightArm = useCallback(() => {
-    setRightArmDelta([0, 0, 0])
-    setRightGripper(undefined)
-  }, [])
-
-  // Reset left arm only
-  const handleResetLeftArm = useCallback(() => {
-    setLeftArmDelta([0, 0, 0])
-    setLeftGripper(undefined)
-  }, [])
-
   // Clearing every stored adjustment must also drop this frame's pending edits.
   const handleClearAll = useCallback(() => {
-    setRightArmDelta([0, 0, 0])
-    setLeftArmDelta([0, 0, 0])
-    setRightGripper(undefined)
-    setLeftGripper(undefined)
+    setDeltas({})
+    setValues({})
     clearTrajectoryAdjustments()
   }, [clearTrajectoryAdjustments])
 
@@ -405,33 +312,25 @@ function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFram
         </div>
       </div>
 
-      {/* Right Arm Editor */}
-      <ArmEditor
-        title="Right Arm"
-        titleColor="text-blue-600"
-        currentPoint={currentPoint}
-        posIndices={[0, 1, 2]}
-        gripperIndex={7}
-        delta={rightArmDelta.some((v) => v !== 0) ? rightArmDelta : undefined}
-        gripperOverride={rightGripper}
-        onDeltaChange={setRightArmDelta}
-        onGripperChange={setRightGripper}
-        onReset={handleResetRightArm}
-      />
+      <p role="note" className="text-muted-foreground text-xs">
+        Exports keep the recorded joint positions and add these adjustments beside them, as
+        qpos_adjusted in HDF5 or adjusted.observation.state in LeRobot, with a mask of the edited
+        rows.
+      </p>
 
-      {/* Left Arm Editor */}
-      <ArmEditor
-        title="Left Arm"
-        titleColor="text-green-600"
-        currentPoint={currentPoint}
-        posIndices={[8, 9, 10]}
-        gripperIndex={15}
-        delta={leftArmDelta.some((v) => v !== 0) ? leftArmDelta : undefined}
-        gripperOverride={leftGripper}
-        onDeltaChange={setLeftArmDelta}
-        onGripperChange={setLeftGripper}
-        onReset={handleResetLeftArm}
-      />
+      <div className="bg-muted/50 max-h-96 space-y-2 overflow-y-auto rounded-lg p-3">
+        {channels.map((channel) => (
+          <ChannelEditor
+            key={channel.id}
+            label={channel.label}
+            value={channel.value}
+            delta={deltas[channel.index] ?? 0}
+            setValue={values[channel.index]}
+            onDeltaChange={(delta) => setChannelDelta(channel.index, delta)}
+            onSetValueChange={(next) => setChannelValue(channel.index, next)}
+          />
+        ))}
+      </div>
 
       {/* Action buttons */}
       <div className="flex gap-2 pt-2">
