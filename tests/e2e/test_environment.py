@@ -1,0 +1,281 @@
+"""Infrastructure-free tests for named-environment resolution in the e2e harness.
+
+These cover the bundle loader in ``tests/e2e/_environment.py`` and the conftest resolution
+helpers that the Azure ML fixtures call, using synthetic bundles only. They prove that a
+selected ``E2E_ENVIRONMENT`` never consults local Terraform state and fails loudly when a
+required value is missing.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+
+from tests.e2e import conftest
+from tests.e2e._environment import (
+    BUNDLE_DIR_VAR,
+    ENVIRONMENT_VAR,
+    EnvironmentBundle,
+    EnvironmentBundleError,
+    activate_named_environment,
+    apply_environment_defaults,
+    bundle_search_paths,
+    derive_compute_target,
+    environment_defaults,
+    load_environment_bundle,
+)
+
+_RESOURCE_VARIABLES = (
+    "AZURE_SUBSCRIPTION_ID",
+    "AZURE_RESOURCE_GROUP",
+    "AZUREML_WORKSPACE_NAME",
+    "AZURE_STORAGE_ACCOUNT_NAME",
+    "AKS_CLUSTER_NAME",
+    "AZUREML_COMPUTE",
+    "E2E_VLA_STORAGE_ACCOUNT",
+)
+
+_COMPLETE_BUNDLE = {
+    "schema_version": 1,
+    "environment": "sample",
+    "subscription_id": "00000000-0000-0000-0000-000000000000",
+    "resource_group": "rg-sample",
+    "azureml_workspace": "mlw-sample",
+    "storage_account": "sample-storage",
+    "aks_cluster": "aks-sample-dev-001",
+}
+
+
+def _write_bundle(directory: Path, payload: object) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    deployment = directory / "deployment.json"
+    deployment.write_text(json.dumps(payload), encoding="utf-8")
+    return deployment
+
+
+def _environ(tmp_path: Path, **extra: str) -> dict[str, str]:
+    return {"HOME": str(tmp_path / "home"), **extra}
+
+
+def test_search_paths_follow_precedence(tmp_path: Path) -> None:
+    environ = _environ(tmp_path, **{BUNDLE_DIR_VAR: str(tmp_path / "explicit")})
+
+    paths = bundle_search_paths("sample", tmp_path / "repo", environ)
+
+    assert paths == [
+        tmp_path / "explicit",
+        tmp_path / "home" / ".config" / "physical-ai-toolchain" / "environments" / "sample",
+        tmp_path / "repo" / "infrastructure" / "setup" / "generated" / "sample",
+    ]
+
+
+def test_explicit_bundle_directory_wins(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _write_bundle(tmp_path / "explicit", {**_COMPLETE_BUNDLE, "resource_group": "rg-explicit"})
+    _write_bundle(
+        tmp_path / "home" / ".config" / "physical-ai-toolchain" / "environments" / "sample",
+        {**_COMPLETE_BUNDLE, "resource_group": "rg-home"},
+    )
+    _write_bundle(repo_root / "infrastructure" / "setup" / "generated" / "sample", _COMPLETE_BUNDLE)
+
+    bundle = load_environment_bundle(
+        "sample", repo_root, _environ(tmp_path, **{BUNDLE_DIR_VAR: str(tmp_path / "explicit")})
+    )
+
+    assert bundle.values["resource_group"] == "rg-explicit"
+
+
+def test_home_bundle_wins_over_generated_bundle(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _write_bundle(
+        tmp_path / "home" / ".config" / "physical-ai-toolchain" / "environments" / "sample",
+        {**_COMPLETE_BUNDLE, "resource_group": "rg-home"},
+    )
+    _write_bundle(repo_root / "infrastructure" / "setup" / "generated" / "sample", _COMPLETE_BUNDLE)
+
+    bundle = load_environment_bundle("sample", repo_root, _environ(tmp_path))
+
+    assert bundle.values["resource_group"] == "rg-home"
+
+
+def test_generated_bundle_is_the_last_fallback(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    generated = repo_root / "infrastructure" / "setup" / "generated" / "sample"
+    _write_bundle(generated, _COMPLETE_BUNDLE)
+
+    bundle = load_environment_bundle("sample", repo_root, _environ(tmp_path))
+
+    assert bundle.directory == generated
+    assert bundle.values["azureml_workspace"] == "mlw-sample"
+
+
+def test_missing_bundle_names_every_searched_location(tmp_path: Path) -> None:
+    with pytest.raises(EnvironmentBundleError, match="was not found") as error:
+        load_environment_bundle("sample", tmp_path / "repo", _environ(tmp_path))
+
+    message = str(error.value)
+    assert str(tmp_path / "home") in message
+    assert str(tmp_path / "repo" / "infrastructure" / "setup" / "generated" / "sample") in message
+
+
+@pytest.mark.parametrize("payload", ["not json", "[1, 2]"], ids=["malformed", "not-an-object"])
+def test_unreadable_bundle_is_rejected(tmp_path: Path, payload: str) -> None:
+    deployment = tmp_path / "explicit" / "deployment.json"
+    deployment.parent.mkdir(parents=True)
+    deployment.write_text(payload, encoding="utf-8")
+
+    with pytest.raises(EnvironmentBundleError, match=r"deployment\.json"):
+        load_environment_bundle("sample", tmp_path, _environ(tmp_path, **{BUNDLE_DIR_VAR: str(deployment.parent)}))
+
+
+def test_symlinked_bundle_file_is_rejected(tmp_path: Path) -> None:
+    target = _write_bundle(tmp_path / "real", _COMPLETE_BUNDLE)
+    linked = tmp_path / "explicit"
+    linked.mkdir()
+    (linked / "deployment.json").symlink_to(target)
+
+    with pytest.raises(EnvironmentBundleError, match="symlink"):
+        load_environment_bundle("sample", tmp_path, _environ(tmp_path, **{BUNDLE_DIR_VAR: str(linked)}))
+
+
+@pytest.mark.parametrize("name", ["../escape", "", "has space", "a/b"])
+def test_invalid_environment_names_are_rejected(tmp_path: Path, name: str) -> None:
+    with pytest.raises(EnvironmentBundleError, match="Invalid"):
+        load_environment_bundle(name, tmp_path, _environ(tmp_path))
+
+
+def test_blank_and_non_string_fields_are_ignored(tmp_path: Path) -> None:
+    _write_bundle(
+        tmp_path / "explicit",
+        {**_COMPLETE_BUNDLE, "azureml_workspace": "  ", "storage_account": 42},
+    )
+
+    bundle = load_environment_bundle(
+        "sample", tmp_path, _environ(tmp_path, **{BUNDLE_DIR_VAR: str(tmp_path / "explicit")})
+    )
+
+    assert "azureml_workspace" not in bundle.values
+    assert "storage_account" not in bundle.values
+    assert "AZUREML_WORKSPACE_NAME" not in environment_defaults(bundle)
+
+
+@pytest.mark.parametrize(
+    ("aks_cluster", "expected"),
+    [
+        ("aks-sample-dev-001", "k8s-sample-dev-0"),
+        ("aks-ab-dev-001", "k8s-ab-dev-001"),
+        ("aks-abcdefghijk-001", "k8s-abcdefghijk"),
+        ("custom-cluster", "custom-cluster"),
+    ],
+)
+def test_compute_target_matches_the_conftest_derivation(aks_cluster: str, expected: str) -> None:
+    assert derive_compute_target(aks_cluster) == expected
+
+
+def test_defaults_never_override_exported_values() -> None:
+    bundle = EnvironmentBundle(
+        name="sample",
+        directory=Path("unused"),
+        values={"resource_group": "rg-bundle", "azureml_workspace": "mlw-bundle", "aks_cluster": "aks-x"},
+    )
+    environ = {"AZURE_RESOURCE_GROUP": "rg-exported", "AZUREML_WORKSPACE_NAME": "  "}
+
+    applied = apply_environment_defaults(bundle, environ)
+
+    assert environ["AZURE_RESOURCE_GROUP"] == "rg-exported"
+    assert environ["AZUREML_WORKSPACE_NAME"] == "mlw-bundle"
+    assert environ["AZUREML_COMPUTE"] == "k8s-x"
+    assert "AZURE_RESOURCE_GROUP" not in applied
+
+
+def test_activation_is_a_no_op_without_a_selection(tmp_path: Path) -> None:
+    environ = _environ(tmp_path)
+
+    assert activate_named_environment(tmp_path, environ) is None
+    assert set(environ) == {"HOME"}
+
+
+@pytest.fixture
+def isolated_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Point every lookup at temporary locations and restore all resource variables afterward."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv(ENVIRONMENT_VAR, raising=False)
+    monkeypatch.delenv(BUNDLE_DIR_VAR, raising=False)
+    # Blank values are treated as unset, and setenv records them for restoration at teardown.
+    for variable in _RESOURCE_VARIABLES:
+        monkeypatch.setenv(variable, "")
+
+    def _no_terraform(_repo_root: Path) -> conftest.TerraformOutputs:
+        raise AssertionError("local Terraform state must not be consulted for a named environment")
+
+    monkeypatch.setattr(conftest, "_terraform_outputs", _no_terraform)
+    conftest._activate_named_environment.cache_clear()
+    yield tmp_path
+    conftest._activate_named_environment.cache_clear()
+
+
+def _select_bundle(monkeypatch: pytest.MonkeyPatch, directory: Path, payload: object) -> None:
+    _write_bundle(directory, payload)
+    monkeypatch.setenv(ENVIRONMENT_VAR, "sample")
+    monkeypatch.setenv(BUNDLE_DIR_VAR, str(directory))
+
+
+def test_named_environment_resolves_without_terraform(
+    isolated_environment: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _select_bundle(monkeypatch, isolated_environment / "bundle", _COMPLETE_BUNDLE)
+
+    identity = conftest._resolve_workspace_identity(isolated_environment)
+
+    assert identity == ("00000000-0000-0000-0000-000000000000", "rg-sample", "mlw-sample")
+    assert conftest._resolve_compute_name(isolated_environment) == "k8s-sample-dev-0"
+    assert conftest._resolve_storage_account(isolated_environment) == "sample-storage"
+
+
+def test_named_environment_missing_field_fails(isolated_environment: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {key: value for key, value in _COMPLETE_BUNDLE.items() if key != "azureml_workspace"}
+    _select_bundle(monkeypatch, isolated_environment / "bundle", payload)
+
+    with pytest.raises(pytest.fail.Exception, match="AZUREML_WORKSPACE_NAME"):
+        conftest._resolve_workspace_identity(isolated_environment)
+
+
+def test_named_environment_missing_storage_fails(isolated_environment: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {key: value for key, value in _COMPLETE_BUNDLE.items() if key != "storage_account"}
+    _select_bundle(monkeypatch, isolated_environment / "bundle", payload)
+
+    with pytest.raises(pytest.fail.Exception, match="AZURE_STORAGE_ACCOUNT_NAME"):
+        conftest._resolve_storage_account(isolated_environment)
+
+
+def test_named_environment_without_a_bundle_fails(isolated_environment: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(ENVIRONMENT_VAR, "sample")
+
+    with pytest.raises(pytest.fail.Exception, match="was not found"):
+        conftest._resolve_compute_name(isolated_environment)
+
+
+def test_unnamed_environment_keeps_the_terraform_fallback(
+    isolated_environment: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outputs = conftest.TerraformOutputs(
+        {
+            "resource_group": {"value": {"name": "rg-terraform"}},
+            "azureml_workspace": {"value": {"name": "mlw-terraform"}},
+            "aks_cluster": {"value": {"name": "aks-tf-dev-001"}},
+            "storage_account": {"value": {"name": "terraform-storage"}},
+        }
+    )
+    monkeypatch.setattr(conftest, "_terraform_outputs", lambda _repo_root: outputs)
+    monkeypatch.setattr(conftest, "_subscription_id_from_az_cli", lambda: "sub-from-cli")
+
+    assert conftest._resolve_workspace_identity(isolated_environment) == (
+        "sub-from-cli",
+        "rg-terraform",
+        "mlw-terraform",
+    )
+    assert conftest._resolve_compute_name(isolated_environment) == "k8s-tf-dev-001"
+    assert conftest._resolve_storage_account(isolated_environment) == "terraform-storage"
