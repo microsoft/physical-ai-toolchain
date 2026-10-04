@@ -97,7 +97,7 @@ function Test-DependencySourceLine {
                 return $false
             }
             return $Line -match '\b(?:index-url|extra-index-url|find-links|registry|url|git)\s*=' -or
-                $Line -match '@\s*[A-Za-z][A-Za-z0-9+.-]*://'
+            $Line -match '@\s*[A-Za-z][A-Za-z0-9+.-]*://'
         }
         '^requirements.*\.txt$' {
             return $Line -match '(?:https?|git\+https)://'
