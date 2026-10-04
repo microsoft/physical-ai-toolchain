@@ -2,7 +2,7 @@
 title: CI Smoke Scripts
 description: GPU-free import smoke scripts for training and evaluation domains, runnable locally and in CI.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-02
+ms.date: 2026-10-04
 ---
 
 GPU-free import smoke checks that catch syntax, import, dependency-resolution, and interpreter/ABI regressions before they reach a GPU job. The same scripts run in CI (`.github/workflows/smoke-cpu.yml`) and locally.
@@ -29,6 +29,9 @@ shared/ci/smoke-image.sh vla --mode cpu
 shared/ci/smoke-image.sh evaluation --mode cpu
 shared/ci/smoke-image.sh vlm-judge --mode cpu
 shared/ci/smoke-image.sh osmo-replay --mode cpu
+shared/ci/smoke-image.sh gpu-smoke --mode cpu        # local-only CPU domains (not in the CI matrix yet)
+shared/ci/smoke-image.sh azureml-register --mode cpu
+shared/ci/smoke-image.sh osmo-proxy --mode cpu
 shared/ci/smoke-image.sh rl                       # runtime-image smoke (Isaac Lab)
 shared/ci/smoke-image.sh il                       # runtime-image smoke (PyTorch)
 shared/ci/smoke-image.sh vla                      # runtime-image smoke (PyTorch)
@@ -53,14 +56,19 @@ shared/ci/smoke-import.sh rl --mode cpu
 
 ## 🧪 Domains
 
-| Domain        | Python | Runtime image                             | CPU smoke | Runtime-image smoke |
-|---------------|--------|-------------------------------------------|-----------|---------------------|
-| `rl`          | 3.12   | Isaac Lab 3.0 (`DEFAULT_ISAAC_LAB_IMAGE`) | yes       | yes                 |
-| `il`          | 3.12   | PyTorch (`lerobot-train.yaml` default)    | yes       | yes                 |
-| `vla`         | 3.12   | PyTorch (`DEFAULT_LEROBOT_TRAIN_IMAGE`)   | yes       | yes                 |
-| `evaluation`  | 3.12   | PyTorch (`evaluate.yaml`)                 | yes       | yes                 |
-| `vlm-judge`   | 3.12   | none                                      | yes       | no                  |
-| `osmo-replay` | 3.11   | Python (`replay-azureml.yaml`)            | yes       | yes                 |
+| Domain             | Python | Runtime image                             | CPU smoke  | Runtime-image smoke |
+|--------------------|--------|-------------------------------------------|------------|---------------------|
+| `rl`               | 3.12   | Isaac Lab 3.0 (`DEFAULT_ISAAC_LAB_IMAGE`) | yes        | yes                 |
+| `il`               | 3.12   | PyTorch (`lerobot-train.yaml` default)    | yes        | yes                 |
+| `vla`              | 3.12   | PyTorch (`DEFAULT_LEROBOT_TRAIN_IMAGE`)   | yes        | yes                 |
+| `evaluation`       | 3.12   | PyTorch (`evaluate.yaml`)                 | yes        | yes                 |
+| `vlm-judge`        | 3.12   | none                                      | yes        | no                  |
+| `osmo-replay`      | 3.11   | Python (`replay-azureml.yaml`)            | yes        | yes                 |
+| `gpu-smoke`        | 3.11   | none                                      | local only | no                  |
+| `azureml-register` | 3.12   | none                                      | local only | no                  |
+| `osmo-proxy`       | 3.12   | none                                      | local only | no                  |
+
+The `gpu-smoke`, `azureml-register`, and `osmo-proxy` domains install the `training/smoke`, `workflows/azureml/scripts`, and `workflows/azureml/osmo-proxy` locks, which no CI job installs today. They run locally, for example through `npm run verify:dependabot`, until the CI import-smoke matrix and CI contract add them. The `azureml-register` probe imports only the component's dependencies because `register_model.py` reads job environment variables at import.
 
 Image references come from their source of truth: `scripts/lib/common.sh` for `rl` and `vla`, `training/il/workflows/osmo/lerobot-train.yaml` for `il`, `evaluation/sil/workflows/azureml/components/evaluate.yaml` for `evaluation`, and `workflows/osmo/replay-azureml.yaml` for `osmo-replay`.
 
