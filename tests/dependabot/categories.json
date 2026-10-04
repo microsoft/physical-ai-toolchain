@@ -675,7 +675,7 @@
           "id": "docs-e2e-container",
           "tier": "cpu",
           "gpu": false,
-          "optional": false,
+          "optional": true,
           "description": "Production browser tests in a Linux Playwright container, compared with the base ref.",
           "command": [
             "bash",
@@ -696,7 +696,8 @@
           ],
           "not_run_exit_codes": [
             3
-          ]
+          ],
+          "notes": "CI runs these tests on docs pull requests. Locally one snapshot takes about an hour on Apple Silicon: system Chrome needs amd64 emulation, and CI retries rerun the serial 13-minute site crawl when the local contrast gate fails."
         }
       ]
     },

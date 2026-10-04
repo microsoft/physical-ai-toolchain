@@ -40,7 +40,7 @@ npm run verify:dependabot -- --tier environment --environment <environment> --ca
 npm run verify:dependabot -- --tier environment --environment <environment> --category rl
 ```
 
-Add `--include-optional` for heavy checks that CI already runs on path-gated pull requests, such as runtime-image smokes.
+Add `--include-optional` for heavy checks that CI already runs on path-gated pull requests, such as runtime-image smokes and the docs browser tests.
 
 ## 🧪 Categories
 
@@ -74,7 +74,7 @@ Environment checks never read environment details from tracked files. With `--en
 
 The bundle fills `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZUREML_WORKSPACE_NAME`, `AZURE_STORAGE_ACCOUNT_NAME`, `AKS_CLUSTER_NAME`, and a derived `AZUREML_COMPUTE`. Variables you export yourself take precedence. With a named environment, the tests never consult local Terraform state, and a missing value fails the run. Set `E2E_AML_INSTANCE_TYPE` to target a specific GPU instance type for the GPU smoke and VLA checks.
 
-Before submitting anything, the runner checks that `az` is signed in to the environment's subscription. Environment checks run one at a time, and they upload your working tree to Azure ML, including uncommitted changes, so commit first and don't run builds at the same time.
+Before submitting anything, the runner checks that `az` is signed in to the environment's subscription. If the AKS cluster behind the compute target is stopped, the Azure ML checks report `not-run`; start the cluster and rerun. Environment checks run one at a time, and they upload your working tree to Azure ML, including uncommitted changes, so commit first and don't run builds at the same time.
 
 ## 📊 Results
 

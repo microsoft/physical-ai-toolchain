@@ -32,7 +32,7 @@ The [category manifest](pathname://../../tests/dependabot/categories.json) maps 
 | `baseline`       | Every update                                                                        | uv and npm lock consistency, public feeds, dependency pinning            | None                                             |
 | `tooling`        | npm `/`, uv `/`, github-actions `/`                                                 | Markdown, spelling, YAML, workflow contract, Python lint, root tests     | None                                             |
 | `dataviewer`     | npm `/` workspace, uv and docker under `data-management/viewer`                     | Frontend lint, type-check, format, tests, coverage, build; backend tests | None                                             |
-| `docs`           | npm `/docs/docusaurus`                                                              | Docs validation and production browser tests in a container              | None                                             |
+| `docs`           | npm `/docs/docusaurus`                                                              | Docs validation; production browser tests in a container (optional)      | None                                             |
 | `data-pipeline`  | uv `/data-pipeline`                                                                 | Capture tests in the project's own lock                                  | None                                             |
 | `evaluation`     | uv `/evaluation`, `/evaluation/vlm_judge`                                           | Evaluation tests, CPU import smokes                                      | None                                             |
 | `rl`             | uv `/training/rl`                                                                   | Training tests, import smoke                                             | Azure ML RL lifecycle                            |
@@ -64,7 +64,9 @@ npm run verify:dependabot -- --category dataviewer --dry-run
 npm run verify:dependabot -- --category dataviewer
 ```
 
-Linux-only locks install inside a `linux/amd64` container when you run on macOS, so keep Docker running. Heavy checks that CI already runs on path-gated pull requests, such as runtime-image smokes and the dataviewer compose smoke, are optional; add `--include-optional` to run them. The docs browser tests run in a Playwright container on a clean snapshot. If they fail, the runner reruns the base ref and reports only new failures, because local contrast measurements can differ from CI.
+Linux-only locks install inside a `linux/amd64` container when you run on macOS, so keep Docker running. Heavy checks that CI already runs on path-gated pull requests, such as runtime-image smokes, the dataviewer compose smoke, and the docs browser tests, are optional; add `--include-optional` to run them.
+
+The docs browser tests run in a Playwright container on a clean snapshot, and one snapshot takes about an hour on Apple Silicon because system Chrome needs amd64 emulation. If they fail, the runner reruns the base ref and reports only new failures, because local contrast measurements can differ from CI.
 
 ## Run the Environment Tier
 
@@ -80,7 +82,9 @@ Environment checks read the environment from its non-secret bundle, never from t
    npm run verify:dependabot -- --tier environment --environment <environment> --category rl
    ```
 
-Before submitting, the runner confirms that the Azure CLI is signed in to the bundle's subscription. Jobs run one at a time with unique names, and their test models are archived afterward. Each job holds a GPU node for several minutes or more, so run only the categories a pull request touches. The pi0 check needs `HF_TOKEN` with access to the gated base model, and `E2E_AML_INSTANCE_TYPE` targets a specific GPU instance type. Don't run local builds while a job uploads its snapshot.
+Before submitting, the runner confirms that the Azure CLI is signed in to the bundle's subscription. If the AKS cluster behind the compute target is stopped, for example after a nightly shutdown, the Azure ML checks report `not-run` instead of waiting for nodes; start the cluster and rerun.
+
+Jobs run one at a time with unique names, and their test models are archived afterward. Each job holds a GPU node for several minutes or more, so run only the categories a pull request touches. The pi0 check needs `HF_TOKEN` with access to the gated base model, and `E2E_AML_INSTANCE_TYPE` targets a specific GPU instance type. Don't run local builds while a job uploads its snapshot.
 
 The read-only Terraform comparison plans the root stack at the base and head refs against your local state and reports only resource addresses, actions, and changed attribute names. It never applies. The vpn, automation, and dns stacks are opt-in.
 
