@@ -823,6 +823,23 @@ class TestEpisodeCameraMetadata:
         assert "il-camera" in episode.cameras
         assert "il-camera" in episode.video_urls
 
+    def test_cameras_survive_an_export_round_trip(self, tmp_path):
+        """An exported episode reloads with its cameras, which the exporter stores as a JSON string."""
+        from src.api.services.hdf5_exporter import HDF5Exporter
+
+        source, output = tmp_path / "source", tmp_path / "export"
+        source.mkdir()
+        _create_hdf5_with_images(source / "episode_000000.hdf5", cameras=["top"])
+        assert HDF5Exporter(source, output).export_episode(0, None).success
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("export", output)
+
+        episode = handler.load_episode("export", 0)
+
+        assert episode is not None
+        assert episode.meta.length == 10
+        assert episode.cameras == ["top"]
+
 
 class TestVideoGeneration:
     """Tests for synchronous video generation."""
