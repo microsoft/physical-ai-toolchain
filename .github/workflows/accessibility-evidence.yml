@@ -254,6 +254,7 @@ jobs:
           files: coverage/coverage-accessibility.xml
           disable_search: true
           use_oidc: true
+          use_pypi: true
           fail_ci_if_error: true
           flags: pytest-accessibility
           name: pytest-accessibility-coverage
