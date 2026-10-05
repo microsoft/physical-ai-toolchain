@@ -16,7 +16,7 @@ prerelease-mode = "allow"
 overrides = [
     { name = "azure-storage-blob", specifier = "==12.30.2" },
     { name = "cryptography", specifier = "==50.0.1" },
-    { name = "datasets", specifier = "==5.0.1" },
+    { name = "datasets", specifier = "==5.1.0" },
     { name = "diffusers", specifier = "==0.40.0" },
     { name = "mlflow-skinny", specifier = "==3.16.1" },
     { name = "numpy", specifier = "==2.5.2" },
@@ -687,13 +687,12 @@ wheels = [
 
 [[package]]
 name = "datasets"
-version = "5.0.1"
+version = "5.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dill" },
     { name = "filelock" },
     { name = "fsspec", extra = ["http"] },
-    { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "multiprocess" },
     { name = "numpy" },
@@ -701,13 +700,12 @@ dependencies = [
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "pyyaml" },
-    { name = "requests" },
     { name = "tqdm" },
     { name = "xxhash" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0a/5b/836516269d4f618efe621661cfb6f9acc57e6f95265db3efaee48a5ffe04/datasets-5.0.1.tar.gz", hash = "sha256:ce22bb851efd7494f08aad33b940803784434f6e77763d00679a0dc45fcf686a", size = 641498, upload-time = "2026-07-28T11:09:12.016Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/17/e6/b5d8c77f13cc6269660b0f2691e8875777b9d94972e281b7b2c25f25bd9d/datasets-5.1.0.tar.gz", hash = "sha256:1561347daa8841b51351ef2ad1647b4ee4af406852c0f7bd1df587ac1ca7888e", size = 687306, upload-time = "2026-10-05T15:32:32.053Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/44/0b/98fc6eb83333508ca5f44c52b3e287ea8137a0ad582714e2cbc67a02154b/datasets-5.0.1-py3-none-any.whl", hash = "sha256:9fbf73688f8c18f7529b4fe592abd04015f81d1e58001e4bac73ffb2b39d7cc4", size = 559079, upload-time = "2026-07-28T11:09:10.266Z" },
+    { url = "https://files.pythonhosted.org/packages/24/cc/7f624629846c709ef1c68aa61bfb8d0ae2638cbe265104a1c2f7a630949e/datasets-5.1.0-py3-none-any.whl", hash = "sha256:86fd08b280485aab82894d2c81842c4151d93b575efea0054315104cb7bc3cec", size = 604432, upload-time = "2026-10-05T15:32:29.892Z" },
 ]
 
 [[package]]
@@ -2343,7 +2341,7 @@ requires-dist = [
     { name = "azure-storage-file-share", specifier = "==12.26.0" },
     { name = "azureml-mlflow", specifier = "==1.62.0.post6" },
     { name = "cryptography", specifier = "==50.0.1" },
-    { name = "datasets", specifier = "==5.0.1" },
+    { name = "datasets", specifier = "==5.1.0" },
     { name = "diffusers", specifier = "==0.40.0" },
     { name = "gitpython", specifier = "==3.1.62" },
     { name = "hf-xet", specifier = "==1.6.0" },
