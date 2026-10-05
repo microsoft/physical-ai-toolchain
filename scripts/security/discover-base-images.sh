@@ -9,7 +9,7 @@ show_help() {
 }
 
 main() {
-  local mode=refs repo_root map_file file line ordinal ref instruction remainder
+  local mode=refs repo_root map_file tracked_list file line ordinal ref instruction remainder
   local -a files=() occurrences=() refs=()
   case "${1:-}" in
     '') ;;
@@ -31,14 +31,19 @@ main() {
     return 0
   fi
 
+  # Bash before 4.4 cannot wait on a process substitution.
+  tracked_list="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f -- $(printf '%q' "${tracked_list}")" EXIT
+  git ls-files -z '*Dockerfile*' '*Containerfile*' > "${tracked_list}" || return 1
   while IFS= read -r -d '' file; do
     files+=("${file}")
-  done < <(git ls-files -z '*Dockerfile*' '*Containerfile*')
-  wait "$!" || return 1
+  done < "${tracked_list}"
 
   local image_pattern='^([A-Za-z0-9.-]+(:[0-9]+)?/)?[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$'
   shopt -s nocasematch
-  for file in "${files[@]}"; do
+  # Bash before 4.4 treats an empty "${files[@]}" as unbound under set -u.
+  for file in ${files[@]+"${files[@]}"}; do
     ordinal=0
     while IFS= read -r line || [[ -n "${line}" ]]; do
       line="${line%$'\r'}"
@@ -68,7 +73,7 @@ main() {
     return 1
   fi
   # cspell:ignore slurpfile
-  jq -cen --rawfile tracked <(printf '%s\0' "${files[@]}") \
+  jq -cen --rawfile tracked <(if (( ${#files[@]} > 0 )); then printf '%s\0' "${files[@]}"; fi) \
     --rawfile occurrences <(if (( ${#occurrences[@]} > 0 )); then printf '%s\0' "${occurrences[@]}"; fi) \
     --slurpfile config "${map_file}" '
     def reject($message): error("Invalid scan lane map: " + $message);
