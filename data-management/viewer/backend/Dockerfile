@@ -19,8 +19,12 @@ FROM base AS build
 
 COPY pyproject.toml uv.lock ./
 
+# Runtime feature extras, separated by commas or spaces.
+ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"
 # Keep installation caches out of the runtime image.
-RUN uv sync --frozen --no-dev --extra azure --extra analysis --extra export --extra auth --extra yolo
+RUN extras=""; \
+    for extra in $(echo "${BACKEND_EXTRAS}" | tr ',' ' '); do extras="${extras} --extra ${extra}"; done; \
+    uv sync --frozen --no-dev ${extras}
 
 FROM base AS runtime
 

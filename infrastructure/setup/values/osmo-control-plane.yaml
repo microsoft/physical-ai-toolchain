@@ -1,7 +1,7 @@
 # Global configuration shared across all OSMO services
 global:
   osmoImageLocation: nvcr.io/nvidia/osmo
-  osmoImageTag: "6.3.0"
+  osmoImageTag: "6.3.1"
   serviceAccountName: osmo-control-plane
 
   logs:
@@ -24,8 +24,8 @@ services:
 
     workflow:
       backend_images:
-        init: "nvcr.io/nvidia/osmo/init-container:6.3.0@sha256:1071863497eba749e4f680a336a08e0fe48cba7d0ddea402fecb732bb6de2041"
-        client: "nvcr.io/nvidia/osmo/client:6.3.0@sha256:b2073f3f7cae0936bc66153eb8ff879b14679557a686aa05c3677f676a37afd7"
+        init: "nvcr.io/nvidia/osmo/init-container:6.3.1@sha256:0278a28a2bcab7c1c7f3d4b821569c04f04d1817cb770a6d2a74d61e1a346704"
+        client: "nvcr.io/nvidia/osmo/client:6.3.1@sha256:912b30bffb90531688dacd349d79fae3013a5d3ed6ad091158ba885625d8b48a"
       workflow_data:
         credential:
           endpoint: ""
@@ -188,17 +188,6 @@ services:
       minReplicas: 1
       maxReplicas: 1  # Dev cluster; increase for production
 
-    # Ingress configuration
-    ingress:
-      prefix: /
-      ingressClass: azureml-nginx  # e.g. alb, nginx
-      sslEnabled: false  # Set to true if managing SSL at the ingress level
-      annotations:
-        nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
-        nginx.ingress.kubernetes.io/proxy-buffers: "8 16k"
-        nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "32k"
-        nginx.ingress.kubernetes.io/large-client-header-buffers: "4 16k"
-
     # Resource allocation - reduced for constrained system node pools
     resources:
       requests:
@@ -224,18 +213,6 @@ services:
       minReplicas: 1
       maxReplicas: 1  # Dev cluster; increase for production
     serviceAccountName: router
-
-    # Ingress configuration
-    ingress:
-      prefix: /
-      ingressClass: azureml-nginx  # e.g. alb, nginx
-      sslEnabled: false  # Set to true if managing SSL at the ingress level
-      annotations:
-        # when using nginx ingress, add the following annotations to handle large OAuth2 response headers from identity providers
-        nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
-        nginx.ingress.kubernetes.io/proxy-buffers: "8 16k"
-        nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "32k"
-        nginx.ingress.kubernetes.io/large-client-header-buffers: "4 16k"
 
     # Resource allocation - reduced for constrained system node pools
     resources:
@@ -324,6 +301,20 @@ gateway:
   authz:
     enabled: false
   envoy:
+    # Private access goes through the Azure ML extension's internal NGINX
+    # load balancer (azureml-ingress-nginx-internal-lb). A LoadBalancer
+    # service here would get a public IP.
+    service:
+      type: ClusterIP
+    ingress:
+      enabled: true
+      ingressClass: azureml-nginx
+      annotations:
+        # Room for large OAuth2 response headers from identity providers
+        nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+        nginx.ingress.kubernetes.io/proxy-buffers: "8 16k"
+        nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "32k"
+        nginx.ingress.kubernetes.io/large-client-header-buffers: "4 16k"
     defaultIdentity:
       user: "admin"
       roles: "osmo-admin,osmo-backend,osmo-ctrl"

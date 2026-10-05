@@ -103,6 +103,9 @@ Security scanning and dependency management scripts.
 | `security/Test-BinaryFreshness.ps1`           | Validate pinned binary hashes and Helm chart versions; emits SARIF for GitHub Security tab                             |
 | `security/Modules/PinnedToolVersions.psm1`    | Provide pin discovery functions for binary freshness checks                                                            |
 | `security/Test-HveCoreFreshness.ps1`          | Check hve-core-derived files against their reviewed release or source-header baselines                                 |
+| `security/Test-WorkflowPermissions.ps1`       | Enforce explicit workflow and job `GITHUB_TOKEN` permissions                                                           |
+| `security/Test-DangerousWorkflow.ps1`         | Detect unsafe event/input interpolation and untrusted `pull_request_target` checkouts                                  |
+| `security/Test-PublicDependencyFeeds.ps1`     | Reject private or non-canonical package sources in committed dependency metadata                                       |
 | `security/Test-DataviewerSecurityHeaders.ps1` | Enforce independent Data Viewer browser-header expectations, including strict UI framing and a same-origin-only bridge |
 | `security/zap-to-sarif.py`                    | Convert ZAP results to SARIF format                                                                                    |
 | `security/gitleaks-scan.mjs`                  | Scan tested-revision history and report explicit secret-scan outcomes                                                  |
@@ -186,6 +189,10 @@ A successful HTTP response is not sufficient evidence for a binary mismatch: the
 The `Test-HveCoreFreshness.ps1` script runs weekly through `check-hve-core-freshness.yml`. Each derived file declares a baseline. `release` files compare the **upstream** blob SHA at `HVE_CORE_DERIVED_FILES_REF` with the resolved newest non-draft release. `source-header` files compare the revision recorded in their header with a resolved upstream `main` revision. This reports relevant upstream changes before they appear in a release.
 
 Source-header files must include `Adapted from microsoft/hve-core <upstream-path> as of commit <40-hex SHA>`. Comparing upstream blobs avoids false drift from intentional local adaptations.
+
+`Test-WorkflowPermissions.ps1` distinguishes absent, empty, and populated workflow-level grants. Jobs must declare their own permissions when the workflow grant is populated; jobs inheriting `permissions: {}` pass because the inherited scope is empty.
+
+`Test-DangerousWorkflow.ps1` treats non-boolean workflow and composite-action inputs as command-bearing. Map them to step-level environment variables before reading them from shell or `actions/github-script` code. The linter also retains the repository-specific check for privileged `pull_request_target` workflows that check out untrusted pull-request code.
 
 ### 🔗 Where Pins Live
 

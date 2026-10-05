@@ -80,8 +80,22 @@ variable "should_enable_private_endpoint" {
 
 variable "should_enable_public_network_access" {
   type        = bool
-  description = "Whether to allow public network access (set to true for dev/test)"
+  description = "Whether to allow public network access (set to true for dev/test). public_network_access_overrides can change individual resources"
   default     = false
+}
+
+variable "public_network_access_overrides" {
+  type        = map(bool)
+  description = "Per-resource public network access that overrides should_enable_public_network_access. Keys: acr, azureml_workspace, key_vault, storage_account, data_lake_storage_account, postgresql, redis, log_analytics, application_insights, grafana, monitor_workspace, data_collection_endpoint"
+  default     = {}
+
+  validation {
+    condition = alltrue([
+      for key in keys(var.public_network_access_overrides) :
+      contains(["acr", "azureml_workspace", "key_vault", "storage_account", "data_lake_storage_account", "postgresql", "redis", "log_analytics", "application_insights", "grafana", "monitor_workspace", "data_collection_endpoint"], key)
+    ])
+    error_message = "public_network_access_overrides keys must be one of: acr, azureml_workspace, key_vault, storage_account, data_lake_storage_account, postgresql, redis, log_analytics, application_insights, grafana, monitor_workspace, data_collection_endpoint."
+  }
 }
 
 /*

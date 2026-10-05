@@ -101,6 +101,7 @@
 		"pyremote",
 		"pyremotecp",
 		"pyremotesitecustomize",
+		"pytestmark",
 		"readyz",
 		"realsense",
 		"rebindings",

@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Script Reference
 description: Submission script inventory, CLI arguments, variable reference, and configuration for AzureML and OSMO training and inference pipelines.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-29
+ms.date: 2026-10-01
 ms.topic: reference
 keywords:
   - scripts
@@ -26,6 +26,7 @@ Inventory of submission scripts for training, evaluation, and inference workflow
 | `submit-azureml-training.sh`            | Package code and submit Azure ML training job       | Azure ML |
 | `submit-azureml-isaaclab-evaluation.sh` | Submit Isaac Lab policy evaluation job              | Azure ML |
 | `submit-azureml-lerobot-training.sh`    | Submit LeRobot training to Azure ML                 | Azure ML |
+| `submit-azureml-gpu-smoke.sh`           | Smoke-test a GPU target and training services       | Azure ML |
 | `submit-osmo-training.sh`               | Package code and submit OSMO workflow               | OSMO     |
 | `submit-osmo-dataset-training.sh`       | Submit OSMO workflow using dataset folder injection | OSMO     |
 | `submit-osmo-lerobot-training.sh`       | Submit LeRobot behavioral cloning training          | OSMO     |
@@ -133,6 +134,38 @@ Example:
   --stream
 ```
 
+### `submit-azureml-gpu-smoke.sh`
+
+Located in `training/smoke/scripts/`. See [Smoke-Test a GPU Target](../training/azureml-training.md#-smoke-test-a-gpu-target) for the checks it runs.
+
+| Option                  | Default                                                                         | Description                                                        | Source                            |
+|-------------------------|---------------------------------------------------------------------------------|--------------------------------------------------------------------|-----------------------------------|
+| `--instance-type`       | `gpuspot`                                                                       | InstanceType to test                                               | CLI                               |
+| `--steps`               | `200`                                                                           | Training steps                                                     | CLI                               |
+| `--checkpoint-interval` | `50`                                                                            | Steps between checkpoints                                          | CLI                               |
+| `--model-name`          | `gpu-smoke-test`                                                                | Registered model name                                              | CLI                               |
+| `--skip-register-model` | `false`                                                                         | Skip the model registry check                                      | CLI                               |
+| `--storage-account`     | from TF                                                                         | Storage account for the upload check; empty skips it               | `AZURE_STORAGE_ACCOUNT_NAME` / TF |
+| `--environment-name`    | `gpu-smoke-env`                                                                 | AzureML environment name                                           | CLI                               |
+| `--environment-version` | derived from `--image` tag/digest                                               | AzureML environment version                                        | CLI                               |
+| `--image`               | `DEFAULT_AZUREML_SMOKE_IMAGE` (`pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime`) | Container image                                                    | CLI                               |
+| `--job-file` / `-w`     | `training/smoke/workflows/azureml/gpu-smoke.yaml`                               | Job YAML template                                                  | CLI                               |
+| `--subscription-id`     | from TF                                                                         | Azure subscription ID                                              | `AZURE_SUBSCRIPTION_ID` / TF      |
+| `--resource-group`      | from TF                                                                         | Azure resource group                                               | `AZURE_RESOURCE_GROUP` / TF       |
+| `--workspace-name`      | from TF                                                                         | Azure ML workspace                                                 | `AZUREML_WORKSPACE_NAME` / TF     |
+| `--compute`             | from TF                                                                         | Compute target                                                     | `AZUREML_COMPUTE` / TF            |
+| `--experiment-name`     | `gpu-smoke`                                                                     | Experiment name                                                    | CLI                               |
+| `--job-name`            | unset                                                                           | Job name override                                                  | CLI                               |
+| `--stream`              | `false`                                                                         | Stream logs, then verify the job status and its checkpoints output | CLI                               |
+| `--config-preview`      | `false`                                                                         | Print configuration and exit                                       | CLI                               |
+| `--`                    | n/a                                                                             | Forward remaining args to `az ml job create`                       | CLI                               |
+
+Example:
+
+```bash
+./submit-azureml-gpu-smoke.sh --instance-type <instance-type> --stream
+```
+
 ### `submit-azureml-isaaclab-evaluation.sh`
 
 | Option                  | Default                                                                  | Description                                      | Source                        |
@@ -177,7 +210,7 @@ Example:
 | `--num-envs` / `-n`            | `2048`                                                                   | Number of parallel environments                  | `NUM_ENVS`                    |
 | `--max-iterations` / `-m`      | unset                                                                    | Max iterations (empty to unset)                  | `MAX_ITERATIONS`              |
 | `--image` / `-i`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:3.0.0-beta2-post1`) | Container image                                  | `IMAGE`                       |
-| `--payload-root` / `-p`        | `/workspace/isaac_payload`                                               | Runtime extraction root                          | `PAYLOAD_ROOT`                |
+| `--payload-root` / `-p`        | `/tmp/isaac_payload`                                                     | Runtime extraction root                          | `PAYLOAD_ROOT`                |
 | `--backend` / `-b`             | `skrl`                                                                   | Training backend: `skrl` (default), `rsl_rl`     | `TRAINING_BACKEND`            |
 | `--checkpoint-uri` / `-c`      | unset                                                                    | MLflow checkpoint artifact URI                   | `CHECKPOINT_URI`              |
 | `--checkpoint-mode` / `-M`     | `from-scratch`                                                           | `from-scratch`, `warm-start`, `resume`, `fresh`  | `CHECKPOINT_MODE`             |

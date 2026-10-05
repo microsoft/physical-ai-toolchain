@@ -1,15 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // SPDX-License-Identifier: MIT
 
-import fs from 'node:fs';
-import path from 'node:path';
-
 import { expect, test } from '@playwright/test';
 
 import {
   expectNoAccessibilityViolations,
   expectNoUnexpectedPageErrors,
   expectPageReady,
+  readMermaidManifest,
   siteRoute,
   watchUnexpectedPageErrors,
 } from './accessibility-helpers';
@@ -17,20 +15,7 @@ import { evidence } from './evidence-cell-reporter';
 import { representativeRoutes } from './representative-routes';
 import { readDeployedRouteManifest } from './route-inventory';
 
-interface MermaidManifest {
-  schemaVersion: 1;
-  diagrams: Array<{
-    description: string;
-    ordinal: number;
-    route: string;
-    sourcePath: string;
-    title: string;
-  }>;
-}
-
-const mermaidManifest = JSON.parse(
-  fs.readFileSync(path.resolve(process.cwd(), 'build', 'mermaid-routes.json'), 'utf8'),
-) as MermaidManifest;
+const mermaidManifest = readMermaidManifest();
 
 const taskListRoute = '/contributing/security-review/';
 const firstTierCategory = 'T0 - Dev (default)';
