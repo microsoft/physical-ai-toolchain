@@ -2,7 +2,7 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-09-23
+ms.date: 2026-10-05
 ms.topic: overview
 ---
 
@@ -73,6 +73,12 @@ Run the cross-platform development command after the container finishes setup:
 ```bash
 npm run dataviewer:dev
 ```
+
+## 📊 AI Analysis
+
+The [AI-analysis endpoints](backend/src/api/routes/ai_analysis.py) require nonempty, rectangular position and force matrices containing only finite numbers. Invalid matrices return HTTP 400. `POST /api/ai/cluster` requires at least two trajectories; an explicit `num_clusters` must be between 2 and 20 and cannot exceed the number of trajectories.
+
+The [clustering service](backend/src/api/services/clustering.py) applies a shared scale to extreme coordinate magnitudes before extracting features when squared statistics or path lengths risk overflowing float64. Ordinary coordinate magnitudes retain their original feature calculation.
 
 ## 📄 Accepted Dataset Contract
 
