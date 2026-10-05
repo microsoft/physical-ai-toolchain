@@ -2246,6 +2246,9 @@ for (const [name, mutate, diagnostic] of [
   ['merge_group trigger removal', candidate => { delete candidate[prPath].on.merge_group; }, 'event ownership mismatch'],
   ['merge_group branch drift', candidate => { candidate[prPath].on.merge_group.branches = ['develop']; }, 'merge_group checks_requested for main'],
   ['merge_group action drift', candidate => { candidate[prPath].on.merge_group.types = ['destroyed']; }, 'merge_group checks_requested for main'],
+  ['reusable workflow concurrency collision', candidate => {
+    candidate[prPath].concurrency.group = '${{ github.workflow }}-${{ github.ref }}';
+  }, 'isolate and supersede event refs'],
   ['moving checkout ref', candidate => { candidate[prPath].jobs.changes.steps[0].with.ref = '${{ github.ref }}'; }, 'tested SHA'],
   ['range resolver removal', candidate => {
     candidate[prPath].jobs.changes.steps = candidate[prPath].jobs.changes.steps.filter(step => step.id !== 'range');

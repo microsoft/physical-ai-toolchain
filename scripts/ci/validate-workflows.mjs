@@ -465,7 +465,7 @@ export function validateWorkflows(graph, contract = loadContract()) {
   const mergeGroup = prWorkflow?.on?.merge_group;
   check(isDeepStrictEqual(mergeGroup?.branches, ['main'])
     && isDeepStrictEqual(mergeGroup?.types, ['checks_requested']), 'PR validation must own merge_group checks_requested for main');
-  check(prWorkflow?.concurrency?.group === '${{ github.workflow }}-${{ github.ref }}'
+  check(prWorkflow?.concurrency?.group === '${{ github.workflow }}-validation-${{ github.event_name }}-${{ github.ref }}'
     && prWorkflow?.concurrency?.['cancel-in-progress'] === true, 'PR validation concurrency must isolate and supersede event refs');
   const checkout = changes?.steps?.find(step => step.uses?.startsWith('actions/checkout@'));
   check(checkout?.with?.['fetch-depth'] === 0 && checkout?.with?.['persist-credentials'] === false
@@ -520,7 +520,7 @@ export function validateWorkflows(graph, contract = loadContract()) {
   const release = main['release-please'];
   check(release?.['continue-on-error'] === undefined && ['', 'success()'].includes(expression(release?.if)), 'Release coordinator must retain success gating without failure suppression');
   check(isDeepStrictEqual(array(release?.needs), ['main-validation-summary']), 'Release coordinator must depend only on the main validation summary');
-  check(graph[contract.orchestrators.pr.path]?.concurrency?.group === '${{ github.workflow }}-${{ github.ref }}' &&
+  check(graph[contract.orchestrators.pr.path]?.concurrency?.group === '${{ github.workflow }}-validation-${{ github.event_name }}-${{ github.ref }}' &&
     graph[contract.orchestrators.pr.path]?.concurrency?.['cancel-in-progress'] === true, 'PR concurrency must isolate workflow and event ref and cancel superseded runs');
   check(!graph[contract.orchestrators.main.path]?.concurrency?.['cancel-in-progress'] &&
     Object.values(main).every(job => !job.concurrency?.['cancel-in-progress']), 'Main and release cancellation is forbidden');
