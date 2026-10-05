@@ -26,6 +26,7 @@ from tests.e2e._environment import (
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_HF_TOKEN_BEFORE = pytest.StashKey[str | None]()
 
 TFVARS_FALLBACK_OUTPUT_KEYS = ("resource_group", "azureml_workspace", "aks_cluster", "storage_account")
 AKS_RESOURCE_ID = re.compile(
@@ -46,15 +47,22 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_runtest_setup(item: pytest.Item) -> None:
     if item.get_closest_marker("requires_hf_token") is None:
         return
-    if os.environ.get("HF_TOKEN", "").strip():
-        return
-    # Like the submission scripts, fall back to the untracked repository-root .env.local.
+    # Match scripts/lib/common.sh, which sources the untracked .env.local over the environment.
     try:
-        token = read_local_env(_REPO_ROOT, ["HF_TOKEN"]).get("HF_TOKEN")
+        local = read_local_env(_REPO_ROOT, ["HF_TOKEN"])
     except LocalEnvError as error:
         pytest.fail(f"{item.nodeid} requires HF_TOKEN: {error}", pytrace=False)
-    if token:
-        os.environ["HF_TOKEN"] = token
+    if "HF_TOKEN" in local:
+        if not local["HF_TOKEN"].strip():
+            pytest.fail(
+                f"{item.nodeid} requires HF_TOKEN: {LOCAL_ENV_FILE} sets it empty, which overrides the environment; "
+                "set it there or remove the line",
+                pytrace=False,
+            )
+        item.stash[_HF_TOKEN_BEFORE] = os.environ.get("HF_TOKEN")
+        os.environ["HF_TOKEN"] = local["HF_TOKEN"]
+        return
+    if os.environ.get("HF_TOKEN", "").strip():
         return
 
     pytest.fail(
@@ -62,6 +70,18 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
         f"set it in {LOCAL_ENV_FILE} at the repository root or export it",
         pytrace=False,
     )
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_runtest_teardown(item: pytest.Item) -> None:
+    """Restore the HF_TOKEN that the setup hook replaced, so the file value stays scoped to its test."""
+    if _HF_TOKEN_BEFORE not in item.stash:
+        return
+    before = item.stash[_HF_TOKEN_BEFORE]
+    if before is None:
+        os.environ.pop("HF_TOKEN", None)
+    else:
+        os.environ["HF_TOKEN"] = before
 
 
 @dataclass(frozen=True)

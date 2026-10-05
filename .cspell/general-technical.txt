@@ -1307,6 +1307,7 @@ stonith
 stopwords
 storsimple
 strategizing
+strerror
 striim
 strpos
 stylecop
@@ -1424,6 +1425,7 @@ trivy
 trufflehog
 trustexitcode
 tryfirst
+trylast
 turbonomic
 twilio
 typeparam

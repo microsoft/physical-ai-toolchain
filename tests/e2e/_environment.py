@@ -38,6 +38,13 @@ COMPUTE_VARIABLE = "AZUREML_COMPUTE"
 
 _ENVIRONMENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _LOCAL_ENV_ASSIGNMENT = re.compile(r"(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)")
+_LOCAL_ENV_SPACED_ASSIGNMENT = re.compile(r"(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]+=")
+# Values that ``source`` assigns literally: empty, single-quoted, double-quoted without
+# expansions or escapes, or a bare word without quoting, expansion, or shell operators.
+_LOCAL_ENV_LITERAL = re.compile(
+    r"""(?:'(?P<single>[^']*)'|"(?P<double>[^"$`\\]*)"|(?P<bare>[^\s'"$`\\~;&|<>()#][^\s'"$`\\~;&|<>()]*))?"""
+    r"(?:[ \t]+#.*)?"
+)
 
 
 class EnvironmentBundleError(RuntimeError):
@@ -155,24 +162,25 @@ def activate_named_environment(
     return bundle
 
 
-def _local_env_value(raw: str) -> str:
-    """Return what ``source`` assigns for the text after ``NAME=``, or ``""`` when it assigns nothing."""
-    if not raw or raw[0].isspace():
-        return ""
-    if raw[0] in "\"'":
-        closing = raw.find(raw[0], 1)
-        return raw[1:closing] if closing > 0 else ""
-    return raw.split(maxsplit=1)[0]
+def _local_env_value(raw: str) -> str | None:
+    """Return the literal value assigned by the text after ``NAME=``, or ``None`` when it isn't a plain literal."""
+    match = _LOCAL_ENV_LITERAL.fullmatch(raw)
+    if match is None:
+        return None
+    return next((group for group in match.group("single", "double", "bare") if group is not None), "")
 
 
 def read_local_env(repo_root: Path, names: Iterable[str]) -> dict[str, str]:
-    """Return the requested variables that the untracked repository-root ``.env.local`` sets.
+    """Return the requested variables that the untracked repository-root ``.env.local`` assigns.
 
-    Submission scripts source the same file through ``scripts/lib/common.sh``. This reads
-    simple ``NAME=value`` lines the way ``source`` would (an optional ``export``, quoting,
-    and the last assignment winning) and returns only requested names with non-empty values.
-    A missing file yields no values; a file that can't be read raises ``LocalEnvError``
-    without exposing its contents.
+    Submission scripts source the same file through ``scripts/lib/common.sh``, after the
+    environment is set, so an assignment there wins over an exported value, even an empty
+    one. This reads ``NAME=value`` lines (an optional ``export``, the last assignment winning)
+    and returns each requested name the file assigns, with its possibly empty value. A
+    requested name must be assigned a plain literal (a bare word, a single-quoted string, or
+    a double-quoted string without ``$``, backticks, or backslashes) so the value matches what
+    ``source`` assigns. Any other assignment to it, or a file that can't be read, raises
+    ``LocalEnvError`` without exposing the value. A missing file yields no values.
     """
     wanted = set(names)
     if not wanted:
@@ -187,8 +195,21 @@ def read_local_env(repo_root: Path, names: Iterable[str]) -> dict[str, str]:
     except OSError as error:
         raise LocalEnvError(f"Cannot read {path}: {error.strerror or type(error).__name__}") from None
     values: dict[str, str] = {}
-    for line in text.splitlines():
-        match = _LOCAL_ENV_ASSIGNMENT.fullmatch(line.strip())
-        if match is not None and match.group(1) in wanted:
-            values[match.group(1)] = _local_env_value(match.group(2))
-    return {name: value for name, value in values.items() if value}
+    for number, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        spaced = _LOCAL_ENV_SPACED_ASSIGNMENT.match(stripped)
+        if spaced is not None and spaced.group(1) in wanted:
+            raise LocalEnvError(
+                f"Cannot use {spaced.group(1)} from {path} (line {number}): remove the spaces around '='"
+            )
+        match = _LOCAL_ENV_ASSIGNMENT.fullmatch(stripped)
+        if match is None or match.group(1) not in wanted:
+            continue
+        value = _local_env_value(match.group(2))
+        if value is None:
+            raise LocalEnvError(
+                f"Cannot use {match.group(1)} from {path} (line {number}): assign a plain value, "
+                "or a quoted one without $, backticks, or backslashes"
+            )
+        values[match.group(1)] = value
+    return values

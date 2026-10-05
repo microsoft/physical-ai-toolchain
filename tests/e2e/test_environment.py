@@ -431,16 +431,16 @@ def test_local_env_follows_shell_assignment_rules(tmp_path: Path) -> None:
                 'DOUBLE="double value"',
                 "SINGLE='single'",
                 "EMPTY=",
-                "SPACED= not-a-value",
-                'UNTERMINATED="never closed',
+                "EMPTY_WITH_COMMENT= # comment",
                 'QUOTED_EMPTY=""',
+                'PADDED=" padded value "',
                 "TRAILING=kept # comment",
                 "REPEATED=first",
                 "REPEATED=second",
                 "CLEARED=value",
                 "CLEARED=",
                 "NOT ASSIGNMENT=ignored",
-                "SPACED_EQUALS = ignored",
+                "NOT_REQUESTED=$EXPANDED ~/path",
             ]
         ),
     )
@@ -449,13 +449,12 @@ def test_local_env_follows_shell_assignment_rules(tmp_path: Path) -> None:
         "DOUBLE",
         "SINGLE",
         "EMPTY",
-        "SPACED",
-        "UNTERMINATED",
+        "EMPTY_WITH_COMMENT",
         "QUOTED_EMPTY",
+        "PADDED",
         "TRAILING",
         "REPEATED",
         "CLEARED",
-        "SPACED_EQUALS",
         "MISSING",
     ]
 
@@ -463,9 +462,50 @@ def test_local_env_follows_shell_assignment_rules(tmp_path: Path) -> None:
         "EXPORTED": _FAKE_SECRET,
         "DOUBLE": "double value",
         "SINGLE": "single",
+        "EMPTY": "",
+        "EMPTY_WITH_COMMENT": "",
+        "QUOTED_EMPTY": "",
+        "PADDED": " padded value ",
         "TRAILING": "kept",
         "REPEATED": "second",
+        "CLEARED": "",
     }
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'HF_TOKEN="$OTHER"',
+        "HF_TOKEN=$OTHER",
+        f'HF_TOKEN="{_FAKE_SECRET}"suffix',
+        f"HF_TOKEN= {_FAKE_SECRET}",
+        f'HF_TOKEN="{_FAKE_SECRET}',
+        f"HF_TOKEN={_FAKE_SECRET}\\x",
+        "HF_TOKEN=~/token",
+        f"HF_TOKEN = {_FAKE_SECRET}",
+        f"HF_TOKEN={_FAKE_SECRET}; echo done",
+        "HF_TOKEN=`cat token`",
+    ],
+    ids=[
+        "quoted-expansion",
+        "expansion",
+        "concatenation",
+        "value-after-space",
+        "unterminated-quote",
+        "backslash",
+        "tilde",
+        "spaces-around-equals",
+        "command-separator",
+        "command-substitution",
+    ],
+)
+def test_assignments_that_are_not_plain_literals_fail_without_their_values(tmp_path: Path, line: str) -> None:
+    _write_local_env(tmp_path, f"{line}\n")
+
+    with pytest.raises(LocalEnvError, match=r"HF_TOKEN .*line 1") as raised:
+        read_local_env(tmp_path, ["HF_TOKEN"])
+
+    assert _FAKE_SECRET not in str(raised.value)
 
 
 def test_local_env_returns_only_requested_names(tmp_path: Path) -> None:
@@ -501,6 +541,7 @@ class _GateItem:
 
     def __init__(self, *, marked: bool = True) -> None:
         self._marked = marked
+        self.stash = pytest.Stash()
 
     def get_closest_marker(self, name: str) -> object | None:
         return object() if self._marked and name == "requires_hf_token" else None
@@ -521,10 +562,10 @@ def test_gate_loads_the_token_from_local_env(gate_root: Path) -> None:
     assert os.environ["HF_TOKEN"] == _FAKE_SECRET
 
 
-def test_gate_prefers_an_exported_token_without_reading_the_file(
+def test_gate_uses_an_exported_token_when_local_env_does_not_set_it(
     gate_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (gate_root / LOCAL_ENV_FILE).mkdir()
+    _write_local_env(gate_root, f"OTHER_SECRET={_FAKE_SECRET}\n")
     monkeypatch.setenv("HF_TOKEN", "exported-token")
 
     conftest.pytest_runtest_setup(_GateItem())  # type: ignore[arg-type]
@@ -532,8 +573,33 @@ def test_gate_prefers_an_exported_token_without_reading_the_file(
     assert os.environ["HF_TOKEN"] == "exported-token"
 
 
+def test_gate_lets_local_env_override_an_exported_token_like_the_scripts(
+    gate_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_local_env(gate_root, f"HF_TOKEN={_FAKE_SECRET}\n")
+    monkeypatch.setenv("HF_TOKEN", "exported-token")
+
+    conftest.pytest_runtest_setup(_GateItem())  # type: ignore[arg-type]
+
+    assert os.environ["HF_TOKEN"] == _FAKE_SECRET
+
+
+def test_gate_rejects_an_empty_local_env_token_that_overrides_the_environment(
+    gate_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_local_env(gate_root, "HF_TOKEN=\n")
+    monkeypatch.setenv("HF_TOKEN", _FAKE_SECRET)
+
+    with pytest.raises(pytest.fail.Exception) as failed:
+        conftest.pytest_runtest_setup(_GateItem())  # type: ignore[arg-type]
+
+    assert LOCAL_ENV_FILE in str(failed.value)
+    assert "empty" in str(failed.value)
+    assert _FAKE_SECRET not in str(failed.value)
+
+
 def test_gate_names_both_places_when_the_token_is_missing(gate_root: Path) -> None:
-    _write_local_env(gate_root, f"HF_TOKEN=\nOTHER_SECRET={_FAKE_SECRET}\n")
+    _write_local_env(gate_root, f"OTHER_SECRET={_FAKE_SECRET}\n")
 
     with pytest.raises(pytest.fail.Exception) as failed:
         conftest.pytest_runtest_setup(_GateItem())  # type: ignore[arg-type]
@@ -543,11 +609,48 @@ def test_gate_names_both_places_when_the_token_is_missing(gate_root: Path) -> No
     assert _FAKE_SECRET not in str(failed.value)
 
 
-def test_gate_reports_an_unreadable_local_env_file(gate_root: Path) -> None:
+def test_gate_reports_an_unreadable_local_env_file_even_with_an_exported_token(
+    gate_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     (gate_root / LOCAL_ENV_FILE).mkdir()
+    monkeypatch.setenv("HF_TOKEN", _FAKE_SECRET)
 
-    with pytest.raises(pytest.fail.Exception, match=r"\.env\.local"):
+    with pytest.raises(pytest.fail.Exception, match=r"\.env\.local") as failed:
         conftest.pytest_runtest_setup(_GateItem())  # type: ignore[arg-type]
+
+    assert _FAKE_SECRET not in str(failed.value)
+
+
+def test_gate_restores_an_absent_token_after_the_test(gate_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_local_env(gate_root, f"HF_TOKEN={_FAKE_SECRET}\n")
+    monkeypatch.delenv("HF_TOKEN")
+    item = _GateItem()
+
+    conftest.pytest_runtest_setup(item)  # type: ignore[arg-type]
+    assert os.environ["HF_TOKEN"] == _FAKE_SECRET
+    conftest.pytest_runtest_teardown(item)  # type: ignore[arg-type]
+
+    assert "HF_TOKEN" not in os.environ
+
+
+def test_gate_restores_an_exported_token_after_the_test(gate_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_local_env(gate_root, f"HF_TOKEN={_FAKE_SECRET}\n")
+    monkeypatch.setenv("HF_TOKEN", "exported-token")
+    item = _GateItem()
+
+    conftest.pytest_runtest_setup(item)  # type: ignore[arg-type]
+    assert os.environ["HF_TOKEN"] == _FAKE_SECRET
+    conftest.pytest_runtest_teardown(item)  # type: ignore[arg-type]
+
+    assert os.environ["HF_TOKEN"] == "exported-token"
+
+
+def test_gate_teardown_leaves_untouched_tests_alone(gate_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HF_TOKEN", "exported-token")
+
+    conftest.pytest_runtest_teardown(_GateItem(marked=False))  # type: ignore[arg-type]
+
+    assert os.environ["HF_TOKEN"] == "exported-token"
 
 
 def test_gate_ignores_tests_without_the_marker(gate_root: Path) -> None:

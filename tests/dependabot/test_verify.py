@@ -443,9 +443,13 @@ def test_preflight_reports_missing_tools_platforms_and_variables() -> None:
     assert verify.preflight_reason(_check(env=("HF_TOKEN",)), {"HF_TOKEN": " "}, which=which) == (
         "set HF_TOKEN in .env.local or the environment to run this check"
     )
-    assert verify.preflight_reason(
-        _check(env=("HF_TOKEN",)), {}, which=which, local_env_error="Cannot read .env.local: Permission denied"
-    ) == ("Cannot read .env.local: Permission denied")
+    problem = "Cannot read .env.local: Permission denied"
+    assert verify.preflight_reason(_check(env=("HF_TOKEN",)), {}, which=which, local_env_problem=problem) == problem
+    assert (
+        verify.preflight_reason(_check(env=("HF_TOKEN",)), {"HF_TOKEN": "x"}, which=which, local_env_problem=problem)
+        == problem
+    )
+    assert verify.preflight_reason(_check(), {}, which=which, local_env_problem=problem) is None
     assert verify.preflight_reason(_check(), {}, which=which) is None
 
 
@@ -529,14 +533,47 @@ def test_declared_variables_come_from_local_env_for_their_check_only(
         assert _FAKE_SECRET not in (git_repo / "logs" / "run" / name).read_text(encoding="utf-8")
 
 
-def test_exported_variables_win_over_local_env(git_repo: Path, tmp_path: Path) -> None:
+def test_local_env_overrides_exported_variables_like_the_submission_scripts(git_repo: Path, tmp_path: Path) -> None:
     (git_repo / ".env.local").write_text(f"SAMPLE_TOKEN={_FAKE_SECRET}\n", encoding="utf-8")
+
+    _, executor, _ = _run_secrets(git_repo, tmp_path, {"SAMPLE_TOKEN": "exported"})
+
+    assert {request.argv[0]: request.env.get("SAMPLE_TOKEN") for request in executor.requests}["token-tool"] == (
+        _FAKE_SECRET
+    )
+
+
+def test_exported_variable_is_used_when_local_env_does_not_set_it(git_repo: Path, tmp_path: Path) -> None:
+    (git_repo / ".env.local").write_text("OTHER_SETTING=1\n", encoding="utf-8")
 
     _, executor, _ = _run_secrets(git_repo, tmp_path, {"SAMPLE_TOKEN": "exported"})
 
     assert {request.argv[0]: request.env.get("SAMPLE_TOKEN") for request in executor.requests}["token-tool"] == (
         "exported"
     )
+
+
+def test_non_blank_local_env_values_pass_through_unchanged(git_repo: Path, tmp_path: Path) -> None:
+    (git_repo / ".env.local").write_text('SAMPLE_TOKEN=" spaced value "\n', encoding="utf-8")
+
+    _, executor, _ = _run_secrets(git_repo, tmp_path, {})
+
+    assert {request.argv[0]: request.env.get("SAMPLE_TOKEN") for request in executor.requests}["token-tool"] == (
+        " spaced value "
+    )
+
+
+@pytest.mark.parametrize("assignment", ["SAMPLE_TOKEN=", 'SAMPLE_TOKEN="   "'], ids=["empty", "blank"])
+def test_empty_local_env_assignment_blocks_the_check(git_repo: Path, tmp_path: Path, assignment: str) -> None:
+    (git_repo / ".env.local").write_text(f"{assignment}\n", encoding="utf-8")
+
+    code, executor, summary = _run_secrets(git_repo, tmp_path, {"SAMPLE_TOKEN": _FAKE_SECRET})
+    results = {check["id"]: check for check in summary["checks"]}  # type: ignore[union-attr]
+
+    assert code == EXIT_INCOMPLETE
+    assert [request.argv[0] for request in executor.requests] == ["ok-tool"]
+    assert results["token-check"]["status"] == "not-run"
+    assert results["token-check"]["reason"] == "SAMPLE_TOKEN is empty in .env.local, which overrides the environment"
 
 
 def test_missing_declared_variable_points_to_local_env(git_repo: Path, tmp_path: Path) -> None:
@@ -552,7 +589,7 @@ def test_missing_declared_variable_points_to_local_env(git_repo: Path, tmp_path:
 def test_unreadable_local_env_is_reported_as_not_run(git_repo: Path, tmp_path: Path) -> None:
     (git_repo / ".env.local").mkdir()
 
-    code, _, summary = _run_secrets(git_repo, tmp_path, {})
+    code, _, summary = _run_secrets(git_repo, tmp_path, {"SAMPLE_TOKEN": "exported"})
     results = {check["id"]: check for check in summary["checks"]}  # type: ignore[union-attr]
 
     assert code == EXIT_INCOMPLETE

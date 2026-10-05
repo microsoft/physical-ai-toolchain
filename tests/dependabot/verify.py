@@ -422,7 +422,7 @@ def preflight_reason(
     env: Mapping[str, str],
     *,
     which: Callable[[str], str | None] = shutil.which,
-    local_env_error: str | None = None,
+    local_env_problem: str | None = None,
 ) -> str | None:
     """Return why a check can't run on this host, or None when it can."""
     if check.platforms and not any(sys.platform.startswith(name) for name in check.platforms):
@@ -435,9 +435,11 @@ def preflight_reason(
     missing = sorted({tool for tool in tools if which(tool) is None})
     if missing:
         return f"missing tools: {', '.join(missing)}"
+    if check.env and local_env_problem:
+        return local_env_problem
     unset = [name for name in check.env if not env.get(name, "").strip()]
     if unset:
-        return local_env_error or f"set {', '.join(unset)} in {LOCAL_ENV_FILE} or the environment to run this check"
+        return f"set {', '.join(unset)} in {LOCAL_ENV_FILE} or the environment to run this check"
     for tool, minimum in check.min_versions.items():
         result = subprocess.run([tool, "--version"], capture_output=True, text=True, check=False)
         found = _version_tuple(result.stdout + result.stderr)
@@ -870,13 +872,12 @@ def main(
             env[ENVIRONMENT_VAR] = args.environment
     environment_problem = environment_preflight(env, args.environment, repo_root) if needs_environment else None
 
-    # Variables a check declares may come from the untracked .env.local, as they do for the
-    # submission scripts; each check receives only the ones it declares.
+    # Mirror scripts/lib/common.sh, which sources the untracked .env.local over the environment:
+    # a declared variable the file assigns takes the file's value, and each check gets only its own.
     local_env: dict[str, str] = {}
     local_env_error: str | None = None
-    unset_names = {name for check in selected for name in check.env if not env.get(name, "").strip()}
     try:
-        local_env = read_local_env(repo_root, unset_names)
+        local_env = read_local_env(repo_root, {name for check in selected for name in check.env})
     except LocalEnvError as error:
         local_env_error = str(error)
 
@@ -891,8 +892,16 @@ def main(
             failed_setup.add(category.id)
 
     for check in selected:
-        check_env = {**env, **{name: local_env[name] for name in check.env if name in local_env}}
-        reason = preflight_reason(check, check_env, local_env_error=local_env_error)
+        overrides = {name: local_env[name] for name in check.env if name in local_env}
+        check_env = {**env, **overrides}
+        empty = [name for name, value in overrides.items() if not value.strip()]
+        problem = local_env_error or (
+            f"{', '.join(empty)} {'is' if len(empty) == 1 else 'are'} empty in {LOCAL_ENV_FILE}, "
+            "which overrides the environment"
+            if empty
+            else None
+        )
+        reason = preflight_reason(check, check_env, local_env_problem=problem)
         if check.tier == "environment" and environment_problem:
             reason = environment_problem
         if check.category in failed_setup:
