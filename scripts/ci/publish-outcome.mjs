@@ -309,6 +309,19 @@ function structuredCounts(data, spec) {
   }
   requireValue(object(data) && Object.keys(data).length > 0, 'Invalid structured JSON report');
   if (spec.tool) requireValue(data.tool === spec.tool || data.summary?.tool === spec.tool, 'Wrong JSON tool');
+  if (Object.hasOwn(data, 'sourcesValidated')) {
+    const violations = data.violations;
+    requireValue(Number.isSafeInteger(data.filesScanned) && data.filesScanned > 0 &&
+      Number.isSafeInteger(data.sourcesValidated) && data.sourcesValidated >= 0 &&
+      Array.isArray(data.allowedHosts) && data.allowedHosts.length > 0 &&
+      data.allowedHosts.every(host => typeof host === 'string' && host.length > 0) &&
+      Array.isArray(violations) && data.violationCount === violations.length &&
+      violations.every(result => object(result) && typeof result.file === 'string' && result.file.length > 0 &&
+        Number.isSafeInteger(result.line) && result.line > 0 && typeof result.source === 'string' &&
+        typeof result.reason === 'string' && result.reason.length > 0),
+    'Contradictory public dependency feed results');
+    return { findings: violations.length, successful: violations.length === 0 };
+  }
   const summary = object(data.summary) ? data.summary : data;
   const array = value => Array.isArray(value) ? value : object(value) ? [value] : null;
   const results = array(data.results);

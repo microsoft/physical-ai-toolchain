@@ -70,9 +70,12 @@ jobs:
         uses: ./.github/actions/setup-node-deps
 
       - name: Install terraform-docs
+        env:
+          TERRAFORM_DOCS_VERSION: ${{ inputs.terraform-docs-version }}
+          TERRAFORM_DOCS_SHA256: ${{ inputs.terraform-docs-sha256 }}
         run: |
-          $version = '${{ inputs.terraform-docs-version }}'
-          $expectedSha = '${{ inputs.terraform-docs-sha256 }}'
+          $version = $env:TERRAFORM_DOCS_VERSION
+          $expectedSha = $env:TERRAFORM_DOCS_SHA256
           $tarball = 'terraform-docs.tar.gz'
           $url = "https://github.com/terraform-docs/terraform-docs/releases/download/${version}/terraform-docs-${version}-linux-amd64.tar.gz"
 

@@ -189,6 +189,15 @@ jobs:
       upload-sarif: true
       exclude-paths: 'scripts/tests/Fixtures/**,shared/ci/tests/Fixtures/**'
 
+  # Canonical public dependency source enforcement
+  public-dependency-feeds:
+    name: Public Dependency Feeds
+    uses: ./.github/workflows/public-dependency-feeds.yml
+    with:
+      soft-fail: false
+    permissions:
+      contents: read
+
   # OSV findings remain advisory and visible in the validation summary.
   osv-scanner:
     name: OSV-Scanner
@@ -535,6 +544,7 @@ jobs:
       - markdown-link-check
       - dependency-review
       - dependency-pinning
+      - public-dependency-feeds
       - osv-scanner
       - pester-tests
       - dataviewer-frontend-tests

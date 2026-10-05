@@ -2,7 +2,7 @@
 title: Scripts
 description: CI/CD scripts, shared libraries, linting, security, and Pester tests for the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-01
+ms.date: 2026-10-05
 ms.topic: reference
 keywords:
   - scripts
@@ -105,6 +105,9 @@ required execution. Only superseded PR runs cancel automatically; main and relea
 Summaries consume the workflow cancellation context even when no child started. A cancelled
 or superseded run never produces a successful release gate.
 
+Public dependency feed validation is mandatory on PRs and main. Its receipt requires the
+checker to succeed and publish the native JSON report before either summary can pass.
+
 Accessibility validation participates in both required summaries. The Docusaurus accessibility
 collector retains its 90-minute budget for provenance checks, browser collection, and evidence
 composition; it is not a build-only job. Scheduled Docusaurus calls remain excluded from PR and
@@ -147,9 +150,9 @@ native exit returns `1`. The CI artifact upload reports a missing results file a
 `uv lock --check` without updating the lock. The main workflow checks all projects; pull requests check changed projects.
 The hosted lock check installs the interpreter pinned in `.python-version` for the root project. An empty full-repository
 selection fails rather than reporting a successful no-op.
-The dataviewer backend includes the editable VLM judge package in its locked `dev` and `vlm-judge` extras. The CI job
-installs the `dev` extra from the backend lock without `--with-editable`, then runs tests with `uv run --no-sync` to
-preserve the selected extras. The judge's Qwen dependencies remain optional.
+The dataviewer backend includes the editable VLM judge package in its locked `dev` dependency group and `vlm-judge` extra.
+The CI job installs the `dev` group from the backend lock without `--with-editable`, then runs tests with
+`uv run --no-sync` to preserve the selected group and extras. The judge's Qwen dependencies remain optional.
 Coverage artifacts from the Python validation jobs require a report after a successful test run. An upload error after a
 test failure does not replace the test failure.
 
@@ -164,6 +167,9 @@ Security scanning and dependency management scripts.
 | `security/Test-BinaryFreshness.ps1`        | Validate pinned binary hashes and Helm chart versions; emits SARIF for GitHub Security tab    |
 | `security/Modules/PinnedToolVersions.psm1` | Provide pin discovery functions for binary freshness checks                                   |
 | `security/Test-HveCoreFreshness.ps1`       | Check hve-core-derived files against their reviewed release or source-header baselines        |
+| `security/Test-WorkflowPermissions.ps1`    | Enforce explicit workflow and job `GITHUB_TOKEN` permissions                                  |
+| `security/Test-DangerousWorkflow.ps1`      | Detect unsafe event/input interpolation and untrusted `pull_request_target` checkouts         |
+| `security/Test-PublicDependencyFeeds.ps1`  | Reject private or non-canonical package sources in committed dependency metadata              |
 | `security/zap-to-sarif.py`                 | Convert ZAP results to SARIF format                                                           |
 | `security/gitleaks-scan.mjs`               | Scan tested-revision history and report explicit secret-scan outcomes                         |
 | `update-chart-hashes.sh`                   | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
@@ -226,20 +232,24 @@ The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.
 
 Findings are written to `binary-freshness-results.sarif` with per-rule `helpUri` values pointing at the appropriate remediation script. The check distinguishes integrity failures from advisory chart drift and unavailable upstream lookups:
 
-| Result | SARIF | Scanner exit | Workflow effect |
-|--------|-------|--------------|-----------------|
-| Clean | No findings | `0` | Success after SARIF upload |
-| Confirmed binary hash mismatch | Warning, `hash-mismatch` | `1` | Failure; SARIF still uploads |
-| Chart version drift | Warning, `version-drift` | `0` | Success with visible alert |
-| Binary download or chart lookup unavailable | Warning, `download-failure` or `lookup-failure` | `0` | Success with visible alert |
-| Scanner setup or report error | SARIF may be absent | `2` | Failure |
-| SARIF ingestion error | Upload step fails | Scanner exit unchanged | Failure |
+| Result                                      | SARIF                                           | Scanner exit           | Workflow effect              |
+|---------------------------------------------|-------------------------------------------------|------------------------|------------------------------|
+| Clean                                       | No findings                                     | `0`                    | Success after SARIF upload   |
+| Confirmed binary hash mismatch              | Warning, `hash-mismatch`                        | `1`                    | Failure; SARIF still uploads |
+| Chart version drift                         | Warning, `version-drift`                        | `0`                    | Success with visible alert   |
+| Binary download or chart lookup unavailable | Warning, `download-failure` or `lookup-failure` | `0`                    | Success with visible alert   |
+| Scanner setup or report error               | SARIF may be absent                             | `2`                    | Failure                      |
+| SARIF ingestion error                       | Upload step fails                               | Scanner exit unchanged | Failure                      |
 
 A successful HTTP response is not sufficient evidence for a binary mismatch: the scanner rejects JSON/HTML responses and malformed ZIP/GZIP bodies before hashing. In September 2026 the pinned NGC CLI 3.41.4 URL returned a changing JSON status response rather than the expected ZIP archive. Do not replace the NGC SHA-256 pin with the hash of that response. Obtain and independently verify the ZIP through NVIDIA's supported download path before changing the pin.
 
 The `Test-HveCoreFreshness.ps1` script runs weekly through `check-hve-core-freshness.yml`. Each derived file declares a baseline. `release` files compare the **upstream** blob SHA at `HVE_CORE_DERIVED_FILES_REF` with the resolved newest non-draft release. `source-header` files compare the revision recorded in their header with a resolved upstream `main` revision. This reports relevant upstream changes before they appear in a release.
 
 Source-header files must include `Adapted from microsoft/hve-core <upstream-path> as of commit <40-hex SHA>`. Comparing upstream blobs avoids false drift from intentional local adaptations.
+
+`Test-WorkflowPermissions.ps1` distinguishes absent, empty, and populated workflow-level grants. Jobs must declare their own permissions when the workflow grant is populated; jobs inheriting `permissions: {}` pass because the inherited scope is empty.
+
+`Test-DangerousWorkflow.ps1` treats non-boolean workflow and composite-action inputs as command-bearing. Map them to step-level environment variables before reading them from shell or `actions/github-script` code. The linter also retains the repository-specific check for privileged `pull_request_target` workflows that check out untrusted pull-request code.
 
 ### 🔗 Where Pins Live
 

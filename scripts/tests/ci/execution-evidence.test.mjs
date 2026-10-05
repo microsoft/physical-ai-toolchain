@@ -427,6 +427,53 @@ test('reports: native date freshness arrays retain stale findings and exact type
   }
 });
 
+test('reports: native public dependency feed results expose violations and reject contradictions', t => {
+  const workspace = fixture(t);
+  const spec = { path: 'logs/public-dependency-feeds-results.json', kind: 'json' };
+  const violation = { file: '.npmrc', line: 1, source: 'https://feed.example.com/', reason: 'not approved' };
+  const clean = { filesScanned: 3, sourcesValidated: 2, allowedHosts: ['registry.npmjs.org'], violationCount: 0, violations: [] };
+  write(workspace, spec.path, clean);
+  assert.deepEqual([inspectReport(workspace, spec).findings, inspectReport(workspace, spec).successful], [0, true]);
+  write(workspace, spec.path, { ...clean, violationCount: 1, violations: [violation] });
+  assert.deepEqual([inspectReport(workspace, spec).findings, inspectReport(workspace, spec).successful], [1, false]);
+  for (const report of [
+    { ...clean, filesScanned: 0 }, { ...clean, sourcesValidated: -1 }, { ...clean, allowedHosts: [] },
+    { ...clean, violationCount: 1 }, { ...clean, violations: null }, { ...clean, violationCount: '0' },
+    { ...clean, violationCount: 1, violations: [{ ...violation, line: 0 }] },
+    { ...clean, violationCount: 1, violations: [{ ...violation, reason: '' }] },
+  ]) {
+    write(workspace, spec.path, report);
+    assert.throws(() => inspectReport(workspace, spec), /public dependency feed/, JSON.stringify(report));
+  }
+});
+
+test('actual process: public dependency feed checker reports produce canonical receipts', t => {
+  const available = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'], { encoding: 'utf8', timeout: 30_000 });
+  if (available.error?.code === 'ENOENT') {
+    t.skip('PowerShell is not installed; native report fixtures remain covered');
+    return;
+  }
+  const canonical = JSON.parse(readFileSync(join(root, 'scripts', 'ci', 'ci-contract.json'), 'utf8'));
+  const definition = canonical.execution['public-dependency-feeds'].jobs['public-dependency-feeds'];
+  const checker = join(root, 'scripts', 'security', 'Test-PublicDependencyFeeds.ps1');
+  for (const [registry, status, findings] of [['https://registry.npmjs.org/', 0, 0], ['https://feed.example.com/npm/', 1, 1]]) {
+    const workspace = fixture(t);
+    const repository = join(workspace, 'repository');
+    write(repository, '.npmrc', `registry=${registry}\n`);
+    assert.equal(spawnSync('git', ['-C', repository, 'init', '--quiet']).status, 0);
+    const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', checker, '-RepoRoot', repository,
+      '-OutputPath', join(workspace, definition.reports[0].path), '-FailOnViolation'], { encoding: 'utf8', timeout: 60_000 });
+    assert.equal(result.status, status, result.stderr);
+    const outcome = status === 0 ? 'success' : 'failure';
+    const receipt = recordOutcome({ ...options(workspace), workflow: 'public-dependency-feeds', job: 'public-dependency-feeds',
+      shard: 'default', target: 'default', requiredSteps: definition['required-steps'], reports: definition.reports,
+      steps: { check: { outcome, conclusion: outcome } } }, canonical);
+    assert.equal(receipt['work-status'], outcome);
+    assert.equal(receipt.counts.findings, findings);
+    assert.equal(receipt.counts.executed, 1);
+  }
+});
+
 test('reports: native execution flags and expected Terraform inventory cannot be optimistic', t => {
   const workspace = fixture(t);
   const spec = { path: 'native.json', kind: 'json' };

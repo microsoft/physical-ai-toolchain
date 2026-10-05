@@ -18,6 +18,7 @@ Usage: $(basename "$0") --environment NAME --host-name NAME [OPTIONS]
 
 Verify an existing OSMO backend and pool, reuse or issue one service token, and publish
 the exact host-bound HiL artifact catalog to pre-created Key Vault secrets.
+Create those secrets and the registry config with prepare-osmo-hil-exchange.sh.
 This script does not create remote desired state or change Key Vault networking or RBAC.
 
 OPTIONS:
@@ -32,7 +33,7 @@ OPTIONS:
     --service-url URL             Existing OSMO service URL (required)
     --backend-name NAME           Existing OSMO backend (required)
     --pool-name NAME              Existing OSMO pool (required)
-    --osmo-config-dir DIR         Empty protected OSMO profile for fresh code login (required)
+    --osmo-config-dir DIR         Empty protected OSMO profile for a fresh login (required)
     --registry-config-file PATH   Protected pull-only Docker config (required)
     --token-expiry YYYY-MM-DD     Service-token expiry (required)
     --arc-cluster-resource-id ID  Arc-enabled Kubernetes resource ID (required for prepare)
@@ -444,7 +445,7 @@ jq -e --arg host "$registry_host" --arg version "$image_version" '
 ' "$image_manifest" >/dev/null || fatal "OSMO image manifest does not match the selected registry and image version"
 export XDG_CONFIG_HOME="$osmo_session_dir"
 operation="authenticate to the explicit OSMO service URL"
-osmo login "$service_url" --method code
+osmo_login "$service_url"
 operation="verify the explicit OSMO service version"
 version_json=$(curl --fail --silent --show-error --connect-timeout 5 "${service_url%/}/api/version")
 expected_major="${image_version%%.*}"

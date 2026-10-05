@@ -3,7 +3,7 @@ sidebar_position: 5
 title: Cluster Setup
 description: Kubernetes service deployment, AzureML extension, and OSMO platform configuration
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-01
+ms.date: 2026-10-03
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -109,43 +109,26 @@ Later runs reuse the address when you omit the flag. Passing a different one mov
 
 Enterprise deployment using private Azure Container Registry.
 
-Prerequisite: import images to ACR before deployment.
+Before deploying, import the pinned OSMO images and Helm charts into the Terraform-deployed ACR. From `infrastructure/setup/`:
 
 ```bash
-# Get ACR name and import images
-cd ../001-iac
-ACR_NAME=$(terraform output -json container_registry | jq -r '.value.name')
-az acr login --name "$ACR_NAME"
-
-# Set versions
-OSMO_VERSION="${OSMO_VERSION:-6.3.0}"
-CHART_VERSION="${CHART_VERSION:-1.3.0}"
-
-OSMO_IMAGES=(
-  service worker logger agent
-  backend-listener backend-worker client
-  delayed-job-monitor init-container
-)
-for img in "${OSMO_IMAGES[@]}"; do
-  az acr import --name "$ACR_NAME" \
-    --source "nvcr.io/nvidia/osmo/${img}:${OSMO_VERSION}" \
-    --image "osmo/${img}:${OSMO_VERSION}"
-done
-
-# Import Helm charts
-for chart in osmo backend-operator; do
-  helm pull "oci://nvcr.io/nvidia/osmo/${chart}" --version "$CHART_VERSION"
-  helm push "${chart}-${CHART_VERSION}.tgz" "oci://${ACR_NAME}.azurecr.io/helm"
-  rm "${chart}-${CHART_VERSION}.tgz"
-done
+./import-osmo-to-acr.sh --environment <environment> --config-preview
+./import-osmo-to-acr.sh --environment <environment>
 ```
 
+The script imports the 11 OSMO images from `nvcr.io` with `az acr import`. It pulls the `service` and `backend-operator` charts from the NGC Helm repository, checks them against the SHA-256 values pinned in `defaults.conf`, and pushes them to `oci://<registry>/helm`. Every imported tag is locked against writes and deletes, and the image digests go into `generated/<environment>/osmo-images.json`.
+
+Reruns reuse locked tags. Pushing charts and reading tags need data-plane access to the registry, so connect to the VPN first if the registry blocks public access.
+
 ```bash
-cd ../002-setup
 ./01-deploy-robotics-charts.sh
 ./02-deploy-azureml-extension.sh
-./03-deploy-osmo.sh --use-acr --private-service-ip <unused-aks-subnet-ip>
+./03-deploy-osmo.sh --use-acr \
+  --image-manifest generated/<environment>/osmo-images.json \
+  --private-service-ip <unused-aks-subnet-ip>
 ```
+
+The OSMO gateway's Envoy image still comes from Docker Hub, so a cluster without internet access needs that image mirrored separately.
 
 ### Scenario Comparison
 
@@ -172,30 +155,47 @@ When deploying with `should_enable_private_endpoint = false`, cluster endpoints 
 
 ### AzureML Extension
 
-The AzureML inference router (`azureml-fe`) handles incoming requests. For public deployments:
+The AzureML extension is configured for training and batch scoring. `enableInference` is `false`, so the extension does not deploy the `azureml-fe` real-time inference router or expose an inference service. `nginxIngress.enabled` remains `true` because OSMO routes its UI and API through the extension-managed `azureml-ingress-nginx` controller.
 
-- Enable HTTPS with TLS certificates (`allowInsecureConnections=False`)
-- Configure `sslSecret` or provide certificate files
-- Consider using `internalLoadBalancerProvider=azure` for internal-only access
+Rerun `02-deploy-azureml-extension.sh` to reconcile an existing extension with the generated training-only configuration. The script compares the live extension settings and updates only values that differ. The update disables extension-hosted real-time inference; migrate any separately created online endpoints before applying it.
 
-See [Secure Kubernetes online endpoints](https://learn.microsoft.com/azure/machine-learning/how-to-secure-kubernetes-online-endpoint) and [Inference routing configuration](https://learn.microsoft.com/azure/machine-learning/how-to-kubernetes-inference-routing-azureml-fe).
+Azure extension updates merge configuration settings, so a cluster upgraded from an inference-enabled configuration can retain stored inference-router settings even though `enableInference=false` makes them inactive. Fresh installs omit those settings.
+
+Inspect the effective stored settings after an update:
+
+```bash
+az k8s-extension show \
+  --name <extension-name> \
+  --cluster-type managedClusters \
+  --cluster-name <cluster-name> \
+  --resource-group <resource-group> \
+  --query configurationSettings \
+  --output json
+```
+
+This deployment profile does not support Azure ML Kubernetes real-time online endpoints. If a cluster must host them, manage an explicit inference-enabled extension configuration outside this script and follow [Configure a secure online endpoint with TLS/SSL](https://learn.microsoft.com/azure/machine-learning/how-to-secure-kubernetes-online-endpoint).
+
+Do not toggle inference manually on an extension managed by this script. The next run restores the training-only settings.
 
 ## 📜 Scripts
 
-| Script                           | Purpose                                         |
-|----------------------------------|-------------------------------------------------|
-| `01-deploy-robotics-charts.sh`   | GPU Operator, KAI Scheduler                     |
-| `02-deploy-azureml-extension.sh` | AzureML K8s extension, compute attach           |
-| `03-deploy-osmo.sh`              | OSMO service, backend operator, platform config |
+| Script                           | Purpose                                              |
+|----------------------------------|------------------------------------------------------|
+| `01-deploy-robotics-charts.sh`   | GPU Operator, KAI Scheduler                          |
+| `02-deploy-azureml-extension.sh` | Training-only AzureML extension, compute attach      |
+| `03-deploy-osmo.sh`              | OSMO service, backend operator, platform config      |
+| `import-osmo-to-acr.sh`          | Pinned OSMO images and charts in ACR, image manifest |
 
 ### Script Flags
 
-| Flag               | Scripts             | Description                      |
-|--------------------|---------------------|----------------------------------|
-| `--use-acr`        | `03-deploy-osmo.sh` | Pull from Terraform-deployed ACR |
-| `--acr-name NAME`  | `03-deploy-osmo.sh` | Specify alternate ACR            |
-| `--skip-backend`   | `03-deploy-osmo.sh` | Skip backend operator deployment |
-| `--config-preview` | All                 | Print config and exit            |
+| Flag                    | Scripts                          | Description                                                            |
+|-------------------------|----------------------------------|------------------------------------------------------------------------|
+| `--fast-prod`           | `02-deploy-azureml-extension.sh` | Set the AzureML cluster purpose to `FastProd`                          |
+| `--use-acr`             | `03-deploy-osmo.sh`              | Pull from Terraform-deployed ACR                                       |
+| `--acr-name NAME`       | `03-deploy-osmo.sh`              | Specify alternate ACR                                                  |
+| `--image-manifest PATH` | `03-deploy-osmo.sh`              | Image manifest from `import-osmo-to-acr.sh`, required with `--use-acr` |
+| `--skip-backend`        | `03-deploy-osmo.sh`              | Skip backend operator deployment                                       |
+| `--config-preview`      | All                              | Print config and exit                                                  |
 
 ## ⚙️ Configuration
 

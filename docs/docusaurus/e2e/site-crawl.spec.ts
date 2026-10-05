@@ -5,9 +5,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
-import { analyzeAccessibility, expectPageReady, siteRoute } from './accessibility-helpers';
+import { analyzeAccessibility, expectPageReady, siteRoute, waitForRenderedRoute } from './accessibility-helpers';
 import { deployedRouteManifestPath, readDeployedRouteManifest } from './route-inventory';
 import { evidence } from './evidence-cell-reporter';
 
@@ -178,12 +178,9 @@ const outputDirectory = path.resolve(process.cwd(), process.env.DOCS_E2E_OUTPUT_
 const resultsPath = path.join(outputDirectory, 'site-crawl-results.json');
 const ledgerPath = path.join(outputDirectory, 'contrast-ledger.json');
 const summaryPath = path.join(outputDirectory, 'site-crawl-summary.txt');
-const contrastEvidenceDirectory = path.join(outputDirectory, 'contrast-evidence');
 const baselinePath = path.resolve(process.cwd(), 'e2e', 'contrast-baseline.json');
 const relativeBaselinePath = path.relative(process.cwd(), baselinePath).replaceAll('\\', '/');
 const baselineWriteRequested = process.env.DOCS_CONTRAST_BASELINE_WRITE === '1' && !process.env.CI;
-
-const evidenceByKey = new Map<string, RouteEvidence>();
 
 function evidenceKey(route: string, theme: Theme, state: RenderedState): string {
   return `${route}|${theme}|${state}`;
@@ -287,6 +284,7 @@ export function requiredContrastRatio(fontSizePx: number, fontWeight: number): n
 
 async function captureContrastMeasurement(
   page: Page,
+  captures: CaptureCoordinator,
   result: AxeResult,
   node: AxeNode,
   route: string,
@@ -391,11 +389,9 @@ async function captureContrastMeasurement(
 
   if (typeof selector === 'string' && targetFound) {
     const relativePath = path.join('contrast-evidence', `${signature}-${tupleDigest.slice(0, 12)}.png`);
-    const absolutePath = path.join(outputDirectory, relativePath);
-    if (!fs.existsSync(absolutePath)) {
-      fs.mkdirSync(contrastEvidenceDirectory, { recursive: true });
+    await captures.capture(path.join(outputDirectory, relativePath), async (temporaryPath) => {
       try {
-        await page.locator(selector).first().screenshot({ path: absolutePath });
+        await page.locator(selector).first().screenshot({ path: temporaryPath });
       } catch {
         const locator = page.locator(selector).first();
         await locator.scrollIntoViewIfNeeded().catch(() => undefined);
@@ -410,9 +406,9 @@ async function captureContrastMeasurement(
               y: Math.max(0, box.y + scroll.y),
             }
           : { height: viewport.height, width: viewport.width, x: scroll.x, y: scroll.y };
-        await page.screenshot({ path: absolutePath, clip });
+        await page.screenshot({ path: temporaryPath, clip });
       }
-    }
+    });
     evidencePath = relativePath.replaceAll('\\', '/');
   }
   return {
@@ -836,8 +832,8 @@ function writeBaselineSeed(entries: LedgerEntry[]): void {
   writeJson(baselinePath, document);
 }
 
-function writeArtifacts(baseline: BaselineEntry[]): CrawlArtifacts {
-  const artifacts = buildCrawlArtifacts([...evidenceByKey.values()], baseline, {
+function writeArtifacts(baseline: BaselineEntry[], evidence: RouteEvidence[]): CrawlArtifacts {
+  const artifacts = buildCrawlArtifacts(evidence, baseline, {
     expectedKeys: expectedEvidenceKeys(),
     today: today(),
   });
@@ -959,8 +955,10 @@ async function probeClientNavigation(page: Page): Promise<ClientNavigationEviden
   });
   await page.locator(`a[href="${candidate.selector}"]`).first().click();
   await page.waitForURL(candidate.href);
+  await waitForRenderedRoute(page);
   await page.goBack();
   await page.waitForURL(origin);
+  await waitForRenderedRoute(page);
   await page.locator('main, [role="main"]').first().waitFor({ state: 'visible' });
 
   const restored = await page.evaluate(() => ({
@@ -971,33 +969,268 @@ async function probeClientNavigation(page: Page): Promise<ClientNavigationEviden
   return { ...restored, performed: true, via: candidate.selector };
 }
 
-async function crawl(page: Page, route: string, theme: Theme, state: RenderedState): Promise<void> {
-  const evidence: RouteEvidence = {
+interface CrawlVisit {
+  route: string;
+  state: RenderedState;
+  theme: Theme;
+}
+
+type AttemptStatus = 'running' | 'stopping' | 'frozen';
+
+const CRAWL_CONCURRENCY = 2;
+const INTERRUPT_BUDGET_MS = 10_000;
+
+function visitKey(visit: CrawlVisit): string {
+  return evidenceKey(visit.route, visit.theme, visit.state);
+}
+
+function visitLabel(visit: CrawlVisit): string {
+  return `${visit.route} [${visit.theme}/${visit.state}]`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function emptyEvidence(visit: CrawlVisit): RouteEvidence {
+  return {
     clientNavigation: null,
     contrastEvidence: [],
     errors: [],
     features: null,
     incomplete: [],
     lang: null,
-    route,
-    state,
+    route: visit.route,
+    state: visit.state,
     status: null,
-    theme,
+    theme: visit.theme,
     title: null,
     violations: [],
   };
+}
+
+function failedEvidence(visit: CrawlVisit, reason: string): RouteEvidence {
+  const evidence = emptyEvidence(visit);
+  evidence.errors.push(`${visitLabel(visit)}: ${reason}`);
+  evidence.errors.push(...checkRouteInvariants(evidence));
+  return evidence;
+}
+
+async function within<T>(promise: Promise<T>, milliseconds: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), milliseconds);
+  });
   try {
-    await page.addInitScript(() => {
-      const registered: string[] = [];
-      (window as unknown as { __docsMotionListeners: string[] }).__docsMotionListeners = registered;
-      const original = window.addEventListener.bind(window);
-      window.addEventListener = function trackMotionListeners(type: string, ...rest: unknown[]) {
-        if (type === 'devicemotion' || type === 'deviceorientation') {
-          registered.push(type);
+    return await Promise.race([promise.then(() => true), expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// One owner per output path: concurrent requests share the in-flight write, and a file only appears once complete.
+export class CaptureCoordinator {
+  private readonly inFlight = new Map<string, Promise<void>>();
+  private sequence = 0;
+
+  capture(target: string, write: (temporaryPath: string) => Promise<void>): Promise<void> {
+    const pending = this.inFlight.get(target);
+    if (pending) {
+      return pending;
+    }
+    if (fs.existsSync(target)) {
+      return Promise.resolve();
+    }
+    const attempt = this.write(target, write).finally(() => this.inFlight.delete(target));
+    this.inFlight.set(target, attempt);
+    return attempt;
+  }
+
+  private async write(target: string, write: (temporaryPath: string) => Promise<void>): Promise<void> {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const extension = path.extname(target);
+    this.sequence += 1;
+    const temporaryPath = `${target.slice(0, -extension.length)}.partial-${process.pid}-${this.sequence}${extension}`;
+    try {
+      await write(temporaryPath);
+      fs.renameSync(temporaryPath, target);
+    } catch (error) {
+      fs.rmSync(temporaryPath, { force: true });
+      throw error;
+    }
+  }
+}
+
+// Owns every visit, browser resource, and record for one collector attempt. Interruption stops dequeuing, closes
+// owned contexts to abort pending browser work, and freezes a snapshot that late callbacks can no longer change.
+export class CrawlAttempt {
+  readonly captures = new CaptureCoordinator();
+  private readonly active = new Map<string, Promise<void>>();
+  private frozen: RouteEvidence[] | null = null;
+  private readonly records = new Map<string, RouteEvidence>();
+  private readonly resources = new Map<string, () => Promise<void>>();
+  private status: AttemptStatus = 'running';
+  private readonly visits = new Map<string, CrawlVisit>();
+
+  constructor(
+    private readonly runVisit: (visit: CrawlVisit, attempt: CrawlAttempt) => Promise<RouteEvidence>,
+    private readonly concurrency = CRAWL_CONCURRENCY,
+  ) {}
+
+  adopt(key: string, close: () => Promise<void>): () => void {
+    if (this.status !== 'running') {
+      throw new Error('the crawl attempt is stopping and accepts no new browser resources');
+    }
+    this.resources.set(key, close);
+    return () => {
+      this.resources.delete(key);
+    };
+  }
+
+  async run(visits: CrawlVisit[]): Promise<void> {
+    const keys = visits.map(visitKey);
+    const repeated = keys.find((key, index) => keys.indexOf(key) !== index || this.visits.has(key));
+    if (repeated) {
+      throw new Error(`route state is scheduled more than once: ${repeated}`);
+    }
+    visits.forEach((visit) => this.visits.set(visitKey(visit), visit));
+
+    const queue = [...visits];
+    const lane = async (): Promise<void> => {
+      while (this.status === 'running') {
+        const visit = queue.shift();
+        if (!visit) {
+          return;
         }
-        return (original as unknown as (...args: unknown[]) => void)(type, ...rest);
-      } as typeof window.addEventListener;
+        const key = visitKey(visit);
+        const task = this.runVisit(visit, this).then(
+          (evidence) => this.record(key, evidence),
+          (error: unknown) => this.record(key, failedEvidence(visit, errorMessage(error))),
+        );
+        this.active.set(key, task);
+        await task;
+        this.active.delete(key);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(this.concurrency, visits.length) }, lane));
+  }
+
+  freeze(): RouteEvidence[] {
+    if (!this.frozen) {
+      this.status = 'frozen';
+      this.frozen = [...this.records.values()];
+    }
+    return this.frozen;
+  }
+
+  async stop(budgetMs = INTERRUPT_BUDGET_MS): Promise<RouteEvidence[]> {
+    if (this.frozen) {
+      return this.frozen;
+    }
+    this.status = 'stopping';
+    const interrupted = [...this.active.keys()];
+    const teardownErrors = new Map<string, string>();
+    const closing = Promise.all(
+      [...this.resources].map(([key, close]) =>
+        close().catch((error: unknown) => {
+          teardownErrors.set(key, `browser context did not close during interruption: ${errorMessage(error)}`);
+        }),
+      ),
+    );
+    const settled = await within(
+      closing.then(() => Promise.allSettled([...this.active.values()])),
+      budgetMs,
+    );
+
+    for (const key of interrupted) {
+      const visit = this.visits.get(key)!;
+      const reasons = [
+        'the crawl attempt was interrupted before this state completed',
+        ...(teardownErrors.has(key) ? [teardownErrors.get(key)!] : []),
+        ...(settled ? [] : [`interrupted work did not settle within ${budgetMs}ms`]),
+      ];
+      const record = this.records.get(key);
+      if (record) {
+        record.errors.push(...reasons.map((reason) => `${visitLabel(visit)}: ${reason}`));
+      } else {
+        const evidence = failedEvidence(visit, reasons[0]);
+        evidence.errors.push(...reasons.slice(1).map((reason) => `${visitLabel(visit)}: ${reason}`));
+        this.records.set(key, evidence);
+      }
+    }
+    return this.freeze();
+  }
+
+  private record(key: string, evidence: RouteEvidence): void {
+    if (this.status === 'frozen') {
+      return;
+    }
+    const existing = this.records.get(key);
+    if (existing) {
+      existing.errors.push(`${key}: route state produced duplicate evidence`);
+      return;
+    }
+    this.records.set(key, evidence);
+  }
+}
+
+// A fresh context per visit isolates storage, theme, and instrumentation. Playwright applies the project's context
+// options and trace recording to contexts created inside a test.
+export async function withIsolatedPage<T>(
+  browser: Browser,
+  attempt: CrawlAttempt,
+  key: string,
+  body: (page: Page) => Promise<T>,
+  retainPage: (result: T) => boolean = () => false,
+): Promise<{ cleanupErrors: string[]; result: T }> {
+  const context = await browser.newContext();
+  let release: () => void;
+  try {
+    release = attempt.adopt(key, () => context.close());
+  } catch (error) {
+    await context.close();
+    throw error;
+  }
+
+  const cleanupErrors: string[] = [];
+  try {
+    const page = await context.newPage();
+    const result = await body(page);
+    // Closing the page first skips Playwright's per-context failure screenshot for healthy visits.
+    if (!retainPage(result)) {
+      await page.close().catch((error: unknown) => {
+        cleanupErrors.push(`page did not close: ${errorMessage(error)}`);
+      });
+    }
+    return { cleanupErrors, result };
+  } finally {
+    await context.close().catch((error: unknown) => {
+      cleanupErrors.push(`browser context did not close: ${errorMessage(error)}`);
     });
+    release();
+  }
+}
+
+async function installMotionListenerProbe(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const registered: string[] = [];
+    const probe = window as unknown as { __docsMotionListeners: string[]; __docsMotionProbeInstalls?: number };
+    probe.__docsMotionListeners = registered;
+    probe.__docsMotionProbeInstalls = (probe.__docsMotionProbeInstalls ?? 0) + 1;
+    const original = window.addEventListener.bind(window);
+    window.addEventListener = function trackMotionListeners(type: string, ...rest: unknown[]) {
+      if (type === 'devicemotion' || type === 'deviceorientation') {
+        registered.push(type);
+      }
+      return (original as unknown as (...args: unknown[]) => void)(type, ...rest);
+    } as typeof window.addEventListener;
+  });
+}
+
+async function crawl(page: Page, visit: CrawlVisit, captures: CaptureCoordinator): Promise<RouteEvidence> {
+  const { route, state, theme } = visit;
+  const evidence = emptyEvidence(visit);
+  try {
     await page.emulateMedia({ colorScheme: theme });
     const response = await page.goto(siteRoute(route));
     evidence.status = response?.status() ?? null;
@@ -1013,40 +1246,63 @@ async function crawl(page: Page, route: string, theme: Theme, state: RenderedSta
     evidence.incomplete = accessibility.incomplete;
     for (const result of evidence.incomplete.filter((candidate) => candidate.id === 'color-contrast')) {
       for (const node of result.nodes) {
-        evidence.contrastEvidence.push(await captureContrastMeasurement(page, result, node, route, theme, state));
+        evidence.contrastEvidence.push(
+          await captureContrastMeasurement(page, captures, result, node, route, theme, state),
+        );
       }
     }
     if (state === 'default') {
       evidence.clientNavigation = await probeClientNavigation(page);
     }
   } catch (error) {
-    evidence.errors.push(`${route} [${theme}/${state}]: ${error instanceof Error ? error.message : String(error)}`);
+    evidence.errors.push(`${visitLabel(visit)}: ${errorMessage(error)}`);
   }
   evidence.errors.push(...checkRouteInvariants(evidence));
-  evidenceByKey.set(evidenceKey(route, theme, state), evidence);
+  return evidence;
+}
+
+async function runCrawlVisit(browser: Browser, visit: CrawlVisit, attempt: CrawlAttempt): Promise<RouteEvidence> {
+  const { cleanupErrors, result } = await withIsolatedPage(
+    browser,
+    attempt,
+    visitKey(visit),
+    async (page) => {
+      await installMotionListenerProbe(page);
+      return crawl(page, visit, attempt.captures);
+    },
+    (evidence) => evidence.errors.length > 0,
+  );
+  result.errors.push(...cleanupErrors.map((error) => `${visitLabel(visit)}: ${error}`));
+  return result;
+}
+
+let collectorAttempt: CrawlAttempt | null = null;
+
+async function collectedEvidence(): Promise<RouteEvidence[]> {
+  return collectorAttempt ? collectorAttempt.stop() : [];
 }
 
 test.describe.serial('all-route default-state evidence', () => {
-  test.afterAll(() => {
-    writeArtifacts(readBaseline());
+  test.afterAll(async () => {
+    writeArtifacts(readBaseline(), await collectedEvidence());
   });
 
   test('collects every route state before evaluating the gate', evidence('dcs01-dcs12-route-crawl', [
     { journeyId: 'DCS01', method: 'PLAYWRIGHT_TREE' },
     { journeyId: 'DCS12', method: 'PLAYWRIGHT_TREE' },
-  ]), async ({ page }) => {
+  ]), async ({ browser }) => {
     test.setTimeout(55 * 60_000);
-    for (const route of manifest.routes) {
-      for (const theme of THEMES) {
-        await crawl(page, route, theme, 'default');
-      }
-    }
+    const attempt = new CrawlAttempt((visit, owner) => runCrawlVisit(browser, visit, owner));
+    collectorAttempt = attempt;
+    await attempt.run(
+      manifest.routes.flatMap((route) => THEMES.map((theme): CrawlVisit => ({ route, state: 'default', theme }))),
+    );
 
     const exclusion = manifest.exclusions.find((entry) => entry.path === '404.html');
     expect(exclusion?.reason, 'the generated 404 output must cite the not-found journey').toMatch(/not-found/i);
-    await crawl(page, NOT_FOUND_ROUTE, 'light', 'not-found');
+    await attempt.run([{ route: NOT_FOUND_ROUTE, state: 'not-found', theme: 'light' }]);
 
-    const artifacts = writeArtifacts(readBaseline());
+    const artifacts = writeArtifacts(readBaseline(), attempt.freeze());
     if (baselineWriteRequested) {
       writeBaselineSeed(artifacts.ledger.entries);
       console.log(`Seeded ${artifacts.ledger.entries.length} unresolved signatures into ${relativeBaselinePath}`);
@@ -1056,7 +1312,7 @@ test.describe.serial('all-route default-state evidence', () => {
 
   test('rejects unresolved contrast signatures', async () => {
     test.skip(baselineWriteRequested, 'Baseline seeding records unresolved signatures for later review.');
-    const artifacts = writeArtifacts(readBaseline());
+    const artifacts = writeArtifacts(readBaseline(), await collectedEvidence());
     expect(
       gatingContrastBlocking(artifacts.ledger.assessments, process.env.REQUIRED_COMPLETENESS),
       artifacts.summary,
@@ -1212,5 +1468,205 @@ test.describe('route and contrast evidence contracts', () => {
     expect(artifacts.summary).toContain('Route states evaluated: 2 of 2 expected');
     // An interrupted run must not claim that unobserved baseline entries are stale.
     expect(artifacts.ledger.assessments.every((assessment) => assessment.status !== 'unreconciled')).toBe(true);
+  });
+
+  const visitsFor = (routes: string[], themes: Theme[] = ['light']): CrawlVisit[] =>
+    routes.flatMap((route) => themes.map((theme): CrawlVisit => ({ route, state: 'default', theme })));
+
+  test('the crawl scheduler runs every state once with at most two concurrent visits', async () => {
+    const visits = visitsFor(['/c', '/a', '/b'], THEMES);
+    const started: string[] = [];
+    const gates = new Map<string, () => void>();
+    let active = 0;
+    let maxActive = 0;
+    const attempt = new CrawlAttempt(async (visit) => {
+      started.push(visitKey(visit));
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise<void>((resolve) => gates.set(visitKey(visit), resolve));
+      active -= 1;
+      return routeEvidence({ route: visit.route, theme: visit.theme, title: visit.route });
+    });
+
+    const running = attempt.run(visits);
+    await expect.poll(() => active).toBe(2);
+    // Release the most recent visit first so completion order differs from schedule order.
+    while (started.length < visits.length || gates.size > 0) {
+      await expect.poll(() => gates.size).toBeGreaterThan(0);
+      const [key, release] = [...gates].at(-1)!;
+      gates.delete(key);
+      release();
+    }
+    await running;
+
+    const expectedKeys = visits.map(visitKey).sort();
+    expect(maxActive).toBe(2);
+    expect([...started].sort()).toEqual(expectedKeys);
+    const artifacts = buildCrawlArtifacts(attempt.freeze(), [], { expectedKeys, today: '2026-09-14' });
+    expect(artifacts.results.results.map((record) => evidenceKey(record.route, record.theme, record.state))).toEqual(
+      expectedKeys,
+    );
+    expect(artifacts.routeBlocking).toEqual([]);
+
+    await expect(attempt.run([visits[0]])).rejects.toThrow(/scheduled more than once/);
+    const duplicate = new CrawlAttempt(async (visit) => routeEvidence({ route: visit.route }));
+    await expect(duplicate.run([visits[0], visits[0]])).rejects.toThrow(/scheduled more than once/);
+    expect(duplicate.freeze()).toEqual([]);
+  });
+
+  test('isolated crawl visits get fresh configured contexts that always close', async ({ baseURL, browser, viewport }) => {
+    const before = browser.contexts().length;
+    const contexts = new Set<BrowserContext>();
+    const cleanupErrors: string[] = [];
+    const observations: Array<{ installs: number; listeners: number; stored: string | null; url: string }> = [];
+    const attempt = new CrawlAttempt(async (visit, owner) => {
+      const isolated = await withIsolatedPage(browser, owner, visitKey(visit), async (page) => {
+        contexts.add(page.context());
+        expect(page.viewportSize()).toEqual(viewport);
+        await installMotionListenerProbe(page);
+        await page.goto(siteRoute('/'));
+        const stored = await page.evaluate(() => localStorage.getItem('crawl-isolation'));
+        const probe = await page.evaluate(() => {
+          window.addEventListener('devicemotion', () => undefined);
+          localStorage.setItem('crawl-isolation', 'used');
+          const instrumented = window as unknown as { __docsMotionListeners: string[]; __docsMotionProbeInstalls: number };
+          return { installs: instrumented.__docsMotionProbeInstalls, listeners: instrumented.__docsMotionListeners.length };
+        });
+        observations.push({ ...probe, stored, url: page.url() });
+        return routeEvidence({ route: visit.route, theme: visit.theme, title: visit.route });
+      });
+      cleanupErrors.push(...isolated.cleanupErrors);
+      return isolated.result;
+    });
+
+    await attempt.run(visitsFor(['/', '/contributing'], THEMES));
+    expect(contexts.size).toBe(4);
+    expect(observations).toHaveLength(4);
+    for (const observation of observations) {
+      expect(observation).toEqual({ installs: 1, listeners: 1, stored: null, url: `${baseURL}` });
+    }
+    expect(cleanupErrors).toEqual([]);
+    expect(browser.contexts()).toHaveLength(before);
+    expect(attempt.freeze().every((record) => record.errors.length === 0)).toBe(true);
+  });
+
+  test('failed and interrupted visits stay blocking and release their browser contexts', async ({ browser }) => {
+    const before = browser.contexts().length;
+    const refusingBrowser = {
+      newContext: async () => ({
+        close: async () => {
+          throw new Error('close refused');
+        },
+        newPage: async () => ({ close: async () => undefined }),
+      }),
+    } as unknown as Browser;
+    let pendingPage: Page | undefined;
+    let resolveLate: (() => void) | undefined;
+    const attempt = new CrawlAttempt(async (visit, owner) => {
+      const key = visitKey(visit);
+      if (visit.route === '/setup') {
+        throw new Error('context creation failed');
+      }
+      if (visit.route === '/cleanup') {
+        const isolated = await withIsolatedPage(refusingBrowser, owner, key, async () =>
+          routeEvidence({ route: visit.route, title: visit.route }),
+        );
+        isolated.result.errors.push(...isolated.cleanupErrors.map((error) => `${visitLabel(visit)}: ${error}`));
+        return isolated.result;
+      }
+      if (visit.route === '/pending') {
+        const isolated = await withIsolatedPage(browser, owner, key, async (page) => {
+          pendingPage = page;
+          await page.setContent('<main>pending</main>');
+          await page.waitForFunction(() => false);
+          return routeEvidence({ route: visit.route, title: visit.route });
+        });
+        return isolated.result;
+      }
+      if (visit.route === '/late') {
+        await new Promise<void>((resolve) => {
+          resolveLate = resolve;
+        });
+      }
+      return routeEvidence({ route: visit.route, title: visit.route });
+    });
+
+    const visits = visitsFor(['/setup', '/cleanup', '/healthy', '/pending', '/late', '/queued']);
+    const running = attempt.run(visits);
+    await expect.poll(() => Boolean(pendingPage && resolveLate)).toBe(true);
+    const snapshot = await attempt.stop(500);
+    const frozen = JSON.stringify(snapshot);
+    resolveLate!();
+    await running;
+
+    const errorsFor = (route: string): string =>
+      snapshot.find((record) => record.route === route)?.errors.join('\n') ?? 'missing';
+    expect(snapshot.map((record) => record.route).sort()).toEqual(['/cleanup', '/healthy', '/late', '/pending', '/setup']);
+    expect(errorsFor('/healthy')).toBe('');
+    expect(errorsFor('/setup')).toContain('context creation failed');
+    expect(errorsFor('/cleanup')).toContain('browser context did not close: close refused');
+    expect(errorsFor('/pending')).toContain('interrupted before this state completed');
+    expect(errorsFor('/late')).toContain('did not settle within 500ms');
+    expect(pendingPage!.isClosed()).toBe(true);
+    expect(browser.contexts()).toHaveLength(before);
+    expect(JSON.stringify(attempt.freeze())).toBe(frozen);
+    await expect(attempt.stop()).resolves.toBe(snapshot);
+
+    const artifacts = buildCrawlArtifacts(snapshot, [], {
+      expectedKeys: visits.map(visitKey).sort(),
+      today: '2026-09-14',
+    });
+    expect(artifacts.routeBlocking).toContain('route state never produced evidence: /queued|light|default');
+    for (const route of ['/setup', '/cleanup', '/pending', '/late']) {
+      expect(artifacts.routeBlocking.some((finding) => finding.startsWith(`${route} [light/default]`)), route).toBe(true);
+    }
+  });
+
+  test('concurrent contrast captures share one complete image and failed writes stay blocking', async (
+    { page },
+    testInfo,
+  ) => {
+    const captures = new CaptureCoordinator();
+    await page.setContent('<main><p style="color: #333">Contrast probe</p></main>');
+    const screenshot = async (temporaryPath: string): Promise<void> => {
+      await page.locator('p').screenshot({ path: temporaryPath });
+    };
+
+    const shared = testInfo.outputPath('contrast-evidence', 'shared.png');
+    let writes = 0;
+    let releaseWrite = (): void => undefined;
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    const gatedWrite = async (temporaryPath: string): Promise<void> => {
+      writes += 1;
+      await writeGate;
+      await screenshot(temporaryPath);
+    };
+    const requests = [captures.capture(shared, gatedWrite), captures.capture(shared, gatedWrite)];
+    expect(fs.existsSync(shared)).toBe(false);
+    releaseWrite();
+    await Promise.all(requests);
+    await captures.capture(shared, gatedWrite);
+    expect(writes).toBe(1);
+    const decoded = await page.evaluate(async (data) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${data}`;
+      await image.decode();
+      return image.naturalWidth > 0 && image.naturalHeight > 0;
+    }, fs.readFileSync(shared).toString('base64'));
+    expect(decoded).toBe(true);
+
+    const failed = testInfo.outputPath('contrast-evidence', 'failed.png');
+    const partialWrite = async (temporaryPath: string): Promise<void> => {
+      fs.writeFileSync(temporaryPath, 'partial');
+      throw new Error('capture failed');
+    };
+    const outcomes = await Promise.allSettled([captures.capture(failed, partialWrite), captures.capture(failed, partialWrite)]);
+    expect(outcomes.map((outcome) => outcome.status)).toEqual(['rejected', 'rejected']);
+    expect(fs.existsSync(failed)).toBe(false);
+    expect(fs.readdirSync(path.dirname(failed)).filter((name) => name.includes('.partial-'))).toEqual([]);
+    await captures.capture(failed, screenshot);
+    expect(fs.existsSync(failed)).toBe(true);
   });
 });

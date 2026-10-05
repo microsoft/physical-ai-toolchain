@@ -40,6 +40,8 @@ const promotionPath = '.github/workflows/docusaurus-accessibility-promotion.yml'
 const smokePath = '.github/workflows/smoke-cpu.yml';
 const weeklyPath = '.github/workflows/weekly-validation.yml';
 const dependencyReviewPath = '.github/workflows/dependency-review.yml';
+const publicFeedsPath = '.github/workflows/public-dependency-feeds.yml';
+const publicFeedsReport = 'logs/public-dependency-feeds-results.json';
 const summaryId = 'pr-validation-summary';
 const unknownSha = '0'.repeat(40);
 
@@ -1375,7 +1377,9 @@ function freshEvidence(t, needs, owner = 'main') {
     } else if (report.kind === 'json') {
       content = JSON.stringify(report.path === 'logs/container/manifest.json'
         ? { summary: { images_count: inventory.length, overall_passed: true }, results: inventory }
-        : { projects_count: 1, drift_count: 0, check_passed: true, results: [{ Project: '.', Passed: true }] });
+        : report.path === publicFeedsReport
+          ? { filesScanned: 1, sourcesValidated: 1, allowedHosts: ['registry.npmjs.org'], violationCount: 0, violations: [] }
+          : { projects_count: 1, drift_count: 0, check_passed: true, results: [{ Project: '.', Passed: true }] });
     } else {
       content = 'Native fixture operation completed.\n';
     }
@@ -1698,6 +1702,64 @@ test('CodeQL contract: native producer reports satisfy every language shard', t 
   }
 });
 
+test('public dependency feeds: mandatory checker, native report upload and receipt remain gated', () => {
+  const lane = contract.lanes.find(item => item.id === 'public-dependency-feeds');
+  assert.equal(lane.classification, 'mandatory');
+  assert.equal(lane.selector, 'always');
+  const metadata = contract.execution['public-dependency-feeds'].jobs['public-dependency-feeds'];
+  assert.deepEqual(metadata['required-steps'], ['check']);
+  assert.deepEqual(metadata.reports, [{ path: publicFeedsReport, kind: 'json' }]);
+  const steps = graph[publicFeedsPath].jobs['public-dependency-feeds'].steps;
+  const check = steps.find(step => step.id === 'check');
+  const upload = steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
+  const producer = steps.find(step => step.id === 'outcome');
+  assert.equal(check.run, './scripts/security/Test-PublicDependencyFeeds.ps1 -FailOnViolation');
+  assert.equal(upload.if, 'always()');
+  assert.equal(upload['continue-on-error'], undefined);
+  assert.equal(upload.with.path, publicFeedsReport);
+  assert.equal(upload.with['if-no-files-found'], 'error');
+  assert.ok(steps.indexOf(check) < steps.indexOf(upload) && steps.indexOf(upload) < steps.indexOf(producer));
+  for (const [owner, path] of [['pr', prPath], ['main', mainPath]]) {
+    assert.ok(requiredLanes(contract, owner).includes(lane));
+    assert.ok(graph[path].jobs[contract.orchestrators[owner].aggregate].needs.includes(lane.owners[owner]));
+  }
+});
+
+for (const [name, mutate, diagnostic] of [
+  ['removed checker operation', ({ job }) => { job.steps = job.steps.filter(step => step.id !== 'check'); },
+    'public-dependency-feeds:public-dependency-feeds:check: required operation implementation mismatch'],
+  ['checker without violation enforcement', ({ job }) => { job.steps.find(step => step.id === 'check').run = './scripts/security/Test-PublicDependencyFeeds.ps1'; },
+    'public-dependency-feeds:public-dependency-feeds:check: required operation implementation mismatch'],
+  ['removed native report measurement', ({ producer }) => { producer.with.reports = '[]'; },
+    'public-dependency-feeds:public-dependency-feeds: required report declaration mismatch'],
+  ['missing execution metadata', ({ contract }) => { delete contract.execution['public-dependency-feeds']; },
+    'public-dependency-feeds: missing execution job metadata'],
+  ['suppressed receipt failure', ({ producer }) => { producer.with['fail-on-error'] = 'false'; },
+    'public-dependency-feeds:public-dependency-feeds: required producer cannot suppress evidence failure'],
+  ['excessive budget', ({ job }) => { job['timeout-minutes'] = 30; },
+    'public-dependency-feeds:public-dependency-feeds: timeout must be within the execution budget'],
+  ['PR caller removed', ({ graph }) => { delete graph[prPath].jobs['public-dependency-feeds']; },
+    `Missing owned job: ${prPath}:public-dependency-feeds`],
+  ['PR caller soft-fail', ({ graph }) => { graph[prPath].jobs['public-dependency-feeds'].with['soft-fail'] = true; },
+    `${prPath}:public-dependency-feeds: effective soft-fail policy mismatch`],
+  ['PR gate omission', ({ graph }) => {
+    const summary = graph[prPath].jobs[summaryId];
+    summary.needs = summary.needs.filter(need => need !== 'public-dependency-feeds');
+  }, `${prPath}: aggregate must include exactly all mandatory jobs`],
+  ['main gate omission', ({ graph }) => {
+    const summary = graph[mainPath].jobs['main-validation-summary'];
+    summary.needs = summary.needs.filter(need => need !== 'public-dependency-feeds');
+  }, `${mainPath}: aggregate must include exactly all mandatory jobs`],
+]) {
+  test(`public dependency feeds mutation: rejects ${name}`, () => {
+    const candidate = { graph: structuredClone(graph), contract: structuredClone(contract) };
+    const job = candidate.graph[publicFeedsPath].jobs['public-dependency-feeds'];
+    mutate({ ...candidate, job, producer: job.steps.find(step => step.id === 'outcome') });
+    const errors = validateWorkflows(candidate.graph, candidate.contract);
+    assert.ok(errors.some(error => error.includes(diagnostic)), `Expected ${diagnostic}; received ${JSON.stringify(errors)}`);
+  });
+}
+
 test('frontmatter workflow: booleans bind to the actual script parameters without replacing scan paths', t => {
   const workspace = temporaryDirectory(t);
   const step = graph['.github/workflows/frontmatter-validation.yml'].jobs['frontmatter-validation'].steps
@@ -1859,6 +1921,25 @@ test('receipt gate: downloaded raw report changes invalidate an otherwise succes
   writeFileSync(join(root.directory, 'reports', 'logs', 'pytest-training-results.xml'),
     '<testsuite tests="1"><testcase name="different"/></testsuite>');
   assert.ok(buildSummary(needs, contract, 'main', evidence.context).report.errors.some(error => error.startsWith('pytest-training: Invalid or incomplete')));
+});
+
+test('receipt gate: public dependency feed violations or missing receipts cannot pass', t => {
+  for (const owner of ['pr', 'main']) {
+    const needs = owner === 'pr' ? outcomeFixture(t) : mainSuccessNeeds();
+    const evidence = freshEvidence(t, needs, owner);
+    assert.equal(buildSummary(needs, contract, owner, evidence.context).report.status, 'success');
+    const root = evidence.roots.get('public-dependency-feeds');
+    writeFileSync(join(root.directory, 'reports', publicFeedsReport), JSON.stringify({
+      filesScanned: 1, sourcesValidated: 1, allowedHosts: ['registry.npmjs.org'], violationCount: 1,
+      violations: [{ file: '.npmrc', line: 1, source: 'https://feed.example.com/', reason: 'not approved' }],
+    }));
+    let summary = buildSummary(needs, contract, owner, evidence.context);
+    assert.equal(summary.report.status, 'failure');
+    assert.ok(summary.report.errors.some(error => error.startsWith('public-dependency-feeds: Invalid or incomplete')), JSON.stringify(summary.report.errors));
+    rmSync(root.directory, { recursive: true });
+    summary = buildSummary(needs, contract, owner, evidence.context);
+    assert.ok(summary.report.errors.includes('public-dependency-feeds: Missing current-attempt output receipt'), JSON.stringify(summary.report.errors));
+  }
 });
 
 test('receipt gate: PR image expectations come from verified selection rather than aggregate claims', t => {

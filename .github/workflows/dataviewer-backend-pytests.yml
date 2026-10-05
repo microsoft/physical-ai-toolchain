@@ -72,7 +72,7 @@ jobs:
 
       - name: Install dependencies
         id: install
-        run: uv sync --frozen --extra dev --extra analysis --extra hdf5 --extra export --extra auth
+        run: uv sync --frozen --group dev --extra analysis --extra hdf5 --extra export --extra auth
 
       - name: Run pytest with coverage
         id: test

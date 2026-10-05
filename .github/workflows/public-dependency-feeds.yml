@@ -1,0 +1,76 @@
+name: Public Dependency Feeds
+
+on:
+  workflow_call:
+    inputs:
+      soft-fail:
+        description: 'Prevent validation failures from failing the workflow'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.public-dependency-feeds.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.public-dependency-feeds.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.public-dependency-feeds.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.public-dependency-feeds.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.public-dependency-feeds.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.public-dependency-feeds.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.public-dependency-feeds.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.public-dependency-feeds.outputs.first-failure }}'}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  public-dependency-feeds:
+    name: Validate Public Dependency Feeds
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create logs directory
+        run: New-Item -ItemType Directory -Force -Path logs | Out-Null
+
+      - name: Validate public dependency feeds
+        id: check
+        run: ./scripts/security/Test-PublicDependencyFeeds.ps1 -FailOnViolation
+        continue-on-error: ${{ inputs.soft-fail }}
+
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: public-dependency-feeds-results
+          path: logs/public-dependency-feeds-results.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: public-dependency-feeds
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["check"]'
+          reports: '[{"path":"logs/public-dependency-feeds-results.json","kind":"json"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}
