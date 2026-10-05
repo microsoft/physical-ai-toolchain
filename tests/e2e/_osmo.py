@@ -550,10 +550,7 @@ def assert_completed_workflow_streams(
             if valid_response and records:
                 break
             if attempt < attempts:
-                log_e2e(
-                    f"OSMO workflow {stream} has no persisted records yet "
-                    f"({attempt}/{attempts}); retrying"
-                )
+                log_e2e(f"OSMO workflow {stream} has no persisted records yet ({attempt}/{attempts}); retrying")
                 time.sleep(retry_seconds)
         else:
             raise AssertionError(

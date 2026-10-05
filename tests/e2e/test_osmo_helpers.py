@@ -266,9 +266,7 @@ def test_task_pod_log_stream_preserves_lines_after_stream_failure(
     monkeypatch.setattr("tests.e2e._osmo.subprocess.Popen", lambda *args, **kwargs: FailedLogProcess())
 
     assert not stream._follow("pod-1")
-    assert workflow.handle.logs["train"] == (
-        'first line\nVLA_RUNTIME_PROVENANCE={"version": "1"}'
-    )
+    assert workflow.handle.logs["train"] == ('first line\nVLA_RUNTIME_PROVENANCE={"version": "1"}')
 
 
 def test_cancel_osmo_workflows_by_identifier_cancels_only_matching_non_terminal(
