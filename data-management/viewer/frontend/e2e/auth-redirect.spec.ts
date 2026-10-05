@@ -1,4 +1,6 @@
+import { once } from 'node:events'
 import { readFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 
@@ -174,25 +176,49 @@ for (const { parent, child } of [
   { parent: 'cross-origin', child: '/redirect.html' },
 ]) {
   test(`${parent} parent cannot frame ${child}`, async ({ page, baseURL }) => {
-    const alternateOrigin = new URL(baseURL!)
-    alternateOrigin.hostname = ['localhost', '127.0.0.1'].includes(alternateOrigin.hostname)
-      ? alternateOrigin.hostname === 'localhost'
-        ? '127.0.0.1'
-        : 'localhost'
-      : 'frame-parent.example.test'
-    const origin = parent === 'same-origin' ? baseURL! : alternateOrigin.origin
+    const body = `<!doctype html><iframe src="${baseURL}${child}"></iframe>`
+    const isLoopback = ['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname)
+    // Real loopback responses avoid Chrome's local-network check on mocked documents.
+    const server =
+      parent === 'cross-origin' && isLoopback
+        ? createServer((_request, response) => {
+            response.writeHead(200, { 'Content-Type': 'text/html' })
+            response.end(body)
+          })
+        : undefined
     const blockedFrames: string[] = []
     page.on('console', (message) => {
       if (message.text().includes('frame-ancestors')) blockedFrames.push(message.text())
     })
-    await page.route(`${origin}/__auth-test/frame`, (route) =>
-      route.fulfill({
-        contentType: 'text/html',
-        body: `<!doctype html><iframe src="${baseURL}${child}"></iframe>`,
-      }),
-    )
-    await page.goto(`${origin}/__auth-test/frame`)
-    await expect.poll(() => blockedFrames.length).toBeGreaterThan(0)
-    expect(page.frames().some((frame) => frame.url() === `${baseURL}${child}`)).toBe(false)
+    try {
+      let origin = baseURL!
+      if (server) {
+        server.listen(0, '127.0.0.1')
+        await once(server, 'listening')
+        const address = server.address()
+        if (!address || typeof address === 'string') {
+          throw new Error('Frame parent server did not bind a TCP port')
+        }
+        origin = `http://127.0.0.1:${address.port}`
+      } else {
+        if (parent === 'cross-origin') {
+          const alternateOrigin = new URL(baseURL!)
+          alternateOrigin.hostname = 'frame-parent.example.test'
+          origin = alternateOrigin.origin
+        }
+        await page.route(`${origin}/__auth-test/frame`, (route) =>
+          route.fulfill({ contentType: 'text/html', body }),
+        )
+      }
+      await page.goto(`${origin}/__auth-test/frame`)
+      await expect.poll(() => blockedFrames.length).toBeGreaterThan(0)
+      expect(page.frames().some((frame) => frame.url() === `${baseURL}${child}`)).toBe(false)
+    } finally {
+      if (server?.listening) {
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => (error ? reject(error) : resolve()))
+        })
+      }
+    }
   })
 }
