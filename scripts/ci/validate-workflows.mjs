@@ -236,12 +236,46 @@ export function validateWorkflows(graph, contract = loadContract()) {
   }
 
   const pr = graph[contract.orchestrators.pr.path]?.jobs ?? {};
+  const prWorkflow = graph[contract.orchestrators.pr.path];
   const changes = pr.changes;
+  const mergeGroup = prWorkflow?.on?.merge_group;
+  check(isDeepStrictEqual(mergeGroup?.branches, ['main'])
+    && isDeepStrictEqual(mergeGroup?.types, ['checks_requested']), 'PR validation must own merge_group checks_requested for main');
+  check(prWorkflow?.concurrency?.group === '${{ github.workflow }}-${{ github.ref }}'
+    && prWorkflow?.concurrency?.['cancel-in-progress'] === true, 'PR validation concurrency must isolate and supersede event refs');
+  const checkout = changes?.steps?.find(step => step.uses?.startsWith('actions/checkout@'));
+  check(checkout?.with?.['fetch-depth'] === 0 && checkout?.with?.['persist-credentials'] === false
+    && checkout?.with?.ref === '${{ github.sha }}', 'Selection checkout must use the tested SHA, full history, and no persisted credentials');
+  const range = changes?.steps?.find(step => step.id === 'range');
+  check(range?.if === undefined && range?.['continue-on-error'] === undefined
+    && range?.run?.trim() === 'node scripts/ci/resolve-workflow-change-range.mjs'
+    && isDeepStrictEqual(range?.env, {
+      EVENT_NAME: '${{ github.event_name }}',
+      BASE_SHA: '${{ github.event.merge_group.base_sha }}',
+      HEAD_SHA: '${{ github.event.merge_group.head_sha || github.sha }}',
+      PULL_REQUEST_HEAD_SHA: '${{ github.event.pull_request.head.sha }}',
+    }), 'Discovery must use the canonical event-aware range resolver');
   const filter = changes?.steps?.find(step => step.id === 'filter');
   check(filter?.if === undefined && filter?.['continue-on-error'] === undefined && changes?.if === undefined && changes?.['continue-on-error'] === undefined, 'Discovery must execute without failure suppression');
-  check(filter?.env?.BASE_SHA === '${{ github.event.pull_request.base.sha }}' && filter?.env?.HEAD_SHA === '${{ github.sha }}', 'PR selection must compare event base SHA to tested merge SHA');
-  check(filter?.run?.trim() === 'node scripts/ci/select-checks.mjs', 'Discovery must use the canonical selector');
-  check(changes?.steps?.some(step => step.uses?.startsWith('actions/checkout@') && step.with?.['fetch-depth'] === 0 && !step.with?.ref), 'Selection checkout must fetch the tested merge tree and history');
+  check(isDeepStrictEqual(filter?.env, {
+    BASE_SHA: '${{ steps.range.outputs.base_sha }}',
+    HEAD_SHA: '${{ steps.range.outputs.head_sha }}',
+    SELECTION_MODE: '${{ steps.range.outputs.mode }}',
+  }), 'PR selection must consume only verified resolver outputs');
+  check(filter?.run?.trim() === 'if [[ "$SELECTION_MODE" == "full" ]]; then\n  node scripts/ci/select-checks.mjs --full\nelse\n  node scripts/ci/select-checks.mjs\nfi', 'Discovery must use the canonical selector with explicit full fallback');
+  const reachable = new Set();
+  const visit = path => {
+    if (reachable.has(path)) return;
+    reachable.add(path);
+    for (const job of Object.values(graph[path]?.jobs ?? {})) {
+      if (job.uses?.startsWith('./.github/workflows/')) visit(job.uses.slice(2));
+    }
+  };
+  visit(contract.orchestrators.pr.path);
+  for (const path of reachable) {
+    const workflow = graph[path];
+    if (workflow) check(!JSON.stringify(workflow).includes('${{ secrets.'), `${path}: merge-group-reachable secret reference is forbidden`);
+  }
   for (const output of [...Object.keys(contract.selectors), 'selection_status', 'base_sha', 'head_sha', 'file_count']) {
     check(changes?.outputs?.[output] === `\${{ steps.filter.outputs.${output} }}`, `Missing selector output: ${output}`);
   }

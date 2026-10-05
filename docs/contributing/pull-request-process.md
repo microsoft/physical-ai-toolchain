@@ -3,7 +3,7 @@ sidebar_position: 5
 title: Pull Request Process
 description: PR workflow, reviewer assignment, review cycles, approval criteria, and update process
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-21
+ms.date: 2026-10-05
 ms.topic: how-to
 keywords:
   - pull request
@@ -24,6 +24,48 @@ Automated linting, security checks, and component tests form the validation base
 3. Validate Locally: Run applicable static checks and tests, plus plan or deployment validation when needed
 4. Create Draft PR: Open draft PR with validation documentation
 5. Request Review: Mark PR ready when validation complete
+
+## Merge Queue
+
+<!-- cspell:ignore ALLGREEN -->
+
+Maintainers merge approved pull requests through GitHub Merge Queue. The queue
+creates a temporary merge group from the current `main` branch and the queued
+pull request, then runs the same aggregate PR Validation workflow against that
+exact commit.
+
+The required `pr-validation-summary` check must succeed on the merge-group SHA.
+The workflow verifies an immutable base and head before selecting path-dependent
+jobs. If the range cannot be proven, it runs every selector instead of skipping
+work.
+
+### Activation and rollback
+
+Activate the hosted queue only after merge-group-compatible workflow code is on
+`main` and the queue-reachable OIDC consumers have approved provider policies.
+Capture the ruleset before changing it and prepare the rollback payload first.
+
+Use this initial queue configuration:
+
+| Setting                              | Value      |
+|--------------------------------------|------------|
+| Grouping strategy                    | `ALLGREEN` |
+| Concurrent builds                    | `1`        |
+| Minimum entries to merge             | `1`        |
+| Maximum entries to merge             | `1`        |
+| Minimum merge wait                   | `0`        |
+| Check response timeout               | 60 minutes |
+| Merge method                         | Squash     |
+| Strict required status check updates | Disabled   |
+
+Prove activation with an existing eligible pull request or a real low-risk
+documentation or maintenance correction. Do not create temporary marker files
+or no-op commits. Record the merge-group SHA and Actions run before confirming
+the squash merge.
+
+If validation stalls or the required check does not report, restore the
+pre-change ruleset. Keep the tracking issue open with diagnostics; do not
+increase concurrency or group size until the serial configuration succeeds.
 
 ## Review Process
 

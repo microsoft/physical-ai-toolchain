@@ -8,6 +8,15 @@ on:
       - opened
       - synchronize
       - reopened
+  merge_group:
+    branches:
+      - main
+    types:
+      - checks_requested
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -49,16 +58,31 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.sha }}
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24.14.1'
+      - name: Resolve change range
+        id: range
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha || github.sha }}
+          PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ci/resolve-workflow-change-range.mjs
       - name: Compute path filters
         id: filter
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.sha }}
-        run: node scripts/ci/select-checks.mjs
+          BASE_SHA: ${{ steps.range.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.range.outputs.head_sha }}
+          SELECTION_MODE: ${{ steps.range.outputs.mode }}
+        run: |
+          if [[ "$SELECTION_MODE" == "full" ]]; then
+            node scripts/ci/select-checks.mjs --full
+          else
+            node scripts/ci/select-checks.mjs
+          fi
 
   # GPU-free import smoke gate. CPU import smoke runs for every domain on every
   # PR (unconditional baseline); the runtime-image smoke is path-gated to the

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "orchestrators": {
-    "pr": { "path": ".github/workflows/pr-validation.yml", "events": ["pull_request"], "aggregate": "pr-validation-summary" },
+    "pr": { "path": ".github/workflows/pr-validation.yml", "events": ["pull_request", "merge_group"], "aggregate": "pr-validation-summary" },
     "main": { "path": ".github/workflows/main.yml", "events": ["push"], "aggregate": "release-please" },
     "promotion": { "path": ".github/workflows/docusaurus-accessibility-promotion.yml", "events": ["workflow_dispatch"], "name": "Docusaurus Accessibility Promotion", "permissionProfile": "artifact-read" },
     "docs": { "path": ".github/workflows/deploy-docs.yml", "events": ["workflow_run"], "permissionProfile": "artifact-read" }
