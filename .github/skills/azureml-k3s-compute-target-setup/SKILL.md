@@ -165,10 +165,10 @@ The extension creates an Azure Relay namespace and hybrid connection in the Arc 
 |-------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
 | `az login` session with rights to the target subscription and workspace                                                       | All `az ml` submission commands                                                                    |
 | `AzureML Data Scientist` on the workspace and `Storage Blob Data Contributor` on its storage account for the compute identity | Granted by `05-attach-hil-azureml-compute.sh`; required for data asset mounts, outputs, and MLflow |
-| `HF_TOKEN` with access to the gated base repository                                                                           | Only when `--policy-repo-id` or the HuggingFace dataset path resolves to a gated repository        |
-| Datastore-backed Azure ML data asset, referenced with an explicit numeric version (`azureml:NAME:VERSION`)                    | `--dataset-asset`; shorthand references without a version are rejected to keep runs reproducible   |
+| Hugging Face token with access to the gated base repository, stored as a Key Vault secret                                     | Only for gated models such as PI; pass `inputs.hf_key_vault_url` and `inputs.hf_token_secret_name` |
+| Datastore-backed Azure ML data asset, referenced with an explicit numeric version (`azureml:NAME:VERSION`)                    | `inputs.dataset.path` and `inputs.dataset_asset_id`; use the same explicit version in both         |
 
-Store `HF_TOKEN` in the untracked repository-root `.env.local`, never as a CLI argument or in chat. The submission script loads `.env.local` and forwards `HF_TOKEN` to the job, so `--hf-token` is not needed. Tokens passed as CLI arguments are visible to any process inspecting the host, so rotate a token immediately if it was ever exposed that way. `.amlignore` already excludes `.env` and `.env.*` from the Azure ML code snapshot.
+Store the Hugging Face token in Key Vault, never as a CLI argument, job input, or chat message. Calibration and training read it through the compute's managed identity, so it never appears in the job definition. SmolVLA does not need a token. Rotate a token immediately if it was ever exposed on a command line.
 
 Data asset mount failures during job start often mean the registered asset version does not resolve against its backing datastore. Register a new datastore-backed version and reference that explicit version rather than reusing a broken one:
 
@@ -181,25 +181,20 @@ az ml data create --name <dataset-name> --version <next-version> \
 
 To check the GPU and the services training depends on before any model runs, submit `training/smoke/scripts/submit-azureml-gpu-smoke.sh --compute <compute-name> --instance-type gpu --stream` first. See [Smoke-Test a GPU Target](../../../docs/training/azureml-training.md#-smoke-test-a-gpu-target).
 
-Submit a short run (10 to 20 steps) before committing to a full training job. Keep `--save-freq` at or below the step count so at least one checkpoint round-trips. Pass `--compute` with the attached compute name. When Terraform outputs are unavailable, set `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, and `AZUREML_WORKSPACE_NAME` in `.env.local` or pass `--subscription-id`, `--resource-group`, and `--workspace-name`:
+Before a full training job, run a short calibrated training run. Submit the standalone calibration sweep, wait for it to report `Completed`, and then submit the training pipeline with the selected trial's outputs, as shown in [Calibrate and Submit PI 0.5 Training](../../../docs/training/vla-azureml-arc-setup.md#calibrate-and-submit-pi-05-training). For the short run, add these overrides to the pipeline submission so at least one checkpoint round-trips:
 
 ```bash
-training/vla/scripts/submit-azureml-vla-pi0-training.sh \
-  -d <dataset-repo-id> --dataset-asset azureml:<dataset-name>:<version> \
-  -p pi05 --policy-repo-id lerobot/pi05_base \
-  --training-steps 10 --batch-size 16 --save-freq 10 --log-freq 1 \
-  --train-expert-only --mixed-precision bf16 \
-  --compute <compute-name> --instance-type gpu \
-  -j <job-name> --config-preview
-
-training/vla/scripts/submit-azureml-vla-pi0-training.sh \
-  -d <dataset-repo-id> --dataset-asset azureml:<dataset-name>:<version> \
-  -p pi05 --policy-repo-id lerobot/pi05_base \
-  --training-steps 10 --batch-size 16 --save-freq 10 --log-freq 1 \
-  --train-expert-only --mixed-precision bf16 \
-  --compute <compute-name> --instance-type gpu \
-  -j <job-name>
+  --set inputs.training_steps=10 \
+  --set inputs.save_freq=10 \
+  --set inputs.log_freq=1 \
+  --set inputs.compute_preflight="azureml:<compute-name>" \
+  --set inputs.compute_train="azureml:<compute-name>" \
+  --set inputs.subscription_id="<workspace-subscription-id>" \
+  --set inputs.resource_group="<workspace-resource-group>" \
+  --set inputs.workspace_name="<workspace-name>"
 ```
+
+The `inputs.subscription_id`, `inputs.resource_group`, and `inputs.workspace_name` overrides are required. `--resource-group` and `--workspace-name` only select where the job is submitted; they do not reach the training step.
 
 ## Validate GPU Usage Without Interrupting the Job
 
@@ -249,16 +244,16 @@ A `[MLflow] Failed to log artifacts for <step>` message citing a task-queue flus
 
 ## Troubleshooting
 
-| Symptom                                                                                            | Likely Cause                                                                                      | Resolution                                                                                                                                                  |
-|----------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Job reserves one GPU but `[GPU-DETECT] torch.cuda.device_count()=0`                                | Pod has no `runtimeClassName` and K3s default runtime is not NVIDIA                               | Run `data-pipeline/setup/hil/05-enable-k3s-gpu.sh` on the host once no job containers are active                                                            |
-| `nvidia-smi` missing or `/dev/nvidia*` absent inside the container                                 | Same root cause as above                                                                          | Confirm with the `kubectl exec` device checks in the validation section, then apply the K3s default runtime fix                                             |
-| `403` fetching a gated HuggingFace repository                                                      | Account lacks gated-repo access, or `HF_TOKEN` is stale                                           | Sign in to huggingface.co as the account that owns `HF_TOKEN`, request access on the model page, refresh the token in `.env.local` if needed, then resubmit |
-| Data asset mount fails at job start                                                                | Asset version not backed by a resolvable datastore path                                           | Register a new datastore-backed asset version and reference it explicitly                                                                                   |
-| `05-attach-hil-azureml-compute.sh` stops at Arc cluster connect                                    | Your identity has no K3s RBAC on the cluster, or the proxy port is in use                         | Grant access with `05-connect-arc-kubernetes.sh --cluster-admin-signed-in-user` or `--cluster-admin-object-id`, or pass `--proxy-port`                      |
-| Job stays `Queued` with the `gpu` instance type                                                    | The node reports no allocatable `nvidia.com/gpu`, usually because the device plugin isn't running | Run `05-enable-k3s-gpu.sh` on the host, then check `kubectl get node <node-name> -o jsonpath='{.status.allocatable.nvidia\.com/gpu}'`                       |
-| Training runs entirely on CPU with no error                                                        | Same GPU runtime-injection root cause; PyTorch silently falls back                                | Apply the K3s default runtime fix before assuming a code-level bug                                                                                          |
-| Job stays `Running` well after the last `step:<n>` log line                                        | Large checkpoint still uploading to blob storage                                                  | Check for an active upload progress bar in the log before assuming a hang                                                                                   |
-| `[MLflow] Failed to log artifacts for <step>: ... Failed to flush task queue within 300.0 seconds` | Transient MLflow tracking-API timeout, unrelated to the checkpoint data itself                    | Confirm the raw upload progress bar immediately after it reaches 100%; no data is lost                                                                      |
+| Symptom                                                                                            | Likely Cause                                                                                      | Resolution                                                                                                                                           |
+|----------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Job reserves one GPU but `[GPU-DETECT] torch.cuda.device_count()=0`                                | Pod has no `runtimeClassName` and K3s default runtime is not NVIDIA                               | Run `data-pipeline/setup/hil/05-enable-k3s-gpu.sh` on the host once no job containers are active                                                     |
+| `nvidia-smi` missing or `/dev/nvidia*` absent inside the container                                 | Same root cause as above                                                                          | Confirm with the `kubectl exec` device checks in the validation section, then apply the K3s default runtime fix                                      |
+| `403` fetching a gated HuggingFace repository                                                      | Account lacks gated-repo access, or the Key Vault token is stale                                  | Sign in to huggingface.co as the account that owns the token, request access on the model page, update the Key Vault secret if needed, then resubmit |
+| Data asset mount fails at job start                                                                | Asset version not backed by a resolvable datastore path                                           | Register a new datastore-backed asset version and reference it explicitly                                                                            |
+| `05-attach-hil-azureml-compute.sh` stops at Arc cluster connect                                    | Your identity has no K3s RBAC on the cluster, or the proxy port is in use                         | Grant access with `05-connect-arc-kubernetes.sh --cluster-admin-signed-in-user` or `--cluster-admin-object-id`, or pass `--proxy-port`               |
+| Job stays `Queued` with the `gpu` instance type                                                    | The node reports no allocatable `nvidia.com/gpu`, usually because the device plugin isn't running | Run `05-enable-k3s-gpu.sh` on the host, then check `kubectl get node <node-name> -o jsonpath='{.status.allocatable.nvidia\.com/gpu}'`                |
+| Training runs entirely on CPU with no error                                                        | Same GPU runtime-injection root cause; PyTorch silently falls back                                | Apply the K3s default runtime fix before assuming a code-level bug                                                                                   |
+| Job stays `Running` well after the last `step:<n>` log line                                        | Large checkpoint still uploading to blob storage                                                  | Check for an active upload progress bar in the log before assuming a hang                                                                            |
+| `[MLflow] Failed to log artifacts for <step>: ... Failed to flush task queue within 300.0 seconds` | Transient MLflow tracking-API timeout, unrelated to the checkpoint data itself                    | Confirm the raw upload progress bar immediately after it reaches 100%; no data is lost                                                               |
 
 > Brought to you by microsoft/physical-ai-toolchain

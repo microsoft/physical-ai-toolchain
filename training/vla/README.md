@@ -116,6 +116,9 @@ az ml job create \
   --set inputs.gradient_checkpointing=true \
   --set inputs.compute_preflight="azureml:<compute-name>" \
   --set inputs.compute_train="azureml:<compute-name>" \
+  --set inputs.subscription_id="<workspace-subscription-id>" \
+  --set inputs.resource_group="<workspace-resource-group>" \
+  --set inputs.workspace_name="<workspace-name>" \
   --set inputs.hf_key_vault_url="<key-vault-url>" \
   --set inputs.hf_token_secret_name="<secret-name>"
 ```

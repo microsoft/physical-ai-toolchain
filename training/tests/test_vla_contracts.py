@@ -12,7 +12,6 @@ from training.vla.scripts.vla_contracts import (
 )
 
 _DIGEST = "a" * 64
-_COMMIT = "b" * 40
 _OUTPUT_PREFIX = "azureml://jobs/evidence-job/outputs"
 
 

@@ -277,8 +277,8 @@ while :; do
   sleep 5
 done
 
-completed_writer_count=$(jq '[.children[] | select(.displayName == "writer" and .status == "Completed")] | length' "$job_result_file")
-completed_reader_count=$(jq '[.children[] | select(.displayName == "reader" and .status == "Completed")] | length' "$job_result_file")
+completed_writer_count=$(jq '[.children[] | select(.displayName == "Managed data smoke writer" and .status == "Completed")] | length' "$job_result_file")
+completed_reader_count=$(jq '[.children[] | select(.displayName == "Managed data smoke reader" and .status == "Completed")] | length' "$job_result_file")
 (( completed_writer_count == 1 )) || fatal "Managed data smoke writer did not complete successfully"
 (( completed_reader_count == 1 )) || fatal "Managed data smoke reader did not complete successfully"
 

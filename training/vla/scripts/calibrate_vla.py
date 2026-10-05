@@ -489,7 +489,8 @@ def _run_candidate(
             raise CalibrationError(f"Probe result is invalid JSON for batch size {batch_size}: {exc}") from exc
         if not isinstance(result, dict):
             raise CalibrationError(f"Probe result must be an object for batch size {batch_size}")
-        if return_code in {EXIT_SUCCESS, EXIT_OOM}:
+        # accelerate launch exits 1 for any worker failure, so trust the probe's own oom record.
+        if return_code == EXIT_SUCCESS or result.get("outcome") == "oom":
             return result
     if return_code in {-signal.SIGKILL, 128 + signal.SIGKILL}:
         return {"micro_batch_size": batch_size, "outcome": "oom", "error_type": "SIGKILL"}

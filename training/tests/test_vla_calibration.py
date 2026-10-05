@@ -15,7 +15,6 @@ from training.vla.scripts import calibrate_vla
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CALIBRATION_SWEEP = _REPO_ROOT / "training/vla/workflows/azureml/vla-calibration-sweep.yaml"
-_PIPELINE = _REPO_ROOT / "training/vla/workflows/azureml/vla-training-pipeline.yaml"
 
 
 def test_given_self_check_when_calibration_runs_then_contract_checks_pass(
@@ -356,6 +355,35 @@ def test_given_probe_timeout_when_candidate_runs_then_timeout_is_retained(
 
     assert result == {"micro_batch_size": 1, "outcome": "timeout", "timeout_seconds": 60}
     terminate.assert_called_once_with(process)
+
+
+def test_given_oom_probe_when_accelerate_exits_one_then_oom_result_is_returned(
+    mocker: pytest.MockFixture,
+    tmp_path: Path,
+) -> None:
+    process = mocker.MagicMock()
+    mocker.patch.object(calibrate_vla.subprocess, "Popen", return_value=process)
+
+    def write_oom_result(*, timeout: int) -> int:
+        (tmp_path / "batch-4.json").write_text(
+            '{"micro_batch_size": 4, "outcome": "oom", "error_type": "OutOfMemoryError"}',
+            encoding="utf-8",
+        )
+        return 1
+
+    process.wait.side_effect = write_oom_result
+
+    result = calibrate_vla._run_candidate(
+        4,
+        ("--dataset.repo_id=org/dataset", "--policy.type=smolvla"),
+        tmp_path,
+        60,
+        1,
+        "bf16",
+        True,
+    )
+
+    assert result == {"micro_batch_size": 4, "outcome": "oom", "error_type": "OutOfMemoryError"}
 
 
 def test_given_unexpected_probe_exit_when_candidate_runs_then_calibration_fails(
