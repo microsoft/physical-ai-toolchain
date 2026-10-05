@@ -38,7 +38,7 @@ PY
   fi
 
   apt-get update -qq && apt-get install -y -qq ffmpeg git build-essential >/dev/null 2>&1
-  pip install --quiet --break-system-packages uv==0.7.12
+  pip install --quiet --break-system-packages uv==0.12.8
 
   uv python install 3.12
   uv venv --python 3.12 "${venv_path}"
