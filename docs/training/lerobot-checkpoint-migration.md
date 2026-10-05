@@ -226,3 +226,7 @@ Register the migrated output as a new immutable model version. Keep its source i
 * [LeRobot Training](lerobot-training.md) for Azure ML and OSMO training workflows
 * [LeRobot ACT Policy Evaluation](../evaluation/lerobot-evaluation.md) for processor-aware inference
 * [Experiment Tracking](experiment-tracking.md) for model registration and lineage
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

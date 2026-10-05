@@ -1,6 +1,7 @@
 ﻿#!/usr/bin/env pwsh
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: MIT
+# cspell:ignore coverprofile covermode
 
 #Requires -Version 7.0
 
@@ -53,8 +54,8 @@ function Write-EmptyResults {
             total_passed     = 0
             total_failed     = 0
             total_skipped    = 0
-            total_errors     = 0
-            overall_passed   = $true
+            total_errors     = 1
+            overall_passed   = $false
         }
     }
 
@@ -79,6 +80,7 @@ function Invoke-GoTestCore {
         [switch]$ChangedFilesOnly
     )
 
+    $PSNativeCommandUseErrorActionPreference = $false
     $repoRoot = & git rev-parse --show-toplevel 2>$null
     if (-not $repoRoot) {
         $repoRoot = (Get-Item $PSScriptRoot).Parent.Parent.Parent.FullName
@@ -96,18 +98,17 @@ function Invoke-GoTestCore {
     # Guard: go.mod must exist
     $goModPath = Join-Path $GoTestDir 'go.mod'
     if (-not (Test-Path $goModPath)) {
-        Write-Host "No go.mod found in $GoTestDir — skipping tests"
-        Write-EmptyResults -OutputPath $OutputPath -SummaryMessage 'No `go.mod` found — nothing to test.'
-        return 0
+        Write-CIAnnotation -Level Error -Message "No go.mod found in $GoTestDir"
+        Write-EmptyResults -OutputPath $OutputPath -SummaryMessage 'Required `go.mod` is missing.'
+        return 1
     }
 
     # Guard: ChangedFilesOnly
     if ($ChangedFilesOnly) {
         $changedFiles = @(Get-ChangedFilesFromGit -FileExtensions @('*.go', 'go.mod', 'go.sum'))
         if ($changedFiles.Count -eq 0) {
-            Write-Host 'No Go files changed — skipping tests'
-            Write-EmptyResults -OutputPath $OutputPath -SummaryMessage 'No Go files changed — skipping tests.'
-            return 0
+            Write-EmptyResults -OutputPath $OutputPath -SummaryMessage 'Selected Go test suite contains no changed files.'
+            return 1
         }
     }
 
@@ -125,6 +126,7 @@ function Invoke-GoTestCore {
     try {
         # Run go test
         $testOutput = & go test -race "-coverprofile=$CoverageOutput" -covermode=atomic -v -json './...' 2>&1
+        $testExitCode = $LASTEXITCODE
 
         # Parse JSON output line by line
         $packageMap = @{}
@@ -144,12 +146,14 @@ function Invoke-GoTestCore {
 
             if (-not $packageMap.ContainsKey($pkg)) {
                 $packageMap[$pkg] = @{
-                    path      = $pkg
-                    passed    = 0
-                    failed    = 0
-                    skipped   = 0
-                    elapsed   = 0.0
-                    test_runs = [System.Collections.ArrayList]@()
+                    path           = $pkg
+                    passed         = 0
+                    failed         = 0
+                    errors         = 0
+                    package_failed = $false
+                    skipped        = 0
+                    elapsed        = 0.0
+                    test_runs      = [System.Collections.ArrayList]@()
                 }
             }
 
@@ -185,6 +189,7 @@ function Invoke-GoTestCore {
                 }
             }
             elseif ($action -eq 'pass' -or $action -eq 'fail') {
+                $packageMap[$pkg].package_failed = $action -eq 'fail'
                 # Package-level summary event
                 if ($testEvent.PSObject.Properties['Elapsed']) {
                     $packageMap[$pkg].elapsed = $testEvent.Elapsed
@@ -197,24 +202,44 @@ function Invoke-GoTestCore {
         $totalPassed = 0
         $totalFailed = 0
         $totalSkipped = 0
+        $totalErrors = 0
         foreach ($pkg in $packages) {
+            if ($pkg.package_failed -and $pkg.failed -eq 0) {
+                $pkg.errors++
+                $null = $pkg.test_runs.Add(@{ name = '[package execution]'; status = 'error'; elapsed = 0.0 })
+            }
             $totalPassed += $pkg.passed
             $totalFailed += $pkg.failed
             $totalSkipped += $pkg.skipped
+            $totalErrors += $pkg.errors
         }
 
-        $packagesPassed = @($packages | Where-Object { $_.failed -eq 0 }).Count
+        if ($testExitCode -ne 0 -and $totalFailed -eq 0 -and $totalErrors -eq 0) {
+            $totalErrors++
+            if ($packages.Count -gt 0) {
+                $packages[0].errors++
+                $null = $packages[0].test_runs.Add(@{ name = '[go test execution]'; status = 'error'; elapsed = 0.0 })
+            }
+            Write-CIAnnotation -Level Error -Message "go test exited with code $testExitCode"
+        }
+        if ($totalPassed + $totalFailed -eq 0) {
+            Write-CIAnnotation -Level Error -Message 'Selected Go suite executed no testcases'
+        }
+
+        $packagesPassed = @($packages | Where-Object { $_.passed -gt 0 -and $_.failed -eq 0 -and $_.errors -eq 0 }).Count
         $packagesSkipped = @($packages | Where-Object { $_.passed -eq 0 -and $_.failed -eq 0 -and $_.skipped -gt 0 }).Count
-        $overallPassed = ($totalFailed -eq 0)
+        $overallPassed = ($testExitCode -eq 0 -and $totalFailed -eq 0 -and $totalErrors -eq 0 -and $totalPassed -gt 0)
 
         $results = @{
             timestamp  = (Get-Date -Format 'o')
             go_version = $goVersion
+            exit_code  = $testExitCode
             packages   = @($packages | ForEach-Object {
                     @{
                         path      = $_.path
                         passed    = $_.passed
                         failed    = $_.failed
+                        errors    = $_.errors
                         skipped   = $_.skipped
                         elapsed   = $_.elapsed
                         test_runs = @($_.test_runs)
@@ -227,7 +252,7 @@ function Invoke-GoTestCore {
                 total_passed     = $totalPassed
                 total_failed     = $totalFailed
                 total_skipped    = $totalSkipped
-                total_errors     = 0
+                total_errors     = $totalErrors
                 overall_passed   = $overallPassed
             }
         }
@@ -252,16 +277,16 @@ function Invoke-GoTestCore {
         $summaryLines += '|---------|--------|--------|---------|--------|'
 
         foreach ($pkg in $packages) {
-            $status = if ($pkg.failed -eq 0) { '✅ Passed' } else { '❌ Failed' }
+            $status = if ($pkg.passed -gt 0 -and $pkg.failed -eq 0 -and $pkg.errors -eq 0) { '✅ Passed' } else { '❌ Failed' }
             $summaryLines += "| $($pkg.path) | $($pkg.passed) | $($pkg.failed) | $($pkg.skipped) | $status |"
         }
 
         if ($packages.Count -eq 0) {
-            $summaryLines += '| (no packages) | 0 | 0 | 0 | ✅ Passed |'
+            $summaryLines += '| (no packages) | 0 | 0 | 0 | ❌ Failed |'
         }
 
         $summaryLines += ''
-        $summaryLines += "**Total:** $totalPassed passed, $totalFailed failed, $totalSkipped skipped"
+        $summaryLines += "**Total:** $totalPassed passed, $totalFailed failed, $totalSkipped skipped, $totalErrors errors; exit code $testExitCode"
 
         $summaryContent = $summaryLines -join "`n"
         Write-CIStepSummary -Content $summaryContent
