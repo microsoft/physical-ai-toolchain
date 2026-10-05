@@ -77,7 +77,7 @@ function Write-SecurityLog {
         return
     }
 
-    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $timestamp = Get-StandardTimestamp
     $logEntry = "[$timestamp] [$Level] $Message"
 
     # Console output with colors
@@ -180,7 +180,7 @@ function New-SecurityIssue {
         File           = $File
         Line           = $Line
         Recommendation = $Recommendation
-        Timestamp      = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        Timestamp      = Get-StandardTimestamp
     }
 }
 
@@ -232,7 +232,7 @@ function Write-SecurityReport {
             $output = @{
                 Summary   = $Summary
                 Issues    = $Results
-                Timestamp = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+                Timestamp = Get-StandardTimestamp
                 Count     = @($Results).Count
             }
             $jsonOutput = $output | ConvertTo-Json -Depth 5

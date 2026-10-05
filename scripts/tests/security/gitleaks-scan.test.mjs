@@ -3,7 +3,6 @@
 
 import assert from 'node:assert/strict';
 import childProcess, { spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -62,8 +61,11 @@ function repository(t) {
   return { cwd, env, git, write, commit, base, reportPath: join(cwd, 'logs', 'scan.sarif') };
 }
 
+// Random hex can contain generic-api-key stopwords such as dead or feed, which suppress the finding.
+const fixtureHex = '0123456789abcdef'.repeat(4);
+
 function syntheticFinding() {
-  return `api_${'key'} = "${randomBytes(32).toString('hex')}"\n`;
+  return `api_${'key'} = "${fixtureHex}"\n`;
 }
 
 function runScan(repo, options = {}) {
@@ -117,7 +119,7 @@ for (const operation of ['present', 'deleted', 'renamed', 'second-parent', 'merg
     assert.equal(result.exitCode, 1);
     assert.equal(result.scannerExitCode, 1);
     assert.ok(result.findings > 0);
-    assert.ok(!JSON.stringify(result).includes(candidate), 'Result must not echo fixture contents');
+    assert.ok(!JSON.stringify(result).includes(fixtureHex), 'Result must not echo fixture contents');
   });
 }
 

@@ -33,7 +33,10 @@ export default defineConfig({
     ['html', { open: 'never', outputFolder: reportDirectory }],
   ],
   use: {
+    // Bound waits without explicit timeouts, including contexts the crawl creates, so a stalled page fails its own route.
+    actionTimeout: 15_000,
     baseURL,
+    navigationTimeout: 15_000,
     screenshot: 'only-on-failure',
     trace: isCI ? 'on-first-retry' : 'retain-on-failure',
     video: 'off',

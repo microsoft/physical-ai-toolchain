@@ -32,8 +32,6 @@ export const riskComponentRegistry = [
       'annotation-panel/LanguageInstructionWidget.tsx',
       'annotation-panel/ObjectDetectionWidget.tsx',
       'annotation-panel/TaskCompletenessWidget.tsx',
-      'curriculum/ExportPanel.tsx',
-      'curriculum/FilterBuilder.tsx',
       'vlm-judge/JudgePanel.tsx',
     ],
     mappedEvidence: 'e2e/accessibility-keyboard.spec.ts',
@@ -47,10 +45,7 @@ export const riskComponentRegistry = [
   {
     id: 'viewer-risk-tabs',
     category: 'tabs',
-    sourcePaths: [
-      'annotation-workspace/AnnotationWorkspaceContent.tsx',
-      'curriculum/CurriculumGenerator.tsx',
-    ],
+    sourcePaths: ['annotation-workspace/AnnotationWorkspaceContent.tsx'],
     mappedEvidence: 'e2e/accessibility-keyboard.spec.ts',
   },
   {

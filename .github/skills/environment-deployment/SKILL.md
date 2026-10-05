@@ -94,18 +94,20 @@ Run `terraform output -json` from the Terraform directory. Select only explicit 
 
 Read these values when present:
 
-| Terraform output     | Bundle use                                      |
-|----------------------|-------------------------------------------------|
-| `resource_group`     | Resource group name and location                |
-| `key_vault_name`     | Key Vault bundle transfer                       |
-| `aks_cluster`        | AKS name and resource ID                        |
-| `node_pools`         | GPU pool VM sizes, priority, labels, and taints |
-| `container_registry` | ACR name and login server                       |
-| `storage_account`    | Storage account name                            |
-| `azureml_workspace`  | Azure ML workspace name                         |
-| `osmo_workload_identity` | OSMO workload identity ID and Entra metadata |
+| Terraform output         | Bundle use                                                        |
+|--------------------------|-------------------------------------------------------------------|
+| `resource_group`         | Resource group name and location                                  |
+| `key_vault_name`         | Key Vault bundle transfer                                         |
+| `aks_cluster`            | AKS name and resource ID                                          |
+| `node_pools`             | GPU pool VM sizes, priority, labels, taints, and scaling settings |
+| `container_registry`     | ACR name and login server                                         |
+| `storage_account`        | Storage account name                                              |
+| `azureml_workspace`      | Azure ML workspace name                                           |
+| `osmo_workload_identity` | OSMO workload identity ID and Entra metadata                      |
 
 Fail when the resource group, Key Vault, or requested AKS/ACR values are missing. Do not infer names from naming conventions when Terraform exposes them.
+
+A pool is parked when `node_pools` reports `should_enable_auto_scaling = false` and `node_count = 0`. Nothing can schedule on a parked pool, so skip it in Kubernetes verification and generate no OSMO pod template, OSMO platform, or Azure ML InstanceType for it.
 
 ### 3. Verify Azure
 
@@ -137,7 +139,7 @@ When kubectl is available and AKS is reachable:
    - `status.allocatable["nvidia.com/gpu"]`
 6. Read `azureml/azureml-ingress-nginx-internal-lb` and form `http://<RFC1918-address>` from its assigned ingress IP.
 
-Scale-to-zero pools may have no live nodes. Generate their configuration from Terraform and record live capacity as unavailable instead of omitting the pool.
+Scale-to-zero pools (autoscaling on with `min_count = 0`) may have no live nodes. Generate their configuration from Terraform and record live capacity as unavailable instead of omitting the pool. Parked pools are the exception and are omitted.
 
 ### 5. Verify OSMO
 
@@ -154,7 +156,7 @@ Record whether OSMO and Helm verification succeeded. Do not copy profile data in
 
 Generate `osmo-platforms.yaml` from `node_pools`.
 
-For each GPU pool:
+For each GPU pool that isn't parked:
 
 - Create one pod template with `agentpool` and `node.kubernetes.io/instance-type` selectors.
 - Add Terraform node labels that constrain scheduling.
@@ -172,7 +174,7 @@ Use unique lowercase identifiers derived from the pool key. Preserve both braces
 Generate `azureml-instance-types.yaml` from the same pool data:
 
 - Always include `defaultinstancetype` for CPU workloads.
-- Create one GPU InstanceType per pool with the pool selector and constraining Terraform labels.
+- Create one GPU InstanceType per pool that isn't parked. Select the pool with `agentpool: <pool key>` plus its constraining Terraform labels, such as the Spot label. Don't select on `accelerator`: AKS sets it on running GPU nodes, and the autoscaler can't predict it for a current GPU size at zero.
 - Use `gpuspot` for the first spot pool and `gpu` for the first regular pool when those names are unambiguous; otherwise use `gpu-<pool>`.
 - Set the GPU limit to a value no greater than verified per-node capacity. Use `1` for scale-to-zero pools without live capacity.
 - Do not generate multi-GPU InstanceTypes without verified capacity or an explicit user requirement.
@@ -181,7 +183,9 @@ The deployment consumes this file through `02-deploy-azureml-extension.sh --inst
 
 ### 8. Generate the immutable ACR image manifest
 
-Generate `osmo-images.json` only when OSMO images are mirrored to ACR. Use this component allowlist:
+Generate `osmo-images.json` only when OSMO images are mirrored to ACR. Mirroring writes to the registry, so it isn't part of discovery. With the user's confirmation, `infrastructure/setup/import-osmo-to-acr.sh` imports and locks the pinned images and charts, writes this file, and records it with the registry and OSMO versions in an existing `deployment.json`. It stops before importing when a value already in `deployment.json` differs.
+
+To describe images that are already mirrored, use this component allowlist:
 
 - `agent`
 - `backend-listener`
@@ -329,9 +333,13 @@ Complete this journey when an existing OSMO backend and pool are ready: the envi
 
 The environment owner runs `infrastructure/setup/04-prepare-osmo-hil-node.sh` after verifying the existing OSMO backend and pool. Supply the generated bundle, approved service URL, existing backend and pool, protected OSMO profile, pull-only registry configuration, and token expiry. The script publishes the generic bundle and the exact host-bound catalog separately, writing the catalog last.
 
-Key Vault is the only scripted protected-artifact transfer. Before publication, the environment owner manually creates the exact secret resources and grants the Ubuntu identity data-plane access to each named inbound secret only. Use `Key Vault Secrets User` for inbound secrets and `Key Vault Secrets Officer` only for the host-specific CSR secret. Verify that the Ubuntu identity has no direct or inherited vault-wide data-plane role.
+Key Vault is the only scripted protected-artifact transfer. Before publication, the environment owner creates the exact secret resources, except the catalog that the publisher writes, and grants the Ubuntu identity data-plane access to each named inbound secret only.
 
-Key Vault networking and RBAC are manual environment-owner actions. The publisher does not assign roles, modify Key Vault networking, or make a private vault reachable. Complete any bounded network-access window and restore private-only access before the consumer continues.
+`infrastructure/setup/prepare-osmo-hil-exchange.sh` creates the secrets and the pull-only registry configuration, and grants the roles when given `--assignee-object-id`; rerun it after the first publication to grant the catalog role.
+
+Use `Key Vault Secrets User` for inbound secrets and `Key Vault Secrets Officer` only for the host-specific CSR secret. Verify that the Ubuntu identity has no direct or inherited vault-wide data-plane role.
+
+Key Vault networking stays a manual environment-owner action. The publisher does not assign roles, modify Key Vault networking, or make a private vault reachable. Complete any bounded network-access window and restore private-only access before the consumer continues.
 
 The publisher reuses the exact catalog-pinned OSMO token and token-metadata secret versions when they are valid and unexpired. `--renew-token` forces a new issuance. An absent catalog or valid expired token metadata issues a new token. Stop on a malformed or inaccessible catalog, or a token-metadata binding or digest mismatch. The publisher does not delete token versions.
 
@@ -371,4 +379,4 @@ The consumer validates the exact catalog-bound inputs and changes only the owned
 
 ## Handoff
 
-Return the generated bundle path, validation results, unavailable checks, and the exact next preview command. For HiL preparation, identify the trusted Key Vault publisher command, the local consumer command, and any environment-owner RBAC or network checkpoint that remains.
+Return the generated bundle path, validation results, unavailable checks, parked pools left out of the bundle, and the exact next preview command. Name any live Azure ML InstanceType or OSMO pool that still targets a parked pool so the operator can remove it; applying the regenerated InstanceTypes doesn't delete it. For HiL preparation, identify the trusted Key Vault publisher command, the local consumer command, and any environment-owner RBAC or network checkpoint that remains.
