@@ -122,15 +122,21 @@ def test_an_invalid_value_in_local_env_is_an_error_that_hides_it(tmp_path: Path)
 
 # Preflight
 
-_AKS_TYPES = {
-    "defaultinstancetype": {"resources": {"limits": {"cpu": "2", "memory": "8Gi"}}},
-    "gpuspot": {"resources": {"limits": {"nvidia.com/gpu": 1}}},
-    "gpu": {"resources": {"limits": {"nvidia.com/gpu": "1"}}},
+# Shaped like `az ml compute show` output, which reports a null GPU count for CPU-only types.
+_CPU_TYPE = {
+    "resources": {
+        "limits": {"cpu": "2", "memory": "8Gi", "nvidia.com/gpu": None},
+        "requests": {"cpu": "1", "memory": "4Gi", "nvidia.com/gpu": None},
+    }
 }
-_HIL_TYPES = {
-    "defaultinstancetype": {"resources": {"limits": {"cpu": "2", "memory": "8Gi"}}},
-    "gpu": {"resources": {"limits": {"nvidia.com/gpu": 1}}},
+_GPU_TYPE = {
+    "resources": {
+        "limits": {"cpu": "8", "memory": "32Gi", "nvidia.com/gpu": "1"},
+        "requests": {"cpu": "4", "memory": "16Gi", "nvidia.com/gpu": None},
+    }
 }
+_AKS_TYPES = {"defaultinstancetype": _CPU_TYPE, "gpuspot": _GPU_TYPE, "gpu": _GPU_TYPE}
+_HIL_TYPES = {"defaultinstancetype": _CPU_TYPE, "gpu": _GPU_TYPE}
 
 
 def _compute(types: dict[str, object] | None, name: str = "k8s-sample") -> _aml.AzureMLCompute:
@@ -146,6 +152,16 @@ def test_the_compute_keeps_only_its_instance_types() -> None:
 
     assert compute == _aml.AzureMLCompute("k8s-sample", frozenset(_AKS_TYPES), frozenset({"gpu", "gpuspot"}))
     assert _compute(None) == _aml.AzureMLCompute("k8s-sample")
+
+
+@pytest.mark.parametrize(
+    ("count", "has_gpu"),
+    [(None, False), (0, False), ("0", False), ("", False), ("one", False), (1, True), ("2", True)],
+)
+def test_only_a_positive_gpu_count_makes_a_gpu_type(count: object, has_gpu: bool) -> None:
+    spec = {"resources": {"limits": {"cpu": "2", "nvidia.com/gpu": count}, "requests": {"nvidia.com/gpu": None}}}
+
+    assert _compute({"sample": spec}).gpu_instance_types == (frozenset({"sample"}) if has_gpu else frozenset())
 
 
 def _problem(choice: InstanceTypeChoice, types: dict[str, object] | None, category: str = "rl") -> str | None:

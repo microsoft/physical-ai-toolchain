@@ -322,7 +322,9 @@ def _instance_type_has_gpu(spec: object) -> bool:
         return False
     for section in ("limits", "requests"):
         values = resources.get(section)
-        if isinstance(values, Mapping) and str(values.get("nvidia.com/gpu", "0")).strip() not in {"", "0"}:
+        # Azure ML reports CPU-only instance types with a null GPU count.
+        count = str(values.get("nvidia.com/gpu") or "").strip() if isinstance(values, Mapping) else ""
+        if count.isdigit() and int(count) > 0:
             return True
     return False
 
