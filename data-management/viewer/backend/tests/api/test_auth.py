@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -47,6 +50,33 @@ def client_auth_disabled(monkeypatch):
     monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "true")
     yield TestClient(app)
     ds_mod._dataset_service = None
+
+
+@pytest.fixture
+def client_with_easy_auth(monkeypatch):
+    """Test client with proxy-bound Easy Auth configured."""
+    import src.api.services.dataset_service as ds_mod
+
+    ds_mod._dataset_service = None
+    monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
+    monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "easy_auth")
+    monkeypatch.setenv("DATAVIEWER_PROXY_KEY", "proxy-secret")
+    yield TestClient(app)
+    ds_mod._dataset_service = None
+
+
+def _easy_auth_headers(*, proxy_key: str | None = "proxy-secret") -> dict[str, str]:
+    principal = {
+        "claims": [
+            {"typ": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", "val": "user-123"},
+            {"typ": "name", "val": "Test User"},
+            {"typ": "roles", "val": "Dataviewer.Admin"},
+        ]
+    }
+    headers = {"X-MS-CLIENT-PRINCIPAL": base64.b64encode(json.dumps(principal).encode()).decode()}
+    if proxy_key is not None:
+        headers["X-Dataviewer-Proxy-Key"] = proxy_key
+    return headers
 
 
 # ============================================================================
@@ -98,6 +128,22 @@ class TestPrincipalContextEndpoint:
 
     def test_missing_api_key_is_rejected(self, client_with_auth):
         response = client_with_auth.get("/api/auth/context")
+
+        assert response.status_code == 401
+
+    def test_proxy_bound_easy_auth_returns_opaque_user_scope(self, client_with_easy_auth):
+        response = client_with_easy_auth.get("/api/auth/context", headers=_easy_auth_headers())
+
+        assert response.status_code == 200
+        assert response.json()["auth_mode"] == "easy_auth"
+        assert "user-123" not in response.json()["scope_id"]
+
+    @pytest.mark.parametrize("proxy_key", [None, "wrong"])
+    def test_unbound_easy_auth_principal_is_rejected(self, client_with_easy_auth, proxy_key):
+        response = client_with_easy_auth.get(
+            "/api/auth/context",
+            headers=_easy_auth_headers(proxy_key=proxy_key),
+        )
 
         assert response.status_code == 401
 

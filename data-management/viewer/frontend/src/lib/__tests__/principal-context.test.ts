@@ -12,7 +12,7 @@ describe('fetchPrincipalContext', () => {
       new Response(
         JSON.stringify({
           scope_id: 'principal-scope',
-          auth_mode: 'azure_ad',
+          auth_mode: 'easy_auth',
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
@@ -21,7 +21,7 @@ describe('fetchPrincipalContext', () => {
 
     const context = await fetchPrincipalContext()
 
-    expect(context).toEqual({ scopeId: 'principal-scope', authMode: 'azure_ad' })
+    expect(context).toEqual({ scopeId: 'principal-scope', authMode: 'easy_auth' })
     expect(mockFetch).toHaveBeenCalledWith('/api/auth/context', expect.any(Object))
   })
 })

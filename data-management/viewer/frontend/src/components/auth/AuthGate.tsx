@@ -1,10 +1,30 @@
 import { InteractionStatus } from '@azure/msal-browser'
 import { AuthenticatedTemplate, UnauthenticatedTemplate, useMsal } from '@azure/msal-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { loginRequest } from '@/lib/auth-config'
 
+async function isEasyAuthActive(): Promise<boolean> {
+  try {
+    const response = await fetch('/.auth/me')
+    if (!response.ok) return false
+    const data = await response.json()
+    return Array.isArray(data) && data.length > 0
+  } catch {
+    return false
+  }
+}
+
 export function AuthGate({ children }: { children: React.ReactNode }) {
+  const [easyAuth, setEasyAuth] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    isEasyAuthActive().then(setEasyAuth)
+  }, [])
+
+  if (easyAuth === null) return null
+  if (easyAuth) return <>{children}</>
+
   return (
     <>
       <AuthenticatedTemplate>{children}</AuthenticatedTemplate>
@@ -17,44 +37,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
 function LoginRedirect() {
   const { instance, inProgress } = useMsal()
-  const [redirectState, setRedirectState] = useState<'idle' | 'redirecting' | 'failed'>('idle')
-  const automaticAttempted = useRef(false)
-  const retryButtonRef = useRef<HTMLButtonElement>(null)
-
-  const startLogin = useCallback(() => {
-    automaticAttempted.current = true
-    setRedirectState('redirecting')
-    void instance.loginRedirect(loginRequest).catch(() => {
-      setRedirectState('failed')
-    })
-  }, [instance])
 
   useEffect(() => {
-    if (inProgress === InteractionStatus.None && !automaticAttempted.current) {
-      startLogin()
+    if (inProgress === InteractionStatus.None) {
+      instance.loginRedirect(loginRequest)
     }
-  }, [inProgress, startLogin])
+  }, [instance, inProgress])
 
-  useEffect(() => {
-    if (redirectState === 'failed') {
-      retryButtonRef.current?.focus()
-    }
-  }, [redirectState])
-
-  return (
-    <div>
-      <p role="status" aria-live="polite">
-        {redirectState === 'redirecting' && 'Redirecting to Microsoft sign-in…'}
-        {redirectState === 'failed' && 'Sign-in redirect stopped.'}
-      </p>
-      {redirectState === 'failed' && (
-        <div role="alert">
-          <p>Microsoft sign-in could not be started.</p>
-          <button ref={retryButtonRef} type="button" onClick={startLogin}>
-            Try sign-in again
-          </button>
-        </div>
-      )}
-    </div>
-  )
+  return null
 }

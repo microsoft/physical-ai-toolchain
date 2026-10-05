@@ -27,6 +27,8 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Dataviewer-Proxy-Key ${NGINX_PROXY_KEY_HEADER};
+        proxy_set_header Authorization ${NGINX_AUTHORIZATION_HEADER};
 
         # Support large video file streaming
         proxy_buffering off;

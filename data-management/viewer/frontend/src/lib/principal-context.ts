@@ -1,6 +1,6 @@
 import { handleResponse, requestHeaders, transformKeys } from './api-client'
 
-export type AuthMode = 'azure_ad' | 'auth0' | 'apikey' | 'local'
+export type AuthMode = 'azure_ad' | 'auth0' | 'easy_auth' | 'apikey' | 'local'
 
 export interface PrincipalContext {
   scopeId: string

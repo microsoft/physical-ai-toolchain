@@ -152,6 +152,16 @@ run "auth_enabled" {
     condition     = length(random_uuid.dataviewer_scope_id) == 1
     error_message = "Random UUID for scope should be created when auth is enabled"
   }
+
+  assert {
+    condition     = length(random_password.dataviewer_proxy_key) == 1
+    error_message = "Proxy credential should be created when auth is enabled"
+  }
+
+  assert {
+    condition     = length(azuread_application_password.dataviewer_easy_auth) == 1
+    error_message = "Easy Auth client credential should be created when auth is enabled"
+  }
 }
 
 run "auth_disabled" {
@@ -184,6 +194,16 @@ run "auth_disabled" {
   assert {
     condition     = length(random_uuid.dataviewer_scope_id) == 0
     error_message = "Random UUID for scope should not be created when auth is disabled"
+  }
+
+  assert {
+    condition     = length(random_password.dataviewer_proxy_key) == 0
+    error_message = "Proxy credential should not be created when auth is disabled"
+  }
+
+  assert {
+    condition     = length(azuread_application_password.dataviewer_easy_auth) == 0
+    error_message = "Easy Auth client credential should not be created when auth is disabled"
   }
 }
 

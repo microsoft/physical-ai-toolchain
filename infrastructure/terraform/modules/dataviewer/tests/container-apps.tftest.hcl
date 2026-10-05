@@ -86,6 +86,72 @@ run "custom_images" {
   }
 }
 
+run "proxy_bound_auth_configuration" {
+  command = plan
+
+  variables {
+    resource_prefix               = run.setup.resource_prefix
+    environment                   = run.setup.environment
+    instance                      = run.setup.instance
+    location                      = run.setup.location
+    resource_group                = run.setup.resource_group
+    virtual_network               = run.setup.virtual_network
+    network_security_group        = run.setup.network_security_group
+    log_analytics_workspace       = run.setup.log_analytics_workspace
+    container_registry            = run.setup.container_registry
+    storage_account               = run.setup.storage_account
+    should_deploy_dataviewer_auth = true
+  }
+
+  assert {
+    condition = anytrue([
+      for item in azurerm_container_app.backend.secret :
+      item.name == "dataviewer-proxy-key"
+    ])
+    error_message = "Backend should define the Terraform-owned proxy credential"
+  }
+
+  assert {
+    condition = anytrue([
+      for item in azurerm_container_app.frontend.secret :
+      item.name == "dataviewer-proxy-key"
+    ])
+    error_message = "Frontend should define the Terraform-owned proxy credential"
+  }
+
+  assert {
+    condition = anytrue([
+      for item in azurerm_container_app.frontend.secret :
+      item.name == "microsoft-provider-authentication-secret"
+    ])
+    error_message = "Frontend should define the Terraform-owned Easy Auth credential"
+  }
+
+  assert {
+    condition = anytrue([
+      for item in azurerm_container_app.backend.template[0].container[0].env :
+      item.name == "DATAVIEWER_PROXY_KEY" && item.secret_name == "dataviewer-proxy-key"
+    ])
+    error_message = "Backend should reference the proxy credential through DATAVIEWER_PROXY_KEY"
+  }
+
+  assert {
+    condition = anytrue([
+      for item in azurerm_container_app.frontend.template[0].container[0].env :
+      item.name == "DATAVIEWER_PROXY_KEY" && item.secret_name == "dataviewer-proxy-key"
+    ])
+    error_message = "Frontend should reference the proxy credential through DATAVIEWER_PROXY_KEY"
+  }
+
+  assert {
+    condition = anytrue([
+      for item in azurerm_container_app.backend.template[0].container[0].env :
+      item.name == "DATAVIEWER_AUTH_PROVIDER" && item.value == "easy_auth"
+    ])
+    error_message = "Backend should select Easy Auth when authentication is enabled"
+  }
+}
+
 // ============================================================
 // ACR Registry Configuration
 // ============================================================

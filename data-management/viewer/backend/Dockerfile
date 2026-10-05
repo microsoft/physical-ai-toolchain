@@ -15,10 +15,20 @@ COPY --from=ghcr.io/astral-sh/uv:0.10.9@sha256:10902f58a1606787602f303954cea0996
 COPY pyproject.toml uv.lock logging.json ./
 
 # Install production dependencies and runtime feature extras into /app/.venv.
+ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"
+ARG UV_DEFAULT_INDEX="https://pypi.org/simple"
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PATH=/app/.venv/bin:$PATH
-RUN uv sync --frozen --no-dev --extra azure --extra analysis --extra export --extra auth --extra yolo
+RUN set -eu; \
+    set --; \
+    old_ifs="$IFS"; \
+    IFS=','; \
+    for extra in $BACKEND_EXTRAS; do \
+        set -- "$@" --extra "$extra"; \
+    done; \
+    IFS="$old_ifs"; \
+    uv sync --frozen --no-dev "$@"
 
 # Copy application source
 COPY src/ ./src/

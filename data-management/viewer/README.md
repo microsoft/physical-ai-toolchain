@@ -394,45 +394,45 @@ The shim reads these variables ([`evaluation/vlm_judge/openai_shim.py`](../../ev
 
 ## 🔒 Authentication with Entra ID
 
-Public deployments use two independent Entra ID controls. Azure Container Apps Easy Auth protects the public frontend perimeter and allows the frontend app registration as a client application, while MSAL.js obtains a delegated API access token that the backend validates as the authorization boundary. The backend never trusts `X-MS-CLIENT-PRINCIPAL`.
+Azure Container Apps deployments use Easy Auth on the public frontend. Easy Auth authenticates the browser and injects `X-MS-CLIENT-PRINCIPAL`; the frontend nginx proxy forwards that principal with a Terraform-managed `X-Dataviewer-Proxy-Key`. The backend accepts the principal only when the proxy credential matches, preventing a direct caller from establishing identity by forging the platform header.
+
+The frontend-to-backend proxy preserves native browser requests for images and video, including `HEAD` and HTTP Range requests. The browser does not acquire or attach a separate API token in this deployment mode.
 
 ### Entra ID Prerequisites
 
 1. An [Azure AD app registration](https://learn.microsoft.com/entra/identity-platform/quickstart-register-app) with:
-   - SPA redirect URIs for local development and the deployed frontend origin
-   - Web redirect URI for `/.auth/login/aad/callback`
-   - API scope `api://<client-id>/access_as_user`
-   - App roles `Dataviewer.Viewer`, `Dataviewer.Annotator`, and `Dataviewer.Admin` as required
-2. Record the application client ID and directory tenant ID.
+   - A **Web** redirect URI at `https://<frontend-fqdn>/.auth/login/aad/callback`
+   - Optional **App roles** for role-based access control, such as `Dataviewer.Viewer`, `Dataviewer.Annotator`, and `Dataviewer.Admin`
 
-Register the deployed frontend origin as an SPA redirect URI and `https://<frontend-fqdn>/.auth/login/aad/callback` as a Web redirect URI before deployment. The deployment script validates both production redirect URIs and does not mutate redirect URI configuration.
+2. Note the **Application (client) ID** and **Directory (tenant) ID** from the app registration.
 
-### Backend Configuration
+Terraform creates the app registration when authentication is enabled. The deployment script validates the callback URI and configures Easy Auth without changing redirect URIs.
 
-Set these environment variables in `backend/.env` (or as container environment variables):
+### Azure Container Apps Configuration
+
+Terraform creates one random proxy credential and installs it under the stable `dataviewer-proxy-key` secret name on both Container Apps. Each app receives the value through a `DATAVIEWER_PROXY_KEY` secret reference; the credential is not exposed as a Terraform output.
 
 ```env
 DATAVIEWER_AUTH_DISABLED=false
-DATAVIEWER_AUTH_PROVIDER=azure_ad
+DATAVIEWER_AUTH_PROVIDER=easy_auth
+DATAVIEWER_PROXY_KEY=<shared-random-proxy-key>
 DATAVIEWER_AZURE_TENANT_ID=<your-tenant-id>
 DATAVIEWER_AZURE_CLIENT_ID=<your-client-id>
-DATAVIEWER_SECURE_COOKIES=true   # Set to true when behind HTTPS
+DATAVIEWER_SECURE_COOKIES=true
 ```
 
-The backend validates the RS256 signature, Entra issuer, API client ID audience, token validity, and the space-delimited `scp` claim. The `scp` claim must contain `access_as_user`; an ID token, a token for another API, or a token without that delegated scope receives HTTP 401.
+Do not put the proxy credential in source, command output, Terraform outputs, or deployment logs. Rotate it by replacing both Container Apps secrets and creating paired frontend and backend revisions before directing traffic to either new revision.
 
-Protected role routes also require the corresponding `roles` claim. Auth0 JWT validation remains available without the Entra-specific scope requirement. When `DATAVIEWER_AUTH_DISABLED=true` (the local default), authentication checks are bypassed.
+### Other Authentication Modes
 
-### Frontend Configuration
-
-The frontend uses build-time environment variables to configure MSAL.js. Set these before building:
+The same images support API key, Auth0, and direct Entra JWT deployments. When `DATAVIEWER_PROXY_KEY` is absent, nginx removes any inbound proxy-proof header and preserves the browser's `Authorization` header. Direct Entra JWT deployments can configure the optional MSAL frontend at build time:
 
 ```env
 VITE_AZURE_CLIENT_ID=<your-client-id>
 VITE_AZURE_TENANT_ID=<your-tenant-id>
 ```
 
-When `VITE_AZURE_CLIENT_ID` is set, the app requires an MSAL account, requests `api://<client-id>/access_as_user`, and attaches the resulting access token to API requests. The Easy Auth browser session and MSAL browser session are separate: passing the frontend perimeter does not authorize backend API access. When the client ID is unset, MSAL is not initialized and the app runs without authentication for local or private deployments.
+The frontend probes `/api/auth/context` before starting MSAL. An active Easy Auth session takes precedence; otherwise the configured MSAL flow obtains a token for the `azure_ad` backend provider. When `DATAVIEWER_AUTH_DISABLED=true`, authentication and CSRF checks are bypassed for local development.
 
 ### Docker Compose with Auth
 
@@ -443,69 +443,60 @@ export VITE_AZURE_TENANT_ID=<your-tenant-id>
 docker compose up --build
 ```
 
-The frontend Dockerfile passes `VITE_AZURE_CLIENT_ID` and `VITE_AZURE_TENANT_ID` as build arguments. The backend receives `DATAVIEWER_AUTH_DISABLED` as a runtime environment variable.
+This example uses direct Entra JWT validation. Easy Auth is a Container Apps platform feature and is not provided by Docker Compose.
 
 ### Auth Environment Variable Reference
 
-| Variable                     | Location              | Description                                                |
-|------------------------------|-----------------------|------------------------------------------------------------|
-| `DATAVIEWER_AUTH_DISABLED`   | Backend               | Set to `false` to enable auth (`true` disables all checks) |
-| `DATAVIEWER_AUTH_PROVIDER`   | Backend               | Auth provider: `apikey`, `azure_ad`, or `auth0`            |
-| `DATAVIEWER_AZURE_TENANT_ID` | Backend               | Entra ID tenant ID (GUID)                                  |
-| `DATAVIEWER_AZURE_CLIENT_ID` | Backend               | App registration client ID (GUID)                          |
-| `DATAVIEWER_SECURE_COOKIES`  | Backend               | Set to `true` for HTTPS deployments                        |
-| `VITE_AZURE_CLIENT_ID`       | Frontend (build-time) | Same client ID — enables MSAL.js when set                  |
-| `VITE_AZURE_TENANT_ID`       | Frontend (build-time) | Same tenant ID — used for authority URL                    |
+| Variable                     | Location              | Description                                                           |
+|------------------------------|-----------------------|-----------------------------------------------------------------------|
+| `DATAVIEWER_AUTH_DISABLED`   | Backend               | Set to `false` to enable auth (`true` disables all checks)            |
+| `DATAVIEWER_AUTH_PROVIDER`   | Backend               | Auth provider: `apikey`, `azure_ad`, `auth0`, or `easy_auth`          |
+| `DATAVIEWER_PROXY_KEY`       | Frontend and backend  | Shared secret binding Easy Auth principal forwarding to trusted nginx |
+| `DATAVIEWER_AZURE_TENANT_ID` | Backend               | Entra ID tenant ID                                                    |
+| `DATAVIEWER_AZURE_CLIENT_ID` | Backend               | App registration client ID                                            |
+| `DATAVIEWER_SECURE_COOKIES`  | Backend               | Set to `true` for HTTPS deployments                                   |
+| `VITE_AZURE_CLIENT_ID`       | Frontend (build-time) | Enables the optional direct Entra JWT flow when set                   |
+| `VITE_AZURE_TENANT_ID`       | Frontend (build-time) | Tenant used by the optional MSAL authority                            |
 
 ### Token Flow
 
 ```text
-Browser → Easy Auth → public frontend perimeter
-Browser → MSAL.js PKCE → delegated access token
-Browser → frontend /api proxy → FastAPI JWT and access_as_user validation
+Browser → frontend Easy Auth → authenticated cookie session
+Browser → frontend nginx → native /api, image, and video requests
+Easy Auth principal + proxy credential → FastAPI identity validation
 FastAPI → Azure Storage → managed identity
 ```
 
 The backend accesses Azure Storage using managed identity, not the user's token. User authentication and storage authentication are independent.
 
-### Staged Deployment
+### Deployment and Rollback
 
-Run `data-management/setup/deploy-dataviewer.sh` interactively for authenticated deployments. Operator access tokens remain in the browser; the script never accepts them through CLI arguments, environment variables, logs, or files.
+Run `data-management/setup/deploy-dataviewer.sh` interactively. For authenticated deployments, the script:
 
-| Stage | Change                                                                         | Required browser gate                                                                                             |
-| ----- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| 1     | Deploy the token-capable frontend while the existing backend remains unchanged | For an existing `easy_auth` or `azure_ad` provider, `/api/auth/context` returns HTTP 200 and reports that mode    |
-| 2     | Change any provider other than `azure_ad` to `azure_ad`                        | `/api/auth/context` sends `Authorization`, returns HTTP 200, and reports `azure_ad`                               |
-| 3     | Deploy the backend that accepts only supported providers                       | `/api/auth/context` continues to send `Authorization`, return HTTP 200, and report `azure_ad`                    |
+1. Verifies both Container Apps already contain the Terraform-owned `dataviewer-proxy-key` secret and the frontend contains the Terraform-owned Easy Auth client credential.
+2. Captures the current images, authentication settings, and secret references for rollback.
+3. Deploys the backend in `easy_auth` mode with its proxy-key secret reference.
+4. Configures frontend Easy Auth to use the Terraform-owned credential by secret name.
+5. Deploys the frontend with its proxy-key secret reference.
+6. Requires one terminal browser and media verification gate before reporting success.
 
-Only an explicit `yes` within 15 minutes advances a gate. EOF, timeout, negative confirmation, missing authorization, non-200 response, or unexpected mode requires rollback. `--skip-backend` can deploy only the frontend and never changes the provider. `--skip-frontend` requires an `azure_ad` preflight browser gate before any mutation.
-
-### Rollback
-
-The deployment script captures the current images and backend authentication environment before mutation. A failed authenticated rollout restores those values. When the script enables a previously disabled Easy Auth platform, rollback disables the platform and removes only the credential appended for that rollout.
-
-| Failure point                      | Automatic rollback                                                                      |
-| ---------------------------------- | --------------------------------------------------------------------------------------- |
-| New frontend or first browser gate | Restore the old frontend image; disable Easy Auth and remove the appended credential if this rollout enabled it |
-| Provider switch or second gate     | Restore the backend authentication environment and frontend image; undo rollout-created Easy Auth enablement    |
-| New backend or final gate          | Restore both images and the backend authentication environment; undo rollout-created Easy Auth enablement       |
-
-Rollback does not reconstruct pre-existing Microsoft provider fields on a disabled Easy Auth platform after a partial provider update. Verify those fields before retrying a failed configuration stage. Do not enable `easy_auth` on the new backend image. If automatic rollback fails, the script exits nonzero and prints the exact recovery command.
+`--skip-backend` requires an existing backend already using `easy_auth` and `dataviewer-proxy-key`. `--skip-frontend` requires enabled frontend Easy Auth and an existing proxy-key reference. A failed paired rollout restores the frontend first and then the backend; if the rollout enabled Easy Auth, rollback also disables it. Terraform retains ownership of both credentials throughout deployment and rollback.
 
 ### Authentication Smoke Test
 
-Open the deployed frontend in a private browser window, complete the Easy Auth and MSAL redirects, and inspect requests in browser developer tools.
+Open the deployed frontend in a private browser window and sign in through Easy Auth.
 
-| Probe                                                           | Expected result                                                                    |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `/api/auth/context` with the MSAL access token                  | HTTP 200 and `auth_mode=azure_ad`; token has the API client ID audience and `access_as_user` scope |
-| Protected route with the role required by that route            | Success                                                                            |
-| Token with a missing or different delegated scope               | HTTP 401                                                                           |
-| Request containing only a forged `X-MS-CLIENT-PRINCIPAL` header | HTTP 401                                                                           |
-| Missing, invalid, wrong-audience, or wrong-issuer token         | HTTP 401                                                                           |
-| Valid scoped token without the required app role                | HTTP 403                                                                           |
+| Probe                                                      | Expected result                        |
+|------------------------------------------------------------|----------------------------------------|
+| `/api/auth/context` through the frontend                   | HTTP 200 with `auth_mode=easy_auth`    |
+| Image and frame requests                                   | Render without a browser bearer header |
+| Video `HEAD` request                                       | Successful native response             |
+| Video Range request                                        | HTTP 206 with the requested byte range |
+| Direct backend request with only a forged principal header | HTTP 401                               |
+| Direct backend request with a missing or wrong proxy key   | HTTP 401                               |
+| Credentialed cross-origin API request                      | Rejected                               |
 
-Run the existing local-disabled, API-key, and Auth0 authentication tests before deployment. These modes remain independent of the Entra delegated-scope requirement.
+The backend Container App remains internal-only. Inspect deployment output and application logs after the smoke test to confirm they contain neither the proxy credential nor decoded principal payloads.
 
 ## 🚀 Running the Application
 
@@ -693,12 +684,12 @@ docker compose up --build
 
 Local storage requires write access to `DATAVIEWER_HOST_DATA_DIR` because annotations and labels are persisted atomically under each dataset directory. The backend validates create, flush, replace, and delete operations during startup and exits with the effective UID and GID when the mount is not writable.
 
-| Environment | Runtime identity |
-|-------------|------------------|
-| Docker Desktop for macOS or Windows | Uses the image-defined UID/GID 999 |
-| Rootful Docker Engine on Linux or directly inside WSL | Set `DATAVIEWER_UID` and `DATAVIEWER_GID` from `id -u` and `id -g` |
-| Rootless Docker | Set `DATAVIEWER_UID=0` and `DATAVIEWER_GID=0`; rootless UID 0 maps to the invoking host user |
-| Docker daemon with user-namespace remapping | Pre-arrange host directory ownership for the daemon's subordinate UID/GID mapping |
+| Environment                                           | Runtime identity                                                                             |
+|-------------------------------------------------------|----------------------------------------------------------------------------------------------|
+| Docker Desktop for macOS or Windows                   | Uses the image-defined UID/GID 999                                                           |
+| Rootful Docker Engine on Linux or directly inside WSL | Set `DATAVIEWER_UID` and `DATAVIEWER_GID` from `id -u` and `id -g`                           |
+| Rootless Docker                                       | Set `DATAVIEWER_UID=0` and `DATAVIEWER_GID=0`; rootless UID 0 maps to the invoking host user |
+| Docker daemon with user-namespace remapping           | Pre-arrange host directory ownership for the daemon's subordinate UID/GID mapping            |
 
 > [!WARNING]
 > Do not use the rootless UID/GID 0 override with a rootful Docker daemon. It runs the backend as host-capable container root.

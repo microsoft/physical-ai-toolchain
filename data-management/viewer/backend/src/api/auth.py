@@ -14,7 +14,10 @@ resource; credentials are never logged.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
+import json
 import logging
 import os
 import secrets
@@ -27,7 +30,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-AuthMode = Literal["azure_ad", "auth0", "apikey", "local"]
+AuthMode = Literal["azure_ad", "auth0", "easy_auth", "apikey", "local"]
 
 
 class PrincipalContext(BaseModel):
@@ -95,15 +98,11 @@ class JwtProvider(AuthProvider):
         audience: str,
         issuer: str,
         auth_method: Literal["azure_ad", "auth0"] = "azure_ad",
-        required_scope: str | None = None,
-        required_claims: tuple[str, ...] = (),
     ) -> None:
         self._jwks_uri = jwks_uri
         self._audience = audience
         self._issuer = issuer
         self._auth_method = auth_method
-        self._required_scope = required_scope
-        self._required_claims = required_claims
         self._jwks_client: Any = None
 
     def _get_jwks_client(self) -> Any:
@@ -140,17 +139,7 @@ class JwtProvider(AuthProvider):
                 algorithms=["RS256"],
                 audience=self._audience,
                 issuer=self._issuer,
-                options={"require": list(self._required_claims)},
             )
-            if any(claim not in payload or payload[claim] is None for claim in self._required_claims):
-                logger.warning("JWT rejected because a required claim is missing")
-                return None
-            if "sub" in self._required_claims and not str(payload["sub"]).strip():
-                logger.warning("JWT rejected because the required subject is blank")
-                return None
-            if self._required_scope and self._required_scope not in str(payload.get("scp", "")).split():
-                logger.warning("JWT rejected because required delegated scope is missing")
-                return None
             payload["auth_method"] = self._auth_method
             return payload
         except jwt.PyJWTError:
@@ -159,6 +148,78 @@ class JwtProvider(AuthProvider):
     @property
     def www_authenticate(self) -> str:
         return 'Bearer realm="DataViewer API"'
+
+
+# ============================================================================
+# Easy Auth provider (Azure Container Apps)
+# ============================================================================
+
+
+class EasyAuthProvider(AuthProvider):
+    """Validate an Easy Auth principal bound to the trusted frontend proxy."""
+
+    def __init__(self, expected_proxy_key: str) -> None:
+        if not expected_proxy_key:
+            raise ValueError("DATAVIEWER_PROXY_KEY is required for easy_auth")
+        try:
+            self._expected_proxy_key = expected_proxy_key.encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise ValueError("DATAVIEWER_PROXY_KEY must contain only ASCII characters") from exc
+
+    async def authenticate(self, request: Request) -> dict[str, Any] | None:
+        proxy_key = request.headers.get("X-Dataviewer-Proxy-Key", "")
+        principal = request.headers.get("X-MS-CLIENT-PRINCIPAL", "")
+        if not proxy_key or not principal:
+            return None
+
+        try:
+            supplied_proxy_key = proxy_key.encode("ascii")
+        except UnicodeEncodeError:
+            return None
+        if not secrets.compare_digest(supplied_proxy_key, self._expected_proxy_key):
+            return None
+
+        try:
+            decoded = base64.b64decode(principal, validate=True)
+            principal_document = json.loads(decoded)
+        except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            return None
+        if not isinstance(principal_document, dict):
+            return None
+
+        claims = principal_document.get("claims")
+        if not isinstance(claims, list):
+            return None
+
+        subject = ""
+        name = ""
+        roles: list[str] = []
+        for claim in claims:
+            if not isinstance(claim, dict):
+                return None
+            claim_type = claim.get("typ")
+            claim_value = claim.get("val")
+            if not isinstance(claim_type, str) or not isinstance(claim_value, str):
+                return None
+            if "nameidentifier" in claim_type:
+                subject = claim_value.strip()
+            elif claim_type == "name":
+                name = claim_value
+            elif claim_type == "roles" and claim_value:
+                roles.append(claim_value)
+
+        if not subject:
+            return None
+        return {
+            "sub": subject,
+            "name": name,
+            "roles": roles,
+            "auth_method": "easy_auth",
+        }
+
+    @property
+    def www_authenticate(self) -> str:
+        return 'EasyAuth realm="DataViewer API"'
 
 
 # ============================================================================
@@ -180,14 +241,7 @@ def _build_provider() -> AuthProvider:
         client_id = os.environ.get("DATAVIEWER_AZURE_CLIENT_ID", "")
         jwks_uri = f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys"
         issuer = f"https://login.microsoftonline.com/{tenant_id}/v2.0"
-        return JwtProvider(
-            jwks_uri=jwks_uri,
-            audience=client_id,
-            issuer=issuer,
-            auth_method="azure_ad",
-            required_scope="access_as_user",
-            required_claims=("exp", "sub"),
-        )
+        return JwtProvider(jwks_uri=jwks_uri, audience=client_id, issuer=issuer, auth_method="azure_ad")
 
     if provider_name == "auth0":
         domain = os.environ.get("DATAVIEWER_AUTH0_DOMAIN", "")
@@ -195,6 +249,9 @@ def _build_provider() -> AuthProvider:
         jwks_uri = f"https://{domain}/.well-known/jwks.json"
         issuer = f"https://{domain}/"
         return JwtProvider(jwks_uri=jwks_uri, audience=audience, issuer=issuer, auth_method="auth0")
+
+    if provider_name == "easy_auth":
+        return EasyAuthProvider(os.environ.get("DATAVIEWER_PROXY_KEY", ""))
 
     logger.error("Unsupported DATAVIEWER_AUTH_PROVIDER value: %s", provider_name)
     raise ValueError(f"Unsupported DATAVIEWER_AUTH_PROVIDER: {provider_name}")
@@ -258,7 +315,7 @@ def resolve_principal_context(user: dict[str, Any] | None) -> PrincipalContext:
         subject = "disabled-auth-session"
     else:
         raw_auth_mode = str(user.get("auth_method", ""))
-        if raw_auth_mode not in {"azure_ad", "auth0", "apikey"}:
+        if raw_auth_mode not in {"azure_ad", "auth0", "easy_auth", "apikey"}:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unsupported authentication identity")
         auth_mode = cast(AuthMode, raw_auth_mode)
         subject = str(user.get("sub", "")).strip()
