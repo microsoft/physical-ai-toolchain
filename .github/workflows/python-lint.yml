@@ -59,6 +59,8 @@ jobs:
         id: ruff-check
         continue-on-error: true
         run: |
+          # Tee-Object creates no file when a clean run emits no output.
+          New-Item ruff-check-results.txt -ItemType File -Force | Out-Null
           uvx --from ruff==0.16.7 ruff check . --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
