@@ -1,6 +1,6 @@
 global:
   osmoImageLocation: nvcr.io/nvidia/osmo
-  osmoImageTag: "6.3.0"
+  osmoImageTag: "6.3.1"
   serviceUrl: ""
   agentNamespace: osmo-hil-operator
   backendNamespace: osmo-hil-workflows

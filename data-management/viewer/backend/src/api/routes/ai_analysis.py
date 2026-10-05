@@ -23,6 +23,39 @@ from ..services.trajectory_analysis import DEFAULT_SMOOTHNESS_MODE, SmoothnessMo
 router = APIRouter(prefix="/ai", tags=["ai"])
 
 
+def _validate_matrix(values: list[list[float]], field_name: str) -> None:
+    """Reject matrices that NumPy cannot represent as a two-dimensional array."""
+    if not values:
+        raise HTTPException(status_code=400, detail=f"{field_name} must not be empty")
+    if any(not row for row in values):
+        raise HTTPException(status_code=400, detail=f"{field_name} rows must not be empty")
+    if values and any(len(row) != len(values[0]) for row in values[1:]):
+        raise HTTPException(status_code=400, detail=f"{field_name} rows must have equal length")
+
+
+def _validate_trajectory_inputs(
+    positions: list[list[float]],
+    timestamps: list[float],
+    *,
+    forces: list[list[float]] | None = None,
+    gripper_states: list[float] | None = None,
+    gripper_commands: list[float] | None = None,
+) -> None:
+    """Validate aligned trajectory inputs before converting them to NumPy arrays."""
+    _validate_matrix(positions, "positions")
+    expected_length = len(positions)
+    for field_name, values in (
+        ("timestamps", timestamps),
+        ("forces", forces),
+        ("gripper_states", gripper_states),
+        ("gripper_commands", gripper_commands),
+    ):
+        if values is not None and len(values) != expected_length:
+            raise HTTPException(status_code=400, detail=f"{field_name} must have the same length as positions")
+    if forces is not None:
+        _validate_matrix(forces, "forces")
+
+
 # Request/Response Models
 
 
@@ -36,6 +69,12 @@ class TrajectoryData(BaseModel):
         default=DEFAULT_SMOOTHNESS_MODE,
         description="Normalization for normalized_smoothness: 'log-scaled' (default) or 'radian-based'",
     )
+
+
+class ErrorResponse(BaseModel):
+    """HTTP error response."""
+
+    detail: str
 
 
 class TrajectoryMetricsResponse(BaseModel):
@@ -160,6 +199,7 @@ class AnnotationSuggestion(BaseModel):
 @router.post(
     "/trajectory-analysis",
     response_model=TrajectoryMetricsResponse,
+    responses={400: {"model": ErrorResponse}},
     dependencies=[Depends(require_csrf_token)],
 )
 async def analyze_trajectory(data: TrajectoryData) -> TrajectoryMetricsResponse:
@@ -172,8 +212,11 @@ async def analyze_trajectory(data: TrajectoryData) -> TrajectoryMetricsResponse:
     if len(data.positions) < 3:
         raise HTTPException(status_code=400, detail="Trajectory must have at least 3 positions")
 
-    if len(data.positions) != len(data.timestamps):
-        raise HTTPException(status_code=400, detail="Positions and timestamps must have same length")
+    _validate_trajectory_inputs(
+        data.positions,
+        data.timestamps,
+        gripper_states=data.gripper_states,
+    )
 
     positions = np.array(data.positions)
     timestamps = np.array(data.timestamps)
@@ -188,6 +231,7 @@ async def analyze_trajectory(data: TrajectoryData) -> TrajectoryMetricsResponse:
 @router.post(
     "/anomaly-detection",
     response_model=AnomalyDetectionResponse,
+    responses={400: {"model": ErrorResponse}},
     dependencies=[Depends(require_csrf_token)],
 )
 async def detect_anomalies(request: AnomalyDetectionRequest) -> AnomalyDetectionResponse:
@@ -199,6 +243,14 @@ async def detect_anomalies(request: AnomalyDetectionRequest) -> AnomalyDetection
     """
     if len(request.positions) < 3:
         raise HTTPException(status_code=400, detail="Trajectory must have at least 3 positions")
+
+    _validate_trajectory_inputs(
+        request.positions,
+        request.timestamps,
+        forces=request.forces,
+        gripper_states=request.gripper_states,
+        gripper_commands=request.gripper_commands,
+    )
 
     positions = np.array(request.positions)
     timestamps = np.array(request.timestamps)
@@ -230,6 +282,7 @@ async def detect_anomalies(request: AnomalyDetectionRequest) -> AnomalyDetection
 @router.post(
     "/cluster",
     response_model=ClusterResponse,
+    responses={400: {"model": ErrorResponse}},
     dependencies=[Depends(require_csrf_token)],
 )
 async def cluster_episodes(request: ClusterRequest) -> ClusterResponse:
@@ -241,6 +294,9 @@ async def cluster_episodes(request: ClusterRequest) -> ClusterResponse:
     """
     if len(request.trajectories) < 2:
         raise HTTPException(status_code=400, detail="At least 2 trajectories required for clustering")
+
+    for index, trajectory in enumerate(request.trajectories):
+        _validate_matrix(trajectory, f"trajectories[{index}]")
 
     trajectories = [np.array(t) for t in request.trajectories]
 
@@ -265,6 +321,7 @@ async def cluster_episodes(request: ClusterRequest) -> ClusterResponse:
 @router.post(
     "/suggest-annotation",
     response_model=AnnotationSuggestion,
+    responses={400: {"model": ErrorResponse}},
     dependencies=[Depends(require_csrf_token)],
 )
 async def suggest_annotation(request: SuggestAnnotationRequest) -> AnnotationSuggestion:
@@ -276,6 +333,13 @@ async def suggest_annotation(request: SuggestAnnotationRequest) -> AnnotationSug
     """
     if len(request.positions) < 3:
         raise HTTPException(status_code=400, detail="Trajectory must have at least 3 positions")
+
+    _validate_trajectory_inputs(
+        request.positions,
+        request.timestamps,
+        forces=request.forces,
+        gripper_states=request.gripper_states,
+    )
 
     positions = np.array(request.positions)
     timestamps = np.array(request.timestamps)
