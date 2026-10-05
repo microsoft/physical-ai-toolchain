@@ -255,6 +255,7 @@ jobs:
           disable_search: true
           use_oidc: true
           use_pypi: true
+          use_legacy_upload_endpoint: true
           fail_ci_if_error: true
           flags: pytest-accessibility
           name: pytest-accessibility-coverage
