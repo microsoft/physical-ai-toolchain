@@ -58,7 +58,7 @@ default-values:
   max_iterations: ""
   code_url: ""
   entry_script_b64: ""
-  payload_root: /workspace/isaac_payload
+  payload_root: /tmp/isaac_payload
   sleep_after_unpack: ""
   azure_subscription_id: ""
   azure_resource_group: ""

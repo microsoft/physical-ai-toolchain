@@ -360,10 +360,9 @@ def bootstrap_azure_ml(
 
     # azureml-mlflow plugin handles azureml:// URIs with DefaultAzureCredential
     # (workload identity supported via AZURE_FEDERATED_TOKEN_FILE).
-    # MLFLOW_REGISTRY_URI=file:///dev/null (set in workflow env) prevents registry
-    # validation failures during set_experiment().
     try:
         mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_registry_uri(tracking_uri)
         if experiment_name:
             mlflow.set_experiment(experiment_name)
     except Exception as exc:
