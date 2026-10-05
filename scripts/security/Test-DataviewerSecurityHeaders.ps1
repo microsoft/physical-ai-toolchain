@@ -8,17 +8,13 @@
     Verifies the running Data Viewer frontend serves the expected security headers.
 
 .DESCRIPTION
-    Parses expected header values directly from the NGINX template so this check
-    cannot drift from the actual server configuration (single source of truth;
-    see also scripts/tests/security/DataviewerSecurityHeaders.Tests.ps1). Asserts
-    the headers are present with unweakened values on the root document, a built
-    static asset, an SPA route, and an API route.
+    Checks responses against independent literal policy expectations, including
+    duplicate-header rejection. Covers the root, built assets, SPA, API error,
+    health, and redirect bridge. Only the bridge permits same-origin framing
+    and must be served with Cache-Control: no-store.
 
 .PARAMETER BaseUri
     Base URI of the running frontend. Default: http://localhost:5173.
-
-.PARAMETER TemplatePath
-    Path to the NGINX config template. Default: data-management/viewer/frontend/nginx.conf.template.
 
 .EXAMPLE
     ./Test-DataviewerSecurityHeaders.ps1
@@ -28,10 +24,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [string]$BaseUri = 'http://localhost:5173',
-
-    [Parameter(Mandatory = $false)]
-    [string]$TemplatePath = 'data-management/viewer/frontend/nginx.conf.template'
+    [string]$BaseUri = 'http://localhost:5173'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,21 +32,20 @@ $ErrorActionPreference = 'Stop'
 function Get-ExpectedHeaders {
     param(
         [Parameter(Mandatory)]
-        [string]$TemplatePath
+        [string]$Route
     )
 
-    $templateContent = Get-Content -Path $TemplatePath -Raw
-    $expectedHeaders = [ordered]@{}
-    $headerMatches = [regex]::Matches(
-        $templateContent,
-        'add_header\s+(?<name>[\w-]+)\s+(?:"(?<quoted>[^"]*)"|(?<bare>\S+))\s+always;'
-    )
-    foreach ($match in $headerMatches) {
-        $name = $match.Groups['name'].Value
-        $value = if ($match.Groups['quoted'].Success) { $match.Groups['quoted'].Value } else { $match.Groups['bare'].Value }
-        $expectedHeaders[$name] = $value
+    $isBridge = $Route -eq '/redirect.html'
+    $ancestors = if ($isBridge) { "'self'" } else { "'none'" }
+    $expectedHeaders = [ordered]@{
+        'Content-Security-Policy' = "default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; frame-ancestors $ancestors; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self' https://login.microsoftonline.com; frame-src 'self' https://login.microsoftonline.com"
+        'X-Frame-Options' = $(if ($isBridge) { 'SAMEORIGIN' } else { 'DENY' })
+        'X-Content-Type-Options' = 'nosniff'
+        'Strict-Transport-Security' = 'max-age=31536000; includeSubDomains'
+        'Referrer-Policy' = 'strict-origin-when-cross-origin'
+        'Permissions-Policy' = 'geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()'
     }
-    if ($expectedHeaders.Count -eq 0) { throw "No add_header directives found in $TemplatePath" }
+    if ($isBridge) { $expectedHeaders['Cache-Control'] = 'no-store' }
     return $expectedHeaders
 }
 
@@ -75,16 +67,19 @@ function Assert-SecurityHeaders {
         }
 
         $values = @($Response.Headers[$expected.Key])
-        if ($values.Count -eq 0 -or @($values | Where-Object { $_ -cne $expected.Value }).Count -gt 0) {
-            throw "$Route has a conflicting or weakened $($expected.Key)"
+        if ($values.Count -ne 1 -or $values[0] -cne $expected.Value) {
+            throw "$Route has a duplicate, conflicting or weakened $($expected.Key)"
         }
+    }
+    foreach ($header in @('Cross-Origin-Embedder-Policy', 'Cross-Origin-Opener-Policy', 'Cross-Origin-Resource-Policy')) {
+        if ($Response.Headers.ContainsKey($header)) { throw "$Route has an unsupported $header" }
     }
 }
 
-$expectedHeaders = Get-ExpectedHeaders -TemplatePath $TemplatePath
-
+$BaseUri = $BaseUri.TrimEnd('/')
 $rootRoute = '/'
 $rootResponse = Invoke-WebRequest -Uri "$BaseUri$rootRoute" -UseBasicParsing
+$expectedHeaders = Get-ExpectedHeaders -Route $rootRoute
 Assert-SecurityHeaders -Route $rootRoute -Response $rootResponse -ExpectedHeaders $expectedHeaders
 
 $assetMatch = [regex]::Match($rootResponse.Content, '<script[^>]+\ssrc=["''](?<path>/assets/[^"'']+\.js)["'']')
@@ -95,6 +90,9 @@ $routes = @(
     @{ Route = $assetRoute; ExpectedStatus = 200 }
     @{ Route = '/security-policy-smoke'; ExpectedStatus = 200 }
     @{ Route = '/api/security-policy-smoke'; ExpectedStatus = 404 }
+    @{ Route = '/health'; ExpectedStatus = 200 }
+    @{ Route = '/redirect.html'; ExpectedStatus = 200 }
+    @{ Route = '/redirect.html/missing'; ExpectedStatus = 200 }
 )
 
 foreach ($request in $routes) {
@@ -105,7 +103,8 @@ foreach ($request in $routes) {
     if ($response.StatusCode -ne $request.ExpectedStatus) {
         throw "$($request.Route) returned status $($response.StatusCode), expected $($request.ExpectedStatus)"
     }
-    Assert-SecurityHeaders -Route $request.Route -Response $response -ExpectedHeaders $expectedHeaders
+    Assert-SecurityHeaders -Route $request.Route -Response $response `
+        -ExpectedHeaders (Get-ExpectedHeaders -Route $request.Route)
 }
 
 Write-Host 'All routes served the expected security headers.'

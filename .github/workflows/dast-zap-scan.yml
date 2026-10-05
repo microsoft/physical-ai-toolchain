@@ -7,10 +7,16 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - "data-management/viewer/frontend/nginx.conf.template"
+      - "data-management/viewer/frontend/**"
+      - "data-management/viewer/docker-compose.yml"
+      - "data-management/viewer/backend/Dockerfile"
+      - ".dockerignore"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/dast-zap-scan.yml"
       - ".zap/rules.tsv"
-      - "scripts/tests/security/DataviewerSecurityHeaders.Tests.ps1"
+      - "scripts/security/Test-DataviewerSecurityHeaders.ps1"
+      - "scripts/tests/security/Test-DataviewerSecurityHeaders.Tests.ps1"
 
 permissions:
   contents: read
@@ -39,6 +45,32 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install Pester
+        run: |
+          Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -SkipPublisherCheck -Scope CurrentUser
+          Import-Module Pester -RequiredVersion 5.7.1
+
+      - name: Verify security policy against hardcoded expectations
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = 'scripts/tests/security/Test-DataviewerSecurityHeaders.Tests.ps1'
+          $config.Run.Exit = $true
+          Invoke-Pester -Configuration $config
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: data-management/viewer/frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install browser test dependencies
+        run: npm ci
+
+      - name: Install Chrome
+        working-directory: data-management/viewer/frontend
+        run: npx playwright install --with-deps chrome
+
       - name: Build and start dataviewer
         shell: bash
         working-directory: data-management/viewer
@@ -57,6 +89,17 @@ jobs:
 
       - name: Verify frontend security headers
         run: ./scripts/security/Test-DataviewerSecurityHeaders.ps1
+
+      - name: Verify production MSAL redirect bridge
+        run: npm run test:auth --workspace robotic-training-data-tool
+
+      - name: Upload failed browser evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dataviewer-auth-browser-results
+          path: artifacts/auth/current/playwright
+          retention-days: 14
 
       - name: ZAP baseline scan
         if: github.event_name != 'pull_request'

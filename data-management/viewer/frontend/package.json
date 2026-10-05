@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "test": "vitest run --passWithNoTests",
     "test:a11y": "playwright test --config=playwright.config.ts",
+    "test:auth": "playwright test --config=playwright.auth.config.ts",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "type-check": "tsc --noEmit",
