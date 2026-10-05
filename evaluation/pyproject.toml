@@ -83,9 +83,9 @@ dev = [
     # Held below 16 because lerobot[dataset]==0.6.1 requires av<16.
     "av==15.1.0",
     "pytest==9.1.1",
-    "pytest-mock==3.15.1",
+    "pytest-mock==3.16.0",
     "pytest-cov==7.1.0",
-    "hypothesis==6.168.1",
+    "hypothesis==6.168.3",
     # Keep aligned with the root constraint used by CPU smoke resolution.
     "pygments==2.21.0",
     "matplotlib==3.11.2",
