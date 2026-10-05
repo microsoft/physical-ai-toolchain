@@ -3,7 +3,7 @@ sidebar_position: 12
 title: Updating External Components
 description: Process for identifying, updating, and vetting reused externally-maintained components
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-01
+ms.date: 2026-10-05
 ms.topic: how-to
 keywords:
   - component-updates
@@ -47,12 +47,12 @@ For quick dependency commands, see the [Component Updates](pull-request-process.
 
 ## Automated Updates (Dependabot)
 
-Dependabot checks version updates weekly on Monday. Configuration lives in [.github/dependabot.yml](pathname://../../.github/dependabot.yml). The 25 update entries keep separate npm, Python, and Docker environments where their constraints differ and share one Terraform configuration across compatible directories.
+Dependabot checks version updates weekly on Monday. Configuration lives in [.github/dependabot.yml](pathname://../../.github/dependabot.yml). Separate update entries keep npm, Python, and Docker environments apart where their constraints differ and share one Terraform configuration across compatible directories.
 
 | Ecosystem      | Coverage                                                                                      | Grouping                                                         |
 |----------------|-----------------------------------------------------------------------------------------------|------------------------------------------------------------------|
 | npm            | Root workspace, including the Dataviewer frontend, and `/docs/docusaurus` as separate entries | Per-entry development, runtime, and framework groups (see below) |
-| uv             | 14 project roots covering development, training, evaluation, data, workflows, and GPU offload | Separate patch/minor group per project                           |
+| uv             | Project roots covering development, training, evaluation, data, workflows, and GPU offload    | Separate patch/minor group per project                           |
 | terraform      | `/infrastructure/terraform`, plus `dns`, `vpn`, and `automation`                              | One coordinated patch/minor provider group                       |
 | github-actions | Workflow files, excluding generated `*.lock.yml` files                                        | One patch/minor group; compiler-managed actions remain excluded  |
 | gomod          | `/infrastructure/terraform/e2e`                                                               | One patch/minor group                                            |
