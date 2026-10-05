@@ -127,6 +127,10 @@ function Invoke-ShellCheckCore {
     }
 
     if ($allShFiles.Count -eq 0) {
+        if (-not $ChangedFilesOnly) {
+            Write-CIAnnotation -Level Error -Message 'Full ShellCheck validation has no shell files.'
+            return 1
+        }
         Write-Host 'No .sh files found to lint'
         Write-EmptyLintResults -OutputPath $OutputPath -SummaryMessage 'No `.sh` files found to lint.'
         return 0
@@ -138,12 +142,19 @@ function Invoke-ShellCheckCore {
     $errorCount = 0
     $warningCount = 0
     $allIssues = @()
+    $executionErrors = @()
+    $PSNativeCommandUseErrorActionPreference = $false
 
     foreach ($file in $allShFiles) {
         $relativePath = $file.FullName.Substring($repoRoot.Length + 1).Replace('\', '/')
-        $jsonOutput = & shellcheck --format=json $file.FullName 2>$null
-        if ($jsonOutput) {
-            $issues = $jsonOutput | ConvertFrom-Json
+        try {
+            $global:LASTEXITCODE = 0
+            $jsonOutput = & shellcheck --format=json $file.FullName 2>&1
+            $exitCode = $LASTEXITCODE
+            $issues = ConvertFrom-Json -InputObject ($jsonOutput -join "`n") -NoEnumerate -ErrorAction Stop
+            if ($issues -isnot [array] -or $exitCode -gt 1 -or ($exitCode -ne 0 -and $issues.Count -eq 0)) {
+                throw 'ShellCheck did not produce a valid completed scan.'
+            }
             foreach ($issue in $issues) {
                 $level = switch ($issue.level) {
                     'error'   { 'Error' }
@@ -167,9 +178,13 @@ function Invoke-ShellCheckCore {
                 }
             }
         }
+        catch {
+            $executionErrors += $relativePath
+            Write-CIAnnotation -Level Error -File $relativePath -Message 'ShellCheck execution or report parsing failed.'
+        }
     }
 
-    $lintPassed = ($errorCount -eq 0 -and $warningCount -eq 0)
+    $lintPassed = ($errorCount -eq 0 -and $warningCount -eq 0 -and $executionErrors.Count -eq 0)
 
     $results = @{
         timestamp          = (Get-Date -Format 'o')
@@ -178,6 +193,7 @@ function Invoke-ShellCheckCore {
         error_count        = $errorCount
         warning_count      = $warningCount
         files_checked      = $allShFiles.Count
+        execution_errors   = $executionErrors
         issues             = $allIssues
         summary            = @{
             overall_passed = $lintPassed

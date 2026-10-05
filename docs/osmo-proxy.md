@@ -138,3 +138,7 @@ Set `OSMO_METRICS_SPEC` to the path of a spec file at submission time. See `work
 > `azureml-mlflow` is required alongside `mlflow-skinny` to register the `azureml://` tracking store plugin. The proxy fails the Azure ML job when plugin initialization, metric logging, or declared-output data asset registration fails. `workflows/azureml/osmo-proxy-job.yaml` installs the frozen runtime from `workflows/azureml/osmo-proxy/uv.lock`.
 
 The proxy must run as an AML job inside the cluster. The `OSMO_GATEWAY_URL` is only reachable from pods inside the AKS cluster.
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

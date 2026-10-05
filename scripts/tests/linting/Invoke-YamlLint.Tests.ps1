@@ -47,15 +47,15 @@ Describe 'Invoke-YamlLintCore' -Tag 'Unit' {
     }
 
     Context 'No workflow files to lint' {
-        It 'Returns 0 when workflow directory is empty' {
+        It 'Fails full validation when workflow directory is empty' {
             $result = Invoke-YamlLintCore -OutputPath $script:TestOutputPath
-            $result | Should -Be 0
+            $result | Should -Be 1
         }
 
-        It 'Returns 0 when workflow directory does not exist' {
+        It 'Fails full validation when workflow directory does not exist' {
             Remove-Item (Join-Path $TestDrive '.github') -Recurse -Force
             $result = Invoke-YamlLintCore -OutputPath $script:TestOutputPath
-            $result | Should -Be 0
+            $result | Should -Be 1
         }
 
         It 'Sets CI output to 0 issues' {
@@ -84,6 +84,7 @@ Describe 'Invoke-YamlLintCore' -Tag 'Unit' {
             Invoke-YamlLintCore -OutputPath $script:TestOutputPath
             $content = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
             $content.totalFiles | Should -Be 2
+            ($content.issues -is [array]) | Should -BeTrue
         }
 
         It 'Excludes *.lock.yml files' {
@@ -240,10 +241,16 @@ Describe 'Invoke-YamlLintCore' -Tag 'Unit' {
             'name: Test' | Set-Content (Join-Path $script:WorkflowDir 'test.yml')
         }
 
-        It 'Returns 0 for invalid JSON' {
+        It 'Fails for invalid JSON even when the command exit code is zero' {
             Mock actionlint { return 'not valid json {{{' }
             $result = Invoke-YamlLintCore -OutputPath $script:TestOutputPath 3>$null
-            $result | Should -Be 0
+            $result | Should -Be 1
+        }
+
+        It 'Fails for nonzero native exit without parsed findings' {
+            Mock actionlint { $global:LASTEXITCODE = 2; return '' }
+            Invoke-YamlLintCore -OutputPath $script:TestOutputPath | Should -Be 1
+            (Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json).lint_passed | Should -BeFalse
         }
 
         It 'Emits warning for invalid JSON' {
@@ -329,7 +336,7 @@ Describe 'Invoke-YamlLintCore' -Tag 'Unit' {
             $customBranch = 'origin/develop'
             Mock -ModuleName LintingHelpers -CommandName git -MockWith { '' }
 
-            Invoke-YamlLintCore -ChangedFilesOnly -BaseBranch $customBranch
+            { Invoke-YamlLintCore -ChangedFilesOnly -BaseBranch $customBranch } | Should -Throw
 
             Should -Invoke -CommandName git -ModuleName LintingHelpers `
                 -ParameterFilter { $args -contains $customBranch } -Times 1
@@ -338,7 +345,7 @@ Describe 'Invoke-YamlLintCore' -Tag 'Unit' {
         It 'uses default BaseBranch when not specified' {
             Mock -ModuleName LintingHelpers -CommandName git -MockWith { '' }
 
-            Invoke-YamlLintCore -ChangedFilesOnly
+            { Invoke-YamlLintCore -ChangedFilesOnly } | Should -Throw
 
             Should -Invoke -CommandName git -ModuleName LintingHelpers `
                 -ParameterFilter { $args -contains 'origin/main' } -Times 1
