@@ -676,3 +676,109 @@ def test_local_env_file_stays_out_of_git_and_repo_root_snapshots(tmp_path: Path)
         ["git", *no_global_excludes, "check-ignore", "-q", LOCAL_ENV_FILE], cwd=probe, check=False
     )
     assert excluded.returncode == 0, f"{snapshot_rules.name} must keep {LOCAL_ENV_FILE} out of repo-root code snapshots"
+
+
+_INSTANCE_TYPE_CASES = [
+    pytest.param(None, None, "<script default>", id="unset"),
+    pytest.param("gpu-sample-1x", "gpu-sample-1x", "gpu-sample-1x", id="named"),
+    pytest.param("", "", "<managed-compute>", id="empty"),
+]
+
+
+def _capture_submissions(monkeypatch: pytest.MonkeyPatch) -> tuple[list[list[str]], list[str]]:
+    commands: list[list[str]] = []
+    messages: list[str] = []
+
+    def fake_run(args: list[str], *, cwd: Path, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="stopped by the test")
+
+    monkeypatch.setattr(_aml, "run_command", fake_run)
+    monkeypatch.setattr(_aml, "log_e2e", messages.append)
+    return commands, messages
+
+
+def _set_instance_type(monkeypatch: pytest.MonkeyPatch, setting: str | None) -> None:
+    if setting is None:
+        monkeypatch.delenv(_aml.INSTANCE_TYPE_ENV, raising=False)
+    else:
+        monkeypatch.setenv(_aml.INSTANCE_TYPE_ENV, setting)
+
+
+def _instance_type_argument(command: list[str]) -> str | None:
+    if "--instance-type" not in command:
+        return None
+    return command[command.index("--instance-type") + 1]
+
+
+def _submit_eval(repo_root: Path, *, policy_type: str, **extra: str | None) -> None:
+    _aml.submit_aml_lerobot_eval(
+        repo_root,
+        _sample_job().workspace,
+        policy_source=_aml.AmlLeRobotEvalPolicySource(args=("--from-aml-model",), description="sample model"),
+        policy_type=policy_type,
+        eval_episodes=1,
+        eval_batch_size=1,
+        blob_storage_account="sample-account",
+        blob_container="sample-container",
+        blob_prefix="sample/prefix",
+        **extra,  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.parametrize(("setting", "expected_argument", "expected_label"), _INSTANCE_TYPE_CASES)
+def test_vla_training_follows_the_instance_type_setting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    setting: str | None,
+    expected_argument: str | None,
+    expected_label: str,
+) -> None:
+    commands, messages = _capture_submissions(monkeypatch)
+    _set_instance_type(monkeypatch, setting)
+
+    with pytest.raises(AssertionError, match="submission failed"):
+        _aml.submit_aml_vla_pi0_training(
+            tmp_path,
+            _sample_job().workspace,
+            blob_url="https://sample.invalid/datasets/sample",
+            training_steps=2,
+            save_freq=1,
+            batch_size=1,
+            log_freq=1,
+            register_model_name="sample-model",
+        )
+
+    assert _instance_type_argument(commands[0]) == expected_argument
+    assert f"instance_type={expected_label}" in messages[0]
+
+
+@pytest.mark.parametrize(("setting", "expected_argument", "expected_label"), _INSTANCE_TYPE_CASES)
+def test_vla_evaluation_follows_the_same_instance_type_setting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    setting: str | None,
+    expected_argument: str | None,
+    expected_label: str,
+) -> None:
+    commands, messages = _capture_submissions(monkeypatch)
+    _set_instance_type(monkeypatch, setting)
+
+    with pytest.raises(AssertionError, match="submission failed"):
+        _submit_eval(tmp_path, policy_type="pi0", instance_type=_aml.requested_instance_type())
+
+    assert _instance_type_argument(commands[0]) == expected_argument
+    assert f"instance_type={expected_label}" in messages[0]
+
+
+def test_evaluation_without_an_instance_type_keeps_the_script_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commands, messages = _capture_submissions(monkeypatch)
+    monkeypatch.setenv(_aml.INSTANCE_TYPE_ENV, "gpu-sample-1x")
+
+    with pytest.raises(AssertionError, match="submission failed"):
+        _submit_eval(tmp_path, policy_type="act")
+
+    assert _instance_type_argument(commands[0]) is None
+    assert "instance_type=<script default>" in messages[0]

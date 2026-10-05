@@ -25,6 +25,7 @@ from tests.e2e._aml import (
     assert_job_snapshot_contains_only_training,
     cancel_aml_job,
     cleanup_aml_job_and_model_versions,
+    requested_instance_type,
     resolve_registered_model,
     submit_aml_lerobot_eval,
     submit_aml_vla_pi0_training,
@@ -92,6 +93,7 @@ def test_aml_vla_pi0_lifecycle_e2e(
         blob_storage_account=dataset.storage_account,
         blob_container=dataset.container,
         blob_prefix=dataset.prefix,
+        instance_type=requested_instance_type(),
     )
     request.addfinalizer(lambda: cancel_aml_job(eval_job, repo_root))
 

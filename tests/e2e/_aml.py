@@ -30,6 +30,7 @@ from tests.e2e._common import (
 AML_STARTED_STATES = {"Running", "Finalizing", "Completed"}
 AML_FAILURE_STATES = {"Canceled", "Cancelled", "Failed", "NotResponding"}
 AML_CANCEL_TIMEOUT_SECONDS = 180
+INSTANCE_TYPE_ENV = "E2E_AML_INSTANCE_TYPE"
 
 
 @dataclass
@@ -273,6 +274,25 @@ def aml_workspace_args(aml_workspace: AzureMLWorkspace) -> list[str]:
     ]
 
 
+def requested_instance_type() -> str | None:
+    """Return the instance type requested through ``E2E_AML_INSTANCE_TYPE``, or ``None`` when it's unset.
+
+    An empty value is kept: it tells the submission scripts to omit the instance type, as
+    managed AmlCompute clusters require. ``None`` leaves each script's own GPU default in place.
+    """
+    return os.environ.get(INSTANCE_TYPE_ENV)
+
+
+def _instance_type_args(instance_type: str | None) -> list[str]:
+    return [] if instance_type is None else ["--instance-type", instance_type]
+
+
+def _instance_type_label(instance_type: str | None) -> str:
+    if instance_type is None:
+        return "<script default>"
+    return instance_type or "<managed-compute>"
+
+
 def _submit_workspace_args(aml_workspace: AzureMLWorkspace) -> list[str]:
     return [
         "--subscription-id",
@@ -384,12 +404,12 @@ def submit_aml_vla_pi0_training(
     register_model_name: str,
 ) -> AzureMLJob:
     experiment_name = e2e_name("vla-pi0-training-e2e-aml")
-    instance_type = os.environ.get("E2E_AML_INSTANCE_TYPE", "")
+    instance_type = requested_instance_type()
     log_e2e(
         "Submitting AzureML VLA pi0 training job "
         f"for dataset={blob_url}, training_steps={training_steps}, "
         f"save_freq={save_freq}, batch_size={batch_size}, log_freq={log_freq}, experiment={experiment_name}, "
-        f"instance_type={instance_type or '<managed-compute>'}"
+        f"instance_type={_instance_type_label(instance_type)}"
     )
     result = run_command(
         [
@@ -408,8 +428,7 @@ def submit_aml_vla_pi0_training(
             str(log_freq),
             "--eval-freq",
             str(training_steps + 1),
-            "--instance-type",
-            instance_type,
+            *_instance_type_args(instance_type),
             "--train-expert-only",
             "--experiment-name",
             experiment_name,
@@ -483,7 +502,9 @@ def submit_aml_lerobot_eval(
     blob_storage_account: str,
     blob_container: str,
     blob_prefix: str,
+    instance_type: str | None = None,
 ) -> AzureMLJob:
+    """Submit a LeRobot eval job; ``instance_type`` of ``None`` keeps the script's default instance type."""
     policy_args = list(policy_source.args)
     policy_description = policy_source.description
     experiment_name = e2e_name("il-eval-e2e-aml")
@@ -493,7 +514,8 @@ def submit_aml_lerobot_eval(
     log_e2e(
         "Submitting AzureML LeRobot eval job "
         f"for policy={policy_description}, policy_type={policy_type}, eval_episodes={eval_episodes}, "
-        f"dataset={blob_storage_account}/{blob_container}/{blob_prefix}, experiment={experiment_name}"
+        f"dataset={blob_storage_account}/{blob_container}/{blob_prefix}, experiment={experiment_name}, "
+        f"instance_type={_instance_type_label(instance_type)}"
     )
     result = run_command(
         [
@@ -515,6 +537,7 @@ def submit_aml_lerobot_eval(
             "--mlflow-enable",
             "--experiment-name",
             experiment_name,
+            *_instance_type_args(instance_type),
             *_submit_workspace_args(aml_workspace),
         ],
         cwd=repo_root,
