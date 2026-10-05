@@ -140,9 +140,9 @@ if [[ "$skip_gpu" == "false" ]]; then
 
   info "GPU Operator installed successfully"
 
-  # Install Microsoft GRID driver on RTX PRO 6000 nodes (vGPU/SR-IOV)
-  # These nodes have nvidia.com/gpu.deploy.driver=false and need the GRID driver
-  # instead of the datacenter driver managed by the GPU Operator.
+  # Fallback GRID driver for RTX PRO 6000 pools created with gpu_driver = "None".
+  # Their nodes carry nvidia.com/gpu.deploy.driver=false; pools with
+  # gpu_driver = "Install" get the AKS-managed GRID driver and skip this.
   grid_manifest="$MANIFESTS_DIR/gpu-grid-driver-installer.yaml"
   grid_scripts_dir="$SETUP_SCRIPTS_DIR/gpu-grid-driver-installer"
   grid_bootstrap_script="$grid_scripts_dir/bootstrap-grid-driver-installer.sh"

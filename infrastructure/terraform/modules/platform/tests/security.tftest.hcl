@@ -392,3 +392,97 @@ run "data_lake_disabled_by_default" {
     error_message = "Data lake storage account should not exist when flag is false"
   }
 }
+
+// ============================================================
+// Per-Resource Public Network Access Overrides
+// ============================================================
+
+run "public_access_overrides_close_selected_resources" {
+  command = plan
+
+  variables {
+    resource_prefix                     = run.setup.resource_prefix
+    environment                         = run.setup.environment
+    instance                            = run.setup.instance
+    location                            = run.setup.location
+    resource_group                      = run.setup.resource_group
+    current_user_oid                    = run.setup.current_user_oid
+    should_enable_public_network_access = true
+    should_deploy_postgresql            = true
+    public_network_access_overrides = {
+      key_vault       = false
+      storage_account = false
+      postgresql      = false
+    }
+  }
+
+  assert {
+    condition     = azurerm_key_vault.main.public_network_access_enabled == false && azurerm_key_vault.main.network_acls[0].default_action == "Deny"
+    error_message = "A key_vault override should close Key Vault public access and deny by default"
+  }
+
+  assert {
+    condition     = azurerm_storage_account.main.public_network_access_enabled == false
+    error_message = "A storage_account override should close storage public access"
+  }
+
+  assert {
+    condition     = azurerm_postgresql_flexible_server.main[0].public_network_access_enabled == false && length(azurerm_postgresql_flexible_server_firewall_rule.allow_azure_services) == 0
+    error_message = "A postgresql override should close PostgreSQL public access and skip its public firewall rule"
+  }
+
+  assert {
+    condition     = azurerm_container_registry.main.public_network_access_enabled == true && azurerm_machine_learning_workspace.main.public_network_access_enabled == true
+    error_message = "Resources without an override should follow should_enable_public_network_access"
+  }
+
+  assert {
+    condition     = azurerm_log_analytics_workspace.main.internet_ingestion_access_type == "Enabled"
+    error_message = "Log Analytics without an override should follow should_enable_public_network_access"
+  }
+}
+
+run "public_access_overrides_open_selected_resources" {
+  command = plan
+
+  variables {
+    resource_prefix                     = run.setup.resource_prefix
+    environment                         = run.setup.environment
+    instance                            = run.setup.instance
+    location                            = run.setup.location
+    resource_group                      = run.setup.resource_group
+    current_user_oid                    = run.setup.current_user_oid
+    should_enable_public_network_access = false
+    public_network_access_overrides = {
+      acr = true
+    }
+  }
+
+  assert {
+    condition     = azurerm_container_registry.main.public_network_access_enabled == true
+    error_message = "An acr override should open ACR public access"
+  }
+
+  assert {
+    condition     = azurerm_key_vault.main.public_network_access_enabled == false
+    error_message = "Key Vault without an override should follow should_enable_public_network_access"
+  }
+}
+
+run "public_access_overrides_reject_unknown_keys" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    public_network_access_overrides = {
+      cosmos = false
+    }
+  }
+
+  expect_failures = [var.public_network_access_overrides]
+}

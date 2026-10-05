@@ -4,7 +4,7 @@ title: Infrastructure Deployment
 slug: infrastructure-deployment
 description: Terraform configuration and deployment for AKS, Azure ML, storage, and OSMO backend services
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-31
+ms.date: 2026-10-03
 ms.topic: how-to
 keywords:
   - terraform
@@ -133,7 +133,7 @@ should_enable_private_aks_cluster = false
 > [!WARNING]
 > Public endpoints expose services to the internet. When using this configuration, you **must** secure cluster workloads:
 >
-> **AzureML Extension**: Configure HTTPS and restrict access via inference router settings. See [Secure online endpoints](https://learn.microsoft.com/azure/machine-learning/how-to-secure-kubernetes-online-endpoint) and [Inference routing](https://learn.microsoft.com/azure/machine-learning/how-to-kubernetes-inference-routing-azureml-fe).
+> **AzureML Extension**: The repository configuration disables the `azureml-fe` real-time inference router. It retains the AzureML nginx ingress controller for OSMO routing; restrict access to the OSMO UI and API and configure its authentication before exposing the cluster.
 >
 > **OSMO UI**: Enable Keycloak authentication to protect the web interface. See [OSMO Keycloak configuration](https://nvidia.github.io/OSMO/main/deployment_guide/getting_started/deploy_service.html#step-2-configure-keycloak).
 
@@ -145,6 +145,7 @@ Enable managed identity for OSMO services (recommended for production):
 osmo_config = {
   should_enable_identity   = true
   should_federate_identity = true
+  should_create_secret     = true
   control_plane_namespace  = "osmo-control-plane"
   operator_namespace       = "osmo-operator"
   workflows_namespace      = "osmo-workflows"
@@ -155,9 +156,9 @@ See [variables.tf](https://github.com/microsoft/physical-ai-toolchain/blob/main/
 
 ## 🔗 Related
 
-- [Infrastructure Reference](infrastructure-reference.md) — architecture, modules, outputs, troubleshooting
-- [VPN Gateway](vpn.md) — point-to-site VPN for private cluster access
-- [Cleanup and Destroy](cleanup.md) — resource teardown procedures
+- [Infrastructure Reference](infrastructure-reference.md): architecture, modules, outputs, troubleshooting
+- [VPN Gateway](vpn.md): point-to-site VPN for private cluster access
+- [Cleanup and Destroy](cleanup.md): resource teardown procedures
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

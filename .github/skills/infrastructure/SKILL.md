@@ -74,10 +74,10 @@ kubectl cluster-info
 cd infrastructure/setup
 ./01-deploy-robotics-charts.sh
 ./02-deploy-azureml-extension.sh
-./03-deploy-osmo.sh
+./03-deploy-osmo.sh --private-service-ip <unused-aks-subnet-ip>
 ```
 
-Scripts must run in numeric order. Each supports `--config-preview` for dry-run output.
+Scripts must run in numeric order. Each supports `--config-preview` for dry-run output. On a new cluster, `03-deploy-osmo.sh` needs `--private-service-ip` with a free address in the AKS subnet for the internal load balancer in front of OSMO; later runs reuse that address.
 
 ## Network Mode Selection
 
@@ -169,17 +169,17 @@ infrastructure/
 | GPU | VM SKU | Driver Source | `gpu_driver` | MIG Strategy |
 |-----|--------|--------------|--------------|--------------|
 | A10 | `Standard_NV36ads_A10_v5` | AKS-managed | `Install` | N/A |
-| RTX PRO 6000 | `Standard_NC128ds_xl_RTXPRO6000BSE_v6` | GRID DaemonSet | `None` | `single` |
+| RTX PRO 6000 | `Standard_NC144ds_xl_RTXPRO6000BSE_v6` (1 GPU, 96 GB) | AKS-managed GRID driver | `Install` | `single` |
 | H100 | `Standard_NC40ads_H100_v5` | GPU Operator | `None` | Disabled |
 
-RTX PRO 6000 nodes require `nvidia.com/gpu.deploy.driver=false` label to prevent GPU Operator driver conflicts.
+Only RTX PRO 6000 pools created with `gpu_driver = "None"` need the `nvidia.com/gpu.deploy.driver=false` label, which hands them to the fallback GRID driver DaemonSet. Preview RTX sizes (128, 256, or 320 vCPUs) no longer deploy. Each `NC144ds_xl` node needs 144 vCPUs of RTX PRO 6000 quota, plus one more node's worth for an upgrade surge; park a pool with autoscaling off and `node_count = 0` until quota exists.
 
 ## Documentation
 
 | Guide | Description |
 |-------|-------------|
-| [Infrastructure README](../../infrastructure/README.md) | Domain overview and quick start |
-| [Terraform README](../../infrastructure/terraform/README.md) | Terraform configuration reference |
-| [Setup README](../../infrastructure/setup/README.md) | Setup script reference |
-| [Infrastructure Deployment](../../docs/infrastructure/infrastructure.md) | Full deployment walkthrough |
-| [GPU Configuration](../../docs/gpu-configuration.md) | Detailed GPU driver and operator reference |
+| [Infrastructure README](../../../infrastructure/README.md) | Domain overview and quick start |
+| [Terraform README](../../../infrastructure/terraform/README.md) | Terraform configuration reference |
+| [Setup README](../../../infrastructure/setup/README.md) | Setup script reference |
+| [Infrastructure Deployment](../../../docs/infrastructure/infrastructure.md) | Full deployment walkthrough |
+| [GPU Configuration](../../../docs/reference/gpu-configuration.md) | Detailed GPU driver and operator reference |

@@ -375,6 +375,7 @@ Describe 'ValidationSummary Class' -Tag 'Unit' {
             $ht.TotalWarnings | Should -Be 1
             $ht.Passed | Should -BeFalse
             $ht.Duration | Should -BeOfType [double]
+            $ht.Timestamp | Should -Match (& $script:FVModule { Get-StandardTimestampPattern })
         }
 
         It 'returns empty summary when no results' {
