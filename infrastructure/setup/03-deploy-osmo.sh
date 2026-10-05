@@ -97,8 +97,12 @@ chart_version="$OSMO_CHART_VERSION"
 image_version="$OSMO_IMAGE_VERSION"
 service_chart_sha256="$OSMO_SERVICE_CHART_SHA256"
 backend_chart_sha256="$OSMO_BACKEND_CHART_SHA256"
-[[ "$OSMO_USE_PRERELEASE" == "true" ]] && chart_version="$OSMO_PRERELEASE_CHART_VERSION"
-[[ "$OSMO_USE_PRERELEASE" == "true" ]] && image_version="$OSMO_PRERELEASE_IMAGE_VERSION"
+if [[ "$OSMO_USE_PRERELEASE" == "true" ]]; then
+    chart_version="$OSMO_PRERELEASE_CHART_VERSION"
+    image_version="$OSMO_PRERELEASE_IMAGE_VERSION"
+    service_chart_sha256="$OSMO_PRERELEASE_SERVICE_CHART_SHA256"
+    backend_chart_sha256="$OSMO_PRERELEASE_BACKEND_CHART_SHA256"
+fi
 use_acr=false
 acr_name=""
 image_manifest=""

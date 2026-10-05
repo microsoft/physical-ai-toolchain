@@ -594,6 +594,11 @@ def mlflow_run_context(
     env_experiment_name = os.environ.get("MLFLOW_EXPERIMENT_NAME")
     env_experiment_id = os.environ.get("MLFLOW_EXPERIMENT_ID")
 
+    if context is not None:
+        tracking_uri = context.tracking_uri
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_registry_uri(tracking_uri)
+
     # Log all relevant MLflow environment variables for debugging
     mlflow_env_vars = {k: v for k, v in os.environ.items() if k.startswith(("MLFLOW_", "AZURE_"))}
     _LOGGER.debug("MLflow-related environment variables: %s", mlflow_env_vars)
