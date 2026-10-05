@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from src.api.services.anomaly_detection import (
     AnomalyDetector,
@@ -44,8 +45,10 @@ class TestVelocitySpikes:
         detector = AnomalyDetector()
         out = detector.detect(positions, _ts(n))
         spikes = [a for a in out if a.type == AnomalyType.VELOCITY_SPIKE]
-        assert spikes
-        assert all(0.0 <= a.confidence <= 1.0 for a in spikes)
+        assert len(spikes) == 1
+        assert spikes[0].frame_range == (49, 51)
+        assert spikes[0].severity == AnomalySeverity.HIGH
+        assert spikes[0].confidence == 1.0
 
 
 class TestUnexpectedStops:
@@ -114,16 +117,36 @@ class TestOscillations:
 
 
 class TestForceSpikes:
-    def test_force_spike_high_severity(self):
-        n = 60
+    @pytest.mark.parametrize(
+        ("n", "expected_severity"),
+        [
+            (14, AnomalySeverity.LOW),
+            (22, AnomalySeverity.MEDIUM),
+            (38, AnomalySeverity.HIGH),
+        ],
+    )
+    def test_force_spike_severity_reflects_outlier_strength(self, n, expected_severity):
         positions = _linear_positions(n)
-        forces = np.full((n, 3), 0.1)
-        forces[30] = [100.0, 100.0, 100.0]  # huge spike -> z > 5
+        forces = np.zeros((n, 1))
+        forces[n // 2] = 1.0
         detector = AnomalyDetector()
+
         out = detector.detect(positions, _ts(n), forces=forces)
         force_anoms = [a for a in out if a.type == AnomalyType.FORCE_SPIKE]
-        assert force_anoms
-        assert any(a.severity == AnomalySeverity.HIGH for a in force_anoms)
+
+        assert len(force_anoms) == 1
+        assert force_anoms[0].severity == expected_severity
+        assert force_anoms[0].frame_range == (n // 2, n // 2 + 1)
+
+    def test_separated_force_spikes_produce_distinct_anomalies(self):
+        n = 80
+        forces = np.zeros((n, 1))
+        forces[[10, 30]] = 1.0
+
+        out = AnomalyDetector().detect(_linear_positions(n), _ts(n), forces=forces)
+        force_anoms = [a for a in out if a.type == AnomalyType.FORCE_SPIKE]
+
+        assert [anomaly.frame_range for anomaly in force_anoms] == [(10, 11), (30, 31)]
 
     def test_constant_forces_no_spike(self):
         n = 60
@@ -185,31 +208,3 @@ class TestJointLimits:
             joint_limits=(np.array([0.0]), np.array([1.0])),
         )
         assert any(a.type == AnomalyType.JOINT_LIMIT for a in out)
-
-
-class TestZScoreSeverity:
-    def test_high(self):
-        d = AnomalyDetector()
-        assert d._zscore_to_severity(6.0) == AnomalySeverity.HIGH
-
-    def test_medium(self):
-        d = AnomalyDetector()
-        assert d._zscore_to_severity(4.5) == AnomalySeverity.MEDIUM
-
-    def test_low(self):
-        d = AnomalyDetector()
-        assert d._zscore_to_severity(3.5) == AnomalySeverity.LOW
-
-
-class TestGroupConsecutive:
-    def test_empty(self):
-        d = AnomalyDetector()
-        assert d._group_consecutive(np.array([], dtype=np.int64)) == []
-
-    def test_groups_split_correctly(self):
-        d = AnomalyDetector()
-        out = d._group_consecutive(np.array([1, 2, 3, 7, 8, 12], dtype=np.int64))
-        assert len(out) == 3
-        assert list(out[0]) == [1, 2, 3]
-        assert list(out[1]) == [7, 8]
-        assert list(out[2]) == [12]

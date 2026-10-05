@@ -10,14 +10,19 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 
 import hypothesis.strategies as st
 import numpy as np
+import pytest
+from fastapi import HTTPException
 from hypothesis import assume, given, settings
 from hypothesis.extra.numpy import arrays
 from numpy.typing import NDArray
 
-from src.api.services.dataset_service.service import _validate_dataset_id
+from src.api.models.datasources import DatasetInfo
+from src.api.services.dataset_service import DatasetService
+from src.api.services.dataset_service.lerobot_handler import LeRobotFormatHandler
 from src.api.services.episode_cache import CacheStats, EpisodeCache
 from src.api.services.frame_interpolation import (
     interpolate_frame_data,
@@ -29,7 +34,8 @@ from src.api.storage.serializers import DateTimeEncoder
 from src.api.validation import (
     SAFE_CAMERA_NAME_PATTERN,
     SAFE_DATASET_ID_PATTERN,
-    _sanitize_nested_value,
+    SanitizedModel,
+    path_string_param,
     sanitize_user_string,
     validate_safe_string,
 )
@@ -56,6 +62,10 @@ _nested_json = st.recursive(
     ),
     max_leaves=20,
 )
+
+
+class NestedSanitizedModel(SanitizedModel):
+    value: object
 
 
 # ===================================================================
@@ -88,42 +98,36 @@ class TestSanitizeUserStringProperties:
 
 
 # ===================================================================
-# _sanitize_nested_value
+# SanitizedModel
 # ===================================================================
 
 
-class TestSanitizeNestedValueProperties:
+class TestSanitizedModelProperties:
     @given(value=_nested_json)
-    def test_preserves_container_type(self, value: object) -> None:
-        result = _sanitize_nested_value(value)
+    def test_preserves_top_level_container_type(self, value: object) -> None:
+        result = NestedSanitizedModel(value=value).value
         assert type(result) is type(value)
 
     @given(value=st.text(max_size=200))
-    def test_string_leaves_sanitized(self, value: str) -> None:
-        result = _sanitize_nested_value(value)
-        assert isinstance(result, str)
-        assert "\r" not in result
-        assert "\n" not in result
+    def test_sanitizes_string_values(self, value: str) -> None:
+        result = NestedSanitizedModel(value=value).value
+        assert result == sanitize_user_string(value)
 
     @given(items=st.lists(st.text(max_size=50), max_size=10))
-    def test_list_elements_all_sanitized(self, items: list[str]) -> None:
-        result = _sanitize_nested_value(items)
-        assert isinstance(result, list)
-        for item in result:
-            assert "\r" not in item
-            assert "\n" not in item
+    def test_sanitizes_all_list_elements(self, items: list[str]) -> None:
+        result = NestedSanitizedModel(value=items).value
+        assert result == [sanitize_user_string(item) for item in items]
 
     @given(mapping=st.dictionaries(st.text(max_size=20), st.text(max_size=50), max_size=10))
-    def test_dict_keys_and_values_sanitized(self, mapping: dict[str, str]) -> None:
-        result = _sanitize_nested_value(mapping)
-        assert isinstance(result, dict)
-        for key, val in result.items():
-            assert "\r" not in key and "\n" not in key
-            assert "\r" not in val and "\n" not in val
+    def test_sanitizes_all_dict_keys_and_values(self, mapping: dict[str, str]) -> None:
+        result = NestedSanitizedModel(value=mapping).value
+        expected = {sanitize_user_string(key): sanitize_user_string(value) for key, value in mapping.items()}
+        assert result == expected
 
     @given(value=st.one_of(st.integers(), st.floats(allow_nan=False), st.none()))
-    def test_non_string_passthrough(self, value: int | float | None) -> None:
-        assert _sanitize_nested_value(value) == value
+    def test_preserves_non_string_values(self, value: int | float | None) -> None:
+        result = NestedSanitizedModel(value=value).value
+        assert result == value
 
 
 # ===================================================================
@@ -145,27 +149,21 @@ class TestValidateSafeStringProperties:
     @given(value=st.text(min_size=1, max_size=100))
     def test_null_bytes_always_rejected(self, value: str) -> None:
         injected = value[:1] + "\x00" + value[1:]
-        from fastapi import HTTPException
 
-        try:
+        with pytest.raises(HTTPException) as exc_info:
             validate_safe_string(injected, pattern=SAFE_DATASET_ID_PATTERN, label="test")
-        except HTTPException as exc:
-            assert exc.status_code == 400
-            return
-        raise AssertionError("Expected HTTPException for null byte injection")
+
+        assert exc_info.value.status_code == 400
 
     @given(prefix=st.text(min_size=1, max_size=50))
     def test_slash_always_rejected(self, prefix: str) -> None:
         assume("\x00" not in prefix and prefix not in (".", ".."))
-        from fastapi import HTTPException
 
         for char in ("/", "\\"):
-            try:
+            with pytest.raises(HTTPException) as exc_info:
                 validate_safe_string(prefix + char, pattern=SAFE_DATASET_ID_PATTERN, label="test")
-            except HTTPException as exc:
-                assert exc.status_code == 400
-            else:
-                raise AssertionError(f"Expected HTTPException for {char!r} injection")
+
+            assert exc_info.value.status_code == 400
 
     @given(value=_valid_dataset_ids)
     def test_idempotent_for_valid_inputs(self, value: str) -> None:
@@ -175,60 +173,59 @@ class TestValidateSafeStringProperties:
 
 
 # ===================================================================
-# _validate_dataset_id
+# Dataset ID validation through public callers
 # ===================================================================
 
 
-class TestValidateDatasetIdProperties:
-    @given(
-        parts=st.lists(
-            _valid_nested_dataset_id_parts,
-            min_size=1,
-            max_size=5,
-        )
-    )
-    def test_valid_nested_ids_accepted(self, parts: list[str]) -> None:
+class TestDatasetIdValidationProperties:
+    @given(parts=st.lists(_valid_nested_dataset_id_parts, min_size=1, max_size=5))
+    def test_valid_nested_ids_are_accepted_by_path_dependency(self, parts: list[str]) -> None:
         dataset_id = "--".join(parts)
-        result = _validate_dataset_id(dataset_id)
-        assert result == dataset_id
+        dependency = path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")
 
-    @given(
-        parts=st.lists(
-            _valid_nested_dataset_id_parts,
-            min_size=6,
-            max_size=10,
+        assert dependency(dataset_id) == dataset_id
+
+    @pytest.mark.asyncio
+    async def test_six_level_existing_dataset_is_rejected_by_public_lookup(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        valid_parts = ["one", "two", "three", "four", "five"]
+        invalid_parts = [*valid_parts, "six"]
+        tmp_path.joinpath(*invalid_parts).mkdir(parents=True)
+        monkeypatch.setattr(LeRobotFormatHandler, "can_handle", lambda _self, _path: True)
+        monkeypatch.setattr(
+            LeRobotFormatHandler,
+            "discover",
+            lambda _self, dataset_id, _path: DatasetInfo(
+                id=dataset_id,
+                name=dataset_id,
+                total_episodes=0,
+                fps=30.0,
+            ),
         )
-    )
-    def test_deep_nesting_rejected(self, parts: list[str]) -> None:
-        dataset_id = "--".join(parts)
-        try:
-            _validate_dataset_id(dataset_id)
-        except ValueError:
-            return
-        raise AssertionError("Expected ValueError for deep nesting")
+        service = DatasetService(base_path=str(tmp_path), episode_cache_capacity=0)
+
+        accepted = await service.get_dataset("--".join(valid_parts))
+        rejected = await service.get_dataset("--".join(invalid_parts))
+
+        assert accepted is not None
+        assert accepted.id == "--".join(valid_parts)
+        assert rejected is None
 
     @given(value=st.text(min_size=1, max_size=100))
-    def test_slash_always_rejected(self, value: str) -> None:
-        for char in ("/", "\\"):
-            try:
-                _validate_dataset_id(value + char)
-            except ValueError:
-                pass
-            else:
-                raise AssertionError(f"Expected ValueError for {char!r}")
+    def test_traversal_is_rejected_by_path_dependency(self, value: str) -> None:
+        dependency = path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")
 
-    @given(
-        prefix=st.from_regex(re.compile(r"[a-zA-Z0-9]{1,10}"), fullmatch=True),
-    )
-    def test_dot_parts_rejected(self, prefix: str) -> None:
-        for dot_part in (".", ".."):
-            dataset_id = f"{prefix}--{dot_part}"
-            try:
-                _validate_dataset_id(dataset_id)
-            except ValueError:
-                pass
-            else:
-                raise AssertionError(f"Expected ValueError for part={dot_part!r}")
+        for separator in ("/", "\\"):
+            candidate = value + separator
+            with pytest.raises(HTTPException) as exc_info:
+                dependency(candidate)
+
+            assert exc_info.value.status_code == 400
+            sanitized = sanitize_user_string(candidate)
+            assert exc_info.value.detail == f"Invalid dataset_id: '{sanitized}'"
 
 
 # ===================================================================
@@ -341,7 +338,7 @@ class TestEpisodeCacheProperties:
         cache = EpisodeCache(capacity=capacity, max_memory_bytes=0)
         for i in range(n_puts):
             cache.put("ds", i, _make_minimal_episode(i))
-        assert len(cache._entries) <= capacity
+        assert cache.stats().size == min(capacity, n_puts)
 
     @given(index=st.integers(min_value=0, max_value=100))
     def test_get_after_put_returns_same_object(self, index: int) -> None:
@@ -360,14 +357,18 @@ class TestEpisodeCacheProperties:
     def test_miss_increments_miss_counter(self, index: int) -> None:
         cache = EpisodeCache(capacity=32, max_memory_bytes=0)
         cache.get("ds", index)
-        assert cache._misses == 1
+        stats = cache.stats()
+        assert stats.hits == 0
+        assert stats.misses == 1
 
     @given(index=st.integers(min_value=0, max_value=100))
     def test_hit_increments_hit_counter(self, index: int) -> None:
         cache = EpisodeCache(capacity=32, max_memory_bytes=0)
         cache.put("ds", index, _make_minimal_episode(index))
         cache.get("ds", index)
-        assert cache._hits == 1
+        stats = cache.stats()
+        assert stats.hits == 1
+        assert stats.misses == 0
 
     @given(
         capacity=st.integers(min_value=2, max_value=10),
@@ -493,14 +494,14 @@ class TestInterpolateImageProperties:
         assert result.dtype == np.uint8
 
     @given(images=_uint8_images)
-    @settings(max_examples=40)
+    @settings(max_examples=40, deadline=None)
     def test_t_zero_returns_first_image(self, images: tuple) -> None:
         img1, img2 = images
         result = interpolate_image(img1, img2, t=0.0)
         np.testing.assert_array_equal(result, img1)
 
     @given(images=_uint8_images)
-    @settings(max_examples=40)
+    @settings(max_examples=40, deadline=None)
     def test_t_one_returns_second_image(self, images: tuple) -> None:
         img1, img2 = images
         result = interpolate_image(img1, img2, t=1.0)
@@ -514,11 +515,8 @@ class TestInterpolateImageProperties:
         assume(shape_a != shape_b)
         img1 = np.zeros(shape_a, dtype=np.uint8)
         img2 = np.zeros(shape_b, dtype=np.uint8)
-        try:
+        with pytest.raises(ValueError):
             interpolate_image(img1, img2)
-            raise AssertionError("Expected ValueError")
-        except ValueError:
-            pass
 
     @given(images=_uint8_images, t=_interp_factor)
     @settings(max_examples=60)
@@ -568,21 +566,15 @@ class TestInterpolateFrameDataProperties:
     @settings(max_examples=40)
     def test_negative_index_raises_index_error(self, n: int) -> None:
         data = np.zeros((n, 3))
-        try:
+        with pytest.raises(IndexError):
             interpolate_frame_data(data, -1)
-            raise AssertionError("Expected IndexError")
-        except IndexError:
-            pass
 
     @given(n=st.integers(min_value=2, max_value=20))
     @settings(max_examples=40)
     def test_out_of_range_index_raises_index_error(self, n: int) -> None:
         data = np.zeros((n, 3))
-        try:
+        with pytest.raises(IndexError):
             interpolate_frame_data(data, n - 1)
-            raise AssertionError("Expected IndexError")
-        except IndexError:
-            pass
 
     @given(
         n=st.integers(min_value=2, max_value=20),
@@ -608,171 +600,6 @@ class TestInterpolateFrameDataProperties:
 # ===================================================================
 # Trajectory Analysis — Property Tests
 # ===================================================================
-
-
-class TestComputeSmoothnessProperties:
-    """Property tests for TrajectoryAnalyzer._compute_smoothness."""
-
-    @given(
-        jerk=arrays(
-            np.float64,
-            st.tuples(st.integers(1, 50), st.integers(1, 6)),
-            elements=st.floats(-1e4, 1e4, allow_nan=False, allow_infinity=False),
-        ),
-    )
-    @settings(max_examples=80)
-    def test_output_in_unit_interval(self, jerk: NDArray) -> None:
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._compute_smoothness(jerk)
-        assert 0.0 <= result <= 1.0
-
-    def test_empty_jerk_returns_one(self) -> None:
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._compute_smoothness(np.array([]).reshape(0, 3))
-        assert result == 1.0
-
-    def test_zero_jerk_returns_one(self) -> None:
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._compute_smoothness(np.zeros((10, 3)))
-        assert result == 1.0
-
-
-class TestComputeEfficiencyProperties:
-    """Property tests for TrajectoryAnalyzer._compute_efficiency."""
-
-    @given(
-        positions=arrays(
-            np.float64,
-            st.tuples(st.integers(2, 50), st.integers(1, 6)),
-            elements=st.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
-        ),
-    )
-    @settings(max_examples=80)
-    def test_output_in_unit_interval(self, positions: NDArray) -> None:
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._compute_efficiency(positions)
-        assert 0.0 <= result <= 1.0
-
-    def test_single_point_returns_one(self) -> None:
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._compute_efficiency(np.array([[1.0, 2.0, 3.0]]))
-        assert result == 1.0
-
-    @given(
-        start=arrays(np.float64, (3,), elements=st.floats(-100, 100, allow_nan=False, allow_infinity=False)),
-        end=arrays(np.float64, (3,), elements=st.floats(-100, 100, allow_nan=False, allow_infinity=False)),
-        n=st.integers(min_value=2, max_value=20),
-    )
-    @settings(max_examples=60)
-    def test_straight_line_efficiency_near_one(self, start: NDArray, end: NDArray, n: int) -> None:
-        assume(np.linalg.norm(end - start) > 1e-4)
-        t_values = np.linspace(0.0, 1.0, n)
-        positions = np.array([start + t * (end - start) for t in t_values])
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._compute_efficiency(positions)
-        assert result > 0.99
-
-
-class TestDetermineFlagsProperties:
-    """Property tests for TrajectoryAnalyzer._determine_flags."""
-
-    @given(
-        smoothness=st.floats(0.0, 1.0, allow_nan=False),
-        jitter=st.floats(0.0, 1.0, allow_nan=False),
-        hesitation_count=st.integers(0, 20),
-        correction_count=st.integers(0, 20),
-    )
-    @settings(max_examples=100)
-    def test_returns_list_of_strings(
-        self,
-        smoothness: float,
-        jitter: float,
-        hesitation_count: int,
-        correction_count: int,
-    ) -> None:
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._determine_flags(smoothness, jitter, hesitation_count, correction_count)
-        assert isinstance(result, list)
-        assert all(isinstance(f, str) for f in result)
-
-    def test_good_metrics_no_flags(self) -> None:
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._determine_flags(smoothness=0.9, jitter=0.1, hesitation_count=0, correction_count=0)
-        assert result == []
-
-    @given(smoothness=st.floats(0.0, 0.499, allow_nan=False))
-    @settings(max_examples=40)
-    def test_low_smoothness_flags_jittery(self, smoothness: float) -> None:
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._determine_flags(smoothness, jitter=0.0, hesitation_count=0, correction_count=0)
-        assert "jittery" in result
-
-    @given(jitter=st.floats(0.301, 1.0, allow_nan=False))
-    @settings(max_examples=40)
-    def test_high_jitter_flags_noise(self, jitter: float) -> None:
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._determine_flags(smoothness=0.9, jitter=jitter, hesitation_count=0, correction_count=0)
-        assert "high_frequency_noise" in result
-
-    @given(hesitation=st.integers(min_value=3, max_value=20))
-    @settings(max_examples=40)
-    def test_many_hesitations_flags_hesitant(self, hesitation: int) -> None:
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._determine_flags(smoothness=0.9, jitter=0.0, hesitation_count=hesitation, correction_count=0)
-        assert "hesitant" in result
-
-    @given(corrections=st.integers(min_value=6, max_value=30))
-    @settings(max_examples=40)
-    def test_many_corrections_flags_excessive(self, corrections: int) -> None:
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._determine_flags(smoothness=0.9, jitter=0.0, hesitation_count=0, correction_count=corrections)
-        assert "excessive_corrections" in result
-
-
-class TestComputeOverallScoreProperties:
-    """Property tests for TrajectoryAnalyzer._compute_overall_score."""
-
-    @given(
-        smoothness=st.floats(0.0, 1.0, allow_nan=False),
-        efficiency=st.floats(0.0, 1.0, allow_nan=False),
-        jitter=st.floats(0.0, 1.0, allow_nan=False),
-        hesitation_count=st.integers(0, 20),
-        correction_count=st.integers(0, 30),
-    )
-    @settings(max_examples=120)
-    def test_score_in_valid_range(
-        self,
-        smoothness: float,
-        efficiency: float,
-        jitter: float,
-        hesitation_count: int,
-        correction_count: int,
-    ) -> None:
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._compute_overall_score(smoothness, efficiency, jitter, hesitation_count, correction_count)
-        assert result in {1, 2, 3, 4, 5}
-
-    def test_perfect_metrics_return_five(self) -> None:
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._compute_overall_score(
-            smoothness=1.0,
-            efficiency=1.0,
-            jitter=0.0,
-            hesitation_count=0,
-            correction_count=0,
-        )
-        assert result == 5
-
-    def test_worst_metrics_return_one(self) -> None:
-        analyzer = TrajectoryAnalyzer()
-        result = analyzer._compute_overall_score(
-            smoothness=0.0,
-            efficiency=0.0,
-            jitter=1.0,
-            hesitation_count=20,
-            correction_count=30,
-        )
-        assert result == 1
 
 
 class TestTrajectoryAnalyzerIntegrationProperties:
@@ -803,13 +630,79 @@ class TestTrajectoryAnalyzerIntegrationProperties:
         timestamps = np.cumsum(np.full(n, 0.033))
         analyzer = TrajectoryAnalyzer()
         result = analyzer.analyze(positions, timestamps)
+
         assert isinstance(result.smoothness, float)
         assert isinstance(result.efficiency, float)
         assert isinstance(result.jitter, float)
         assert isinstance(result.hesitation_count, int)
         assert isinstance(result.correction_count, int)
+        assert 0.0 <= result.smoothness <= 1.0
+        assert 0.0 <= result.normalized_smoothness <= 1.0
+        assert 0.0 <= result.efficiency <= 1.0
+        assert 0.0 <= result.jitter <= 1.0
         assert result.overall_score in {1, 2, 3, 4, 5}
-        assert isinstance(result.flags, list)
+
+        expected_flags = []
+        if result.smoothness < 0.5:
+            expected_flags.append("jittery")
+        if result.jitter > 0.3:
+            expected_flags.append("high_frequency_noise")
+        if result.hesitation_count > 2:
+            expected_flags.append("hesitant")
+        if result.correction_count > 5:
+            expected_flags.append("excessive_corrections")
+        assert result.flags == expected_flags
+
+    @given(
+        start=arrays(np.float64, (3,), elements=st.floats(-100, 100, allow_nan=False, allow_infinity=False)),
+        end=arrays(np.float64, (3,), elements=st.floats(-100, 100, allow_nan=False, allow_infinity=False)),
+        n=st.integers(min_value=4, max_value=20),
+    )
+    @settings(max_examples=60, deadline=None)
+    def test_straight_line_trajectory_has_ideal_metrics(self, start: NDArray, end: NDArray, n: int) -> None:
+        analyzer = TrajectoryAnalyzer()
+        speed = np.linalg.norm(end - start) / (n - 1)
+        assume(speed > analyzer.velocity_threshold * 2)
+        positions = np.linspace(start, end, n)
+        timestamps = np.arange(n, dtype=np.float64)
+
+        result = analyzer.analyze(positions, timestamps)
+
+        assert result.smoothness == pytest.approx(1.0)
+        assert result.efficiency == pytest.approx(1.0)
+        assert result.jitter == 0.0
+        assert result.hesitation_count == 0
+        assert result.correction_count == 0
+        assert result.overall_score == 5
+        assert result.flags == []
+
+    def test_slow_straight_line_is_counted_as_one_hesitation(self) -> None:
+        analyzer = TrajectoryAnalyzer()
+        frame_count = analyzer.hesitation_min_frames + 2
+        step = analyzer.velocity_threshold / 2
+        positions = (np.arange(frame_count, dtype=np.float64) * step).reshape(-1, 1)
+        timestamps = np.arange(frame_count, dtype=np.float64)
+
+        result = analyzer.analyze(positions, timestamps)
+
+        assert result.smoothness == pytest.approx(1.0)
+        assert result.efficiency == pytest.approx(1.0)
+        assert result.jitter == 0.0
+        assert result.hesitation_count == 1
+        assert result.correction_count == 0
+        assert result.overall_score == 5
+        assert result.flags == []
+
+    def test_repeated_reversals_are_reported_through_analysis(self) -> None:
+        positions = np.tile([0.0, 1.0], 20).reshape(-1, 1)
+        timestamps = np.arange(len(positions), dtype=np.float64)
+
+        result = TrajectoryAnalyzer().analyze(positions, timestamps)
+
+        assert result.smoothness < 0.5
+        assert result.correction_count > 5
+        assert "jittery" in result.flags
+        assert "excessive_corrections" in result.flags
 
     @given(data=_small_float_array)
     @settings(max_examples=60)

@@ -9,16 +9,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-import pytest
 from fastapi.testclient import TestClient
-
-
-@pytest.fixture
-def client() -> TestClient:
-    from src.api.main import app
-
-    with TestClient(app) as c:
-        yield c
 
 
 def _smooth_trajectory(num_points: int = 50, num_joints: int = 6) -> tuple[list[list[float]], list[float]]:
@@ -85,6 +76,18 @@ class TestAnalyzeTrajectory:
         assert resp.status_code == 400
         assert "same length" in resp.json()["detail"]
 
+    def test_ragged_positions_return_400(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/ai/trajectory-analysis",
+            json={
+                "positions": [[0.0], [], [1.0, 2.0]],
+                "timestamps": [0.0, 1.0, 2.0],
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "positions rows" in resp.json()["detail"]
+
 
 class TestDetectAnomalies:
     def test_success_with_all_optionals(self, client: TestClient) -> None:
@@ -140,6 +143,20 @@ class TestDetectAnomalies:
         )
         assert resp.status_code == 400
 
+    def test_optional_series_length_mismatch_returns_400(self, client: TestClient) -> None:
+        positions, timestamps = _smooth_trajectory(num_points=3)
+        resp = client.post(
+            "/api/ai/anomaly-detection",
+            json={
+                "positions": positions,
+                "timestamps": timestamps,
+                "forces": [[0.1] * 6],
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "forces must have the same length" in resp.json()["detail"]
+
 
 class TestClusterEpisodes:
     def test_success_default_num_clusters(self, client: TestClient) -> None:
@@ -184,6 +201,29 @@ class TestClusterEpisodes:
             json={"trajectories": [positions, positions], "num_clusters": 1},
         )
         assert resp.status_code == 422
+
+    def test_ragged_trajectory_returns_400(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/ai/cluster",
+            json={
+                "trajectories": [
+                    [[0.0], [1.0, 2.0]],
+                    [[0.0], [1.0]],
+                ]
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "trajectories[0] rows must have equal length" in resp.json()["detail"]
+
+    def test_empty_trajectory_returns_400(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/ai/cluster",
+            json={"trajectories": [[], [[0.0]]]},
+        )
+
+        assert resp.status_code == 400
+        assert "trajectories[0] must not be empty" in resp.json()["detail"]
 
 
 class TestSuggestAnnotation:

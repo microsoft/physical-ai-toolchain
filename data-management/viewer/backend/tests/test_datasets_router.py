@@ -21,14 +21,6 @@ from src.api.services.dataset_service import DatasetService
 
 
 @pytest.fixture
-def client() -> TestClient:
-    from src.api.main import app
-
-    with TestClient(app) as c:
-        yield c
-
-
-@pytest.fixture
 def mock_service() -> MagicMock:
     svc = MagicMock()
     svc.list_datasets = AsyncMock(return_value=[])

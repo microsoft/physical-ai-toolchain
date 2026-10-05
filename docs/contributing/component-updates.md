@@ -3,7 +3,7 @@ sidebar_position: 12
 title: Updating External Components
 description: Process for identifying, updating, and vetting reused externally-maintained components
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-04
+ms.date: 2026-10-05
 ms.topic: how-to
 keywords:
   - component-updates
@@ -18,18 +18,18 @@ For quick dependency commands, see the [Component Updates](pull-request-process.
 
 ## Component Inventory
 
-| Component                 | Source    | Version Location                                               | Current Version   | Update Method              |
-|---------------------------|-----------|----------------------------------------------------------------|-------------------|----------------------------|
-| NVIDIA GPU Operator       | Helm      | `infrastructure/setup/defaults.conf` → `GPU_OPERATOR_VERSION`  | v26.3.2           | Manual                     |
-| KAI Scheduler             | Helm      | `infrastructure/setup/defaults.conf` → `KAI_SCHEDULER_VERSION` | v0.20.1           | Manual                     |
-| OSMO Chart                | Helm      | `infrastructure/setup/defaults.conf` → `OSMO_CHART_VERSION`    | 1.3.0             | Manual                     |
-| OSMO Image                | Container | `infrastructure/setup/defaults.conf` → `OSMO_IMAGE_VERSION`    | 6.3.0             | Manual                     |
-| AzureML K8s Extension     | Azure CLI | `02-deploy-azureml-extension.sh` → `--release-train stable`    | Latest stable     | Automatic                  |
-| Isaac Lab                 | Container | Shared default plus direct-workflow fallbacks                  | 3.0.0-beta2-post1 | Image digest updater       |
-| ORAS                      | Binary    | `scripts/security/tool-checksums.json`                         | 1.2.0             | Manual                     |
-| Azure Terraform Providers | Terraform | `versions.tf` across 10 directories                            | Floor-pinned      | Dependabot (4 stack roots) |
-| Python Packages           | uv        | `pyproject.toml`, `uv.lock`                                    | Mixed             | Dependabot                 |
-| GitHub Actions            | GitHub    | Workflow YAML (18 files)                                       | SHA-pinned        | Dependabot                 |
+| Component                 | Source    | Version Location                                                   | Current Version   | Update Method                            |
+|---------------------------|-----------|--------------------------------------------------------------------|-------------------|------------------------------------------|
+| NVIDIA GPU Operator       | Helm      | `infrastructure/setup/defaults.conf` → `GPU_OPERATOR_VERSION`      | v26.3.2           | Manual                                   |
+| KAI Scheduler             | Helm      | `infrastructure/setup/defaults.conf` → `KAI_SCHEDULER_VERSION`     | v0.20.1           | Manual                                   |
+| OSMO Chart                | Helm      | `infrastructure/setup/defaults.conf` → `OSMO_CHART_VERSION`        | 1.3.1             | Manual                                   |
+| OSMO Image                | Container | `infrastructure/setup/defaults.conf` → `OSMO_IMAGE_VERSION`        | 6.3.1             | Manual                                   |
+| AzureML K8s Extension     | Azure CLI | `02-deploy-azureml-extension.sh` → `--release-train stable`        | Latest stable     | Automatic                                |
+| Isaac Lab                 | Container | Shared default plus direct-workflow fallbacks                      | 3.0.0-beta2-post1 | Image digest updater                     |
+| ORAS                      | Binary    | `scripts/security/tool-checksums.json`                             | 1.2.0             | Manual                                   |
+| Azure Terraform Providers | Terraform | `versions.tf` in 4 deployment directories and 6 module directories | Floor-pinned      | Dependabot (deployment directories only) |
+| Python Packages           | uv        | `pyproject.toml`, `uv.lock`                                        | Mixed             | Dependabot                               |
+| GitHub Actions            | GitHub    | Workflow YAML (18 files)                                           | SHA-pinned        | Dependabot                               |
 
 > [!IMPORTANT]
 > Isaac Lab defaults to `DEFAULT_ISAAC_LAB_IMAGE` in `scripts/lib/common.sh`. Direct OSMO workflow fallbacks repeat the digest-pinned reference and must stay synchronized.
@@ -47,16 +47,43 @@ For quick dependency commands, see the [Component Updates](pull-request-process.
 
 ## Automated Updates (Dependabot)
 
-Dependabot opens grouped PRs every Monday for npm, uv, Terraform, Go modules, Docker, and GitHub Actions. [.github/dependabot.yml](pathname://../../.github/dependabot.yml) lists every update entry with its directory, group, cooldown, and ignore rules.
+Dependabot checks version updates weekly on Monday. Configuration lives in [.github/dependabot.yml](pathname://../../.github/dependabot.yml). Separate update entries keep npm, Python, and Docker environments apart where their constraints differ and share one Terraform configuration across compatible directories.
 
-PR flow: Dependabot opens a PR → CI runs the checks its paths select → a maintainer runs the [verification categories](dependabot-verification.md) the PR touches, including Azure ML GPU checks for training runtimes → a maintainer can request the advisory reviewer with `/aw-dependabot-review` → merge.
+| Ecosystem      | Coverage                                                                                      | Grouping                                                         |
+|----------------|-----------------------------------------------------------------------------------------------|------------------------------------------------------------------|
+| npm            | Root workspace, including the Dataviewer frontend, and `/docs/docusaurus` as separate entries | Per-entry development, runtime, and framework groups (see below) |
+| uv             | Project roots covering development, training, evaluation, data, workflows, and GPU offload    | Separate patch/minor group per project                           |
+| terraform      | `/infrastructure/terraform`, plus `dns`, `vpn`, and `automation`                              | One coordinated patch/minor provider group                       |
+| github-actions | Workflow files, excluding generated `*.lock.yml` files                                        | One patch/minor group; compiler-managed actions remain excluded  |
+| gomod          | `/infrastructure/terraform/e2e`                                                               | One patch/minor group                                            |
+| docker         | Six configured Dataviewer and GPU-offload Dockerfile directories                              | Separate patch/minor group per directory                         |
+
+The npm entries use these version-update groups:
+
+| Entry              | Group                | Included updates                                                                   | Review boundary                                                                                                  |
+|--------------------|----------------------|------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
+| `/`                | `npm-vitest`         | `vitest` and `@vitest/*`, including major versions                                 | Keep the test runner and coverage provider together; require frontend tests and coverage validation              |
+| `/`                | `npm-authentication` | Patch/minor production `@azure/msal-*` updates                                     | Review authentication separately from tooling and other runtime changes                                          |
+| `/`                | `npm-development`    | Other patch/minor development dependencies                                         | Keep tooling separate from production dependencies; validate affected lint, test, build, or test-server behavior |
+| `/`                | `npm-runtime`        | Other patch/minor production dependencies                                          | Review web runtime behavior separately from tooling and authentication                                           |
+| `/docs/docusaurus` | `docs-docusaurus`    | Patch/minor `@docusaurus/*` updates across development and production dependencies | Keep framework packages aligned; require documentation typecheck, build, and tests                               |
+| `/docs/docusaurus` | `docs-development`   | Other patch/minor development dependencies                                         | Validate documentation lint, accessibility, build, and test-server behavior                                      |
+| `/docs/docusaurus` | `docs-runtime`       | Other patch/minor production dependencies                                          | Review site runtime behavior separately from tooling                                                             |
+
+Groups are evaluated in order within each entry. Explicit exclusions keep the coupled families out of the generic groups. Apart from the dedicated Vitest group, major updates remain outside groups and require separate compatibility review. The root entry ignores ESLint 10, including ESLint 10 security fixes, until the Dataviewer accessibility and React plugins support that major version. The documentation site already uses ESLint 10, so its separate entry receives those updates.
+
+Version updates use a seven-day cooldown, with a fourteen-day major-version cooldown where configured. The open-PR limit applies to each update entry, not the entire repository. Security updates remain ungrouped and are not delayed by the version-update schedule or cooldown.
+
+Grouping reduces PR overhead; it does not waive CI or workload-specific validation. Development dependencies can affect generated assets and test servers. Review every changed manifest and lockfile, not only the PR title. Existing open PRs may be superseded as Dependabot reevaluates the configuration after it reaches the default branch; this change does not merge or approve them.
+
+PR flow: Dependabot opens a PR → CI runs the checks its paths select → a maintainer runs the [verification categories](dependabot-verification.md) the PR touches, including Azure ML GPU checks for training runtimes → a maintainer optionally requests an advisory review with `/aw-dependabot-review` → the maintainer reviews the changelog and test results → merge.
 
 > [!NOTE]
-> Dependabot does not cover Helm charts, container images referenced from scripts and workflow templates, or the Terraform module directories under `infrastructure/terraform/modules/`. These require manual updates.
+> Dependabot covers only the configured Dockerfile directories, not every container reference. Helm charts, image references in workflow YAML or shell defaults, and the Terraform module directories under `infrastructure/terraform/modules/` still require manual updates.
 
 ### Advisory Reviewer Agent
 
-An agentic workflow at [.github/workflows/aw-dependabot-pr-review.md](pathname://../../.github/workflows/aw-dependabot-pr-review.md) runs when a maintainer comments `/aw-dependabot-review` on a Dependabot PR and posts a single `COMMENT` review. It never approves, never requests changes, and never blocks a merge.
+An agentic workflow at [.github/workflows/aw-dependabot-pr-review.md](pathname://../../.github/workflows/aw-dependabot-pr-review.md) runs when a maintainer comments `/aw-dependabot-review` on a Dependabot PR. It posts a single `COMMENT` review, never `APPROVE` or `REQUEST_CHANGES`. Human approval remains the merge gate.
 
 The reviewer enriches each update with:
 
@@ -149,11 +176,12 @@ tracks Dockerfiles, so these tag-plus-digest references are bumped manually.
 
 ### Terraform Providers
 
-For the module directories under `infrastructure/terraform/modules/`, which Dependabot does not cover:
+Dependabot coordinates patch/minor provider updates across the four deployment directories (the `root`, `dns`, `vpn`, and `automation` stacks). It does not update the module directories under `infrastructure/terraform/modules/`. For grouped, module, or manual provider updates:
 
-1. Update the provider constraint in the module's `versions.tf`
-2. Commit the change, then run `infrastructure/terraform/scripts/compare-plans.sh --stack <stack>` for each deployed stack that uses the module; it plans the base and head refs read-only against your deployed state and reports only changed resources
-3. Submit PR with provider changelog references
+1. Review provider release notes and identify each affected stack, including every stack that uses a changed module
+2. Update the provider constraint in each changed module's `versions.tf`, or run `terraform init -upgrade` in each affected deployment directory
+3. Commit the change, then run `infrastructure/terraform/scripts/compare-plans.sh --stack <stack>` for each affected stack in each configured environment; it plans the base and head refs read-only against the deployed state and reports only changed resources
+4. Include provider changelog references and plan results in the PR
 
 ## Vetting Criteria
 
