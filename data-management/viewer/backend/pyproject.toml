@@ -42,7 +42,7 @@ export = [
     "h5py==3.16.0",
 ]
 yolo = [
-    "ultralytics==8.4.163",
+    "ultralytics==8.4.164",
 ]
 vlm-judge = [
     "physical-ai-vlm-judge==0.1.0",
@@ -59,7 +59,7 @@ dev = [
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
     "httpx==0.28.1",
-    "hypothesis==6.168.1",
+    "hypothesis==6.168.3",
     "schemathesis==4.28.0",
 ]
 
