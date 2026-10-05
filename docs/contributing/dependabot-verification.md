@@ -88,7 +88,9 @@ Before submitting, the runner confirms that the Azure CLI is signed in to the bu
 
 Jobs run one at a time with unique names, and their test models are archived afterward. Each job holds a GPU node for several minutes or more, so run only the categories a pull request touches. Don't run local builds while a job uploads its snapshot.
 
-Each GPU check uses its submission script's default GPU instance type unless you export `E2E_AML_INSTANCE_TYPE`, or set it before the command; `.env.local` doesn't set it. For the pi0 check, the value applies to both the training and evaluation jobs. Training updates only pi0's action expert, but the gated backbone still has to fit, so if the default instance type can land on a GPU that's too small, choose a larger one.
+The GPU smoke and pi0 checks use their submission scripts' default GPU instance types unless you export `E2E_AML_INSTANCE_TYPE`, or set it before the command; `.env.local` doesn't set it. The RL and IL lifecycle checks don't read it and always use their scripts' `gpuspot` default, so they need a cluster that defines that instance type.
+
+For the pi0 check, the value applies to both the training and evaluation jobs. Training updates only pi0's action expert, but the gated backbone still has to fit, so if the default instance type can land on a GPU that's too small, choose a larger one.
 
 On managed AmlCompute clusters, where the cluster's VM size decides, export `E2E_AML_INSTANCE_TYPE` as an empty value so the pi0 jobs omit the instance type. The GPU smoke always needs a named instance type.
 
