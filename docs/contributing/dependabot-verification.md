@@ -3,7 +3,7 @@ sidebar_position: 12
 title: Verifying Dependabot Updates
 description: Verification categories, CPU and GPU tiers, and the commands that prove a Dependabot pull request safe without exposing a deployment environment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-04
+ms.date: 2026-10-05
 ms.topic: how-to
 keywords:
   - dependabot
@@ -25,7 +25,7 @@ The runner selects categories from the files a branch changed relative to `origi
 
 ## Categories
 
-The [category manifest](pathname://../../tests/dependabot/categories.json) maps all 29 entries in `.github/dependabot.yml` to these categories:
+The [category manifest](pathname://../../tests/dependabot/categories.json) maps every ecosystem and directory listed in `.github/dependabot.yml` to these categories:
 
 | Category         | Dependabot entries                                                                  | CPU checks                                                               | Environment checks                               |
 |------------------|-------------------------------------------------------------------------------------|--------------------------------------------------------------------------|--------------------------------------------------|

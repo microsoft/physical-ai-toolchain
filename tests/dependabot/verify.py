@@ -1,9 +1,10 @@
 """Run Dependabot verification checks by category.
 
-The category manifest (``categories.json``) maps every ``.github/dependabot.yml`` entry to
-the checks that prove an update safe. CPU checks run anywhere; environment checks submit
-Azure ML jobs (or read deployed Terraform state) against a named environment resolved
-from an untracked bundle. Results go to a gitignored run directory.
+The category manifest (``categories.json``) maps every ecosystem and directory in
+``.github/dependabot.yml`` to the checks that prove an update safe. CPU checks run
+anywhere; environment checks submit Azure ML jobs (or read deployed Terraform state)
+against a named environment resolved from an untracked bundle. Results go to a
+gitignored run directory.
 
 Run from the repository root:
 

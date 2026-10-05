@@ -50,7 +50,11 @@ CATEGORY_OPTION = re.compile(r"--category[ =]([a-z0-9-]+)")
 
 def _dependabot_entries() -> set[tuple[str, str]]:
     config = yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
-    return {(update["package-ecosystem"], update["directory"]) for update in config["updates"]}
+    entries: set[tuple[str, str]] = set()
+    for update in config["updates"]:
+        directories = update.get("directories") or [update["directory"]]
+        entries.update((update["package-ecosystem"], directory) for directory in directories)
+    return entries
 
 
 def _npm_scripts(package_dir: Path) -> set[str]:
