@@ -211,3 +211,7 @@ Before submitting documentation changes:
 * [Contributing Guide](README.md) - Main contributing guide with all sections
 * [Pull Request Process](pull-request-process.md) - PR workflow, reviewers, approval criteria
 * [Prerequisites and Build Validation](prerequisites.md) - Tools, Azure access, build commands
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

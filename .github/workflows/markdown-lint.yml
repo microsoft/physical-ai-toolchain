@@ -8,6 +8,15 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.markdown-lint.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.markdown-lint.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.markdown-lint.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.markdown-lint.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.markdown-lint.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.markdown-lint.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.markdown-lint.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.markdown-lint.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -20,6 +29,16 @@ jobs:
   markdown-lint:
     name: Markdown Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -35,3 +54,13 @@ jobs:
         id: markdown-lint
         run: npm run lint:md
         continue-on-error: ${{ inputs.soft-fail }}
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: markdown-lint
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["markdown-lint"]'
+          fail-on-error: ${{ !inputs.soft-fail }}

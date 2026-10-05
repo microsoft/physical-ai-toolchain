@@ -130,49 +130,23 @@ function Get-MsDateFromFrontmatter {
         [string]$FilePath
     )
 
-    try {
-        $content = Get-Content -Path $FilePath -Raw -ErrorAction Stop
-
-        if ($content -match '(?s)^---\r?\n(.*?)\r?\n---') {
-            $yamlContent = $matches[1]
-
-            if (-not (Get-Command ConvertFrom-Yaml -ErrorAction SilentlyContinue)) {
-                Write-Warning "PowerShell-Yaml module not found. Install with: Install-Module PowerShell-Yaml"
-                return $null
-            }
-
-            try {
-                $frontmatter = $yamlContent | ConvertFrom-Yaml
-
-                if ($frontmatter -and $frontmatter.'ms.date') {
-                    $msDateString = $frontmatter.'ms.date'
-
-                    try {
-                        $msDate = [DateTime]::ParseExact(
-                            $msDateString,
-                            'yyyy-MM-dd',
-                            [Globalization.CultureInfo]::InvariantCulture
-                        )
-                        return $msDate
-                    }
-                    catch {
-                        Write-Verbose "Invalid ms.date format in ${FilePath}: $msDateString"
-                        return $null
-                    }
-                }
-            }
-            catch {
-                Write-Verbose "Failed to parse YAML frontmatter in ${FilePath}: $($_.Exception.Message)"
-                return $null
-            }
-        }
-
+    $content = Get-Content -Path $FilePath -Raw -ErrorAction Stop
+    if ($content -notmatch '(?s)^---\r?\n(.*?)\r?\n---') {
         return $null
     }
-    catch {
-        Write-Warning "Error reading file ${FilePath}: $($_.Exception.Message)"
+    $yamlContent = $matches[1]
+    if (-not (Get-Command ConvertFrom-Yaml -ErrorAction SilentlyContinue)) {
+        throw 'PowerShell-Yaml is required to validate ms.date.'
+    }
+    $frontmatter = $yamlContent | ConvertFrom-Yaml -ErrorAction Stop
+    if (-not $frontmatter -or -not $frontmatter.Contains('ms.date')) {
         return $null
     }
+    return [DateTime]::ParseExact(
+        [string]$frontmatter.'ms.date',
+        'yyyy-MM-dd',
+        [Globalization.CultureInfo]::InvariantCulture
+    )
 }
 
 function New-MsDateReport {
@@ -193,7 +167,7 @@ function New-MsDateReport {
     $jsonPath = Join-Path $logsDir 'msdate-freshness-results.json'
     $mdPath = Join-Path $logsDir 'msdate-summary.md'
 
-    $Results | ConvertTo-Json -Depth 10 | Out-File -FilePath $jsonPath -Encoding utf8
+    ConvertTo-Json -InputObject @($Results) -Depth 10 | Out-File -FilePath $jsonPath -Encoding utf8
     Write-Verbose "JSON report written to $jsonPath"
 
     $staleFiles = @($Results | Where-Object { $_.IsStale })
@@ -250,8 +224,8 @@ if ($MyInvocation.InvocationName -ne '.') {
     $markdownFiles = @(Get-MarkdownFiles -SearchPaths $Paths -ChangedOnly:$ChangedFilesOnly -Base $BaseBranch)
 
     if (@($markdownFiles).Count -eq 0) {
-        Write-Warning "No markdown files found to check"
-        exit 0
+        Write-Error "Selected freshness validation has no markdown files."
+        exit 1
     }
 
     Write-Verbose "Checking $(@($markdownFiles).Count) markdown files"
@@ -295,8 +269,8 @@ if ($MyInvocation.InvocationName -ne '.') {
     }
 
     if (@($results).Count -eq 0) {
-        Write-Warning "No files with ms.date frontmatter found"
-        exit 0
+        Write-Error "Selected freshness validation has no files with ms.date."
+        exit 1
     }
 
     $report = New-MsDateReport -Results $results -Threshold $ThresholdDays

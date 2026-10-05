@@ -85,9 +85,8 @@ function Invoke-GoLintCore {
     # Guard: go.mod must exist
     $goModPath = Join-Path $GoModuleDir 'go.mod'
     if (-not (Test-Path $goModPath)) {
-        Write-Host "No go.mod found in $GoModuleDir — skipping lint"
-        Write-EmptyLintResults -OutputPath $OutputPath -SummaryMessage 'No `go.mod` found — nothing to lint.'
-        return 0
+        Write-CIAnnotation -Level Error -Message "Required go.mod not found in $GoModuleDir"
+        return 1
     }
 
     # Guard: ChangedFilesOnly
@@ -106,7 +105,7 @@ function Invoke-GoLintCore {
         $lintInstallVersion = '2.11.4'
         $lintExpectedSHA256 = '200c5b7503f67b59a6743ccf32133026c174e272b930ee79aa2aa6f37aca7ef1'
         $lintUrl = "https://github.com/golangci/golangci-lint/releases/download/v${lintInstallVersion}/golangci-lint-${lintInstallVersion}-linux-amd64.tar.gz"
-        $lintTarball = '/tmp/golangci-lint.tar.gz'
+        $lintTarball = Join-Path $repoRoot 'golangci-lint.tar.gz'
         $goPathBin = (& go env GOPATH) + '/bin'
 
         & bash -c "set -euo pipefail && curl -fsSL -o '${lintTarball}' '${lintUrl}' && echo '${lintExpectedSHA256}  ${lintTarball}' | sha256sum -c --quiet - && mkdir -p '${goPathBin}' && tar -xzf '${lintTarball}' -C '${goPathBin}' --strip-components=1 'golangci-lint-${lintInstallVersion}-linux-amd64/golangci-lint' && rm -f '${lintTarball}'"

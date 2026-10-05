@@ -206,7 +206,7 @@ Describe 'ConvertTo-JUnitXmlCore' -Tag 'Unit' {
         }
     }
 
-    Context 'fallback naming without test_runs' {
+    Context 'missing case evidence' {
         BeforeEach {
             $module = @{
                 path    = 'modules/compute'
@@ -219,38 +219,48 @@ Describe 'ConvertTo-JUnitXmlCore' -Tag 'Unit' {
                 Set-Content $script:TestInputPath
         }
 
-        It 'Uses test_N naming for passed tests' {
-            ConvertTo-JUnitXmlCore -InputPath $script:TestInputPath `
-                -OutputPath $script:TestOutputPath
+        It 'Rejects counters without real test runs rather than inventing passed cases' {
+            { ConvertTo-JUnitXmlCore -InputPath $script:TestInputPath `
+                -OutputPath $script:TestOutputPath } | Should -Throw
+        }
+    }
+
+    Context 'Go and skipped Terraform reports' {
+        It 'Converts Go packages with durations and skipped cases' {
+            @{
+                timestamp = '2026-03-19T12:00:00Z'
+                packages = @(@{
+                    path = 'example/tests'
+                    passed = 1; failed = 0; errors = 0; skipped = 1
+                    test_runs = @(
+                        @{ name = 'TestOne'; status = 'pass'; elapsed = 0.25 }
+                        @{ name = 'TestTwo'; status = 'skip'; elapsed = 0 }
+                    )
+                })
+            } | ConvertTo-Json -Depth 6 | Set-Content $script:TestInputPath
+            ConvertTo-JUnitXmlCore -InputPath $script:TestInputPath -OutputPath $script:TestOutputPath | Should -Be 0
             [xml]$xml = Get-Content $script:TestOutputPath -Raw
-            $testcases = $xml.testsuites.testsuite.testcase
-            ($testcases | Where-Object { $_.name -eq 'test_1' }) | Should -Not -BeNullOrEmpty
-            ($testcases | Where-Object { $_.name -eq 'test_2' }) | Should -Not -BeNullOrEmpty
+            $xml.testsuites.name | Should -Be 'Go Tests'
+            $xml.testsuites.tests | Should -Be '2'
+            $xml.testsuites.skipped | Should -Be '1'
+            $xml.testsuites.testsuite.testcase[0].time | Should -Be '0.25'
+            $xml.SelectNodes('//testcase/skipped').Count | Should -Be 1
         }
 
-        It 'Uses failed_N naming with failure element' {
-            ConvertTo-JUnitXmlCore -InputPath $script:TestInputPath `
-                -OutputPath $script:TestOutputPath
+        It 'Keeps duplicate run names in different Terraform files distinct' {
+            $module = @{
+                path = 'modules/network'; passed = 1; failed = 0; errors = 0; skipped = 1
+                test_runs = @(
+                    @{ name = 'naming'; file = 'tests/a.tftest.hcl'; status = 'pass' }
+                    @{ name = 'naming'; file = 'tests/b.tftest.hcl'; status = 'skip' }
+                )
+            }
+            New-TestResults -Modules @($module) -TotalPassed 1 | Set-Content $script:TestInputPath
+            ConvertTo-JUnitXmlCore -InputPath $script:TestInputPath -OutputPath $script:TestOutputPath | Should -Be 0
             [xml]$xml = Get-Content $script:TestOutputPath -Raw
-            $failedCase = $xml.testsuites.testsuite.testcase | Where-Object { $_.name -eq 'failed_1' }
-            $failedCase | Should -Not -BeNullOrEmpty
-            $failedCase.failure | Should -Not -BeNullOrEmpty
-        }
-
-        It 'Uses error_N naming with error element' {
-            ConvertTo-JUnitXmlCore -InputPath $script:TestInputPath `
-                -OutputPath $script:TestOutputPath
-            [xml]$xml = Get-Content $script:TestOutputPath -Raw
-            $errorCase = $xml.testsuites.testsuite.testcase | Where-Object { $_.name -eq 'error_1' }
-            $errorCase | Should -Not -BeNullOrEmpty
-            $errorCase.error | Should -Not -BeNullOrEmpty
-        }
-
-        It 'Creates correct total testcase count' {
-            ConvertTo-JUnitXmlCore -InputPath $script:TestInputPath `
-                -OutputPath $script:TestOutputPath
-            [xml]$xml = Get-Content $script:TestOutputPath -Raw
-            $xml.testsuites.testsuite.testcase.Count | Should -Be 4
+            $xml.testsuites.tests | Should -Be '2'
+            $xml.testsuites.testsuite.skipped | Should -Be '1'
+            $xml.testsuites.testsuite.testcase[0].classname | Should -Not -Be $xml.testsuites.testsuite.testcase[1].classname
         }
     }
 

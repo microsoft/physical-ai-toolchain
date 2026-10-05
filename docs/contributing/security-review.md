@@ -106,3 +106,7 @@ Security patch PRs are encouraged and receive expedited review:
 * [SECURITY.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/SECURITY.md) - Security vulnerability reporting
 * [Deployment Validation](deployment-validation.md) - Validation levels and testing
 * [Infrastructure Style](infrastructure-style.md) - Secure coding patterns
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.
