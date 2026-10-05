@@ -82,7 +82,7 @@ dependencies = [
     # Pin wrapt explicitly to 2.4.0. opentelemetry-instrumentation accepts
     # wrapt>=1.0,<3.0, so the 2.x line is in range; the explicit pin prevents
     # the prerelease resolver from selecting a stray 2.x release candidate.
-    "wrapt==2.4.1",
+    "wrapt==2.5.0",
 ]
 
 [build-system]
