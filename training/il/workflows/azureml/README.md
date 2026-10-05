@@ -161,6 +161,13 @@ The `preprocess` Component is a newly authored script (`training/il/scripts/lero
 
 The `register` Component wraps `workflows/azureml/scripts/register_model.py`.
 
+## 🔍 Troubleshooting
+
+| Symptom                                                         | Cause                                                                                                                                                                                                           | Fix                                                                                       |
+|-----------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
+| The pipeline stays `NotStarted` and never shows child jobs      | Azure ML timed out while creating it, and the CLI's automatic retry returned the stuck record. The workspace Activity Log shows a `GatewayTimeout` on `Microsoft.MachineLearningServices/workspaces/jobs/write` | Cancel it with `az ml job cancel`, archive it with `az ml job archive`, then submit again |
+| The submit script takes several minutes before it prints a name | The train and evaluate components upload the repository root, and the Azure ML CLI scans every file under it, including ignored folders such as `node_modules` and `.venv`, before uploading                    | Wait for it; Azure ML reuses an unchanged snapshot instead of uploading it again          |
+
 ## 📚 Related
 
 - [LeRobot training entry](../../scripts/lerobot/train.py)

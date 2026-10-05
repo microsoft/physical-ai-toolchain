@@ -76,8 +76,9 @@ Environment checks read the environment from its non-secret bundle, never from t
 
 1. Get the bundle. Run `infrastructure/setup/download-environment-bundle.sh --environment <environment> --resource-group <resource-group>`, which stores it in `~/.config/physical-ai-toolchain/environments/<environment>`, or use the gitignored `infrastructure/setup/generated/<environment>` directory written by the deployment workflow. Never commit a bundle.
 2. Connect to the environment's VPN and run `az login`. Optionally run `infrastructure/setup/connect-environment.sh --environment <environment>` to configure kubectl and the OSMO CLI.
-3. Commit your changes. Azure ML jobs upload your working tree, including uncommitted edits, and the run summary records whether the tree was clean.
-4. Preview the jobs, then submit them:
+3. For GPU checks, set the instance types your compute defines in `.env.local` when the submission scripts' defaults don't fit it; see [Choose GPU Instance Types](#choose-gpu-instance-types).
+4. Commit your changes. Azure ML jobs upload your working tree, including uncommitted edits, and the run summary records whether the tree was clean.
+5. Preview the jobs, then submit them. The preview shows the instance type each GPU check will request:
 
    ```bash
    npm run verify:dependabot -- --tier environment --environment <environment> --category rl --dry-run
@@ -88,12 +89,6 @@ Before submitting, the runner confirms that the Azure CLI is signed in to the bu
 
 Jobs run one at a time with unique names, and their test models are archived afterward. Each job holds a GPU node for several minutes or more, so run only the categories a pull request touches. Don't run local builds while a job uploads its snapshot.
 
-The GPU smoke and pi0 checks use their submission scripts' default GPU instance types unless you export `E2E_AML_INSTANCE_TYPE`, or set it before the command; `.env.local` doesn't set it. The RL and IL lifecycle checks don't read it and always use their scripts' `gpuspot` default, so they need a cluster that defines that instance type.
-
-For the pi0 check, the value applies to both the training and evaluation jobs. Training updates only pi0's action expert, but the gated backbone still has to fit, so if the default instance type can land on a GPU that's too small, choose a larger one.
-
-On managed AmlCompute clusters, where the cluster's VM size decides, export `E2E_AML_INSTANCE_TYPE` as an empty value so the pi0 jobs omit the instance type. The GPU smoke always needs a named instance type.
-
 The pi0 check needs a Hugging Face token that can read the gated base model. Add `HF_TOKEN=<token>` to the untracked repository-root `.env.local`. The runner, the e2e tests, and the submission scripts read it from there, and a value in `.env.local` takes precedence over an exported one. The [VLA training README](pathname://../../training/vla/README.md) explains how to create the token.
 
 Every submission script loads `.env.local`, and the LeRobot evaluation script passes the token to every evaluation job, not only pi0, as an environment variable that anyone who can read those jobs can see. Use a fine-grained token that can only read that model.
@@ -101,6 +96,43 @@ Every submission script loads `.env.local`, and the LeRobot evaluation script pa
 Each environment check has a time limit, set by `timeout_minutes` in the manifest, so a hung Azure call can't stall the run. When a check runs past its limit, the runner interrupts it and gives the test up to 15 minutes to cancel its jobs and archive its models before stopping it. The check then reports `failed` with a `timed out` reason.
 
 The read-only Terraform comparison plans the root stack at the base and head refs against your local state and reports only resource addresses, actions, and changed attribute names. It never applies. The vpn, automation, and dns stacks are opt-in.
+
+## Choose GPU Instance Types
+
+Every job a GPU check submits requests an Azure ML instance type. Set the types once in the untracked repository-root `.env.local`, starting from `.env.local.example`:
+
+| Variable                          | Applies to                                       |
+|-----------------------------------|--------------------------------------------------|
+| `E2E_AML_INSTANCE_TYPE`           | Every GPU check: `rl`, `il`, `vla`, `gpu-smoke`  |
+| `E2E_AML_INSTANCE_TYPE_RL`        | RL training and Isaac Lab evaluation             |
+| `E2E_AML_INSTANCE_TYPE_IL`        | LeRobot training and evaluation in the lifecycle |
+| `E2E_AML_INSTANCE_TYPE_VLA`       | pi0 training and evaluation                      |
+| `E2E_AML_INSTANCE_TYPE_GPU_SMOKE` | The GPU smoke job                                |
+
+A category's own variable wins over `E2E_AML_INSTANCE_TYPE`, and for each variable, a value in `.env.local` wins over an exported one, the same rule the submission scripts follow when they load that file. With neither set, each submission script uses its default: `gpuspot`, or `gpu` for pi0 training. The IL pipeline checks run on CPU and ignore these variables.
+
+List the instance types your compute defines:
+
+```bash
+az ml compute show --name <compute> --resource-group <resource-group> --workspace-name <workspace> \
+  --query "keys(properties.instance_types)" -o tsv
+```
+
+Then match them to the jobs:
+
+* Isaac Lab runs the RL checks and needs a GPU with RT cores; NVIDIA doesn't support it on A100 or H100 GPUs. On a cluster that also has those, give `E2E_AML_INSTANCE_TYPE_RL` a type that selects an RTX-class GPU such as an A10, because `gpuspot` and `gpu` can select any GPU node.
+* pi0 training updates only the action expert, but the gated backbone nearly fills a 24 GB GPU, so give `E2E_AML_INSTANCE_TYPE_VLA` a type with more memory.
+* HiL computes define `gpu` but not `gpuspot`, so set `E2E_AML_INSTANCE_TYPE=gpu` for them.
+* On managed AmlCompute clusters, where the VM size decides, export `E2E_AML_INSTANCE_TYPE` as an empty value to omit the instance type. The GPU smoke can't omit it.
+
+For example, a cluster with spot A10 and regular H100 pools could use:
+
+```bash
+E2E_AML_INSTANCE_TYPE=<a10-instance-type>
+E2E_AML_INSTANCE_TYPE_VLA=<h100-instance-type>
+```
+
+Before it submits anything, each GPU check confirms that a Kubernetes compute defines the instance type it will request, or each script default it relies on, and that the type has a GPU. Otherwise the check fails at once, naming the variable to set and the compute's GPU instance types. An empty value in `.env.local`, or an exported empty value on a Kubernetes compute, also fails, because the jobs would run on the compute's CPU default.
 
 ## Read the Results
 
@@ -117,26 +149,28 @@ The command exits 0 when every selected required check passed, 1 when any check 
 
 ## Known Gaps
 
-| Area                                   | Coverage today                                                                                                      |
-|----------------------------------------|---------------------------------------------------------------------------------------------------------------------|
-| OSMO replay mirror (`/workflows/osmo`) | CPU and runtime-image import smokes; it runs only inside OSMO, so there's no Azure ML check                         |
-| RL `rsl_rl` backend                    | Install and import only; the `rsl_rl` backend has no Azure ML path today                                            |
-| Azure ML-to-OSMO proxy                 | Opt-in check; it drives OSMO and fails where the OSMO control template requests more storage than its workflow does |
-| GitHub Actions bumps                   | Syntax and contract checks locally; runtime behavior is proven only by CI on a pushed branch                        |
-| GPU offload                            | Local NVIDIA host through mise tasks; the SO-101 example needs the robot hardware                                   |
-| Dependency pinning                     | The scan runs as CI runs it, which currently doesn't enforce the compliance threshold                               |
-| IL pipeline checks                     | Can fail before they start when Azure ML pipeline creation times out; see the note below                            |
+| Area                                   | Coverage today                                                                                                        |
+|----------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
+| OSMO replay mirror (`/workflows/osmo`) | CPU and runtime-image import smokes; it runs only inside OSMO, so there's no Azure ML check                           |
+| RL `rsl_rl` backend                    | Install and import only; the `rsl_rl` backend has no Azure ML path today                                              |
+| Azure ML-to-OSMO proxy                 | Opt-in check; it drives OSMO and fails where the OSMO control template requests more storage than its workflow does   |
+| GitHub Actions bumps                   | Syntax and contract checks locally; runtime behavior is proven only by CI on a pushed branch                          |
+| GPU offload                            | Local NVIDIA host through mise tasks; the SO-101 example needs the robot hardware                                     |
+| Dependency pinning                     | The scan runs as CI runs it, which currently doesn't enforce the compliance threshold                                 |
+| IL pipeline checks                     | Recover once from a pipeline that Azure ML creates but never starts; a second one fails the check, see the note below |
 
-The IL pipeline checks, `aml-il-pipeline-register` and `aml-il-pipeline-diffusion`, can fail before they start. LeRobot pipeline creation can time out at the Azure ML gateway, which leaves the pipeline `NotStarted` with no child jobs until the check's 15-minute start timeout. A `GatewayTimeout` on the pipeline's `jobs/write` in the workspace Activity Log confirms it.
+Azure ML occasionally takes longer than its 30-second gateway limit to create a job. A pipeline caught by that is created but never starts: it stays `NotStarted` with no child jobs, while the CLI's automatic retry reports it as submitted.
 
-When this happens, no pipeline step runs, so the failure says nothing about the Dependabot update: `aml-il-lifecycle` and the `il` CPU checks still cover the LeRobot lock, and `azureml-register-import-smoke` covers the register lock. A fix is tracked as follow-up work.
+The IL pipeline checks, `aml-il-pipeline-register` and `aml-il-pipeline-diffusion`, notice this after five minutes, cancel and archive the stuck pipeline, and resubmit once. If the second pipeline is stuck too, the check fails and points to the workspace Activity Log, where a `GatewayTimeout` on `Microsoft.MachineLearningServices/workspaces/jobs/write` confirms the cause. Rerun the check later.
+
+When that happens, no pipeline step runs, so the failure says nothing about the Dependabot update: `aml-il-lifecycle` and the `il` CPU checks still cover the LeRobot lock, and `azureml-register-import-smoke` covers the register lock.
 
 CI doesn't yet run the suite's own tests, the root `tests/` unit tests, or the `gpu-smoke`, `azureml-register`, and `osmo-proxy` import smokes. Run them locally until CI adopts them.
 
 ## Add a Category or Check
 
 1. Edit [categories.json](pathname://../../tests/dependabot/categories.json). Add a `cpu` command, or an `environment` pytest node from a `tests/e2e/test_e2e_aml_*` module. Give every environment check a positive `timeout_minutes`, which the consistency tests require. Size it above the test's own start, completion, and cleanup deadlines; no test checks the sizing.
-2. Add any new environment check to the allowlist in [test_categories.py](pathname://../../tests/dependabot/test_categories.py).
+2. Add any new environment check to the allowlist in [test_categories.py](pathname://../../tests/dependabot/test_categories.py). A GPU check calls `require_gpu_instance_type` from `tests/e2e/_aml.py` before it submits and passes the result to every job; add each new submission script's default to `SCRIPT_DEFAULT_INSTANCE_TYPES` there.
 3. When Dependabot gains a directory, add it to a category's `dependabot` list and `paths`.
 4. Run `uv run --frozen pytest -o addopts="" tests/dependabot`. The consistency tests fail until every Dependabot entry is mapped and every referenced script, npm script, pytest node, and CI lane exists.
 
