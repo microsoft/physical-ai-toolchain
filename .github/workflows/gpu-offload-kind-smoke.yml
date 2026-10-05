@@ -12,6 +12,31 @@ name: GPU Offload Kind Smoke
 
 'on':
   workflow_call:
+    outputs:
+      work-status:
+        description: Execution status
+        value: ${{ jobs.kind-smoke.outputs.work-status }}
+      expected-count:
+        description: Selected operation count
+        value: ${{ jobs.kind-smoke.outputs.expected-count }}
+      executed-count:
+        description: Executed operation count
+        value: ${{ jobs.kind-smoke.outputs.executed-count }}
+      artifact-id:
+        description: Execution evidence artifact ID
+        value: ${{ jobs.kind-smoke.outputs.artifact-id }}
+      artifact-url:
+        description: Execution evidence artifact URL
+        value: ${{ jobs.kind-smoke.outputs.artifact-url }}
+      test-count:
+        description: Executed test case count
+        value: ${{ jobs.kind-smoke.outputs.test-count }}
+      skipped-count:
+        description: Skipped operation and test case count
+        value: ${{ jobs.kind-smoke.outputs.skipped-count }}
+      first-failure:
+        description: First failing operation
+        value: ${{ jobs.kind-smoke.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -23,6 +48,15 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    outputs:
+      work-status: ${{ steps.evidence.outputs.work-status }}
+      expected-count: ${{ steps.evidence.outputs.expected-count }}
+      executed-count: ${{ steps.evidence.outputs.executed-count }}
+      artifact-id: ${{ steps.evidence.outputs.artifact-id }}
+      artifact-url: ${{ steps.evidence.outputs.artifact-url }}
+      test-count: ${{ steps.evidence.outputs.test-count }}
+      skipped-count: ${{ steps.evidence.outputs.skipped-count }}
+      first-failure: ${{ steps.evidence.outputs.first-failure }}
     env:
       # Force the deterministic CPU/kind path rather than relying on
       # runner auto-detection (detect-platform.sh would resolve the same way
@@ -52,11 +86,25 @@ jobs:
         run: mise run b-host-02-kubernetes-tools
 
       - name: Set up the offload cluster
+        id: setup
         run: mise run f-10-setup
 
       - name: Verify admission and remote execution
+        id: verify
         run: mise run f-20-verify
 
       - name: Tear down the cluster
+        id: cleanup
         if: always()
         run: mise run f-40-teardown-all
+
+      - name: Publish execution evidence
+        id: evidence
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: gpu-offload-kind-smoke
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["setup", "verify", "cleanup"]'
+          selection-reason: Caller selected CPU kind admission and remote execution
+          tools: '["node", "git"]'

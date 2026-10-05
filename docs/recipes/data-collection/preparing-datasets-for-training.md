@@ -1,4 +1,7 @@
-# Preparing Datasets for Training
+---
+title: Preparing Datasets for Training
+description: Download, inspect, and validate datasets from Azure Blob Storage or HuggingFace for LeRobot training workflows.
+---
 
 Download a dataset from Azure Blob Storage or HuggingFace, inspect its structure, validate format compliance, and connect it to a LeRobot training workflow. By the end of this recipe, you will have a training-ready dataset on your local machine or in a cloud-accessible location.
 
