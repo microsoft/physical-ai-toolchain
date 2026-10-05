@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import time
 from collections.abc import Iterator
@@ -24,14 +25,17 @@ from tests.e2e import _aml, conftest
 from tests.e2e._environment import (
     BUNDLE_DIR_VAR,
     ENVIRONMENT_VAR,
+    LOCAL_ENV_FILE,
     EnvironmentBundle,
     EnvironmentBundleError,
+    LocalEnvError,
     activate_named_environment,
     apply_environment_defaults,
     bundle_search_paths,
     derive_compute_target,
     environment_defaults,
     load_environment_bundle,
+    read_local_env,
 )
 
 _RESOURCE_VARIABLES = (
@@ -408,3 +412,164 @@ def test_cleanup_archives_models_when_the_job_never_stops(tmp_path: Path, monkey
         _aml.cleanup_aml_job_and_model_versions(job, tmp_path, job.workspace, "sample-model")
 
     assert archived == ["sample-model"]
+
+
+_FAKE_SECRET = "fake-secret-0123456789"
+
+
+def _write_local_env(root: Path, text: str) -> None:
+    (root / LOCAL_ENV_FILE).write_text(text, encoding="utf-8")
+
+
+def test_local_env_follows_shell_assignment_rules(tmp_path: Path) -> None:
+    _write_local_env(
+        tmp_path,
+        "\n".join(
+            [
+                "# HF_TOKEN=commented-out",
+                f"export EXPORTED={_FAKE_SECRET}",
+                'DOUBLE="double value"',
+                "SINGLE='single'",
+                "EMPTY=",
+                "SPACED= not-a-value",
+                'UNTERMINATED="never closed',
+                'QUOTED_EMPTY=""',
+                "TRAILING=kept # comment",
+                "REPEATED=first",
+                "REPEATED=second",
+                "CLEARED=value",
+                "CLEARED=",
+                "NOT ASSIGNMENT=ignored",
+                "SPACED_EQUALS = ignored",
+            ]
+        ),
+    )
+    names = [
+        "EXPORTED",
+        "DOUBLE",
+        "SINGLE",
+        "EMPTY",
+        "SPACED",
+        "UNTERMINATED",
+        "QUOTED_EMPTY",
+        "TRAILING",
+        "REPEATED",
+        "CLEARED",
+        "SPACED_EQUALS",
+        "MISSING",
+    ]
+
+    assert read_local_env(tmp_path, names) == {
+        "EXPORTED": _FAKE_SECRET,
+        "DOUBLE": "double value",
+        "SINGLE": "single",
+        "TRAILING": "kept",
+        "REPEATED": "second",
+    }
+
+
+def test_local_env_returns_only_requested_names(tmp_path: Path) -> None:
+    _write_local_env(tmp_path, f"HF_TOKEN={_FAKE_SECRET}\nOTHER_SECRET=other\n")
+
+    assert read_local_env(tmp_path, ["HF_TOKEN"]) == {"HF_TOKEN": _FAKE_SECRET}
+    assert read_local_env(tmp_path, []) == {}
+
+
+def test_missing_local_env_file_is_empty(tmp_path: Path) -> None:
+    assert read_local_env(tmp_path, ["HF_TOKEN"]) == {}
+
+
+def test_unreadable_local_env_file_is_reported_without_its_contents(tmp_path: Path) -> None:
+    (tmp_path / LOCAL_ENV_FILE).mkdir()
+
+    with pytest.raises(LocalEnvError, match=r"\.env\.local"):
+        read_local_env(tmp_path, ["HF_TOKEN"])
+
+
+def test_invalid_utf8_local_env_file_is_reported_without_its_contents(tmp_path: Path) -> None:
+    (tmp_path / LOCAL_ENV_FILE).write_bytes(b"HF_TOKEN=\xff\xfe" + _FAKE_SECRET.encode())
+
+    with pytest.raises(LocalEnvError) as raised:
+        read_local_env(tmp_path, ["HF_TOKEN"])
+
+    assert "UTF-8" in str(raised.value)
+    assert _FAKE_SECRET not in str(raised.value)
+
+
+class _GateItem:
+    nodeid = "tests/e2e/test_e2e_aml_vla_pi0_training.py::test_vla"
+
+    def __init__(self, *, marked: bool = True) -> None:
+        self._marked = marked
+
+    def get_closest_marker(self, name: str) -> object | None:
+        return object() if self._marked and name == "requires_hf_token" else None
+
+
+@pytest.fixture
+def gate_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr(conftest, "_REPO_ROOT", tmp_path)
+    monkeypatch.setenv("HF_TOKEN", "")
+    return tmp_path
+
+
+def test_gate_loads_the_token_from_local_env(gate_root: Path) -> None:
+    _write_local_env(gate_root, f"HF_TOKEN={_FAKE_SECRET}\n")
+
+    conftest.pytest_runtest_setup(_GateItem())  # type: ignore[arg-type]
+
+    assert os.environ["HF_TOKEN"] == _FAKE_SECRET
+
+
+def test_gate_prefers_an_exported_token_without_reading_the_file(
+    gate_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (gate_root / LOCAL_ENV_FILE).mkdir()
+    monkeypatch.setenv("HF_TOKEN", "exported-token")
+
+    conftest.pytest_runtest_setup(_GateItem())  # type: ignore[arg-type]
+
+    assert os.environ["HF_TOKEN"] == "exported-token"
+
+
+def test_gate_names_both_places_when_the_token_is_missing(gate_root: Path) -> None:
+    _write_local_env(gate_root, f"HF_TOKEN=\nOTHER_SECRET={_FAKE_SECRET}\n")
+
+    with pytest.raises(pytest.fail.Exception) as failed:
+        conftest.pytest_runtest_setup(_GateItem())  # type: ignore[arg-type]
+
+    assert LOCAL_ENV_FILE in str(failed.value)
+    assert "export" in str(failed.value)
+    assert _FAKE_SECRET not in str(failed.value)
+
+
+def test_gate_reports_an_unreadable_local_env_file(gate_root: Path) -> None:
+    (gate_root / LOCAL_ENV_FILE).mkdir()
+
+    with pytest.raises(pytest.fail.Exception, match=r"\.env\.local"):
+        conftest.pytest_runtest_setup(_GateItem())  # type: ignore[arg-type]
+
+
+def test_gate_ignores_tests_without_the_marker(gate_root: Path) -> None:
+    (gate_root / LOCAL_ENV_FILE).mkdir()
+
+    conftest.pytest_runtest_setup(_GateItem(marked=False))  # type: ignore[arg-type]
+
+
+def test_local_env_file_stays_out_of_git_and_repo_root_snapshots(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    no_global_excludes = ["-c", f"core.excludesFile={os.devnull}"]
+    tracked = subprocess.run(["git", *no_global_excludes, "check-ignore", "-q", LOCAL_ENV_FILE], cwd=repo, check=False)
+    assert tracked.returncode == 0, f"{LOCAL_ENV_FILE} must stay gitignored"
+
+    # Azure ML snapshots of the repository root use only the root .amlignore, or .gitignore when it is absent.
+    amlignore = repo / ".amlignore"
+    snapshot_rules = amlignore if amlignore.is_file() else repo / ".gitignore"
+    probe = tmp_path / "snapshot-root"
+    probe.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=probe, check=True)
+    shutil.copyfile(snapshot_rules, probe / ".gitignore")
+    excluded = subprocess.run(
+        ["git", *no_global_excludes, "check-ignore", "-q", LOCAL_ENV_FILE], cwd=probe, check=False
+    )
+    assert excluded.returncode == 0, f"{snapshot_rules.name} must keep {LOCAL_ENV_FILE} out of repo-root code snapshots"

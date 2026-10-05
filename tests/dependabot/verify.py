@@ -45,8 +45,11 @@ from pathlib import Path
 from tests.e2e._environment import (
     BUNDLE_DIR_VAR,
     ENVIRONMENT_VAR,
+    LOCAL_ENV_FILE,
     EnvironmentBundleError,
+    LocalEnvError,
     load_environment_bundle,
+    read_local_env,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -415,7 +418,11 @@ def _version_tuple(text: str) -> tuple[int, ...] | None:
 
 
 def preflight_reason(
-    check: Check, env: Mapping[str, str], *, which: Callable[[str], str | None] = shutil.which
+    check: Check,
+    env: Mapping[str, str],
+    *,
+    which: Callable[[str], str | None] = shutil.which,
+    local_env_error: str | None = None,
 ) -> str | None:
     """Return why a check can't run on this host, or None when it can."""
     if check.platforms and not any(sys.platform.startswith(name) for name in check.platforms):
@@ -430,7 +437,7 @@ def preflight_reason(
         return f"missing tools: {', '.join(missing)}"
     unset = [name for name in check.env if not env.get(name, "").strip()]
     if unset:
-        return f"set {', '.join(unset)} to run this check"
+        return local_env_error or f"set {', '.join(unset)} in {LOCAL_ENV_FILE} or the environment to run this check"
     for tool, minimum in check.min_versions.items():
         result = subprocess.run([tool, "--version"], capture_output=True, text=True, check=False)
         found = _version_tuple(result.stdout + result.stderr)
@@ -863,6 +870,16 @@ def main(
             env[ENVIRONMENT_VAR] = args.environment
     environment_problem = environment_preflight(env, args.environment, repo_root) if needs_environment else None
 
+    # Variables a check declares may come from the untracked .env.local, as they do for the
+    # submission scripts; each check receives only the ones it declares.
+    local_env: dict[str, str] = {}
+    local_env_error: str | None = None
+    unset_names = {name for check in selected for name in check.env if not env.get(name, "").strip()}
+    try:
+        local_env = read_local_env(repo_root, unset_names)
+    except LocalEnvError as error:
+        local_env_error = str(error)
+
     commit, dirty = git_state(repo_root)
     results: list[CheckResult] = []
     failed_setup: set[str] = set()
@@ -874,7 +891,8 @@ def main(
             failed_setup.add(category.id)
 
     for check in selected:
-        reason = preflight_reason(check, env)
+        check_env = {**env, **{name: local_env[name] for name in check.env if name in local_env}}
+        reason = preflight_reason(check, check_env, local_env_error=local_env_error)
         if check.tier == "environment" and environment_problem:
             reason = environment_problem
         if check.category in failed_setup:
@@ -886,7 +904,9 @@ def main(
             )
         else:
             print(f"run    {check.id} (log: {display_path(run_dir / f'{check.id}.log', repo_root)})", flush=True)
-            result = run_check(check, repo_root=repo_root, run_dir=run_dir, env=env, values=values, executor=executor)
+            result = run_check(
+                check, repo_root=repo_root, run_dir=run_dir, env=check_env, values=values, executor=executor
+            )
         print(f"{result.status:<7} {check.id}{f' ({result.reason})' if result.reason else ''}", flush=True)
         results.append(result)
     for check in skipped:

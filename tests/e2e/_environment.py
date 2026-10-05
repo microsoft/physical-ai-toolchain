@@ -6,7 +6,9 @@ Azure resource variables that the e2e fixtures and submit scripts read. Values t
 are already exported always win, so a bundle only supplies missing defaults.
 
 Bundles are never tracked: they live under the user's configuration directory or the
-gitignored ``infrastructure/setup/generated/<name>`` directory.
+gitignored ``infrastructure/setup/generated/<name>`` directory. Secrets such as
+``HF_TOKEN`` never go in a bundle; they live in the gitignored repository-root
+``.env.local``, which ``read_local_env`` reads for the variables a caller needs.
 """
 
 from __future__ import annotations
@@ -14,13 +16,14 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
 
 ENVIRONMENT_VAR = "E2E_ENVIRONMENT"
 BUNDLE_DIR_VAR = "E2E_ENVIRONMENT_BUNDLE_DIR"
 DEPLOYMENT_FILE = "deployment.json"
+LOCAL_ENV_FILE = ".env.local"
 AML_COMPUTE_NAME_MAX_LENGTH = 16
 
 # Bundle field to the environment variable the fixtures and submit scripts read.
@@ -34,10 +37,15 @@ BUNDLE_VARIABLES: tuple[tuple[str, str], ...] = (
 COMPUTE_VARIABLE = "AZUREML_COMPUTE"
 
 _ENVIRONMENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_LOCAL_ENV_ASSIGNMENT = re.compile(r"(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)")
 
 
 class EnvironmentBundleError(RuntimeError):
     """Raised when a named environment bundle cannot be found or read."""
+
+
+class LocalEnvError(RuntimeError):
+    """Raised when the repository-root ``.env.local`` exists but cannot be read."""
 
 
 @dataclass(frozen=True)
@@ -145,3 +153,42 @@ def activate_named_environment(
     bundle = load_environment_bundle(name, repo_root, environ)
     apply_environment_defaults(bundle, environ)
     return bundle
+
+
+def _local_env_value(raw: str) -> str:
+    """Return what ``source`` assigns for the text after ``NAME=``, or ``""`` when it assigns nothing."""
+    if not raw or raw[0].isspace():
+        return ""
+    if raw[0] in "\"'":
+        closing = raw.find(raw[0], 1)
+        return raw[1:closing] if closing > 0 else ""
+    return raw.split(maxsplit=1)[0]
+
+
+def read_local_env(repo_root: Path, names: Iterable[str]) -> dict[str, str]:
+    """Return the requested variables that the untracked repository-root ``.env.local`` sets.
+
+    Submission scripts source the same file through ``scripts/lib/common.sh``. This reads
+    simple ``NAME=value`` lines the way ``source`` would (an optional ``export``, quoting,
+    and the last assignment winning) and returns only requested names with non-empty values.
+    A missing file yields no values; a file that can't be read raises ``LocalEnvError``
+    without exposing its contents.
+    """
+    wanted = set(names)
+    if not wanted:
+        return {}
+    path = repo_root / LOCAL_ENV_FILE
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    except UnicodeDecodeError:
+        raise LocalEnvError(f"Cannot read {path}: the file is not valid UTF-8") from None
+    except OSError as error:
+        raise LocalEnvError(f"Cannot read {path}: {error.strerror or type(error).__name__}") from None
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        match = _LOCAL_ENV_ASSIGNMENT.fullmatch(line.strip())
+        if match is not None and match.group(1) in wanted:
+            values[match.group(1)] = _local_env_value(match.group(2))
+    return {name: value for name, value in values.items() if value}

@@ -16,11 +16,16 @@ from tests.e2e._aml import AzureMLWorkspace
 from tests.e2e._common import run_command
 from tests.e2e._environment import (
     ENVIRONMENT_VAR,
+    LOCAL_ENV_FILE,
     EnvironmentBundle,
     EnvironmentBundleError,
+    LocalEnvError,
     activate_named_environment,
     derive_compute_target,
+    read_local_env,
 )
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 TFVARS_FALLBACK_OUTPUT_KEYS = ("resource_group", "azureml_workspace", "aks_cluster", "storage_account")
 AKS_RESOURCE_ID = re.compile(
@@ -43,9 +48,18 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
         return
     if os.environ.get("HF_TOKEN", "").strip():
         return
+    # Like the submission scripts, fall back to the untracked repository-root .env.local.
+    try:
+        token = read_local_env(_REPO_ROOT, ["HF_TOKEN"]).get("HF_TOKEN")
+    except LocalEnvError as error:
+        pytest.fail(f"{item.nodeid} requires HF_TOKEN: {error}", pytrace=False)
+    if token:
+        os.environ["HF_TOKEN"] = token
+        return
 
     pytest.fail(
-        f"{item.nodeid} requires HF_TOKEN for gated Hugging Face model access",
+        f"{item.nodeid} requires HF_TOKEN for gated Hugging Face model access; "
+        f"set it in {LOCAL_ENV_FILE} at the repository root or export it",
         pytrace=False,
     )
 

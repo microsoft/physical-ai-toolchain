@@ -441,9 +441,124 @@ def test_preflight_reports_missing_tools_platforms_and_variables() -> None:
     assert verify.preflight_reason(_check(requires=("pwsh",)), {}, which=which) == "missing tools: pwsh"
     assert verify.preflight_reason(_check(platforms=("plan9",)), {}, which=which) == "runs only on plan9"
     assert verify.preflight_reason(_check(env=("HF_TOKEN",)), {"HF_TOKEN": " "}, which=which) == (
-        "set HF_TOKEN to run this check"
+        "set HF_TOKEN in .env.local or the environment to run this check"
     )
+    assert verify.preflight_reason(
+        _check(env=("HF_TOKEN",)), {}, which=which, local_env_error="Cannot read .env.local: Permission denied"
+    ) == ("Cannot read .env.local: Permission denied")
     assert verify.preflight_reason(_check(), {}, which=which) is None
+
+
+_FAKE_SECRET = "fake-secret-0123456789"
+
+
+def _env_manifest(tmp_path: Path) -> Path:
+    def category(category_id: str, check: dict[str, object], **extra: object) -> dict[str, object]:
+        return {
+            "id": category_id,
+            "title": category_id.title(),
+            "summary": f"{category_id} checks.",
+            "dependabot": [],
+            "paths": [],
+            "setup": [],
+            "notes": [],
+            "checks": [check],
+            **extra,
+        }
+
+    def check(check_id: str, tool: str, **extra: object) -> dict[str, object]:
+        return {
+            "id": check_id,
+            "tier": "cpu",
+            "gpu": False,
+            "optional": False,
+            "description": f"Runs {tool}.",
+            "command": [tool],
+            "requires": [],
+            **extra,
+        }
+
+    manifest = {
+        "schema_version": 1,
+        "base_ref": "HEAD",
+        "root_routes": [],
+        "categories": [
+            category("baseline", check("always-ok", "ok-tool"), always=True),
+            category(
+                "secrets",
+                check("token-check", "token-tool", env=["SAMPLE_TOKEN"]),
+                dependabot=[{"ecosystem": "uv", "directory": "/secrets"}],
+                paths=["secrets/"],
+            ),
+        ],
+    }
+    path = tmp_path / "env-categories.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    return path
+
+
+def _run_secrets(
+    git_repo: Path, tmp_path: Path, environ: dict[str, str]
+) -> tuple[int, FakeExecutor, dict[str, object]]:
+    executor = FakeExecutor()
+    code = verify.main(
+        ["--category", "secrets", "--output-dir", str(git_repo / "logs" / "run")],
+        executor=executor,
+        repo_root=git_repo,
+        manifest_path=_env_manifest(tmp_path),
+        environ=environ,
+    )
+    summary = json.loads((git_repo / "logs" / "run" / "summary.json").read_text(encoding="utf-8"))
+    return code, executor, summary
+
+
+def test_declared_variables_come_from_local_env_for_their_check_only(
+    git_repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (git_repo / ".env.local").write_text(f"SAMPLE_TOKEN={_FAKE_SECRET}\nOTHER_SECRET=other-fake\n", encoding="utf-8")
+
+    code, executor, _ = _run_secrets(git_repo, tmp_path, {})
+    environments = {request.argv[0]: request.env for request in executor.requests}
+
+    assert code == EXIT_PASSED
+    assert environments["token-tool"]["SAMPLE_TOKEN"] == _FAKE_SECRET
+    assert "SAMPLE_TOKEN" not in environments["ok-tool"]
+    assert all("OTHER_SECRET" not in env for env in environments.values())
+    assert _FAKE_SECRET not in capsys.readouterr().out
+    for name in ("summary.json", "summary.md"):
+        assert _FAKE_SECRET not in (git_repo / "logs" / "run" / name).read_text(encoding="utf-8")
+
+
+def test_exported_variables_win_over_local_env(git_repo: Path, tmp_path: Path) -> None:
+    (git_repo / ".env.local").write_text(f"SAMPLE_TOKEN={_FAKE_SECRET}\n", encoding="utf-8")
+
+    _, executor, _ = _run_secrets(git_repo, tmp_path, {"SAMPLE_TOKEN": "exported"})
+
+    assert {request.argv[0]: request.env.get("SAMPLE_TOKEN") for request in executor.requests}["token-tool"] == (
+        "exported"
+    )
+
+
+def test_missing_declared_variable_points_to_local_env(git_repo: Path, tmp_path: Path) -> None:
+    code, executor, summary = _run_secrets(git_repo, tmp_path, {})
+    results = {check["id"]: check for check in summary["checks"]}  # type: ignore[union-attr]
+
+    assert code == EXIT_INCOMPLETE
+    assert [request.argv[0] for request in executor.requests] == ["ok-tool"]
+    assert results["token-check"]["status"] == "not-run"
+    assert results["token-check"]["reason"] == "set SAMPLE_TOKEN in .env.local or the environment to run this check"
+
+
+def test_unreadable_local_env_is_reported_as_not_run(git_repo: Path, tmp_path: Path) -> None:
+    (git_repo / ".env.local").mkdir()
+
+    code, _, summary = _run_secrets(git_repo, tmp_path, {})
+    results = {check["id"]: check for check in summary["checks"]}  # type: ignore[union-attr]
+
+    assert code == EXIT_INCOMPLETE
+    assert results["always-ok"]["status"] == "passed"
+    assert results["token-check"]["status"] == "not-run"
+    assert ".env.local" in results["token-check"]["reason"]
 
 
 def test_output_dir_must_be_ignored_inside_the_repository(git_repo: Path, tmp_path: Path) -> None:
