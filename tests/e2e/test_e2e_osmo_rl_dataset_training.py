@@ -20,6 +20,7 @@ import pytest
 
 from tests.e2e._common import log_e2e
 from tests.e2e._osmo import (
+    assert_completed_workflow_streams,
     assert_workflow_task_succeeded,
     monitor_osmo_workflow,
     submit_osmo_dataset_training,
@@ -47,4 +48,6 @@ def test_osmo_rl_dataset_training_e2e(
     # the dataset-injection script exposes no --correlation-id, so success is verified via task status.
     log_e2e("Validating OSMO dataset-injection workflow task success")
     assert_workflow_task_succeeded(workflow, repo_root, _ISAAC_TASK_NAME)
+    log_e2e("Validating completed workflow log and event streams")
+    assert_completed_workflow_streams(workflow, repo_root)
     log_e2e("OSMO RL dataset-injection e2e test finished successfully")

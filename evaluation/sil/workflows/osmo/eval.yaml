@@ -54,7 +54,7 @@ default-values:
   video_length: "200"
   code_url: ""
   entry_script_b64: ""
-  payload_root: /workspace/isaac_payload
+  payload_root: /tmp/isaac_payload
   checkpoint_uri: ""
   inference_format: "both"
   azure_subscription_id: ""

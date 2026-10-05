@@ -122,7 +122,8 @@ class EpisodeClusterer:
             labels = clustering.fit_predict(features_normalized)
 
             # Compute silhouette score
-            sil_score = silhouette_score(features_normalized, labels) if len(set(labels)) > 1 else 1.0
+            unique_labels = len(set(labels))
+            sil_score = silhouette_score(features_normalized, labels) if 1 < unique_labels < len(labels) else 1.0
 
             # Compute similarity scores (distance to cluster centroid)
             assignments = []

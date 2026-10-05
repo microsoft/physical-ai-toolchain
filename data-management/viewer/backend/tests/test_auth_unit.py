@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 import sys
@@ -44,49 +43,45 @@ def _reset_provider():
 
 
 class TestApiKeyProvider:
-    def test_valid_key_returns_user(self):
+    @pytest.mark.asyncio
+    async def test_valid_key_returns_user(self):
         provider = ApiKeyProvider("secret")
-        result = asyncio.run(
-            provider.authenticate(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "secret"}))
-        )
-        assert result is not None
-        assert result["auth_method"] == "apikey"
+        result = await provider.authenticate(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "secret"}))
+        assert result == {"sub": "api-key-client", "auth_method": "apikey"}
 
-    def test_wrong_key_returns_none(self):
+    @pytest.mark.asyncio
+    async def test_wrong_key_returns_none(self):
         provider = ApiKeyProvider("secret")
-        assert (
-            asyncio.run(provider.authenticate(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "wrong"})))
-            is None
-        )
+        result = await provider.authenticate(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "wrong"}))
+        assert result is None
 
-    def test_missing_header_returns_none(self):
+    @pytest.mark.asyncio
+    async def test_missing_header_returns_none(self):
         provider = ApiKeyProvider("secret")
-        assert asyncio.run(provider.authenticate(make_asgi_request("POST", "/api/x"))) is None
+        assert await provider.authenticate(make_asgi_request("POST", "/api/x")) is None
 
-    def test_empty_expected_key_rejects_all(self):
+    @pytest.mark.asyncio
+    async def test_empty_expected_key_rejects_all(self):
         provider = ApiKeyProvider("")
-        assert (
-            asyncio.run(provider.authenticate(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "anything"})))
-            is None
-        )
+        result = await provider.authenticate(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "anything"}))
+        assert result is None
 
     def test_www_authenticate_header(self):
-        assert "ApiKey" in ApiKeyProvider("k").www_authenticate
+        assert ApiKeyProvider("k").www_authenticate == 'ApiKey realm="DataViewer API"'
 
 
 class TestEasyAuthProvider:
-    def test_bound_principal_is_authenticated(self):
+    @pytest.mark.asyncio
+    async def test_bound_principal_is_authenticated(self):
         provider = EasyAuthProvider("proxy-secret")
-        result = asyncio.run(
-            provider.authenticate(
-                make_asgi_request(
-                    "POST",
-                    "/api/x",
-                    headers={
-                        "X-MS-CLIENT-PRINCIPAL": _easy_auth_principal(),
-                        "X-Dataviewer-Proxy-Key": "proxy-secret",
-                    },
-                )
+        result = await provider.authenticate(
+            make_asgi_request(
+                "POST",
+                "/api/x",
+                headers={
+                    "X-MS-CLIENT-PRINCIPAL": _easy_auth_principal(),
+                    "X-Dataviewer-Proxy-Key": "proxy-secret",
+                },
             )
         )
         assert result == {
@@ -110,9 +105,10 @@ class TestEasyAuthProvider:
             },
         ],
     )
-    def test_unbound_principal_is_rejected(self, headers: dict[str, str]):
+    @pytest.mark.asyncio
+    async def test_unbound_principal_is_rejected(self, headers: dict[str, str]):
         provider = EasyAuthProvider("proxy-secret")
-        assert asyncio.run(provider.authenticate(make_asgi_request("POST", "/api/x", headers=headers))) is None
+        assert await provider.authenticate(make_asgi_request("POST", "/api/x", headers=headers)) is None
 
     @pytest.mark.parametrize(
         "principal",
@@ -123,18 +119,17 @@ class TestEasyAuthProvider:
             _easy_auth_principal(subject=" "),
         ],
     )
-    def test_malformed_or_incomplete_principal_is_rejected(self, principal: str):
+    @pytest.mark.asyncio
+    async def test_malformed_or_incomplete_principal_is_rejected(self, principal: str):
         provider = EasyAuthProvider("proxy-secret")
-        result = asyncio.run(
-            provider.authenticate(
-                make_asgi_request(
-                    "POST",
-                    "/api/x",
-                    headers={
-                        "X-MS-CLIENT-PRINCIPAL": principal,
-                        "X-Dataviewer-Proxy-Key": "proxy-secret",
-                    },
-                )
+        result = await provider.authenticate(
+            make_asgi_request(
+                "POST",
+                "/api/x",
+                headers={
+                    "X-MS-CLIENT-PRINCIPAL": principal,
+                    "X-Dataviewer-Proxy-Key": "proxy-secret",
+                },
             )
         )
         assert result is None
@@ -148,17 +143,17 @@ class TestEasyAuthProvider:
 
 
 class TestJwtProvider:
-    def test_missing_bearer_returns_none(self):
+    @pytest.mark.asyncio
+    async def test_missing_bearer_returns_none(self):
         provider = JwtProvider("https://example/jwks", "aud", "iss")
-        assert asyncio.run(provider.authenticate(make_asgi_request("POST", "/api/x"))) is None
+        assert await provider.authenticate(make_asgi_request("POST", "/api/x")) is None
         assert (
-            asyncio.run(
-                provider.authenticate(make_asgi_request("POST", "/api/x", headers={"Authorization": "Basic abc"}))
-            )
+            await provider.authenticate(make_asgi_request("POST", "/api/x", headers={"Authorization": "Basic abc"}))
             is None
         )
 
-    def test_valid_token_returns_payload(self, monkeypatch: pytest.MonkeyPatch):
+    @pytest.mark.asyncio
+    async def test_valid_token_returns_payload(self, monkeypatch: pytest.MonkeyPatch):
         signing_key = MagicMock()
         signing_key.key = "fake-key"
         jwks_client = MagicMock()
@@ -171,19 +166,21 @@ class TestJwtProvider:
         monkeypatch.setitem(sys.modules, "jwt", fake_jwt)
 
         provider = JwtProvider("https://example/jwks", "aud", "iss")
-        result = asyncio.run(
-            provider.authenticate(make_asgi_request("POST", "/api/x", headers={"Authorization": "Bearer my-token"}))
+        result = await provider.authenticate(
+            make_asgi_request("POST", "/api/x", headers={"Authorization": "Bearer my-token"})
         )
         assert result == {"sub": "abc", "aud": "aud", "auth_method": "azure_ad"}
         fake_jwt.decode.assert_called_once()
         # JWKS client is cached on the provider after first use.
-        result2 = asyncio.run(
-            provider.authenticate(make_asgi_request("POST", "/api/x", headers={"Authorization": "Bearer my-token"}))
+        result2 = await provider.authenticate(
+            make_asgi_request("POST", "/api/x", headers={"Authorization": "Bearer my-token"})
         )
         assert result2 == {"sub": "abc", "aud": "aud", "auth_method": "azure_ad"}
         fake_jwt.PyJWKClient.assert_called_once()
+        assert fake_jwt.decode.call_count == 2
 
-    def test_decode_error_returns_none(self, monkeypatch: pytest.MonkeyPatch):
+    @pytest.mark.asyncio
+    async def test_decode_error_returns_none(self, monkeypatch: pytest.MonkeyPatch):
         class FakeJWTError(Exception):
             pass
 
@@ -199,12 +196,14 @@ class TestJwtProvider:
         monkeypatch.setitem(sys.modules, "jwt", fake_jwt)
 
         provider = JwtProvider("https://example/jwks", "aud", "iss")
-        result = asyncio.run(
-            provider.authenticate(make_asgi_request("POST", "/api/x", headers={"Authorization": "Bearer my-token"}))
+        result = await provider.authenticate(
+            make_asgi_request("POST", "/api/x", headers={"Authorization": "Bearer my-token"})
         )
+
         assert result is None
 
-    def test_missing_pyjwt_raises_runtime_error(self, monkeypatch: pytest.MonkeyPatch):
+    @pytest.mark.asyncio
+    async def test_missing_pyjwt_raises_runtime_error(self, monkeypatch: pytest.MonkeyPatch):
         # Block `import jwt` by inserting a finder that raises ImportError.
         monkeypatch.delitem(sys.modules, "jwt", raising=False)
 
@@ -225,9 +224,7 @@ class TestJwtProvider:
 
         provider = JwtProvider("https://example/jwks", "aud", "iss")
         with pytest.raises(RuntimeError, match="pyjwt"):
-            asyncio.run(
-                provider.authenticate(make_asgi_request("POST", "/api/x", headers={"Authorization": "Bearer t"}))
-            )
+            await provider.authenticate(make_asgi_request("POST", "/api/x", headers={"Authorization": "Bearer t"}))
 
     def test_www_authenticate_header(self):
         assert "Bearer" in JwtProvider("u", "a", "i").www_authenticate
@@ -236,78 +233,86 @@ class TestJwtProvider:
 class TestProviderSelection:
     """Validate provider selection through the public ``require_auth`` dependency."""
 
-    @staticmethod
-    def _expect_challenge(scheme: str) -> None:
-        with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(require_auth(make_asgi_request("POST", "/api/x")))
-        assert exc_info.value.status_code == 401
-        assert scheme in exc_info.value.headers.get("WWW-Authenticate", "")
+    pytestmark = pytest.mark.asyncio
 
-    def test_default_is_apikey(self, monkeypatch: pytest.MonkeyPatch):
+    @staticmethod
+    async def _expect_challenge(scheme: str) -> None:
+        with pytest.raises(HTTPException) as exc_info:
+            await require_auth(make_asgi_request("POST", "/api/x"))
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail == "Authentication required"
+        assert exc_info.value.headers["WWW-Authenticate"].startswith(scheme)
+
+    async def test_default_is_apikey(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.delenv("DATAVIEWER_AUTH_PROVIDER", raising=False)
         monkeypatch.setenv("DATAVIEWER_API_KEY", "k")
-        self._expect_challenge("ApiKey")
+        await self._expect_challenge("ApiKey")
 
-    def test_apikey_without_env_logs_warning(self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
+    async def test_apikey_without_env_logs_warning(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "apikey")
         monkeypatch.delenv("DATAVIEWER_API_KEY", raising=False)
         with caplog.at_level("WARNING", logger="src.api.auth"):
-            self._expect_challenge("ApiKey")
-        assert any("DATAVIEWER_API_KEY" in r.message for r in caplog.records)
+            await self._expect_challenge("ApiKey")
+        assert "DATAVIEWER_API_KEY is not set; all API-key auth will fail" in caplog.messages
 
-    def test_unknown_provider_fails_closed(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_unknown_provider_fails_closed(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "bogus")
         monkeypatch.setenv("DATAVIEWER_API_KEY", "k")
         with pytest.raises(ValueError, match="DATAVIEWER_AUTH_PROVIDER"):
-            asyncio.run(require_auth(make_asgi_request("POST", "/api/x")))
+            await require_auth(make_asgi_request("POST", "/api/x"))
 
-    def test_easy_auth_selection_requires_proxy_key(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_easy_auth_selection_requires_proxy_key(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "easy_auth")
         monkeypatch.delenv("DATAVIEWER_PROXY_KEY", raising=False)
         with pytest.raises(ValueError, match="DATAVIEWER_PROXY_KEY"):
-            asyncio.run(require_auth(make_asgi_request("POST", "/api/x")))
+            await require_auth(make_asgi_request("POST", "/api/x"))
 
-    def test_easy_auth_selection(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_easy_auth_selection(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "easy_auth")
         monkeypatch.setenv("DATAVIEWER_PROXY_KEY", "proxy-secret")
-        self._expect_challenge("EasyAuth")
+        await self._expect_challenge("EasyAuth")
 
-    def test_azure_ad_selection(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_azure_ad_selection(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "azure_ad")
         monkeypatch.setenv("DATAVIEWER_AZURE_TENANT_ID", "tenant")
         monkeypatch.setenv("DATAVIEWER_AZURE_CLIENT_ID", "client")
-        self._expect_challenge("Bearer")
+        await self._expect_challenge("Bearer")
 
-    def test_auth0_selection(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_auth0_selection(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "auth0")
         monkeypatch.setenv("DATAVIEWER_AUTH0_DOMAIN", "x.auth0.com")
         monkeypatch.setenv("DATAVIEWER_AUTH0_AUDIENCE", "aud")
-        self._expect_challenge("Bearer")
+        await self._expect_challenge("Bearer")
 
 
 class TestRequireAuth:
-    def test_bypass_when_disabled(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "true")
-        assert asyncio.run(require_auth(make_asgi_request("POST", "/api/x"))) is None
+    pytestmark = pytest.mark.asyncio
 
-    def test_failure_raises_401_with_header(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_bypass_when_disabled(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "true")
+        assert await require_auth(make_asgi_request("POST", "/api/x")) is None
+
+    async def test_failure_raises_401_with_header(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "apikey")
         monkeypatch.setenv("DATAVIEWER_API_KEY", "right")
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(require_auth(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "wrong"})))
+            await require_auth(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "wrong"}))
         assert exc_info.value.status_code == 401
-        assert "WWW-Authenticate" in exc_info.value.headers
+        assert exc_info.value.detail == "Authentication required"
+        assert exc_info.value.headers["WWW-Authenticate"] == 'ApiKey realm="DataViewer API"'
 
     @pytest.mark.parametrize("proxy_key", [None, "wrong", "é"])
-    def test_forged_easy_auth_header_is_rejected(
+    async def test_forged_easy_auth_header_is_rejected(
         self,
         monkeypatch: pytest.MonkeyPatch,
         proxy_key: str | None,
@@ -320,11 +325,15 @@ class TestRequireAuth:
             headers["X-Dataviewer-Proxy-Key"] = proxy_key
 
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(require_auth(make_asgi_request("POST", "/api/x", headers=headers)))
+            await require_auth(make_asgi_request("POST", "/api/x", headers=headers))
 
         assert exc_info.value.status_code == 401
 
-    def test_failure_logs_unknown_client_when_missing(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_failure_logs_unknown_client_when_missing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ):
         # Build a request with no client tuple to exercise the "unknown" branch.
         from fastapi import FastAPI
         from starlette.requests import Request
@@ -344,15 +353,20 @@ class TestRequireAuth:
             "scheme": "http",
             "server": ("testserver", 80),
         }
-        with pytest.raises(HTTPException):
-            asyncio.run(require_auth(Request(scope)))
+        with (
+            caplog.at_level("WARNING", logger="src.api.auth"),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await require_auth(Request(scope))
+        assert exc_info.value.status_code == 401
+        assert "Authentication failed: method=POST path=/api/x client=unknown" in caplog.messages
 
-    def test_success_returns_user(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_success_returns_user(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "apikey")
         monkeypatch.setenv("DATAVIEWER_API_KEY", "right")
-        user = asyncio.run(require_auth(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "right"})))
-        assert user is not None and user["auth_method"] == "apikey"
+        user = await require_auth(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "right"}))
+        assert user == {"sub": "api-key-client", "auth_method": "apikey"}
 
 
 class TestPrincipalContext:
@@ -394,46 +408,52 @@ class TestPrincipalContext:
 
 
 class TestRequireRole:
-    def test_bypass_when_user_none(self):
-        dep = require_role("admin")
-        assert asyncio.run(dep(user=None)) is None
+    pytestmark = pytest.mark.asyncio
 
-    def test_role_present_passes(self):
+    async def test_bypass_when_user_none(self):
+        dep = require_role("admin")
+        assert await dep(user=None) is None
+
+    async def test_role_present_passes(self):
         dep = require_role("admin")
         user = {"roles": ["admin", "viewer"]}
-        assert asyncio.run(dep(user=user)) is user
+        assert await dep(user=user) is user
 
-    def test_missing_role_raises_403(self):
+    async def test_missing_role_raises_403(self):
         dep = require_role("admin")
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(dep(user={"roles": ["viewer"]}))
+            await dep(user={"roles": ["viewer"]})
         assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == "Insufficient permissions"
 
-    def test_missing_roles_claim_raises_403(self):
+    async def test_missing_roles_claim_raises_403(self):
         dep = require_role("admin")
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(dep(user={}))
+            await dep(user={})
         assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == "Insufficient permissions"
 
 
 class TestResetProvider:
-    def test_reset_picks_up_new_configuration(self, monkeypatch: pytest.MonkeyPatch):
+    pytestmark = pytest.mark.asyncio
+
+    async def test_reset_picks_up_new_configuration(self, monkeypatch: pytest.MonkeyPatch):
         """``reset_auth_provider`` clears the cached singleton so subsequent
         ``require_auth`` calls observe updated configuration."""
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "apikey")
         monkeypatch.setenv("DATAVIEWER_API_KEY", "first")
 
-        user = asyncio.run(require_auth(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "first"})))
-        assert user is not None and user["auth_method"] == "apikey"
+        user = await require_auth(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "first"}))
+        assert user == {"sub": "api-key-client", "auth_method": "apikey"}
 
         monkeypatch.setenv("DATAVIEWER_API_KEY", "second")
-        user = asyncio.run(require_auth(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "first"})))
-        assert user is not None
+        user = await require_auth(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "first"}))
+        assert user == {"sub": "api-key-client", "auth_method": "apikey"}
 
         reset_auth_provider()
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(require_auth(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "first"})))
+            await require_auth(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "first"}))
         assert exc_info.value.status_code == 401
-        user = asyncio.run(require_auth(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "second"})))
-        assert user is not None
+        user = await require_auth(make_asgi_request("POST", "/api/x", headers={"X-API-Key": "second"}))
+        assert user == {"sub": "api-key-client", "auth_method": "apikey"}

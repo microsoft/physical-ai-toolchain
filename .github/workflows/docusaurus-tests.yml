@@ -471,6 +471,9 @@ jobs:
           root_dir: docs/docusaurus
           disable_search: true
           use_oidc: true
+          use_pypi: true
+          use_legacy_upload_endpoint: true
+          url: https://codecov.io
           fail_ci_if_error: true
           verbose: true
           flags: docusaurus

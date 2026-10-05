@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-PAYLOAD_ROOT="${PAYLOAD_ROOT:-/workspace/isaac_payload}"
+PAYLOAD_ROOT="${PAYLOAD_ROOT:-/tmp/isaac_payload}"
 TRAINING_ROOT="${TRAINING_ROOT:-${PAYLOAD_ROOT}/training/rl}"
 
 mkdir -p "${PAYLOAD_ROOT}"
