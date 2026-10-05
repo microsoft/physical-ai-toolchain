@@ -14,3 +14,7 @@ keywords:
 ---
 
 Push trained models to edge devices for on-premises robot operation. This section covers device configuration and edge-specific workflows.
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

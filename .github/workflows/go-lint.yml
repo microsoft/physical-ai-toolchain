@@ -13,6 +13,15 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.go-lint.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.go-lint.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.go-lint.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.go-lint.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.go-lint.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.go-lint.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.go-lint.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.go-lint.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -25,6 +34,16 @@ jobs:
   go-lint:
     name: Go Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -59,4 +78,15 @@ jobs:
         with:
           name: go-lint-results
           path: logs/go-lint-results.json
-          if-no-files-found: ignore
+          if-no-files-found: error
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: go-lint
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["go-lint"]'
+          reports: '[{"path":"logs/go-lint-results.json","kind":"json"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

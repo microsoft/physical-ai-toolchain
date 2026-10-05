@@ -53,7 +53,7 @@ Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {
         }
     }
 
-    Context 'Merge-base fails, HEAD~1 fallback' {
+    Context 'Merge-base fails despite available HEAD~1' {
         BeforeEach {
             Mock git {
                 $global:LASTEXITCODE = 128
@@ -73,13 +73,13 @@ Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {
             Mock Test-Path { return $true } -ModuleName 'LintingHelpers' -ParameterFilter { $PathType -eq 'Leaf' }
         }
 
-        It 'Falls back to HEAD~1 comparison and returns files' {
-            $result = Get-ChangedFilesFromGit -FileExtensions @('*.ps1')
-            $result | Should -Contain 'fallback-file.ps1'
+        It 'Rejects an unverified comparison instead of using HEAD~1' {
+            { Get-ChangedFilesFromGit -FileExtensions @('*.ps1') } | Should -Throw '*merge base*'
+            Should -Not -Invoke git -ModuleName LintingHelpers -ParameterFilter { $args[0] -eq 'diff' }
         }
     }
 
-    Context 'Both fallbacks fail, uses diff-filter ACMR on HEAD' {
+    Context 'Merge-base and previous commit are unavailable' {
         BeforeEach {
             Mock git {
                 $global:LASTEXITCODE = 128
@@ -99,9 +99,8 @@ Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {
             Mock Test-Path { return $true } -ModuleName 'LintingHelpers' -ParameterFilter { $PathType -eq 'Leaf' }
         }
 
-        It 'Falls back to git diff --diff-filter=ACMR HEAD and returns files' {
-            $result = Get-ChangedFilesFromGit -FileExtensions @('*.ps1')
-            $result | Should -Contain 'unstaged-file.ps1'
+        It 'Rejects a working-tree fallback' {
+            { Get-ChangedFilesFromGit -FileExtensions @('*.ps1') } | Should -Throw '*merge base*'
         }
     }
 
@@ -207,9 +206,8 @@ Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {
             } -ModuleName 'LintingHelpers' -ParameterFilter { $args[0] -eq 'diff' }
         }
 
-        It 'Returns empty array when git diff fails' {
-            $result = Get-ChangedFilesFromGit
-            $result | Should -BeNullOrEmpty
+        It 'Fails when git diff fails rather than reporting no changes' {
+            { Get-ChangedFilesFromGit } | Should -Throw '*compare Git changes*'
         }
     }
 
@@ -220,13 +218,12 @@ Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {
             } -ModuleName 'LintingHelpers' -ParameterFilter { $args[0] -eq 'merge-base' }
         }
 
-        It 'Catches exceptions and returns empty array' {
-            $result = Get-ChangedFilesFromGit
-            $result | Should -BeNullOrEmpty
+        It 'Propagates comparison exceptions' {
+            { Get-ChangedFilesFromGit } | Should -Throw '*Simulated git failure*'
         }
     }
 
-    Context 'Third fallback explicit staged+unstaged diff' {
+    Context 'Unverified staged and unstaged changes' {
         BeforeEach {
             Mock git {
                 $global:LASTEXITCODE = 128
@@ -246,9 +243,9 @@ Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {
             Mock Test-Path { return $true } -ModuleName 'LintingHelpers' -ParameterFilter { $PathType -eq 'Leaf' }
         }
 
-        It 'Falls through to staged+unstaged diff when merge-base and HEAD~1 both fail' {
-            $result = Get-ChangedFilesFromGit -BaseBranch 'origin/main' -FileExtensions @('*.md')
-            $result | Should -Contain 'docs/new.md'
+        It 'Does not substitute staged and unstaged changes for the requested comparison' {
+            { Get-ChangedFilesFromGit -BaseBranch 'origin/main' -FileExtensions @('*.md') } |
+                Should -Throw '*merge base*'
         }
     }
 
@@ -301,9 +298,8 @@ Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {
             } -ModuleName 'LintingHelpers' -ParameterFilter { $args[0] -eq 'merge-base' }
         }
 
-        It 'Returns empty array when git diff output cannot be parsed' {
-            $result = Get-ChangedFilesFromGit -BaseBranch 'origin/main'
-            $result | Should -BeNullOrEmpty
+        It 'Propagates unexpected comparison failures' {
+            { Get-ChangedFilesFromGit -BaseBranch 'origin/main' } | Should -Throw '*unexpected error*'
         }
     }
 }

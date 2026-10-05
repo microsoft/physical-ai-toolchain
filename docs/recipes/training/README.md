@@ -1,4 +1,7 @@
-# Training Recipes
+---
+title: Training Recipes
+description: Recipes for reinforcement learning and imitation learning with Isaac Lab, AzureML, and OSMO.
+---
 
 Guides for training reinforcement learning and imitation learning policies using Isaac Lab, AzureML, and OSMO.
 
@@ -14,3 +17,7 @@ Guides for training reinforcement learning and imitation learning policies using
 
 - [Training Guide](../../training/README.md) — reference documentation for RL and IL workflows
 - [Data Collection Recipes](../data-collection/README.md) — prepare datasets before training
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.
