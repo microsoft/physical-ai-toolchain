@@ -86,7 +86,11 @@ Environment checks read the environment from its non-secret bundle, never from t
 
 Before submitting, the runner confirms that the Azure CLI is signed in to the bundle's subscription. If the AKS cluster behind the compute target is stopped, for example after a nightly shutdown, the Azure ML checks report `not-run` instead of waiting for nodes; start the cluster and rerun.
 
-Jobs run one at a time with unique names, and their test models are archived afterward. Each job holds a GPU node for several minutes or more, so run only the categories a pull request touches. `E2E_AML_INSTANCE_TYPE` targets a specific GPU instance type. Don't run local builds while a job uploads its snapshot.
+Jobs run one at a time with unique names, and their test models are archived afterward. Each job holds a GPU node for several minutes or more, so run only the categories a pull request touches. Don't run local builds while a job uploads its snapshot.
+
+Each GPU check uses its submission script's default GPU instance type unless you export `E2E_AML_INSTANCE_TYPE`, or set it before the command; `.env.local` doesn't set it. For the pi0 check, the value applies to both the training and evaluation jobs. Training updates only pi0's action expert, but the gated backbone still has to fit, so if the default instance type can land on a GPU that's too small, choose a larger one.
+
+On managed AmlCompute clusters, where the cluster's VM size decides, export `E2E_AML_INSTANCE_TYPE` as an empty value so the pi0 jobs omit the instance type. The GPU smoke always needs a named instance type.
 
 The pi0 check needs a Hugging Face token that can read the gated base model. Add `HF_TOKEN=<token>` to the untracked repository-root `.env.local`. The runner, the e2e tests, and the submission scripts read it from there, and a value in `.env.local` takes precedence over an exported one. The [VLA training README](pathname://../../training/vla/README.md) explains how to create the token.
 

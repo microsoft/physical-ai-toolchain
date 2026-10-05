@@ -74,7 +74,9 @@ Environment checks never read environment details from tracked files. With `--en
 2. `~/.config/physical-ai-toolchain/environments/<name>`, where `download-environment-bundle.sh` stores it
 3. `infrastructure/setup/generated/<name>`, which is gitignored and written by the environment-deployment workflow
 
-The bundle fills `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZUREML_WORKSPACE_NAME`, `AZURE_STORAGE_ACCOUNT_NAME`, `AKS_CLUSTER_NAME`, and a derived `AZUREML_COMPUTE`. Variables you export yourself take precedence. With a named environment, the tests never consult local Terraform state, and a missing value fails the run. Set `E2E_AML_INSTANCE_TYPE` to target a specific GPU instance type for the GPU smoke and VLA checks.
+The bundle fills `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZUREML_WORKSPACE_NAME`, `AZURE_STORAGE_ACCOUNT_NAME`, `AKS_CLUSTER_NAME`, and a derived `AZUREML_COMPUTE`. Variables you export yourself take precedence. With a named environment, the tests never consult local Terraform state, and a missing value fails the run.
+
+Export `E2E_AML_INSTANCE_TYPE` to choose the GPU instance type for the GPU smoke and VLA checks; otherwise each submission script's GPU default applies. For the VLA check it covers both training and evaluation, and an empty value omits the instance type on managed AmlCompute.
 
 Secrets never go in a bundle. Put `HF_TOKEN` for the VLA check in the untracked repository-root `.env.local`, starting from `.env.local.example`. The runner, the e2e tests, and the submission scripts read it from there, and a value in `.env.local` takes precedence over an exported one. The runner passes the token only to the check that declares it, but every submission script loads all of `.env.local`, so LeRobot evaluation jobs receive it too.
 
