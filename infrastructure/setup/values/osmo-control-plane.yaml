@@ -188,17 +188,6 @@ services:
       minReplicas: 1
       maxReplicas: 1  # Dev cluster; increase for production
 
-    # Ingress configuration
-    ingress:
-      prefix: /
-      ingressClass: azureml-nginx  # e.g. alb, nginx
-      sslEnabled: false  # Set to true if managing SSL at the ingress level
-      annotations:
-        nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
-        nginx.ingress.kubernetes.io/proxy-buffers: "8 16k"
-        nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "32k"
-        nginx.ingress.kubernetes.io/large-client-header-buffers: "4 16k"
-
     # Resource allocation - reduced for constrained system node pools
     resources:
       requests:
@@ -224,18 +213,6 @@ services:
       minReplicas: 1
       maxReplicas: 1  # Dev cluster; increase for production
     serviceAccountName: router
-
-    # Ingress configuration
-    ingress:
-      prefix: /
-      ingressClass: azureml-nginx  # e.g. alb, nginx
-      sslEnabled: false  # Set to true if managing SSL at the ingress level
-      annotations:
-        # when using nginx ingress, add the following annotations to handle large OAuth2 response headers from identity providers
-        nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
-        nginx.ingress.kubernetes.io/proxy-buffers: "8 16k"
-        nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "32k"
-        nginx.ingress.kubernetes.io/large-client-header-buffers: "4 16k"
 
     # Resource allocation - reduced for constrained system node pools
     resources:
@@ -324,6 +301,20 @@ gateway:
   authz:
     enabled: false
   envoy:
+    # Private access goes through the Azure ML extension's internal NGINX
+    # load balancer (azureml-ingress-nginx-internal-lb). A LoadBalancer
+    # service here would get a public IP.
+    service:
+      type: ClusterIP
+    ingress:
+      enabled: true
+      ingressClass: azureml-nginx
+      annotations:
+        # Room for large OAuth2 response headers from identity providers
+        nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+        nginx.ingress.kubernetes.io/proxy-buffers: "8 16k"
+        nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "32k"
+        nginx.ingress.kubernetes.io/large-client-header-buffers: "4 16k"
     defaultIdentity:
       user: "admin"
       roles: "osmo-admin,osmo-backend,osmo-ctrl"

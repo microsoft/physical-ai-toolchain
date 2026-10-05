@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Install the Microsoft GRID driver on Azure RTX PRO 6000 vGPU nodes.
+# Fallback for pools created with gpu_driver = "None"; AKS installs this driver
+# itself on pools with gpu_driver = "Install".
 set -o errexit -o nounset -o pipefail
 
-readonly DRIVER_URL="https://download.microsoft.com/download/85beffdc-8361-4df4-a823-dcb1b230a7aa/NVIDIA-Linux-x86_64-580.105.08-grid-azure.run"
-readonly DRIVER_SHA256="b360c7edf0686c7e47b1dc7980baa5c7740a00eb372cfafe045a28b4456fb32b"
-readonly DRIVER_FILE="/tmp/NVIDIA-Linux-x86_64-580.105.08-grid-azure.run"
+# Microsoft's supported NCv6 GRID driver: vGPU 20.2 (R595)
+readonly DRIVER_URL="https://download.microsoft.com/download/a7cb6d36-3bbc-43d6-9e88-e0842e6f9ab9/NVIDIA-Linux-x86_64-595.91.07-grid-azure.run"
+readonly DRIVER_SHA256="72056e38ee17d86606ebdb97594d01cd1fe64b1fbd7e1a888634fa959529ca0a"
+readonly DRIVER_FILE="/tmp/NVIDIA-Linux-x86_64-595.91.07-grid-azure.run"
 KERNEL_RELEASE="$(uname -r)"
 readonly KERNEL_RELEASE
 
@@ -42,11 +45,9 @@ wget -q -O "$DRIVER_FILE" "$DRIVER_URL"
 echo "${DRIVER_SHA256}  ${DRIVER_FILE}" | sha256sum -c --quiet -
 chmod +x "$DRIVER_FILE"
 
-echo "Installing GRID driver (compiling kernel modules)..."
-if ! "$DRIVER_FILE" --silent --no-drm 2>&1; then
-  echo "Retrying with open kernel modules..."
-  "$DRIVER_FILE" -M open --silent --no-drm 2>&1
-fi
+# RTX PRO 6000 Blackwell GPUs require the open kernel modules.
+echo "Installing GRID driver with open kernel modules..."
+"$DRIVER_FILE" -M open --silent --no-drm 2>&1
 
 echo "Loading NVIDIA kernel modules..."
 modprobe nvidia

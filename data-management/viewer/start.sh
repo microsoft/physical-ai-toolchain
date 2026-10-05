@@ -154,6 +154,40 @@ check_prerequisites() {
     fi
 }
 
+require_port_available() {
+    local port="$1"
+    local service="$2"
+    local python_command
+
+    python_command="$(command -v python3 || command -v python)"
+    if ! "${python_command}" - "${port}" <<'PY'
+import socket
+import sys
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+    try:
+        listener.bind(("0.0.0.0", int(sys.argv[1])))
+    except OSError:
+        raise SystemExit(1) from None
+PY
+    then
+        log_error "${service} port ${port} is already in use"
+        return 1
+    fi
+}
+
+is_running_job() {
+    local pid="$1"
+    local running_pid
+
+    while IFS= read -r running_pid; do
+        if [[ "${running_pid}" == "${pid}" ]]; then
+            return 0
+        fi
+    done < <(jobs -pr)
+    return 1
+}
+
 wait_for_service() {
     local url="$1"
     local pid="$2"
@@ -163,9 +197,15 @@ wait_for_service() {
     log_info "Waiting for ${label} to be ready..."
 
     while [[ ${elapsed} -lt ${HEALTH_TIMEOUT} ]]; do
-        if ! kill -0 "${pid}" 2>/dev/null; then
+        if ! is_running_job "${pid}"; then
+            local status=1
+            if wait "${pid}"; then
+                status=1
+            else
+                status=$?
+            fi
             log_error "${label} exited before readiness"
-            return 1
+            return "${status}"
         fi
         if curl --max-time 2 -sf "${url}" >/dev/null 2>&1; then
             log_success "${label} is healthy"
@@ -179,9 +219,22 @@ wait_for_service() {
     return 1
 }
 
+wait_for_either_service() {
+    while kill -0 "${BACKEND_PID}" 2>/dev/null && kill -0 "${FRONTEND_PID}" 2>/dev/null; do
+        sleep 1
+    done
+
+    if ! kill -0 "${BACKEND_PID}" 2>/dev/null; then
+        wait "${BACKEND_PID}"
+    else
+        wait "${FRONTEND_PID}"
+    fi
+}
+
 start_backend() {
+    require_port_available "${BACKEND_PORT}" "Backend"
     log_info "Starting backend on port ${BACKEND_PORT}..."
-    local backend_install_extras=".[dev,analysis,export]"
+    local backend_sync_args=(--frozen --python 3.12 --group dev --extra analysis --extra export)
     local vlm_judge_package_spec="${REPO_ROOT}/evaluation/vlm_judge"
     local should_install_vlm_judge=false
 
@@ -207,7 +260,7 @@ start_backend() {
         should_install_vlm_judge=true
         if [[ "${VLM_JUDGE_BACKEND:-echo}" == "qwen3-vl" ]]; then
             vlm_judge_package_spec="${vlm_judge_package_spec}[qwen3-vl]"
-            backend_install_extras=".[dev,analysis,export,vlm-judge]"
+            backend_sync_args+=(--extra vlm-judge)
         elif [[ "${VLM_JUDGE_BACKEND:-echo}" == "openai-compat" ]]; then
             vlm_judge_package_spec="${vlm_judge_package_spec}[openai]"
         fi
@@ -243,11 +296,8 @@ start_backend() {
     if [[ ! -d "${BACKEND_DIR}/.venv" ]]; then
         log_warn "Virtual environment not found at ${BACKEND_DIR}/.venv"
         log_info "Creating virtual environment..."
-
         if command -v uv &>/dev/null; then
-            (cd "${BACKEND_DIR}" && uv venv --python 3.12)
-            # shellcheck source=/dev/null
-            (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${backend_install_extras}")
+            (cd "${BACKEND_DIR}" && uv sync "${backend_sync_args[@]}")
             if [[ "${should_install_vlm_judge}" == "true" ]]; then
                 # shellcheck source=/dev/null
                 (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${vlm_judge_package_spec}")
@@ -258,8 +308,7 @@ start_backend() {
         fi
     elif [[ "${should_install_vlm_judge}" == "true" ]]; then
         log_info "Ensuring VLM judge package dependencies are installed..."
-        # shellcheck source=/dev/null
-        (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${backend_install_extras}")
+        (cd "${BACKEND_DIR}" && uv sync --inexact "${backend_sync_args[@]}")
         # shellcheck source=/dev/null
         (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${vlm_judge_package_spec}")
     fi
@@ -282,6 +331,7 @@ resolve_vite_bin() {
 }
 
 start_frontend() {
+    require_port_available "${FRONTEND_PORT}" "Frontend"
     log_info "Starting frontend on port ${FRONTEND_PORT}..."
     local frontend_api_base_url="${VITE_API_BASE_URL:-http://localhost:${BACKEND_PORT}}"
     local vite_bin
@@ -422,12 +472,7 @@ main() {
             log_info "Press Ctrl+C to stop all services"
             echo ""
 
-            # Bash 3.2 on macOS does not support wait -n.
-            while kill -0 "${BACKEND_PID}" 2>/dev/null && kill -0 "${FRONTEND_PID}" 2>/dev/null; do
-                sleep 1
-            done
-            log_error "A service exited unexpectedly"
-            return 1
+            wait_for_either_service
         else
             return 1
         fi

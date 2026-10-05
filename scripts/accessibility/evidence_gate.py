@@ -2305,7 +2305,7 @@ def prepare_docusaurus_reviewer_handoff(
         expected_human_cells, "cellId", "canonical human cell"
     ):
         raise ValueError("Reviewer handoff canonical human cell inventory drifted")
-    if journeys != {item["journeyId"]: item for item in assets["journeys"]}:
+    if _hve_canonicalize(journeys) != _hve_canonicalize({item["journeyId"]: item for item in assets["journeys"]}):
         raise ValueError("Reviewer handoff canonical journey inventory drifted")
     method_counts = Counter(item["method"] for item in human_cells)
 

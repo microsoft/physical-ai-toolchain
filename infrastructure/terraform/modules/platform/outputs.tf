@@ -44,9 +44,10 @@ output "network_security_group" {
 
 output "nat_gateway" {
   description = "NAT Gateway for outbound connectivity. Null when NAT Gateway is disabled"
-  value = try({
+  // Keyed on the flag rather than try() so consumers can use its nullness in count during plan
+  value = var.should_enable_nat_gateway ? {
     id = azurerm_nat_gateway.main[0].id
-  }, null)
+  } : null
 }
 
 /*

@@ -3,7 +3,7 @@ sidebar_position: 7
 title: OSMO Training Workflows
 description: Submit Isaac Lab training jobs to NVIDIA OSMO on Azure Kubernetes Service
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-18
+ms.date: 2026-09-30
 ms.topic: how-to
 keywords:
   - osmo
@@ -190,7 +190,7 @@ osmo version
 ```
 
 > [!NOTE]
-> Verify the internal load balancer IP: `kubectl get svc -n azureml azureml-nginx-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}'`
+> Verify the internal load balancer IP: `kubectl get svc -n azureml azureml-ingress-nginx-internal-lb -o jsonpath='{.status.loadBalancer.ingress[0].ip}'`
 
 ### Via Port-Forward (Public Cluster without VPN)
 

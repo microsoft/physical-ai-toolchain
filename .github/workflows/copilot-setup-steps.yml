@@ -67,7 +67,8 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
-          version: '0.12.8'
+          version: '0.12.20'
+          checksum: '6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f'
 
       - name: Setup Node.js (frontend pin)
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
@@ -110,7 +111,7 @@ jobs:
 
       - name: Presync dataviewer backend Python (dev + analysis + hdf5 + export + auth)
         working-directory: data-management/viewer/backend
-        run: uv sync --frozen --extra dev --extra analysis --extra hdf5 --extra export --extra auth
+        run: uv sync --frozen --group dev --extra analysis --extra hdf5 --extra export --extra auth
 
       - name: Presync evaluation Python dev group
         working-directory: evaluation
@@ -128,8 +129,8 @@ jobs:
       - name: Bootstrap hve-core RPI skills
         env:
           GH_TOKEN: ${{ github.token }}
-          # microsoft/hve-core derived-files release: hve-core-v3.2.2 (2026-03-23)
-          HVE_CORE_DERIVED_FILES_REF: e69486a5f809ede45c63c0a31358c12912bd5168
+          # microsoft/hve-core derived-files release: hve-core-v3.3.101 (2026-04-25)
+          HVE_CORE_DERIVED_FILES_REF: 0d4452b33c2409d03315019dae0d34e468641dfb
           RPI_SKILLS_REF: 130ab64338bb77e912e603693672c31f14bc60c6
         run: |
           skills=(

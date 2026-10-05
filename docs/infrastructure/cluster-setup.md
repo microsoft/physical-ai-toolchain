@@ -60,30 +60,18 @@ kubectl cluster-info
 
 # Choose your path:
 # - AzureML: ./02-deploy-azureml-extension.sh
-# - OSMO:    ./03-deploy-osmo.sh
+# - OSMO:    ./03-deploy-osmo.sh --private-service-ip <unused-aks-subnet-ip>
 ```
 
 > [!IMPORTANT]
-> **Do not re-run `03-deploy-osmo.sh` against a Postgres database that already holds OSMO state from a previous AKS cluster.** Script 03 mints a fresh Master Encryption Key on every run; the new key cannot decrypt rows wrapped by the previous one, and OSMO will fail with `jwcrypto` `InvalidJWEData` / `InvalidTag` errors on login and on workflow submission.
+> **Do not re-run `03-deploy-osmo.sh` against a Postgres database that already holds OSMO state from a previous AKS cluster.** On a cluster without a `mek-config` ConfigMap, script 03 creates a new Master Encryption Key. The new key cannot decrypt rows wrapped by the previous one, and OSMO will fail with `jwcrypto` `InvalidJWEData` / `InvalidTag` errors on login and on workflow submission. Reruns on the same cluster keep the existing key.
 >
 > If you destroyed and re-created AKS while preserving the Postgres flexible server, first drop and re-create the `osmo` database (or `TRUNCATE` the `configs`, `credential`, `ueks`, and `backends` tables) before running script 03 again.
 
 <!-- -->
 
 > [!NOTE]
-> **Supported OSMO version.** This repository targets a single current OSMO release — **6.3** (chart `1.3.1`, image `6.3.1`; see [Component Inventory](../contributing/component-updates.md#component-inventory)). Support tracks the current upstream release and may change as OSMO advances; older versions are not maintained here.
-
-<!-- -->
-
-> [!WARNING]
-> **Upgrading from OSMO 6.2?** A direct rerun is not supported. OSMO 6.3 folds the standalone `router` and `web-ui` charts into the `service` chart, and `03-deploy-osmo.sh` now installs a single Helm release named `osmo` (replacing the previous `service`, `router`, and `ui` releases). It also defaults to ConfigMap mode (`services.configs.enabled: true`), under which CLI/API config writes return HTTP 409. Before deploying 6.3:
->
-> 1. Export any database-stored config to Helm values with NVIDIA's `deployments/upgrades/export_configs_to_helm.py`, then fold it into `infrastructure/setup/values/osmo-platforms.yaml` (ConfigMap mode replaces the `osmo config` API).
-> 2. Remove the legacy Helm releases so the new `osmo` release installs cleanly (adjust names/namespace to your install):
->    `helm uninstall web-ui router service -n osmo-control-plane`
-> 3. Run `infrastructure/setup/03-deploy-osmo.sh`.
->
-> See NVIDIA's [OSMO 6.3.0 release notes](https://github.com/NVIDIA/OSMO/blob/main/releases/6.3.0.md) for the full list of breaking changes (router/web-ui consolidation, squid-proxy sidecar removal, ConfigMap mode).
+> **Supported OSMO version.** This repository targets one OSMO release, **6.3** (chart `1.3.1`, image `6.3.1`; see [Component Inventory](../contributing/component-updates.md#component-inventory)). Support follows the current upstream release, and older versions aren't maintained here. To move an older install to 6.3, see [Upgrade from Earlier OSMO Releases](#-upgrade-from-earlier-osmo-releases).
 
 ## 🔐 Deployment Scenarios
 
@@ -98,6 +86,7 @@ Use Azure Workload Identity for key-less authentication.
 osmo_config = {
   should_enable_identity   = true
   should_federate_identity = true
+  should_create_secret     = true
   control_plane_namespace  = "osmo-control-plane"
   operator_namespace       = "osmo-operator"
   workflows_namespace      = "osmo-workflows"
@@ -107,52 +96,39 @@ osmo_config = {
 ```bash
 ./01-deploy-robotics-charts.sh
 ./02-deploy-azureml-extension.sh
-./03-deploy-osmo.sh
+./03-deploy-osmo.sh --private-service-ip <unused-aks-subnet-ip>
 ```
 
 Script `03-deploy-osmo.sh` auto-detects the OSMO managed identity from Terraform outputs and configures ServiceAccount annotations for the service and backend operator.
+
+On a new cluster, pass `--private-service-ip` with a free address in the AKS subnet (`10.0.5.0/24` by default). Script 03 gives that address to the internal load balancer in front of OSMO, which VPN clients, the private DNS record, and HiL backends use. Pick an address that no node or other resource holds, outside the Kubernetes service CIDR and the five addresses Azure reserves in every subnet.
+
+Later runs reuse the address when you omit the flag. Passing a different one moves the load balancer, so update the DNS record and HiL backends if you do.
 
 ### Workload Identity + Private ACR (Air-Gapped)
 
 Enterprise deployment using private Azure Container Registry.
 
-Prerequisite: import images to ACR before deployment.
+Before deploying, import the pinned OSMO images and Helm charts into the Terraform-deployed ACR. From `infrastructure/setup/`:
 
 ```bash
-# Get ACR name and import images
-cd ../001-iac
-ACR_NAME=$(terraform output -json container_registry | jq -r '.value.name')
-az acr login --name "$ACR_NAME"
-
-# Set versions
-OSMO_VERSION="${OSMO_VERSION:-6.3.1}"
-CHART_VERSION="${CHART_VERSION:-1.3.1}"
-
-OSMO_IMAGES=(
-  service worker logger agent
-  backend-listener backend-worker client
-  delayed-job-monitor init-container
-)
-for img in "${OSMO_IMAGES[@]}"; do
-  az acr import --name "$ACR_NAME" \
-    --source "nvcr.io/nvidia/osmo/${img}:${OSMO_VERSION}" \
-    --image "osmo/${img}:${OSMO_VERSION}"
-done
-
-# Import Helm charts
-for chart in osmo backend-operator; do
-  helm pull "oci://nvcr.io/nvidia/osmo/${chart}" --version "$CHART_VERSION"
-  helm push "${chart}-${CHART_VERSION}.tgz" "oci://${ACR_NAME}.azurecr.io/helm"
-  rm "${chart}-${CHART_VERSION}.tgz"
-done
+./import-osmo-to-acr.sh --environment <environment> --config-preview
+./import-osmo-to-acr.sh --environment <environment>
 ```
 
+The script imports the 11 OSMO images from `nvcr.io` with `az acr import`. It pulls the `service` and `backend-operator` charts from the NGC Helm repository, checks them against the SHA-256 values pinned in `defaults.conf`, and pushes them to `oci://<registry>/helm`. Every imported tag is locked against writes and deletes, and the image digests go into `generated/<environment>/osmo-images.json`.
+
+Reruns reuse locked tags. Pushing charts and reading tags need data-plane access to the registry, so connect to the VPN first if the registry blocks public access.
+
 ```bash
-cd ../002-setup
 ./01-deploy-robotics-charts.sh
 ./02-deploy-azureml-extension.sh
-./03-deploy-osmo.sh --use-acr
+./03-deploy-osmo.sh --use-acr \
+  --image-manifest generated/<environment>/osmo-images.json \
+  --private-service-ip <unused-aks-subnet-ip>
 ```
+
+The OSMO gateway's Envoy image still comes from Docker Hub, so a cluster without internet access needs that image mirrored separately.
 
 ### Scenario Comparison
 
@@ -161,6 +137,17 @@ cd ../002-setup
 | Storage Auth | Workload Identity |    Workload Identity    |
 | Registry     |      nvcr.io      |       Private ACR       |
 | Air-Gap      |         ✗         |            ✓            |
+
+## 🔄 Upgrade from Earlier OSMO Releases
+
+`03-deploy-osmo.sh` stops when `osmo-control-plane` holds a pre-6.3 install: separate releases of the `service`, `router`, or `web-ui` charts, or an `osmo` release on an older chart line. Upgrade those installs, from 6.0-era builds through 6.2, with `infrastructure/setup/optional/upgrade-osmo.sh`, one confirmed stage per run:
+
+| Path      | Stages, in order                                                 |
+|-----------|------------------------------------------------------------------|
+| Keep data | `backup`, `hop-6.2`, `tokens`, `export`, `hop-6.3`, and `verify` |
+| Fresh     | `backup`, `reset`, `hop-6.3`, and `verify`                       |
+
+Both paths end in ConfigMap mode, where config writes through the CLI or API return HTTP 409 and pools change through Helm values. See [OSMO Upgrade from Pre-6.3 Releases](osmo-upgrade.md) for prerequisites, the config review, HiL token renewal, and the rollback runbook.
 
 ## 🔒 Security Considerations
 
@@ -178,20 +165,22 @@ See [Secure Kubernetes online endpoints](https://learn.microsoft.com/azure/machi
 
 ## 📜 Scripts
 
-| Script                           | Purpose                                         |
-|----------------------------------|-------------------------------------------------|
-| `01-deploy-robotics-charts.sh`   | GPU Operator, KAI Scheduler                     |
-| `02-deploy-azureml-extension.sh` | AzureML K8s extension, compute attach           |
-| `03-deploy-osmo.sh`              | OSMO service, backend operator, platform config |
+| Script                           | Purpose                                              |
+|----------------------------------|------------------------------------------------------|
+| `01-deploy-robotics-charts.sh`   | GPU Operator, KAI Scheduler                          |
+| `02-deploy-azureml-extension.sh` | AzureML K8s extension, compute attach                |
+| `03-deploy-osmo.sh`              | OSMO service, backend operator, platform config      |
+| `import-osmo-to-acr.sh`          | Pinned OSMO images and charts in ACR, image manifest |
 
 ### Script Flags
 
-| Flag               | Scripts             | Description                      |
-|--------------------|---------------------|----------------------------------|
-| `--use-acr`        | `03-deploy-osmo.sh` | Pull from Terraform-deployed ACR |
-| `--acr-name NAME`  | `03-deploy-osmo.sh` | Specify alternate ACR            |
-| `--skip-backend`   | `03-deploy-osmo.sh` | Skip backend operator deployment |
-| `--config-preview` | All                 | Print config and exit            |
+| Flag                    | Scripts             | Description                                                            |
+|-------------------------|---------------------|------------------------------------------------------------------------|
+| `--use-acr`             | `03-deploy-osmo.sh` | Pull from Terraform-deployed ACR                                       |
+| `--acr-name NAME`       | `03-deploy-osmo.sh` | Specify alternate ACR                                                  |
+| `--image-manifest PATH` | `03-deploy-osmo.sh` | Image manifest from `import-osmo-to-acr.sh`, required with `--use-acr` |
+| `--skip-backend`        | `03-deploy-osmo.sh` | Skip backend operator deployment                                       |
+| `--config-preview`      | All                 | Print config and exit                                                  |
 
 ## ⚙️ Configuration
 
@@ -218,5 +207,11 @@ kubectl get sa -n osmo-control-plane osmo-control-plane -o yaml | grep azure.wor
 
 ## 🔗 Related
 
-- [Cluster Operations](cluster-setup-advanced.md) — accessing OSMO, troubleshooting, optional scripts
-- [Cleanup and Destroy](cleanup.md) — resource teardown procedures
+- [Cluster Operations](cluster-setup-advanced.md): accessing OSMO, troubleshooting, optional scripts
+- [OSMO Upgrade from Pre-6.3 Releases](osmo-upgrade.md): staged upgrade, backups, and rollback
+- [Cleanup and Destroy](cleanup.md): resource teardown procedures
+
+<!-- markdownlint-disable MD036 -->
+*🤖 Crafted with precision by ✨Copilot following brilliant human instruction,
+then carefully refined by our team of discerning human reviewers.*
+<!-- markdownlint-enable MD036 -->

@@ -66,6 +66,7 @@ OPTIONS:
     --mek-config-file PATH  Use existing MEK config file
     --service-url URL       OSMO control plane URL (default: auto-detect)
     --private-service-ip IP Stable RFC1918 frontend IP for the internal LoadBalancer
+                            (required on first install; later runs reuse it)
     --hil-backend-name NAME Add an external HiL backend and CPU pool
     --hil-pool-name NAME    HiL pool name (default: backend name)
     --hil-workflow-namespace NAME
@@ -266,7 +267,7 @@ if [[ "$config_preview" == "true" ]]; then
     print_kv "Image Manifest" "${image_manifest:-not used}"
     print_kv "Auth Mode" "workload-identity"
     print_kv "Backend Name" "$backend_name"
-    print_kv "Private Service IP" "${private_service_ip:-<required for HiL>}"
+    print_kv "Private Service IP" "${private_service_ip:-<existing LoadBalancer address; required on first install>}"
     print_kv "HiL Backend" "${hil_backend_name:-not configured}"
     print_kv "HiL Pool" "${hil_pool_name:-not configured}"
     print_kv "Backend" "$([[ $skip_backend == true ]] && echo 'skipped' || echo 'deployed')"
@@ -293,6 +294,15 @@ if [[ "$skip_backend" == "false" && -n "$backend_chart_sha256" ]]; then
 fi
 
 connect_aks "$resource_group" "$aks_cluster" "$kubeconfig" "$context"
+
+# Pre-6.3 installs run separate service, router, and web-ui releases, or an older osmo
+# chart line. Installing over them collides on resource ownership, so stop before any
+# change. --skip-preflight doesn't skip this check.
+legacy_releases=$(osmo_legacy_releases "$NS_OSMO_CONTROL_PLANE" "$chart_version")
+if [[ -n "$legacy_releases" ]]; then
+    error "Legacy OSMO releases in $NS_OSMO_CONTROL_PLANE: $(awk -F'\t' '{printf "%s%s (%s)", (NR > 1 ? ", " : ""), $1, $2}' <<< "$legacy_releases")"
+    fatal "This script installs OSMO as one osmo release on chart $chart_version and can't run over them. Upgrade with infrastructure/setup/optional/upgrade-osmo.sh; see docs/infrastructure/osmo-upgrade.md"
+fi
 
 if [[ -n "$hil_backend_name" ]] && helm status osmo -n "$NS_OSMO_CONTROL_PLANE" >/dev/null 2>&1; then
         current_values=$(helm get values osmo -n "$NS_OSMO_CONTROL_PLANE" -o json --all)
@@ -322,6 +332,12 @@ info "Applying internal LoadBalancer ingress service..."
 if [[ -z "$private_service_ip" ]]; then
     private_service_ip=$(kubectl get svc azureml-ingress-nginx-internal-lb -n azureml \
     -o jsonpath='{.metadata.annotations.service\.beta\.kubernetes\.io/azure-load-balancer-ipv4}' 2>/dev/null || true)
+fi
+# Older installs created the service without the ipv4 annotation; pin the address it already has.
+if [[ -z "$private_service_ip" ]]; then
+    private_service_ip=$(kubectl get svc azureml-ingress-nginx-internal-lb -n azureml \
+    -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+    [[ -z "$private_service_ip" ]] || info "Pinning the internal LoadBalancer's current address $private_service_ip"
 fi
 [[ -n "$private_service_ip" ]] || fatal "A stable private service IP is required; pass --private-service-ip"
 is_rfc1918_ipv4 "$private_service_ip" || fatal "Private service IP must be an RFC1918 IPv4 address"
@@ -474,7 +490,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: psql
-      image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
+      image: $POSTGRES_CLIENT_IMAGE
       env:
         - name: PGPASSWORD
           valueFrom:

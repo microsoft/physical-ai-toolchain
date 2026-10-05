@@ -31,7 +31,7 @@
     "@mdx-js/react": "3.1.1",
     "clsx": "2.1.1",
     "docusaurus-plugin-image-zoom": "3.0.1",
-    "mermaid": "11.17.2",
+    "mermaid": "12.1.0",
     "prism-react-renderer": "2.4.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -52,7 +52,7 @@
     "@typescript-eslint/parser": "8.70.0",
     "eslint": "10.10.0",
     "eslint-plugin-jsx-a11y-x": "0.2.0",
-    "express": "4.22.1",
+    "express": "5.2.1",
     "express-rate-limit": "8.7.0",
     "identity-obj-proxy": "3.0.0",
     "jest": "30.5.2",
@@ -62,10 +62,13 @@
     "typescript": "6.0.3"
   },
   "overrides": {
-    "express": "4.22.1",
+    "express": "5.2.1",
     "follow-redirects": "1.16.0",
     "lodash": "4.18.1",
     "path-to-regexp": "1.9.0",
+    "router": {
+      "path-to-regexp": "8.4.2"
+    },
     "qs": "6.15.2",
     "serialize-javascript": "7.0.5",
     "ws": "8.20.1",
