@@ -2866,8 +2866,8 @@ def test_given_accessibility_runtime_contracts_when_inspected_then_native_toolch
     breadcrumb_js = _REPOSITORY_ROOT / "docs/docusaurus/src/theme/DocBreadcrumbs/index.js"
 
     assert annotation_model.splitlines()[7] == "from __future__ import annotations"
-    assert viewer_manifest["devDependencies"]["@playwright/test"] == "1.61.1"
-    assert viewer_lock["packages"]["data-management/viewer/frontend"]["devDependencies"]["@playwright/test"] == "1.61.1"
+    assert viewer_manifest["devDependencies"]["@playwright/test"] == "1.63.0"
+    assert viewer_lock["packages"]["data-management/viewer/frontend"]["devDependencies"]["@playwright/test"] == "1.63.0"
     assert breadcrumb_tsx.is_file()
     assert not breadcrumb_js.exists()
     assert "interface BreadcrumbLinkProps" in breadcrumb_tsx.read_text(encoding="utf-8")
