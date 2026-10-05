@@ -26,6 +26,8 @@ class TestHealthCheck:
 
 
 class TestHealthCheckAzureBranch:
+    pytestmark = pytest.mark.asyncio
+
     """The azure-mode health branch reports based on blob_provider presence."""
 
     async def test_azure_with_blob_provider_returns_healthy(self, monkeypatch):
