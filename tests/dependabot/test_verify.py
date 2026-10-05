@@ -299,6 +299,33 @@ def test_snapshot_checks_use_committed_files_and_clean_up(git_repo: Path) -> Non
     assert not snapshot_root.exists()
 
 
+def test_a_snapshot_is_its_own_repository_root(git_repo: Path) -> None:
+    roots: list[bool] = []
+
+    def executor(request: ExecutionRequest) -> int:
+        top = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=request.cwd / "infra",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        roots.append(str(Path(top.stdout.strip()).resolve()) == str(request.cwd.resolve()))
+        return top.returncode
+
+    result = run_check(
+        _check(snapshot=("infra",)),
+        repo_root=git_repo,
+        run_dir=git_repo / "logs" / "run",
+        env={},
+        values={"base_ref": "HEAD", "run_dir": "x"},
+        executor=executor,
+    )
+
+    assert result.status == "passed"
+    assert roots == [True]
+
+
 def test_snapshot_is_removed_when_the_command_errors(git_repo: Path) -> None:
     roots: list[Path] = []
 

@@ -526,7 +526,11 @@ def pytest_argv(check: Check, junit_path: Path) -> tuple[str, ...]:
 
 
 def create_snapshot(repo_root: Path, ref: str, paths: Sequence[str], destination: Path) -> None:
-    """Extract ``paths`` at ``ref`` into ``destination`` with git archive."""
+    """Extract ``paths`` at ``ref`` into ``destination`` with git archive.
+
+    The snapshot gets an empty git repository so scripts that find the repository root with
+    ``git rev-parse --show-toplevel`` resolve to the snapshot rather than a parent directory.
+    """
     archive = subprocess.run(
         ["git", "archive", "--format=tar", ref, "--", *paths], cwd=repo_root, capture_output=True, check=False
     )
@@ -534,6 +538,9 @@ def create_snapshot(repo_root: Path, ref: str, paths: Sequence[str], destination
         raise RuntimeError(f"git archive failed: {archive.stderr.decode(errors='replace').strip()}")
     with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
         tar.extractall(destination, filter="data")
+    initialized = subprocess.run(["git", "init", "-q"], cwd=destination, capture_output=True, check=False)
+    if initialized.returncode != 0:
+        raise RuntimeError(f"git init failed: {initialized.stderr.decode(errors='replace').strip()}")
 
 
 def junit_outcome(junit_path: Path) -> tuple[str, str | None]:
