@@ -86,7 +86,11 @@ Environment checks read the environment from its non-secret bundle, never from t
 
 Before submitting, the runner confirms that the Azure CLI is signed in to the bundle's subscription. If the AKS cluster behind the compute target is stopped, for example after a nightly shutdown, the Azure ML checks report `not-run` instead of waiting for nodes; start the cluster and rerun.
 
-Jobs run one at a time with unique names, and their test models are archived afterward. Each job holds a GPU node for several minutes or more, so run only the categories a pull request touches. The pi0 check needs `HF_TOKEN` with access to the gated base model, and `E2E_AML_INSTANCE_TYPE` targets a specific GPU instance type. Don't run local builds while a job uploads its snapshot.
+Jobs run one at a time with unique names, and their test models are archived afterward. Each job holds a GPU node for several minutes or more, so run only the categories a pull request touches. `E2E_AML_INSTANCE_TYPE` targets a specific GPU instance type. Don't run local builds while a job uploads its snapshot.
+
+The pi0 check needs a Hugging Face token that can read the gated base model. Add `HF_TOKEN=<token>` to the untracked repository-root `.env.local`; the runner, the e2e tests, and the submission scripts read it from there or from your environment. The [VLA training README](pathname://../../training/vla/README.md) explains how to create the token.
+
+The submission scripts set the token as an environment variable on the Azure ML jobs, where anyone who can read those jobs can see it, so use a fine-grained token that can only read that model.
 
 Each environment check has a time limit, set by `timeout_minutes` in the manifest, so a hung Azure call can't stall the run. When a check runs past its limit, the runner interrupts it and gives the test up to 15 minutes to cancel its jobs and archive its models before stopping it. The check then reports `failed` with a `timed out` reason.
 

@@ -4,7 +4,7 @@ End-to-end lifecycle test for Azure ML VLA pi0 training and evaluation.
 Stages a synthetic LeRobot dataset, submits a short pi0 training job, and
 validates its code snapshot, MLflow tracking, checkpoint output, registered
 model, and schema-v1 evaluation artifacts. The gated PaliGemma backbone requires
-``HF_TOKEN``.
+``HF_TOKEN``, exported or set in the repository-root ``.env.local``.
 
 ```shell
 uv run pytest -vv -s -m e2e tests/e2e/test_e2e_aml_vla_pi0_training.py
