@@ -714,6 +714,88 @@ def test_main_dry_run_never_executes(git_repo: Path, tiny_manifest: Path, capsys
 
 
 @pytest.mark.parametrize(
+    ("local_env", "environ", "expected"),
+    [
+        pytest.param(None, {}, "script default", id="nothing-set"),
+        pytest.param(
+            "E2E_AML_INSTANCE_TYPE=gpu-sample\n", {}, "gpu-sample (E2E_AML_INSTANCE_TYPE in .env.local)", id="file"
+        ),
+        pytest.param(
+            "E2E_AML_INSTANCE_TYPE=gpu-sample\n",
+            {"E2E_AML_INSTANCE_TYPE_INFRA": "gpu-other"},
+            "gpu-other (E2E_AML_INSTANCE_TYPE_INFRA in environment)",
+            id="category-variable",
+        ),
+    ],
+)
+def test_dry_run_shows_the_instance_type_of_each_gpu_check(
+    git_repo: Path,
+    tiny_manifest: Path,
+    capsys: pytest.CaptureFixture[str],
+    local_env: str | None,
+    environ: dict[str, str],
+    expected: str,
+) -> None:
+    if local_env is not None:
+        (git_repo / ".env.local").write_text(local_env, encoding="utf-8")
+
+    code = verify.main(
+        ["--category", "infra", "--tier", "all", "--environment", "sample", "--dry-run"],
+        executor=FakeExecutor(),
+        repo_root=git_repo,
+        manifest_path=tiny_manifest,
+        environ=environ,
+    )
+
+    output = capsys.readouterr().out
+    assert code == EXIT_PASSED
+    assert f"infra-live: instance type {expected}" in output
+    assert "infra-check: instance type" not in output
+
+
+def _run_environment_tier(git_repo: Path, tiny_manifest: Path, executor: FakeExecutor) -> dict[str, dict[str, str]]:
+    verify.main(
+        [
+            *("--category", "infra", "--tier", "environment", "--environment", "sample"),
+            *("--output-dir", str(git_repo / "logs" / "run")),
+        ],
+        executor=executor,
+        repo_root=git_repo,
+        manifest_path=tiny_manifest,
+        environ={},
+    )
+    summary = json.loads((git_repo / "logs" / "run" / "summary.json").read_text(encoding="utf-8"))
+    return {check["id"]: check for check in summary["checks"]}
+
+
+def test_an_empty_instance_type_in_local_env_stops_the_gpu_check(
+    git_repo: Path, tiny_manifest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(verify, "environment_preflight", lambda env, environment, repo_root: None)
+    (git_repo / ".env.local").write_text("E2E_AML_INSTANCE_TYPE_INFRA=\n", encoding="utf-8")
+    executor = FakeExecutor()
+
+    checks = _run_environment_tier(git_repo, tiny_manifest, executor)
+
+    assert checks["infra-live"]["status"] == "not-run"
+    assert "E2E_AML_INSTANCE_TYPE_INFRA is empty in .env.local" in checks["infra-live"]["reason"]
+    assert all("pytest" not in request.argv for request in executor.requests)
+
+
+def test_a_gpu_check_announces_its_instance_type_when_it_runs(
+    git_repo: Path, tiny_manifest: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(verify, "environment_preflight", lambda env, environment, repo_root: None)
+    (git_repo / ".env.local").write_text("E2E_AML_INSTANCE_TYPE=gpu-sample\n", encoding="utf-8")
+    executor = FakeExecutor()
+
+    _run_environment_tier(git_repo, tiny_manifest, executor)
+
+    assert any("pytest" in request.argv for request in executor.requests)
+    assert "infra-live: instance type gpu-sample (E2E_AML_INSTANCE_TYPE in .env.local)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
     "argv",
     [
         ["--category", "nope"],

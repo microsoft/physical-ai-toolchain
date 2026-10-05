@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from tests.e2e._aml import AzureMLWorkspace
+from tests.e2e._aml import AzureMLCompute, AzureMLWorkspace, aml_compute_from_payload
 from tests.e2e._common import run_command
 from tests.e2e._environment import (
     ENVIRONMENT_VAR,
@@ -377,9 +377,10 @@ def storage_account(repo_root: Path) -> str:
 
 
 @pytest.fixture(scope="session")
-def aml_compute_target(repo_root: Path, aml_workspace: AzureMLWorkspace) -> None:
+def aml_compute_target(repo_root: Path, aml_workspace: AzureMLWorkspace) -> AzureMLCompute:
     """
-    Ensures AML compute target is available, skipping tests if not.
+    Ensures AML compute target is available, skipping tests if not, and returns it with the
+    instance types a Kubernetes compute defines.
     The compute target name is determined by the AZUREML_COMPUTE env var (which a selected
     ``E2E_ENVIRONMENT`` bundle derives from its AKS cluster) or Terraform outputs.
     """
@@ -422,6 +423,7 @@ def aml_compute_target(repo_root: Path, aml_workspace: AzureMLWorkspace) -> None
         pytest.skip(
             f"AzureML compute target {compute_name} runs on an AKS cluster that is {power_state}; start it, then rerun"
         )
+    return aml_compute_from_payload(compute_name, payload)
 
 
 def _attached_aks_power_state(compute: dict[str, Any], repo_root: Path) -> str | None:

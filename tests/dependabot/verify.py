@@ -51,6 +51,7 @@ from tests.e2e._environment import (
     LocalEnvError,
     load_environment_bundle,
     read_local_env,
+    resolve_instance_type,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -416,6 +417,19 @@ def host_is_linux_amd64() -> bool:
 def _version_tuple(text: str) -> tuple[int, ...] | None:
     match = _VERSION_PATTERN.search(text)
     return tuple(int(part) for part in match.groups()) if match else None
+
+
+def instance_type_note(check: Check, repo_root: Path, env: Mapping[str, str]) -> tuple[str | None, str | None]:
+    """Describe the instance type a GPU environment check will request, or why it can't choose one.
+
+    Returns ``(description, problem)``; both are ``None`` for checks that run no GPU job.
+    """
+    if check.tier != "environment" or not check.gpu:
+        return None, None
+    try:
+        return resolve_instance_type(repo_root, check.category, env).describe(), None
+    except LocalEnvError as error:
+        return None, str(error)
 
 
 def preflight_reason(
@@ -862,6 +876,9 @@ def main(
             if check.container and not host_is_linux_amd64() and not check.pytest:
                 argv_preview = container_argv(check, argv_preview, repo_root)
             print(f"{check.tier:<11} {check.id}: {' '.join(argv_preview)}")
+            instance_type, instance_type_problem = instance_type_note(check, repo_root, env)
+            if instance_type or instance_type_problem:
+                print(f"{'':<11} {check.id}: instance type {instance_type or instance_type_problem}")
         for check in skipped:
             print(f"optional {check.id}: skipped (add --include-optional)")
         return EXIT_PASSED
@@ -905,6 +922,8 @@ def main(
         reason = preflight_reason(check, check_env, local_env_problem=problem)
         if check.tier == "environment" and environment_problem:
             reason = environment_problem
+        instance_type, instance_type_problem = instance_type_note(check, repo_root, env)
+        reason = reason or instance_type_problem
         if check.category in failed_setup:
             result = CheckResult(check.id, check.category, check.tier, check.gpu, check.optional, "failed")
             result.reason = "category setup failed"
@@ -914,6 +933,8 @@ def main(
             )
         else:
             print(f"run    {check.id} (log: {display_path(run_dir / f'{check.id}.log', repo_root)})", flush=True)
+            if instance_type:
+                print(f"       {check.id}: instance type {instance_type}", flush=True)
             result = run_check(
                 check, repo_root=repo_root, run_dir=run_dir, env=check_env, values=values, executor=executor
             )

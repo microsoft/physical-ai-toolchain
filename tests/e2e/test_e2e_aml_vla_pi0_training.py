@@ -6,6 +6,10 @@ validates its code snapshot, MLflow tracking, checkpoint output, registered
 model, and schema-v1 evaluation artifacts. The gated PaliGemma backbone requires
 ``HF_TOKEN``, exported or set in the repository-root ``.env.local``.
 
+Training and evaluation request the instance type in ``E2E_AML_INSTANCE_TYPE_VLA`` or
+``E2E_AML_INSTANCE_TYPE``, read from ``.env.local`` before the environment, or the scripts'
+defaults. pi0 needs a large GPU; its backbone alone nearly fills a 24 GB card.
+
 ```shell
 uv run pytest -vv -s -m e2e tests/e2e/test_e2e_aml_vla_pi0_training.py
 ```
@@ -18,6 +22,9 @@ from pathlib import Path
 import pytest
 
 from tests.e2e._aml import (
+    LEROBOT_EVAL_SCRIPT,
+    VLA_PI0_TRAINING_SCRIPT,
+    AzureMLCompute,
     AzureMLWorkspace,
     aml_lerobot_policy_source_from_model,
     assert_aml_lerobot_eval_artifact_contract,
@@ -25,7 +32,7 @@ from tests.e2e._aml import (
     assert_job_snapshot_contains_only_training,
     cancel_aml_job,
     cleanup_aml_job_and_model_versions,
-    requested_instance_type,
+    require_gpu_instance_type,
     resolve_registered_model,
     submit_aml_lerobot_eval,
     submit_aml_vla_pi0_training,
@@ -42,14 +49,17 @@ from tests.e2e._mlflow import (
 
 @pytest.mark.e2e
 @pytest.mark.requires_hf_token
-@pytest.mark.usefixtures("aml_compute_target")
 def test_aml_vla_pi0_lifecycle_e2e(
     request: pytest.FixtureRequest,
     aml_workspace: AzureMLWorkspace,
+    aml_compute_target: AzureMLCompute,
     repo_root: Path,
     storage_account: str,
 ) -> None:
     log_e2e("Starting AzureML VLA pi0 training e2e test")
+    instance_type = require_gpu_instance_type(
+        aml_compute_target, repo_root, category="vla", scripts=(VLA_PI0_TRAINING_SCRIPT, LEROBOT_EVAL_SCRIPT)
+    )
     dataset = stage_synthetic_lerobot_dataset(
         request,
         repo_root,
@@ -66,6 +76,7 @@ def test_aml_vla_pi0_lifecycle_e2e(
         batch_size=1,
         log_freq=1,
         register_model_name=register_model_name,
+        instance_type=instance_type,
     )
     request.addfinalizer(lambda: cleanup_aml_job_and_model_versions(job, repo_root, aml_workspace, register_model_name))
 
@@ -93,7 +104,7 @@ def test_aml_vla_pi0_lifecycle_e2e(
         blob_storage_account=dataset.storage_account,
         blob_container=dataset.container,
         blob_prefix=dataset.prefix,
-        instance_type=requested_instance_type(),
+        instance_type=instance_type,
     )
     request.addfinalizer(lambda: cancel_aml_job(eval_job, repo_root))
 

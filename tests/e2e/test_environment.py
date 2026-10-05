@@ -4,7 +4,8 @@ These cover the bundle loader in ``tests/e2e/_environment.py`` and the conftest 
 helpers that the Azure ML fixtures call, using synthetic bundles only. They prove that a
 selected ``E2E_ENVIRONMENT`` never consults local Terraform state, fails loudly when a
 required value is missing, that a stopped AKS cluster behind the compute target is detected,
-and that job cleanup can't hang on a cancel request or skip archiving test models.
+that job cleanup can't hang on a cancel request or skip archiving test models, and that a
+pipeline Azure ML creates without starting is retired and resubmitted once.
 """
 
 # cspell:ignore amlcompute
@@ -414,6 +415,180 @@ def test_cleanup_archives_models_when_the_job_never_stops(tmp_path: Path, monkey
     assert archived == ["sample-model"]
 
 
+class _FakePipelineService:
+    """Stand-in for the Azure ML calls that ``start_aml_pipeline`` makes, keyed by submission order."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, outcomes: list[str]) -> None:
+        self.outcomes = outcomes
+        self.submitted: list[_aml.AzureMLJob] = []
+        self.registered: list[str] = []
+        self.cancelled: list[tuple[str, float | None]] = []
+        self.archived: list[str] = []
+        self.waits: list[tuple[str, int]] = []
+        monkeypatch.setattr(_aml, "wait_until_aml_started", self.wait_until_started)
+        monkeypatch.setattr(_aml, "fetch_aml_job_payload", self.payload)
+        monkeypatch.setattr(_aml, "list_aml_child_jobs", self.children)
+        monkeypatch.setattr(_aml, "cancel_aml_job", self.cancel)
+        monkeypatch.setattr(_aml, "archive_aml_job", lambda job, repo_root: self.archived.append(job.name))
+        monkeypatch.setattr(_aml, "log_e2e", lambda message: None)
+
+    def outcome(self, job: _aml.AzureMLJob) -> str:
+        return self.outcomes[int(job.name.rsplit("-", 1)[1])]
+
+    def submit(self) -> _aml.AzureMLJob:
+        job = _aml.AzureMLJob(f"pipeline-{len(self.submitted)}", _sample_job().workspace, "sample")
+        self.submitted.append(job)
+        return job
+
+    def wait_until_started(
+        self, job: _aml.AzureMLJob, repo_root: Path, *, timeout_minutes: int, poll_interval_seconds: int
+    ) -> None:
+        self.waits.append((job.name, timeout_minutes))
+        outcome = self.outcome(job)
+        if outcome == "started" or (outcome == "slow" and len(self.waits) > 1):
+            return
+        if outcome == "failed":
+            raise AssertionError(f"AzureML job {job.name} to start failed with status 'Failed'")
+        raise AssertionError(f"Timed out waiting for AzureML job {job.name} to start; last status was 'NotStarted'")
+
+    def payload(self, job: _aml.AzureMLJob, repo_root: Path) -> dict[str, str]:
+        return {"status": "Failed" if self.outcome(job) == "failed" else "NotStarted"}
+
+    def children(self, job: _aml.AzureMLJob, repo_root: Path) -> list[str]:
+        return ["step"] if self.outcome(job) == "slow" else []
+
+    def cancel(self, job: _aml.AzureMLJob, repo_root: Path, *, timeout_seconds: float | None = None) -> None:
+        self.cancelled.append((job.name, timeout_seconds))
+
+    def start(self, repo_root: Path) -> _aml.AzureMLJob:
+        return _aml.start_aml_pipeline(
+            self.submit,
+            repo_root,
+            on_submitted=lambda job: self.registered.append(job.name),
+            timeout_minutes=15,
+            poll_interval_seconds=30,
+        )
+
+
+def test_a_pipeline_that_starts_is_returned_without_a_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = _FakePipelineService(monkeypatch, ["started"])
+
+    job = service.start(tmp_path)
+
+    assert job.name == "pipeline-0"
+    assert service.registered == ["pipeline-0"]
+    assert service.waits == [("pipeline-0", _aml.AML_ORPHAN_WINDOW_MINUTES)]
+    assert service.cancelled == []
+    assert service.archived == []
+    assert job.handle.retry_classifications.get("azureml_job", "none") == "none"
+
+
+def test_an_orphaned_pipeline_is_retired_and_resubmitted_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = _FakePipelineService(monkeypatch, ["orphaned", "started"])
+
+    job = service.start(tmp_path)
+
+    orphan = service.submitted[0]
+    assert job.name == "pipeline-1"
+    assert service.registered == ["pipeline-0", "pipeline-1"]
+    assert service.cancelled == [("pipeline-0", _aml.AML_ORPHAN_CANCEL_TIMEOUT_SECONDS)]
+    assert service.archived == ["pipeline-0"]
+    assert orphan.is_terminal
+    assert orphan.terminal_status == "Orphaned"
+    assert job.handle.attempts["azureml_job"] == ["initial", "orphaned-resubmit-1"]
+    assert job.handle.retry_classifications["azureml_job"] == _aml.ORPHANED_SUBMISSION
+
+
+def test_a_second_orphan_fails_with_the_activity_log_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = _FakePipelineService(monkeypatch, ["orphaned", "orphaned", "started"])
+
+    with pytest.raises(AssertionError, match=r"pipeline-0, pipeline-1.*GatewayTimeout.*jobs/write") as error:
+        service.start(tmp_path)
+
+    assert "Activity Log" in str(error.value)
+    assert service.registered == ["pipeline-0", "pipeline-1"]
+    assert service.archived == ["pipeline-0", "pipeline-1"]
+
+
+def test_a_pipeline_with_child_jobs_keeps_waiting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = _FakePipelineService(monkeypatch, ["slow"])
+
+    job = service.start(tmp_path)
+
+    assert job.name == "pipeline-0"
+    assert service.waits == [("pipeline-0", 5), ("pipeline-0", 10)]
+    assert service.cancelled == []
+    assert service.archived == []
+
+
+def test_a_failed_pipeline_is_not_resubmitted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = _FakePipelineService(monkeypatch, ["failed", "started"])
+
+    with pytest.raises(AssertionError, match="failed with status 'Failed'"):
+        service.start(tmp_path)
+
+    assert service.registered == ["pipeline-0"]
+    assert service.archived == []
+
+
+def test_cancel_uses_the_requested_time_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    limits: list[float] = []
+
+    def fake_run(args: list[str], *, cwd: Path, timeout_seconds: float) -> None:
+        limits.append(timeout_seconds)
+        return None
+
+    monkeypatch.setattr(_aml, "_run_with_time_limit", fake_run)
+    monkeypatch.setattr(_aml, "log_e2e", lambda message: None)
+
+    _aml.cancel_aml_job(_sample_job(), tmp_path)
+    _aml.cancel_aml_job(_sample_job(), tmp_path, timeout_seconds=_aml.AML_ORPHAN_CANCEL_TIMEOUT_SECONDS)
+
+    assert limits == [_aml.AML_CANCEL_TIMEOUT_SECONDS, _aml.AML_ORPHAN_CANCEL_TIMEOUT_SECONDS]
+
+
+def test_child_jobs_and_archive_use_the_job_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[list[str]] = []
+    messages: list[str] = []
+
+    def fake_run(args: list[str], *, cwd: Path, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        if args[3] == "list":
+            return subprocess.CompletedProcess(args, 0, stdout='["step-a", "step-b"]', stderr="")
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="archive refused")
+
+    monkeypatch.setattr(_aml, "run_command", fake_run)
+    monkeypatch.setattr(_aml, "log_e2e", messages.append)
+    job = _sample_job()
+
+    assert _aml.list_aml_child_jobs(job, tmp_path) == ["step-a", "step-b"]
+    _aml.archive_aml_job(job, tmp_path)
+
+    assert commands[0][commands[0].index("--parent-job-name") + 1] == "sample-job"
+    assert commands[1][:4] == ["az", "ml", "job", "archive"]
+    assert all("rg-sample" in command and "mlw-sample" in command for command in commands)
+    assert "Could not archive AzureML job sample-job" in messages[0]
+
+
+def test_cleanup_skips_waiting_on_a_retired_orphan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    archived: list[str] = []
+
+    def unexpected_wait(*args: object, **kwargs: object) -> str:
+        raise AssertionError("cleanup must not wait on a retired orphan")
+
+    monkeypatch.setattr(_aml, "wait_for_status", unexpected_wait)
+    monkeypatch.setattr(_aml, "log_e2e", lambda message: None)
+    monkeypatch.setattr(
+        _aml, "archive_all_model_versions", lambda repo_root, workspace, model_name: archived.append(model_name)
+    )
+    job = _sample_job()
+    _aml._mark_job_terminal(job, "Orphaned")
+
+    _aml.cleanup_aml_job_and_model_versions(job, tmp_path, job.workspace, "sample-model")
+
+    assert archived == ["sample-model"]
+
+
 _FAKE_SECRET = "fake-secret-0123456789"
 
 
@@ -676,109 +851,3 @@ def test_local_env_file_stays_out_of_git_and_repo_root_snapshots(tmp_path: Path)
         ["git", *no_global_excludes, "check-ignore", "-q", LOCAL_ENV_FILE], cwd=probe, check=False
     )
     assert excluded.returncode == 0, f"{snapshot_rules.name} must keep {LOCAL_ENV_FILE} out of repo-root code snapshots"
-
-
-_INSTANCE_TYPE_CASES = [
-    pytest.param(None, None, "<script default>", id="unset"),
-    pytest.param("gpu-sample-1x", "gpu-sample-1x", "gpu-sample-1x", id="named"),
-    pytest.param("", "", "<managed-compute>", id="empty"),
-]
-
-
-def _capture_submissions(monkeypatch: pytest.MonkeyPatch) -> tuple[list[list[str]], list[str]]:
-    commands: list[list[str]] = []
-    messages: list[str] = []
-
-    def fake_run(args: list[str], *, cwd: Path, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
-        commands.append(args)
-        return subprocess.CompletedProcess(args, 1, stdout="", stderr="stopped by the test")
-
-    monkeypatch.setattr(_aml, "run_command", fake_run)
-    monkeypatch.setattr(_aml, "log_e2e", messages.append)
-    return commands, messages
-
-
-def _set_instance_type(monkeypatch: pytest.MonkeyPatch, setting: str | None) -> None:
-    if setting is None:
-        monkeypatch.delenv(_aml.INSTANCE_TYPE_ENV, raising=False)
-    else:
-        monkeypatch.setenv(_aml.INSTANCE_TYPE_ENV, setting)
-
-
-def _instance_type_argument(command: list[str]) -> str | None:
-    if "--instance-type" not in command:
-        return None
-    return command[command.index("--instance-type") + 1]
-
-
-def _submit_eval(repo_root: Path, *, policy_type: str, **extra: str | None) -> None:
-    _aml.submit_aml_lerobot_eval(
-        repo_root,
-        _sample_job().workspace,
-        policy_source=_aml.AmlLeRobotEvalPolicySource(args=("--from-aml-model",), description="sample model"),
-        policy_type=policy_type,
-        eval_episodes=1,
-        eval_batch_size=1,
-        blob_storage_account="sample-account",
-        blob_container="sample-container",
-        blob_prefix="sample/prefix",
-        **extra,  # type: ignore[arg-type]
-    )
-
-
-@pytest.mark.parametrize(("setting", "expected_argument", "expected_label"), _INSTANCE_TYPE_CASES)
-def test_vla_training_follows_the_instance_type_setting(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    setting: str | None,
-    expected_argument: str | None,
-    expected_label: str,
-) -> None:
-    commands, messages = _capture_submissions(monkeypatch)
-    _set_instance_type(monkeypatch, setting)
-
-    with pytest.raises(AssertionError, match="submission failed"):
-        _aml.submit_aml_vla_pi0_training(
-            tmp_path,
-            _sample_job().workspace,
-            blob_url="https://sample.invalid/datasets/sample",
-            training_steps=2,
-            save_freq=1,
-            batch_size=1,
-            log_freq=1,
-            register_model_name="sample-model",
-        )
-
-    assert _instance_type_argument(commands[0]) == expected_argument
-    assert f"instance_type={expected_label}" in messages[0]
-
-
-@pytest.mark.parametrize(("setting", "expected_argument", "expected_label"), _INSTANCE_TYPE_CASES)
-def test_vla_evaluation_follows_the_same_instance_type_setting(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    setting: str | None,
-    expected_argument: str | None,
-    expected_label: str,
-) -> None:
-    commands, messages = _capture_submissions(monkeypatch)
-    _set_instance_type(monkeypatch, setting)
-
-    with pytest.raises(AssertionError, match="submission failed"):
-        _submit_eval(tmp_path, policy_type="pi0", instance_type=_aml.requested_instance_type())
-
-    assert _instance_type_argument(commands[0]) == expected_argument
-    assert f"instance_type={expected_label}" in messages[0]
-
-
-def test_evaluation_without_an_instance_type_keeps_the_script_default(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    commands, messages = _capture_submissions(monkeypatch)
-    monkeypatch.setenv(_aml.INSTANCE_TYPE_ENV, "gpu-sample-1x")
-
-    with pytest.raises(AssertionError, match="submission failed"):
-        _submit_eval(tmp_path, policy_type="act")
-
-    assert _instance_type_argument(commands[0]) is None
-    assert "instance_type=<script default>" in messages[0]

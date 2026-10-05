@@ -8,7 +8,9 @@ are already exported always win, so a bundle only supplies missing defaults.
 Bundles are never tracked: they live under the user's configuration directory or the
 gitignored ``infrastructure/setup/generated/<name>`` directory. Secrets such as
 ``HF_TOKEN`` never go in a bundle; they live in the gitignored repository-root
-``.env.local``, which ``read_local_env`` reads for the variables a caller needs.
+``.env.local``, which ``read_local_env`` reads for the variables a caller needs. The GPU
+instance types for the Azure ML checks come from the same file through
+``resolve_instance_type``.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ BUNDLE_VARIABLES: tuple[tuple[str, str], ...] = (
     ("aks_cluster", "AKS_CLUSTER_NAME"),
 )
 COMPUTE_VARIABLE = "AZUREML_COMPUTE"
+INSTANCE_TYPE_VARIABLE = "E2E_AML_INSTANCE_TYPE"
 
 _ENVIRONMENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _LOCAL_ENV_ASSIGNMENT = re.compile(r"(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)")
@@ -213,3 +216,51 @@ def read_local_env(repo_root: Path, names: Iterable[str]) -> dict[str, str]:
             )
         values[match.group(1)] = value
     return values
+
+
+@dataclass(frozen=True)
+class InstanceTypeChoice:
+    """The GPU instance type a category's Azure ML jobs request and the variable that chose it.
+
+    ``value`` is ``None`` when no variable is set, so each submission script keeps its own
+    default, and empty when an exported variable asks the scripts to omit the instance type.
+    """
+
+    value: str | None
+    variable: str | None = None
+    source: str | None = None
+
+    def describe(self) -> str:
+        if self.value is None:
+            return "script default"
+        name = self.value or "omitted"
+        return f"{name} ({self.variable} in {self.source})"
+
+
+def instance_type_variables(category: str) -> tuple[str, str]:
+    """Return a category's own instance-type variable, then the variable shared by every category."""
+    return f"{INSTANCE_TYPE_VARIABLE}_{category.upper().replace('-', '_')}", INSTANCE_TYPE_VARIABLE
+
+
+def resolve_instance_type(repo_root: Path, category: str, environ: Mapping[str, str]) -> InstanceTypeChoice:
+    """Choose the instance type for a category from ``.env.local`` and the environment.
+
+    The category's own variable wins over the shared one. For each variable, a value assigned
+    in ``.env.local`` wins over an exported one, as it does for the submission scripts. A value
+    in the file must name an instance type; an empty or invalid one raises ``LocalEnvError``
+    without exposing it.
+    """
+    names = instance_type_variables(category)
+    local = read_local_env(repo_root, names)
+    for name in names:
+        if name in local:
+            value = local[name].strip()
+            if not value:
+                raise LocalEnvError(
+                    f"{name} is empty in {LOCAL_ENV_FILE}, which overrides the environment; "
+                    "set an instance type name there or remove the line"
+                )
+            return InstanceTypeChoice(value, name, LOCAL_ENV_FILE)
+        if name in environ:
+            return InstanceTypeChoice(environ[name].strip(), name, "environment")
+    return InstanceTypeChoice(None)

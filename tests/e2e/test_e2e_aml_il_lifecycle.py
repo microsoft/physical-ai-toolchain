@@ -9,6 +9,9 @@ dataset via ``submit-azureml-lerobot-eval.sh``.
 Set ``E2E_AML_LEROBOT_EVAL_MODEL`` (AzureML ``name:version``) to skip training and evaluate a
 pre-existing policy — a fast inner loop while fixing the eval path.
 
+Both jobs request the instance type in ``E2E_AML_INSTANCE_TYPE_IL`` or ``E2E_AML_INSTANCE_TYPE``,
+read from the repository-root ``.env.local`` before the environment, or the scripts' default.
+
 ```shell
 uv run pytest -vv -s -m e2e tests/e2e/test_e2e_aml_il_lifecycle.py
 ```
@@ -22,6 +25,9 @@ import pytest
 
 from tests.e2e._aml import (
     _AML_LEROBOT_EVAL_MODEL_ENV,
+    LEROBOT_EVAL_SCRIPT,
+    LEROBOT_TRAINING_SCRIPT,
+    AzureMLCompute,
     AzureMLWorkspace,
     aml_lerobot_policy_source_from_model,
     archive_all_model_versions,
@@ -29,6 +35,7 @@ from tests.e2e._aml import (
     assert_job_has_checkpoint,
     assert_job_snapshot_contains_only_training,
     cancel_aml_job,
+    require_gpu_instance_type,
     resolve_aml_lerobot_eval_policy_override,
     resolve_registered_model,
     submit_aml_lerobot_eval,
@@ -79,14 +86,17 @@ def test_resolve_aml_lerobot_eval_policy_override_none(monkeypatch: pytest.Monke
 
 
 @pytest.mark.e2e
-@pytest.mark.usefixtures("aml_compute_target")
 def test_aml_il_lifecycle_e2e(
     request: pytest.FixtureRequest,
     aml_workspace: AzureMLWorkspace,
+    aml_compute_target: AzureMLCompute,
     repo_root: Path,
     storage_account: str,
 ) -> None:
     log_e2e(f"Starting AzureML IL (LeRobot/{_POLICY_TYPE}) lifecycle e2e test")
+    instance_type = require_gpu_instance_type(
+        aml_compute_target, repo_root, category="il", scripts=(LEROBOT_TRAINING_SCRIPT, LEROBOT_EVAL_SCRIPT)
+    )
     policy_source = resolve_aml_lerobot_eval_policy_override()
     dataset = stage_synthetic_lerobot_dataset(
         request,
@@ -106,6 +116,7 @@ def test_aml_il_lifecycle_e2e(
             batch_size=8,
             log_freq=1,
             register_model_name=register_model_name,
+            instance_type=instance_type,
         )
         request.addfinalizer(lambda: cancel_aml_job(job, repo_root))
 
@@ -135,6 +146,7 @@ def test_aml_il_lifecycle_e2e(
         blob_storage_account=dataset.storage_account,
         blob_container=dataset.container,
         blob_prefix=dataset.prefix,
+        instance_type=instance_type,
     )
     request.addfinalizer(lambda: cancel_aml_job(eval_job, repo_root))
 

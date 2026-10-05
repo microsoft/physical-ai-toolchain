@@ -7,7 +7,7 @@ import re
 import signal
 import subprocess
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,11 +26,41 @@ from tests.e2e._common import (
     run_command,
     wait_for_status,
 )
+from tests.e2e._environment import (
+    INSTANCE_TYPE_VARIABLE,
+    LOCAL_ENV_FILE,
+    InstanceTypeChoice,
+    LocalEnvError,
+    instance_type_variables,
+    resolve_instance_type,
+)
 
 AML_STARTED_STATES = {"Running", "Finalizing", "Completed"}
 AML_FAILURE_STATES = {"Canceled", "Cancelled", "Failed", "NotResponding"}
 AML_CANCEL_TIMEOUT_SECONDS = 180
-INSTANCE_TYPE_ENV = "E2E_AML_INSTANCE_TYPE"
+# A pipeline whose creation timed out at the Azure ML gateway stays NotStarted with no child
+# jobs; healthy pipelines start within seconds, so this window can't mistake one for the other.
+AML_ORPHAN_WINDOW_MINUTES = 5
+AML_ORPHAN_CANCEL_TIMEOUT_SECONDS = 60
+AML_ORPHAN_RESUBMISSIONS = 1
+ORPHANED_SUBMISSION = "orphaned-submission"
+
+RL_TRAINING_SCRIPT = "training/rl/scripts/submit-azureml-training.sh"
+ISAAC_EVAL_SCRIPT = "evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh"
+LEROBOT_TRAINING_SCRIPT = "training/il/scripts/submit-azureml-lerobot-training.sh"
+LEROBOT_EVAL_SCRIPT = "evaluation/sil/scripts/submit-azureml-lerobot-eval.sh"
+VLA_PI0_TRAINING_SCRIPT = "training/vla/scripts/submit-azureml-vla-pi0-training.sh"
+GPU_SMOKE_SCRIPT = "training/smoke/scripts/submit-azureml-gpu-smoke.sh"
+# The instance type each GPU submission script requests when it gets none; a test keeps these
+# in step with the scripts. The pi0 evaluation wrapper delegates to the LeRobot evaluation script.
+SCRIPT_DEFAULT_INSTANCE_TYPES: dict[str, str] = {
+    RL_TRAINING_SCRIPT: "gpuspot",
+    ISAAC_EVAL_SCRIPT: "gpuspot",
+    LEROBOT_TRAINING_SCRIPT: "gpuspot",
+    LEROBOT_EVAL_SCRIPT: "gpuspot",
+    VLA_PI0_TRAINING_SCRIPT: "gpu",
+    GPU_SMOKE_SCRIPT: "gpuspot",
+}
 
 
 @dataclass
@@ -274,13 +304,92 @@ def aml_workspace_args(aml_workspace: AzureMLWorkspace) -> list[str]:
     ]
 
 
-def requested_instance_type() -> str | None:
-    """Return the instance type requested through ``E2E_AML_INSTANCE_TYPE``, or ``None`` when it's unset.
+@dataclass(frozen=True)
+class AzureMLCompute:
+    """A compute target and, for a Kubernetes compute, the instance types it defines.
 
-    An empty value is kept: it tells the submission scripts to omit the instance type, as
-    managed AmlCompute clusters require. ``None`` leaves each script's own GPU default in place.
+    ``instance_types`` is ``None`` when the compute doesn't report any, as for managed AmlCompute.
     """
-    return os.environ.get(INSTANCE_TYPE_ENV)
+
+    name: str
+    instance_types: frozenset[str] | None = None
+    gpu_instance_types: frozenset[str] = frozenset()
+
+
+def _instance_type_has_gpu(spec: object) -> bool:
+    resources = spec.get("resources") if isinstance(spec, Mapping) else None
+    if not isinstance(resources, Mapping):
+        return False
+    for section in ("limits", "requests"):
+        values = resources.get(section)
+        if isinstance(values, Mapping) and str(values.get("nvidia.com/gpu", "0")).strip() not in {"", "0"}:
+            return True
+    return False
+
+
+def aml_compute_from_payload(name: str, payload: Mapping[str, Any]) -> AzureMLCompute:
+    """Build an ``AzureMLCompute`` from ``az ml compute show`` JSON without keeping its other properties."""
+    properties = payload.get("properties")
+    types = properties.get("instance_types") if isinstance(properties, Mapping) else None
+    if payload.get("type") != "kubernetes" or not isinstance(types, Mapping):
+        return AzureMLCompute(name)
+    gpu_types = frozenset(str(type_name) for type_name, spec in types.items() if _instance_type_has_gpu(spec))
+    return AzureMLCompute(name, frozenset(str(type_name) for type_name in types), gpu_types)
+
+
+def instance_type_problem(
+    choice: InstanceTypeChoice, compute: AzureMLCompute, *, category: str, scripts: Sequence[str]
+) -> str | None:
+    """Explain why a compute can't run a category's GPU jobs with this choice, or return ``None``."""
+    if compute.instance_types is None:
+        return None
+    category_variable = instance_type_variables(category)[0]
+    if compute.gpu_instance_types:
+        available = f"one of its GPU instance types: {', '.join(sorted(compute.gpu_instance_types))}"
+    else:
+        defined = ", ".join(sorted(compute.instance_types)) or "no types"
+        available = f"a GPU instance type; it defines none, only {defined}"
+    fix = f"Set {category_variable} or {INSTANCE_TYPE_VARIABLE} in {LOCAL_ENV_FILE} to {available}."
+    if choice.value == "":
+        return (
+            f"{choice.variable} is empty, which omits the instance type. Only managed AmlCompute supports that; "
+            f"on Kubernetes compute {compute.name} the jobs would run without a GPU. {fix}"
+        )
+    if choice.value:
+        if choice.value in compute.gpu_instance_types:
+            return None
+        defined = "defines without a GPU" if choice.value in compute.instance_types else "doesn't define"
+        return (
+            f"{choice.variable} in {choice.source} requests instance type {choice.value}, which compute "
+            f"{compute.name} {defined}. {fix}"
+        )
+    missing = sorted({SCRIPT_DEFAULT_INSTANCE_TYPES[script] for script in scripts} - compute.gpu_instance_types)
+    if not missing:
+        return None
+    script_names = ", ".join(Path(script).name for script in scripts)
+    return (
+        f"Compute {compute.name} has no GPU instance type named {', '.join(missing)}, the default of "
+        f"{script_names}, and no instance type is set for {category}. {fix}"
+    )
+
+
+def require_gpu_instance_type(
+    compute: AzureMLCompute, repo_root: Path, *, category: str, scripts: Sequence[str]
+) -> str | None:
+    """Choose a category's GPU instance type and confirm the compute can run it, before any submission.
+
+    Returns the value to pass to the submit helpers: a name, ``None`` for the scripts' defaults, or
+    an empty string to omit the instance type on a compute that reports no instance types.
+    """
+    try:
+        choice = resolve_instance_type(repo_root, category, os.environ)
+    except LocalEnvError as error:
+        pytest.fail(f"Can't choose a GPU instance type for {category}: {error}", pytrace=False)
+    problem = instance_type_problem(choice, compute, category=category, scripts=scripts)
+    if problem:
+        pytest.fail(problem, pytrace=False)
+    log_e2e(f"GPU instance type for the {category} jobs: {choice.describe()}")
+    return choice.value
 
 
 def _instance_type_args(instance_type: str | None) -> list[str]:
@@ -312,15 +421,17 @@ def submit_aml_training(
     max_iterations: int,
     num_envs: int,
     register_model_name: str,
+    instance_type: str | None,
 ) -> AzureMLJob:
     experiment_name = e2e_name("rl-training-e2e-aml")
     log_e2e(
         "Submitting AzureML training job "
-        f"for task={task}, num_envs={num_envs}, max_iterations={max_iterations}, experiment={experiment_name}"
+        f"for task={task}, num_envs={num_envs}, max_iterations={max_iterations}, experiment={experiment_name}, "
+        f"instance_type={_instance_type_label(instance_type)}"
     )
     result = run_command(
         [
-            str(repo_root / "training/rl/scripts/submit-azureml-training.sh"),
+            str(repo_root / RL_TRAINING_SCRIPT),
             "--task",
             task,
             "--max-iterations",
@@ -329,6 +440,7 @@ def submit_aml_training(
             str(num_envs),
             "--experiment-name",
             experiment_name,
+            *_instance_type_args(instance_type),
             *_submit_workspace_args(aml_workspace),
             "--register-checkpoint",
             register_model_name,
@@ -352,18 +464,20 @@ def submit_aml_lerobot_training(
     batch_size: int,
     log_freq: int,
     register_model_name: str,
+    instance_type: str | None,
 ) -> AzureMLJob:
     experiment_name = e2e_name("il-training-e2e-aml")
     log_e2e(
         "Submitting AzureML LeRobot training job "
         f"for dataset={blob_url}, policy={policy_type}, training_steps={training_steps}, "
-        f"save_freq={save_freq}, batch_size={batch_size}, log_freq={log_freq}, experiment={experiment_name}"
+        f"save_freq={save_freq}, batch_size={batch_size}, log_freq={log_freq}, experiment={experiment_name}, "
+        f"instance_type={_instance_type_label(instance_type)}"
     )
     # eval-freq > training-steps disables in-loop evaluation (which would need
     # sim deps that are not part of the lerobot training container).
     result = run_command(
         [
-            str(repo_root / "training/il/scripts/submit-azureml-lerobot-training.sh"),
+            str(repo_root / LEROBOT_TRAINING_SCRIPT),
             "--blob-url",
             blob_url,
             "--policy-type",
@@ -380,6 +494,7 @@ def submit_aml_lerobot_training(
             str(log_freq),
             "--experiment-name",
             experiment_name,
+            *_instance_type_args(instance_type),
             *_submit_workspace_args(aml_workspace),
             "--register-checkpoint",
             register_model_name,
@@ -402,9 +517,9 @@ def submit_aml_vla_pi0_training(
     batch_size: int,
     log_freq: int,
     register_model_name: str,
+    instance_type: str | None,
 ) -> AzureMLJob:
     experiment_name = e2e_name("vla-pi0-training-e2e-aml")
-    instance_type = requested_instance_type()
     log_e2e(
         "Submitting AzureML VLA pi0 training job "
         f"for dataset={blob_url}, training_steps={training_steps}, "
@@ -413,7 +528,7 @@ def submit_aml_vla_pi0_training(
     )
     result = run_command(
         [
-            str(repo_root / "training/vla/scripts/submit-azureml-vla-pi0-training.sh"),
+            str(repo_root / VLA_PI0_TRAINING_SCRIPT),
             "--blob-url",
             blob_url,
             "--policy-type",
@@ -502,7 +617,7 @@ def submit_aml_lerobot_eval(
     blob_storage_account: str,
     blob_container: str,
     blob_prefix: str,
-    instance_type: str | None = None,
+    instance_type: str | None,
 ) -> AzureMLJob:
     """Submit a LeRobot eval job; ``instance_type`` of ``None`` keeps the script's default instance type."""
     policy_args = list(policy_source.args)
@@ -673,17 +788,18 @@ def submit_aml_isaaclab_eval(
     task: str,
     eval_episodes: int,
     num_envs: int,
+    instance_type: str | None,
 ) -> AzureMLJob:
     """Submit the AzureML Isaac Lab evaluation against a concrete registered model."""
     experiment_name = e2e_name("rl-eval-e2e-aml")
     log_e2e(
         "Submitting AzureML Isaac Lab eval job "
         f"for model={model.name}:{model.version}, task={task}, eval_episodes={eval_episodes}, num_envs={num_envs}, "
-        f"experiment={experiment_name}"
+        f"experiment={experiment_name}, instance_type={_instance_type_label(instance_type)}"
     )
     result = run_command(
         [
-            str(repo_root / "evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh"),
+            str(repo_root / ISAAC_EVAL_SCRIPT),
             "--model-name",
             model.name,
             "--model-version",
@@ -701,6 +817,7 @@ def submit_aml_isaaclab_eval(
             "0.0",
             "--experiment-name",
             experiment_name,
+            *_instance_type_args(instance_type),
             *_submit_workspace_args(aml_workspace),
         ],
         cwd=repo_root,
@@ -1088,12 +1205,13 @@ def _run_with_time_limit(
     return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
 
 
-def cancel_aml_job(job: AzureMLJob, repo_root: Path) -> None:
+def cancel_aml_job(job: AzureMLJob, repo_root: Path, *, timeout_seconds: float | None = None) -> None:
     if job.is_terminal:
         log_e2e(f"Skipping cancel for AzureML job {job.name}; terminal status={job.terminal_status}")
         return
 
     log_e2e(f"Cancelling AzureML job {job.name}")
+    limit = AML_CANCEL_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
 
     # The CLI waits for the service to finish cancelling, which never happens for a job the
     # pipeline service didn't accept, so bound the wait; the accepted request still applies.
@@ -1113,13 +1231,129 @@ def cancel_aml_job(job: AzureMLJob, repo_root: Path) -> None:
             job.name,
         ],
         cwd=repo_root,
-        timeout_seconds=AML_CANCEL_TIMEOUT_SECONDS,
+        timeout_seconds=limit,
     )
     if result is None:
-        log_e2e(
-            f"Cancel request for AzureML job {job.name} did not return within "
-            f"{AML_CANCEL_TIMEOUT_SECONDS}s; continuing cleanup"
+        log_e2e(f"Cancel request for AzureML job {job.name} did not return within {limit}s; continuing cleanup")
+
+
+def list_aml_child_jobs(job: AzureMLJob, repo_root: Path) -> list[str]:
+    """Return the names of a pipeline job's child jobs."""
+    result = run_command(
+        [
+            "az",
+            "ml",
+            "job",
+            "list",
+            *aml_workspace_args(job.workspace),
+            "--parent-job-name",
+            job.name,
+            "--query",
+            "[].name",
+            "-o",
+            "json",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"Unable to list child jobs of AzureML job {job.name!r}\n\n{format_command_failure(result)}"
         )
+    payload = parse_json_from_output(result.stdout)
+    if not isinstance(payload, list):
+        raise AssertionError(f"AzureML child job list for {job.name!r} was not a JSON array")
+    return [name for name in payload if isinstance(name, str)]
+
+
+def archive_aml_job(job: AzureMLJob, repo_root: Path) -> None:
+    """Hide a job from default job lists; a failure is logged, because archiving is only cleanup."""
+    result = run_command(
+        ["az", "ml", "job", "archive", *aml_workspace_args(job.workspace), "--name", job.name],
+        cwd=repo_root,
+    )
+    if result.returncode == 0:
+        log_e2e(f"Archived AzureML job {job.name}")
+    else:
+        log_e2e(f"Could not archive AzureML job {job.name}; continuing\n\n{format_command_failure(result)}")
+
+
+def _wait_until_started_or_orphaned(
+    job: AzureMLJob,
+    repo_root: Path,
+    *,
+    timeout_minutes: int,
+    poll_interval_seconds: int,
+) -> bool:
+    """Wait for a pipeline to start; return False when Azure ML created it without ever starting it."""
+    window = min(AML_ORPHAN_WINDOW_MINUTES, timeout_minutes)
+    try:
+        wait_until_aml_started(job, repo_root, timeout_minutes=window, poll_interval_seconds=poll_interval_seconds)
+        return True
+    except AssertionError:
+        status = _aml_status(fetch_aml_job_payload(job, repo_root))
+        if status in AML_FAILURE_STATES:
+            raise
+        if status == "NotStarted" and not list_aml_child_jobs(job, repo_root):
+            return False
+        if timeout_minutes <= window:
+            raise
+    log_e2e(f"AzureML pipeline job {job.name} hasn't started yet but has child jobs; still waiting")
+    wait_until_aml_started(
+        job, repo_root, timeout_minutes=timeout_minutes - window, poll_interval_seconds=poll_interval_seconds
+    )
+    return True
+
+
+def _retire_orphaned_job(job: AzureMLJob, repo_root: Path) -> None:
+    log_e2e(
+        f"AzureML pipeline job {job.name} is still NotStarted with no child jobs after "
+        f"{AML_ORPHAN_WINDOW_MINUTES} minutes, so Azure ML created it without starting it; "
+        "cancelling and archiving it"
+    )
+    cancel_aml_job(job, repo_root, timeout_seconds=AML_ORPHAN_CANCEL_TIMEOUT_SECONDS)
+    archive_aml_job(job, repo_root)
+    _mark_job_terminal(job, "Orphaned")
+
+
+def start_aml_pipeline(
+    submit: Callable[[], AzureMLJob],
+    repo_root: Path,
+    *,
+    on_submitted: Callable[[AzureMLJob], object],
+    timeout_minutes: int,
+    poll_interval_seconds: int,
+) -> AzureMLJob:
+    """Submit an AzureML pipeline and wait for it to start, resubmitting once if Azure ML orphans it.
+
+    When pipeline creation times out at the Azure ML gateway, the CLI retries and returns a job
+    record that never starts. ``on_submitted`` receives every job as soon as it exists, so the
+    caller can register cleanup before any wait.
+    """
+    orphans: list[AzureMLJob] = []
+    while True:
+        job = submit()
+        on_submitted(job)
+        if orphans:
+            job.handle.attempts["azureml_job"] = [
+                "initial",
+                *(f"orphaned-resubmit-{attempt}" for attempt in range(1, len(orphans) + 1)),
+            ]
+            job.handle.retry_classifications["azureml_job"] = ORPHANED_SUBMISSION
+        if _wait_until_started_or_orphaned(
+            job, repo_root, timeout_minutes=timeout_minutes, poll_interval_seconds=poll_interval_seconds
+        ):
+            return job
+        _retire_orphaned_job(job, repo_root)
+        orphans.append(job)
+        if len(orphans) > AML_ORPHAN_RESUBMISSIONS:
+            names = ", ".join(orphan.name for orphan in orphans)
+            raise AssertionError(
+                f"Azure ML created pipeline jobs {names} but never started them: each stayed NotStarted with no "
+                f"child jobs for {AML_ORPHAN_WINDOW_MINUTES} minutes. Pipeline creation probably timed out at the "
+                "Azure ML gateway; look for a GatewayTimeout on "
+                "Microsoft.MachineLearningServices/workspaces/jobs/write in the workspace Activity Log, then rerun."
+            )
+        log_e2e(f"Resubmitting the AzureML pipeline after orphaned job {job.name}")
 
 
 def cleanup_aml_job_and_model_versions(

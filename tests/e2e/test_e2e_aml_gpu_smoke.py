@@ -7,8 +7,9 @@ non-zero unless the job completed, its smoke summary passed, and at least one ch
 job's checks cover GPU access, a short training loop, MLflow metrics and artifacts, Azure Storage
 uploads, and model registration. Finalizers cancel a still-running job and archive the test model.
 
-Set ``E2E_AML_INSTANCE_TYPE`` to target a specific GPU instance type; the script default applies
-otherwise.
+The job requests the instance type in ``E2E_AML_INSTANCE_TYPE_GPU_SMOKE`` or
+``E2E_AML_INSTANCE_TYPE``, read from the repository-root ``.env.local`` before the environment;
+the script default applies otherwise.
 
 ```shell
 E2E_ENVIRONMENT=<environment> uv run pytest -o addopts="" -vv -s -m e2e tests/e2e/test_e2e_aml_gpu_smoke.py
@@ -23,17 +24,18 @@ from pathlib import Path
 import pytest
 
 from tests.e2e._aml import (
+    GPU_SMOKE_SCRIPT,
+    AzureMLCompute,
     AzureMLJob,
     AzureMLWorkspace,
     _submit_workspace_args,
     archive_all_model_versions,
     cancel_aml_job,
+    require_gpu_instance_type,
 )
-from tests.e2e._common import e2e_name, env_value, log_e2e
+from tests.e2e._common import e2e_name, log_e2e
 
-_SUBMIT_SCRIPT = "training/smoke/scripts/submit-azureml-gpu-smoke.sh"
 _EXPERIMENT_NAME = "gpu-smoke-e2e"
-_INSTANCE_TYPE_ENV = "E2E_AML_INSTANCE_TYPE"
 _TIMEOUT_SECONDS = 90 * 60
 
 
@@ -48,7 +50,7 @@ def build_gpu_smoke_command(
 ) -> list[str]:
     """Build the submit command for one verified GPU smoke run."""
     command = [
-        str(repo_root / _SUBMIT_SCRIPT),
+        str(repo_root / GPU_SMOKE_SCRIPT),
         *_submit_workspace_args(aml_workspace),
         "--job-name",
         job_name,
@@ -77,7 +79,7 @@ def test_build_gpu_smoke_command_targets_the_workspace_and_verifies() -> None:
         instance_type=None,
     )
 
-    assert command[0] == f"/repo/{_SUBMIT_SCRIPT}"
+    assert command[0] == f"/repo/{GPU_SMOKE_SCRIPT}"
     assert command[1:7] == ["--subscription-id", "sub", "--resource-group", "rg", "--workspace-name", "mlw"]
     assert command[command.index("--job-name") + 1] == "gpu-smoke-e2e-1"
     assert command[command.index("--model-name") + 1] == "gpu-smoke-e2e-model-1"
@@ -103,13 +105,16 @@ def test_build_gpu_smoke_command_honors_an_instance_type() -> None:
 
 
 @pytest.mark.e2e
-@pytest.mark.usefixtures("aml_compute_target")
 def test_aml_gpu_smoke_e2e(
     request: pytest.FixtureRequest,
     aml_workspace: AzureMLWorkspace,
+    aml_compute_target: AzureMLCompute,
     repo_root: Path,
     storage_account: str,
 ) -> None:
+    instance_type = require_gpu_instance_type(
+        aml_compute_target, repo_root, category="gpu-smoke", scripts=(GPU_SMOKE_SCRIPT,)
+    )
     job_name = e2e_name("gpu-smoke-e2e")
     model_name = e2e_name("gpu-smoke-e2e-model")
     job = AzureMLJob(name=job_name, workspace=aml_workspace, experiment_name=_EXPERIMENT_NAME)
@@ -122,7 +127,7 @@ def test_aml_gpu_smoke_e2e(
         job_name=job_name,
         model_name=model_name,
         storage_account=storage_account,
-        instance_type=env_value(_INSTANCE_TYPE_ENV),
+        instance_type=instance_type,
     )
     log_e2e(f"Submitting and streaming AzureML GPU smoke job {job_name}")
     try:
