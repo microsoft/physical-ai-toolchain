@@ -75,7 +75,13 @@ export function selectionOutputs({ base, head, full = false, cwd, contract = loa
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const outputs = selectionOutputs({ base: process.env.BASE_SHA, head: process.env.HEAD_SHA, full: process.argv.includes('--full') });
+    const mode = process.env.SELECTION_MODE;
+    if (mode !== undefined && !['range', 'full'].includes(mode)) throw new Error(`Unsupported selection mode: ${mode}`);
+    const outputs = selectionOutputs({
+      base: process.env.BASE_SHA,
+      head: process.env.HEAD_SHA,
+      full: process.argv.includes('--full') || mode === 'full',
+    });
     if (process.env.GITHUB_OUTPUT) {
       appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join(''));
     }

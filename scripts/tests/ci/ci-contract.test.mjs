@@ -514,10 +514,13 @@ test('selector CLI: committed changes emit complete matching JSON and GitHub out
   assert.deepEqual(Object.fromEntries(rows.map(row => row.split('='))), expected);
 });
 
-test('selector CLI: main full mode needs no repository or comparison SHAs', t => {
+for (const [name, repo, args] of [
+  ['argument', { env: process.env }, ['--full']],
+  ['resolver environment', { env: { ...process.env, SELECTION_MODE: 'full' } }, []],
+]) test(`selector CLI: ${name} full mode needs no repository or comparison SHAs`, t => {
   const cwd = temporaryDirectory(t);
   const output = join(cwd, 'github-output');
-  const result = runSelector({ cwd, env: process.env }, '', '', output, ['--full']);
+  const result = runSelector({ cwd, ...repo }, '', '', output, args);
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
     ...expectedSelection(allSelectors, true),
@@ -1270,8 +1273,8 @@ for (const [name, mutate, diagnostic] of [
     candidate[prPath].jobs.changes.steps = candidate[prPath].jobs.changes.steps.filter(step => step.id !== 'range');
   }, 'event-aware range resolver'],
   ['full fallback removal', candidate => {
-    candidate[prPath].jobs.changes.steps.find(step => step.id === 'filter').run = 'node scripts/ci/select-checks.mjs';
-  }, 'explicit full fallback'],
+    delete candidate[prPath].jobs.changes.steps.find(step => step.id === 'filter').env.SELECTION_MODE;
+  }, 'verified resolver outputs'],
   ['unverified range input', candidate => {
     candidate[prPath].jobs.changes.steps.find(step => step.id === 'filter').env.BASE_SHA = '${{ github.event.merge_group.base_sha }}';
   }, 'verified resolver outputs'],

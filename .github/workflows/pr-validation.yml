@@ -77,12 +77,7 @@ jobs:
           BASE_SHA: ${{ steps.range.outputs.base_sha }}
           HEAD_SHA: ${{ steps.range.outputs.head_sha }}
           SELECTION_MODE: ${{ steps.range.outputs.mode }}
-        run: |
-          if [[ "$SELECTION_MODE" == "full" ]]; then
-            node scripts/ci/select-checks.mjs --full
-          else
-            node scripts/ci/select-checks.mjs
-          fi
+        run: node scripts/ci/select-checks.mjs
 
   # GPU-free import smoke gate. CPU import smoke runs for every domain on every
   # PR (unconditional baseline); the runtime-image smoke is path-gated to the

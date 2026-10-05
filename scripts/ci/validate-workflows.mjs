@@ -262,7 +262,7 @@ export function validateWorkflows(graph, contract = loadContract()) {
     HEAD_SHA: '${{ steps.range.outputs.head_sha }}',
     SELECTION_MODE: '${{ steps.range.outputs.mode }}',
   }), 'PR selection must consume only verified resolver outputs');
-  check(filter?.run?.trim() === 'if [[ "$SELECTION_MODE" == "full" ]]; then\n  node scripts/ci/select-checks.mjs --full\nelse\n  node scripts/ci/select-checks.mjs\nfi', 'Discovery must use the canonical selector with explicit full fallback');
+  check(filter?.run?.trim() === 'node scripts/ci/select-checks.mjs', 'Discovery must use the canonical selector with resolver-controlled full fallback');
   const reachable = new Set();
   const visit = path => {
     if (reachable.has(path)) return;
