@@ -24,8 +24,8 @@ services:
 
     workflow:
       backend_images:
-        init: "nvcr.io/nvidia/osmo/init-container:6.3.1@sha256:b2669a4b514ad315a59c153dd5d8b4b906e40f9a9ec8cc65dd6c157692513cd2"
-        client: "nvcr.io/nvidia/osmo/client:6.3.1@sha256:b26ef864a85394a05e696191668f0d02b8861e1912cbd08040673461fc2b7d63"
+        init: "nvcr.io/nvidia/osmo/init-container:6.3.1@sha256:0278a28a2bcab7c1c7f3d4b821569c04f04d1817cb770a6d2a74d61e1a346704"
+        client: "nvcr.io/nvidia/osmo/client:6.3.1@sha256:912b30bffb90531688dacd349d79fae3013a5d3ed6ad091158ba885625d8b48a"
       workflow_data:
         credential:
           endpoint: ""

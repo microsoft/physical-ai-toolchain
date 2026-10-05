@@ -20,6 +20,7 @@ from tests.e2e._osmo import (
     OSMOWorkflow,
     _osmo_status,
     _task_statuses,
+    assert_completed_workflow_streams,
     cancel_osmo_workflow,
     cancel_osmo_workflows_by_identifier,
     submit_osmo_replay_output_fixture,
@@ -79,6 +80,81 @@ def test_cancel_osmo_workflow_raises_on_failed_cancel(monkeypatch: pytest.Monkey
 
     with pytest.raises(AssertionError, match="Failed to cancel OSMO workflow"):
         cancel_osmo_workflow(workflow, tmp_path)
+
+
+def test_assert_completed_workflow_streams_checks_logs_and_events(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run_command(
+        args: list[str],
+        *,
+        cwd: Path,
+        input_text: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="record\n", stderr="")
+
+    monkeypatch.setattr("tests.e2e._osmo.run_command", fake_run_command)
+
+    assert_completed_workflow_streams(_make_workflow(), tmp_path)
+
+    assert commands == [
+        ["osmo", "workflow", "logs", "workflow-1"],
+        ["osmo", "workflow", "events", "workflow-1"],
+    ]
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "stderr"),
+    [
+        (1, "records", "Log stream has timed out or failed."),
+        (0, "records", "response_timeout"),
+        (0, "", ""),
+    ],
+)
+def test_assert_completed_workflow_streams_rejects_invalid_completion(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    returncode: int,
+    stdout: str,
+    stderr: str,
+) -> None:
+    def fake_run_command(
+        args: list[str],
+        *,
+        cwd: Path,
+        input_text: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=args, returncode=returncode, stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr("tests.e2e._osmo.run_command", fake_run_command)
+
+    with pytest.raises(AssertionError, match="OSMO workflow logs"):
+        assert_completed_workflow_streams(_make_workflow(), tmp_path)
+
+
+def test_assert_completed_workflow_streams_rejects_hung_stream(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_run_command(
+        args: list[str],
+        *,
+        cwd: Path,
+        input_text: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(args, timeout_seconds)
+
+    monkeypatch.setattr("tests.e2e._osmo.run_command", fake_run_command)
+
+    with pytest.raises(AssertionError, match="did not close within 1s"):
+        assert_completed_workflow_streams(_make_workflow(), tmp_path, timeout_seconds=1)
 
 
 def test_cancel_osmo_workflows_by_identifier_cancels_only_matching_non_terminal(

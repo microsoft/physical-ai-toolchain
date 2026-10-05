@@ -109,6 +109,7 @@ def run_command(
     *,
     cwd: Path,
     input_text: str | None = None,
+    timeout_seconds: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         args,
@@ -117,6 +118,7 @@ def run_command(
         check=False,
         cwd=str(cwd),
         input=input_text,
+        timeout=timeout_seconds,
     )
 
 

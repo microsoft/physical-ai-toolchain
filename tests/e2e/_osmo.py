@@ -500,6 +500,35 @@ def fetch_workflow_task_logs(
     return persisted_result.stdout
 
 
+def assert_completed_workflow_streams(
+    workflow: OSMOWorkflow,
+    repo_root: Path,
+    *,
+    timeout_seconds: float = 90,
+) -> None:
+    """Verify completed workflow log and event streams close without gateway timeouts."""
+    for stream in ("logs", "events"):
+        args = ["osmo", "workflow", stream, workflow.workflow_id]
+        try:
+            result = run_command(args, cwd=repo_root, timeout_seconds=timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            raise AssertionError(
+                f"OSMO workflow {stream} did not close within {timeout_seconds:g}s "
+                f"for completed workflow {workflow.workflow_id!r}"
+            ) from exc
+
+        output = f"{result.stdout}\n{result.stderr}".lower()
+        if result.returncode != 0 or "stream has timed out or failed" in output or "response_timeout" in output:
+            raise AssertionError(
+                f"OSMO workflow {stream} failed for completed workflow "
+                f"{workflow.workflow_id!r}\n\n{format_command_failure(result)}"
+            )
+        if not result.stdout.strip():
+            raise AssertionError(
+                f"OSMO workflow {stream} returned no records for completed workflow {workflow.workflow_id!r}"
+            )
+
+
 def cancel_osmo_workflow(workflow: OSMOWorkflow, repo_root: Path) -> None:
     if workflow.is_terminal:
         log_e2e(f"Skipping cancel for OSMO workflow {workflow.workflow_id}; terminal status={workflow.terminal_status}")
