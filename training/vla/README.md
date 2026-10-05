@@ -98,10 +98,16 @@ backbone, so it needs a Hugging Face token that can read that model:
    ```
 
 Git ignores `.env.local`, and Azure ML code snapshots exclude it. The test, the Dependabot
-verification runner, and the submission scripts read `HF_TOKEN` from it, or from your
-environment when you export one. The submission scripts set the token as an environment
-variable on the Azure ML training and evaluation jobs, where anyone who can read those jobs
-can see it, so keep the token limited to reading that model.
+verification runner, and the submission scripts use the value in `.env.local` whenever the
+file sets `HF_TOKEN`, and an exported value only when it doesn't; a submission script's
+`--hf-token` option overrides both. An empty `HF_TOKEN=` line overrides an exported token, so
+leave the line commented out if you export the token instead. Keep the line a plain value as
+shown: the checks reject shell syntax such as `$OTHER` rather than guess what it expands to.
+
+Every submission script loads `.env.local`, and the LeRobot evaluation script passes the
+token in effect to every evaluation job, not only pi0. Those jobs and the pi0 training job
+carry it as an environment variable that anyone who can read the jobs can see, so keep the
+token limited to reading that one model.
 
 To confirm access before submitting a job, request a small file from the model. The command
 reads the token from `.env.local` without putting it on a command line, and prints `200` when
@@ -121,8 +127,8 @@ uv run pytest -o addopts='' -vv -s -m e2e tests/e2e/test_e2e_aml_vla_pi0_trainin
 ```
 
 Pytest fails during client-side setup, before resolving Azure fixtures or submitting a
-job, when `HF_TOKEN` is set in neither place. Other E2E tests require this variable only
-when they carry the `requires_hf_token` marker.
+job, when `HF_TOKEN` is set in neither place or `.env.local` sets it empty. Other E2E tests
+require this variable only when they carry the `requires_hf_token` marker.
 
 Dependabot verification runs this test as the `aml-vla-pi0` check in the `vla` category. See
 [Verifying Dependabot Updates](../../docs/contributing/dependabot-verification.md).

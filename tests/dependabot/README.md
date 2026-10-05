@@ -76,7 +76,7 @@ Environment checks never read environment details from tracked files. With `--en
 
 The bundle fills `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZUREML_WORKSPACE_NAME`, `AZURE_STORAGE_ACCOUNT_NAME`, `AKS_CLUSTER_NAME`, and a derived `AZUREML_COMPUTE`. Variables you export yourself take precedence. With a named environment, the tests never consult local Terraform state, and a missing value fails the run. Set `E2E_AML_INSTANCE_TYPE` to target a specific GPU instance type for the GPU smoke and VLA checks.
 
-Secrets never go in a bundle. Put `HF_TOKEN` for the VLA check in the untracked repository-root `.env.local`, starting from `.env.local.example`. The runner, the e2e tests, and the submission scripts read it from there or from your environment, and the runner passes it only to the check that declares it.
+Secrets never go in a bundle. Put `HF_TOKEN` for the VLA check in the untracked repository-root `.env.local`, starting from `.env.local.example`. The runner, the e2e tests, and the submission scripts read it from there, and a value in `.env.local` takes precedence over an exported one. The runner passes the token only to the check that declares it, but every submission script loads all of `.env.local`, so LeRobot evaluation jobs receive it too.
 
 Before submitting anything, the runner checks that `az` is signed in to the environment's subscription. If the AKS cluster behind the compute target is stopped, the Azure ML checks report `not-run`; start the cluster and rerun. Environment checks run one at a time, and they upload your working tree to Azure ML, including uncommitted changes, so commit first and don't run builds at the same time.
 
