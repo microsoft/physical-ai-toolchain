@@ -1,0 +1,45 @@
+[project]
+name = "robotics-training-smoke"
+version = "0.1.0"
+description = "Azure ML GPU smoke test runtime dependencies"
+# Pinned to 3.11 to match the pytorch/pytorch 2.6.0 CUDA 12.4 runtime image.
+requires-python = "==3.11.*"
+dependencies = [
+    "azure-core==1.41.0",
+    "azure-identity==1.25.3",
+    "azure-ai-ml==1.35.0",
+    "azureml-mlflow==1.62.0.post6",
+    "azure-storage-blob==12.30.3",
+    "mlflow-skinny==3.16.1",
+    "idna==3.20",
+    # 2.8.0 fixes GHSA-8988-9cw3-xx77, GHSA-vxq7-64xx-v4gw, and GHSA-gh4c-6fx4-qh6g.
+    "urllib3==2.8.0",
+    "cryptography==50.0.1",
+    # 2.15.0 is the first PyJWT release without open advisories
+    # (GHSA-ffc3-869f-jxw9, GHSA-42vr-xj54-vc7v).
+    "pyjwt==2.15.0",
+    # marshmallow held at 3.x because azure-ai-ml imports symbols that
+    # marshmallow 4.x removed. Mirror training/rl; bump together with azure-ai-ml.
+    "marshmallow==3.26.2",
+    # starlette pulled transitively by mlflow-skinny; mirror the training/rl
+    # security pin (GHSA-wqp7-x3pw-xc5r, GHSA-x746-7m8f-x49c, GHSA-82w8-qh3p-5jfq).
+    "starlette==1.7.0",
+]
+
+[tool.uv]
+# Lock only for the job container target so `uv export --no-deps` installs a
+# single resolution. torch comes from the container image, not this project.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+# Each override repeats a direct pin above; remove it only when the upstream
+# constraint that required it is lifted. Mirrors training/rl.
+override-dependencies = [
+    # azureml-mlflow caps mlflow-skinny below the version training validates.
+    "mlflow-skinny==3.16.1",
+    # azureml-mlflow caps azure-storage-blob below the download retry fix.
+    "azure-storage-blob==12.30.3",
+    # azureml-mlflow caps cryptography below 49.0.0; 48.0.1 is the security
+    # floor for GHSA-537c-gmf6-5ccf.
+    "cryptography==50.0.1",
+    "starlette==1.7.0",
+]
+package = false

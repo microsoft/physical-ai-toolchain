@@ -2,9 +2,11 @@
 title: Docusaurus Site Operations
 description: Install, validate, test, serve, and troubleshoot the documentation site
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-28
+ms.date: 2026-10-03
 ms.topic: how-to
 ---
+
+<!-- cspell:words Chevrotain dagre ES2024 rjxr -->
 
 Operate the repository documentation site from the repository root or from `docs/docusaurus`.
 
@@ -27,6 +29,33 @@ npm start
 ```
 
 The site uses the `/physical-ai-toolchain/` base path.
+
+## 🔒 Mermaid Dependency Policy
+
+Mermaid is pinned to `12.1.0` in [package.json](package.json). It uses Chevrotain 13, which has no
+`lodash-es` dependency. No `lodash-es` override is needed: `dagre-d3-es` resolves a patched copy.
+Every resolved `lodash-es` copy must be `4.18.0` or later to address
+[GHSA-r5fr-rjxr-66jc](https://github.com/advisories/GHSA-r5fr-rjxr-66jc) and
+[GHSA-f23m-r3pf-42rh](https://github.com/advisories/GHSA-f23m-r3pf-42rh).
+Preserve the other overrides, including `lodash`, and avoid unrelated dependency updates.
+
+[docusaurus.config.js](docusaurus.config.js) explicitly selects `layout: 'dagre'` and `look: 'classic'` while retaining
+the `neutral` light theme and `dark` dark theme. Keep these settings to avoid the Mermaid 12 default redesign.
+
+The [Mermaid 12 browser baseline](https://github.com/mermaid-js/mermaid/releases/tag/mermaid%4012.0.0)
+is ES2024 and Safari 17.4+. Node.js 24+ satisfies its Node.js 22.12+ requirement.
+
+For future Mermaid bumps:
+
+1. Regenerate the docs lockfile with npm against the public registry:
+   `npm --prefix docs/docusaurus install --registry=https://registry.npmjs.org`.
+2. Inspect the complete lockfile and run
+   `npm --prefix docs/docusaurus ls lodash-es --all` after a clean `npm --prefix docs/docusaurus ci`.
+   Reject any `lodash-es` copy below `4.18.0`, including nested copies, and confirm installation leaves the
+   lockfile unchanged. A patched hoisted copy alone is not sufficient.
+3. Run `npm run validate:docs` and the existing [browser validation](#-browser-validation). Check Mermaid SVGs,
+   accessible names and descriptions, and visual presentation in both light and dark modes.
+4. Require Dependency Review, required CI checks, and review approval before merging.
 
 ## ✅ Validation
 
@@ -68,6 +97,17 @@ representative keyboard, search, adaptive, table, and Mermaid journeys, and craw
 Keyboard tests wait for rendered disclosure visibility as well as `aria-expanded` before traversing links.
 Mobile navigation tests also wait for the background to become inert before checking focus containment.
 Use these observable states rather than fixed delays; keep the subsequent keyboard-focus assertions.
+
+Page readiness does not wait for network idle. `expectPageReady` waits for hydration, a canonical link that matches
+the address bar, loaded fonts, one visible `main` landmark, and the Mermaid diagram count recorded for the route in
+`build/mermaid-routes.json`. On the search page with a query, it also waits for the announced result count. The
+canonical check proves a client-side route has rendered, because Docusaurus keeps the previous page on screen until
+the next one loads. Give any new client-rendered widget its own explicit readiness condition.
+
+The exhaustive crawl remains one test with one evidence record. It visits two route states at a time, each in a fresh
+browser context, so storage, theme, and instrumentation never carry between visits. Healthy visits close quietly;
+failing visits keep a screenshot, and retried runs record a trace. If the collector is interrupted, it stops
+scheduling, closes open contexts, and marks unfinished states as blocking findings.
 
 Browser evidence is written to these ignored paths:
 

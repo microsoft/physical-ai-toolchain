@@ -26,9 +26,6 @@ from .annotations import (
 )
 from .datasources import (
     AzureBlobDataSource,
-    CurriculumCriteria,
-    CurriculumDefinition,
-    CurriculumStage,
     DatasetInfo,
     DataSource,
     EpisodeCluster,
@@ -54,9 +51,6 @@ __all__ = [
     "AzureBlobDataSource",
     "ComputedQualityMetrics",
     "ConfidenceLevel",
-    "CurriculumCriteria",
-    "CurriculumDefinition",
-    "CurriculumStage",
     "DataQualityAnnotation",
     "DataQualityIssue",
     "DataQualityIssueType",

@@ -41,6 +41,14 @@ def launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
         f'export PATH={shlex.quote(str(backend_bin))}:"$PATH"\n',
         encoding="utf-8",
     )
+    uv = backend_bin / "uv"
+    uv.write_text(
+        "#!/usr/bin/env bash\n"
+        f"printf '%q ' \"$@\" >> {shlex.quote(str(backend / 'uv-calls.txt'))}\n"
+        f"printf '\\n' >> {shlex.quote(str(backend / 'uv-calls.txt'))}\n",
+        encoding="utf-8",
+    )
+    uv.chmod(0o755)
     uvicorn = backend_bin / "uvicorn"
     uvicorn.write_text(
         "#!/usr/bin/env bash\n"
@@ -119,6 +127,26 @@ def test_backend_failure_is_reported_with_optional_env_keys_absent(launcher: Pat
     assert "Backend child invoked" in result.stdout
     assert "Backend exited before readiness" in result.stdout or "Backend failed to start" in result.stdout
     assert "All services stopped" in result.stdout
+
+
+def test_vlm_setup_preserves_existing_optional_dependencies(launcher: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VLM_JUDGE_ENABLED", "true")
+    result = subprocess.run(
+        ["bash", str(launcher), "--backend"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 23, result.stdout + result.stderr
+    calls = [
+        shlex.split(line)
+        for line in (launcher.parent / "backend" / "uv-calls.txt").read_text(encoding="utf-8").splitlines()
+    ]
+    sync_calls = [args for args in calls if args and args[0] == "sync"]
+    assert len(sync_calls) == 1
+    assert "--inexact" in sync_calls[0]
 
 
 def _option_value(args: list[str], option: str) -> str | None:
