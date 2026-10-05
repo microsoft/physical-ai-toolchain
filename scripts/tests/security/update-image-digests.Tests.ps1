@@ -6,8 +6,8 @@
 
 BeforeDiscovery {
     $script:ToolsPresent = [bool](Get-Command bash -ErrorAction SilentlyContinue) -and
-        [bool](Get-Command git -ErrorAction SilentlyContinue) -and
-        [bool](Get-Command jq -ErrorAction SilentlyContinue)
+    [bool](Get-Command git -ErrorAction SilentlyContinue) -and
+    [bool](Get-Command jq -ErrorAction SilentlyContinue)
 }
 
 BeforeAll {
@@ -136,14 +136,14 @@ Describe 'update-image-digests.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent)
         $result.ExitCode | Should -Be 2
         @($sarif.runs[0].results) | Should -HaveCount 2
         @($sarif.runs[0].results | ForEach-Object {
-            $_.locations[0].physicalLocation.region.startLine
-        } | Select-Object -Unique) | Should -Be @(1)
+                $_.locations[0].physicalLocation.region.startLine
+            } | Select-Object -Unique) | Should -Be @(1)
         @($sarif.runs[0].results | ForEach-Object {
-            $_.locations[0].physicalLocation.region.startColumn
-        } | Select-Object -Unique) | Should -Be @(10, 105)
+                $_.locations[0].physicalLocation.region.startColumn
+            } | Select-Object -Unique) | Should -Be @(10, 105)
         @($sarif.runs[0].results | ForEach-Object {
-            $_.locations[0].physicalLocation.region.endColumn
-        } | Select-Object -Unique) | Should -Be @(103, 198)
+                $_.locations[0].physicalLocation.region.endColumn
+            } | Select-Object -Unique) | Should -Be @(103, 198)
     }
 
     It 'reports a stale occurrence after a current occurrence on the same line' {
@@ -242,7 +242,7 @@ printf 'HTTP/1.1 200 OK\nDocker-Content-Digest: %s\n\n' "`$digest"
         $result.ExitCode | Should -Be 2
         @($sarif.runs[0].results) | Should -HaveCount 1
         $sarif.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri |
-            Should -Be '.github/workflows/manual.yml'
+        Should -Be '.github/workflows/manual.yml'
     }
 
     It 'updates stale pins in default mode' {
@@ -356,8 +356,8 @@ esac
 
         $result = Invoke-DigestScript -Workspace $workspace -Arguments @('--check') -CurlBody $curlBody
         $manifestCalls = @($result.Calls | Where-Object {
-            $_ -match 'registry-1\.docker\.io/v2/library/robot/manifests/1\.0'
-        })
+                $_ -match 'registry-1\.docker\.io/v2/library/robot/manifests/1\.0'
+            })
 
         $result.ExitCode | Should -Be 2
         ($result.Calls -join "`n") | Should -Match 'auth\.docker\.io/token'
@@ -472,8 +472,8 @@ esac
 
         $result = Invoke-DigestScript -Workspace $workspace -Arguments @('--check') -CurlBody $curlBody
         $manifestCalls = @($result.Calls | Where-Object {
-            $_ -match 'nvcr\.io/v2/nvidia/isaac/manifests/1\.0'
-        })
+                $_ -match 'nvcr\.io/v2/nvidia/isaac/manifests/1\.0'
+            })
 
         $result.ExitCode | Should -Be 2
         ($result.Calls -join "`n") | Should -Match 'nvcr\.io/proxy_auth\?scope=repository:nvidia/isaac:pull'
@@ -518,8 +518,8 @@ esac
 
         $result = Invoke-DigestScript -Workspace $workspace -Arguments @('--check') -CurlBody $curlBody
         $manifestCalls = @($result.Calls | Where-Object {
-            $_ -match 'registry\.example\.com:5000/v2/team/robot/manifests/1\.0'
-        })
+                $_ -match 'registry\.example\.com:5000/v2/team/robot/manifests/1\.0'
+            })
 
         $result.ExitCode | Should -Be 2
         $manifestCalls | Should -HaveCount 1
@@ -661,10 +661,10 @@ printf 'HTTP/1.1 200 OK\nDocker-Content-Digest: %s\n\n' "`$digest"
         $fixtureDirectory = Join-Path $workspace 'scripts/tests/Fixtures'
         New-Item -ItemType Directory -Path $fixtureDirectory -Force | Out-Null
         $excludedFiles = @{
-            'Dockerfile' = "FROM $staleReference`n"
-            'docker-compose.yml' = "image: $staleReference`n"
+            'Dockerfile'                         = "FROM $staleReference`n"
+            'docker-compose.yml'                 = "image: $staleReference`n"
             'scripts/tests/Fixtures/sample.yaml' = "image: $staleReference`n"
-            'scripts/tests/sample.Tests.ps1' = "`$image = '$staleReference'`n"
+            'scripts/tests/sample.Tests.ps1'     = "`$image = '$staleReference'`n"
         }
         foreach ($entry in $excludedFiles.GetEnumerator()) {
             $path = Join-Path $workspace $entry.Key
