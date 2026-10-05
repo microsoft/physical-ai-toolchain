@@ -38,6 +38,7 @@ OPTIONS:
     --vault-name NAME             Expected Key Vault for post-VPN verification
     --subscription ID             Expected subscription for post-VPN verification
     --azure-config-dir DIR        Existing isolated Azure CLI state
+    --managed-identity            Sign in as the host's Arc-enabled server identity, not device code
     --input-dir DIR               Protected public VPN input directory
     --request-dir DIR             Protected local private-key directory
     --response-dir DIR            Protected signed public-response directory
@@ -57,6 +58,7 @@ tenant_id=""
 vault_name=""
 subscription_id=""
 azure_config_dir=""
+use_managed_identity=false
 input_dir=""
 request_dir=""
 response_dir=""
@@ -74,6 +76,7 @@ while [[ $# -gt 0 ]]; do
     --vault-name)               vault_name="$2"; shift 2 ;;
     --subscription)             subscription_id="$2"; shift 2 ;;
     --azure-config-dir)         azure_config_dir="$2"; shift 2 ;;
+    --managed-identity)         use_managed_identity=true; shift ;;
     --input-dir)                input_dir="$2"; shift 2 ;;
     --request-dir)              request_dir="$2"; shift 2 ;;
     --response-dir)             response_dir="$2"; shift 2 ;;
@@ -103,6 +106,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Milestone" "reachable: VPN connected"
   print_kv "Environment" "$environment"
   print_kv "Host" "$host_name"
+  print_kv "Azure Sign-in" "$([[ "$use_managed_identity" == "true" ]] && echo 'managed identity' || echo 'device code')"
   print_kv "Tenant" "$tenant_id"
   print_kv "Connection" "$connection_name"
   print_kv "Private Vault Verified" "$private_vault_verified"
@@ -260,7 +264,7 @@ sudo k3s kubectl patch configmap coredns-custom --namespace kube-system \
   --type merge --patch "$coredns_patch" >/dev/null
 sudo k3s kubectl rollout restart deployment coredns --namespace kube-system >/dev/null
 sudo k3s kubectl rollout status deployment coredns --namespace kube-system --timeout=2m >/dev/null
-hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir"
+hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir" "$use_managed_identity"
 catalog_secret="${environment}-${host_name}-hil-catalog"
 az keyvault secret show --subscription "$subscription_id" --vault-name "$vault_name" \
   --name "$catalog_secret" --query id -o tsv >/dev/null

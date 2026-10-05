@@ -143,7 +143,9 @@ test('accessibility coverage: exact report upload isolates OIDC and fails closed
     assert.match(upload.uses, /^codecov\/codecov-action@[a-f0-9]{40}$/);
     assert.deepEqual(upload.with, {
       files: 'coverage/coverage-accessibility.xml', disable_search: true, use_oidc: true,
-      fail_ci_if_error: true, flags: 'pytest-accessibility', name: 'pytest-accessibility-coverage',
+      use_pypi: true, use_legacy_upload_endpoint: true, fail_ci_if_error: true,
+      url: 'https://codecov.io', flags: 'pytest-accessibility',
+      name: 'pytest-accessibility-coverage',
     });
     for (const step of uploader.steps) {
       assert.equal(step.if, undefined);

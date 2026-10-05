@@ -11,7 +11,6 @@ h5py = pytest.importorskip("h5py")
 
 from src.api.services import hdf5_loader as mod
 from src.api.services.hdf5_loader import (
-    HDF5EpisodeData,
     HDF5Loader,
     HDF5LoaderError,
     get_hdf5_loader,
@@ -72,17 +71,15 @@ def _write_episode(
             grp.attrs["weights"] = np.array([0.5, 0.25])
 
 
-# ---------- HDF5LoaderError ----------
+# ---------- HDF5Loader construction ----------
 
 
-def test_hdf5_loader_error_carries_cause() -> None:
-    cause = ValueError("bad")
-    err = HDF5LoaderError("oops", cause=cause)
-    assert err.cause is cause
-    assert "oops" in str(err)
+def test_hdf5_loader_error_preserves_message_and_cause() -> None:
+    cause = ValueError("invalid episode")
+    error = HDF5LoaderError("load failed", cause=cause)
 
-
-# ---------- HDF5Loader.__init__ ----------
+    assert str(error) == "load failed"
+    assert error.cause is cause
 
 
 def test_init_raises_when_h5py_unavailable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -91,7 +88,7 @@ def test_init_raises_when_h5py_unavailable(monkeypatch: pytest.MonkeyPatch, tmp_
         HDF5Loader(tmp_path)
 
 
-# ---------- _find_episode_file ----------
+# ---------- load_episode file discovery ----------
 
 
 @pytest.mark.parametrize(
@@ -107,20 +104,21 @@ def test_init_raises_when_h5py_unavailable(monkeypatch: pytest.MonkeyPatch, tmp_
         "episodes/episode_3.hdf5",
     ],
 )
-def test_find_episode_file_patterns(tmp_path: Path, rel: str) -> None:
+def test_load_episode_supports_common_filename_patterns(tmp_path: Path, rel: str) -> None:
     target = tmp_path / rel
     _write_episode(target, length=2, with_images=False, with_metadata_group=False)
     loader = HDF5Loader(tmp_path)
-    found = loader._find_episode_file(3)
-    assert found == target
-    # cache hit on second call
-    assert loader._find_episode_file(3) == target
+    episode = loader.load_episode(3)
+
+    assert episode.episode_index == 3
+    assert episode.length == 2
+    np.testing.assert_array_equal(episode.joint_positions, [[0.0, 1.0], [2.0, 3.0]])
 
 
-def test_find_episode_file_missing_raises(tmp_path: Path) -> None:
+def test_load_episode_missing_file_raises(tmp_path: Path) -> None:
     loader = HDF5Loader(tmp_path)
     with pytest.raises(HDF5LoaderError, match="No HDF5 file found"):
-        loader._find_episode_file(99)
+        loader.load_episode(99)
 
 
 # ---------- list_episodes ----------
@@ -130,26 +128,10 @@ def test_list_episodes_discovers_across_dirs(tmp_path: Path) -> None:
     _write_episode(tmp_path / "episode_000001.hdf5", length=1, with_images=False, with_metadata_group=False)
     _write_episode(tmp_path / "data" / "episode_000002.hdf5", length=1, with_images=False, with_metadata_group=False)
     _write_episode(tmp_path / "episodes" / "ep_3.hdf5", length=1, with_images=False, with_metadata_group=False)
-    # unparseable name should be skipped
     (tmp_path / "random.hdf5").write_bytes(b"")
+    (tmp_path / "episode_invalid.hdf5").write_bytes(b"")
     loader = HDF5Loader(tmp_path)
     assert loader.list_episodes() == [1, 2, 3]
-
-
-# ---------- _parse_episode_index ----------
-
-
-@pytest.mark.parametrize(
-    ("name", "expected"),
-    [
-        ("episode_000005.hdf5", 5),
-        ("ep_3.hdf5", 3),
-        ("garbage.hdf5", None),
-        ("episode_abc.hdf5", None),
-    ],
-)
-def test_parse_episode_index(name: str, expected: int | None) -> None:
-    assert HDF5Loader._parse_episode_index(Path(name)) == expected
 
 
 # ---------- load_episode happy path ----------
@@ -159,7 +141,6 @@ def test_load_episode_happy_path(tmp_path: Path) -> None:
     _write_episode(tmp_path / "episode_0.hdf5", length=4)
     loader = HDF5Loader(tmp_path)
     ep = loader.load_episode(0, load_images=True)
-    assert isinstance(ep, HDF5EpisodeData)
     assert ep.episode_index == 0
     assert ep.length == 4
     assert ep.timestamps.shape == (4,)
@@ -247,10 +228,13 @@ def test_load_episode_uses_existing_cameras_metadata(tmp_path: Path) -> None:
     assert ep.metadata["cameras"] == [b"preset"]
 
 
-# ---------- _load_images corrupt-dataset branch ----------
+# ---------- load_episode corrupt camera handling ----------
 
 
-def test_load_images_skips_corrupt_dataset(tmp_path: Path) -> None:
+def test_load_episode_skips_unreadable_camera(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     target = tmp_path / "episode_0.hdf5"
     with h5py.File(target, "w") as f:
         f.create_dataset("data/qpos", data=np.zeros((2, 2)))
@@ -270,15 +254,11 @@ def test_load_images_skips_corrupt_dataset(tmp_path: Path) -> None:
         return real_asarray(data, dtype=dtype, **kwargs) if dtype is not None else real_asarray(data, **kwargs)
 
     fake_asarray.calls = 0
-    monkey_target = mod.np
-    orig = monkey_target.asarray
-    try:
-        monkey_target.asarray = fake_asarray
-        ep = loader.load_episode(0, load_images=True)
-    finally:
-        monkey_target.asarray = orig
-    assert "cam0" in ep.images
-    assert "cam1" not in ep.images
+    monkeypatch.setattr(mod.np, "asarray", fake_asarray)
+
+    episode = loader.load_episode(0, load_images=True)
+
+    assert set(episode.images) == {"cam0"}
 
 
 # ---------- get_episode_info ----------
@@ -331,9 +311,12 @@ def test_get_episode_info_zero_task_index(tmp_path: Path) -> None:
 
 
 def test_get_hdf5_loader_returns_loader(tmp_path: Path) -> None:
+    _write_episode(tmp_path / "episode_0.hdf5", length=2, with_images=False)
     loader = get_hdf5_loader(tmp_path)
-    assert isinstance(loader, HDF5Loader)
-    assert loader.base_path == tmp_path
+    episode = loader.load_episode(0)
+
+    assert episode.length == 2
+    assert episode.episode_index == 0
 
 
 # ---------- module-level load_single_frame ----------

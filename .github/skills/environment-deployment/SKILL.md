@@ -185,7 +185,9 @@ The deployment consumes this file through `02-deploy-azureml-extension.sh --inst
 
 ### 8. Generate the immutable ACR image manifest
 
-Generate `osmo-images.json` only when OSMO images are mirrored to ACR. Use this component allowlist:
+Generate `osmo-images.json` only when OSMO images are mirrored to ACR. Mirroring writes to the registry, so it isn't part of discovery. With the user's confirmation, `infrastructure/setup/import-osmo-to-acr.sh` imports and locks the pinned images and charts, writes this file, and records it with the registry and OSMO versions in an existing `deployment.json`. It stops before importing when a value already in `deployment.json` differs.
+
+To describe images that are already mirrored, use this component allowlist:
 
 - `agent`
 - `backend-listener`
@@ -333,9 +335,13 @@ Complete this journey when an existing OSMO backend and pool are ready: the envi
 
 The environment owner runs `infrastructure/setup/04-prepare-osmo-hil-node.sh` after verifying the existing OSMO backend and pool. Supply the generated bundle, approved service URL, existing backend and pool, protected OSMO profile, pull-only registry configuration, and token expiry. The script publishes the generic bundle and the exact host-bound catalog separately, writing the catalog last.
 
-Key Vault is the only scripted protected-artifact transfer. Before publication, the environment owner manually creates the exact secret resources and grants the Ubuntu identity data-plane access to each named inbound secret only. Use `Key Vault Secrets User` for inbound secrets and `Key Vault Secrets Officer` only for the host-specific CSR secret. Verify that the Ubuntu identity has no direct or inherited vault-wide data-plane role.
+Key Vault is the only scripted protected-artifact transfer. Before publication, the environment owner creates the exact secret resources, except the catalog that the publisher writes, and grants the Ubuntu identity data-plane access to each named inbound secret only.
 
-Key Vault networking and RBAC are manual environment-owner actions. The publisher does not assign roles, modify Key Vault networking, or make a private vault reachable. Complete any bounded network-access window and restore private-only access before the consumer continues.
+`infrastructure/setup/prepare-osmo-hil-exchange.sh` creates the secrets and the pull-only registry configuration, and grants the roles when given `--assignee-object-id`; rerun it after the first publication to grant the catalog role.
+
+Use `Key Vault Secrets User` for inbound secrets and `Key Vault Secrets Officer` only for the host-specific CSR secret. Verify that the Ubuntu identity has no direct or inherited vault-wide data-plane role.
+
+Key Vault networking stays a manual environment-owner action. The publisher does not assign roles, modify Key Vault networking, or make a private vault reachable. Complete any bounded network-access window and restore private-only access before the consumer continues.
 
 When VPN is required, generate `vpn.json` from the selected environment's Terraform outputs and Azure VPN artifacts. Set `private_dns.server` to `dns_server_ip`. Derive each route-only query suffix from `private_dns_zones` by removing the leading `privatelink.` label; map the Key Vault zone `privatelink.vaultcore.azure.net` to `vault.azure.net`.
 

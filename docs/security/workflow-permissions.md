@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Workflow Permissions
 description: GitHub Actions permission scopes and OSSF Scorecard Token-Permissions exception rationale
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-18
+ms.date: 2026-09-29
 ms.topic: reference
 keywords:
   - security
@@ -13,16 +13,38 @@ keywords:
   - token-permissions
 ---
 
+GitHub Actions permission and command-interpolation controls for workflows and composite actions in this repository.
+
 ## 📋 Overview
 
-All GitHub Actions workflows in this repository follow the [OpenSSF Scorecard Token-Permissions](https://github.com/ossf/scorecard/blob/main/docs/checks.md#token-permissions) principle:
+All workflows follow the [OpenSSF Scorecard Token-Permissions](https://github.com/ossf/scorecard/blob/main/docs/checks.md#token-permissions) principle:
 
 - Top-level `permissions:` is `contents: read` (read-only by default).
-- Write-scoped permissions are declared at the **job level** only when a specific step requires them.
+- Jobs under a populated workflow-level grant declare their own `permissions:` block, including read-only jobs.
+- Write-scoped permissions are declared at the job level only when a specific step requires them.
 - No workflow grants `permissions: write-all` or omits an explicit top-level `permissions:` block.
 
-> [!NOTE]
-> `scripts/security/Test-WorkflowPermissions.ps1` fails any workflow missing a top-level `permissions:` block, and `scripts/security/Test-DangerousWorkflow.ps1` flags untrusted interpolation (including `${{ github.head_ref }}` and selected `${{ github.event.* }}` contexts) in `run:` steps and `pull_request_target` checkouts of untrusted pull-request code. Both linters run under `npm run test:ps` (and in CI via the Pester suite); both linters also run standalone in `workflow-permissions-scan.yml`.
+An empty workflow-level `permissions: {}` block grants no token scopes. Jobs that inherit this empty grant pass without a redundant job-level block; jobs that declare permissions remain explicit.
+
+## 🔍 Enforced Rules
+
+| Script                                          | Rule                                                                                                                                                                       |
+|-------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `scripts/security/Test-WorkflowPermissions.ps1` | Reject workflows without top-level permissions and jobs that implicitly inherit a populated workflow-level grant.                                                         |
+| `scripts/security/Test-DangerousWorkflow.ps1`   | Reject direct interpolation of attacker-controlled event values or non-boolean inputs into `run` and `actions/github-script`, plus untrusted `pull_request_target` checkout. |
+
+Both linters run under `npm run test:ps` and standalone in `workflow-permissions-scan.yml`.
+
+Map non-boolean inputs to a step-level environment variable before using them in shell or script code:
+
+```yaml
+- name: Run command
+  env:
+    COMMAND: ${{ inputs.command }}
+  run: ./tool --command "$COMMAND"
+```
+
+Boolean inputs may be interpolated directly because they resolve only to `true` or `false`.
 
 This document enumerates every job-scoped `security-events`, `contents`, and `attestations` write grant across `.github/workflows/` and records the justification so security auditors and Scorecard reviewers can verify each exception.
 

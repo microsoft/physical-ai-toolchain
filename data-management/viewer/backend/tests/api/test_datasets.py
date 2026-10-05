@@ -1,37 +1,8 @@
-"""
-Integration tests for dataset API endpoints.
-"""
-
-import os
-import tempfile
+"""Integration tests for dataset API endpoints."""
 
 import pytest
-from fastapi.testclient import TestClient
 
-from src.api.main import app
 from src.api.models.datasources import DatasetInfo, FeatureSchema, TaskInfo
-
-
-@pytest.fixture
-def client():
-    """Create test client with isolated singletons and empty temp data path."""
-    with tempfile.TemporaryDirectory() as tmp:
-        os.environ["DATA_DIR"] = tmp
-
-        import src.api.config as config_mod
-        import src.api.services.annotation_service as ann_mod
-        import src.api.services.dataset_service as ds_mod
-
-        config_mod._app_config = None
-        ds_mod._dataset_service = None
-        ann_mod._annotation_service = None
-
-        with TestClient(app) as c:
-            yield c
-
-        config_mod._app_config = None
-        ds_mod._dataset_service = None
-        ann_mod._annotation_service = None
 
 
 @pytest.fixture
@@ -54,16 +25,13 @@ def sample_dataset():
 
 
 @pytest.fixture
-def registered_dataset(client, sample_dataset):
+async def registered_dataset(client, sample_dataset):
     """Register a sample dataset before tests."""
-    import asyncio
-
     import src.api.services.dataset_service as ds_mod
 
     service = ds_mod.get_dataset_service()
-    asyncio.run(service.register_dataset(sample_dataset))
-    yield sample_dataset
-    service._datasets.clear()
+    await service.register_dataset(sample_dataset)
+    return sample_dataset
 
 
 class TestDatasetEndpoints:

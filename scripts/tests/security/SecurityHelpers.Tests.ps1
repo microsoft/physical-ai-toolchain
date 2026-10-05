@@ -12,13 +12,15 @@
 BeforeAll {
     $modulePath = Join-Path $PSScriptRoot '../../security/Modules/SecurityHelpers.psm1'
     Import-Module $modulePath -Force
+    Import-Module (Join-Path $PSScriptRoot '../../lib/Modules/CIHelpers.psm1') -Force
 }
 
 Describe 'Write-SecurityLog' -Tag 'Unit' {
     Context 'Console output' {
         It 'Outputs formatted message with timestamp' {
             $output = Write-SecurityLog -Message 'Test message' -Level Info 6>&1
-            $output | Should -Match '\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] \[Info\] Test message'
+            $timestampPattern = (Get-StandardTimestampPattern).TrimStart('^').TrimEnd('$')
+            $output | Should -Match "\[$timestampPattern\] \[Info\] Test message"
         }
 
         It 'Outputs message with Warning level' {
@@ -116,10 +118,11 @@ Describe 'New-SecurityIssue' -Tag 'Unit' {
     }
 
     It 'Sets Timestamp to current time' {
-        $before = Get-Date
+        $before = (Get-Date).ToUniversalTime()
         $issue = New-SecurityIssue -Type 'Test' -Severity 'Low' -Title 'Test' -Description 'Test'
-        $after = Get-Date
-        $timestamp = [datetime]::ParseExact($issue.Timestamp, 'yyyy-MM-dd HH:mm:ss', $null)
+        $after = (Get-Date).ToUniversalTime()
+        $issue.Timestamp | Should -Match (Get-StandardTimestampPattern)
+        $timestamp = [datetime]::Parse($issue.Timestamp, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
         $timestamp | Should -BeGreaterOrEqual $before.AddSeconds(-1)
         $timestamp | Should -BeLessOrEqual $after.AddSeconds(1)
     }
@@ -216,7 +219,8 @@ Describe 'Write-SecurityReport' -Tag 'Unit' {
         It 'Includes Timestamp in JSON' {
             $output = Write-SecurityReport -Results $script:testIssues -OutputFormat json
             $json = $output | ConvertFrom-Json
-            $json.Timestamp | Should -Match '\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}'
+            $json.Timestamp | Should -BeOfType [datetime]
+            $json.Timestamp.ToUniversalTime().ToString('o') | Should -Match (Get-StandardTimestampPattern)
         }
 
         It 'Includes Count in JSON' {
