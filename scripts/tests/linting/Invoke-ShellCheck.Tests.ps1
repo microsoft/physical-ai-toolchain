@@ -66,23 +66,19 @@ Describe 'Invoke-ShellCheckCore' -Tag 'Unit' {
     }
 
     Context 'no files found' {
-        It 'Returns 0 when no .sh files exist' {
+        It 'Fails full validation when no .sh files exist' {
             $result = Invoke-ShellCheckCore -OutputPath $script:TestOutputPath
-            $result | Should -Be 0
+            $result | Should -Be 1
         }
 
-        It 'Writes empty results JSON when no .sh files exist' {
+        It 'Does not publish a passing empty report for full validation' {
             Invoke-ShellCheckCore -OutputPath $script:TestOutputPath
-            $script:TestOutputPath | Should -Exist
-            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
-            $json.lint_passed | Should -BeTrue
-            $json.error_count | Should -Be 0
-            $json.warning_count | Should -Be 0
+            $script:TestOutputPath | Should -Not -Exist
         }
 
-        It 'Writes step summary when no .sh files found' {
+        It 'Annotates missing full-scan targets' {
             Invoke-ShellCheckCore -OutputPath $script:TestOutputPath
-            Should -Invoke Write-CIStepSummary -Times 1
+            Should -Invoke Write-CIAnnotation -Times 1 -ParameterFilter { $Level -eq 'Error' }
         }
     }
 
@@ -115,7 +111,7 @@ Describe 'Invoke-ShellCheckCore' -Tag 'Unit' {
             '#!/bin/bash' | Set-Content (Join-Path $shDir 'unchanged.sh')
 
             Mock Get-ChangedFilesFromGit { return @('scripts/changed.sh') }
-            Mock shellcheck { return $null } -ParameterFilter { $args[0] -eq '--format=json' }
+            Mock shellcheck { return '[]' } -ParameterFilter { $args[0] -eq '--format=json' }
 
             Invoke-ShellCheckCore -OutputPath $script:TestOutputPath -ChangedFilesOnly
             Should -Invoke shellcheck -Times 1 -ParameterFilter { $args[0] -eq '--format=json' }
@@ -128,7 +124,7 @@ Describe 'Invoke-ShellCheckCore' -Tag 'Unit' {
             New-Item -ItemType Directory -Force -Path $shDir | Out-Null
             '#!/bin/bash' | Set-Content (Join-Path $shDir 'clean.sh')
 
-            Mock shellcheck { return $null } -ParameterFilter { $args[0] -eq '--format=json' }
+            Mock shellcheck { return '[]' } -ParameterFilter { $args[0] -eq '--format=json' }
         }
 
         It 'Returns 0 when no issues found' {
@@ -151,6 +147,24 @@ Describe 'Invoke-ShellCheckCore' -Tag 'Unit' {
         It 'Writes step summary on success' {
             Invoke-ShellCheckCore -OutputPath $script:TestOutputPath
             Should -Invoke Write-CIStepSummary -Times 1
+        }
+
+        It 'Fails when the scanner exits nonzero without findings' {
+            Mock shellcheck { $global:LASTEXITCODE = 2; '[]' } -ParameterFilter { $args[0] -eq '--format=json' }
+            Invoke-ShellCheckCore -OutputPath $script:TestOutputPath | Should -Be 1
+            $report = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $report.lint_passed | Should -BeFalse
+            $report.execution_errors.Count | Should -Be 1
+        }
+
+        It 'Fails when a successful scanner emits malformed JSON' {
+            Mock shellcheck { 'broken json' } -ParameterFilter { $args[0] -eq '--format=json' }
+            Invoke-ShellCheckCore -OutputPath $script:TestOutputPath | Should -Be 1
+        }
+
+        It 'Fails when a successful scanner emits no report' {
+            Mock shellcheck { $null } -ParameterFilter { $args[0] -eq '--format=json' }
+            Invoke-ShellCheckCore -OutputPath $script:TestOutputPath | Should -Be 1
         }
     }
 
@@ -301,10 +315,10 @@ Describe 'Invoke-ShellCheckCore' -Tag 'Unit' {
             }
         }
 
-        It 'Returns 0 when all .sh files are in excluded directories' {
-            Mock shellcheck { return $null } -ParameterFilter { $args[0] -eq '--format=json' }
+        It 'Fails full validation when every shell file is excluded' {
+            Mock shellcheck { return '[]' } -ParameterFilter { $args[0] -eq '--format=json' }
             $result = Invoke-ShellCheckCore -OutputPath $script:TestOutputPath
-            $result | Should -Be 0
+            $result | Should -Be 1
         }
     }
 
@@ -319,7 +333,7 @@ Describe 'Invoke-ShellCheckCore' -Tag 'Unit' {
             $shDir = Join-Path $TestDrive 'scripts'
             New-Item -ItemType Directory -Force -Path $shDir | Out-Null
             '#!/bin/bash' | Set-Content (Join-Path $shDir 'test.sh')
-            Mock shellcheck { return $null } -ParameterFilter { $args[0] -eq '--format=json' }
+            Mock shellcheck { return '[]' } -ParameterFilter { $args[0] -eq '--format=json' }
 
             Invoke-ShellCheckCore -OutputPath $script:TestOutputPath
             { Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json } | Should -Not -Throw
@@ -395,7 +409,7 @@ Describe 'Invoke-ShellCheckCore' -Tag 'Unit' {
             $shDir = Join-Path $TestDrive 'scripts'
             New-Item -ItemType Directory -Force -Path $shDir | Out-Null
             '#!/bin/bash' | Set-Content (Join-Path $shDir 'test.sh')
-            Mock shellcheck { return $null } -ParameterFilter { $args[0] -eq '--format=json' }
+            Mock shellcheck { return '[]' } -ParameterFilter { $args[0] -eq '--format=json' }
         }
 
         It 'Extracts version from shellcheck output' {

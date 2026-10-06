@@ -16,12 +16,22 @@ BeforeAll {
 }
 
 Describe 'Get-UvProject' -Tag 'Unit' {
-    It 'Discovers directories containing pyproject.toml as repo-relative paths' {
+    BeforeEach {
+        Mock git {
+            $global:LASTEXITCODE = 0
+            $root = $args[1]
+            Get-ChildItem -Path $root -Filter pyproject.toml -Recurse -File | ForEach-Object {
+                [IO.Path]::GetRelativePath($root, $_.FullName) -replace '\\', '/'
+            }
+        } -ParameterFilter { $args[0] -eq '-C' }
+    }
+
+    It 'Discovers tracked manifest directories as repo-relative paths' {
         New-Item -ItemType Directory -Force -Path (Join-Path $TestDrive 'training/rl') | Out-Null
         New-Item -ItemType Directory -Force -Path (Join-Path $TestDrive 'evaluation') | Out-Null
-        'manifest' | Set-Content (Join-Path $TestDrive 'pyproject.toml')
-        'manifest' | Set-Content (Join-Path $TestDrive 'training/rl/pyproject.toml')
-        'manifest' | Set-Content (Join-Path $TestDrive 'evaluation/pyproject.toml')
+        '[project]' | Set-Content (Join-Path $TestDrive 'pyproject.toml')
+        '[project]' | Set-Content (Join-Path $TestDrive 'training/rl/pyproject.toml')
+        '[project]' | Set-Content (Join-Path $TestDrive 'evaluation/pyproject.toml')
 
         $projects = Get-UvProject -RepoRoot $TestDrive
 
@@ -34,8 +44,8 @@ Describe 'Get-UvProject' -Tag 'Unit' {
     It 'Excludes vendored and tooling directories' {
         New-Item -ItemType Directory -Force -Path (Join-Path $TestDrive 'external/IsaacLab') | Out-Null
         New-Item -ItemType Directory -Force -Path (Join-Path $TestDrive '.venv') | Out-Null
-        'manifest' | Set-Content (Join-Path $TestDrive 'external/IsaacLab/pyproject.toml')
-        'manifest' | Set-Content (Join-Path $TestDrive '.venv/pyproject.toml')
+        '[project]' | Set-Content (Join-Path $TestDrive 'external/IsaacLab/pyproject.toml')
+        '[project]' | Set-Content (Join-Path $TestDrive '.venv/pyproject.toml')
 
         $projects = Get-UvProject -RepoRoot $TestDrive
 
@@ -43,13 +53,29 @@ Describe 'Get-UvProject' -Tag 'Unit' {
         $projects | Should -Not -Contain '.venv'
     }
 
-    It 'Returns an empty array when no pyproject.toml exists' {
+    It 'Returns an empty array when no tracked manifests exist' {
         $emptyRoot = Join-Path $TestDrive 'empty'
         New-Item -ItemType Directory -Force -Path $emptyRoot | Out-Null
 
         $projects = @(Get-UvProject -RepoRoot $emptyRoot)
 
         $projects.Count | Should -Be 0
+    }
+
+    It 'Does not shrink the expected inventory when one project loses its lock' {
+        foreach ($project in @('intact', 'missing-lock')) {
+            New-Item -ItemType Directory -Force -Path (Join-Path $TestDrive $project) | Out-Null
+            '[project]' | Set-Content (Join-Path $TestDrive "$project/pyproject.toml")
+        }
+        'lock' | Set-Content (Join-Path $TestDrive 'intact/uv.lock')
+        $projects = @(Get-UvProject -RepoRoot $TestDrive)
+        $projects | Should -Contain 'intact'
+        $projects | Should -Contain 'missing-lock'
+    }
+
+    It 'Fails manifest discovery when Git fails' {
+        Mock git { $global:LASTEXITCODE = 1 } -ParameterFilter { $args[0] -eq '-C' }
+        { Get-UvProject -RepoRoot $TestDrive } | Should -Throw '*tracked project manifests*'
     }
 }
 
@@ -113,23 +139,27 @@ Describe 'Invoke-UvLockCheck' -Tag 'Unit' {
 
 Describe 'Test-UvLockProject' -Tag 'Unit' {
     BeforeEach {
-        New-Item -ItemType Directory -Force -Path (Join-Path $TestDrive 'training/rl') | Out-Null
-        New-Item -ItemType Directory -Force -Path (Join-Path $TestDrive 'evaluation') | Out-Null
-        foreach ($directory in @($TestDrive, (Join-Path $TestDrive 'training/rl'), (Join-Path $TestDrive 'evaluation'))) {
-            'manifest' | Set-Content (Join-Path $directory 'pyproject.toml')
-            'lock' | Set-Content (Join-Path $directory 'uv.lock')
+        foreach ($project in @('.', 'training/rl', 'evaluation')) {
+            $path = Join-Path $TestDrive $project
+            New-Item -ItemType Directory -Force -Path $path | Out-Null
+            'lock' | Set-Content (Join-Path $path 'uv.lock')
+            '[project]' | Set-Content (Join-Path $path 'pyproject.toml')
         }
+        Mock git { $global:LASTEXITCODE = 0; $args[-1] } -ParameterFilter { $args -contains 'ls-files' }
     }
 
-    It 'Rejects a missing lock without invoking uv' {
+    It 'Rejects a missing lock before invoking uv' {
         Remove-Item (Join-Path $TestDrive 'evaluation/uv.lock')
-        Mock Invoke-UvLockCheck { throw 'should not run' }
-
+        Mock Invoke-UvLockCheck { throw 'must not execute' }
         $result = Test-UvLockProject -Project 'evaluation' -RepoRoot $TestDrive
-
         $result.Passed | Should -BeFalse
         $result.Detail | Should -Be 'uv.lock is missing'
         Should -Not -Invoke Invoke-UvLockCheck
+    }
+
+    It 'Rejects an untracked lock even when it exists on disk' {
+        Mock git { $global:LASTEXITCODE = 1 } -ParameterFilter { $args -contains 'ls-files' }
+        (Test-UvLockProject -Project 'evaluation' -RepoRoot $TestDrive).Passed | Should -BeFalse
     }
 
     It 'Rejects an explicitly selected project without a manifest' {
@@ -420,7 +450,7 @@ Describe 'Invoke-UvLockConsistencyCheckCore' -Tag 'Unit' {
         Should -Invoke Get-UvProject -Times 1
     }
 
-    It 'Returns 1 when discovery finds no projects' {
+    It 'Fails full validation when discovery finds no projects' {
         Mock Get-UvProject { @() }
         Mock Test-UvLockProject { throw 'should not run' }
 
@@ -428,7 +458,7 @@ Describe 'Invoke-UvLockConsistencyCheckCore' -Tag 'Unit' {
 
         $result | Should -Be 1
         Should -Not -Invoke Test-UvLockProject
-        Should -Invoke Write-CIAnnotation -ParameterFilter { $Message -like '*No pyproject.toml*' }
+        Should -Invoke Write-CIAnnotation -ParameterFilter { $Level -eq 'Error' -and $Message -like '*no tracked project manifests*' }
     }
 
     It 'Derives the output path under the repository root when none is supplied' {

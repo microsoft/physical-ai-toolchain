@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument } from 'yaml';
 import { loadContract } from './select-checks.mjs';
-import { requiredLanes } from './evaluate-checks.mjs';
+import { visibleLanes } from './evaluate-checks.mjs';
 
 const array = value => value === undefined ? [] : Array.isArray(value) ? value : [value];
 const expression = value => String(value ?? '').replace(/^\s*\$\{\{\s*|\s*\}\}\s*$/g, '').trim();
@@ -15,6 +16,241 @@ const events = workflow => typeof workflow.on === 'string' ? [workflow.on] : Arr
 const executableEvents = workflow => events(workflow).filter(event => event !== 'workflow_call');
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const hasOwn = (value, key) => Object.hasOwn(value ?? {}, key);
+const evidenceOutputs = ['work-status', 'expected-count', 'executed-count', 'artifact-id', 'artifact-url', 'test-count', 'skipped-count', 'first-failure'];
+const outcomeAction = './.github/actions/ci-outcome';
+// Ref pinning is enforced by the dependency pinning lane so Dependabot ref bumps do not break bindings.
+const actionPath = uses => String(uses ?? '').split('@')[0];
+
+function githubExpressionBodies(value) {
+  const bodies = [];
+  let cursor = 0;
+  while ((cursor = value.indexOf('${{', cursor)) !== -1) {
+    const bodyStart = cursor + 3;
+    let quoted = false;
+    let closed = false;
+    for (cursor = bodyStart; cursor < value.length - 1; cursor++) {
+      if (value[cursor] === "'") {
+        if (quoted && value[cursor + 1] === "'") cursor++;
+        else quoted = !quoted;
+      } else if (!quoted && value.slice(cursor, cursor + 2) === '}}') {
+        bodies.push(value.slice(bodyStart, cursor));
+        cursor += 2;
+        closed = true;
+        break;
+      }
+    }
+    if (!closed) break;
+  }
+  return bodies;
+}
+
+function referencesSecretsContext(value) {
+  if (typeof value === 'string') {
+    return githubExpressionBodies(value).some(body => {
+      const expressionBody = body.replace(/'(?:''|[^'])*'/g, "''");
+      return /(?:^|[^A-Za-z0-9_.])secrets\s*(?:\.|\[)/.test(expressionBody);
+    });
+  }
+  if (Array.isArray(value)) return value.some(referencesSecretsContext);
+  return isObject(value) && Object.values(value).some(referencesSecretsContext);
+}
+
+function jsonInput(value) {
+  try { return JSON.parse(value); } catch { return undefined; }
+}
+
+function requiredStepStatusJson(requiredSteps) {
+  if (!Array.isArray(requiredSteps)) return '';
+  return JSON.stringify(Object.fromEntries(requiredSteps.map(id => [id, {
+    outcome: `\${{ steps.${id}.outcome }}`,
+    conclusion: `\${{ steps.${id}.conclusion }}`,
+  }])));
+}
+function timeoutLimit(workflow, job) {
+  if (/aggregate|summary|discover|outcome/.test(job)) return 10;
+  if (workflow === 'accessibility-evidence' && ['evidence', 'product-evidence'].includes(job)) return 20;
+  if (workflow === 'gpu-offload-kind-smoke' || /pytest|pytests|frontend-tests|pester-tests|go-tests|fuzz-regression|terraform/.test(workflow)) return 20;
+  if (workflow === 'docusaurus-tests') return job === 'docusaurus' ? 90 : 15;
+  if (workflow === 'smoke-cpu') return job === 'import-smoke' ? 10 : job === 'build-smoke-dataviewer' ? 20 : 15;
+  return 10;
+}
+
+function matrixShards(matrix, template) {
+  let rows = [{}];
+  for (const [axis, values] of Object.entries(matrix ?? {})) {
+    if (axis === 'include') continue;
+    if (!Array.isArray(values)) return undefined;
+    rows = rows.flatMap(row => values.map(value => ({ ...row, [axis]: value })));
+  }
+  if (matrix?.include) {
+    if (!Array.isArray(matrix.include)) return undefined;
+    rows = Object.keys(matrix).length === 1 ? matrix.include : [...rows, ...matrix.include];
+  }
+  return rows.map(row => template.replace(/\$\{\{\s*matrix\.(\w+)\s*\}\}/g, (_, axis) => String(row[axis] ?? 'missing')));
+}
+
+function aggregateInventory(spec, aggregate) {
+  let declaration = aggregate['expected-shards'] ?? '';
+  declaration = declaration.replace(/\$\{\{\s*inputs\.\w+\s*&&\s*'(\[[^']*\])'\s*\|\|\s*'\[\]'\s*\}\}/g, '$1');
+  for (const metadata of Object.values(spec.jobs)) {
+    if (metadata.if && metadata.shards) {
+      const shards = JSON.stringify(metadata.shards);
+      declaration = declaration.replaceAll(`\${{ (${expression(metadata.if)}) && '${shards}' || '[]' }}`, shards);
+    }
+    if (metadata.discovery) {
+      const discovery = metadata.discovery;
+      declaration = declaration.replaceAll(`\${{ needs.${discovery.job}.outputs.${discovery['shards-output']} || '[]' }}`, '[]');
+    }
+  }
+  return jsonInput(declaration);
+}
+
+function validateExecution(graph, contract, check) {
+  const execution = contract.execution;
+  check(isObject(execution), 'Missing execution contract');
+  const targets = new Set(contract.lanes.filter(lane => lane.target).map(lane => lane.target.replace(/\.ya?ml$/, '')));
+  for (const workflow of Object.keys(execution ?? {})) check(targets.has(workflow), `${workflow}: stale execution contract`);
+  for (const lane of contract.lanes.filter(lane => lane.target)) {
+    const name = lane.target.replace(/\.ya?ml$/, '');
+    const label = `.github/workflows/${lane.target}`;
+    const workflow = graph[label];
+    const spec = execution?.[name];
+    if (!isObject(spec) || !isObject(spec.jobs) || Object.keys(spec.jobs).length === 0) {
+      check(false, `${name}: missing execution job metadata`);
+      continue;
+    }
+    const jobs = workflow?.jobs ?? {};
+    const aggregate = spec.aggregate;
+    const outputJob = spec['output-job'];
+    check(typeof outputJob === 'string' && Boolean(jobs[outputJob]) && !jobs[outputJob]?.strategy?.matrix, `${name}: workflow outputs require a single non-matrix producer`);
+    check(aggregate ? outputJob === aggregate.job : Object.keys(spec.jobs).length === 1 && hasOwn(spec.jobs, outputJob), `${name}: output producer must cover every execution job`);
+    const outputProducer = aggregate?.producer ?? spec.jobs[outputJob]?.producer;
+    for (const output of evidenceOutputs) {
+      check(workflow?.on?.workflow_call?.outputs?.[output]?.value === `\${{ jobs.${outputJob}.outputs.${output} }}`, `${name}: broken reusable output ${output}`);
+      check(jobs[outputJob]?.outputs?.[output] === `\${{ steps.${outputProducer}.outputs.${output} }}`, `${name}: broken producer output ${output}`);
+    }
+    const permissionCeiling = contract.permissionProfiles[lane.permissionProfile];
+    for (const [id, job] of Object.entries(jobs)) {
+      const secondaryTarget = contract.secondaryCallers?.[label]?.jobs?.[id];
+      if (!secondaryTarget || job.uses !== `./.github/workflows/${secondaryTarget}`) {
+        check(Number.isInteger(job['timeout-minutes']) && job['timeout-minutes'] > 0 && job['timeout-minutes'] <= timeoutLimit(name, id), `${name}:${id}: timeout must be within the execution budget`);
+      }
+      const permissions = job.permissions ?? workflow.permissions;
+      check(isObject(permissions) && Object.entries(permissions).every(([permission, level]) =>
+        ['none', 'read', 'write'].includes(level) && (level === 'none' || permissionCeiling[permission] === level ||
+          level === 'read' && permissionCeiling[permission] === 'write')), `${name}:${id}: producer permission escalation`);
+      const producers = (job.steps ?? []).filter(step => step.uses === outcomeAction);
+      if (producers.length) check(hasOwn(spec.jobs, id) || aggregate?.job === id, `${name}:${id}: undeclared evidence producer`);
+      check(new Set((job.steps ?? []).filter(step => step.id).map(step => step.id)).size === (job.steps ?? []).filter(step => step.id).length, `${name}:${id}: duplicate step identity`);
+    }
+    for (const [id, metadata] of Object.entries(spec.jobs)) {
+      const job = jobs[id];
+      if (!job || !isObject(metadata)) { check(false, `${name}:${id}: stale execution job metadata`); continue; }
+      const producers = (job.steps ?? []).filter(step => step.uses === outcomeAction);
+      const producer = producers.find(step => step.id === metadata.producer);
+      check(producers.length === 1 && Boolean(producer), `${name}:${id}: missing unique evidence producer`);
+      check(expression(producer?.if) === 'always()' && producer?.['continue-on-error'] === undefined, `${name}:${id}: evidence publication must always execute without suppression`);
+      const expectedStepsJson = name === 'dependency-review' ? requiredStepStatusJson(metadata['required-steps']) : '${{ toJSON(steps) }}';
+      check(producer?.with?.workflow === name && producer?.with?.['steps-json'] === expectedStepsJson, `${name}:${id}: incorrect producer identity or step context`);
+      check(isDeepStrictEqual(jsonInput(producer?.with?.['required-steps']), metadata['required-steps']), `${name}:${id}: required operation declaration mismatch`);
+      const reports = metadata.reports?.map(report => ({ ...report, path: report.path?.replaceAll('{shard}', metadata['shard-input'] ?? 'default') }));
+      check(isDeepStrictEqual(jsonInput(producer?.with?.reports ?? '[]'), reports), `${name}:${id}: required report declaration mismatch`);
+      check((producer?.with?.shard ?? 'default') === (metadata['shard-input'] ?? 'default') &&
+        (producer?.with?.target ?? producer?.with?.shard ?? 'default') === (metadata['target-input'] ?? metadata['shard-input'] ?? 'default'), `${name}:${id}: shard or target identity mismatch`);
+      check(isDeepStrictEqual(job.strategy?.matrix, metadata.matrix), `${name}:${id}: execution matrix mismatch`);
+      check(metadata.discovery ? metadata.discovery.job && metadata.discovery['shards-output'] && metadata.discovery['targets-output'] :
+        Array.isArray(metadata.shards) && metadata.shards.length > 0 && new Set(metadata.shards).size === metadata.shards.length, `${name}:${id}: missing or duplicate expected shards`);
+      if (!metadata.discovery) {
+        check(isDeepStrictEqual(metadata.shards, matrixShards(metadata.matrix, metadata['shard-input'] ?? 'default')), `${name}:${id}: canonical shards must cover the complete matrix`);
+      }
+      if (metadata.discovery) {
+        const discovery = metadata.discovery;
+        check(array(job.needs).includes(discovery.job) && Boolean(spec.jobs[discovery.job]), `${name}:${id}: dynamic matrix requires verified discovery`);
+        const operation = spec.jobs[discovery.job]?.['required-steps']?.[0];
+        for (const output of [discovery['shards-output'], discovery['targets-output']]) {
+          check(jobs[discovery.job]?.outputs?.[output] === `\${{ steps.${operation}.outputs.${output} }}`, `${name}:${id}: discovered target output chain mismatch`);
+        }
+        check(Boolean(aggregate?.['expected-targets']), `${name}:${id}: aggregate requires independent target mapping`);
+      }
+      check(expression(job.if) === expression(metadata.if), `${name}:${id}: unexpected execution job condition`);
+      check(!producer?.with?.['expected-shards'] && !producer?.with?.['needs-json'], `${name}:${id}: record producer cannot aggregate instead`);
+      check(producer?.with?.selected === undefined || producer.with.selected === 'true' || producer.with.selected === true, `${name}:${id}: selected execution cannot become a planned skip`);
+      const strictFailure = producer?.with?.['fail-on-error'] === undefined || String(producer.with['fail-on-error']) === 'true' ||
+        producer.with['fail-on-error'] === '${{ !inputs.soft-fail }}' && Object.values(lane.softFailPolicy ?? {}).every(value => value === false);
+      if (lane.classification === 'mandatory') check(strictFailure, `${name}:${id}: required producer cannot suppress evidence failure`);
+      const required = metadata['required-steps'];
+      check(Array.isArray(required) && required.length > 0 && new Set(required).size === required.length, `${name}:${id}: missing or duplicate required operations`);
+      check(isObject(metadata.bindings) && isDeepStrictEqual(Object.keys(metadata.bindings).sort(), [...(required ?? [])].sort()), `${name}:${id}: required operation bindings incomplete`);
+      for (const operation of required ?? []) {
+        const step = (job.steps ?? []).find(step => step.id === operation);
+        const binding = metadata.bindings?.[operation];
+        if (binding?.uses) check(!binding.uses.includes('@'), `${name}:${id}:${operation}: operation binding must name the action path without a ref`);
+        check(Boolean(step) && isObject(binding) && (binding.uses ? actionPath(step.uses) === binding.uses && step.run === undefined :
+          typeof step.run === 'string' && binding['run-sha256'] === createHash('sha256').update(step.run).digest('hex')),
+        `${name}:${id}:${operation}: required operation implementation mismatch`);
+        if (binding?.uses) check(binding['with-sha256'] === createHash('sha256').update(JSON.stringify(step?.with ?? {})).digest('hex'),
+          `${name}:${id}:${operation}: required action input context mismatch`);
+        check(step?.if === undefined || step.if === binding?.if, `${name}:${id}:${operation}: unexpected operation condition`);
+        check((job.steps ?? []).indexOf(step) < (job.steps ?? []).indexOf(producer), `${name}:${id}:${operation}: evidence precedes operation`);
+      }
+      check(Array.isArray(metadata.reports) && metadata.reports.every(report => isObject(report) &&
+        ['junit', 'nunit', 'jest', 'json', 'file', 'sarif'].includes(report.kind) && typeof report.path === 'string' && report.path.length > 0),
+      `${name}:${id}: invalid required report metadata`);
+    }
+    if (aggregate) {
+      const job = jobs[aggregate.job];
+      const producers = job?.steps?.filter(step => step.uses === outcomeAction) ?? [];
+      const producer = producers.find(step => step.id === aggregate.producer);
+      check(producers.length === 1 && Boolean(producer) && !job?.strategy, `${name}: aggregate must have exactly one non-matrix producer`);
+      check(expression(job?.if) === 'always()' && ['', 'always()'].includes(expression(producer?.if)) && !job?.['continue-on-error'] && !producer?.['continue-on-error'], `${name}: aggregate must always execute without suppression`);
+      check(isDeepStrictEqual([...array(job?.needs)].sort(), [...(aggregate.needs ?? [])].sort()) &&
+        Object.keys(spec.jobs).every(id => array(job?.needs).includes(id)), `${name}: aggregate must depend on complete execution inventory`);
+      check(producer?.with?.workflow === name && producer?.with?.['needs-json'] === '${{ toJSON(needs) }}', `${name}: aggregate identity or needs context mismatch`);
+      check((producer?.with?.shard ?? 'default') === (aggregate.shard ?? 'default'), `${name}: aggregate output shard mismatch`);
+      check(producer?.with?.['expected-shards'] === aggregate['expected-shards'] && Boolean(aggregate['expected-shards']), `${name}: aggregate expected shards mismatch`);
+      check(producer?.with?.['expected-targets'] === aggregate['expected-targets'], `${name}: aggregate expected targets mismatch`);
+      const expected = aggregateInventory(spec, aggregate);
+      check(isObject(expected), `${name}: unverified aggregate shard expression`);
+      if (expected) {
+        check(isDeepStrictEqual(Object.keys(expected).sort(), Object.keys(spec.jobs).sort()), `${name}: aggregate expected jobs mismatch`);
+        for (const [id, metadata] of Object.entries(spec.jobs)) {
+          if (!metadata.discovery) check(isDeepStrictEqual(expected[id], metadata.shards), `${name}:${id}: aggregate expected shard inventory mismatch`);
+        }
+      }
+      if (lane.classification === 'mandatory') check(producer?.with?.['fail-on-error'] === undefined || String(producer.with['fail-on-error']) === 'true' ||
+        producer.with['fail-on-error'] === '${{ !inputs.soft-fail }}' && Object.values(lane.softFailPolicy ?? {}).every(value => value === false), `${name}: aggregate cannot suppress evidence failure`);
+    }
+  }
+}
+
+function validateEvidenceAction(graph, contract, check) {
+  const action = graph[contract.evidenceAction?.path];
+  check(action?.runs?.using === 'composite', 'Missing shared composite evidence action');
+  for (const output of evidenceOutputs) {
+    const step = output.startsWith('artifact-') ? 'upload' : 'receipt';
+    check(action?.outputs?.[output]?.value === `\${{ steps.${step}.outputs.${output} }}`, `Shared action output chain mismatch: ${output}`);
+  }
+  const receipt = action?.runs?.steps?.find(step => step.id === 'receipt');
+  check(receipt?.run === contract.evidenceAction?.['receipt-command'] && Boolean(receipt?.run) &&
+    expression(receipt.if) === 'always()', 'Shared action must always invoke the canonical receipt publisher');
+  for (const input of ['workflow', 'shard', 'target', 'steps-json', 'required-steps', 'reports', 'selected',
+    'expected-shards', 'expected-targets', 'needs-json', 'fail-on-error', 'selection-reason', 'tools']) {
+    check(receipt?.env?.[`INPUT_${input.toUpperCase().replaceAll('-', '_')}`] === `\${{ inputs.${input} }}`, `Shared action input chain mismatch: ${input}`);
+  }
+  const upload = action?.runs?.steps?.find(step => step.id === 'upload');
+  check(/^actions\/upload-artifact@[a-f0-9]{40}$/.test(upload?.uses ?? '') && !upload?.['continue-on-error'] &&
+    upload.with?.path === '${{ steps.receipt.outputs.artifact-path }}' && upload.with?.name === '${{ steps.receipt.outputs.artifact-name }}' &&
+    upload.with?.['if-no-files-found'] === 'error' && expression(upload.if) === "always() && steps.receipt.outputs.artifact-path != ''",
+  'Shared action must publish the validated artifact without suppressing upload failure');
+  const enforcement = action?.runs?.steps?.at(-1);
+  check(expression(enforcement?.if) === 'always()' && !enforcement?.['continue-on-error'] && typeof enforcement?.run === 'string' &&
+    createHash('sha256').update(enforcement.run).digest('hex') === contract.evidenceAction?.['enforcement-sha256'] &&
+    enforcement.env?.FAIL_ON_ERROR === '${{ inputs.fail-on-error }}' &&
+    enforcement.env?.WORK_STATUS === '${{ steps.receipt.outputs.work-status }}' &&
+    enforcement.env?.ARTIFACT_ID === '${{ steps.upload.outputs.artifact-id }}' &&
+    enforcement.env?.ARTIFACT_URL === '${{ steps.upload.outputs.artifact-url }}',
+  'Shared action must enforce published status and artifact identity');
+}
 
 function effectiveBooleanInput(job, workflow, input) {
   const declaration = workflow?.on?.workflow_call?.inputs?.[input];
@@ -133,8 +369,12 @@ export function validateWorkflows(graph, contract = loadContract()) {
           check(softFail.valid, `${key}: soft-fail must resolve from a boolean caller override or callee default`);
           check(softFail.value === lane.softFailPolicy?.[owner], `${key}: effective soft-fail policy mismatch`);
         }
-        const innerFilter = job.with?.['changed-files-only'] ?? graph[`.github/workflows/${lane.target}`]?.on?.workflow_call?.inputs?.['changed-files-only']?.default;
-        check(innerFilter === undefined || innerFilter === false, `${key}: secondary changed-file filter is forbidden`);
+        if (lane.target === 'accessibility-evidence.yml') {
+          const product = effectiveBooleanInput(job, graph[`.github/workflows/${lane.target}`], 'run-product-evidence');
+          check(product.valid && product.value === true, `${key}: required accessibility lane must run product evidence`);
+        }
+        const innerFilter = graph[`.github/workflows/${lane.target}`]?.on?.workflow_call?.inputs?.['changed-files-only'];
+        check(!innerFilter || job.with?.['changed-files-only'] === false, `${key}: secondary changed-file filter is forbidden; explicitly disable it`);
         const expected = owner === 'pr' && lane.selector !== 'always' ? `needs.changes.outputs.${lane.selector} == 'true'` : '';
         check(expression(job.if) === expected, `${key}: selector condition mismatch`);
         if (expected) check(array(job.needs).includes('changes'), `${key}: selector dependency missing`);
@@ -230,19 +470,71 @@ export function validateWorkflows(graph, contract = loadContract()) {
     for (const id of Object.keys(workflow.jobs ?? {})) check(ownership.has(`${config.path}:${id}`), `${config.path}: undeclared job ${id}`);
     if (config.aggregate) {
       const aggregate = workflow.jobs?.[config.aggregate];
-      const expected = requiredLanes(contract, owner).map(lane => lane.owners[owner]).sort();
-      check(isDeepStrictEqual([...array(aggregate?.needs)].sort(), expected), `${config.path}: aggregate must include exactly all mandatory jobs`);
+      const expected = visibleLanes(contract, owner).map(lane => lane.owners[owner]).sort();
+      check(isDeepStrictEqual([...array(aggregate?.needs)].sort(), expected), `${config.path}: aggregate must include exactly all mandatory jobs and advisory visibility`);
+      check(expression(aggregate?.if) === 'always()', `${config.path}: Required summary must always execute`);
+      check(aggregate?.['continue-on-error'] === undefined, `${config.path}: Required summary cannot suppress failure`);
+      check(Number.isInteger(aggregate?.['timeout-minutes']) && aggregate['timeout-minutes'] > 0 && aggregate['timeout-minutes'] <= 10, `${config.path}: summary timeout exceeds budget`);
+      const evaluators = aggregate?.steps?.filter(step => step.run?.trim() === 'node scripts/ci/evaluate-checks.mjs') ?? [];
+      check(evaluators.length === 1 && evaluators[0].env?.NEEDS_JSON === '${{ toJSON(needs) }}' && evaluators[0].env?.CI_OWNER === owner && expression(evaluators[0].if) === 'always()' && evaluators[0]['continue-on-error'] === undefined, `${config.path}: Summary must use one unconditional canonical evaluator with complete needs evidence`);
+      check(evaluators[0]?.env?.CI_RECEIPTS_DIRECTORY === '.ci-validation-receipts' && evaluators[0]?.env?.HEAD_SHA === '${{ github.sha }}' &&
+        (owner !== 'main' || evaluators[0]?.env?.BASE_SHA === '${{ github.event.before }}'), `${config.path}: summary comparison and receipt context mismatch`);
+      const cancellation = aggregate?.steps?.filter(step => step.id === 'cancellation') ?? [];
+      check(cancellation.length === 1 && expression(cancellation[0].if) === 'cancelled()' &&
+        cancellation[0].shell === 'bash' && cancellation[0].run === 'printf \'cancelled=true\\n\' >> "$GITHUB_OUTPUT"' &&
+        cancellation[0]['continue-on-error'] === undefined &&
+        aggregate.steps.indexOf(cancellation[0]) < aggregate.steps.indexOf(evaluators[0]) &&
+        evaluators[0]?.env?.CI_CANCELLED === "${{ steps.cancellation.outputs.cancelled || 'false' }}",
+      `${config.path}: summary must preserve explicit workflow cancellation context`);
+      check(aggregate?.steps?.some(step => step.uses?.startsWith('actions/upload-artifact@') && expression(step.if) === 'always()' && step.with?.['if-no-files-found'] === 'error' && step.with?.path === 'logs/ci-validation-summary.*'), `${config.path}: summary artifacts must always publish`);
+      check(aggregate?.steps?.some(step => step.uses?.startsWith('actions/download-artifact@') && expression(step.if) === 'always()' &&
+        step.with?.pattern === 'ci-outcome-*-${{ github.run_id }}-${{ github.run_attempt }}' &&
+        step.with?.path === '.ci-validation-receipts' && step.with?.['merge-multiple'] === false), `${config.path}: summary must download current-attempt receipt evidence without merging shards`);
     }
   }
 
   const pr = graph[contract.orchestrators.pr.path]?.jobs ?? {};
+  const prWorkflow = graph[contract.orchestrators.pr.path];
   const changes = pr.changes;
+  const mergeGroup = prWorkflow?.on?.merge_group;
+  check(isDeepStrictEqual(mergeGroup?.branches, ['main'])
+    && isDeepStrictEqual(mergeGroup?.types, ['checks_requested']), 'PR validation must own merge_group checks_requested for main');
+  check(prWorkflow?.concurrency?.group === '${{ github.workflow }}-validation-${{ github.event_name }}-${{ github.ref }}'
+    && prWorkflow?.concurrency?.['cancel-in-progress'] === true, 'PR validation concurrency must isolate and supersede event refs');
+  const checkout = changes?.steps?.find(step => step.uses?.startsWith('actions/checkout@'));
+  check(checkout?.with?.['fetch-depth'] === 0 && checkout?.with?.['persist-credentials'] === false
+    && checkout?.with?.ref === '${{ github.sha }}', 'Selection checkout must use the tested SHA, full history, and no persisted credentials');
+  const range = changes?.steps?.find(step => step.id === 'range');
+  check(range?.if === undefined && range?.['continue-on-error'] === undefined
+    && range?.run?.trim() === 'node scripts/ci/resolve-workflow-change-range.mjs'
+    && isDeepStrictEqual(range?.env, {
+      EVENT_NAME: '${{ github.event_name }}',
+      BASE_SHA: '${{ github.event.merge_group.base_sha }}',
+      HEAD_SHA: '${{ github.event.merge_group.head_sha || github.sha }}',
+      PULL_REQUEST_HEAD_SHA: '${{ github.event.pull_request.head.sha }}',
+    }), 'Discovery must use the canonical event-aware range resolver');
   const filter = changes?.steps?.find(step => step.id === 'filter');
   check(filter?.if === undefined && filter?.['continue-on-error'] === undefined && changes?.if === undefined && changes?.['continue-on-error'] === undefined, 'Discovery must execute without failure suppression');
-  check(filter?.env?.BASE_SHA === '${{ github.event.pull_request.base.sha }}' && filter?.env?.HEAD_SHA === '${{ github.sha }}', 'PR selection must compare event base SHA to tested merge SHA');
-  check(filter?.run?.trim() === 'node scripts/ci/select-checks.mjs', 'Discovery must use the canonical selector');
-  check(changes?.steps?.some(step => step.uses?.startsWith('actions/checkout@') && step.with?.['fetch-depth'] === 0 && !step.with?.ref), 'Selection checkout must fetch the tested merge tree and history');
-  for (const output of [...Object.keys(contract.selectors), 'selection_status', 'base_sha', 'head_sha', 'file_count']) {
+  check(isDeepStrictEqual(filter?.env, {
+    BASE_SHA: '${{ steps.range.outputs.base_sha }}',
+    HEAD_SHA: '${{ steps.range.outputs.head_sha }}',
+    SELECTION_MODE: '${{ steps.range.outputs.mode }}',
+  }), 'PR selection must consume only verified resolver outputs');
+  check(filter?.run?.trim() === 'node scripts/ci/select-checks.mjs', 'Discovery must use the canonical selector with resolver-controlled full fallback');
+  const reachable = new Set();
+  const visit = path => {
+    if (reachable.has(path)) return;
+    reachable.add(path);
+    for (const job of Object.values(graph[path]?.jobs ?? {})) {
+      if (job.uses?.startsWith('./.github/workflows/')) visit(job.uses.slice(2));
+    }
+  };
+  visit(contract.orchestrators.pr.path);
+  for (const path of reachable) {
+    const workflow = graph[path];
+    if (workflow) check(!referencesSecretsContext(workflow), `${path}: merge-group-reachable secret reference is forbidden`);
+  }
+  for (const output of [...Object.keys(contract.selectors), 'selection_status', 'base_sha', 'head_sha', 'file_count', 'selection_reasons']) {
     check(changes?.outputs?.[output] === `\${{ steps.filter.outputs.${output} }}`, `Missing selector output: ${output}`);
   }
   const summary = pr['pr-validation-summary'];
@@ -250,14 +542,29 @@ export function validateWorkflows(graph, contract = loadContract()) {
   check(summary?.['continue-on-error'] === undefined, 'Required summary cannot suppress failure');
   check(!summary?.name || summary.name === 'pr-validation-summary', 'Required summary check context must remain stable');
   const evaluators = summary?.steps?.filter(step => step.run?.trim() === 'node scripts/ci/evaluate-checks.mjs') ?? [];
-  check(evaluators.length === 1 && evaluators[0].env?.NEEDS_JSON === '${{ toJSON(needs) }}' && evaluators[0].if === undefined && evaluators[0]['continue-on-error'] === undefined, 'Summary must use one unconditional canonical evaluator with complete needs evidence');
+  check(evaluators.length === 1 && evaluators[0].env?.NEEDS_JSON === '${{ toJSON(needs) }}' && expression(evaluators[0].if) === 'always()' && evaluators[0]['continue-on-error'] === undefined, 'Summary must use one unconditional canonical evaluator with complete needs evidence');
   const osv = contract.lanes.find(lane => lane.id === 'osv-scanner');
-  check(osv?.classification === 'advisory' && osv?.outcomeSchema === 'advisory' && !array(summary?.needs).includes('osv-scanner'), 'OSV must remain advisory in the contract and aggregate');
+  check(osv?.classification === 'advisory' && osv?.outcomeSchema === 'advisory' && array(summary?.needs).includes('osv-scanner'), 'OSV must remain advisory in the contract and aggregate');
   check(pr['osv-scanner']?.steps?.some(step => step.uses?.startsWith('google/osv-scanner-action/') && step['continue-on-error'] === true), 'OSV must remain advisory');
+  check(pr['osv-scanner']?.outputs?.['work-status'] === '${{ steps.osv-scan.outcome }}' &&
+    pr['osv-scanner']?.steps?.some(step => step.id === 'osv-scan' && step.uses?.startsWith('google/osv-scanner-action/')),
+  'OSV advisory summary must expose the scan outcome rather than its tolerated conclusion');
 
   const main = graph[contract.orchestrators.main.path]?.jobs ?? {};
-  const release = main[contract.orchestrators.main.aggregate];
+  const release = main['release-please'];
   check(release?.['continue-on-error'] === undefined && ['', 'success()'].includes(expression(release?.if)), 'Release coordinator must retain success gating without failure suppression');
+  check(isDeepStrictEqual(array(release?.needs), ['main-validation-summary']), 'Release coordinator must depend only on the main validation summary');
+  check(graph[contract.orchestrators.pr.path]?.concurrency?.group === '${{ github.workflow }}-validation-${{ github.event_name }}-${{ github.ref }}' &&
+    graph[contract.orchestrators.pr.path]?.concurrency?.['cancel-in-progress'] === true, 'PR concurrency must isolate workflow and event ref and cancel superseded runs');
+  check(!graph[contract.orchestrators.main.path]?.concurrency?.['cancel-in-progress'] &&
+    Object.values(main).every(job => !job.concurrency?.['cancel-in-progress']), 'Main and release cancellation is forbidden');
+  check(changes?.['timeout-minutes'] > 0 && changes['timeout-minutes'] <= 10 && pr['osv-scanner']?.['timeout-minutes'] > 0 && pr['osv-scanner']['timeout-minutes'] <= 10, 'Discovery and advisory jobs require bounded timeouts');
+  for (const id of ['markdown-link-check', 'terraform-tests', 'terraform-docs-check', 'terraform-security']) {
+    check(contract.lanes.find(lane => lane.id === id)?.classification === 'advisory', `${id}: whole-step tolerated execution must remain advisory`);
+  }
+  for (const id of ['container-scan', 'codeql-analysis']) {
+    check(contract.lanes.find(lane => lane.id === id)?.classification === 'mandatory', `${id}: execution remains mandatory`);
+  }
 
   const contractWorkflow = graph['.github/workflows/workflow-refs-check.yml'];
   const contractJob = contractWorkflow?.jobs?.['workflow-refs-check'];
@@ -285,6 +592,8 @@ export function validateWorkflows(graph, contract = loadContract()) {
     && ['', "github.ref == 'refs/heads/main'"].includes(expression(promote?.if)), 'Documentation promotion must retain fail-closed manual execution');
 
   const docs = graph[contract.orchestrators.docs.path];
+  validateExecution(graph, contract, check);
+  validateEvidenceAction(graph, contract, check);
   const trigger = docs?.on?.workflow_run;
   check(isDeepStrictEqual(trigger?.workflows, ['Docusaurus Accessibility Promotion'])
     && isDeepStrictEqual(trigger?.types, ['completed'])

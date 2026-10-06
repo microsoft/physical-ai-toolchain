@@ -371,3 +371,7 @@ Post-processing or LeRobot conversion fails with codec errors. Identify whether 
 [^5]: [MCAP ROS 2 storage plugin](https://mcap.dev/guides/getting-started/ros-2) — `rosbag2_storage_mcap` with chunk-level compression (Lz4, Zstd) and `--storage-config-file` options.
 [^6]: [Zstandard RFC 8878](https://datatracker.ietf.org/doc/html/rfc8878) — Zstandard compression data format specification.
 [^7]: [ROS 2 Humble record arguments](https://github.com/ros2/rosbag2/blob/humble/ros2bag/ros2bag/verb/record.py): native topic selection, output, splitting, cache, and storage configuration options.
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.
