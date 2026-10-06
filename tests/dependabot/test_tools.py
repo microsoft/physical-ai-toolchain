@@ -130,7 +130,7 @@ Timeout: 5000ms
 
 Call log:
   - Expect "toHaveURL" with timeout 5000ms
-    {attempts} × unexpected value "http://127.0.0.1:3001/physical-ai-toolchain/{route}"
+    {attempts} \u00d7 unexpected value "http://127.0.0.1:3001/physical-ai-toolchain/{route}"
 
   {line} |   await expect(page).toHaveURL((url) => url.pathname === tierPath);
        |                      ^
