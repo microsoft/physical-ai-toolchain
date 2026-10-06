@@ -531,6 +531,30 @@ def test_time_limit_stops_descendants_that_outlive_their_wrapper(
     assert _wait_until_gone(int(pid_file.read_text(encoding="utf-8")), timeout_seconds=0.5)
 
 
+def test_time_limit_stops_work_a_survivor_starts_after_its_wrapper_exits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(verify, "STOP_GRACE_SECONDS", 2)
+    pid_file = tmp_path / "grandchild.pid"
+    inner = tmp_path / "inner.sh"
+    # Background jobs of a non-interactive shell ignore SIGINT, so the child survives the interrupt and
+    # starts new work only once its wrapper is gone.
+    inner.write_text(
+        'while kill -0 "$PPID" 2>/dev/null; do sleep 0.1; done\nsleep 30 &\necho $! > "$PID_FILE"\nwait\n',
+        encoding="utf-8",
+    )
+    outer = tmp_path / "outer.sh"
+    outer.write_text(f"trap 'exit 130' INT\nbash \"{inner}\" &\nwait\n", encoding="utf-8")
+    request = ExecutionRequest(
+        ("bash", str(outer)), tmp_path, {**os.environ, "PID_FILE": str(pid_file)}, tmp_path / "check.log", 1
+    )
+
+    with pytest.raises(CheckTimeoutError):
+        default_executor(request)
+
+    assert _wait_until_gone(int(pid_file.read_text(encoding="utf-8")), timeout_seconds=0.5)
+
+
 def test_check_logs_and_run_directories_are_private(tmp_path: Path) -> None:
     log_path = tmp_path / "run" / "check.log"
 

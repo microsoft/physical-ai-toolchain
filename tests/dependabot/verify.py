@@ -642,8 +642,13 @@ def stop_process_tree(
     while True:
         table = _process_table()
         root_running = process.poll() is None
+        # Keep adding descendants of the root and of every tracked process still alive, so work a survivor
+        # starts during cleanup is stopped too.
+        parents = [pid for pid, started in tracked.items() if pid in table and table[pid].started == started]
         if root_running:
-            for pid in _process_tree(process.pid, table):
+            parents.append(process.pid)
+        for parent in parents:
+            for pid in _process_tree(parent, table):
                 if pid in table:
                     tracked.setdefault(pid, table[pid].started)
         survivors = {
