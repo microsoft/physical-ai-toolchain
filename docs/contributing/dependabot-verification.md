@@ -3,7 +3,7 @@ sidebar_position: 12
 title: Verifying Dependabot Updates
 description: Verification categories, CPU and GPU tiers, and the commands that prove a Dependabot pull request safe without exposing a deployment environment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-05
+ms.date: 2026-10-06
 ms.topic: how-to
 keywords:
   - dependabot
@@ -12,16 +12,29 @@ keywords:
   - azure-ml
 ---
 
-Every Dependabot pull request maps to one or more verification categories. Each category lists the checks that prove the update safe, split into two tiers. CPU checks run on any workstation with Docker, and CI runs most of the same checks. Environment checks submit Azure ML jobs to a deployed environment, most of them on GPU nodes, and never use OSMO workflows. The suite lives in [tests/dependabot](pathname://../../tests/dependabot/README.md), and one command runs it.
+Every Dependabot pull request maps to one or more verification categories. Each category lists the checks that prove the update safe, split into a CPU tier and an environment tier. The suite lives in [tests/dependabot](pathname://../../tests/dependabot/README.md), and one command runs it.
 
 ## How Verification Works
 
-| Tier        | Where it runs                                              | What it proves                                                                                | Command                                                                       |
-|-------------|------------------------------------------------------------|-----------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------|
-| CPU         | Any workstation with Docker; CI runs most of these checks  | Locks match manifests, packages install and import, builds and unit tests pass, browser tests | `npm run verify:dependabot`                                                   |
-| Environment | A deployed environment with Azure ML GPU compute, over VPN | Runtimes work on real GPU nodes with Azure identity, MLflow, storage, and the model registry  | `npm run verify:dependabot -- --tier environment --environment <environment>` |
+CPU checks run on any workstation with Docker, and CI runs most of the same checks. Environment checks run against a deployed environment over its VPN; most submit Azure ML jobs, many of them on GPU nodes. One command runs either tier:
 
-The runner selects categories from the files a branch changed relative to `origin/main`, and always adds the `baseline` category. Pass `--category <name>` to pick categories yourself, and `--dry-run` to see exactly what would run.
+```bash
+# Every category, its checks, and their notes
+npm run verify:dependabot -- --list
+
+# CPU tier: the categories this branch touches, plus the baseline
+npm run verify:dependabot
+
+# Preview what a category would run, without running anything
+npm run verify:dependabot -- --category rl --dry-run
+
+# Environment tier: Azure ML jobs in a deployed environment
+npm run verify:dependabot -- --tier environment --environment <environment>
+```
+
+CPU checks prove that locks match their manifests, packages install and import, builds and unit tests pass, and the docs pass their browser tests. Environment checks prove that the runtimes work with Azure identity, MLflow, storage, and the model registry on real GPU nodes. The `infrastructure` check plans Terraform against the deployed state without running a job. Only the optional `aml-osmo-proxy` check involves OSMO, because the proxy it tests submits an OSMO workflow.
+
+The runner selects categories from the files a branch changed relative to `origin/main`, and always adds the `baseline` category. Pass `--category <name>` to pick categories yourself, and `--dry-run` to see exactly what would run. A tier filters what runs: `baseline` holds only CPU checks, so `--tier environment` alone runs none of them. Use `--tier all`, or run both tiers, when a pull request needs both kinds of evidence.
 
 ## Categories
 
@@ -43,11 +56,13 @@ The [category manifest](pathname://../../tests/dependabot/categories.json) maps 
 | `gpu-offload`    | uv and docker under `gpu-offload`                                                   | Controller and runtime tests, wheel build                                | None on Azure ML                                 |
 | `infrastructure` | terraform root, dns, vpn, automation; gomod `infrastructure/terraform/e2e`          | Terraform validate, test, TFLint, Go contract tests                      | Read-only plan comparison against deployed state |
 
-Run `npm run verify:dependabot -- --list` for every check, its command, and its notes.
+Run `npm run verify:dependabot -- --list` to see every check with its flags and notes, and add `--dry-run` to any selection to see the exact commands. The manifest holds each check's full definition.
 
 ## Which Categories Need a GPU
 
 Four categories need GPU verification, because their locks load in GPU training or evaluation jobs: `rl`, `il`, `vla`, and `gpu-smoke`. CI has no GPU nodes, so these run as Azure ML jobs in a deployed environment. Each job installs the lock from your checkout, trains briefly, and checks the result. The RL and IL lifecycles also register a model and run the matching evaluation.
+
+The runner always trains: it clears `E2E_AML_ISAAC_EVAL_MODEL` and `E2E_AML_LEROBOT_EVAL_MODEL`, which make the lifecycle tests evaluate an existing model instead. A direct pytest run with either variable set is evaluation-only and doesn't verify training.
 
 `workflows` needs the environment but not a GPU. Its register component runs as the last step of an Azure ML pipeline and writes to the model registry, which CI can't reach. Both IL pipeline checks run on the compute's default instance type, which is CPU-only on Kubernetes computes.
 
@@ -74,11 +89,12 @@ The docs browser tests run in a Playwright container on a clean snapshot, and on
 
 Environment checks read the environment from its non-secret bundle, never from tracked files:
 
-1. Get the bundle. Run `infrastructure/setup/download-environment-bundle.sh --environment <environment> --resource-group <resource-group>`, which stores it in `~/.config/physical-ai-toolchain/environments/<environment>`, or use the gitignored `infrastructure/setup/generated/<environment>` directory written by the deployment workflow. Never commit a bundle.
-2. Connect to the environment's VPN and run `az login`. Optionally run `infrastructure/setup/connect-environment.sh --environment <environment>` to configure kubectl and the OSMO CLI.
-3. For GPU checks, set the instance types your compute defines in `.env.local` when the submission scripts' defaults don't fit it; see [Choose GPU Instance Types](#choose-gpu-instance-types).
-4. Commit your changes. Azure ML jobs upload your working tree, including uncommitted edits, and the run summary records whether the tree was clean.
-5. Preview the jobs, then submit them. The preview shows the instance type each GPU check will request:
+1. Connect to the environment's VPN, run `az login`, and select the environment's subscription with `az account set --subscription <subscription>`. The bundle download and every check need that session.
+2. Get the bundle. Run `infrastructure/setup/download-environment-bundle.sh --environment <environment> --resource-group <resource-group>`, which stores it in `~/.config/physical-ai-toolchain/environments/<environment>`, or use the gitignored `infrastructure/setup/generated/<environment>` directory written by the deployment workflow. A bundle is used only when its `environment` field matches `--environment`. Never commit a bundle.
+3. Optionally run `infrastructure/setup/connect-environment.sh --environment <environment>` to configure kubectl and the OSMO CLI.
+4. For GPU checks, set the instance types your compute defines in `.env.local` when the submission scripts' defaults don't fit it; see [Choose GPU Instance Types](#choose-gpu-instance-types).
+5. Commit your changes. Azure ML jobs upload your working tree, including uncommitted edits, and the run summary records whether the tree was clean.
+6. Preview the jobs, then submit them. The preview shows the instance type each GPU check will request:
 
    ```bash
    npm run verify:dependabot -- --tier environment --environment <environment> --category rl --dry-run
@@ -87,15 +103,17 @@ Environment checks read the environment from its non-secret bundle, never from t
 
 Before submitting, the runner confirms that the Azure CLI is signed in to the bundle's subscription. If the AKS cluster behind the compute target is stopped, for example after a nightly shutdown, the Azure ML checks report `not-run` instead of waiting for nodes; start the cluster and rerun.
 
-Jobs run one at a time with unique names, and their test models are archived afterward. Each job holds a GPU node for several minutes or more, so run only the categories a pull request touches. Don't run local builds while a job uploads its snapshot.
+`--include-optional` adds the `aml-osmo-proxy` check, the only one that involves OSMO: it submits the Azure ML proxy job, which drives an OSMO workflow, so the environment needs OSMO deployed.
+
+Jobs run one at a time with unique names, and their test models are archived afterward. Each job is submitted with the bundle's workspace and compute as explicit flags, so a `.env.local` that names another compute can't redirect it. Each job holds a GPU node for several minutes or more, so run only the categories a pull request touches. Don't run local builds while a job uploads its snapshot.
 
 The pi0 check needs a Hugging Face token that can read the gated base model. Add `HF_TOKEN=<token>` to the untracked repository-root `.env.local`. The runner, the e2e tests, and the submission scripts read it from there, and a value in `.env.local` takes precedence over an exported one. The [VLA training README](pathname://../../training/vla/README.md) explains how to create the token.
 
 Every submission script loads `.env.local`, and the LeRobot evaluation script passes the token to every evaluation job, not only pi0, as an environment variable that anyone who can read those jobs can see. Use a fine-grained token that can only read that model.
 
-Each environment check has a time limit, set by `timeout_minutes` in the manifest, so a hung Azure call can't stall the run. When a check runs past its limit, the runner interrupts it and gives the test up to 15 minutes to cancel its jobs and archive its models before stopping it. The check then reports `failed` with a `timed out` reason.
+Each environment check has a time limit, set by `timeout_minutes` in the manifest, so a hung Azure call can't stall the run. When a check runs past its limit, the runner interrupts it and gives the test up to 15 minutes to cancel its jobs and archive its models, then stops every process the check started. The check then reports `failed` with a `timed out` reason.
 
-The read-only Terraform comparison plans the root stack at the base and head refs against your local state and reports only resource addresses, actions, and changed attribute names. It never applies. The vpn, automation, and dns stacks are opt-in.
+The read-only Terraform comparison plans the root stack at the base and head refs against your local state. It compares the planned values privately, so two plans that set different values still differ, and reports only resource addresses, actions, and changed attribute names. A failed plan's output goes to an owner-only file under the run directory instead of the log. It never applies. The vpn, automation, and dns stacks are opt-in.
 
 ## Choose GPU Instance Types
 
@@ -136,7 +154,7 @@ Before it submits anything, each GPU check confirms that a Kubernetes compute de
 
 ## Read the Results
 
-Each run writes `summary.json`, `summary.md`, and one log per check to `logs/dependabot/<run-id>/`, which is gitignored. Environment-tier logs include Azure ML Studio links and resource names, and `summary.json` records the environment name. To share results in a pull request or issue, copy the status table from `summary.md` and remove any resource names from its reasons.
+Each run writes `summary.json`, `summary.md`, and one log per check to `logs/dependabot/<run-id>/`, which is gitignored and readable only by you. A pytest-backed check passes only when pytest exits 0 and writes a passing report during that run. Environment-tier logs include Azure ML Studio links and resource names, and `summary.json` records the environment name. To share results in a pull request or issue, copy the status table from `summary.md` and remove any resource names from its reasons.
 
 | Status    | Meaning                                                                         |
 |-----------|---------------------------------------------------------------------------------|
@@ -159,20 +177,20 @@ The command exits 0 when every selected required check passed, 1 when any check 
 | Dependency pinning                     | The scan runs as CI runs it, which currently doesn't enforce the compliance threshold                                 |
 | IL pipeline checks                     | Recover once from a pipeline that Azure ML creates but never starts; a second one fails the check, see the note below |
 
-Azure ML occasionally takes longer than its 30-second gateway limit to create a job. A pipeline caught by that is created but never starts: it stays `NotStarted` with no child jobs, while the CLI's automatic retry reports it as submitted.
+A pipeline can be created without ever starting: it stays `NotStarted` with no child jobs, while the CLI reports it as submitted. The likely cause is Azure ML's 30-second gateway limit on job creation, which makes the CLI retry and return the stuck record.
 
-The IL pipeline checks, `aml-il-pipeline-register` and `aml-il-pipeline-diffusion`, notice this after five minutes, cancel and archive the stuck pipeline, and resubmit once. If the second pipeline is stuck too, the check fails and points to the workspace Activity Log, where a `GatewayTimeout` on `Microsoft.MachineLearningServices/workspaces/jobs/write` confirms the cause. Rerun the check later.
+The IL pipeline checks, `aml-il-pipeline-register` and `aml-il-pipeline-diffusion`, notice this after five minutes. They cancel and archive the stuck pipeline, confirm it is still inert, and resubmit once. If it started after all, or the second pipeline is stuck too, the check fails; a `GatewayTimeout` on `Microsoft.MachineLearningServices/workspaces/jobs/write` in the workspace Activity Log confirms the timeout. Rerun the check later. Cleanup still cancels every pipeline the check submitted.
 
-When that happens, no pipeline step runs, so the failure says nothing about the Dependabot update: `aml-il-lifecycle` and the `il` CPU checks still cover the LeRobot lock, and `azureml-register-import-smoke` covers the register lock.
+A pipeline that never started ran no step, so the failure is no evidence either way about the Dependabot update. `aml-il-lifecycle` and the `il` CPU checks still cover the LeRobot lock, and `azureml-register-import-smoke` covers the register lock.
 
 CI doesn't yet run the suite's own tests, the root `tests/` unit tests, or the `gpu-smoke`, `azureml-register`, and `osmo-proxy` import smokes. Run them locally until CI adopts them.
 
 ## Add a Category or Check
 
 1. Edit [categories.json](pathname://../../tests/dependabot/categories.json). Add a `cpu` command, or an `environment` pytest node from a `tests/e2e/test_e2e_aml_*` module. Give every environment check a positive `timeout_minutes`, which the consistency tests require. Size it above the test's own start, completion, and cleanup deadlines; no test checks the sizing.
-2. Add any new environment check to the allowlist in [test_categories.py](pathname://../../tests/dependabot/test_categories.py). A GPU check calls `require_gpu_instance_type` from `tests/e2e/_aml.py` before it submits and passes the result to every job; add each new submission script's default to `SCRIPT_DEFAULT_INSTANCE_TYPES` there.
+2. Add any new environment check to the allowlist in [test_categories.py](pathname://../../tests/dependabot/test_categories.py). A GPU check calls `require_gpu_instance_type` from `tests/e2e/_aml.py` before it submits and passes the result to every job; add each new submission script's default to `SCRIPT_DEFAULT_INSTANCE_TYPES` there. Every submit helper also takes `compute=aml_compute_target.name`.
 3. When Dependabot gains a directory, add it to a category's `dependabot` list and `paths`.
-4. Run `uv run --frozen pytest -o addopts="" tests/dependabot`. The consistency tests fail until every Dependabot entry is mapped and every referenced script, npm script, pytest node, and CI lane exists.
+4. Run `uv run --frozen pytest -o addopts="" -m "not e2e" tests/dependabot`. Keep `-m "not e2e"` whenever you override `addopts`, or pytest also runs the live e2e tests. The consistency tests fail until every Dependabot entry is mapped and every referenced script, npm script, pytest node, and CI lane exists.
 
 ## Related Documentation
 
