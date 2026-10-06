@@ -18,6 +18,23 @@ on:
         required: false
         type: string
         default: automated
+    outputs:
+      work-status:
+        value: ${{ jobs.aggregate.outputs.work-status }}
+      expected-count:
+        value: ${{ jobs.aggregate.outputs.expected-count }}
+      executed-count:
+        value: ${{ jobs.aggregate.outputs.executed-count }}
+      artifact-id:
+        value: ${{ jobs.aggregate.outputs.artifact-id }}
+      artifact-url:
+        value: ${{ jobs.aggregate.outputs.artifact-url }}
+      test-count:
+        value: ${{ jobs.aggregate.outputs.test-count }}
+      skipped-count:
+        value: ${{ jobs.aggregate.outputs.skipped-count }}
+      first-failure:
+        value: ${{ jobs.aggregate.outputs.first-failure }}
 
 permissions:
   contents: read
@@ -45,6 +62,7 @@ jobs:
           persist-credentials: false
 
       - name: Validate evidence policy
+        id: evidence-policy
         shell: bash
         run: |
           set -euo pipefail
@@ -60,6 +78,7 @@ jobs:
             echo "::error::Release completeness requires release scope"
             exit 1
           fi
+          mkdir -p logs
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -108,8 +127,10 @@ jobs:
           npm ci --prefix "$skill_root/scripts/runtime_a11y"
           (
             cd "$skill_root"
-            uv run --frozen pytest -q
-            node --test tests/runtime_a11y/runner/*.test.mjs
+            uv run --frozen pytest -q --junitxml="$GITHUB_WORKSPACE/logs/docusaurus-hve-python.xml"
+            node --test --test-reporter=junit \
+              --test-reporter-destination="$GITHUB_WORKSPACE/logs/docusaurus-hve-node.xml" \
+              tests/runtime_a11y/runner/*.test.mjs
           )
 
       - name: Validate Docusaurus screen-reader binding
@@ -174,7 +195,7 @@ jobs:
         run: |
           set -euo pipefail
           uv run --project "$HVE_SKILL_ROOT" --frozen --with pydantic==2.13.5 \
-            pytest -c /dev/null -q \
+            pytest -c /dev/null -q --junitxml=logs/docusaurus-evidence-contracts.xml \
             tests/test_accessibility_evidence.py tests/test_accessibility_promotion.py
           uvx --from ruff==0.16.5 ruff check \
             scripts/accessibility/evidence_gate.py \
@@ -193,6 +214,7 @@ jobs:
             > artifacts/accessibility/docusaurus/presentation-taxonomy.json
 
       - name: Capture Docusaurus source inputs
+        id: source-inputs
         shell: bash
         run: |
           set -euo pipefail
@@ -204,6 +226,7 @@ jobs:
             --repository-root .
 
       - name: Install dependencies
+        id: install
         working-directory: docs/docusaurus
         run: npm ci
 
@@ -222,10 +245,21 @@ jobs:
       - name: Typecheck, tests, and coverage
         id: test-coverage
         working-directory: docs/docusaurus
-        run: npm run test:coverage
+        shell: bash
+        # Match test:coverage, retaining native reports outside Playwright's cleaned output directory.
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm run build
+          npx --no-install jest --coverage --json --outputFile="$GITHUB_WORKSPACE/logs/docusaurus-jest.json"
+          node --test --test-reporter=junit \
+            --test-reporter-destination="$GITHUB_WORKSPACE/logs/docusaurus-node.xml" \
+            scripts/validate-mermaid-accessibility.test.mjs
+          node scripts/validate-mermaid-accessibility.mjs
         continue-on-error: ${{ inputs.soft-fail }}
 
       - name: Upload coverage artifact
+        id: coverage-artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         continue-on-error: ${{ inputs.soft-fail }}
@@ -236,6 +270,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Verify system Chrome
+        id: chrome
         run: google-chrome --version
         continue-on-error: ${{ inputs.soft-fail }}
 
@@ -249,7 +284,13 @@ jobs:
         working-directory: docs/docusaurus
         env:
           DOCS_E2E_EXTENDED: '0'
-        run: npm run ci:test:e2e
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/playwright-results.json
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report
+          PLAYWRIGHT_HTML_OPEN: never
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/logs/docusaurus-browser.xml
+        run: >-
+          npm run ci:test:e2e --
+          --reporter=./e2e/route-inventory.ts,./e2e/evidence-cell-reporter.ts,list,github,json,html,junit
         continue-on-error: ${{ inputs.soft-fail }}
 
       - name: Run supplemental scheduled WebKit gates
@@ -372,6 +413,7 @@ jobs:
         continue-on-error: ${{ inputs.soft-fail }}
 
       - name: Emit Docusaurus accessibility validation manifest
+        id: validation-manifest
         if: ${{ always() && steps.compose-evidence.outcome != 'skipped' }}
         shell: bash
         run: |
@@ -429,6 +471,7 @@ jobs:
             --repository-root .
 
       - name: Upload Docusaurus accessibility evidence
+        id: evidence-artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         continue-on-error: ${{ inputs.soft-fail }}
@@ -439,6 +482,29 @@ jobs:
           retention-days: ${{ inputs.evidence-cadence == 'release' && 90 || 30 }}
           if-no-files-found: warn
 
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: docusaurus-tests
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: >-
+            ["evidence-policy","hve-acquire","hve-self-tests","screen-reader-binding",
+            "evidence-contracts","presentation-taxonomy","source-inputs","install",
+            "accessibility-lint","label-consistency","test-coverage","coverage-artifact",
+            "chrome","browser","contrast-review","prepare-evidence","compose-evidence",
+            "validate-evidence","validation-manifest","stage-evidence","evidence-artifact"]
+          reports: >-
+            [{"path":"logs/docusaurus-hve-python.xml","kind":"junit"},
+            {"path":"logs/docusaurus-hve-node.xml","kind":"junit"},
+            {"path":"logs/docusaurus-evidence-contracts.xml","kind":"junit"},
+            {"path":"logs/docusaurus-jest.json","kind":"jest"},
+            {"path":"logs/docusaurus-node.xml","kind":"junit"},
+            {"path":"logs/docusaurus-browser.xml","kind":"junit"},
+            {"path":"docs/docusaurus/coverage/lcov.info","kind":"file"}]
+          fail-on-error: ${{ !inputs.soft-fail }}
+
   docusaurus-codecov:
     name: Docusaurus Codecov Upload
     needs: docusaurus
@@ -448,6 +514,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    outputs:
+      download-outcome: ${{ steps.coverage-download.outcome }}
+      upload-outcome: ${{ steps.codecov.outcome }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -457,12 +526,13 @@ jobs:
       - name: Download coverage artifact
         id: coverage-download
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        continue-on-error: true
+        continue-on-error: ${{ inputs.soft-fail }}
         with:
           name: docusaurus-coverage
           path: coverage
 
       - name: Upload coverage to Codecov
+        id: codecov
         if: ${{ steps.coverage-download.outcome == 'success' }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         continue-on-error: ${{ inputs.soft-fail }}
@@ -478,3 +548,73 @@ jobs:
           verbose: true
           flags: docusaurus
           name: docusaurus-coverage
+
+  coverage-result:
+    name: Verify Docusaurus Coverage Publication
+    needs: docusaurus-codecov
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify coverage publication
+        id: coverage-upload
+        shell: bash
+        env:
+          JOB_RESULT: ${{ needs.docusaurus-codecov.result }}
+          DOWNLOAD_OUTCOME: ${{ needs.docusaurus-codecov.outputs.download-outcome }}
+          UPLOAD_OUTCOME: ${{ needs.docusaurus-codecov.outputs.upload-outcome }}
+        run: |
+          test "$JOB_RESULT" = success &&
+            test "$DOWNLOAD_OUTCOME" = success &&
+            test "$UPLOAD_OUTCOME" = success
+
+      - name: Publish coverage execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: docusaurus-tests
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["coverage-upload"]'
+          reports: '[]'
+          fail-on-error: ${{ !inputs.soft-fail }}
+
+  aggregate:
+    name: Aggregate Docusaurus execution evidence
+    if: always()
+    needs: [docusaurus, coverage-result]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Aggregate execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: docusaurus-tests
+          needs-json: ${{ toJSON(needs) }}
+          expected-shards: '{"docusaurus":["default"],"coverage-result":["default"]}'
+          fail-on-error: ${{ !inputs.soft-fail }}

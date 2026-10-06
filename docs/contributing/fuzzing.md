@@ -208,3 +208,7 @@ The `pytest-fuzz` and `vitest` flags are omitted from top-level project status g
 - [Security Review](security-review.md) for security testing requirements
 - [Prerequisites](prerequisites.md) for required tool versions
 - [Deployment Validation](deployment-validation.md) for validation levels
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.
