@@ -1,5 +1,7 @@
 """FastAPI application entry point."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -7,17 +9,18 @@ import tempfile
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from .auth import PrincipalContext, require_auth, require_principal_context
-from .csrf import CSRF_COOKIE_NAME, generate_csrf_token
+from .auth import MediaSession, PrincipalContext, issue_media_session, require_auth, require_principal_context
+from .csrf import CSRF_COOKIE_NAME, generate_csrf_token, require_csrf_token
 from .middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddleware
 from .rate_limiter import limiter
 from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, vlm_judge
@@ -265,3 +268,18 @@ async def get_auth_context(
 ) -> PrincipalContext:
     """Return the opaque ownership scope for the authenticated principal."""
     return principal
+
+
+@app.post(
+    "/api/auth/media-session",
+    response_model=MediaSession,
+    tags=["auth"],
+    dependencies=[Depends(require_csrf_token)],
+)
+async def create_media_session(
+    request: Request,
+    response: Response,
+    user: dict[str, Any] | None = Depends(require_auth),
+) -> MediaSession:
+    """Authorize native same-origin images and range-based video without URL credentials."""
+    return issue_media_session(request, response, user)

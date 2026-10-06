@@ -136,6 +136,19 @@ function Invoke-TerraformValidationCore {
             continue
         }
 
+        if (-not (Test-Path $fullPath -PathType Container)) {
+            if ($firstFailure -eq 0) { $firstFailure = 1 }
+            $validationResults += @{
+                directory = $displayPath
+                passed    = $false
+                skipped   = $false
+                exit_code = 1
+                errors    = @(@{ severity = 'error'; summary = 'Required deployment directory is missing.' })
+                warnings  = @()
+            }
+            continue
+        }
+
         Push-Location $fullPath
         try {
             $initOutput = & terraform init -backend=false -input=false -no-color 2>&1
@@ -157,6 +170,9 @@ function Invoke-TerraformValidationCore {
                     $validateResult = $validateOutput | Out-String | ConvertFrom-Json -AsHashtable
                     if ($null -eq $validateResult -or -not $validateResult.Contains('diagnostics')) {
                         throw 'Terraform validation output has no diagnostics field.'
+                    }
+                    if ($validateExit -eq 0 -and ($validateResult['valid'] -ne $true -or $validateResult['error_count'] -ne 0)) {
+                        $validateExit = 1
                     }
                     if ($validateExit -ne 0 -and -not $validateResult.diagnostics) {
                         $validateResult.diagnostics = @(@{
@@ -232,7 +248,9 @@ function Invoke-TerraformValidationCore {
     $directoriesChecked = @($validationResults | Where-Object { -not $_.skipped }).Count
     $directoriesPassed = @($validationResults | Where-Object { -not $_.skipped -and $_.passed }).Count
     $directoriesSkipped = @($validationResults | Where-Object { $_.skipped }).Count
-    $overallPassed = $versionExit -eq 0 -and $fmtPassed -and ($directoriesChecked -eq $directoriesPassed)
+    $expectedDirectories = @($dirsToValidate).Count
+    $overallPassed = $versionExit -eq 0 -and $fmtPassed -and ($directoriesChecked -eq $directoriesPassed) -and
+        ($directoriesChecked -eq $expectedDirectories) -and ($ChangedFilesOnly -or $directoriesChecked -eq $deployDirs.Count)
 
     $results = @{
         timestamp         = (Get-Date -Format 'o')
@@ -252,6 +270,7 @@ function Invoke-TerraformValidationCore {
                 }
             })
         summary           = @{
+            directories_expected = $expectedDirectories
             directories_checked = $directoriesChecked
             directories_passed  = $directoriesPassed
             directories_skipped = $directoriesSkipped
