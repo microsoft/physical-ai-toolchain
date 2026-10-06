@@ -158,6 +158,26 @@ def test_invalid_environment_names_are_rejected(tmp_path: Path, name: str) -> No
         load_environment_bundle(name, tmp_path, _environ(tmp_path))
 
 
+def test_a_bundle_for_another_environment_is_never_used(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _write_bundle(tmp_path / "explicit", {**_COMPLETE_BUNDLE, "environment": "production-example"})
+    _write_bundle(repo_root / "infrastructure" / "setup" / "generated" / "sample", _COMPLETE_BUNDLE)
+
+    with pytest.raises(EnvironmentBundleError, match="is for environment 'production-example', not 'sample'"):
+        load_environment_bundle("sample", repo_root, _environ(tmp_path, **{BUNDLE_DIR_VAR: str(tmp_path / "explicit")}))
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [pytest.param({"schema_version": 2}, id="newer"), pytest.param({"schema_version": None}, id="missing")],
+)
+def test_a_bundle_with_an_unknown_schema_is_rejected(tmp_path: Path, schema: dict[str, object]) -> None:
+    _write_bundle(tmp_path / "explicit", {**_COMPLETE_BUNDLE, **schema})
+
+    with pytest.raises(EnvironmentBundleError, match="schema_version"):
+        load_environment_bundle("sample", tmp_path, _environ(tmp_path, **{BUNDLE_DIR_VAR: str(tmp_path / "explicit")}))
+
+
 def test_blank_and_non_string_fields_are_ignored(tmp_path: Path) -> None:
     _write_bundle(
         tmp_path / "explicit",
@@ -416,7 +436,11 @@ def test_cleanup_archives_models_when_the_job_never_stops(tmp_path: Path, monkey
 
 
 class _FakePipelineService:
-    """Stand-in for the Azure ML calls that ``start_aml_pipeline`` makes, keyed by submission order."""
+    """Stand-in for the Azure ML calls that ``start_aml_pipeline`` makes, keyed by submission order.
+
+    Orphan outcomes differ only after the cancel request: ``orphaned`` ignores it, as real orphans do,
+    ``orphan-canceled`` reaches ``Canceled``, and ``orphan-starts`` starts running with a child job.
+    """
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch, outcomes: list[str]) -> None:
         self.outcomes = outcomes
@@ -425,6 +449,7 @@ class _FakePipelineService:
         self.cancelled: list[tuple[str, float | None]] = []
         self.archived: list[str] = []
         self.waits: list[tuple[str, int]] = []
+        self.observed: list[str] = []
         monkeypatch.setattr(_aml, "wait_until_aml_started", self.wait_until_started)
         monkeypatch.setattr(_aml, "fetch_aml_job_payload", self.payload)
         monkeypatch.setattr(_aml, "list_aml_child_jobs", self.children)
@@ -451,11 +476,24 @@ class _FakePipelineService:
             raise AssertionError(f"AzureML job {job.name} to start failed with status 'Failed'")
         raise AssertionError(f"Timed out waiting for AzureML job {job.name} to start; last status was 'NotStarted'")
 
+    def _cancel_requested(self, job: _aml.AzureMLJob) -> bool:
+        return any(name == job.name for name, _ in self.cancelled)
+
     def payload(self, job: _aml.AzureMLJob, repo_root: Path) -> dict[str, str]:
-        return {"status": "Failed" if self.outcome(job) == "failed" else "NotStarted"}
+        self.observed.append(job.name)
+        outcome = self.outcome(job)
+        if outcome == "failed":
+            return {"status": "Failed"}
+        if self._cancel_requested(job) and outcome == "orphan-canceled":
+            return {"status": "Canceled"}
+        if self._cancel_requested(job) and outcome == "orphan-starts":
+            return {"status": "Running"}
+        return {"status": "NotStarted"}
 
     def children(self, job: _aml.AzureMLJob, repo_root: Path) -> list[str]:
-        return ["step"] if self.outcome(job) == "slow" else []
+        outcome = self.outcome(job)
+        started_late = outcome == "orphan-starts" and self._cancel_requested(job)
+        return ["step"] if outcome == "slow" or started_late else []
 
     def cancel(self, job: _aml.AzureMLJob, repo_root: Path, *, timeout_seconds: float | None = None) -> None:
         self.cancelled.append((job.name, timeout_seconds))
@@ -493,10 +531,39 @@ def test_an_orphaned_pipeline_is_retired_and_resubmitted_once(tmp_path: Path, mo
     assert service.registered == ["pipeline-0", "pipeline-1"]
     assert service.cancelled == [("pipeline-0", _aml.AML_ORPHAN_CANCEL_TIMEOUT_SECONDS)]
     assert service.archived == ["pipeline-0"]
-    assert orphan.is_terminal
-    assert orphan.terminal_status == "Orphaned"
+    # The cancel had no visible effect, so the orphan is suspected, not terminal, and stays cleanup-eligible.
+    assert orphan.suspected_orphan
+    assert not orphan.is_terminal
+    assert orphan.terminal_status is None
     assert job.handle.attempts["azureml_job"] == ["initial", "orphaned-resubmit-1"]
     assert job.handle.retry_classifications["azureml_job"] == _aml.ORPHANED_SUBMISSION
+
+
+def test_an_orphan_that_stops_after_its_cancel_records_the_observed_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = _FakePipelineService(monkeypatch, ["orphan-canceled", "started"])
+
+    job = service.start(tmp_path)
+
+    orphan = service.submitted[0]
+    assert job.name == "pipeline-1"
+    assert orphan.is_terminal
+    assert orphan.terminal_status == "Canceled"
+
+
+def test_an_orphan_that_starts_after_its_cancel_is_not_resubmitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = _FakePipelineService(monkeypatch, ["orphan-starts", "started"])
+
+    with pytest.raises(AssertionError, match="started after it looked orphaned"):
+        service.start(tmp_path)
+
+    orphan = service.submitted[0]
+    assert service.registered == ["pipeline-0"]
+    assert orphan.suspected_orphan
+    assert not orphan.is_terminal
 
 
 def test_a_second_orphan_fails_with_the_activity_log_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -506,6 +573,7 @@ def test_a_second_orphan_fails_with_the_activity_log_hint(tmp_path: Path, monkey
         service.start(tmp_path)
 
     assert "Activity Log" in str(error.value)
+    assert "no pipeline step ran" in str(error.value)
     assert service.registered == ["pipeline-0", "pipeline-1"]
     assert service.archived == ["pipeline-0", "pipeline-1"]
 
@@ -541,10 +609,18 @@ def test_cancel_uses_the_requested_time_limit(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr(_aml, "_run_with_time_limit", fake_run)
     monkeypatch.setattr(_aml, "log_e2e", lambda message: None)
 
+    suspected = _sample_job()
+    suspected.suspected_orphan = True
+
     _aml.cancel_aml_job(_sample_job(), tmp_path)
     _aml.cancel_aml_job(_sample_job(), tmp_path, timeout_seconds=_aml.AML_ORPHAN_CANCEL_TIMEOUT_SECONDS)
+    _aml.cancel_aml_job(suspected, tmp_path)
 
-    assert limits == [_aml.AML_CANCEL_TIMEOUT_SECONDS, _aml.AML_ORPHAN_CANCEL_TIMEOUT_SECONDS]
+    assert limits == [
+        _aml.AML_CANCEL_TIMEOUT_SECONDS,
+        _aml.AML_ORPHAN_CANCEL_TIMEOUT_SECONDS,
+        _aml.AML_ORPHAN_CANCEL_TIMEOUT_SECONDS,
+    ]
 
 
 def test_child_jobs_and_archive_use_the_job_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -570,22 +646,53 @@ def test_child_jobs_and_archive_use_the_job_workspace(tmp_path: Path, monkeypatc
     assert "Could not archive AzureML job sample-job" in messages[0]
 
 
-def test_cleanup_skips_waiting_on_a_retired_orphan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _retired_orphan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> tuple[_FakePipelineService, _aml.AzureMLJob, list[str], list[str]]:
+    service = _FakePipelineService(monkeypatch, [outcome, "started"])
+    if outcome == "orphaned":
+        service.start(tmp_path)
+    else:
+        with pytest.raises(AssertionError, match="started after it looked orphaned"):
+            service.start(tmp_path)
     archived: list[str] = []
+    waits: list[str] = []
 
-    def unexpected_wait(*args: object, **kwargs: object) -> str:
-        raise AssertionError("cleanup must not wait on a retired orphan")
+    def record_wait(*args: object, **kwargs: object) -> str:
+        waits.append(str(kwargs["goal_description"]))
+        return "Canceled"
 
-    monkeypatch.setattr(_aml, "wait_for_status", unexpected_wait)
-    monkeypatch.setattr(_aml, "log_e2e", lambda message: None)
+    monkeypatch.setattr(_aml, "wait_for_status", record_wait)
     monkeypatch.setattr(
         _aml, "archive_all_model_versions", lambda repo_root, workspace, model_name: archived.append(model_name)
     )
-    job = _sample_job()
-    _aml._mark_job_terminal(job, "Orphaned")
+    return service, service.submitted[0], archived, waits
 
-    _aml.cleanup_aml_job_and_model_versions(job, tmp_path, job.workspace, "sample-model")
 
+def test_cleanup_cancels_and_rechecks_an_inert_orphan_without_waiting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, orphan, archived, waits = _retired_orphan(tmp_path, monkeypatch, "orphaned")
+    observed_before = service.observed.count("pipeline-0")
+
+    _aml.cleanup_aml_job_and_model_versions(orphan, tmp_path, orphan.workspace, "sample-model")
+
+    # A failed or ignored cancel during recovery is retried at cleanup, and the job is checked again.
+    assert [name for name, _ in service.cancelled] == ["pipeline-0", "pipeline-0"]
+    assert service.observed.count("pipeline-0") > observed_before
+    assert waits == []
+    assert not orphan.is_terminal
+    assert archived == ["sample-model"]
+
+
+def test_cleanup_waits_for_an_orphan_that_started(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service, orphan, archived, waits = _retired_orphan(tmp_path, monkeypatch, "orphan-starts")
+
+    _aml.cleanup_aml_job_and_model_versions(orphan, tmp_path, orphan.workspace, "sample-model")
+
+    assert [name for name, _ in service.cancelled] == ["pipeline-0", "pipeline-0"]
+    assert waits == ["AzureML job pipeline-0 cleanup"]
+    assert orphan.terminal_status == "Canceled"
     assert archived == ["sample-model"]
 
 

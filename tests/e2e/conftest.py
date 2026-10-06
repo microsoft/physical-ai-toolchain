@@ -242,21 +242,21 @@ def _named_environment_active(repo_root: Path) -> bool:
     Terraform state, so a misconfigured environment never targets other resources.
     """
     try:
-        return _activate_named_environment(repo_root) is not None
+        bundle = _activate_named_environment(repo_root)
     except EnvironmentBundleError as error:
         pytest.fail(str(error), pytrace=False)
+    return bundle is not None
 
 
 def _required_named_value(*variables: str) -> str:
     """Return the first non-blank variable, failing when the named environment lacks it."""
-    for variable in variables:
-        value = os.environ.get(variable, "").strip()
-        if value:
-            return value
-    pytest.fail(
-        f"{variables[-1]} is not set, and the {ENVIRONMENT_VAR} bundle does not provide it",
-        pytrace=False,
-    )
+    value = next((value for value in (os.environ.get(name, "").strip() for name in variables) if value), "")
+    if not value:
+        pytest.fail(
+            f"{variables[-1]} is not set, and the {ENVIRONMENT_VAR} bundle does not provide it",
+            pytrace=False,
+        )
+    return value
 
 
 @pytest.fixture(scope="session")

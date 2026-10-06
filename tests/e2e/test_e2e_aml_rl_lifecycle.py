@@ -102,6 +102,7 @@ def test_aml_rl_lifecycle_e2e(
             num_envs=64,
             register_model_name=register_model_name,
             instance_type=instance_type,
+            compute=aml_compute_target.name,
         )
         request.addfinalizer(lambda: cancel_aml_job(job, repo_root))
 
@@ -128,6 +129,7 @@ def test_aml_rl_lifecycle_e2e(
         eval_episodes=2,
         num_envs=4,
         instance_type=instance_type,
+        compute=aml_compute_target.name,
     )
     request.addfinalizer(lambda: cancel_aml_job(eval_job, repo_root))
 

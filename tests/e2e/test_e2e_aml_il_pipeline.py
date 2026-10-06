@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from tests.e2e._aml import (
+    AzureMLCompute,
     AzureMLJob,
     AzureMLWorkspace,
     archive_all_model_versions,
@@ -49,7 +50,6 @@ def pipeline_dataset_asset(
 
 
 @pytest.mark.e2e
-@pytest.mark.usefixtures("aml_compute_target")
 @pytest.mark.parametrize(
     ("policy_type", "should_register"),
     [
@@ -60,6 +60,7 @@ def pipeline_dataset_asset(
 def test_aml_il_pipeline_e2e(
     request: pytest.FixtureRequest,
     aml_workspace: AzureMLWorkspace,
+    aml_compute_target: AzureMLCompute,
     repo_root: Path,
     pipeline_dataset_asset: str,
     policy_type: str,
@@ -99,6 +100,7 @@ def test_aml_il_pipeline_e2e(
             batch_size=8,
             eval_episodes=1,
             register_model_name=register_model_name,
+            compute=aml_compute_target.name,
         )
 
     log_e2e("Submitting the AzureML pipeline and waiting for it to start")

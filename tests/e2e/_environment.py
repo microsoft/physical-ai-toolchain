@@ -25,6 +25,8 @@ from pathlib import Path
 ENVIRONMENT_VAR = "E2E_ENVIRONMENT"
 BUNDLE_DIR_VAR = "E2E_ENVIRONMENT_BUNDLE_DIR"
 DEPLOYMENT_FILE = "deployment.json"
+# The bundle schema infrastructure/setup writes and checks in connect-environment.sh.
+BUNDLE_SCHEMA_VERSION = 1
 LOCAL_ENV_FILE = ".env.local"
 AML_COMPUTE_NAME_MAX_LENGTH = 16
 
@@ -111,6 +113,16 @@ def load_environment_bundle(
         if not deployment.is_file():
             continue
         payload = _read_deployment(deployment)
+        declared = payload.get("environment")
+        if payload.get("schema_version") != BUNDLE_SCHEMA_VERSION:
+            raise EnvironmentBundleError(
+                f"Environment bundle file {deployment} has schema_version {payload.get('schema_version')!r}; "
+                f"this checkout reads version {BUNDLE_SCHEMA_VERSION}"
+            )
+        if declared != name:
+            raise EnvironmentBundleError(
+                f"Environment bundle file {deployment} is for environment {declared!r}, not {name!r}; it was not used"
+            )
         values: dict[str, str] = {}
         for field, _ in BUNDLE_VARIABLES:
             value = payload.get(field)

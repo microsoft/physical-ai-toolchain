@@ -77,6 +77,7 @@ def test_aml_vla_pi0_lifecycle_e2e(
         log_freq=1,
         register_model_name=register_model_name,
         instance_type=instance_type,
+        compute=aml_compute_target.name,
     )
     request.addfinalizer(lambda: cleanup_aml_job_and_model_versions(job, repo_root, aml_workspace, register_model_name))
 
@@ -105,6 +106,7 @@ def test_aml_vla_pi0_lifecycle_e2e(
         blob_container=dataset.container,
         blob_prefix=dataset.prefix,
         instance_type=instance_type,
+        compute=aml_compute_target.name,
     )
     request.addfinalizer(lambda: cancel_aml_job(eval_job, repo_root))
 

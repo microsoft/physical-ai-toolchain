@@ -37,12 +37,15 @@ from tests.e2e._environment import (
 
 AML_STARTED_STATES = {"Running", "Finalizing", "Completed"}
 AML_FAILURE_STATES = {"Canceled", "Cancelled", "Failed", "NotResponding"}
+AML_TERMINAL_STATES = {"Completed", *AML_FAILURE_STATES}
 AML_CANCEL_TIMEOUT_SECONDS = 180
 # A pipeline whose creation timed out at the Azure ML gateway stays NotStarted with no child
 # jobs; healthy pipelines start within seconds, so this window can't mistake one for the other.
 AML_ORPHAN_WINDOW_MINUTES = 5
 AML_ORPHAN_CANCEL_TIMEOUT_SECONDS = 60
 AML_ORPHAN_RESUBMISSIONS = 1
+# An orphan in these states with no child jobs has done no work and can't start any.
+AML_INERT_ORPHAN_STATES = {"NotStarted", "CancelRequested"}
 ORPHANED_SUBMISSION = "orphaned-submission"
 
 RL_TRAINING_SCRIPT = "training/rl/scripts/submit-azureml-training.sh"
@@ -107,6 +110,8 @@ class AzureMLJob:
     handle: E2EHandle = field(default_factory=E2EHandle)
     is_terminal: bool = False
     terminal_status: str | None = None
+    # Set when the job looked orphaned; only an observed status ever makes it terminal.
+    suspected_orphan: bool = False
 
 
 @dataclass(frozen=True)
@@ -415,6 +420,11 @@ def _submit_workspace_args(aml_workspace: AzureMLWorkspace) -> list[str]:
     ]
 
 
+def submit_target_args(aml_workspace: AzureMLWorkspace, compute: str) -> list[str]:
+    """Name the validated workspace and compute as flags, which win over values a script loads from ``.env.local``."""
+    return [*_submit_workspace_args(aml_workspace), "--compute", compute]
+
+
 def submit_aml_training(
     repo_root: Path,
     aml_workspace: AzureMLWorkspace,
@@ -424,12 +434,13 @@ def submit_aml_training(
     num_envs: int,
     register_model_name: str,
     instance_type: str | None,
+    compute: str,
 ) -> AzureMLJob:
     experiment_name = e2e_name("rl-training-e2e-aml")
     log_e2e(
         "Submitting AzureML training job "
         f"for task={task}, num_envs={num_envs}, max_iterations={max_iterations}, experiment={experiment_name}, "
-        f"instance_type={_instance_type_label(instance_type)}"
+        f"instance_type={_instance_type_label(instance_type)}, compute={compute}"
     )
     result = run_command(
         [
@@ -443,7 +454,7 @@ def submit_aml_training(
             "--experiment-name",
             experiment_name,
             *_instance_type_args(instance_type),
-            *_submit_workspace_args(aml_workspace),
+            *submit_target_args(aml_workspace, compute),
             "--register-checkpoint",
             register_model_name,
         ],
@@ -467,13 +478,14 @@ def submit_aml_lerobot_training(
     log_freq: int,
     register_model_name: str,
     instance_type: str | None,
+    compute: str,
 ) -> AzureMLJob:
     experiment_name = e2e_name("il-training-e2e-aml")
     log_e2e(
         "Submitting AzureML LeRobot training job "
         f"for dataset={blob_url}, policy={policy_type}, training_steps={training_steps}, "
         f"save_freq={save_freq}, batch_size={batch_size}, log_freq={log_freq}, experiment={experiment_name}, "
-        f"instance_type={_instance_type_label(instance_type)}"
+        f"instance_type={_instance_type_label(instance_type)}, compute={compute}"
     )
     # eval-freq > training-steps disables in-loop evaluation (which would need
     # sim deps that are not part of the lerobot training container).
@@ -497,7 +509,7 @@ def submit_aml_lerobot_training(
             "--experiment-name",
             experiment_name,
             *_instance_type_args(instance_type),
-            *_submit_workspace_args(aml_workspace),
+            *submit_target_args(aml_workspace, compute),
             "--register-checkpoint",
             register_model_name,
         ],
@@ -520,13 +532,14 @@ def submit_aml_vla_pi0_training(
     log_freq: int,
     register_model_name: str,
     instance_type: str | None,
+    compute: str,
 ) -> AzureMLJob:
     experiment_name = e2e_name("vla-pi0-training-e2e-aml")
     log_e2e(
         "Submitting AzureML VLA pi0 training job "
         f"for dataset={blob_url}, training_steps={training_steps}, "
         f"save_freq={save_freq}, batch_size={batch_size}, log_freq={log_freq}, experiment={experiment_name}, "
-        f"instance_type={_instance_type_label(instance_type)}"
+        f"instance_type={_instance_type_label(instance_type)}, compute={compute}"
     )
     result = run_command(
         [
@@ -549,7 +562,7 @@ def submit_aml_vla_pi0_training(
             "--train-expert-only",
             "--experiment-name",
             experiment_name,
-            *_submit_workspace_args(aml_workspace),
+            *submit_target_args(aml_workspace, compute),
             "--register-checkpoint",
             register_model_name,
         ],
@@ -620,6 +633,7 @@ def submit_aml_lerobot_eval(
     blob_container: str,
     blob_prefix: str,
     instance_type: str | None,
+    compute: str,
 ) -> AzureMLJob:
     """Submit a LeRobot eval job; ``instance_type`` of ``None`` keeps the script's default instance type."""
     policy_args = list(policy_source.args)
@@ -632,7 +646,7 @@ def submit_aml_lerobot_eval(
         "Submitting AzureML LeRobot eval job "
         f"for policy={policy_description}, policy_type={policy_type}, eval_episodes={eval_episodes}, "
         f"dataset={blob_storage_account}/{blob_container}/{blob_prefix}, experiment={experiment_name}, "
-        f"instance_type={_instance_type_label(instance_type)}"
+        f"instance_type={_instance_type_label(instance_type)}, compute={compute}"
     )
     result = run_command(
         [
@@ -655,7 +669,7 @@ def submit_aml_lerobot_eval(
             "--experiment-name",
             experiment_name,
             *_instance_type_args(instance_type),
-            *_submit_workspace_args(aml_workspace),
+            *submit_target_args(aml_workspace, compute),
         ],
         cwd=repo_root,
     )
@@ -791,13 +805,14 @@ def submit_aml_isaaclab_eval(
     eval_episodes: int,
     num_envs: int,
     instance_type: str | None,
+    compute: str,
 ) -> AzureMLJob:
     """Submit the AzureML Isaac Lab evaluation against a concrete registered model."""
     experiment_name = e2e_name("rl-eval-e2e-aml")
     log_e2e(
         "Submitting AzureML Isaac Lab eval job "
         f"for model={model.name}:{model.version}, task={task}, eval_episodes={eval_episodes}, num_envs={num_envs}, "
-        f"experiment={experiment_name}, instance_type={_instance_type_label(instance_type)}"
+        f"experiment={experiment_name}, instance_type={_instance_type_label(instance_type)}, compute={compute}"
     )
     result = run_command(
         [
@@ -820,7 +835,7 @@ def submit_aml_isaaclab_eval(
             "--experiment-name",
             experiment_name,
             *_instance_type_args(instance_type),
-            *_submit_workspace_args(aml_workspace),
+            *submit_target_args(aml_workspace, compute),
         ],
         cwd=repo_root,
     )
@@ -842,6 +857,7 @@ def submit_aml_lerobot_pipeline(
     batch_size: int,
     eval_episodes: int,
     register_model_name: str | None = None,
+    compute: str,
 ) -> AzureMLJob:
     experiment_name = e2e_name("il-pipeline-e2e-aml")
     register_args = (
@@ -851,7 +867,8 @@ def submit_aml_lerobot_pipeline(
         "Submitting AzureML LeRobot pipeline job "
         f"for dataset_asset={dataset_asset}, dataset_repo_id={dataset_repo_id}, policy={policy_type}, "
         f"training_steps={training_steps}, save_freq={save_freq}, batch_size={batch_size}, "
-        f"eval_episodes={eval_episodes}, register_model_name={register_model_name}, experiment={experiment_name}"
+        f"eval_episodes={eval_episodes}, register_model_name={register_model_name}, experiment={experiment_name}, "
+        f"compute={compute}"
     )
     result = run_command(
         [
@@ -873,7 +890,7 @@ def submit_aml_lerobot_pipeline(
             "--experiment-name",
             experiment_name,
             *register_args,
-            *_submit_workspace_args(aml_workspace),
+            *submit_target_args(aml_workspace, compute),
         ],
         cwd=repo_root,
     )
@@ -1195,15 +1212,18 @@ def _run_with_time_limit(
     process = subprocess.Popen(
         args, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
     )
+    finished = False
     try:
         stdout, stderr = process.communicate(timeout=timeout_seconds)
-    except BaseException as error:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
-        process.communicate()
-        if isinstance(error, subprocess.TimeoutExpired):
-            return None
-        raise
+        finished = True
+    except subprocess.TimeoutExpired:
+        return None
+    finally:
+        # Also covers an interrupt, so the command's whole session never outlives the test.
+        if not finished:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            process.communicate()
     return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
 
 
@@ -1213,7 +1233,10 @@ def cancel_aml_job(job: AzureMLJob, repo_root: Path, *, timeout_seconds: float |
         return
 
     log_e2e(f"Cancelling AzureML job {job.name}")
-    limit = AML_CANCEL_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
+    if timeout_seconds is not None:
+        limit = timeout_seconds
+    else:
+        limit = AML_ORPHAN_CANCEL_TIMEOUT_SECONDS if job.suspected_orphan else AML_CANCEL_TIMEOUT_SECONDS
 
     # The CLI waits for the service to finish cancelling, which never happens for a job the
     # pipeline service didn't accept, so bound the wait; the accepted request still applies.
@@ -1306,15 +1329,33 @@ def _wait_until_started_or_orphaned(
     return True
 
 
+def _orphan_is_inert(job: AzureMLJob, repo_root: Path) -> bool:
+    """Re-read a suspected orphan: True when it can't do work, recording a terminal status only when observed."""
+    status = _aml_status(fetch_aml_job_payload(job, repo_root))
+    if status in AML_TERMINAL_STATES:
+        _mark_job_terminal(job, status)
+        return True
+    return status in AML_INERT_ORPHAN_STATES and not list_aml_child_jobs(job, repo_root)
+
+
 def _retire_orphaned_job(job: AzureMLJob, repo_root: Path) -> None:
+    """Cancel and archive a suspected orphan, then confirm it is still inert before anything replaces it.
+
+    A real orphan never reaches a terminal status after a cancel, so the job stays eligible for cleanup.
+    """
     log_e2e(
         f"AzureML pipeline job {job.name} is still NotStarted with no child jobs after "
-        f"{AML_ORPHAN_WINDOW_MINUTES} minutes, so Azure ML created it without starting it; "
+        f"{AML_ORPHAN_WINDOW_MINUTES} minutes, so Azure ML probably created it without starting it; "
         "cancelling and archiving it"
     )
+    job.suspected_orphan = True
     cancel_aml_job(job, repo_root, timeout_seconds=AML_ORPHAN_CANCEL_TIMEOUT_SECONDS)
     archive_aml_job(job, repo_root)
-    _mark_job_terminal(job, "Orphaned")
+    if not _orphan_is_inert(job, repo_root):
+        raise AssertionError(
+            f"AzureML pipeline job {job.name} started after it looked orphaned, so it isn't resubmitted. "
+            "Cleanup cancels it and waits for it to stop; rerun the check afterward."
+        )
 
 
 def start_aml_pipeline(
@@ -1351,8 +1392,9 @@ def start_aml_pipeline(
             names = ", ".join(orphan.name for orphan in orphans)
             raise AssertionError(
                 f"Azure ML created pipeline jobs {names} but never started them: each stayed NotStarted with no "
-                f"child jobs for {AML_ORPHAN_WINDOW_MINUTES} minutes. Pipeline creation probably timed out at the "
-                "Azure ML gateway; look for a GatewayTimeout on "
+                f"child jobs for {AML_ORPHAN_WINDOW_MINUTES} minutes, so no pipeline step ran and the check says "
+                "nothing about the code under test. A likely cause is a pipeline creation timeout at the Azure ML "
+                "gateway; confirm it with a GatewayTimeout on "
                 "Microsoft.MachineLearningServices/workspaces/jobs/write in the workspace Activity Log, then rerun."
             )
         log_e2e(f"Resubmitting the AzureML pipeline after orphaned job {job.name}")
@@ -1364,18 +1406,30 @@ def cleanup_aml_job_and_model_versions(
     aml_workspace: AzureMLWorkspace,
     model_name: str,
 ) -> None:
-    """Cancel an AzureML job, then archive every model version it registered, even if it never stops."""
+    """Cancel an AzureML job, then archive every model version it registered, even if it never stops.
+
+    A suspected orphan that is still inert after its cancel request is not waited on, because it never reaches
+    a terminal status; one that started is waited on like any other job.
+    """
     cancel_aml_job(job, repo_root)
     try:
-        if not job.is_terminal:
-            terminal_status = wait_for_status(
-                lambda: _aml_status(fetch_aml_job_payload(job, repo_root)),
-                goal_description=f"AzureML job {job.name} cleanup",
-                timeout_minutes=10,
-                poll_interval_seconds=15,
-                success_statuses={"Completed", *AML_FAILURE_STATES},
-                status_log_prefix="Cleanup poll status",
-            )
-            _mark_job_terminal(job, terminal_status)
+        if job.is_terminal:
+            return
+        if job.suspected_orphan and _orphan_is_inert(job, repo_root):
+            if not job.is_terminal:
+                log_e2e(
+                    f"AzureML pipeline job {job.name} is still inert after its cancel request; "
+                    "it can't start work, so cleanup doesn't wait for a terminal status"
+                )
+            return
+        terminal_status = wait_for_status(
+            lambda: _aml_status(fetch_aml_job_payload(job, repo_root)),
+            goal_description=f"AzureML job {job.name} cleanup",
+            timeout_minutes=10,
+            poll_interval_seconds=15,
+            success_statuses={"Completed", *AML_FAILURE_STATES},
+            status_log_prefix="Cleanup poll status",
+        )
+        _mark_job_terminal(job, terminal_status)
     finally:
         archive_all_model_versions(repo_root, aml_workspace, model_name)

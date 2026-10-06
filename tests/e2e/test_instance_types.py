@@ -32,6 +32,7 @@ from tests.e2e._environment import (
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RL_VARIABLE = f"{INSTANCE_TYPE_VARIABLE}_RL"
 _WORKSPACE = _aml.AzureMLWorkspace("sub", "rg-sample", "mlw-sample")
+_COMPUTE_NAME = "k8s-sample"
 
 
 @pytest.fixture(autouse=True)
@@ -310,6 +311,7 @@ def _rl_training(root: Path, instance_type: str | None) -> None:
         num_envs=1,
         register_model_name="sample-model",
         instance_type=instance_type,
+        compute=_COMPUTE_NAME,
     )
 
 
@@ -322,6 +324,7 @@ def _isaac_eval(root: Path, instance_type: str | None) -> None:
         eval_episodes=1,
         num_envs=1,
         instance_type=instance_type,
+        compute=_COMPUTE_NAME,
     )
 
 
@@ -337,6 +340,7 @@ def _lerobot_training(root: Path, instance_type: str | None) -> None:
         log_freq=1,
         register_model_name="sample-model",
         instance_type=instance_type,
+        compute=_COMPUTE_NAME,
     )
 
 
@@ -351,6 +355,7 @@ def _vla_training(root: Path, instance_type: str | None) -> None:
         log_freq=1,
         register_model_name="sample-model",
         instance_type=instance_type,
+        compute=_COMPUTE_NAME,
     )
 
 
@@ -367,6 +372,7 @@ def _lerobot_eval(policy_type: str) -> Callable[[Path, str | None], None]:
             blob_container="sample-container",
             blob_prefix="sample/prefix",
             instance_type=instance_type,
+            compute=_COMPUTE_NAME,
         )
 
     return submit
@@ -406,6 +412,48 @@ def test_every_gpu_submission_requests_the_chosen_instance_type(
 
     assert _instance_type_argument(commands[0]) == expected_argument
     assert f"instance_type={expected_label}" in messages[0]
+
+
+def _lerobot_pipeline(root: Path, instance_type: str | None) -> None:
+    _aml.submit_aml_lerobot_pipeline(
+        root,
+        _WORKSPACE,
+        dataset_asset="sample-asset:1",
+        dataset_repo_id="sample/dataset",
+        policy_type="act",
+        training_steps=2,
+        save_freq=1,
+        batch_size=1,
+        eval_episodes=1,
+        register_model_name="sample-model",
+        compute=_COMPUTE_NAME,
+    )
+
+
+@pytest.mark.parametrize(
+    "submit",
+    [
+        pytest.param(_rl_training, id="rl-training"),
+        pytest.param(_isaac_eval, id="isaac-eval"),
+        pytest.param(_lerobot_training, id="il-training"),
+        pytest.param(_lerobot_eval("diffusion"), id="il-eval"),
+        pytest.param(_vla_training, id="vla-training"),
+        pytest.param(_lerobot_eval("pi0"), id="vla-eval"),
+        pytest.param(_lerobot_pipeline, id="il-pipeline"),
+    ],
+)
+def test_every_submission_names_the_validated_compute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, submit: Callable[[Path, str | None], None]
+) -> None:
+    commands, messages = _record_submissions(monkeypatch)
+
+    with pytest.raises(AssertionError, match="submission failed"):
+        submit(tmp_path, None)
+
+    # The scripts source .env.local before parsing flags, so only an explicit flag pins the compute.
+    assert commands[0].count("--compute") == 1
+    assert commands[0][commands[0].index("--compute") + 1] == _COMPUTE_NAME
+    assert f"compute={_COMPUTE_NAME}" in messages[0]
 
 
 # Script defaults
