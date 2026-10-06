@@ -92,12 +92,54 @@ def _compare(head: Path, base: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _summary(blocking: int, route_findings: tuple[str, ...] = (), evaluated: str = "179 of 179") -> str:
+    """Build the crawl's evidence-summary failure message, as site-crawl.spec.ts reports it."""
+    lines = [
+        "Error: Docusaurus route and contrast evidence summary",
+        "=============================================",
+        f"Route states evaluated: {evaluated} expected",
+        f"Blocking findings: {blocking}",
+        "",
+    ]
+    if route_findings:
+        lines += ["Route findings", "--------------", *(f"  {finding}" for finding in route_findings), ""]
+    lines += [
+        "Contrast ledger findings",
+        "------------------------",
+        f"  [unresolved] sig-b color-contrast is unresolved ({blocking} nodes)",
+        "",
+        "expect(received).toEqual(expected) // deep equality",
+        "",
+        f"+ Received  + {blocking}",
+    ]
+    return "\n".join(lines)
+
+
 _CONTRAST_FAILURE: Failure = (
     "chrome",
     "site-crawl.spec.ts",
     "rejects unresolved contrast signatures",
-    "Error: expect(received).toEqual(expected) // 12 blocking findings",
+    _summary(12),
 )
+
+_NAVIGATION_FAILURE = """Error: expect(page).toHaveURL(expected) failed
+
+Expected: predicate to succeed
+Received: "http://127.0.0.1:3001/physical-ai-toolchain/{route}"
+Timeout: 5000ms
+
+Call log:
+  - Expect "toHaveURL" with timeout 5000ms
+    {attempts} × unexpected value "http://127.0.0.1:3001/physical-ai-toolchain/{route}"
+
+  {line} |   await expect(page).toHaveURL((url) => url.pathname === tierPath);
+       |                      ^
+    at /work/docs/docusaurus/e2e/navigation-search.spec.ts:{line}:22"""
+
+
+def _navigation_failure(route: str, *, attempts: int = 9, line: int = 483) -> Failure:
+    message = _NAVIGATION_FAILURE.format(route=route, attempts=attempts, line=line)
+    return ("chrome", "navigation-search.spec.ts", "responsive navigation opens a tier", message)
 
 
 @requires_bash_and_jq
@@ -123,14 +165,85 @@ def test_identical_failures_report_parity(tmp_path: Path) -> None:
 
 
 @requires_bash_and_jq
-def test_counts_in_error_messages_do_not_break_parity(tmp_path: Path) -> None:
-    head_failure = (*_CONTRAST_FAILURE[:3], "Error: expect(received).toEqual(expected) // 14 blocking findings")
+def test_evidence_summary_counts_do_not_break_parity(tmp_path: Path) -> None:
+    head_failure = (*_CONTRAST_FAILURE[:3], _summary(14))
     head = _write_reports(tmp_path / "head", [head_failure])
     base = _write_reports(tmp_path / "base", [_CONTRAST_FAILURE])
 
     result = _compare(head, base)
 
     assert result.returncode == 0, result.stderr
+
+
+@requires_bash_and_jq
+def test_a_new_route_finding_in_the_evidence_summary_is_reported(tmp_path: Path) -> None:
+    finding = "/docs/new (light/default): Error: page.goto: Timeout 15000ms exceeded"
+    head = _write_reports(tmp_path / "head", [(*_CONTRAST_FAILURE[:3], _summary(13, (finding,)))])
+    base = _write_reports(tmp_path / "base", [_CONTRAST_FAILURE])
+
+    result = _compare(head, base)
+
+    assert result.returncode == 1
+    assert "finding|/docs/new (light/default): Error: page.goto: Timeout <duration> exceeded" in result.stderr
+
+
+@requires_bash_and_jq
+def test_incomplete_route_states_in_the_evidence_summary_are_reported(tmp_path: Path) -> None:
+    head = _write_reports(tmp_path / "head", [(*_CONTRAST_FAILURE[:3], _summary(12, evaluated="178 of 179"))])
+    base = _write_reports(tmp_path / "base", [_CONTRAST_FAILURE])
+
+    result = _compare(head, base)
+
+    assert result.returncode == 1
+    assert "incomplete route states" in result.stderr
+
+
+@requires_bash_and_jq
+def test_the_same_assertion_with_a_different_received_value_is_reported(tmp_path: Path) -> None:
+    head = _write_reports(tmp_path / "head", [_navigation_failure("")])
+    base = _write_reports(tmp_path / "base", [_navigation_failure("docs/getting-started/")])
+
+    result = _compare(head, base)
+
+    assert result.returncode == 1
+    assert 'Received: "http://127.0.0.1:<port>/physical-ai-toolchain/"' in result.stderr
+
+
+@requires_bash_and_jq
+def test_call_logs_code_frames_and_timings_do_not_break_parity(tmp_path: Path) -> None:
+    head = _write_reports(tmp_path / "head", [_navigation_failure("", attempts=4, line=490)])
+    base = _write_reports(tmp_path / "base", [_navigation_failure("", attempts=9, line=483)])
+
+    result = _compare(head, base)
+
+    assert result.returncode == 0, result.stderr
+
+
+@requires_bash_and_jq
+@pytest.mark.parametrize(
+    ("base_stats", "expected"),
+    [
+        pytest.param(None, "base run has no usable test evidence", id="base-missing"),
+        pytest.param({"expected": 0, "unexpected": 0, "flaky": 0, "skipped": 4}, "no test executed", id="base-empty"),
+    ],
+)
+def test_parity_needs_executed_tests_on_both_refs(
+    tmp_path: Path, base_stats: dict[str, int] | None, expected: str
+) -> None:
+    head = tmp_path / "head"
+    head.mkdir()
+    base = tmp_path / "base"
+    base.mkdir()
+    if base_stats is not None:
+        report = {"suites": [], "errors": [], "stats": base_stats}
+        (base / "playwright-results.json").write_text(json.dumps(report), encoding="utf-8")
+
+    result = _compare(head, base)
+
+    # Matching absence on both refs used to cancel out and report parity.
+    assert result.returncode == 1
+    assert "head run has no usable test evidence" in result.stderr
+    assert expected in result.stderr
 
 
 @requires_bash_and_jq
@@ -221,6 +334,18 @@ def test_a_run_where_no_test_executed_is_a_new_failure(tmp_path: Path) -> None:
 
 
 @requires_bash_and_jq
+def test_an_unreadable_report_fails_instead_of_reading_as_no_failures(tmp_path: Path) -> None:
+    head = _write_reports(tmp_path / "head", [_CONTRAST_FAILURE])
+    (head / "playwright-results.json").write_text("{not json", encoding="utf-8")
+    base = _write_reports(tmp_path / "base", [_CONTRAST_FAILURE])
+
+    result = _compare(head, base)
+
+    assert result.returncode == 1
+    assert "Cannot read the head reports" in result.stderr
+
+
+@requires_bash_and_jq
 def test_config_preview_needs_no_docker(tmp_path: Path) -> None:
     result = subprocess.run(
         ["bash", str(DOCS_E2E_SCRIPT), "--config-preview", "--compare-base", "HEAD", "--output-dir", str(tmp_path)],
@@ -261,6 +386,10 @@ case "${args[0]}" in
     echo copy-lock > "$dir/.terraform.lock.hcl"
     ;;
   plan)
+    if [[ -n "${FAKE_TERRAFORM_FAIL_PLAN:-}" ]]; then
+      echo "Error: invalid value $FAKE_TERRAFORM_FAIL_PLAN"
+      exit 1
+    fi
     for arg in "${args[@]}"; do
       if [[ "$arg" == -out=* ]]; then echo plan > "${arg#-out=}"; fi
     done
@@ -277,7 +406,7 @@ esac
 """
 
 
-def _plan_json(extra_address: str = "") -> str:
+def _plan_json(extra_address: str = "", *, sku: str = "y") -> str:
     changes: list[dict[str, object]] = [
         {"address": "azurerm_resource_group.main", "change": {"actions": ["no-op"], "before": {}, "after": {}}},
         {
@@ -285,7 +414,7 @@ def _plan_json(extra_address: str = "") -> str:
             "change": {
                 "actions": ["update"],
                 "before": {"sku": "x", "name": "secret-value"},
-                "after": {"sku": "y", "name": "secret-value"},
+                "after": {"sku": sku, "name": "secret-value"},
             },
         },
     ]
@@ -336,7 +465,7 @@ def _local_stack_files(repo: Path) -> dict[str, str]:
 
 
 def _compare_command(
-    tmp_path: Path, *, head_extra: str = "", sleep_seconds: int = 0
+    tmp_path: Path, *, head_extra: str = "", sleep_seconds: int = 0, base_sku: str = "y", head_sku: str = "y"
 ) -> tuple[list[str], dict[str, str]]:
     """Install the fake terraform and plan outputs, then return the compare command and environment."""
     bin_dir = tmp_path / "bin"
@@ -344,8 +473,8 @@ def _compare_command(
     fake = bin_dir / "terraform"
     fake.write_text(_FAKE_TERRAFORM, encoding="utf-8")
     fake.chmod(0o755)
-    (tmp_path / "plan-base.json").write_text(_plan_json(), encoding="utf-8")
-    (tmp_path / "plan-head.json").write_text(_plan_json(head_extra), encoding="utf-8")
+    (tmp_path / "plan-base.json").write_text(_plan_json(sku=base_sku), encoding="utf-8")
+    (tmp_path / "plan-head.json").write_text(_plan_json(head_extra, sku=head_sku), encoding="utf-8")
     scratch = tmp_path / "scratch"
     scratch.mkdir(exist_ok=True)
     env = {
@@ -420,6 +549,44 @@ def test_compare_plans_fails_when_the_head_change_set_differs(tmp_path: Path) ->
 
     assert result.returncode == 1
     assert "+azurerm_storage_account.extra update [a]" in result.stdout
+
+
+def _retained_text(directory: Path) -> str:
+    return "".join(path.read_text(encoding="utf-8") for path in directory.rglob("*") if path.is_file())
+
+
+@requires_terraform_tooling
+def test_compare_plans_detects_value_changes_without_showing_values(tmp_path: Path) -> None:
+    repo = _terraform_repo(tmp_path)
+    command, env = _compare_command(tmp_path, base_sku="VpnGw2", head_sku="VpnGw5")
+
+    result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, check=False)
+
+    # The value-free summaries match ("update [sku]"), so only the private comparison sees the difference.
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "resource module.vpn.azurerm_virtual_network_gateway.main" in result.stdout
+    for value in ("VpnGw2", "VpnGw5", "secret-value"):
+        assert value not in result.stdout + result.stderr
+        assert value not in _retained_text(tmp_path / "out")
+    assert list((tmp_path / "scratch").iterdir()) == []
+
+
+@requires_terraform_tooling
+def test_compare_plans_keeps_failure_diagnostics_private(tmp_path: Path) -> None:
+    repo = _terraform_repo(tmp_path)
+    command, env = _compare_command(tmp_path)
+    env["FAKE_TERRAFORM_FAIL_PLAN"] = "private-marker-value"
+
+    result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, check=False)
+
+    assert result.returncode == 1
+    assert "private-marker-value" not in result.stdout + result.stderr
+    diagnostics = tmp_path / "out" / "root" / "diagnostics"
+    kept = diagnostics / "base-plan.log"
+    assert str(kept) in result.stderr
+    assert "private-marker-value" in kept.read_text(encoding="utf-8")
+    assert kept.stat().st_mode & 0o777 == 0o600
+    assert diagnostics.stat().st_mode & 0o777 == 0o700
 
 
 @requires_terraform_tooling

@@ -20,8 +20,10 @@ Usage: $(basename "$0") [OPTIONS]
 Plan a Terraform stack at two refs against the same deployed state and compare
 the planned change sets. Each ref is extracted with git archive into a private
 temporary directory and initialized there with -backend=false; plans use
--lock=false and read the stack's state and tfvars in place. Output lists
-resource addresses, actions, and changed attribute names only, never values.
+-lock=false and read the stack's state and tfvars in place. Planned values are
+compared privately; output lists resource addresses, actions, and changed
+attribute names only, never values. A failed init or plan leaves its output in
+an owner-only file under <output-dir>/diagnostics instead of printing it.
 
 OPTIONS:
     -b, --base REF           Base ref (default: origin/main)
@@ -68,6 +70,29 @@ summarize_plan() {
       outputs: ([(.output_changes // {}) | to_entries[] | select(.value.actions != ["no-op"])
         | "\(.key) \(.value.actions | join("/"))"] | sort)
     }'
+}
+
+# Key every planned change by address with its full record, values included, for the
+# private comparison. These records never leave the private work directory.
+semantic_plan() {
+  jq -c '
+    def record: {actions, before, after, after_unknown, before_sensitive, after_sensitive, replace_paths};
+    [.resource_changes[]? | select(.change.actions != ["no-op"])
+      | {key: "resource \(.address)", value: (.change | record) + {action_reason}}]
+    + [(.output_changes // {}) | to_entries[] | select(.value.actions != ["no-op"])
+      | {key: "output \(.key)", value: (.value | record)}]
+    | from_entries'
+}
+
+# Copy a failed command's output where only the current user can read it, and print its
+# path. The output can contain input values, so it never goes to stdout or stderr.
+keep_diagnostics() {
+  local log="$1" name="$2" kept="$output_dir/diagnostics/$2"
+  mkdir -p "$output_dir/diagnostics"
+  chmod 700 "$output_dir/diagnostics"
+  cp "$log" "$kept"
+  chmod 600 "$kept"
+  echo "$kept"
 }
 
 # Defaults
@@ -143,7 +168,8 @@ trap 'exit 143' TERM
 mkdir -p "$output_dir" "$work_dir/plugin-cache"
 export TF_PLUGIN_CACHE_DIR="$work_dir/plugin-cache" TF_IN_AUTOMATION=1 TF_INPUT=0 CHECKPOINT_DISABLE=1
 
-# Plan one ref inside its own archived copy and write a value-free summary.
+# Plan one ref inside its own archived copy, then write a value-free summary to the output
+# directory and the full change records to the private work directory.
 plan_ref() {
   local ref="$1" label="$2" copy="$work_dir/$2" plan_file="$work_dir/$2.tfplan" status=0
   section "Plan: $label ($ref)"
@@ -153,19 +179,19 @@ plan_ref() {
   local dir="$copy/$stack_path"
 
   if ! terraform -chdir="$dir" init -backend=false -input=false -no-color > "$work_dir/$label.init.log" 2>&1; then
-    tail -n 20 "$work_dir/$label.init.log" >&2
-    fatal "terraform init failed for $label"
+    fatal "terraform init failed for $label; private diagnostics: $(keep_diagnostics "$work_dir/$label.init.log" "$label-init.log")"
   fi
   terraform -chdir="$dir" plan -lock=false -input=false -no-color -detailed-exitcode \
     -state="$state_file" -var-file="$var_file" -out="$plan_file" > "$work_dir/$label.plan.log" 2>&1 || status=$?
   if [[ "$status" -ne 0 && "$status" -ne 2 ]]; then
-    tail -n 20 "$work_dir/$label.plan.log" >&2
-    fatal "terraform plan failed for $label (exit $status)"
+    fatal "terraform plan failed for $label (exit $status); private diagnostics: $(keep_diagnostics "$work_dir/$label.plan.log" "$label-plan.log")"
   fi
   print_kv "Plan" "$(grep -m1 -E '^(Plan:|No changes\.)' "$work_dir/$label.plan.log" || echo "exit $status")"
 
-  terraform -chdir="$dir" show -json "$plan_file" | summarize_plan > "$output_dir/$label-summary.json"
-  rm -f "$plan_file"
+  terraform -chdir="$dir" show -json "$plan_file" > "$work_dir/$label.plan.json"
+  summarize_plan < "$work_dir/$label.plan.json" > "$output_dir/$label-summary.json"
+  semantic_plan < "$work_dir/$label.plan.json" > "$work_dir/$label.semantic.json"
+  rm -f "$plan_file" "$work_dir/$label.plan.json"
 }
 
 plan_ref "$base_ref" base
@@ -181,6 +207,15 @@ for field in changes outputs; do
     result="$EXIT_DIFFERENT"
   fi
 done
+# The summaries omit values, so two plans can match there yet set different values.
+# cspell:ignore slurpfile
+value_changes="$(jq -rn --slurpfile base "$work_dir/base.semantic.json" --slurpfile head "$work_dir/head.semantic.json" '
+  $base[0] as $b | $head[0] as $h | ([$b, $h] | map(keys) | add | unique)[] | select($b[.] != $h[.])')"
+if [[ -n "$value_changes" ]]; then
+  result="$EXIT_DIFFERENT"
+  warn "Planned values differ from the base plan for these changes (compared privately; values not shown):"
+  printf '  %s\n' "$value_changes"
+fi
 if ! diff -q <(jq -r '.drift[]' "$base_summary") <(jq -r '.drift[]' "$head_summary") >/dev/null; then
   warn "Detected drift differs between the base and head plans; review $output_dir"
 fi

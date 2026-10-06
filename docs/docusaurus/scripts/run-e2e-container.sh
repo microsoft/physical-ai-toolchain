@@ -47,43 +47,94 @@ EOF
 
 # Print sorted failure fingerprints from a report directory: run-level Playwright
 # errors (such as a web server that fails to start), a run in which no test
-# executed, failing tests (project, file, title, normalized first error line),
-# and non-accepted contrast-ledger signatures.
+# executed, failing tests, and non-accepted contrast-ledger signatures.
+#
+# A failing test is identified by project, file, and title plus its error header:
+# the message before Playwright's call log, without code frames or stack lines.
+# Only ANSI codes, localhost ports, retry markers, and durations are normalized,
+# so different expected or received values stay distinct. The crawl's evidence
+# summary contributes one fingerprint per route finding instead of its counts;
+# its contrast findings are compared through the ledger.
 failure_fingerprints() {
   local results="$1/playwright-results.json" ledger="$1/contrast-ledger.json"
   {
     if [[ -f "$results" ]]; then
       jq -r '
-        def normalize: gsub("\u001b\\[[0-9;]*m"; "") | split("\n")[0] | gsub("[0-9]+"; "N") | .[0:160];
-        [ (.errors // [])[] | "error|\((.message // "unknown error") | normalize)" ],
+        def message_lines: gsub("\u001b\\[[0-9;]*m"; "") | split("\n");
+        def known_noise:
+          gsub("(?<host>127\\.0\\.0\\.1|localhost):[0-9]+"; "\(.host):<port>")
+          | gsub("retry #[0-9]+"; "retry #<n>")
+          | gsub("\\b[0-9]+(\\.[0-9]+)?(ms|s)\\b"; "<duration>");
+        def header:
+          message_lines
+          | (map(test("^\\s*Call log:")) | index(true)) as $cut
+          | (if $cut == null then . else .[:$cut] end)
+          | map(select(test("^\\s*>?\\s*[0-9]+\\s*\\|") or test("^\\s*\\|\\s*\\^") or test("^\\s+at\\s") | not)
+            | known_noise | sub("\\s+$"; ""))
+          | map(select(length > 0)) | join(" \\n ") | .[0:2000];
+        def summary_fingerprints($id):
+          message_lines
+          | (map(test("^\\s*expect\\(")) | index(true)) as $cut
+          | (if $cut == null then . else .[:$cut] end) as $summary
+          | [ $summary[] | select(test("^  [^\\s\\[]")) | sub("^\\s+"; "") | known_noise | "\($id)|finding|\(.)" ]
+            + [ $summary[] | capture("Route states evaluated: (?<got>[0-9]+) of (?<want>[0-9]+)")
+                | select(.got != .want) | "\($id)|finding|incomplete route states" ]
+            + [ "\($id)|summary" ]
+          | .[];
+        [ (.errors // [])[] | "error|\((.message // "unknown error") | header)" ],
         (if ((.stats.expected // 0) + (.stats.unexpected // 0) + (.stats.flaky // 0)) == 0
           then ["report|no tests ran"] else [] end),
         [ .. | objects | select(has("specs")) | .specs[]? as $spec
           | ($spec.tests // [])[] | select(.status == "unexpected")
           | ([.results[]?.error?.message // empty] | last // "") as $message
-          | "test|\(.projectName)|\($spec.file)|\($spec.title)|\($message | normalize)"
-        ] | .[]' "$results"
+          | "test|\(.projectName)|\($spec.file)|\($spec.title)" as $id
+          | if ($message | message_lines | .[0] | test("Docusaurus route and contrast evidence summary"))
+            then $message | summary_fingerprints($id)
+            else "\($id)|\($message | header)" end
+        ] | .[]' "$results" || return 1
     else
       echo "report|missing playwright-results.json"
     fi
     if [[ -f "$ledger" ]]; then
-      jq -r '[.assessments[]? | select(.status != "accepted") | "contrast|\(.status)|\(.signature)"] | .[]' "$ledger"
+      jq -r '[.assessments[]? | select(.status != "accepted") | "contrast|\(.status)|\(.signature)"] | .[]' \
+        "$ledger" || return 1
     fi
   } | LC_ALL=C sort -u
 }
 
+# Print why a report directory can't support a comparison, or nothing when it can.
+evidence_problem() {
+  local results="$1/playwright-results.json"
+  if [[ ! -f "$results" ]]; then
+    echo "missing playwright-results.json"
+  elif ! jq -e '((.stats.expected // 0) + (.stats.unexpected // 0) + (.stats.flaky // 0)) > 0' \
+    "$results" >/dev/null 2>&1; then
+    echo "no test executed"
+  fi
+}
+
 # Compare head and base report directories; print the result and return its exit code.
 compare_reports() {
-  local head_dir="$1" base_dir="$2" head_failures base_failures new_failures
+  local head_dir="$1" base_dir="$2" head_failures base_failures new_failures head_problem base_problem
   [[ -d "$head_dir" ]] || fatal "Head report directory not found: $head_dir"
   [[ -d "$base_dir" ]] || fatal "Base report directory not found: $base_dir"
-  head_failures="$(failure_fingerprints "$head_dir")"
-  base_failures="$(failure_fingerprints "$base_dir")"
-  new_failures="$(LC_ALL=C comm -23 <(printf '%s\n' "$head_failures" | sed '/^$/d') <(printf '%s\n' "$base_failures" | sed '/^$/d'))"
+  # An unreadable report must fail the comparison rather than read as no failures.
+  head_failures="$(failure_fingerprints "$head_dir")" || fatal "Cannot read the head reports in $head_dir"
+  base_failures="$(failure_fingerprints "$base_dir")" || fatal "Cannot read the base reports in $base_dir"
+  head_problem="$(evidence_problem "$head_dir")"
+  base_problem="$(evidence_problem "$base_dir")"
 
   section "Docs e2e comparison"
   print_kv "Head failures" "$(printf '%s\n' "$head_failures" | sed '/^$/d' | wc -l | tr -d ' ')"
   print_kv "Base failures" "$(printf '%s\n' "$base_failures" | sed '/^$/d' | wc -l | tr -d ' ')"
+  # Parity needs tests that ran on both refs; matching absence proves nothing.
+  if [[ -n "$head_problem" || -n "$base_problem" ]]; then
+    [[ -z "$head_problem" ]] || error "The head run has no usable test evidence: $head_problem"
+    [[ -z "$base_problem" ]] || error "The base run has no usable test evidence, so parity can't be shown: $base_problem"
+    printf '  %s\n' "$head_failures" >&2
+    return "$EXIT_NEW_FAILURES"
+  fi
+  new_failures="$(LC_ALL=C comm -23 <(printf '%s\n' "$head_failures" | sed '/^$/d') <(printf '%s\n' "$base_failures" | sed '/^$/d'))"
   if [[ -z "$new_failures" ]]; then
     info "Parity: every head failure also occurs on the base"
     return 0
