@@ -730,7 +730,6 @@ class TestLifecycleAndCapabilities:
         assert [episode.index for episode in await service.list_episodes("dataset")] == [0]
         assert provider.sync_meta_only_to_local.await_count == 2
 
-    @pytest.mark.asyncio
     async def test_blob_synced_directory_is_accepted_as_safe_video_location(
         self,
         tmp_path: Path,

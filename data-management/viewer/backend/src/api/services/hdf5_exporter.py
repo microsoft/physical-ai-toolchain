@@ -625,7 +625,7 @@ class HDF5Exporter:
         """Export metadata attributes."""
         # Copy original metadata
         for key, value in episode.metadata.items():
-            if isinstance(value, list | dict):
+            if key != "cameras" and isinstance(value, list | dict):
                 dst.attrs[key] = json.dumps(value)
             else:
                 dst.attrs[key] = value

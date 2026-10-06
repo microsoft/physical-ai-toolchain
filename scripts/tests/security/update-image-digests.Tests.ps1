@@ -6,8 +6,8 @@
 
 BeforeDiscovery {
     $script:ToolsPresent = [bool](Get-Command bash -ErrorAction SilentlyContinue) -and
-        [bool](Get-Command git -ErrorAction SilentlyContinue) -and
-        [bool](Get-Command jq -ErrorAction SilentlyContinue)
+    [bool](Get-Command git -ErrorAction SilentlyContinue) -and
+    [bool](Get-Command jq -ErrorAction SilentlyContinue)
 }
 
 BeforeAll {
@@ -136,14 +136,14 @@ Describe 'update-image-digests.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent)
         $result.ExitCode | Should -Be 2
         @($sarif.runs[0].results) | Should -HaveCount 2
         @($sarif.runs[0].results | ForEach-Object {
-            $_.locations[0].physicalLocation.region.startLine
-        } | Select-Object -Unique) | Should -Be @(1)
+                $_.locations[0].physicalLocation.region.startLine
+            } | Select-Object -Unique) | Should -Be @(1)
         @($sarif.runs[0].results | ForEach-Object {
-            $_.locations[0].physicalLocation.region.startColumn
-        } | Select-Object -Unique) | Should -Be @(10, 105)
+                $_.locations[0].physicalLocation.region.startColumn
+            } | Select-Object -Unique) | Should -Be @(10, 105)
         @($sarif.runs[0].results | ForEach-Object {
-            $_.locations[0].physicalLocation.region.endColumn
-        } | Select-Object -Unique) | Should -Be @(103, 198)
+                $_.locations[0].physicalLocation.region.endColumn
+            } | Select-Object -Unique) | Should -Be @(103, 198)
     }
 
     It 'reports a stale occurrence after a current occurrence on the same line' {
@@ -242,7 +242,7 @@ printf 'HTTP/1.1 200 OK\nDocker-Content-Digest: %s\n\n' "`$digest"
         $result.ExitCode | Should -Be 2
         @($sarif.runs[0].results) | Should -HaveCount 1
         $sarif.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri |
-            Should -Be '.github/workflows/manual.yml'
+        Should -Be '.github/workflows/manual.yml'
     }
 
     It 'updates stale pins in default mode' {
@@ -356,14 +356,107 @@ esac
 
         $result = Invoke-DigestScript -Workspace $workspace -Arguments @('--check') -CurlBody $curlBody
         $manifestCalls = @($result.Calls | Where-Object {
-            $_ -match 'registry-1\.docker\.io/v2/library/robot/manifests/1\.0'
-        })
+                $_ -match 'registry-1\.docker\.io/v2/library/robot/manifests/1\.0'
+            })
 
         $result.ExitCode | Should -Be 2
         ($result.Calls -join "`n") | Should -Match 'auth\.docker\.io/token'
         $manifestCalls | Should -HaveCount 1
         $manifestCalls[0] | Should -Match ([regex]::Escape('Authorization: Bearer test-token'))
         $manifestCalls[0] | Should -Match -- '--proto-redir =https'
+    }
+
+    It 'resolves Docker Hub reference <Reference> through the authenticated registry endpoint' -ForEach @(
+        @{ Reference = 'docker.io/library/python:3.11-slim'; Repository = 'library/python'; Tag = '3.11-slim' }
+        @{ Reference = 'docker.io/python:3.11-slim'; Repository = 'library/python'; Tag = '3.11-slim' }
+        @{ Reference = 'docker.io/team/robot:1.0'; Repository = 'team/robot'; Tag = '1.0' }
+        @{ Reference = 'python:3.11-slim'; Repository = 'library/python'; Tag = '3.11-slim' }
+        @{ Reference = 'library/python:3.11-slim'; Repository = 'library/python'; Tag = '3.11-slim' }
+        @{ Reference = 'registry-1.docker.io/library/python:3.11-slim'; Repository = 'library/python'; Tag = '3.11-slim' }
+    ) {
+        $workspace = New-DigestTestRepository -Name 'docker-hub-reference' -Content "image: $Reference@$($script:OldDigest)`n"
+        $configPath = Join-Path $workspace 'config/images.yaml'
+        $hashBefore = (Get-FileHash -Path $configPath -Algorithm SHA256).Hash
+        $sarifPath = Join-Path $workspace 'logs/docker-hub-reference.sarif'
+        $tokenUrl = "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${Repository}:pull"
+        $manifestUrl = "https://registry-1.docker.io/v2/$Repository/manifests/$Tag"
+        $curlBody = @"
+case "`$*" in
+  *"$tokenUrl"*) printf '{"token":"test-token"}\n' ;;
+  *"Authorization: Bearer test-token"*"$manifestUrl") printf 'HTTP/1.1 200 OK\nDocker-Content-Digest: $($script:NewDigest)\n\n' ;;
+  *) exit 22 ;;
+esac
+"@
+
+        $result = Invoke-DigestScript -Workspace $workspace -Arguments @(
+            '--check', '--sarif-output', $sarifPath
+        ) -CurlBody $curlBody
+        $tokenCalls = @($result.Calls | Where-Object { $_.Contains($tokenUrl) })
+        $manifestCalls = @($result.Calls | Where-Object { $_ -match '/manifests/' })
+
+        $result.ExitCode | Should -Be 2 -Because $result.StdErr
+        $tokenCalls | Should -HaveCount 1
+        $manifestCalls | Should -HaveCount 1
+        $manifestCalls[0] | Should -BeLike "*Authorization: Bearer test-token*$manifestUrl"
+        $manifestCalls[0] | Should -Match -- '--proto-redir =https'
+        ($result.Calls -join "`n") | Should -Not -Match ([regex]::Escape('https://docker.io/v2/'))
+        ($result.Calls -join "`n") | Should -Not -Match 'library/library/'
+        $sarif = Get-Content -Path $sarifPath -Raw | ConvertFrom-Json
+        @($sarif.runs[0].results) | Should -HaveCount 1
+        $sarif.runs[0].results[0].message.text | Should -BeExactly (
+            "Pinned digest $($script:OldDigest) for $Reference " +
+            "differs from the registry digest $($script:NewDigest)."
+        )
+        (Get-FileHash -Path $configPath -Algorithm SHA256).Hash | Should -Be $hashBefore
+    }
+
+    It 'passes check mode for a current explicit docker.io pin' {
+        $workspace = New-DigestTestRepository -Name 'docker-io-current' -Content "image: docker.io/library/python:3.11-slim@$($script:NewDigest)`n"
+        $configPath = Join-Path $workspace 'config/images.yaml'
+        $hashBefore = (Get-FileHash -Path $configPath -Algorithm SHA256).Hash
+        $sarifPath = Join-Path $workspace 'logs/docker-io-current.sarif'
+        $curlBody = @"
+case "`$*" in
+  *"scope=repository:library/python:pull"*) printf '{"token":"test-token"}\n' ;;
+  *"Authorization: Bearer test-token"*"https://registry-1.docker.io/v2/library/python/manifests/3.11-slim") printf 'HTTP/1.1 200 OK\nDocker-Content-Digest: $($script:NewDigest)\n\n' ;;
+  *) exit 22 ;;
+esac
+"@
+
+        $result = Invoke-DigestScript -Workspace $workspace -Arguments @(
+            '--check', '--sarif-output', $sarifPath
+        ) -CurlBody $curlBody
+
+        $result.ExitCode | Should -Be 0 -Because $result.StdErr
+        @($result.Calls | Where-Object { $_ -match '/manifests/' }) | Should -HaveCount 1
+        $sarif = Get-Content -Path $sarifPath -Raw | ConvertFrom-Json
+        @($sarif.runs[0].results) | Should -HaveCount 0
+        (Get-FileHash -Path $configPath -Algorithm SHA256).Hash | Should -Be $hashBefore
+    }
+
+    It 'fails without SARIF when an explicit docker.io manifest cannot be resolved' {
+        $workspace = New-DigestTestRepository -Name 'docker-io-failure' -Content "image: docker.io/library/python:3.11-slim@$($script:OldDigest)`n"
+        $configPath = Join-Path $workspace 'config/images.yaml'
+        $hashBefore = (Get-FileHash -Path $configPath -Algorithm SHA256).Hash
+        $sarifPath = Join-Path $workspace 'logs/docker-io-failure.sarif'
+        $curlBody = @"
+case "`$*" in
+  *"scope=repository:library/python:pull"*) printf '{"token":"test-token"}\n' ;;
+  *) exit 22 ;;
+esac
+"@
+
+        $result = Invoke-DigestScript -Workspace $workspace -Arguments @(
+            '--check', '--sarif-output', $sarifPath
+        ) -CurlBody $curlBody
+        $manifestCalls = @($result.Calls | Where-Object { $_ -match '/manifests/' })
+
+        $result.ExitCode | Should -Be 1
+        $result.StdErr | Should -Match ([regex]::Escape('Could not resolve a valid digest for docker.io/library/python:3.11-slim'))
+        $manifestCalls | Should -HaveCount 1
+        $manifestCalls[0] | Should -BeLike '*Authorization: Bearer test-token*https://registry-1.docker.io/v2/library/python/manifests/3.11-slim'
+        Test-Path $sarifPath | Should -BeFalse
+        (Get-FileHash -Path $configPath -Algorithm SHA256).Hash | Should -Be $hashBefore
     }
 
     It 'uses the NGC token endpoint for nvcr.io references' {
@@ -379,13 +472,38 @@ esac
 
         $result = Invoke-DigestScript -Workspace $workspace -Arguments @('--check') -CurlBody $curlBody
         $manifestCalls = @($result.Calls | Where-Object {
-            $_ -match 'nvcr\.io/v2/nvidia/isaac/manifests/1\.0'
-        })
+                $_ -match 'nvcr\.io/v2/nvidia/isaac/manifests/1\.0'
+            })
 
         $result.ExitCode | Should -Be 2
         ($result.Calls -join "`n") | Should -Match 'nvcr\.io/proxy_auth\?scope=repository:nvidia/isaac:pull'
         $manifestCalls | Should -HaveCount 1
         $manifestCalls[0] | Should -Match ([regex]::Escape('Authorization: Bearer ngc-token'))
+    }
+
+    It 'uses the GHCR token endpoint for ghcr.io references' {
+        $workspace = New-DigestTestRepository -Name 'ghcr-auth' -Content "image: ghcr.io/astral-sh/uv:0.10.9@$($script:OldDigest)`n"
+        $configPath = Join-Path $workspace 'config/images.yaml'
+        $hashBefore = (Get-FileHash -Path $configPath -Algorithm SHA256).Hash
+        $tokenUrl = 'https://ghcr.io/token?scope=repository:astral-sh/uv:pull'
+        $manifestUrl = 'https://ghcr.io/v2/astral-sh/uv/manifests/0.10.9'
+        $curlBody = @"
+case "`$*" in
+  *"$tokenUrl"*) printf '{"token":"ghcr-token"}\n' ;;
+  *"Authorization: Bearer ghcr-token"*"$manifestUrl") printf 'HTTP/1.1 200 OK\nDocker-Content-Digest: $($script:NewDigest)\n\n' ;;
+  *) exit 22 ;;
+esac
+"@
+
+        $result = Invoke-DigestScript -Workspace $workspace -Arguments @('--check') -CurlBody $curlBody
+        $manifestCalls = @($result.Calls | Where-Object { $_ -match '/manifests/' })
+
+        $result.ExitCode | Should -Be 2 -Because $result.StdErr
+        @($result.Calls | Where-Object { $_.Contains($tokenUrl) }) | Should -HaveCount 1
+        $manifestCalls | Should -HaveCount 1
+        $manifestCalls[0] | Should -BeLike "*Authorization: Bearer ghcr-token*$manifestUrl"
+        $result.StdOut | Should -Match 'Drift Findings: 1'
+        (Get-FileHash -Path $configPath -Algorithm SHA256).Hash | Should -Be $hashBefore
     }
 
     It 'routes references with registry ports to the complete host' {
@@ -400,8 +518,8 @@ esac
 
         $result = Invoke-DigestScript -Workspace $workspace -Arguments @('--check') -CurlBody $curlBody
         $manifestCalls = @($result.Calls | Where-Object {
-            $_ -match 'registry\.example\.com:5000/v2/team/robot/manifests/1\.0'
-        })
+                $_ -match 'registry\.example\.com:5000/v2/team/robot/manifests/1\.0'
+            })
 
         $result.ExitCode | Should -Be 2
         $manifestCalls | Should -HaveCount 1
@@ -543,10 +661,10 @@ printf 'HTTP/1.1 200 OK\nDocker-Content-Digest: %s\n\n' "`$digest"
         $fixtureDirectory = Join-Path $workspace 'scripts/tests/Fixtures'
         New-Item -ItemType Directory -Path $fixtureDirectory -Force | Out-Null
         $excludedFiles = @{
-            'Dockerfile' = "FROM $staleReference`n"
-            'docker-compose.yml' = "image: $staleReference`n"
+            'Dockerfile'                         = "FROM $staleReference`n"
+            'docker-compose.yml'                 = "image: $staleReference`n"
             'scripts/tests/Fixtures/sample.yaml' = "image: $staleReference`n"
-            'scripts/tests/sample.Tests.ps1' = "`$image = '$staleReference'`n"
+            'scripts/tests/sample.Tests.ps1'     = "`$image = '$staleReference'`n"
         }
         foreach ($entry in $excludedFiles.GetEnumerator()) {
             $path = Join-Path $workspace $entry.Key
