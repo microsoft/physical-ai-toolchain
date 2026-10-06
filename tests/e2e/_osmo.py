@@ -485,7 +485,7 @@ def fetch_workflow_task_logs(
             "--task",
             task_name,
             "-n",
-            "10000",
+            "2000",
         ],
         cwd=repo_root,
         description=f"OSMO persisted log read for {workflow.workflow_id}/{task_name}",

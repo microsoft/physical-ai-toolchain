@@ -243,7 +243,8 @@ def wait_for_status(
     status_log_prefix: str = "Observed status",
     log_status_changes: bool = True,
 ) -> str:
-    started_at = time.time()
+    # Measure elapsed polling time without allowing wall-clock adjustments to expire the budget early.
+    started_at = time.monotonic()
     deadline = started_at + (timeout_minutes * 60)
     next_heartbeat_at = started_at + _STATUS_HEARTBEAT_INTERVAL_SECONDS
     last_status = "UNKNOWN"
@@ -254,7 +255,7 @@ def wait_for_status(
     log_e2e(f"Waiting for {goal_description} for up to {timeout_minutes} minutes (poll every {poll_interval_seconds}s)")
 
     consecutive_errors = 0
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         try:
             last_status = fetch_status()
         except Exception as error:
@@ -270,7 +271,7 @@ def wait_for_status(
         normalized_status = last_status.upper()
 
         if log_status_changes:
-            now = time.time()
+            now = time.monotonic()
             if last_status != previous_status:
                 log_e2e(f"{status_log_prefix}={last_status}")
                 previous_status = last_status

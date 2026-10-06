@@ -22,6 +22,21 @@ variable "location" {
 variable "resource_prefix" {
   type        = string
   description = "Prefix for all resources in this module"
+
+  validation {
+    condition     = can(regex("^[a-z0-9]+$", var.resource_prefix))
+    error_message = "resource_prefix must contain only lowercase letters and digits."
+  }
+
+  validation {
+    condition     = length("st${var.resource_prefix}${var.environment}${var.instance}") <= 24
+    error_message = "resource_prefix is too long for the primary storage-account name."
+  }
+
+  validation {
+    condition     = !var.should_create_data_lake_storage || length("stdl${var.resource_prefix}${var.environment}${var.instance}") <= 24
+    error_message = "resource_prefix is too long for the data-lake storage-account name."
+  }
 }
 
 /*

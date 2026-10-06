@@ -949,6 +949,8 @@ class TestMlflowRunContext:
         assert tags_call["checkpoint_resume"] == "/some/ckpt"
         assert tags_call["checkpoint_source_uri"] == "runs:/abc"
         assert tags_call["correlation_id"] == "corr-99"
+        mlflow.set_tracking_uri.assert_called_once_with("azureml://tracking")
+        mlflow.set_registry_uri.assert_called_once_with("azureml://tracking")
 
 
 # ---------------------------------------------------------------------------
