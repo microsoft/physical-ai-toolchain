@@ -1,0 +1,132 @@
+$schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
+type: pipeline
+display_name: VLA Training Pipeline
+experiment_name: vla-training-pipeline
+description: Validate data, train from selected calibration evidence, and finalize an immutable VLA candidate.
+
+settings:
+  default_datastore: azureml:workspaceblobstore
+  continue_on_step_failure: false
+
+identity:
+  type: managed_identity
+
+inputs:
+  dataset:
+    type: uri_folder
+  dataset_asset_id: azureml:placeholder-dataset:1
+  dataset_repo_id: placeholder/dataset
+  workload_contract:
+    type: uri_folder
+  calibration_report:
+    type: uri_folder
+  policy_type: placeholder
+  init_from_policy_hf_repo_id: placeholder/model
+  init_from_policy_hf_revision: 0000000000000000000000000000000000000000
+  adapter_name: placeholder
+  code_repository: placeholder/repository
+  code_revision: 0000000000000000000000000000000000000000
+  pipeline_contract_fingerprint: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  train_expert_only: "false"
+  gradient_checkpointing: "false"
+  use_imagenet_stats: "false"
+  rename_map_b64: none
+  training_steps: 2
+  save_freq: 1
+  log_freq: 1
+  job_name: vla-training-pipeline
+  output_dir: /workspace/outputs/train
+  mixed_precision: bf16
+  policy_dtype: none
+  subscription_id: 00000000-0000-0000-0000-000000000000
+  resource_group: placeholder
+  workspace_name: placeholder
+  mlflow_token_refresh_retries: 3
+  mlflow_http_request_timeout: 60
+  azure_client_id: none
+  hf_key_vault_url: none
+  hf_token_secret_name: none
+  compute_preflight: azureml:placeholder
+  compute_train: azureml:placeholder
+
+outputs:
+  dataset_manifest:
+    type: uri_folder
+    mode: upload
+  checkpoints:
+    type: uri_folder
+    mode: upload
+  training_record:
+    type: uri_folder
+    mode: upload
+  candidate:
+    type: uri_folder
+    mode: upload
+  candidate_manifest:
+    type: uri_folder
+    mode: upload
+
+jobs:
+  preflight_step:
+    type: command
+    component: ./components/preflight.yaml
+    compute: ${{parent.inputs.compute_preflight}}
+    inputs:
+      dataset: ${{parent.inputs.dataset}}
+      dataset_asset_id: ${{parent.inputs.dataset_asset_id}}
+      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
+    outputs:
+      dataset_manifest: ${{parent.outputs.dataset_manifest}}
+
+  training_step:
+    type: command
+    component: ./components/train.yaml
+    compute: ${{parent.inputs.compute_train}}
+    resources:
+      instance_type: gpu-high-memory
+    inputs:
+      dataset: ${{parent.inputs.dataset}}
+      dataset_manifest: ${{parent.jobs.preflight_step.outputs.dataset_manifest}}
+      dataset_asset_id: ${{parent.inputs.dataset_asset_id}}
+      calibration_report: ${{parent.inputs.calibration_report}}
+      workload_contract: ${{parent.inputs.workload_contract}}
+      adapter_name: ${{parent.inputs.adapter_name}}
+      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
+      policy_type: ${{parent.inputs.policy_type}}
+      init_from_policy_hf_repo_id: ${{parent.inputs.init_from_policy_hf_repo_id}}
+      init_from_policy_hf_revision: ${{parent.inputs.init_from_policy_hf_revision}}
+      train_expert_only: ${{parent.inputs.train_expert_only}}
+      gradient_checkpointing: ${{parent.inputs.gradient_checkpointing}}
+      use_imagenet_stats: ${{parent.inputs.use_imagenet_stats}}
+      rename_map_b64: ${{parent.inputs.rename_map_b64}}
+      training_steps: ${{parent.inputs.training_steps}}
+      save_freq: ${{parent.inputs.save_freq}}
+      log_freq: ${{parent.inputs.log_freq}}
+      job_name: ${{parent.inputs.job_name}}
+      output_dir: ${{parent.inputs.output_dir}}
+      mixed_precision: ${{parent.inputs.mixed_precision}}
+      policy_dtype: ${{parent.inputs.policy_dtype}}
+      subscription_id: ${{parent.inputs.subscription_id}}
+      resource_group: ${{parent.inputs.resource_group}}
+      workspace_name: ${{parent.inputs.workspace_name}}
+      mlflow_token_refresh_retries: ${{parent.inputs.mlflow_token_refresh_retries}}
+      mlflow_http_request_timeout: ${{parent.inputs.mlflow_http_request_timeout}}
+      azure_client_id: ${{parent.inputs.azure_client_id}}
+      hf_key_vault_url: ${{parent.inputs.hf_key_vault_url}}
+      hf_token_secret_name: ${{parent.inputs.hf_token_secret_name}}
+      code_repository: ${{parent.inputs.code_repository}}
+      code_revision: ${{parent.inputs.code_revision}}
+      compute_target: ${{parent.inputs.compute_train}}
+    outputs:
+      checkpoints: ${{parent.outputs.checkpoints}}
+      training_record: ${{parent.outputs.training_record}}
+      candidate: ${{parent.outputs.candidate}}
+      candidate_manifest: ${{parent.outputs.candidate_manifest}}
+    identity:
+      type: managed_identity
+
+tags:
+  framework: lerobot
+  lifecycle_stage: training
+  pipeline_contract_fingerprint: ${{parent.inputs.pipeline_contract_fingerprint}}
+  code_revision: ${{parent.inputs.code_revision}}

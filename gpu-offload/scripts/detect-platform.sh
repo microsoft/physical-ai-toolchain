@@ -101,15 +101,17 @@ else
 fi
 
 if [[ "$runtime" == "k3s" ]]; then
-  cluster_name="gpu-offload-k3s"
-  kube_context="gpu-offload-k3s"
+  default_cluster_name="gpu-offload-k3s"
+  default_kube_context="gpu-offload-k3s"
 elif [[ "$gpu_enabled" == "true" ]]; then
-  cluster_name="gpu-offload-nvidia"
-  kube_context="kind-gpu-offload-nvidia"
+  default_cluster_name="gpu-offload-nvidia"
+  default_kube_context="kind-gpu-offload-nvidia"
 else
-  cluster_name="gpu-offload"
-  kube_context="kind-gpu-offload"
+  default_cluster_name="gpu-offload"
+  default_kube_context="kind-gpu-offload"
 fi
+cluster_name="${GPU_OFFLOAD_CLUSTER_NAME:-$default_cluster_name}"
+kube_context="${GPU_OFFLOAD_KUBE_CONTEXT:-$default_kube_context}"
 
 if [[ "$export_mode" == "true" ]]; then
   cat << EOF

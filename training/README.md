@@ -12,9 +12,9 @@ training/
 ├── il/                                # Imitation learning (LeRobot ACT/Diffusion)
 │   ├── scripts/                       # LeRobot training and submission scripts
 │   └── workflows/                     # AzureML and OSMO job definitions
-├── vla/                               # Vision-Language-Action (planned)
-│   ├── scripts/                       # Reserved for VLA training scripts
-│   └── workflows/                     # Reserved for VLA job definitions
+├── vla/                               # Vision-Language-Action training
+│   ├── scripts/                       # Calibration and training entry points
+│   └── workflows/                     # Azure ML and OSMO workflows
 ├── smoke/                             # Azure ML GPU smoke test
 │   ├── scripts/                       # Smoke test, job entry point, and submission script
 │   └── workflows/                     # AzureML job definition
@@ -38,16 +38,22 @@ training/
 |------------------------|-----------|--------------------------------------|---------|
 | Reinforcement Learning | `rl/`     | SKRL (primary), RSL-RL (alternative) | Active  |
 | Imitation Learning     | `il/`     | LeRobot (ACT, Diffusion policies)    | Active  |
-| Vision-Language-Action | `vla/`    | Multi-modal transformer policies     | Planned |
+| Vision-Language-Action | `vla/`    | Multi-modal transformer policies     | Active  |
 
 ## 🚀 Submission
 
-Training jobs submit via AzureML or OSMO. Each approach has dedicated submission scripts and workflow definitions.
+Training jobs submit via Azure ML or OSMO. Each approach has dedicated submission scripts and workflow definitions.
 
-| Approach | AzureML Script                                  | OSMO Script                                  |
-|----------|-------------------------------------------------|----------------------------------------------|
-| RL       | `rl/scripts/submit-azureml-training.sh`         | `rl/scripts/submit-osmo-training.sh`         |
-| IL       | `il/scripts/submit-azureml-lerobot-training.sh` | `il/scripts/submit-osmo-lerobot-training.sh` |
+> [!IMPORTANT]
+> Azure ML VLA training is a two-job workflow. Run the standalone calibration
+> sweep and wait for it to complete, then submit the training pipeline with the
+> selected child's outputs. Follow the [VLA Quick Start](vla/README.md#-quick-start).
+
+| Approach | Azure ML entry point                                                  | OSMO entry point                              |
+|----------|-----------------------------------------------------------------------|-----------------------------------------------|
+| RL       | `rl/scripts/submit-azureml-training.sh`                               | `rl/scripts/submit-osmo-training.sh`          |
+| IL       | `il/scripts/submit-azureml-lerobot-training.sh`                       | `il/scripts/submit-osmo-lerobot-training.sh`  |
+| VLA      | [Calibration sweep, then training pipeline](vla/README.md#-quick-start) | `vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh` |
 
 Before a first training run on a new GPU target, run `smoke/scripts/submit-azureml-gpu-smoke.sh --instance-type <name> --stream`. It proves the GPU and the services training depends on. See [Smoke-Test a GPU Target](../docs/training/azureml-training.md#-smoke-test-a-gpu-target).
 
@@ -64,7 +70,7 @@ Trained policies export to ONNX and TensorRT formats via `packaging/scripts/expo
 |--------------------------------------------------------------|-----------------------------------------------|
 | [RL Training](specifications/rl-training.specification.md)   | SKRL, RSL-RL, Isaac Lab runtime configuration |
 | [IL Training](specifications/il-training.specification.md)   | LeRobot ACT/Diffusion policies, blob datasets |
-| [VLA Training](specifications/vla-training.specification.md) | Multi-modal transformer training (planned)    |
+| [VLA Training](specifications/vla-training.specification.md) | Multi-modal transformer training              |
 | [Packaging](specifications/packaging.specification.md)       | ONNX/TensorRT model export                    |
 
 > [!NOTE]

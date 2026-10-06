@@ -1,0 +1,720 @@
+---
+sidebar_position: 6
+title: Azure ML Arc VLA Setup and Operations
+description: Prepare an Ubuntu K3s GPU host, connect it through Azure Arc, attach it to Azure ML, and run PI 0.5 VLA training
+author: Microsoft Robotics-AI Team
+ms.date: 2026-10-01
+ms.topic: how-to
+keywords:
+  - vla
+  - pi05
+  - lerobot
+  - azureml
+  - azure arc
+  - k3s
+  - gpu
+---
+
+Use this guide to prepare an Ubuntu GPU host as Azure ML compute through K3s and Azure Arc, submit PI 0.5 VLA training, and monitor the run from Azure ML and the host. Keep environment-specific identifiers, generated InstanceTypes, endpoints, and credentials outside tracked source.
+
+## Architecture and Automation Boundary
+
+The execution path has two independent network legs:
+
+1. The operator workstation uploads the code asset and submits the job to Azure ML. A private workspace requires workstation access to the workspace storage private endpoint, provided by the environment's point-to-site VPN.
+2. The K3s host maintains outbound Azure Arc and Azure ML connectivity, pulls images and models, mounts data, emits MLflow metrics, and uploads outputs. The accepted job does not depend on the workstation remaining connected.
+
+Azure Arc-enabled Server and Azure Arc-enabled Kubernetes are separate resources:
+
+| Resource                      | Purpose                                               | Required for Azure ML compute |
+|-------------------------------|-------------------------------------------------------|-------------------------------|
+| Arc-enabled Server            | Host inventory, policy, and server management         | No                            |
+| Arc-enabled Kubernetes        | Kubernetes control-plane reach and extension delivery | Yes                           |
+| Azure ML Kubernetes extension | Azure ML training services inside K3s                 | Yes                           |
+| Azure ML Kubernetes compute   | Workspace-visible job placement target                | Yes                           |
+
+> [!IMPORTANT]
+> `infrastructure/setup/02-deploy-azureml-extension.sh` supports `Microsoft.ContainerService/managedClusters` only. Do not run it against Arc K3s or change its cluster type at runtime. Use `data-pipeline/setup/edge/06-deploy-azureml-extension.sh` for Arc K3s.
+
+## Prerequisites
+
+| Requirement                         | Purpose                                                                 |
+|-------------------------------------|-------------------------------------------------------------------------|
+| Ubuntu 22.04 or 24.04 on x86_64     | Supported host for the Azure ML Kubernetes extension                    |
+| NVIDIA driver and container runtime | Expose the GPU to Kubernetes workloads                                  |
+| Repository checkout                 | Provide pinned K3s, Arc, training, and validation scripts               |
+| Azure CLI authentication            | Create Arc, extension, identity, and Azure ML resources                 |
+| Azure resource permissions          | Register providers, connect Arc, install extensions, and attach compute |
+| Outbound TCP 443 and DNS            | Reach Azure Arc, Azure ML, storage, registry, and model services        |
+| Authorized Hugging Face token       | Load the gated PaliGemma tokenizer used by PI 0.5                       |
+
+Register the Azure providers required by Arc-enabled Kubernetes:
+
+```bash
+az provider register --namespace Microsoft.Kubernetes
+az provider register --namespace Microsoft.KubernetesConfiguration
+az provider register --namespace Microsoft.ExtendedLocation
+```
+
+Wait until each provider reports `Registered` before connecting the cluster.
+
+## Prepare the Ubuntu K3s Host
+
+Preview and run the checked-in host preparation:
+
+```bash
+data-pipeline/setup/hil/00-prepare-ubuntu.sh --config-preview
+data-pipeline/setup/hil/00-prepare-ubuntu.sh
+```
+
+Preview and install the repository-owned K3s version:
+
+```bash
+data-pipeline/setup/hil/01-install-k3s.sh \
+  --node-name "<host-name>" \
+  --config-preview
+
+data-pipeline/setup/hil/01-install-k3s.sh \
+  --node-name "<host-name>"
+```
+
+Record the protected kubeconfig path and context printed by the deployment summary. The default context is `physical-ai-edge`.
+
+Validate the local cluster:
+
+```bash
+KUBECONFIG="<protected-kubeconfig>"
+KUBE_CONTEXT="physical-ai-edge"
+
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" get --raw=/readyz
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" get nodes -o wide
+```
+
+### Validate GPU readiness
+
+The K3s installer does not install the NVIDIA host driver, container toolkit, or Kubernetes device plugin. Configure those components through the approved host GPU procedure before installing the Azure ML extension.
+
+Validate the host driver:
+
+```bash
+nvidia-smi
+```
+
+Validate Kubernetes GPU discovery:
+
+```bash
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" \
+  get nodes \
+  -o custom-columns='NAME:.metadata.name,GPU:.status.allocatable.nvidia\.com/gpu'
+```
+
+Do not continue until the expected `nvidia.com/gpu` capacity appears. For RTX PRO 6000 vGPU behavior, driver constraints, and MIG requirements, see [GPU Configuration](../reference/gpu-configuration.md).
+
+## Establish Network Connectivity
+
+The K3s host does not require inbound public access for Azure ML job control. Azure Arc agents initiate outbound connections. Permit required outbound DNS and TLS traffic through the host firewall, proxy, and upstream network controls.
+
+Validate these dependency categories:
+
+| Dependency             | Required operation                                 |
+|------------------------|----------------------------------------------------|
+| Azure Resource Manager | Arc and extension resource management              |
+| Azure Arc services     | Agent heartbeat, configuration, and extension sync |
+| Azure ML               | Job control, data-capability, and MLflow           |
+| Workspace storage      | Dataset reads, code and checkpoint transfers       |
+| Container registry     | Digest-pinned training image pull                  |
+| Hugging Face           | Revision-pinned policy and gated tokenizer access  |
+| DNS and NTP            | Endpoint resolution and certificate validation     |
+
+Use the current Microsoft network-requirements documentation for the complete endpoint list. Do not copy a temporary allowlist from one environment into tracked defaults.
+
+Confirm the Azure CLI can reach the selected subscription:
+
+```bash
+az account show --query '{subscription:id,tenant:tenantId}' --output yaml
+```
+
+Confirm host time and DNS are healthy before Arc onboarding:
+
+```bash
+timedatectl status
+getent hosts management.azure.com
+```
+
+## Connect K3s to Azure Arc
+
+Preview the checked-in Arc-enabled Kubernetes onboarding:
+
+```bash
+data-pipeline/setup/edge/05-connect-arc-kubernetes.sh \
+  --subscription-id "<subscription-id>" \
+  --tenant-id "<tenant-id>" \
+  --resource-group "<arc-resource-group>" \
+  --location "<azure-region>" \
+  --cluster-name "<arc-cluster-name>" \
+  --kubeconfig "$KUBECONFIG" \
+  --context "$KUBE_CONTEXT" \
+  --enable-workload-identity \
+  --config-preview
+```
+
+Remove `--config-preview` after reviewing the target. The script creates or updates the Arc-enabled Kubernetes resource without duplicating it and configures the Arc OIDC issuer when workload identity is enabled.
+
+Validate Arc connectivity:
+
+```bash
+az connectedk8s show \
+  --name "<arc-cluster-name>" \
+  --resource-group "<arc-resource-group>" \
+  --subscription "<subscription-id>" \
+  --query '{state:connectivityStatus,distribution:distribution,version:kubernetesVersion}' \
+  --output yaml
+
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" \
+  get pods --namespace azure-arc
+```
+
+The connectivity state must be `Connected`, and the Arc agents must be healthy before installing Azure ML.
+
+### Optional Arc-enabled Server onboarding
+
+Connect the Ubuntu host as an Arc-enabled Server only when host management requires it:
+
+```bash
+data-pipeline/setup/edge/03-connect-arc-server.sh \
+  --subscription-id "<subscription-id>" \
+  --tenant-id "<tenant-id>" \
+  --resource-group "<arc-resource-group>" \
+  --location "<azure-region>" \
+  --server-name "<arc-server-name>" \
+  --config-preview
+```
+
+Arc-enabled Server does not replace Arc-enabled Kubernetes and is not sufficient for Azure ML compute attachment.
+
+## Install the Azure ML Kubernetes Extension
+
+Preview the Arc extension, InstanceType, identity-role, and compute attachment configuration:
+
+```bash
+data-pipeline/setup/edge/06-deploy-azureml-extension.sh \
+  --subscription-id "<arc-subscription-id>" \
+  --cluster-resource-group "<arc-resource-group>" \
+  --cluster-name "<arc-cluster-name>" \
+  --workspace-subscription-id "<workspace-subscription-id>" \
+  --workspace-resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --extension-name "<azureml-extension-name>" \
+  --compute-name "<compute-name>" \
+  --identity-resource-id "<compute-identity-resource-id>" \
+  --kubeconfig "$KUBECONFIG" \
+  --context "$KUBE_CONTEXT" \
+  --bundle-dir "infrastructure/setup/generated/<environment>" \
+  --config-preview
+```
+
+Remove `--config-preview` after reviewing the target. The script creates or updates the training-only extension, applies the reviewed InstanceTypes, attaches the Kubernetes compute, reconciles required workspace and storage roles, and writes a deployment receipt under the ignored bundle directory.
+
+Azure ML data operations on attached Kubernetes compute use the identity assigned to the compute. The script grants that identity `AzureML Data Scientist` on the workspace and `Storage Blob Data Contributor` on workspace storage. The Azure ML extension identity does not own training data access and must have zero effective Blob data roles on workspace storage. The script checks inherited and group assignments and stops without removing them when it finds an unsupported extension-identity role.
+
+Use the following raw commands only to diagnose or recover an incomplete automated deployment.
+
+Create the Azure ML workload namespace before attachment:
+
+```bash
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" \
+  create namespace azureml \
+  --dry-run=client \
+  --output yaml |
+  kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" apply -f -
+```
+
+Install the training-only extension against the Arc connected-cluster resource:
+
+```bash
+az k8s-extension create \
+  --name "<azureml-extension-name>" \
+  --extension-type Microsoft.AzureML.Kubernetes \
+  --cluster-type connectedClusters \
+  --cluster-name "<arc-cluster-name>" \
+  --resource-group "<arc-resource-group>" \
+  --scope cluster \
+  --release-namespace azureml \
+  --release-train stable \
+  --config enableTraining=True enableInference=False
+```
+
+Training-only compute does not require an inference router. Keep `enableInference=False` unless a separate inference design is approved.
+
+Validate the Azure resource and in-cluster workloads:
+
+```bash
+az k8s-extension show \
+  --name "<azureml-extension-name>" \
+  --cluster-type connectedClusters \
+  --cluster-name "<arc-cluster-name>" \
+  --resource-group "<arc-resource-group>" \
+  --query '{state:provisioningState,version:version}' \
+  --output yaml
+
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" \
+  get pods --namespace azureml
+```
+
+Wait for extension provisioning to succeed and required pods to become ready.
+
+## Configure Azure ML InstanceTypes
+
+InstanceTypes must not request more CPU, memory, ephemeral storage, or GPUs than the live host can provide. Do not apply AKS-only selectors such as `kubernetes.azure.com/scalesetpriority` to K3s.
+
+Inspect live capacity and existing InstanceTypes:
+
+```bash
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" describe node
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" get instancetypes
+```
+
+Generate target-specific InstanceTypes under:
+
+```text
+infrastructure/setup/generated/<environment>/
+```
+
+Keep generated manifests out of Git. Apply the reviewed manifest:
+
+```bash
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" \
+  apply -f "infrastructure/setup/generated/<environment>/azureml-instance-types.yaml"
+```
+
+Confirm that the `gpu` InstanceType requests exactly one GPU and fits the host's allocatable capacity.
+
+### Add a High-Memory GPU InstanceType
+
+Create a separate InstanceType when a calibration trial exits with code `137`
+after exhausting its pod memory limit. Do not enlarge the shared `gpu` type in
+place because that changes the resource contract for every job that uses it.
+
+Measure allocatable memory and current non-workload use before choosing values:
+
+```bash
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" \
+  get node <node-name> \
+  -o jsonpath='{.status.allocatable.memory}{" allocatable\n"}'
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" \
+  top node <node-name>
+```
+
+Kubernetes schedules against `requests.memory`, while the container can grow to
+`limits.memory`. Set the request near expected steady-state use. Keep the limit
+below allocatable memory minus the operating system, K3s, Azure ML services, and
+other active workloads. A limit equal to total host memory can trigger node-wide
+memory pressure instead of containing the training process.
+
+Add the new type to the ignored environment manifest. This 8 GiB request and
+12 GiB limit is an example for a single-GPU host with at least 20 GiB allocatable
+memory; size other hosts from their live measurements:
+
+```yaml
+apiVersion: amlarc.azureml.com/v1alpha1
+kind: InstanceType
+metadata:
+  name: gpu-high-memory
+spec:
+  nodeSelector:
+    accelerator: nvidia
+    kubernetes.io/hostname: <node-name>
+  resources:
+    requests:
+      cpu: "2"
+      memory: "8Gi"
+    limits:
+      cpu: "4"
+      memory: "12Gi"
+      nvidia.com/gpu: 1
+```
+
+Apply and verify the type while no Azure ML workload is running:
+
+```bash
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" \
+  apply -f "infrastructure/setup/generated/<environment>/azureml-instance-types.yaml"
+kubectl --kubeconfig "$KUBECONFIG" --context "$KUBE_CONTEXT" \
+  get instancetype gpu-high-memory -o yaml
+```
+
+Select `gpu-high-memory` only for jobs that require the larger boundary. Raising
+pod memory can prevent a trial-level exit `137`; it does not resolve Azure ML
+pipeline orchestration failures that occur before Kubernetes creates a pod.
+
+## Attach the Arc Cluster to Azure ML
+
+The Arc setup script performs this attachment during the primary workflow. Use the following commands only to diagnose or recover the attachment manually.
+
+Use an immutable Azure ML compute name. Do not repoint an existing compute name to another Kubernetes cluster.
+
+Resolve the Arc cluster and user-assigned identity resource IDs:
+
+```bash
+ARC_CLUSTER_ID=$(az connectedk8s show \
+  --name "<arc-cluster-name>" \
+  --resource-group "<arc-resource-group>" \
+  --query id \
+  --output tsv)
+
+COMPUTE_IDENTITY_ID=$(az identity show \
+  --name "<compute-identity-name>" \
+  --resource-group "<identity-resource-group>" \
+  --query id \
+  --output tsv)
+```
+
+Attach the compute:
+
+```bash
+az ml compute attach \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --type Kubernetes \
+  --name "<compute-name>" \
+  --resource-id "$ARC_CLUSTER_ID" \
+  --namespace azureml \
+  --identity-type UserAssigned \
+  --user-assigned-identities "$COMPUTE_IDENTITY_ID"
+```
+
+Grant the compute identity only the permissions required to pull the image, read inputs, write outputs, and emit Azure ML and MLflow data. Do not grant model-registry mutation to the training identity.
+
+Validate attachment:
+
+```bash
+az ml compute show \
+  --name "<compute-name>" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --query '{state:provisioning_state,type:type,resource:resource_id}' \
+  --output yaml
+```
+
+Do not submit VLA training until the provisioning state is `Succeeded`.
+
+## Validate Managed Data Access
+
+Static role assignments and TLS checks do not prove that Azure ML can stage an output into a downstream input. Run the network validation and a managed writer-to-reader smoke before every first VLA submission on a new Arc compute:
+
+```bash
+data-pipeline/setup/edge/07-validate-azureml-network.sh \
+  --subscription-id "<workspace-subscription-id>" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --compute-name "<compute-name>" \
+  --bundle-dir "infrastructure/setup/generated/<environment>"
+
+data-pipeline/setup/edge/08-run-azureml-cpu-smoke.sh \
+  --subscription-id "<workspace-subscription-id>" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --compute-name "<compute-name>" \
+  --instance-type "<cpu-instance-type>" \
+  --environment "azureml:<environment-name>:<version>" \
+  --bundle-dir "infrastructure/setup/generated/<environment>" \
+  --config-preview
+```
+
+Remove `--config-preview` to submit the smoke after reviewing the rendered contract. The writer uploads a small token through the compute managed identity. The reader downloads that output through the same managed data path and verifies its contents. Both child jobs and the parent pipeline must report `Completed` in `azureml-cpu-smoke-result.json`.
+
+> [!IMPORTANT]
+> Do not submit the VLA pipeline when setup reports an extension-principal Blob role or when either smoke child fails. Preserve the generated receipt and Azure ML job details, then correct the compute identity, storage private endpoint, DNS, or data-capability failure. Do not grant workspace storage access to the extension identity.
+
+## Validate Sweep Failure Isolation
+
+Run the serial sweep smoke before the first VLA submission on an Arc compute:
+
+The smoke uses the Arc extension's `defaultinstancetype` for CPU-only trials. Confirm that this InstanceType exists before submission:
+
+```bash
+kubectl get instancetypes.amlarc.azureml.com defaultinstancetype
+```
+
+```bash
+az ml job create \
+  --file training/vla/workflows/azureml/sweep-failure-smoke.yaml \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --set compute="azureml:<compute-name>" \
+  --stream
+```
+
+If `--stream` exits with a local artifact-storage credential error while the job remains active, monitor the control-plane status instead:
+
+```bash
+az ml job show \
+  --name "<sweep-job-name>" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --query status \
+  --output tsv
+```
+
+The Azure ML schema validator does not verify Arc InstanceType names. A missing InstanceType causes each child to fail before Arc creates a pod, so treat the `kubectl` check above as a required preflight.
+
+The `success` trial writes `result.json` and logs `sweep_smoke_score=1`. The `fail` trial exits nonzero. The parent sweep must report `Completed`, and the best trial output must be downloadable:
+
+```bash
+az ml job download \
+  --name "<sweep-job-name>" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --output-name smoke_result \
+  --download-path "infrastructure/setup/generated/<environment>/sweep-smoke"
+```
+
+Confirm that the downloaded output contains `result.json` with `"selected": true`. Stop before VLA submission if the parent fails or the successful output is unavailable.
+
+## Calibrate and Submit PI 0.5 Training
+
+Connect the operator workstation to the environment's point-to-site VPN when workspace storage uses private endpoints. Store `HF_TOKEN` in an ignored local environment file or retrieve it from an approved secret store; never pass a real token in tracked YAML.
+
+Submit the standalone calibration sweep with the immutable workload inputs:
+
+```bash
+CODE_REVISION=$(git rev-parse HEAD)
+COMPUTE="azureml:<compute-name>"
+RENAME_MAP_B64=$(printf '%s' \
+  '{"observation.images.d435":"observation.images.base_0_rgb","observation.images.d405":"observation.images.left_wrist_0_rgb"}' |
+  base64 --wrap=0)
+
+CALIBRATION_JOB=$(az ml job create \
+  --file training/vla/workflows/azureml/vla-calibration-sweep.yaml \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --set compute="$COMPUTE" \
+  --set inputs.compute_target="$COMPUTE" \
+  --set inputs.dataset.path="azureml:<dataset-data-asset>:<version>" \
+  --set inputs.dataset_asset_id="azureml:<dataset-data-asset>:<version>" \
+  --set inputs.dataset_repo_id="<hugging-face-dataset>" \
+  --set inputs.policy_type=pi05 \
+  --set inputs.init_from_policy_hf_repo_id=lerobot/pi05_base \
+  --set inputs.init_from_policy_hf_revision=b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba \
+  --set inputs.adapter_name=lerobot-pi \
+  --set inputs.policy_dtype=bfloat16 \
+  --set inputs.code_repository=https://github.com/microsoft/physical-ai-toolchain.git \
+  --set inputs.code_revision="$CODE_REVISION" \
+  --set inputs.train_expert_only=true \
+  --set inputs.gradient_checkpointing=true \
+  --set inputs.rename_map_b64="$RENAME_MAP_B64" \
+  --set inputs.hf_key_vault_url="<key-vault-url>" \
+  --set inputs.hf_token_secret_name="<secret-name>" \
+  --query name --output tsv)
+```
+
+The sweep evaluates candidates `[1,2,4]` serially in separate containers. Each
+candidate runs one real optimizer step and logs `safe_micro_batch_size` only
+after its calibration report retains the configured CUDA headroom. The sweep
+publishes the largest safe trial's workload contract and calibration report.
+Model and data-loader initialization repeat for every candidate.
+
+Wait until the root sweep reports `Completed`:
+
+```bash
+az ml job show \
+  --name "$CALIBRATION_JOB" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --query status \
+  --output tsv
+```
+
+Resolve the selected trial's run-scoped output root. Use the datastore named
+by `settings.default_datastore` when the pipeline overrides
+`workspaceblobstore`.
+
+```bash
+BEST_CALIBRATION_RUN=$(az ml job show \
+  --name "$CALIBRATION_JOB" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --query properties.best_child_run_id \
+  --output tsv)
+CALIBRATION_OUTPUT_ROOT="azureml://datastores/workspaceblobstore/paths/azureml/$BEST_CALIBRATION_RUN"
+```
+
+Submit the command-only training pipeline with the immutable selected outputs:
+
+```bash
+az ml job create \
+  --file training/vla/workflows/azureml/vla-training-pipeline.yaml \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --set inputs.dataset.path="azureml:<dataset-data-asset>:<version>" \
+  --set inputs.dataset_asset_id="azureml:<dataset-data-asset>:<version>" \
+  --set inputs.dataset_repo_id="<hugging-face-dataset>" \
+  --set inputs.workload_contract.path="$CALIBRATION_OUTPUT_ROOT/workload_contract/" \
+  --set inputs.calibration_report.path="$CALIBRATION_OUTPUT_ROOT/calibration_report/" \
+  --set inputs.pipeline_contract_fingerprint="<pipeline-contract-sha256>" \
+  --set inputs.policy_type=pi05 \
+  --set inputs.init_from_policy_hf_repo_id=lerobot/pi05_base \
+  --set inputs.init_from_policy_hf_revision=b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba \
+  --set inputs.adapter_name=lerobot-pi \
+  --set inputs.policy_dtype=bfloat16 \
+  --set inputs.code_repository=https://github.com/microsoft/physical-ai-toolchain.git \
+  --set inputs.code_revision="$CODE_REVISION" \
+  --set inputs.train_expert_only=true \
+  --set inputs.gradient_checkpointing=true \
+  --set inputs.rename_map_b64="$RENAME_MAP_B64" \
+  --set inputs.training_steps=40000 \
+  --set inputs.save_freq=1000 \
+  --set inputs.compute_preflight="$COMPUTE" \
+  --set inputs.compute_train="$COMPUTE" \
+  --set inputs.subscription_id="<workspace-subscription-id>" \
+  --set inputs.resource_group="<workspace-resource-group>" \
+  --set inputs.workspace_name="<workspace-name>" \
+  --set inputs.hf_key_vault_url="<key-vault-url>" \
+  --set inputs.hf_token_secret_name="<secret-name>"
+```
+
+Training regenerates the dataset manifest and validates that the selected
+calibration workload matches the current dataset, model, code, and runtime.
+The run-scoped datastore paths avoid unsupported cross-job
+`azureml://jobs/...` input materialization on Arc pipeline children. Workload
+validation prevents stale sweep outputs from controlling a changed training
+job.
+
+> [!IMPORTANT]
+> Validate failed-trial tolerance on the attached Arc compute before the first VLA sweep. A failed trial must leave the sweep completed with the successful trial selected and its named outputs downloadable. Stop before VLA submission if this gate fails; do not raise the InstanceType limit or broaden storage roles as a workaround.
+
+Azure CLI prints each accepted job name and portal URL. If a command is
+interrupted before it prints the job name, check the Azure ML jobs page before
+resubmitting.
+
+## Monitor Azure ML
+
+Set local variables from the submission summary:
+
+```bash
+AZUREML_JOB_NAME="<job-name>"
+AZURE_RESOURCE_GROUP="<workspace-resource-group>"
+AZUREML_WORKSPACE_NAME="<workspace-name>"
+```
+
+Query control-plane status:
+
+```bash
+az ml job show \
+  --name "$AZUREML_JOB_NAME" \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --workspace-name "$AZUREML_WORKSPACE_NAME" \
+  --query '{name:name,status:status,compute:compute,created:creation_context.created_at}' \
+  --output yaml
+```
+
+Stream logs:
+
+```bash
+az ml job stream \
+  --name "$AZUREML_JOB_NAME" \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --workspace-name "$AZUREML_WORKSPACE_NAME"
+```
+
+Pressing `Ctrl+C` stops the local stream but does not cancel an accepted job. Use the portal URL to inspect job properties, outputs, and MLflow metrics.
+
+Monitor these MLflow series:
+
+| Metric                | Interpretation                                      |
+|-----------------------|-----------------------------------------------------|
+| `train/loss`          | Optimization progress and exact update-record count |
+| `train/grad_norm`     | Gradient stability; investigate non-finite values   |
+| `train/learning_rate` | Scheduler behavior                                  |
+| `train/update_time_s` | Optimizer update duration                           |
+| `train/data_time_s`   | Input-pipeline delay                                |
+| `train/samples`       | Cumulative processed samples                        |
+| `train/episodes`      | Cumulative processed episodes                       |
+
+For a run created before the exact-step fix, count `train/loss` history records when `--log-freq 1`; one record corresponds to one completed optimizer update.
+
+## Monitor the K3s Host
+
+List the newest Azure ML pods:
+
+```bash
+sudo k3s kubectl get pods \
+  --namespace azureml \
+  --output wide \
+  --sort-by=.metadata.creationTimestamp
+```
+
+Inspect the selected pod and available log containers:
+
+```bash
+POD="<training-pod>"
+
+sudo k3s kubectl get pod \
+  --namespace azureml \
+  "$POD" \
+  --output jsonpath='{.spec.containers[*].name}{"\n"}'
+
+sudo k3s kubectl describe pod --namespace azureml "$POD"
+```
+
+Stream the confirmed user-training container:
+
+```bash
+CONTAINER="<user-training-container>"
+
+sudo k3s kubectl logs \
+  --namespace azureml \
+  "$POD" \
+  --container "$CONTAINER" \
+  --follow \
+  --timestamps
+```
+
+Monitor the GPU interactively:
+
+```bash
+nvtop
+```
+
+The blue `GPU0 %` line in `nvtop` is utilization, not clock speed. Use NVIDIA device monitoring for processor and memory clocks:
+
+```bash
+nvidia-smi dmon -s pucm -d 2
+```
+
+Interpret Azure ML, MLflow, pod, and host signals together:
+
+| Observation                       | Interpretation or action                                                     |
+|-----------------------------------|------------------------------------------------------------------------------|
+| High GPU utilization              | Training kernels are actively executing                                      |
+| Brief utilization drops           | Check for normal loading, synchronization, logging, or checkpoint boundaries |
+| Sustained zero utilization        | Inspect pod logs, CPU, storage, DNS, and network dependencies                |
+| Stable memory with variable usage | Model state remains resident while compute alternates between phases         |
+| Rising memory each step           | Investigate retention or leaks across checkpoint and evaluation boundaries   |
+| Clock decline at high temperature | Inspect NVIDIA power, thermal, and throttling reasons                        |
+
+Do not cancel or resubmit solely because utilization dips. Confirm that logs and MLflow metrics have stopped advancing beyond the normal model-download, checkpoint, or logging interval.
+
+## Expected Outcome
+
+The environment is ready when:
+
+- Arc-enabled Kubernetes reports `Connected`.
+- Azure ML extension provisioning reports `Succeeded`.
+- Required `azureml` pods are ready.
+- The node exposes the expected `nvidia.com/gpu` capacity.
+- The `gpu` InstanceType fits live allocatable capacity.
+- Azure ML compute provisioning reports `Succeeded`.
+- The managed data smoke writer, reader, and parent pipeline report `Completed`.
+- A PI 0.5 job reaches checkpoint loading, dataset construction, and optimizer updates.
+- MLflow metrics and checkpoint outputs advance.
+
+For observed failures, diagnostic signatures, and recovery actions, see [VLA Full-Run Troubleshooting](vla-full-run-troubleshooting.md).
+
+## References
+
+- [Ubuntu HiL Host and K3s Setup](../data-pipeline/edge-k3s-setup.md)
+- [Azure ML Training Workflows](azureml-training.md)
+- [Attach a Kubernetes cluster to Azure ML](https://learn.microsoft.com/azure/machine-learning/how-to-attach-kubernetes-to-workspace)
+- [Deploy the Azure ML Kubernetes extension](https://learn.microsoft.com/azure/machine-learning/how-to-deploy-kubernetes-extension)
+- [Connect an existing Kubernetes cluster to Azure Arc](https://learn.microsoft.com/azure/azure-arc/kubernetes/quickstart-connect-cluster)

@@ -1,0 +1,95 @@
+$schema: https://azuremlschemas.azureedge.net/latest/sweepJob.schema.json
+type: sweep
+display_name: VLA Calibration Sweep
+experiment_name: vla-calibration-sweep
+description: Select the largest safe VLA micro-batch size using isolated optimizer-step trials.
+
+compute: azureml:placeholder
+identity:
+  type: managed_identity
+resources:
+  instance_type: gpu-high-memory
+
+sampling_algorithm: grid
+search_space:
+  micro_batch_size:
+    type: choice
+    values: [1, 2, 4]
+objective:
+  goal: maximize
+  primary_metric: safe_micro_batch_size
+limits:
+  max_total_trials: 3
+  max_concurrent_trials: 1
+  trial_timeout: 3600
+  timeout: 14400
+
+inputs:
+  dataset:
+    type: uri_folder
+    path: azureml:placeholder-dataset:1
+    mode: ro_mount
+  dataset_asset_id: azureml:placeholder-dataset:1
+  dataset_repo_id: placeholder/dataset
+  policy_type: placeholder
+  init_from_policy_hf_repo_id: placeholder/model
+  init_from_policy_hf_revision: 0000000000000000000000000000000000000000
+  adapter_name: placeholder
+  code_repository: placeholder/repository
+  code_revision: 0000000000000000000000000000000000000000
+  train_expert_only: "false"
+  gradient_checkpointing: "false"
+  use_imagenet_stats: "false"
+  rename_map_b64: none
+  headroom_fraction: 0.1
+  probe_timeout_seconds: 3600
+  mixed_precision: bf16
+  policy_dtype: none
+  azure_client_id: none
+  hf_key_vault_url: none
+  hf_token_secret_name: none
+  compute_target: azureml:placeholder
+  runtime_image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
+
+outputs:
+  workload_contract:
+    type: uri_folder
+    mode: upload
+  calibration_report:
+    type: uri_folder
+    mode: upload
+
+trial:
+  code: ../../..
+  environment:
+    image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
+  resources:
+    instance_type: gpu-high-memory
+  command: >-
+    env AZUREML_PARAMETER_adapter_name='${{inputs.adapter_name}}'
+    AZUREML_PARAMETER_dataset_repo_id='${{inputs.dataset_repo_id}}'
+    AZUREML_PARAMETER_dataset_asset_id='${{inputs.dataset_asset_id}}'
+    AZUREML_PARAMETER_policy_type='${{inputs.policy_type}}'
+    AZUREML_PARAMETER_mixed_precision='${{inputs.mixed_precision}}'
+    AZUREML_PARAMETER_policy_dtype='${{inputs.policy_dtype}}'
+    AZUREML_PARAMETER_init_from_policy_hf_repo_id='${{inputs.init_from_policy_hf_repo_id}}'
+    AZUREML_PARAMETER_init_from_policy_hf_revision='${{inputs.init_from_policy_hf_revision}}'
+    AZUREML_PARAMETER_train_expert_only='${{inputs.train_expert_only}}'
+    AZUREML_PARAMETER_gradient_checkpointing='${{inputs.gradient_checkpointing}}'
+    AZUREML_PARAMETER_use_imagenet_stats='${{inputs.use_imagenet_stats}}'
+    AZUREML_PARAMETER_rename_map_b64='${{inputs.rename_map_b64}}'
+    AZUREML_PARAMETER_candidate_batch_sizes='${{search_space.micro_batch_size}}'
+    AZUREML_PARAMETER_headroom_fraction='${{inputs.headroom_fraction}}'
+    AZUREML_PARAMETER_probe_timeout_seconds='${{inputs.probe_timeout_seconds}}'
+    AZUREML_PARAMETER_code_repository='${{inputs.code_repository}}'
+    AZUREML_PARAMETER_code_revision='${{inputs.code_revision}}'
+    AZUREML_PARAMETER_compute_target='${{inputs.compute_target}}'
+    AZUREML_PARAMETER_azure_client_id='${{inputs.azure_client_id}}'
+    AZUREML_PARAMETER_hf_key_vault_url='${{inputs.hf_key_vault_url}}'
+    AZUREML_PARAMETER_hf_token_secret_name='${{inputs.hf_token_secret_name}}'
+    AZUREML_PARAMETER_runtime_image='${{inputs.runtime_image}}'
+    AZURE_ML_INPUT_dataset='${{inputs.dataset}}'
+    AZURE_ML_OUTPUT_workload_contract='${{outputs.workload_contract}}'
+    AZURE_ML_OUTPUT_calibration_report='${{outputs.calibration_report}}'
+    CALIBRATION_SWEEP_TRIAL=true
+    bash vla/scripts/azureml-component-entry.sh calibrate

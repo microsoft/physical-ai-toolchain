@@ -1,7 +1,6 @@
 # VLA Training
 
-Vision-Language-Action (VLA) training for `pi0`, `pi0_fast`, and `pi05` policies via `lerobot[dataset,pi]`. Jobs submit to Azure ML as a single `CommandJob`, reusing the IL LeRobot entry script with a VLA dependency lockfile and policy whitelist.
-NVIDIA GR00T fine-tuning runs through OSMO using the same lifecycle domain.
+Vision-Language-Action (VLA) training for `pi0`, `pi0_fast`, and `pi05` policies via `lerobot[dataset,pi]`. Azure ML uses a standalone calibration sweep followed by a training pipeline that consumes the selected calibration outputs. NVIDIA GR00T fine-tuning runs through OSMO using the same lifecycle domain.
 
 ## 📁 Directory Structure
 
@@ -20,11 +19,13 @@ vla/
 │   ├── groot/
 │   │   ├── osmo-train-entry.sh                  # Container entry: env setup + fine-tune
 │   │   └── download_blob.py                     # Azure Blob dataset downloader
-│   ├── submit-azureml-vla-pi0-training.sh       # pi0 family submission to Azure ML
+│   ├── azureml-component-entry.sh                # Shared Azure ML component launcher
+│   ├── calibrate_vla.py                          # Isolated micro-batch calibration
 │   └── submit-osmo-lerobot-vla-fine-tuning.sh   # GR00T submission to OSMO
 ├── workflows/
 │   ├── azureml/
-│   │   └── vla-pi0-train.yaml                   # Azure ML pi0 CommandJob template
+│   │   ├── vla-calibration-sweep.yaml             # Isolated batch-size selection
+│   │   └── vla-training-pipeline.yaml             # VLA training pipeline
 │   └── osmo/
 │       └── groot-train.yaml                     # OSMO GR00T fine-tuning workflow
 └── README.md
@@ -38,63 +39,132 @@ vla/
 | `pi0_fast` | pi0 variant with FAST action tokenization for higher throughput |
 | `pi05`     | pi05 successor checkpoint (same API surface as `pi0`)           |
 
-Any value outside `pi0|pi0_fast|pi05` is rejected by the submit script before any AzureML call.
+The LeRobot PI adapter rejects values outside `pi0|pi0_fast|pi05` before training starts.
 
 ## 🚀 Quick Start
 
-### Train from a HuggingFace dataset
+Submit a versioned Azure ML dataset to the standalone calibration sweep, then
+pass the selected outputs to the training pipeline. Use immutable dataset,
+model, and code revisions.
+
+> [!IMPORTANT]
+> The training pipeline does not run calibration. Wait until the standalone
+> sweep reports `Completed`, resolve `properties.best_child_run_id`, and bind
+> that child's `workload_contract` and `calibration_report` datastore folders
+> to the pipeline inputs.
+
+Before the first calibration sweep on an Arc compute target, run the
+[sweep failure-isolation smoke test](../../docs/training/vla-azureml-arc-setup.md#validate-sweep-failure-isolation).
+Continue only when the sweep completes despite its deliberate failed trial and
+publishes the successful trial output.
 
 ```bash
-./training/vla/scripts/submit-azureml-vla-pi0-training.sh \
-    --dataset-repo-id lerobot/aloha_sim_transfer_cube_human \
-    --policy-type pi0 \
-    --training-steps 30000
+CODE_REVISION=$(git rev-parse HEAD)
+COMPUTE="azureml:<compute-name>"
+
+CALIBRATION_JOB=$(az ml job create \
+  --file training/vla/workflows/azureml/vla-calibration-sweep.yaml \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --set compute="$COMPUTE" \
+  --set inputs.compute_target="$COMPUTE" \
+  --set inputs.dataset.path="azureml:ur10e-gear-pick-place-train:1" \
+  --set inputs.dataset_asset_id="azureml:ur10e-gear-pick-place-train:1" \
+  --set inputs.dataset_repo_id="<dataset-repository>" \
+  --set inputs.policy_type=pi05 \
+  --set inputs.init_from_policy_hf_repo_id=lerobot/pi05_base \
+  --set inputs.init_from_policy_hf_revision=b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba \
+  --set inputs.adapter_name=lerobot-pi \
+  --set inputs.code_repository=https://github.com/microsoft/physical-ai-toolchain.git \
+  --set inputs.code_revision="$CODE_REVISION" \
+  --set inputs.policy_dtype=bfloat16 \
+  --set inputs.gradient_checkpointing=true \
+  --set inputs.hf_key_vault_url="<key-vault-url>" \
+  --set inputs.hf_token_secret_name="<secret-name>" \
+  --query name --output tsv)
+
+az ml job show \
+  --name "$CALIBRATION_JOB" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --query status --output tsv
+
+BEST_CALIBRATION_RUN=$(az ml job show \
+  --name "$CALIBRATION_JOB" \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --query properties.best_child_run_id --output tsv)
+CALIBRATION_OUTPUT_ROOT="azureml://datastores/workspaceblobstore/paths/azureml/$BEST_CALIBRATION_RUN"
+
+az ml job create \
+  --file training/vla/workflows/azureml/vla-training-pipeline.yaml \
+  --resource-group "<workspace-resource-group>" \
+  --workspace-name "<workspace-name>" \
+  --set inputs.dataset.path="azureml:ur10e-gear-pick-place-train:1" \
+  --set inputs.dataset_asset_id="azureml:ur10e-gear-pick-place-train:1" \
+  --set inputs.dataset_repo_id="<dataset-repository>" \
+  --set inputs.workload_contract.path="$CALIBRATION_OUTPUT_ROOT/workload_contract/" \
+  --set inputs.calibration_report.path="$CALIBRATION_OUTPUT_ROOT/calibration_report/" \
+  --set inputs.pipeline_contract_fingerprint="<pipeline-contract-sha256>" \
+  --set inputs.policy_type=pi05 \
+  --set inputs.init_from_policy_hf_repo_id=lerobot/pi05_base \
+  --set inputs.init_from_policy_hf_revision=b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba \
+  --set inputs.adapter_name=lerobot-pi \
+  --set inputs.code_repository=https://github.com/microsoft/physical-ai-toolchain.git \
+  --set inputs.code_revision="$CODE_REVISION" \
+  --set inputs.policy_dtype=bfloat16 \
+  --set inputs.gradient_checkpointing=true \
+  --set inputs.compute_preflight="azureml:<compute-name>" \
+  --set inputs.compute_train="azureml:<compute-name>" \
+  --set inputs.subscription_id="<workspace-subscription-id>" \
+  --set inputs.resource_group="<workspace-resource-group>" \
+  --set inputs.workspace_name="<workspace-name>" \
+  --set inputs.hf_key_vault_url="<key-vault-url>" \
+  --set inputs.hf_token_secret_name="<secret-name>"
 ```
 
-### Train from an AzureML data asset
+Submit the training pipeline only after the calibration sweep reports
+`Completed`. The sweep runs candidates `[1,2,4]` serially in separate
+containers and publishes the largest safe candidate's report and workload
+contract. Arc pipeline children consume the selected trial's concrete,
+run-scoped datastore folders because cross-job `azureml://jobs/...` inputs do
+not materialize on this compute target. Training regenerates the dataset
+manifest and rejects calibration evidence that does not match the current
+dataset, model, code, and runtime.
 
-```bash
-./training/vla/scripts/submit-azureml-vla-pi0-training.sh \
-    --dataset-asset "azureml:my-aloha-dataset:3" \
-    --policy-type pi0_fast \
-    --batch-size 8
-```
+The pipeline requires a full Git commit. The checked-in entrypoint downloads the
+snapshot after installing the locked runtime, validates `config.json` and the
+`model.safetensors` tensor index, and then passes the local directory to
+LeRobot. PI policy processors load their tokenizer from the gated
+`google/paligemma-3b-pt-224` repository. Calibration and training retrieve the
+Hugging Face token from Key Vault through managed identity. Missing PI 0.5 camera
+slots are masked and padded by LeRobot.
 
-### Fine-tune from a registered pi0 checkpoint
+Set `inputs.policy_dtype=bfloat16` to instantiate PI policy storage in BF16 instead
+of relying only on runtime mixed precision. Set
+`inputs.gradient_checkpointing=true` when activation memory is the limiting
+factor; it reduces memory usage by recomputing activations during backward.
 
-```bash
-./training/vla/scripts/submit-azureml-vla-pi0-training.sh \
-    --dataset-asset "azureml:my-aloha-dataset:3" \
-    --init-from-policy-model "azureml:pi0-base:1"
-```
+Use [Azure ML Arc VLA Setup and Operations](../../docs/training/vla-azureml-arc-setup.md)
+to prepare Arc-connected K3s compute, submit PI 0.5 training, and monitor the
+run. See [VLA Full-Run Troubleshooting](../../docs/training/vla-full-run-troubleshooting.md)
+for the failure chronology, diagnostic signatures, unsuccessful mitigations,
+and validated recovery configuration.
 
-The model input uses download mode and forwards its local path to LeRobot as `policy.path`.
-
-### Register the resulting checkpoint
-
-```bash
-./training/vla/scripts/submit-azureml-vla-pi0-training.sh \
-    --dataset-asset "azureml:my-aloha-dataset:3" \
-    --register-checkpoint pi0-aloha-transfer
-```
-
-The training script writes the registration manifest under `outputs/checkpoints/`; AzureML's job-completion hook publishes the model version.
+The pipeline ends after finalizing the candidate and its lineage manifest. Evaluation,
+deployment gating, and model registration remain separate lifecycle concerns.
 
 ## 🧪 End-to-End Test
 
-The Azure ML pi0 E2E test initializes pi0 from the gated
-[`google/paligemma-3b-pt-224`](https://huggingface.co/google/paligemma-3b-pt-224)
-backbone. Accept the model access conditions on Hugging Face, then export a read token
-authorized for the model before running the test:
+The Azure ML VLA E2E test registers a synthetic LeRobot dataset, runs the
+calibration sweep with SmolVLA, binds the selected trial to a two-step training
+pipeline, and checks that the training record uses the recommended micro-batch.
+SmolVLA does not need a Hugging Face token. Calibration and training check out
+the current `HEAD` commit, so push it before running the test:
 
 ```bash
-export HF_TOKEN="$(cat /secure/path/to/hf-token)"
-uv run pytest -o addopts='' -vv -s -m e2e tests/e2e/test_e2e_aml_vla_pi0_training.py
+uv run pytest -o addopts='' -vv -s -m e2e tests/e2e/test_e2e_aml_vla_training.py
 ```
-
-Pytest fails during client-side setup before resolving Azure fixtures or submitting a
-job when `HF_TOKEN` is unset or empty. Other E2E tests require this variable only when
-they carry the `requires_hf_token` marker.
 
 ## 🚀 GR00T-N1.5 Fine-Tuning
 

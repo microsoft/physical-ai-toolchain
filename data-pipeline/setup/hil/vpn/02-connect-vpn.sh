@@ -13,6 +13,14 @@ source "$REPO_ROOT/scripts/lib/hil.sh"
 # shellcheck source=../../defaults.conf
 source "$SCRIPT_DIR/../../defaults.conf"
 
+validate_vpn_dns_zones() {
+  jq -e '
+    length > 0 and length == (unique | length) and
+    all(.[]; type == "string" and test("^[A-Za-z0-9.-]+$") and (endswith(".") | not)) and
+    index("vault.azure.net") != null
+  ' <<< "$1" >/dev/null
+}
+
 # Describe the explicit private-access checkpoint and the protected local inputs used for connection.
 show_help() {
   cat << EOF
@@ -111,7 +119,7 @@ if [[ "$config_preview" == "true" ]]; then
 fi
 
 # Load the files and settings used to render the local connection.
-require_tools apt-get az jq openssl sudo
+require_tools apt-get az jq k3s openssl sudo
 catalog="$input_dir/catalog.json"
 hil_validate_catalog "$catalog" "$environment" "$host_name" "$tenant_id" "$subscription_id" "$vault_name"
 hil_validate_catalog_contract "$catalog" "$environment" "$host_name"
@@ -140,6 +148,9 @@ mapfile -t private_routes <<< "$vpn_routes"
 vpn_dns_zones=$(jq -ec '(.private_dns.zones // []) | if type == "array" then . else error("invalid DNS zones") end' \
   "$vpn_config") || fatal "VPN configuration contains invalid private DNS zones"
 mapfile -t dns_zones < <(jq -r '.[]' <<< "$vpn_dns_zones")
+[[ -n "$dns_server" ]] || fatal "VPN configuration does not contain a private DNS server"
+validate_vpn_dns_zones "$vpn_dns_zones" || \
+  fatal "VPN configuration must route vault.azure.net through the private DNS server"
 
 # Install strongSwan and create or replace the local connection files.
 sudo apt-get update
@@ -161,6 +172,15 @@ cleanup() {
 }
 trap cleanup EXIT
 chmod 0700 "$work_dir"
+for zone in "${dns_zones[@]}"; do
+  cat >> "$work_dir/azure-private.server" <<EOF
+$zone:53 {
+  errors
+  cache 30
+  forward . $dns_server
+}
+EOF
+done
 
 # Build the requested strongSwan connection, secret, and ownership receipt.
 cat > "$work_dir/connection.conf" <<EOF
@@ -235,6 +255,15 @@ fi
 # Restart strongSwan and bring up the requested connection.
 sudo ipsec restart
 sudo ipsec up "$connection_name"
+if ! sudo k3s kubectl get configmap coredns-custom --namespace kube-system >/dev/null 2>&1; then
+  sudo k3s kubectl create configmap coredns-custom --namespace kube-system >/dev/null
+fi
+coredns_patch=$(jq -nc --rawfile config "$work_dir/azure-private.server" \
+  '{data: {"azure-private.server": $config}}')
+sudo k3s kubectl patch configmap coredns-custom --namespace kube-system \
+  --type merge --patch "$coredns_patch" >/dev/null
+sudo k3s kubectl rollout restart deployment coredns --namespace kube-system >/dev/null
+sudo k3s kubectl rollout status deployment coredns --namespace kube-system --timeout=2m >/dev/null
 hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir" "$use_managed_identity"
 catalog_secret="${environment}-${host_name}-hil-catalog"
 az keyvault secret show --subscription "$subscription_id" --vault-name "$vault_name" \
@@ -246,6 +275,7 @@ print_kv "Milestone" "reachable: VPN connected"
 print_kv "Connection" "$connection_name"
 print_kv "Gateway" "$gateway"
 print_kv "Private Routes" "${private_routes[*]}"
+print_kv "Workload DNS Zones" "${dns_zones[*]}"
 print_kv "Key Vault Verification" "passed"
 print_kv "Next" "$REPO_ROOT/data-pipeline/setup/hil/02-connect-osmo-backend.sh"
 info "Optional private reachability is ready"
