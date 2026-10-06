@@ -160,19 +160,26 @@ test failure does not replace the test failure.
 
 Security scanning and dependency management scripts.
 
-| Script                                     | Purpose                                                                                       |
-|--------------------------------------------|-----------------------------------------------------------------------------------------------|
-| `security/Test-DependencyPinning.ps1`      | Validate dependency pinning compliance                                                        |
-| `security/Test-SHAStaleness.ps1`           | Check for outdated SHA pins                                                                   |
-| `security/Test-BinaryFreshness.ps1`        | Validate pinned binary hashes and Helm chart versions; emits SARIF for GitHub Security tab    |
-| `security/Modules/PinnedToolVersions.psm1` | Provide pin discovery functions for binary freshness checks                                   |
-| `security/Test-HveCoreFreshness.ps1`       | Check hve-core-derived files against their reviewed release or source-header baselines        |
-| `security/Test-WorkflowPermissions.ps1`    | Enforce explicit workflow and job `GITHUB_TOKEN` permissions                                  |
-| `security/Test-DangerousWorkflow.ps1`      | Detect unsafe event/input interpolation and untrusted `pull_request_target` checkouts         |
-| `security/Test-PublicDependencyFeeds.ps1`  | Reject private or non-canonical package sources in committed dependency metadata              |
-| `security/zap-to-sarif.py`                 | Convert ZAP results to SARIF format                                                           |
-| `security/gitleaks-scan.mjs`               | Scan tested-revision history and report explicit secret-scan outcomes                         |
-| `update-chart-hashes.sh`                   | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
+| Script                                        | Purpose                                                                                                                |
+|-----------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| `security/Test-DependencyPinning.ps1`         | Validate dependency pinning compliance                                                                                 |
+| `security/Test-SHAStaleness.ps1`              | Check for outdated SHA pins                                                                                            |
+| `security/Test-BinaryFreshness.ps1`           | Validate pinned binary hashes and Helm chart versions; emits SARIF for GitHub Security tab                             |
+| `security/Modules/PinnedToolVersions.psm1`    | Provide pin discovery functions for binary freshness checks                                                            |
+| `security/Test-HveCoreFreshness.ps1`          | Check hve-core-derived files against their reviewed release or source-header baselines                                 |
+| `security/Test-WorkflowPermissions.ps1`       | Enforce explicit workflow and job `GITHUB_TOKEN` permissions                                                           |
+| `security/Test-DangerousWorkflow.ps1`         | Detect unsafe event/input interpolation and untrusted `pull_request_target` checkouts                                  |
+| `security/Test-PublicDependencyFeeds.ps1`     | Reject private or non-canonical package sources in committed dependency metadata                                       |
+| `security/Test-DataviewerSecurityHeaders.ps1` | Enforce independent Data Viewer browser-header expectations, including strict UI framing and a same-origin-only bridge |
+| `security/zap-to-sarif.py`                    | Convert ZAP results to SARIF format                                                                                    |
+| `security/gitleaks-scan.mjs`                  | Scan tested-revision history and report explicit secret-scan outcomes                                                  |
+| `update-chart-hashes.sh`                      | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf`                          |
+
+### Data Viewer Browser Policy
+
+Run `./scripts/security/Test-DataviewerSecurityHeaders.ps1` against the auth-disabled production Compose frontend; use `-BaseUri` for a different local endpoint. The verifier uses independent policy literals rather than reading NGINX configuration. It checks root, static, SPA, API error, health, bridge and near-miss routes, rejecting missing, weakened, conflicting or duplicate headers. Only `/redirect.html` permits same-origin framing and must be `no-store`.
+
+The [DAST workflow](../.github/workflows/dast-zap-scan.yml) runs exact-policy Pester before building, then the live verifier and `npm run test:auth --workspace robotic-training-data-tool` against the built NGINX frontend. The real-SDK browser suite requires no Entra credentials; scheduled/manual runs additionally execute ZAP. See the [viewer authentication guidance](../data-management/viewer/README.md#-authentication-with-entra-id) for registration, rollback and live acceptance.
 
 ### Gitleaks Scan Scope
 

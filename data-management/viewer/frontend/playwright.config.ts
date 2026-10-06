@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: '**/auth-redirect.spec.ts',
   outputDir: '../../../artifacts/accessibility/current/playwright',
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),

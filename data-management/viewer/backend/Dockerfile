@@ -11,26 +11,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 # uv binary from its official image, pinned by digest for OSSF Scorecard.
 COPY --from=ghcr.io/astral-sh/uv:0.10.9@sha256:10902f58a1606787602f303954cea099626a4adb02acbac4c69920fe9d278f82 /uv /uvx /bin/
 
-# Copy dependency manifests and runtime logging configuration
-COPY pyproject.toml uv.lock logging.json ./
-
-# Install production dependencies and runtime feature extras into /app/.venv.
-# BACKEND_EXTRAS lists extras separated by commas or spaces. The yolo extra pulls
-# CUDA torch (about 9 GB compressed), so Azure Container Apps builds pass a
-# smaller list to fit the Consumption profile's 8 GB limit.
-ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PATH=/app/.venv/bin:$PATH
+
+FROM base AS build
+
+COPY pyproject.toml uv.lock ./
+
+# Runtime feature extras, separated by commas or spaces.
+ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"
+# Keep installation caches out of the runtime image.
 RUN extras=""; \
     for extra in $(echo "${BACKEND_EXTRAS}" | tr ',' ' '); do extras="${extras} --extra ${extra}"; done; \
     uv sync --frozen --no-dev ${extras}
 
-# Copy application source
-COPY src/ ./src/
+FROM base AS runtime
 
-# Run as an unprivileged user
-RUN useradd --system --no-create-home appuser && chown -R appuser /app
+RUN useradd --system --no-create-home appuser && chown appuser /app
+
+COPY --from=build --chown=appuser:appuser /app/.venv /app/.venv
+COPY --chown=appuser:appuser pyproject.toml uv.lock logging.json ./
+COPY --chown=appuser:appuser src/ ./src/
 USER appuser
 
 # Expose the API port (override with BACKEND_PORT env var at runtime)

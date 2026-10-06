@@ -519,7 +519,6 @@ def test_import_analysis_labels_without_values_does_not_persist(
     dataset_service.invalidate_episode_cache.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_local_storage_save_then_load_roundtrip(tmp_path: Path) -> None:
     """LocalLabelStorage persists and reloads a labels file."""
     storage = labels_mod.LocalLabelStorage(str(tmp_path))
@@ -606,7 +605,6 @@ def test_azure_configuration_loads_labels_from_blob_provider(
     assert provider.requested_paths == ["owner/dataset/meta/episode_labels.json"]
 
 
-@pytest.mark.asyncio
 async def test_local_storage_load_missing_returns_defaults(tmp_path: Path) -> None:
     """LocalLabelStorage.load returns defaults when no file exists."""
     storage = labels_mod.LocalLabelStorage(str(tmp_path))
@@ -619,7 +617,6 @@ async def test_local_storage_load_missing_returns_defaults(tmp_path: Path) -> No
     }
 
 
-@pytest.mark.asyncio
 async def test_blob_label_storage_logs_sanitized_dataset_id(monkeypatch: pytest.MonkeyPatch) -> None:
     """Invalid blob content should log a sanitized dataset identifier."""
     logged: list[tuple[object, ...]] = []
@@ -643,7 +640,6 @@ async def test_blob_label_storage_logs_sanitized_dataset_id(monkeypatch: pytest.
     assert logged == [("Invalid labels blob for %s, returning defaults", "datasetname")]
 
 
-@pytest.mark.asyncio
 async def test_blob_label_storage_load_missing_returns_defaults() -> None:
     """BlobLabelStorage.load returns defaults when blob is absent."""
     provider = SimpleNamespace(_read_blob_bytes=AsyncMock(return_value=None))
@@ -659,7 +655,6 @@ async def test_blob_label_storage_load_missing_returns_defaults() -> None:
     }
 
 
-@pytest.mark.asyncio
 async def test_blob_label_storage_load_uses_provider_etag() -> None:
     """BlobLabelStorage prefers the provider's native ETag when available."""
     blob_client = SimpleNamespace(get_blob_properties=AsyncMock(return_value=SimpleNamespace(etag='"azure-revision"')))
@@ -683,7 +678,6 @@ async def test_blob_label_storage_load_uses_provider_etag() -> None:
     assert result.value.dataset_id == "ds"
 
 
-@pytest.mark.asyncio
 async def test_blob_label_storage_load_falls_back_when_provider_etag_fails() -> None:
     """BlobLabelStorage retains its content ETag when provider metadata fails."""
     content = json.dumps(labels_mod.DatasetLabelsFile(dataset_id="ds").model_dump()).encode()
@@ -700,7 +694,6 @@ async def test_blob_label_storage_load_falls_back_when_provider_etag_fails() -> 
     assert result.value is not None
 
 
-@pytest.mark.asyncio
 async def test_blob_label_storage_save_uploads_json() -> None:
     """BlobLabelStorage.save uploads serialized JSON via the blob client."""
     blob_client = SimpleNamespace(upload_blob=AsyncMock())
@@ -733,7 +726,6 @@ async def test_blob_label_storage_save_uploads_json() -> None:
         assert kwargs["content_settings"].content_type == "application/json"
 
 
-@pytest.mark.asyncio
 async def test_blob_label_storage_save_uses_matching_revision(monkeypatch: pytest.MonkeyPatch) -> None:
     """Blob label updates use Azure native ETag matching."""
     match_conditions = SimpleNamespace(IfNotModified="if-not-modified")
@@ -758,7 +750,6 @@ async def test_blob_label_storage_save_uses_matching_revision(monkeypatch: pytes
     assert kwargs["match_condition"] == "if-not-modified"
 
 
-@pytest.mark.asyncio
 async def test_blob_label_storage_save_uses_create_only_precondition() -> None:
     """Blob label creation sends Azure's create-only precondition."""
     blob_client = SimpleNamespace(upload_blob=AsyncMock(return_value={}))
@@ -781,7 +772,6 @@ async def test_blob_label_storage_save_uses_create_only_precondition() -> None:
     assert etag.startswith('"') and etag.endswith('"')
 
 
-@pytest.mark.asyncio
 async def test_blob_label_storage_save_failure_raises_500(monkeypatch: pytest.MonkeyPatch) -> None:
     """BlobLabelStorage.save logs and raises HTTPException(500) on errors."""
     logged: list[tuple[object, ...]] = []
