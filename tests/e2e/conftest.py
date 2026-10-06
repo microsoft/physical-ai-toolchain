@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from tests.e2e._aml import AzureMLWorkspace
-from tests.e2e._common import run_command
+from tests.e2e._common import format_command_failure, run_command
 
 AML_COMPUTE_NAME_MAX_LENGTH = 16
 TFVARS_FALLBACK_OUTPUT_KEYS = ("resource_group", "azureml_workspace", "aks_cluster", "storage_account")
@@ -250,7 +250,9 @@ def aml_workspace(repo_root: Path) -> AzureMLWorkspace:
         cwd=repo_root,
     )
     if result.returncode != 0:
-        pytest.skip("AzureML workspace is unreachable with the current Azure CLI context")
+        pytest.skip(
+            f"AzureML workspace is unreachable with the current Azure CLI context\n{format_command_failure(result)}"
+        )
 
     return AzureMLWorkspace(
         subscription_id=subscription_id,
@@ -413,7 +415,9 @@ def _cluster_has_scalable_gpu_node_pool(repo_root: Path) -> bool:
 
     result = run_command(command, cwd=repo_root)
     if result.returncode != 0:
-        return False
+        pytest.skip(
+            f"AKS node pools are unreachable with the current Azure CLI context\n{format_command_failure(result)}"
+        )
 
     return any(_is_scalable_gpu_node_pool(pool) for pool in _json_array_from_output(result.stdout))
 
