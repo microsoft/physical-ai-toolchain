@@ -228,6 +228,15 @@ def test_environment_checks_declare_a_time_limit() -> None:
             assert check.timeout_minutes, check.id
 
 
+@pytest.mark.parametrize(
+    ("check_id", "variable"),
+    [("aml-rl-lifecycle", "E2E_AML_ISAAC_EVAL_MODEL"), ("aml-il-lifecycle", "E2E_AML_LEROBOT_EVAL_MODEL")],
+)
+def test_lifecycle_checks_always_train(check_id: str, variable: str) -> None:
+    # An exported evaluation override would skip training, which is the evidence these checks exist for.
+    assert ALL_CHECKS[check_id].set_env == {variable: ""}
+
+
 @pytest.mark.parametrize("doc", CATEGORY_DOCS, ids=lambda path: path.name)
 def test_docs_list_every_category_in_manifest_order(doc: Path) -> None:
     section = CATEGORY_SECTION.search(doc.read_text(encoding="utf-8"))

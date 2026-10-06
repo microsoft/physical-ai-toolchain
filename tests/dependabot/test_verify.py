@@ -11,7 +11,7 @@ import json
 import os
 import subprocess
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -372,6 +372,56 @@ def test_pytest_checks_read_junit_and_skip_means_not_run(git_repo: Path) -> None
     assert "unreachable" in (result.reason or "")
 
 
+_PASSING_JUNIT = '<testsuite><testcase name="t"/></testsuite>'
+
+
+def _run_pytest_check(git_repo: Path, executor: Callable[[ExecutionRequest], int]) -> CheckResult:
+    check = _check(tier="environment", gpu=True, command=(), pytest="tests/e2e/test_e2e_aml_x.py::test_x")
+    return run_check(
+        check,
+        repo_root=git_repo,
+        run_dir=git_repo / "logs" / "run",
+        env={},
+        values={"base_ref": "HEAD", "run_dir": "x"},
+        executor=executor,
+    )
+
+
+def _writes_passing_junit(code: int) -> Callable[[ExecutionRequest], int]:
+    def executor(request: ExecutionRequest) -> int:
+        junit = Path(request.argv[-1].split("=", 1)[1])
+        junit.parent.mkdir(parents=True, exist_ok=True)
+        junit.write_text(_PASSING_JUNIT, encoding="utf-8")
+        return code
+
+    return executor
+
+
+def test_a_pytest_check_passes_with_a_fresh_report_and_exit_zero(git_repo: Path) -> None:
+    result = _run_pytest_check(git_repo, _writes_passing_junit(0))
+
+    assert result.status == "passed"
+
+
+def test_a_stale_report_cannot_pass_a_failed_launch(git_repo: Path) -> None:
+    stale = git_repo / "logs" / "run" / "sample.xml"
+    stale.parent.mkdir(parents=True)
+    stale.write_text(_PASSING_JUNIT, encoding="utf-8")
+
+    result = _run_pytest_check(git_repo, lambda request: 1)
+
+    assert result.status == "failed"
+    assert result.reason == "pytest exited 1 without writing a junit report"
+    assert not stale.exists()
+
+
+def test_a_nonzero_pytest_exit_fails_a_passing_report(git_repo: Path) -> None:
+    result = _run_pytest_check(git_repo, _writes_passing_junit(3))
+
+    assert result.status == "failed"
+    assert result.reason == "pytest exited 3"
+
+
 @pytest.mark.parametrize(
     ("overrides", "expected_seconds"),
     [
@@ -459,6 +509,35 @@ def test_time_limit_kills_processes_that_ignore_the_interrupt(tmp_path: Path, mo
 
     assert time.monotonic() - started < 15
     assert _wait_until_gone(int(pid_file.read_text(encoding="utf-8")))
+
+
+def test_time_limit_stops_descendants_that_outlive_their_wrapper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(verify, "STOP_GRACE_SECONDS", 1)
+    pid_file = tmp_path / "inner.pid"
+    inner = tmp_path / "inner.sh"
+    inner.write_text("trap '' INT\necho $$ > \"$PID_FILE\"\nsleep 30\n", encoding="utf-8")
+    outer = tmp_path / "outer.sh"
+    # The wrapper exits on the interrupt at once, so its child is reparented while still running.
+    outer.write_text(f"trap 'exit 130' INT\nbash \"{inner}\" &\nwait\n", encoding="utf-8")
+    request = ExecutionRequest(
+        ("bash", str(outer)), tmp_path, {**os.environ, "PID_FILE": str(pid_file)}, tmp_path / "check.log", 1
+    )
+
+    with pytest.raises(CheckTimeoutError):
+        default_executor(request)
+
+    assert _wait_until_gone(int(pid_file.read_text(encoding="utf-8")), timeout_seconds=0.5)
+
+
+def test_check_logs_and_run_directories_are_private(tmp_path: Path) -> None:
+    log_path = tmp_path / "run" / "check.log"
+
+    assert default_executor(ExecutionRequest(("true",), tmp_path, dict(os.environ), log_path)) == 0
+
+    assert log_path.stat().st_mode & 0o777 == 0o600
+    assert log_path.parent.stat().st_mode & 0o777 == 0o700
 
 
 def test_preflight_reports_missing_tools_platforms_and_variables() -> None:
@@ -720,6 +799,66 @@ def test_main_runs_setup_and_checks_and_writes_the_summary(git_repo: Path, tiny_
         "infra-check": "failed",
     }
     assert (git_repo / "logs" / "run" / "summary.md").is_file()
+    for path in (git_repo / "logs" / "run").iterdir():
+        assert path.stat().st_mode & 0o777 == 0o600, path.name
+    assert (git_repo / "logs" / "run").stat().st_mode & 0o777 == 0o700
+
+
+def _shared_setup_manifest(tiny_manifest: Path) -> Path:
+    manifest = json.loads(tiny_manifest.read_text(encoding="utf-8"))
+    infra = manifest["categories"][1]
+    manifest["categories"].append(
+        {
+            **infra,
+            "id": "infra2",
+            "title": "Infra 2",
+            "dependabot": [{"ecosystem": "terraform", "directory": "/infra2"}],
+            "paths": ["infra2/"],
+            "checks": [{**infra["checks"][0], "id": "infra2-check", "command": ["infra2-tool"]}],
+        }
+    )
+    tiny_manifest.write_text(json.dumps(manifest), encoding="utf-8")
+    return tiny_manifest
+
+
+def test_a_failed_shared_setup_fails_every_category_that_needs_it(git_repo: Path, tiny_manifest: Path) -> None:
+    executor = FakeExecutor(codes={"setup-tool": 1})
+
+    code = verify.main(
+        ["--category", "infra", "--category", "infra2", "--output-dir", str(git_repo / "logs" / "run")],
+        executor=executor,
+        repo_root=git_repo,
+        manifest_path=_shared_setup_manifest(tiny_manifest),
+        environ={},
+    )
+    summary = json.loads((git_repo / "logs" / "run" / "summary.json").read_text(encoding="utf-8"))
+    results = {check["id"]: (check["status"], check["reason"]) for check in summary["checks"]}
+
+    assert code == EXIT_FAILED
+    assert [request.argv[0] for request in executor.requests] == ["setup-tool", "ok-tool"]
+    assert results["infra-check"] == ("failed", "category setup failed")
+    assert results["infra2-check"] == ("failed", "category setup failed")
+
+
+def test_the_real_manifest_blocks_every_category_sharing_the_root_npm_install(git_repo: Path) -> None:
+    executor = FakeExecutor(codes={"npm": 1})
+
+    code = verify.main(
+        ["--category", "tooling", "--category", "dataviewer", "--output-dir", str(git_repo / "logs" / "run")],
+        executor=executor,
+        repo_root=git_repo,
+        environ={},
+    )
+    summary = json.loads((git_repo / "logs" / "run" / "summary.json").read_text(encoding="utf-8"))
+
+    assert code == EXIT_FAILED
+    shared = [
+        check
+        for check in summary["checks"]
+        if check["category"] in {"tooling", "dataviewer"} and check["status"] != "skipped"
+    ]
+    assert shared
+    assert {(check["status"], check["reason"]) for check in shared} == {("failed", "category setup failed")}
 
 
 def test_main_dry_run_never_executes(git_repo: Path, tiny_manifest: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -845,4 +984,6 @@ def test_usage_errors_exit_64(git_repo: Path, tiny_manifest: Path, argv: list[st
 
 def test_main_lists_categories(capsys: pytest.CaptureFixture[str]) -> None:
     assert verify.main(["--list"]) == EXIT_PASSED
-    assert "gpu-smoke: Azure ML GPU smoke runtime" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "gpu-smoke: Azure ML GPU smoke runtime" in output
+    assert "      note: Always trains: the runner clears E2E_AML_ISAAC_EVAL_MODEL" in output

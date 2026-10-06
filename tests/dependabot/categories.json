@@ -942,7 +942,11 @@
           "requires": [
             "az"
           ],
-          "ci_lanes": []
+          "ci_lanes": [],
+          "set_env": {
+            "E2E_AML_ISAAC_EVAL_MODEL": ""
+          },
+          "notes": "Always trains: the runner clears E2E_AML_ISAAC_EVAL_MODEL, which would skip training and evaluate an existing model."
         }
       ]
     },
@@ -1077,7 +1081,11 @@
           "requires": [
             "az"
           ],
-          "ci_lanes": []
+          "ci_lanes": [],
+          "set_env": {
+            "E2E_AML_LEROBOT_EVAL_MODEL": ""
+          },
+          "notes": "Always trains: the runner clears E2E_AML_LEROBOT_EVAL_MODEL, which would skip training and evaluate an existing model."
         },
         {
           "id": "aml-il-pipeline-diffusion",

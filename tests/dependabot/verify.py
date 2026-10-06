@@ -42,6 +42,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TextIO
 
 from tests.e2e._environment import (
     BUNDLE_DIR_VAR,
@@ -64,6 +65,7 @@ EXIT_INCOMPLETE = 2
 EXIT_USAGE = 64
 
 STOP_GRACE_SECONDS = 15 * 60
+STOP_POLL_SECONDS = 0.5
 
 TIERS = ("cpu", "environment")
 STATUSES = ("passed", "failed", "not-run", "skipped")
@@ -577,19 +579,38 @@ def junit_outcome(junit_path: Path) -> tuple[str, str | None]:
     return "failed", "no tests ran"
 
 
-def _process_tree(root: int) -> list[int]:
-    """Return ``root`` and its live descendants, parents before children."""
+# cspell:ignore lstart WRONLY CREAT fchmod
+@dataclass(frozen=True)
+class _ProcessInfo:
+    parent: int
+    state: str
+    started: str
+
+
+def _process_table() -> dict[int, _ProcessInfo]:
+    """Return every process by PID; the start time tells a reused PID from the original process."""
     try:
         listing = subprocess.run(
-            ["ps", "-A", "-o", "pid=", "-o", "ppid="], capture_output=True, text=True, check=False
+            ["ps", "-A", "-o", "pid=", "-o", "ppid=", "-o", "stat=", "-o", "lstart="],
+            capture_output=True,
+            text=True,
+            check=False,
         ).stdout
     except OSError:
-        return [root]
-    children: dict[int, list[int]] = {}
+        return {}
+    table: dict[int, _ProcessInfo] = {}
     for line in listing.splitlines():
         fields = line.split()
-        if len(fields) == 2 and fields[0].isdigit() and fields[1].isdigit():
-            children.setdefault(int(fields[1]), []).append(int(fields[0]))
+        if len(fields) >= 4 and fields[0].isdigit() and fields[1].isdigit():
+            table[int(fields[0])] = _ProcessInfo(int(fields[1]), fields[2], " ".join(fields[3:]))
+    return table
+
+
+def _process_tree(root: int, table: Mapping[int, _ProcessInfo]) -> list[int]:
+    """Return ``root`` and its descendants in ``table``, parents before children."""
+    children: dict[int, list[int]] = {}
+    for pid, info in table.items():
+        children.setdefault(info.parent, []).append(pid)
     tree = [root]
     pending = [root]
     while pending:
@@ -599,22 +620,60 @@ def _process_tree(root: int) -> list[int]:
     return tree
 
 
-def _signal_tree(root: int, signum: int) -> None:
-    for pid in _process_tree(root):
+def _signal_processes(process_ids: Iterable[int], signum: int) -> None:
+    for pid in process_ids:
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.kill(pid, signum)
 
 
-def stop_process_tree(process: subprocess.Popen[bytes], grace_seconds: float) -> None:
-    """Interrupt a process and its descendants, then kill whatever outlives the grace period."""
-    _signal_tree(process.pid, signal.SIGINT)
-    try:
-        process.wait(timeout=grace_seconds)
-        return
-    except subprocess.TimeoutExpired:
-        pass
-    _signal_tree(process.pid, signal.SIGKILL)
+def stop_process_tree(
+    process: subprocess.Popen[bytes], grace_seconds: float, *, poll_seconds: float = STOP_POLL_SECONDS
+) -> None:
+    """Interrupt a process and its descendants, wait for all of them, then kill whatever outlives the grace period.
+
+    Descendants are remembered with their start times while the root runs, so ones that outlive it under a new
+    parent are still waited on and stopped, and a PID the system reuses is never signaled.
+    """
+    table = _process_table()
+    tracked = {pid: table[pid].started for pid in _process_tree(process.pid, table) if pid in table}
+    # One interrupt each: a second SIGINT makes pytest abandon its cleanup finalizers.
+    _signal_processes({process.pid, *tracked}, signal.SIGINT)
+    deadline = time.monotonic() + grace_seconds
+    while True:
+        table = _process_table()
+        root_running = process.poll() is None
+        if root_running:
+            for pid in _process_tree(process.pid, table):
+                if pid in table:
+                    tracked.setdefault(pid, table[pid].started)
+        survivors = {
+            pid
+            for pid, started in tracked.items()
+            if pid != process.pid
+            and pid in table
+            and table[pid].started == started
+            and not table[pid].state.startswith("Z")
+        }
+        if not root_running and not survivors:
+            return
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(poll_seconds)
+    _signal_processes([*([process.pid] if root_running else []), *survivors], signal.SIGKILL)
     process.wait()
+
+
+def _open_private(path: Path) -> TextIO:
+    """Open a file for writing that only the current user can read."""
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(descriptor, 0o600)
+    return os.fdopen(descriptor, "w", encoding="utf-8")
+
+
+def make_private_dir(path: Path) -> None:
+    """Create a directory only the current user can enter; logs can name environment resources."""
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.chmod(0o700)
 
 
 def _format_minutes(seconds: float) -> str:
@@ -624,8 +683,8 @@ def _format_minutes(seconds: float) -> str:
 
 def default_executor(request: ExecutionRequest) -> int:
     """Run a command with its output written to the check log, stopping it at its time limit."""
-    request.log_path.parent.mkdir(parents=True, exist_ok=True)
-    with request.log_path.open("w", encoding="utf-8") as log:
+    make_private_dir(request.log_path.parent)
+    with _open_private(request.log_path) as log:
         log.write(f"$ (cd {request.cwd} && {' '.join(request.argv)})\n")
         log.flush()
         try:
@@ -665,8 +724,17 @@ def run_check(
     try:
         if check.pytest:
             junit_path = run_dir / f"{check.id}.xml"
-            executor(ExecutionRequest(pytest_argv(check, junit_path), repo_root, check_env, log_path, timeout_seconds))
+            # A report left in a reused run directory must never stand in for this execution's result.
+            junit_path.unlink(missing_ok=True)
+            code = executor(
+                ExecutionRequest(pytest_argv(check, junit_path), repo_root, check_env, log_path, timeout_seconds)
+            )
+            report_written = junit_path.is_file()
             result.status, result.reason = junit_outcome(junit_path)
+            if code != 0 and result.status != "failed":
+                result.status, result.reason = "failed", f"pytest exited {code}"
+            elif code != 0 and not report_written:
+                result.reason = f"pytest exited {code} without writing a junit report"
             return result
         argv = substitute(check.command, values)
         base_dir = repo_root
@@ -719,8 +787,9 @@ def git_state(repo_root: Path) -> tuple[str, bool]:
 
 
 def write_summary(path_root: Path, summary: dict[str, object]) -> None:
-    path_root.mkdir(parents=True, exist_ok=True)
-    (path_root / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    make_private_dir(path_root)
+    with _open_private(path_root / "summary.json") as handle:
+        handle.write(json.dumps(summary, indent=2) + "\n")
     lines = [
         f"# Dependabot verification run {summary['run_id']}",
         "",
@@ -737,7 +806,8 @@ def write_summary(path_root: Path, summary: dict[str, object]) -> None:
             f"| {check['id']} | {check['category']} | {check['tier']} | {check['status']} | "
             f"{check['duration_seconds']} | {check['reason'] or ''} |"
         )
-    (path_root / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with _open_private(path_root / "summary.md") as handle:
+        handle.write("\n".join(lines) + "\n")
 
 
 def resolve_output_dir(requested: str | None, run_id: str, repo_root: Path) -> Path:
@@ -774,6 +844,8 @@ def format_listing(manifest: Manifest) -> str:
                 flags = [flag for flag, on in (("gpu", check.gpu), ("optional", check.optional)) if on]
                 suffix = f" [{', '.join(flags)}]" if flags else ""
                 lines.append(f"    {check.id}{suffix}: {check.description}")
+                if check.notes:
+                    lines.append(f"      note: {check.notes}")
         for note in category.notes:
             lines.append(f"  note: {note}")
         lines.append("")
@@ -852,6 +924,11 @@ def main(
             raise UsageError("The environment tier needs --environment <name> or exported Azure ML variables")
         run_id = f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{os.getpid()}"
         run_dir = resolve_output_dir(args.output_dir, run_id, repo_root) if not args.dry_run else Path("<run-dir>")
+        if not args.dry_run:
+            try:
+                make_private_dir(run_dir)
+            except OSError as error:
+                raise UsageError(f"Cannot make the run directory private: {error}") from error
     except (ManifestError, UsageError) as error:
         print(f"verify:dependabot: {error}", file=sys.stderr)
         return EXIT_USAGE
@@ -866,16 +943,23 @@ def main(
     if args.tier == "cpu" and available_environment:
         print(f"{available_environment} environment check(s) available: add --tier environment --environment <name>")
 
-    setup_steps: list[tuple[Category, SetupStep]] = []
+    # A shared setup step runs once; every category that needs it owns its outcome.
+    setup_steps: list[tuple[SetupStep, list[Category]]] = []
     for category in categories:
         if any(check.tier == "cpu" and check in selected for check in category.checks):
             for step in category.setup:
-                if all((step.command, step.cwd) != (seen.command, seen.cwd) for _, seen in setup_steps):
-                    setup_steps.append((category, step))
+                owners = next(
+                    (owners for seen, owners in setup_steps if (seen.command, seen.cwd) == (step.command, step.cwd)),
+                    None,
+                )
+                if owners is None:
+                    setup_steps.append((step, [category]))
+                else:
+                    owners.append(category)
 
     if args.dry_run:
-        for _, step in setup_steps:
-            print(f"setup  {step.cwd}: {' '.join(step.command)}")
+        for step, owners in setup_steps:
+            print(f"setup  {step.cwd}: {' '.join(step.command)} (for {', '.join(owner.id for owner in owners)})")
         for check in selected:
             argv_preview = (
                 pytest_argv(check, run_dir / f"{check.id}.xml") if check.pytest else substitute(check.command, values)
@@ -909,12 +993,13 @@ def main(
     commit, dirty = git_state(repo_root)
     results: list[CheckResult] = []
     failed_setup: set[str] = set()
-    for category, step in setup_steps:
-        log_path = run_dir / f"setup-{category.id}.log"
+    for step, owners in setup_steps:
+        owner_ids = [owner.id for owner in owners]
+        log_path = run_dir / f"setup-{owner_ids[0]}.log"
         code = executor(ExecutionRequest(step.command, repo_root / step.cwd, env, log_path))
-        print(f"setup  {category.id}: {'ok' if code == 0 else f'failed (exit {code}, {log_path})'}")
+        print(f"setup  {', '.join(owner_ids)}: {'ok' if code == 0 else f'failed (exit {code}, {log_path})'}")
         if code != 0:
-            failed_setup.add(category.id)
+            failed_setup.update(owner_ids)
 
     for check in selected:
         overrides = {name: local_env[name] for name in check.env if name in local_env}
