@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { buildSummary, evaluateChecks, readReceiptTools, requiredLanes, visibleLanes } from '../../ci/evaluate-checks.mjs';
 import { aggregateOutcomes, inspectReport, outcomeOutputs, publishOutcome, recordOutcome } from '../../ci/publish-outcome.mjs';
+import { fullValidation, resolveWorkflowChangeRange } from '../../ci/resolve-workflow-change-range.mjs';
 import { comparePaths, loadContract, parseChangedPaths, selectChecks, selectionOutputs } from '../../ci/select-checks.mjs';
 import { readWorkflowGraph, validateWorkflows } from '../../ci/validate-workflows.mjs';
 
@@ -20,6 +21,7 @@ const root = fileURLToPath(new URL('../../../', import.meta.url));
 const selectorPath = join(root, 'scripts/ci/select-checks.mjs');
 const evaluatorPath = join(root, 'scripts/ci/evaluate-checks.mjs');
 const validatorPath = join(root, 'scripts/ci/validate-workflows.mjs');
+const resolverPath = join(root, 'scripts/ci/resolve-workflow-change-range.mjs');
 const contract = loadContract();
 const graph = readWorkflowGraph(root);
 const allSelectors = [
@@ -340,6 +342,100 @@ function runSelector(repo, base, head, output, args = []) {
   return result;
 }
 
+function mergeFixture(t) {
+  const repo = createRepository(t, { 'base.txt': 'base\n' });
+  repo.git('checkout', '--quiet', '-b', 'feature');
+  writeFixture(repo.cwd, 'feature.txt', 'feature\n');
+  const pullRequestHead = repo.commit();
+  repo.git('checkout', '--quiet', 'main');
+  writeFixture(repo.cwd, 'main.txt', 'main\n');
+  const base = repo.commit();
+  repo.git('merge', '--quiet', '--no-ff', '--no-gpg-sign', '-m', 'Test merge', 'feature');
+  const head = repo.git('rev-parse', 'HEAD').trim();
+  return { ...repo, base, head, pullRequestHead };
+}
+
+test('range resolver: pull request proves the test-merge parent structure', t => {
+  const repo = mergeFixture(t);
+  assert.deepEqual(resolveWorkflowChangeRange({
+    eventName: 'pull_request', headSha: repo.head, pullRequestHeadSha: repo.pullRequestHead, cwd: repo.cwd,
+  }), { mode: 'range', base_sha: repo.base, head_sha: repo.head });
+});
+
+test('range resolver: merge group uses immutable payload commits', t => {
+  const repo = mergeFixture(t);
+  assert.deepEqual(resolveWorkflowChangeRange({
+    eventName: 'merge_group', baseSha: repo.base, headSha: repo.head, cwd: repo.cwd,
+  }), { mode: 'range', base_sha: repo.base, head_sha: repo.head });
+});
+
+for (const [name, resolveRange] of [
+  ['malformed object ID', repo => ({ eventName: 'merge_group', baseSha: 'HEAD', headSha: repo.head })],
+  ['missing commit', repo => ({ eventName: 'merge_group', baseSha: unknownSha, headSha: repo.head })],
+  ['checked-out head mismatch', repo => ({ eventName: 'merge_group', baseSha: repo.base, headSha: repo.pullRequestHead })],
+  ['equal base and head', repo => ({ eventName: 'merge_group', baseSha: repo.head, headSha: repo.head })],
+  ['wrong pull request second parent', repo => ({ eventName: 'pull_request', headSha: repo.head, pullRequestHeadSha: repo.base })],
+  ['unsupported event', repo => ({ eventName: 'push', baseSha: repo.base, headSha: repo.head })],
+]) {
+  test(`range resolver: ${name} selects full validation`, t => {
+    const repo = mergeFixture(t);
+    assert.deepEqual(resolveWorkflowChangeRange({ ...resolveRange(repo), cwd: repo.cwd }), fullValidation);
+  });
+}
+
+test('range resolver: non-ancestor base selects full validation', t => {
+  const repo = mergeFixture(t);
+  repo.git('checkout', '--quiet', '--orphan', 'unrelated');
+  repo.git('rm', '--quiet', '-rf', '.');
+  writeFixture(repo.cwd, 'unrelated.txt', 'unrelated\n');
+  const unrelated = repo.commit();
+  repo.git('checkout', '--quiet', repo.head);
+  assert.deepEqual(resolveWorkflowChangeRange({
+    eventName: 'merge_group', baseSha: unrelated, headSha: repo.head, cwd: repo.cwd,
+  }), fullValidation);
+});
+
+test('range resolver: non-diffable pair selects full validation', t => {
+  const repo = mergeFixture(t);
+  const git = (args, cwd) => args[0] === 'diff'
+    ? { status: 1, stdout: '', stderr: 'not diffable' }
+    : spawnSync('git', args, { cwd, encoding: 'utf8' });
+  assert.deepEqual(resolveWorkflowChangeRange({
+    eventName: 'merge_group', baseSha: repo.base, headSha: repo.head, cwd: repo.cwd, git,
+  }), fullValidation);
+});
+
+test('range resolver: infrastructure crashes fail explicitly', () => {
+  assert.throws(() => resolveWorkflowChangeRange({
+    eventName: 'merge_group', baseSha: unknownSha, headSha: unknownSha,
+    git: () => { throw new Error('git unavailable'); },
+  }), /git unavailable/);
+});
+
+test('range resolver CLI: writes verified outputs and fails on infrastructure errors', t => {
+  const repo = mergeFixture(t);
+  const output = join(repo.cwd, 'range-output');
+  const success = spawnSync(process.execPath, [resolverPath], {
+    cwd: repo.cwd,
+    env: {
+      ...repo.env, NODE_DISABLE_COMPILE_CACHE: '1', EVENT_NAME: 'merge_group',
+      BASE_SHA: repo.base, HEAD_SHA: repo.head, GITHUB_OUTPUT: output,
+    },
+    encoding: 'utf8',
+  });
+  assert.ifError(success.error);
+  assert.equal(success.status, 0, success.stderr);
+  assert.equal(readFileSync(output, 'utf8'), `mode=range\nbase_sha=${repo.base}\nhead_sha=${repo.head}\n`);
+  const failure = spawnSync(process.execPath, [resolverPath], {
+    cwd: temporaryDirectory(t),
+    env: { ...nodeEnvironment, PATH: '', EVENT_NAME: 'merge_group', BASE_SHA: repo.base, HEAD_SHA: repo.head },
+    encoding: 'utf8',
+  });
+  assert.ifError(failure.error);
+  assert.equal(failure.status, 1);
+  assert.match(failure.stderr, /Workflow change-range resolution failed/);
+});
+
 const selectionCases = [
   ['root uv.lock selects every Python consumer', 'uv.lock', pythonConsumers],
   ['root pyproject selects every Python consumer', 'pyproject.toml', pythonConsumers],
@@ -471,10 +567,13 @@ test('selector CLI: committed changes emit complete matching JSON and GitHub out
   assert.deepEqual(Object.fromEntries(rows.map(row => row.split('='))), expected);
 });
 
-test('selector CLI: main full mode needs no repository or comparison SHAs', t => {
+for (const [name, repo, args] of [
+  ['argument', { env: process.env }, ['--full']],
+  ['resolver environment', { env: { ...process.env, SELECTION_MODE: 'full' } }, []],
+]) test(`selector CLI: ${name} full mode needs no repository or comparison SHAs`, t => {
   const cwd = temporaryDirectory(t);
   const output = join(cwd, 'github-output');
-  const result = runSelector({ cwd, env: process.env }, '', '', output, ['--full']);
+  const result = runSelector({ cwd, ...repo }, '', '', output, args);
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
     ...expectedSelection(allSelectors, true),
@@ -927,8 +1026,8 @@ const graphMutations = [
   ['secondary main changed-file filter', ({ main }) => { main['pester-tests'].with['changed-files-only'] = true; }, 'secondary changed-file filter'],
   ['CPU domain drift', ({ cpu }) => { cpu.strategy.matrix.domain = cpu.strategy.matrix.domain.filter(domain => domain !== 'vla'); }, 'CPU smoke domain matrix changed'],
   ['boolean-false CPU smoke condition', ({ cpu }) => { cpu.if = false; }, 'CPU smoke must remain unconditional'],
-  ['PR head substituted for event base SHA', ({ pr }) => { pr.changes.steps.find(step => step.id === 'filter').env.BASE_SHA = '${{ github.event.pull_request.head.sha }}'; }, 'event base SHA to tested merge SHA'],
-  ['PR head substituted for tested merge SHA', ({ pr }) => { pr.changes.steps.find(step => step.id === 'filter').env.HEAD_SHA = '${{ github.event.pull_request.head.sha }}'; }, 'event base SHA to tested merge SHA'],
+  ['PR head substituted for verified base SHA', ({ pr }) => { pr.changes.steps.find(step => step.id === 'filter').env.BASE_SHA = '${{ github.event.pull_request.head.sha }}'; }, 'verified resolver outputs'],
+  ['PR head substituted for verified tested SHA', ({ pr }) => { pr.changes.steps.find(step => step.id === 'filter').env.HEAD_SHA = '${{ github.event.pull_request.head.sha }}'; }, 'verified resolver outputs'],
   ['renamed required summary job ID', ({ pr, summary }) => { pr['renamed-summary'] = summary; delete pr[summaryId]; }, 'Missing owned job'],
   ['renamed required summary check context', ({ summary }) => { summary.name = 'Different Required Check'; }, 'check context must remain stable'],
   ['required summary without always', ({ summary }) => { summary.if = 'success()'; }, 'Required summary must always execute'],
@@ -2141,6 +2240,48 @@ test('soft-fail policy: every declared advisory exception passes unchanged', () 
     assert.ok(Object.values(lane.softFailPolicy).every(Boolean), `${id} must remain explicitly advisory`);
   }
   assert.deepEqual(validateWorkflows(graph, contract), []);
+});
+
+for (const [name, mutate, diagnostic] of [
+  ['merge_group trigger removal', candidate => { delete candidate[prPath].on.merge_group; }, 'event ownership mismatch'],
+  ['merge_group branch drift', candidate => { candidate[prPath].on.merge_group.branches = ['develop']; }, 'merge_group checks_requested for main'],
+  ['merge_group action drift', candidate => { candidate[prPath].on.merge_group.types = ['destroyed']; }, 'merge_group checks_requested for main'],
+  ['reusable workflow concurrency collision', candidate => {
+    candidate[prPath].concurrency.group = '${{ github.workflow }}-${{ github.ref }}';
+  }, 'isolate and supersede event refs'],
+  ['moving checkout ref', candidate => { candidate[prPath].jobs.changes.steps[0].with.ref = '${{ github.ref }}'; }, 'tested SHA'],
+  ['range resolver removal', candidate => {
+    candidate[prPath].jobs.changes.steps = candidate[prPath].jobs.changes.steps.filter(step => step.id !== 'range');
+  }, 'event-aware range resolver'],
+  ['full fallback removal', candidate => {
+    delete candidate[prPath].jobs.changes.steps.find(step => step.id === 'filter').env.SELECTION_MODE;
+  }, 'verified resolver outputs'],
+  ['unverified range input', candidate => {
+    candidate[prPath].jobs.changes.steps.find(step => step.id === 'filter').env.BASE_SHA = '${{ github.event.merge_group.base_sha }}';
+  }, 'verified resolver outputs'],
+  ...[
+    '${{ secrets.TEST_SECRET }}',
+    '${{secrets.TEST_SECRET}}',
+    "${{ secrets['TEST_SECRET'] }}",
+    '${{ secrets["TEST_SECRET"] }}',
+    "${{ format('{0}', secrets.TEST_SECRET) }}",
+    "${{ format('}}', secrets.TEST_SECRET) }}",
+  ].map((reference, index) => [`secret introduction form ${index + 1}`, candidate => {
+    candidate[prPath].jobs.changes.steps.find(step => step.id === 'range').env.TEST_SECRET = reference;
+  }, 'merge-group-reachable secret reference']),
+]) {
+  test(`merge queue contract: rejects ${name}`, () => {
+    const candidate = structuredClone(graph);
+    mutate(candidate);
+    const errors = validateWorkflows(candidate, contract);
+    assert.ok(errors.some(error => error.includes(diagnostic)), JSON.stringify(errors));
+  });
+}
+
+test('merge queue contract: ignores secrets-like text inside expression string literals', () => {
+  const candidate = structuredClone(graph);
+  candidate[prPath].env = { HARMLESS_TEXT: "${{ format('secrets.TEST_SECRET') }}" };
+  assert.deepEqual(validateWorkflows(candidate, contract), []);
 });
 
 test('release policy: an explicit success condition is allowed', () => {

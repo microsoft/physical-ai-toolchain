@@ -21,6 +21,40 @@ const outcomeAction = './.github/actions/ci-outcome';
 // Ref pinning is enforced by the dependency pinning lane so Dependabot ref bumps do not break bindings.
 const actionPath = uses => String(uses ?? '').split('@')[0];
 
+function githubExpressionBodies(value) {
+  const bodies = [];
+  let cursor = 0;
+  while ((cursor = value.indexOf('${{', cursor)) !== -1) {
+    const bodyStart = cursor + 3;
+    let quoted = false;
+    let closed = false;
+    for (cursor = bodyStart; cursor < value.length - 1; cursor++) {
+      if (value[cursor] === "'") {
+        if (quoted && value[cursor + 1] === "'") cursor++;
+        else quoted = !quoted;
+      } else if (!quoted && value.slice(cursor, cursor + 2) === '}}') {
+        bodies.push(value.slice(bodyStart, cursor));
+        cursor += 2;
+        closed = true;
+        break;
+      }
+    }
+    if (!closed) break;
+  }
+  return bodies;
+}
+
+function referencesSecretsContext(value) {
+  if (typeof value === 'string') {
+    return githubExpressionBodies(value).some(body => {
+      const expressionBody = body.replace(/'(?:''|[^'])*'/g, "''");
+      return /(?:^|[^A-Za-z0-9_.])secrets\s*(?:\.|\[)/.test(expressionBody);
+    });
+  }
+  if (Array.isArray(value)) return value.some(referencesSecretsContext);
+  return isObject(value) && Object.values(value).some(referencesSecretsContext);
+}
+
 function jsonInput(value) {
   try { return JSON.parse(value); } catch { return undefined; }
 }
@@ -460,12 +494,46 @@ export function validateWorkflows(graph, contract = loadContract()) {
   }
 
   const pr = graph[contract.orchestrators.pr.path]?.jobs ?? {};
+  const prWorkflow = graph[contract.orchestrators.pr.path];
   const changes = pr.changes;
+  const mergeGroup = prWorkflow?.on?.merge_group;
+  check(isDeepStrictEqual(mergeGroup?.branches, ['main'])
+    && isDeepStrictEqual(mergeGroup?.types, ['checks_requested']), 'PR validation must own merge_group checks_requested for main');
+  check(prWorkflow?.concurrency?.group === '${{ github.workflow }}-validation-${{ github.event_name }}-${{ github.ref }}'
+    && prWorkflow?.concurrency?.['cancel-in-progress'] === true, 'PR validation concurrency must isolate and supersede event refs');
+  const checkout = changes?.steps?.find(step => step.uses?.startsWith('actions/checkout@'));
+  check(checkout?.with?.['fetch-depth'] === 0 && checkout?.with?.['persist-credentials'] === false
+    && checkout?.with?.ref === '${{ github.sha }}', 'Selection checkout must use the tested SHA, full history, and no persisted credentials');
+  const range = changes?.steps?.find(step => step.id === 'range');
+  check(range?.if === undefined && range?.['continue-on-error'] === undefined
+    && range?.run?.trim() === 'node scripts/ci/resolve-workflow-change-range.mjs'
+    && isDeepStrictEqual(range?.env, {
+      EVENT_NAME: '${{ github.event_name }}',
+      BASE_SHA: '${{ github.event.merge_group.base_sha }}',
+      HEAD_SHA: '${{ github.event.merge_group.head_sha || github.sha }}',
+      PULL_REQUEST_HEAD_SHA: '${{ github.event.pull_request.head.sha }}',
+    }), 'Discovery must use the canonical event-aware range resolver');
   const filter = changes?.steps?.find(step => step.id === 'filter');
   check(filter?.if === undefined && filter?.['continue-on-error'] === undefined && changes?.if === undefined && changes?.['continue-on-error'] === undefined, 'Discovery must execute without failure suppression');
-  check(filter?.env?.BASE_SHA === '${{ github.event.pull_request.base.sha }}' && filter?.env?.HEAD_SHA === '${{ github.sha }}', 'PR selection must compare event base SHA to tested merge SHA');
-  check(filter?.run?.trim() === 'node scripts/ci/select-checks.mjs', 'Discovery must use the canonical selector');
-  check(changes?.steps?.some(step => step.uses?.startsWith('actions/checkout@') && step.with?.['fetch-depth'] === 0 && !step.with?.ref), 'Selection checkout must fetch the tested merge tree and history');
+  check(isDeepStrictEqual(filter?.env, {
+    BASE_SHA: '${{ steps.range.outputs.base_sha }}',
+    HEAD_SHA: '${{ steps.range.outputs.head_sha }}',
+    SELECTION_MODE: '${{ steps.range.outputs.mode }}',
+  }), 'PR selection must consume only verified resolver outputs');
+  check(filter?.run?.trim() === 'node scripts/ci/select-checks.mjs', 'Discovery must use the canonical selector with resolver-controlled full fallback');
+  const reachable = new Set();
+  const visit = path => {
+    if (reachable.has(path)) return;
+    reachable.add(path);
+    for (const job of Object.values(graph[path]?.jobs ?? {})) {
+      if (job.uses?.startsWith('./.github/workflows/')) visit(job.uses.slice(2));
+    }
+  };
+  visit(contract.orchestrators.pr.path);
+  for (const path of reachable) {
+    const workflow = graph[path];
+    if (workflow) check(!referencesSecretsContext(workflow), `${path}: merge-group-reachable secret reference is forbidden`);
+  }
   for (const output of [...Object.keys(contract.selectors), 'selection_status', 'base_sha', 'head_sha', 'file_count', 'selection_reasons']) {
     check(changes?.outputs?.[output] === `\${{ steps.filter.outputs.${output} }}`, `Missing selector output: ${output}`);
   }
@@ -486,8 +554,8 @@ export function validateWorkflows(graph, contract = loadContract()) {
   const release = main['release-please'];
   check(release?.['continue-on-error'] === undefined && ['', 'success()'].includes(expression(release?.if)), 'Release coordinator must retain success gating without failure suppression');
   check(isDeepStrictEqual(array(release?.needs), ['main-validation-summary']), 'Release coordinator must depend only on the main validation summary');
-  check(graph[contract.orchestrators.pr.path]?.concurrency?.group === '${{ github.workflow }}-pr-${{ github.event.pull_request.number }}' &&
-    graph[contract.orchestrators.pr.path]?.concurrency?.['cancel-in-progress'] === true, 'PR concurrency must isolate workflow and PR number and cancel superseded runs');
+  check(graph[contract.orchestrators.pr.path]?.concurrency?.group === '${{ github.workflow }}-validation-${{ github.event_name }}-${{ github.ref }}' &&
+    graph[contract.orchestrators.pr.path]?.concurrency?.['cancel-in-progress'] === true, 'PR concurrency must isolate workflow and event ref and cancel superseded runs');
   check(!graph[contract.orchestrators.main.path]?.concurrency?.['cancel-in-progress'] &&
     Object.values(main).every(job => !job.concurrency?.['cancel-in-progress']), 'Main and release cancellation is forbidden');
   check(changes?.['timeout-minutes'] > 0 && changes['timeout-minutes'] <= 10 && pr['osv-scanner']?.['timeout-minutes'] > 0 && pr['osv-scanner']['timeout-minutes'] <= 10, 'Discovery and advisory jobs require bounded timeouts');
