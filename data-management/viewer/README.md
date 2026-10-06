@@ -2,7 +2,7 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-09-23
+ms.date: 2026-10-06
 ms.topic: overview
 ---
 
@@ -73,6 +73,12 @@ Run the cross-platform development command after the container finishes setup:
 ```bash
 npm run dataviewer:dev
 ```
+
+## 📊 AI Analysis
+
+The [AI-analysis endpoints](backend/src/api/routes/ai_analysis.py) require nonempty, rectangular position and force matrices containing only finite numbers. Invalid matrices return HTTP 400. `POST /api/ai/cluster` requires at least two trajectories; an explicit `num_clusters` must be between 2 and 20 and cannot exceed the number of trajectories.
+
+The [clustering service](backend/src/api/services/clustering.py) applies a shared scale to extreme coordinate magnitudes before extracting features when squared statistics or path lengths risk overflowing float64. Ordinary coordinate magnitudes retain their original feature calculation.
 
 ## 📄 Accepted Dataset Contract
 
@@ -397,12 +403,14 @@ The frontend-to-backend proxy preserves native browser requests for images and v
 ### Entra ID Prerequisites
 
 1. An [Azure AD app registration](https://learn.microsoft.com/entra/identity-platform/quickstart-register-app) with:
-   - A **Web** redirect URI at `https://<frontend-fqdn>/.auth/login/aad/callback`
-   - Optional **App roles** for role-based access control, such as `Dataviewer.Viewer`, `Dataviewer.Annotator`, and `Dataviewer.Admin`
+   - A web redirect URI at `https://<frontend-fqdn>/.auth/login/aad/callback`
+   - A single-page application redirect URI at `http://localhost:5173/redirect.html` for local direct JWT development or `https://<frontend-host>/redirect.html` for production direct JWT deployments
+   - API scope named `access_as_user` under "Expose an API" (`api://<client-id>/access_as_user`) for direct JWT deployments
+   - Optional app roles for role-based access control, such as `Dataviewer.Viewer`, `Dataviewer.Annotator`, and `Dataviewer.Admin`
 
 2. Note the **Application (client) ID** and **Directory (tenant) ID** from the app registration.
 
-Terraform creates the app registration when authentication is enabled. The deployment script validates the callback URI and configures Easy Auth without changing redirect URIs.
+Terraform creates the app registration when authentication is enabled. The deployment script validates the Easy Auth web callback and configures Easy Auth without changing redirect URIs. The [Terraform module](../../infrastructure/terraform/modules/dataviewer/variables.tf) defaults to MSAL bridge URIs on local ports 5173 and 5174. Supply `dataviewer_redirect_uris` explicitly for production direct JWT origins or different development ports; caller-supplied lists are used unchanged.
 
 ### Azure Container Apps Configuration
 
@@ -428,7 +436,15 @@ VITE_AZURE_CLIENT_ID=<your-client-id>
 VITE_AZURE_TENANT_ID=<your-tenant-id>
 ```
 
-The frontend probes `/api/auth/context` before starting MSAL. An active Easy Auth session takes precedence; otherwise the configured MSAL flow obtains a token for the `azure_ad` backend provider. When `DATAVIEWER_AUTH_DISABLED=true`, authentication and CSRF checks are bypassed for local development.
+The frontend checks `/.auth/me` before starting MSAL. An active Easy Auth session takes precedence. Otherwise, when `VITE_AZURE_CLIENT_ID` is set, the app uses MSAL and attaches bearer tokens to API fetches for the `azure_ad` backend provider. When unset, MSAL is not initialized. Set `DATAVIEWER_AUTH_DISABLED=true` only for local development or private deployments that intentionally bypass application authentication.
+
+Native images and videos cannot attach authorization headers. [`MediaAuthGate`](frontend/src/components/auth/MediaAuthGate.tsx) obtains a media cookie before mounting the authenticated workspace using the JWT- and CSRF-protected `POST /api/auth/media-session` endpoint. The gate renews at half the returned lifetime and displays an error on failure.
+
+The backend sets a host-only `__Secure-dataviewer-media` cookie with `HttpOnly`, `Secure`, `SameSite=Strict`, and path `/api/datasets/`. Its browser lifetime is at most five minutes and never exceeds the JWT's remaining lifetime. Cookie authentication is restricted to exact read-only frame and video routes, including range requests.
+
+Signature, issuer, audience, and expiration checks still apply; an invalid authorization header never falls back to a cookie. Dataset metadata, annotations, and mutations require ordinary authentication headers. Tokens are never placed in media URLs. Serve the frontend and API on the same HTTPS origin; Easy Auth continues to use its platform session.
+
+Deploy the backend endpoint before the frontend gate. For acceptance, inspect a native `<video>` or `<img>` request with no authorization header, verify playback or image decoding, and confirm cookie-only general API access returns 401.
 
 ### Docker Compose with Auth
 
@@ -440,6 +456,39 @@ docker compose up --build
 ```
 
 This example uses direct Entra JWT validation. Easy Auth is a Container Apps platform feature and is not provided by Docker Compose.
+
+Supply the backend provider, tenant and client variables through container deployment environment settings as well; the Compose file forwards only the auth-disabled switch. Verify the effective environment with `docker compose config` before enabling authentication.
+
+### Redirect Bridge and Deployment
+
+MSAL v5 uses the standalone [redirect bridge](frontend/src/redirect.ts) for interactive redirects and silent iframe responses, independently of cross-origin isolation headers. Vite builds both `index.html` and `redirect.html`; the Docker image copies both documents and their bundled external modules. Token acquisition failures other than interaction-required errors reject API callers rather than sending requests without authentication headers.
+
+The production [NGINX policy](frontend/nginx.conf.template) permits same-origin framing only on `/redirect.html`, with `frame-ancestors 'self'`, `X-Frame-Options: SAMEORIGIN`, and `Cache-Control: no-store`. Root, SPA, static, health and API responses retain framing denial. Keep bridge scripts on the same origin; do not add inline-script allowances or COOP/COEP/CORP headers. Vite development serves the bridge but does not enforce the production NGINX policy.
+
+1. Add each exact `/redirect.html` URI to the Entra SPA registration before deploying an auth-enabled build. Retain the root SPA registration during the rollback window, and keep the Easy Auth web callback unchanged.
+2. Deploy the frontend image with the intended client/tenant build variables, verify the bridge and headers, then complete live authentication acceptance below.
+3. For rollback, restore the previous image and its matching configuration/registration. Do not loosen normal-page framing headers. Remove root SPA entries only after the rollback window closes.
+
+### Authentication Smoke Tests
+
+With an auth-disabled production Compose build running, execute from the repository root:
+
+```bash
+./scripts/security/Test-DataviewerSecurityHeaders.ps1
+npm run test:auth --workspace robotic-training-data-tool
+```
+
+The verifier checks independent policy literals, rejecting weakened or duplicate headers. The browser suite uses the pinned SDK and built bridge without credentials: synthetic `login_required` must reach the caller as `InteractionRequiredAuthError`; blocked framing or a missing bridge must time out. It also checks cross-origin denial and visible, sanitized errors for malformed/missing responses.
+
+These tests prove response delivery, not successful Entra authentication. Direct navigation to `/redirect.html` without an auth response must show an error.
+
+| Runtime                       | Acceptance                                                                                                                                                                                                  |
+|-------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Auth disabled                 | Build without `VITE_AZURE_CLIENT_ID`, run the backend with `DATAVIEWER_AUTH_DISABLED=true`, and verify normal dataset/API access without login. The bridge still exists for deterministic production tests  |
+| Auth-enabled Vite development | Register the exact origin/port bridge URI, configure both frontend and backend auth, and verify sign-in and authorized API access. Use the production container for framing/header evidence                 |
+| Auth-enabled production       | Register the HTTPS bridge URI, verify proxy headers and bridge asset delivery, then verify real sign-in, API access, silent renewal and the forced iframe fallback under the target tenant/browser policies |
+
+Cached access tokens and successful refresh-token exchanges can bypass the iframe. In a controlled live test, use the pinned SDK's `CacheLookupPolicy.Skip` to force that path and verify its result or interactive recovery; never log codes, tokens or response hashes. Treat tenant consent, browser cookies, issued-token validation and refresh behavior as deployment acceptance, not outcomes of the synthetic suite.
 
 ### Auth Environment Variable Reference
 
@@ -753,6 +802,8 @@ NGINX verifies the backend certificate and hostname against `/etc/ssl/certs/ca-c
 Mount the reviewed model directory read-only at `/models`. Update the mount and digest map together during rollout or rollback.
 
 ### Building Images
+
+The backend image includes the frozen `azure`, `analysis`, `export`, `auth`, and `yolo` extras. Its build stage installs dependencies; the runtime stage copies the virtual environment with the application user's ownership. Installation caches remain in the build stage.
 
 ```bash
 # Backend

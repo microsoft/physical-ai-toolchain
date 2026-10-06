@@ -117,3 +117,7 @@ legacy naming.
 | Submission flow   | Submit through the companion scripts listed above to resolve defaults from CLI, env vars, and Terraform outputs. |
 | Runtime packaging | RL workflows deliver code via object storage (`url:` input) or dataset injection; choose based on reuse needs.   |
 | Related reference | See [Reference index](README.md) for adjacent script and artifact guides.                                        |
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

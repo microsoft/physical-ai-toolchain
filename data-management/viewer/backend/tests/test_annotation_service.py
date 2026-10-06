@@ -70,7 +70,6 @@ def service(tmp_path: Path) -> AnnotationService:
     return AnnotationService(storage_adapter=LocalStorageAdapter(str(tmp_path)))
 
 
-@pytest.mark.asyncio
 class TestAnnotationServiceConstruction:
     async def test_uses_provided_adapter(self, tmp_path: Path) -> None:
         adapter = LocalStorageAdapter(str(tmp_path))
@@ -88,7 +87,6 @@ class TestAnnotationServiceConstruction:
         assert loaded.annotations[0].annotator_id == "alice"
 
 
-@pytest.mark.asyncio
 class TestSaveAndGet:
     async def test_save_creates_new_file(self, service: AnnotationService) -> None:
         result = await service.save_annotation("ds", 0, _build_annotation())
@@ -116,7 +114,6 @@ class TestSaveAndGet:
         assert await service.get_annotation("ds", 99) is None
 
 
-@pytest.mark.asyncio
 class TestDelete:
     async def test_delete_all_annotators(self, service: AnnotationService) -> None:
         await service.save_annotation("ds", 0, _build_annotation("alice"))
@@ -147,7 +144,6 @@ class TestDelete:
         assert await service.get_annotation("ds", 0) is None
 
 
-@pytest.mark.asyncio
 class TestRunAutoAnalysis:
     async def test_short_trajectory_returns_neutral(self, service: AnnotationService) -> None:
         ep = _make_episode([_trajectory_point(0, [0.0] * 6, [0.0] * 6)])
@@ -200,7 +196,6 @@ class TestRunAutoAnalysis:
         assert result.computed.correction_count == 18
 
 
-@pytest.mark.asyncio
 class TestGetSummary:
     async def test_empty_dataset(self, service: AnnotationService) -> None:
         summary = await service.get_summary("ds", total_episodes=10)

@@ -211,7 +211,7 @@ kubectl get sa -n osmo-control-plane osmo-control-plane -o yaml | grep azure.wor
 - [OSMO Upgrade from Pre-6.3 Releases](osmo-upgrade.md): staged upgrade, backups, and rollback
 - [Cleanup and Destroy](cleanup.md): resource teardown procedures
 
-<!-- markdownlint-disable MD036 -->
-*🤖 Crafted with precision by ✨Copilot following brilliant human instruction,
-then carefully refined by our team of discerning human reviewers.*
-<!-- markdownlint-enable MD036 -->
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction,
+then carefully refined by our team of discerning human reviewers.

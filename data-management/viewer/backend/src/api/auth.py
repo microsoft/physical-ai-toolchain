@@ -20,17 +20,27 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, Literal, cast
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
+
+from .validation import SAFE_CAMERA_NAME_PATTERN, SAFE_DATASET_ID_PATTERN
 
 logger = logging.getLogger(__name__)
 
 AuthMode = Literal["azure_ad", "auth0", "easy_auth", "apikey", "local"]
+MEDIA_COOKIE_NAME = "__Secure-dataviewer-media"
+MEDIA_COOKIE_TTL_SECONDS = 300
+_MEDIA_PATH = re.compile(
+    rf"/api/datasets/{SAFE_DATASET_ID_PATTERN.removeprefix('^').removesuffix('$')}"
+    rf"/episodes/[0-9]+/(?:frames/[0-9]+|video/{SAFE_CAMERA_NAME_PATTERN.removeprefix('^').removesuffix('$')})"
+)
 
 
 class PrincipalContext(BaseModel):
@@ -38,6 +48,12 @@ class PrincipalContext(BaseModel):
 
     scope_id: str
     auth_mode: AuthMode
+
+
+class MediaSession(BaseModel):
+    """Lifetime of the native-media cookie, without exposing credentials."""
+
+    expires_in: int
 
 
 # ============================================================================
@@ -119,9 +135,20 @@ class JwtProvider(AuthProvider):
 
     async def authenticate(self, request: Request) -> dict[str, Any] | None:
         auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
+        if "Authorization" in request.headers:
+            if not auth_header.startswith("Bearer "):
+                return None
+            token = auth_header[len("Bearer ") :].strip()
+        elif (
+            request.method in {"GET", "HEAD"}
+            and _MEDIA_PATH.fullmatch(request.url.path)
+            and request.headers.get("Sec-Fetch-Site", "same-origin") in {"same-origin", "none"}
+        ):
+            token = request.cookies.get(MEDIA_COOKIE_NAME, "")
+        else:
             return None
-        token = auth_header[len("Bearer ") :].strip()
+        if not token:
+            return None
         try:
             import jwt  # pyjwt[cryptography]
         except ImportError as exc:
@@ -139,6 +166,7 @@ class JwtProvider(AuthProvider):
                 algorithms=["RS256"],
                 audience=self._audience,
                 issuer=self._issuer,
+                options={"require": ["exp"]},
             )
             payload["auth_method"] = self._auth_method
             return payload
@@ -306,6 +334,40 @@ async def require_auth(request: Request) -> dict[str, Any] | None:
         )
 
     return user
+
+
+def issue_media_session(request: Request, response: Response, user: dict[str, Any] | None) -> MediaSession:
+    """Copy an already verified JWT to a short-lived, read-only media cookie."""
+    expiration = user.get("exp") if user is not None else None
+    authorization = request.headers.get("Authorization", "")
+    if (
+        user is None
+        or user.get("auth_method") not in {"azure_ad", "auth0"}
+        or not authorization.startswith("Bearer ")
+        or not isinstance(expiration, int)
+        or isinstance(expiration, bool)
+    ):
+        logger.warning("Media session rejected: a verified expiring JWT is required")
+        raise HTTPException(status_code=401, detail="JWT authentication required for native media")
+    lifetime = min(MEDIA_COOKIE_TTL_SECONDS, expiration - int(time.time()))
+    if lifetime <= 0:
+        logger.warning("Media session rejected: credential has expired")
+        raise HTTPException(status_code=401, detail="Authentication expired")
+    token = authorization[len("Bearer ") :].strip()
+    if len(token.encode("utf-8")) > 3800:
+        logger.warning("Media session rejected: credential exceeds browser cookie capacity")
+        raise HTTPException(status_code=400, detail="Authentication token exceeds native media cookie capacity")
+    response.set_cookie(
+        key=MEDIA_COOKIE_NAME,
+        value=token,
+        max_age=lifetime,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        path="/api/datasets/",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return MediaSession(expires_in=lifetime)
 
 
 def resolve_principal_context(user: dict[str, Any] | None) -> PrincipalContext:

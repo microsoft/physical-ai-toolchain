@@ -2,7 +2,7 @@
 title: Scripts
 description: CI/CD scripts, shared libraries, linting, security, and Pester tests for the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-28
+ms.date: 2026-10-05
 ms.topic: reference
 keywords:
   - scripts
@@ -56,6 +56,70 @@ CI bootstrap and release automation.
 | `ci/New-SigningArtifacts.ps1`         | Generate release signing artifacts                      |
 | `ci/Update-ChangelogMsDate.ps1`       | Refresh changelog metadata dates                        |
 
+### Required validation gates
+
+`ci/ci-contract.json` declares lane ownership, selection, permissions, operation identities,
+required reports, matrix shards, and reusable output bindings. `ci/select-checks.mjs` compares
+the PR event base to the tested merge SHA and publishes explicit selection reasons.
+Selected PR lanes and every main lane disable inner changed-file filtering.
+Execution bindings pin each required `run` scalar by SHA-256 and each action by its `uses`
+path (without the `@` ref) and the SHA-256 of `JSON.stringify` of its parsed `with` mapping.
+The dependency pinning and SHA staleness lanes enforce action ref pinning, so Dependabot
+action bumps do not require contract edits.
+Review operation changes before updating these hashes; do not regenerate them to dismiss
+unexplained workflow drift.
+
+| Status         | Required-gate behavior                                                        |
+|----------------|-------------------------------------------------------------------------------|
+| `success`      | Require all expected operations, valid reports, counts, and artifact identity |
+| `failure`      | Block the aggregate and report the first failed or missing operation          |
+| `cancelled`    | Block the aggregate; report cancellation separately from validation failure   |
+| `planned-skip` | Accept only a lane excluded by verified PR selection                          |
+| Missing        | Block the aggregate; a green job result alone is not execution evidence       |
+
+GitHub omits empty job outputs. An absent `first-failure` value is accepted only with otherwise
+valid success or verified planned-skip evidence; required status, count, and artifact fields
+must remain present.
+
+`.github/actions/ci-outcome` validates actual step outcomes and suite-specific reports before
+publishing receipts. Matrix aggregates require the complete expected job/shard inventory and
+current run ID, attempt, and commit SHA. Test counts exclude skipped cases. Summary JSON and
+Markdown retain comparison SHAs, selection reasons, operation/test counts, first failures,
+tool versions, and artifact links without copying arbitrary step outputs.
+Summaries revalidate mandatory output receipts and raw child reports from the current attempt
+and reconcile their counts with exposed workflow outputs. Missing, duplicate, stale, or
+contradictory mandatory evidence blocks the gate even when GitHub retains earlier successful
+job outputs. Missing advisory receipts produce warnings without blocking required checks.
+
+Receipt readers validate and read the same open file descriptor, reject linked or replaced
+receipt files, and close descriptors on success and failure. CodeQL SARIF evidence uses the
+native `CodeQL` driver name; keep the workflow report declaration and canonical contract aligned.
+PowerShell workflow steps pass named switches through hashtable splatting rather than arrays
+of flag-shaped strings.
+
+`pr-validation-summary` remains the stable required check. `main-validation-summary` evaluates
+full execution before `release-please` can start. Markdown links, Terraform tests, Terraform
+documentation freshness, OSV, and Terraform security remain advisory and visible in summaries.
+Container findings are advisory; container discovery, scanning, and report publication remain
+required execution. Only superseded PR runs cancel automatically; main and release runs do not.
+Summaries consume the workflow cancellation context even when no child started. A cancelled
+or superseded run never produces a successful release gate.
+
+Public dependency feed validation is mandatory on PRs and main. Its receipt requires the
+checker to succeed and publish the native JSON report before either summary can pass.
+
+Accessibility validation participates in both required summaries. The Docusaurus accessibility
+collector retains its 90-minute budget for provenance checks, browser collection, and evidence
+composition; it is not a build-only job. Scheduled Docusaurus calls remain excluded from PR and
+main execution inventories. Documentation deployment consumes verified accessibility promotion
+artifacts independently of the release-please gate.
+
+Use a full workflow rerun after a failure. Partial reruns cannot reuse receipts from an earlier
+attempt. Run `npm run lint:ci` and `npm run test:ci` for graph validation, negative mutations,
+report-adapter tests, and the existing 80% line/branch/function coverage gate.
+Local validation does not verify hosted PR checks, branch protection, or post-merge execution;
+verify those separately without treating a local green result as hosted evidence.
+
 ## 🔍 Linting Scripts
 
 PowerShell scripts for validating code quality and documentation.
@@ -86,9 +150,9 @@ native exit returns `1`. The CI artifact upload reports a missing results file a
 `uv lock --check` without updating the lock. The main workflow checks all projects; pull requests check changed projects.
 The hosted lock check installs the interpreter pinned in `.python-version` for the root project. An empty full-repository
 selection fails rather than reporting a successful no-op.
-The dataviewer backend includes the editable VLM judge package in its locked `dev` and `vlm-judge` extras. The CI job
-installs the `dev` extra from the backend lock without `--with-editable`, then runs tests with `uv run --no-sync` to
-preserve the selected extras. The judge's Qwen dependencies remain optional.
+The dataviewer backend includes the editable VLM judge package in its locked `dev` dependency group and `vlm-judge` extra.
+The CI job installs the `dev` group from the backend lock without `--with-editable`, then runs tests with
+`uv run --no-sync` to preserve the selected group and extras. The judge's Qwen dependencies remain optional.
 Coverage artifacts from the Python validation jobs require a report after a successful test run. An upload error after a
 test failure does not replace the test failure.
 
@@ -96,19 +160,26 @@ test failure does not replace the test failure.
 
 Security scanning and dependency management scripts.
 
-| Script                                     | Purpose                                                                                       |
-|--------------------------------------------|-----------------------------------------------------------------------------------------------|
-| `security/Test-DependencyPinning.ps1`      | Validate dependency pinning compliance                                                        |
-| `security/Test-SHAStaleness.ps1`           | Check for outdated SHA pins                                                                   |
-| `security/Test-BinaryFreshness.ps1`        | Validate pinned binary hashes and Helm chart versions; emits SARIF for GitHub Security tab    |
-| `security/Modules/PinnedToolVersions.psm1` | Provide pin discovery functions for binary freshness checks                                   |
-| `security/Test-HveCoreFreshness.ps1`       | Check hve-core-derived files against their reviewed release or source-header baselines        |
-| `security/Test-WorkflowPermissions.ps1`    | Enforce explicit workflow and job `GITHUB_TOKEN` permissions                                  |
-| `security/Test-DangerousWorkflow.ps1`      | Detect unsafe event/input interpolation and untrusted `pull_request_target` checkouts          |
-| `security/Test-PublicDependencyFeeds.ps1`  | Reject private or non-canonical package sources in committed dependency metadata               |
-| `security/zap-to-sarif.py`                 | Convert ZAP results to SARIF format                                                           |
-| `security/gitleaks-scan.mjs`               | Scan tested-revision history and report explicit secret-scan outcomes                         |
-| `update-chart-hashes.sh`                   | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
+| Script                                        | Purpose                                                                                                                |
+|-----------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| `security/Test-DependencyPinning.ps1`         | Validate dependency pinning compliance                                                                                 |
+| `security/Test-SHAStaleness.ps1`              | Check for outdated SHA pins                                                                                            |
+| `security/Test-BinaryFreshness.ps1`           | Validate pinned binary hashes and Helm chart versions; emits SARIF for GitHub Security tab                             |
+| `security/Modules/PinnedToolVersions.psm1`    | Provide pin discovery functions for binary freshness checks                                                            |
+| `security/Test-HveCoreFreshness.ps1`          | Check hve-core-derived files against their reviewed release or source-header baselines                                 |
+| `security/Test-WorkflowPermissions.ps1`       | Enforce explicit workflow and job `GITHUB_TOKEN` permissions                                                           |
+| `security/Test-DangerousWorkflow.ps1`         | Detect unsafe event/input interpolation and untrusted `pull_request_target` checkouts                                  |
+| `security/Test-PublicDependencyFeeds.ps1`     | Reject private or non-canonical package sources in committed dependency metadata                                       |
+| `security/Test-DataviewerSecurityHeaders.ps1` | Enforce independent Data Viewer browser-header expectations, including strict UI framing and a same-origin-only bridge |
+| `security/zap-to-sarif.py`                    | Convert ZAP results to SARIF format                                                                                    |
+| `security/gitleaks-scan.mjs`                  | Scan tested-revision history and report explicit secret-scan outcomes                                                  |
+| `update-chart-hashes.sh`                      | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf`                          |
+
+### Data Viewer Browser Policy
+
+Run `./scripts/security/Test-DataviewerSecurityHeaders.ps1` against the auth-disabled production Compose frontend; use `-BaseUri` for a different local endpoint. The verifier uses independent policy literals rather than reading NGINX configuration. It checks root, static, SPA, API error, health, bridge and near-miss routes, rejecting missing, weakened, conflicting or duplicate headers. Only `/redirect.html` permits same-origin framing and must be `no-store`.
+
+The [DAST workflow](../.github/workflows/dast-zap-scan.yml) runs exact-policy Pester before building, then the live verifier and `npm run test:auth --workspace robotic-training-data-tool` against the built NGINX frontend. The real-SDK browser suite requires no Entra credentials; scheduled/manual runs additionally execute ZAP. See the [viewer authentication guidance](../data-management/viewer/README.md#-authentication-with-entra-id) for registration, rollback and live acceptance.
 
 ### Gitleaks Scan Scope
 
@@ -168,14 +239,14 @@ The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.
 
 Findings are written to `binary-freshness-results.sarif` with per-rule `helpUri` values pointing at the appropriate remediation script. The check distinguishes integrity failures from advisory chart drift and unavailable upstream lookups:
 
-| Result | SARIF | Scanner exit | Workflow effect |
-|--------|-------|--------------|-----------------|
-| Clean | No findings | `0` | Success after SARIF upload |
-| Confirmed binary hash mismatch | Warning, `hash-mismatch` | `1` | Failure; SARIF still uploads |
-| Chart version drift | Warning, `version-drift` | `0` | Success with visible alert |
-| Binary download or chart lookup unavailable | Warning, `download-failure` or `lookup-failure` | `0` | Success with visible alert |
-| Scanner setup or report error | SARIF may be absent | `2` | Failure |
-| SARIF ingestion error | Upload step fails | Scanner exit unchanged | Failure |
+| Result                                      | SARIF                                           | Scanner exit           | Workflow effect              |
+|---------------------------------------------|-------------------------------------------------|------------------------|------------------------------|
+| Clean                                       | No findings                                     | `0`                    | Success after SARIF upload   |
+| Confirmed binary hash mismatch              | Warning, `hash-mismatch`                        | `1`                    | Failure; SARIF still uploads |
+| Chart version drift                         | Warning, `version-drift`                        | `0`                    | Success with visible alert   |
+| Binary download or chart lookup unavailable | Warning, `download-failure` or `lookup-failure` | `0`                    | Success with visible alert   |
+| Scanner setup or report error               | SARIF may be absent                             | `2`                    | Failure                      |
+| SARIF ingestion error                       | Upload step fails                               | Scanner exit unchanged | Failure                      |
 
 A successful HTTP response is not sufficient evidence for a binary mismatch: the scanner rejects JSON/HTML responses and malformed ZIP/GZIP bodies before hashing. In September 2026 the pinned NGC CLI 3.41.4 URL returned a changing JSON status response rather than the expected ZIP archive. Do not replace the NGC SHA-256 pin with the hash of that response. Obtain and independently verify the ZIP through NVIDIA's supported download path before changing the pin.
 

@@ -5,6 +5,10 @@ Provides endpoints for trajectory analysis, anomaly detection,
 and episode clustering.
 """
 
+from __future__ import annotations
+
+import math
+
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -31,6 +35,8 @@ def _validate_matrix(values: list[list[float]], field_name: str) -> None:
         raise HTTPException(status_code=400, detail=f"{field_name} rows must not be empty")
     if values and any(len(row) != len(values[0]) for row in values[1:]):
         raise HTTPException(status_code=400, detail=f"{field_name} rows must have equal length")
+    if any(not math.isfinite(value) for row in values for value in row):
+        raise HTTPException(status_code=400, detail=f"{field_name} must contain only finite values")
 
 
 def _validate_trajectory_inputs(
@@ -90,7 +96,7 @@ class TrajectoryMetricsResponse(BaseModel):
     flags: list[str] = Field(description="Detected quality flags")
 
     @classmethod
-    def from_metrics(cls, metrics: TrajectoryMetrics) -> "TrajectoryMetricsResponse":
+    def from_metrics(cls, metrics: TrajectoryMetrics) -> TrajectoryMetricsResponse:
         """Create from TrajectoryMetrics dataclass."""
         return cls(
             smoothness=metrics.smoothness,
@@ -117,7 +123,7 @@ class AnomalyResponse(BaseModel):
     auto_detected: bool = Field(default=True, description="Auto-detected flag")
 
     @classmethod
-    def from_anomaly(cls, anomaly: DetectedAnomaly) -> "AnomalyResponse":
+    def from_anomaly(cls, anomaly: DetectedAnomaly) -> AnomalyResponse:
         """Create from DetectedAnomaly dataclass."""
         return cls(
             id=anomaly.id,
@@ -294,6 +300,8 @@ async def cluster_episodes(request: ClusterRequest) -> ClusterResponse:
     """
     if len(request.trajectories) < 2:
         raise HTTPException(status_code=400, detail="At least 2 trajectories required for clustering")
+    if request.num_clusters is not None and request.num_clusters > len(request.trajectories):
+        raise HTTPException(status_code=400, detail="num_clusters must not exceed the number of trajectories")
 
     for index, trajectory in enumerate(request.trajectories):
         _validate_matrix(trajectory, f"trajectories[{index}]")

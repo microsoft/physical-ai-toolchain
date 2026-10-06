@@ -5,6 +5,10 @@ import { AuthGate } from '../AuthGate'
 
 const mockLoginRedirect = vi.fn()
 
+vi.mock('../MediaAuthGate', () => ({
+  MediaAuthGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
 vi.mock('@azure/msal-react', () => ({
   AuthenticatedTemplate: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="authenticated">{children}</div>
