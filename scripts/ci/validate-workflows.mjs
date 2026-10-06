@@ -21,6 +21,40 @@ const outcomeAction = './.github/actions/ci-outcome';
 // Ref pinning is enforced by the dependency pinning lane so Dependabot ref bumps do not break bindings.
 const actionPath = uses => String(uses ?? '').split('@')[0];
 
+function githubExpressionBodies(value) {
+  const bodies = [];
+  let cursor = 0;
+  while ((cursor = value.indexOf('${{', cursor)) !== -1) {
+    const bodyStart = cursor + 3;
+    let quoted = false;
+    let closed = false;
+    for (cursor = bodyStart; cursor < value.length - 1; cursor++) {
+      if (value[cursor] === "'") {
+        if (quoted && value[cursor + 1] === "'") cursor++;
+        else quoted = !quoted;
+      } else if (!quoted && value.slice(cursor, cursor + 2) === '}}') {
+        bodies.push(value.slice(bodyStart, cursor));
+        cursor += 2;
+        closed = true;
+        break;
+      }
+    }
+    if (!closed) break;
+  }
+  return bodies;
+}
+
+function referencesSecretsContext(value) {
+  if (typeof value === 'string') {
+    return githubExpressionBodies(value).some(body => {
+      const expressionBody = body.replace(/'(?:''|[^'])*'/g, "''");
+      return /(?:^|[^A-Za-z0-9_.])secrets\s*(?:\.|\[)/.test(expressionBody);
+    });
+  }
+  if (Array.isArray(value)) return value.some(referencesSecretsContext);
+  return isObject(value) && Object.values(value).some(referencesSecretsContext);
+}
+
 function jsonInput(value) {
   try { return JSON.parse(value); } catch { return undefined; }
 }
@@ -498,7 +532,7 @@ export function validateWorkflows(graph, contract = loadContract()) {
   visit(contract.orchestrators.pr.path);
   for (const path of reachable) {
     const workflow = graph[path];
-    if (workflow) check(!JSON.stringify(workflow).includes('${{ secrets.'), `${path}: merge-group-reachable secret reference is forbidden`);
+    if (workflow) check(!referencesSecretsContext(workflow), `${path}: merge-group-reachable secret reference is forbidden`);
   }
   for (const output of [...Object.keys(contract.selectors), 'selection_status', 'base_sha', 'head_sha', 'file_count', 'selection_reasons']) {
     check(changes?.outputs?.[output] === `\${{ steps.filter.outputs.${output} }}`, `Missing selector output: ${output}`);

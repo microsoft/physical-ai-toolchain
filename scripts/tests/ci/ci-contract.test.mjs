@@ -2259,9 +2259,16 @@ for (const [name, mutate, diagnostic] of [
   ['unverified range input', candidate => {
     candidate[prPath].jobs.changes.steps.find(step => step.id === 'filter').env.BASE_SHA = '${{ github.event.merge_group.base_sha }}';
   }, 'verified resolver outputs'],
-  ['secret introduction', candidate => {
-    candidate[prPath].jobs.changes.steps.find(step => step.id === 'range').env.TEST_SECRET = '${{ secrets.TEST_SECRET }}';
-  }, 'merge-group-reachable secret reference'],
+  ...[
+    '${{ secrets.TEST_SECRET }}',
+    '${{secrets.TEST_SECRET}}',
+    "${{ secrets['TEST_SECRET'] }}",
+    '${{ secrets["TEST_SECRET"] }}',
+    "${{ format('{0}', secrets.TEST_SECRET) }}",
+    "${{ format('}}', secrets.TEST_SECRET) }}",
+  ].map((reference, index) => [`secret introduction form ${index + 1}`, candidate => {
+    candidate[prPath].jobs.changes.steps.find(step => step.id === 'range').env.TEST_SECRET = reference;
+  }, 'merge-group-reachable secret reference']),
 ]) {
   test(`merge queue contract: rejects ${name}`, () => {
     const candidate = structuredClone(graph);
@@ -2270,6 +2277,12 @@ for (const [name, mutate, diagnostic] of [
     assert.ok(errors.some(error => error.includes(diagnostic)), JSON.stringify(errors));
   });
 }
+
+test('merge queue contract: ignores secrets-like text inside expression string literals', () => {
+  const candidate = structuredClone(graph);
+  candidate[prPath].env = { HARMLESS_TEXT: "${{ format('secrets.TEST_SECRET') }}" };
+  assert.deepEqual(validateWorkflows(candidate, contract), []);
+});
 
 test('release policy: an explicit success condition is allowed', () => {
   const candidate = structuredClone(graph);
