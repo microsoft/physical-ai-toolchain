@@ -23,6 +23,14 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(import.meta.dirname, './src'),
       },
     },
+    build: {
+      rollupOptions: {
+        input: {
+          app: path.resolve(import.meta.dirname, 'index.html'),
+          redirect: path.resolve(import.meta.dirname, 'redirect.html'),
+        },
+      },
+    },
     server: {
       host: true,
       port: 5173,
