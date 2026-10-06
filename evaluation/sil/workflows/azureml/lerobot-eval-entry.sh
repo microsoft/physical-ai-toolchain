@@ -12,6 +12,12 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "
 source "${REPO_ROOT}/training/il/scripts/lerobot/lerobot-azureml.sh"
 
 LEROBOT_PROJECT="${LEROBOT_PROJECT:-training/il/lerobot}"
+case "${POLICY_TYPE:-act}" in
+  pi0|pi0_fast|pi05|smolvla)
+    [[ "${LEROBOT_PROJECT}" == "training/il/lerobot" ]] && LEROBOT_PROJECT="training/vla/lerobot"
+    ;;
+esac
+
 case "${LEROBOT_PROJECT}" in
   /*|../*|*/../*|*/..)
     echo "ERROR: LEROBOT_PROJECT must be a repo-relative path without parent traversal: ${LEROBOT_PROJECT}" >&2
@@ -27,7 +33,7 @@ fi
 runtime_modules=(av azure.ai.ml azure.identity azure.storage.blob azureml.mlflow lerobot matplotlib mlflow pyarrow)
 case "${POLICY_TYPE:-act}" in
   diffusion) runtime_modules+=(diffusers) ;;
-  pi0|pi0_fast) runtime_modules+=(scipy tokenizers transformers) ;;
+  pi0|pi0_fast|pi05|smolvla) runtime_modules+=(scipy tokenizers transformers) ;;
 esac
 ensure_lerobot_runtime \
   "${LEROBOT_EVAL_VENV:-/opt/lerobot-eval-venv}" \

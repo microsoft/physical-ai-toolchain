@@ -188,7 +188,7 @@ class TestPolicyRunner:
         assert runner.metrics.total_inference_s >= 0
         assert runner.metrics.total_preprocess_s >= 0
 
-    @pytest.mark.parametrize("policy_type", ["pi0", "pi0_fast"])
+    @pytest.mark.parametrize("policy_type", ["pi0", "pi0_fast", "pi05", "smolvla"])
     def test_vla_step_requires_task(
         self,
         policy_type: str,
@@ -207,7 +207,7 @@ class TestPolicyRunner:
         with pytest.raises(ValueError, match="require a non-empty task description"):
             runner.step(RobotObservation(joint_positions=joint_positions, color_image=color_image))
 
-    @pytest.mark.parametrize("policy_type", ["pi0", "pi0_fast"])
+    @pytest.mark.parametrize("policy_type", ["pi0", "pi0_fast", "pi05", "smolvla"])
     def test_vla_step_propagates_task_and_uses_tensor_postprocessor(
         self,
         policy_type: str,
@@ -291,7 +291,7 @@ class TestPolicyRunnerFromPretrained:
             == "0123456789abcdef0123456789abcdef01234567"
         )
 
-    @pytest.mark.parametrize("policy_type", ["pi0", "pi0_fast"])
+    @pytest.mark.parametrize("policy_type", ["pi0", "pi0_fast", "pi05", "smolvla"])
     def test_loads_vla_policy_with_paired_processors(
         self,
         policy_type: str,
