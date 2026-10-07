@@ -278,16 +278,18 @@ The uv version is intentionally replicated across bootstrap entry points. Update
 
 All other references to these pins are read-only consumers:
 
-| Consumer                                    | Role                                                                                                 |
-|---------------------------------------------|------------------------------------------------------------------------------------------------------|
-| `scripts/update-chart-hashes.sh`            | Writes chart versions + SHAs back into `defaults.conf` via `sed`; no other file touched.             |
-| `scripts/security/Test-BinaryFreshness.ps1` | Reads the canonical pin files with format-specific extractors to compare artifacts against upstream. |
-| `docs/contributing/component-updates.md`    | Documents `defaults.conf` as authoritative for chart pins.                                           |
-| `.env.local.example`                        | User-override stubs only — does not redefine defaults.                                               |
+| Consumer                                    | Role                                                                                                            |
+|---------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| `scripts/update-chart-hashes.sh`            | Writes chart versions + SHAs back into `defaults.conf` via `sed`; keeps the KAI version; no other file touched. |
+| `scripts/security/Test-BinaryFreshness.ps1` | Reads the canonical pin files with format-specific extractors to compare artifacts against upstream.            |
+| `docs/contributing/component-updates.md`    | Documents `defaults.conf` as authoritative for chart pins.                                                      |
+| `.env.local.example`                        | User-override stubs only — does not redefine defaults.                                                          |
 
 ### 🔄 Updating Chart Pins
 
 Run `scripts/update-chart-hashes.sh` locally after bumping any pinned Helm chart version. The script runs `helm pull` for each chart, computes the SHA-256, and rewrites the matching `VAR="${VAR:-...}"` line in `infrastructure/setup/defaults.conf` so the runtime default stays in sync with the upstream digest. Commit the resulting `defaults.conf` diff alongside the chart-version bump.
+
+The script doesn't bump KAI Scheduler. `KAI_SCHEDULER_VERSION` follows the KAI release NVIDIA tests with the pinned OSMO version, and a new version also needs new image digests for the KAI operator and its install hooks, so the script only refreshes the pinned KAI chart's hash and warns when a newer release exists. Both this script and the freshness check skip pre-release tags and the releases listed in `KAI_SCHEDULER_RETRACTED_VERSIONS`.
 
 Freshness alone does not establish chart digest, paired OSMO image, or deployed GPU compatibility. Keep the GPU Operator and OSMO chart defaults until a coordinated chart-and-hash update passes deployment compatibility validation.
 
