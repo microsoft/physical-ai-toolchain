@@ -24,7 +24,7 @@ dependencies = [
     "azure-core==1.41.0",
     "azure-storage-blob==12.30.3",
     "azure-identity==1.25.3",
-    "azure-ai-ml==1.35.0",
+    "azure-ai-ml==1.35.1",
     "azureml-mlflow==1.62.0.post6",
     # azure-ai-ml allows newer prerelease storage clients when prerelease
     # resolution is enabled for telemetry; keep storage clients on stable rails.
@@ -41,7 +41,7 @@ dependencies = [
     # and hf-xet alpha/dev releases; pin stable versions unless a direct
     # dependency requires them.
     "pydantic==2.13.5",
-    "sentry-sdk==2.70.0",
+    "sentry-sdk==2.71.0",
     "hf-xet==1.6.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
@@ -72,7 +72,7 @@ dependencies = [
     "torchcodec==0.16.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via
     # mlflow-skinny and wandb).
-    "gitpython==3.1.62",
+    "gitpython==3.2.0",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.8.0",
     # Pin cryptography above the 48.0.1 security floor for
@@ -82,7 +82,7 @@ dependencies = [
     # Pin wrapt explicitly to 2.4.0. opentelemetry-instrumentation accepts
     # wrapt>=1.0,<3.0, so the 2.x line is in range; the explicit pin prevents
     # the prerelease resolver from selecting a stray 2.x release candidate.
-    "wrapt==2.4.1",
+    "wrapt==2.5.0",
 ]
 
 [build-system]
