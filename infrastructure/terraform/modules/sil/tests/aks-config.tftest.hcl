@@ -577,7 +577,7 @@ run "auto_scaler_profile_set" {
       should_enable_private_cluster               = false
       auto_scaler_profile = {
         expander               = "least-waste"
-        new_pod_scale_up_delay = "2m"
+        new_pod_scale_up_delay = "120s"
       }
     }
   }
@@ -588,7 +588,7 @@ run "auto_scaler_profile_set" {
   }
 
   assert {
-    condition     = azurerm_kubernetes_cluster.main.auto_scaler_profile[0].new_pod_scale_up_delay == "2m"
+    condition     = azurerm_kubernetes_cluster.main.auto_scaler_profile[0].new_pod_scale_up_delay == "120s"
     error_message = "new_pod_scale_up_delay should pass through to the cluster autoscaler profile"
   }
 }
@@ -644,6 +644,35 @@ run "rejects_invalid_new_pod_scale_up_delay" {
       should_enable_private_cluster               = false
       auto_scaler_profile = {
         new_pod_scale_up_delay = "2 minutes"
+      }
+    }
+  }
+
+  expect_failures = [var.aks_config]
+}
+
+run "rejects_minutes_new_pod_scale_up_delay" {
+  command = plan
+
+  variables {
+    resource_prefix         = run.setup.resource_prefix
+    environment             = run.setup.environment
+    instance                = run.setup.instance
+    location                = run.setup.location
+    resource_group          = run.setup.resource_group
+    virtual_network         = run.setup.virtual_network
+    subnets                 = run.setup.subnets
+    network_security_group  = run.setup.network_security_group
+    nat_gateway             = run.setup.nat_gateway
+    log_analytics_workspace = run.setup.log_analytics_workspace
+    container_registry      = run.setup.container_registry
+    aks_config = {
+      system_node_pool_vm_size                    = "Standard_D8ds_v5"
+      system_node_pool_node_count                 = 2
+      should_enable_system_node_pool_auto_scaling = false
+      should_enable_private_cluster               = false
+      auto_scaler_profile = {
+        new_pod_scale_up_delay = "2m"
       }
     }
   }

@@ -106,8 +106,8 @@ variable "aks_config" {
   }
 
   validation {
-    condition     = try(var.aks_config.auto_scaler_profile.new_pod_scale_up_delay, null) == null ? true : can(regex("^([0-9]+(\\.[0-9]+)?(ms|s|m|h))+$", var.aks_config.auto_scaler_profile.new_pod_scale_up_delay))
-    error_message = "aks_config.auto_scaler_profile.new_pod_scale_up_delay must be a duration such as 0s, 2m, or 10m."
+    condition     = try(var.aks_config.auto_scaler_profile.new_pod_scale_up_delay, null) == null ? true : can(regex("^[0-9]+s$", var.aks_config.auto_scaler_profile.new_pod_scale_up_delay))
+    error_message = "aks_config.auto_scaler_profile.new_pod_scale_up_delay must be whole seconds such as 0s, 120s, or 600s; AKS rejects other units."
   }
 }
 

@@ -199,14 +199,14 @@ Check the plan a version supports with `az aks get-versions --location <region>`
 ```hcl
 aks_auto_scaler_profile = {
   expander               = "least-waste"
-  new_pod_scale_up_delay = "2m"
+  new_pod_scale_up_delay = "120s"
 }
 ```
 
-| Field                    | Values                                                         | AKS default |
-|--------------------------|----------------------------------------------------------------|-------------|
-| `expander`               | `least-waste`, `most-pods`, `priority`, or `random`            | `random`    |
-| `new_pod_scale_up_delay` | How old a pending pod must be before it can trigger a scale-up | `0s`        |
+| Field                    | Values                                                                                                          | AKS default |
+|--------------------------|-----------------------------------------------------------------------------------------------------------------|-------------|
+| `expander`               | `least-waste`, `most-pods`, `priority`, or `random`                                                             | `random`    |
+| `new_pod_scale_up_delay` | How old a pending pod must be before it can trigger a scale-up, in whole seconds (AKS rejects `2m`; use `120s`) | `0s`        |
 
 Clusters whose GPU pools scale from zero use both settings so that CPU pods waiting briefly while the cluster starts don't add a GPU node; see [Scale-from-zero GPU Pools](../training/azureml-training.md#-scale-from-zero-gpu-pools). Removing the input later doesn't reset the cluster. Set the values you want explicitly instead.
 

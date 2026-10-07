@@ -34,7 +34,7 @@ system_node_pool_node_count = 1
 // GPU pools that scale from zero use both settings; see docs/training/azureml-training.md.
 // aks_auto_scaler_profile = {
 //   expander               = "least-waste"
-//   new_pod_scale_up_delay = "2m"
+//   new_pod_scale_up_delay = "120s" // whole seconds only; AKS rejects "2m"
 // }
 
 // GPU Node Pools
