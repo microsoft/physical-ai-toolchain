@@ -69,8 +69,12 @@ variable "aks_config" {
     should_enable_microsoft_defender            = optional(bool, false)
     sku_tier                                    = optional(string, "Standard")
     support_plan                                = optional(string, "KubernetesOfficial")
+    auto_scaler_profile = optional(object({
+      expander               = optional(string)
+      new_pod_scale_up_delay = optional(string)
+    }))
   })
-  description = "AKS cluster configuration for the system node pool, SKU tier, and support plan. AKSLongTermSupport requires the Premium tier"
+  description = "AKS cluster configuration for the system node pool, SKU tier, support plan, and cluster autoscaler profile. AKSLongTermSupport requires the Premium tier. A null auto_scaler_profile leaves the cluster's autoscaler profile unchanged"
   default = {
     system_node_pool_vm_size                    = "Standard_D8ds_v5"
     system_node_pool_node_count                 = 2
@@ -94,6 +98,16 @@ variable "aks_config" {
   validation {
     condition     = var.aks_config.support_plan != "AKSLongTermSupport" || var.aks_config.sku_tier == "Premium"
     error_message = "aks_config.support_plan AKSLongTermSupport requires aks_config.sku_tier Premium."
+  }
+
+  validation {
+    condition     = try(var.aks_config.auto_scaler_profile.expander, null) == null ? true : contains(["least-waste", "most-pods", "priority", "random"], var.aks_config.auto_scaler_profile.expander)
+    error_message = "aks_config.auto_scaler_profile.expander must be least-waste, most-pods, priority, or random."
+  }
+
+  validation {
+    condition     = try(var.aks_config.auto_scaler_profile.new_pod_scale_up_delay, null) == null ? true : can(regex("^([0-9]+(\\.[0-9]+)?(ms|s|m|h))+$", var.aks_config.auto_scaler_profile.new_pod_scale_up_delay))
+    error_message = "aks_config.auto_scaler_profile.new_pod_scale_up_delay must be a duration such as 0s, 2m, or 10m."
   }
 }
 

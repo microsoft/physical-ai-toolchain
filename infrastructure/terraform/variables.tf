@@ -482,6 +482,15 @@ variable "aks_support_plan" {
   default     = "KubernetesOfficial"
 }
 
+variable "aks_auto_scaler_profile" {
+  type = object({
+    expander               = optional(string)
+    new_pod_scale_up_delay = optional(string)
+  })
+  description = "Optional AKS cluster autoscaler settings. expander: least-waste, most-pods, priority, or random. new_pod_scale_up_delay: how old a pending pod must be before it can trigger a scale-up, as a duration such as 0s, 2m, or 10m. Null leaves the cluster's autoscaler profile unchanged"
+  default     = null
+}
+
 /*
  * Observability Feature Flags - Optional
  */

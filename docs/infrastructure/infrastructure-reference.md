@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Infrastructure Reference
 description: Architecture, module structure, outputs, and troubleshooting for the Terraform deployment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-01
+ms.date: 2026-10-07
 ms.topic: reference
 keywords:
   - architecture
@@ -191,6 +191,24 @@ aks_support_plan = "AKSLongTermSupport"
 ```
 
 Check the plan a version supports with `az aks get-versions --location <region>`. A version that lists only `AKSLongTermSupport` can't move back to `KubernetesOfficial` until the cluster upgrades to a version that lists both. When a cluster was moved to Premium or long-term support outside Terraform, set these values to match before the next apply; otherwise the plan reverts the tier.
+
+### AKS cluster autoscaler profile
+
+`aks_auto_scaler_profile` sets the cluster autoscaler's expander and new-pod delay. Leave it unset to keep the cluster's current profile:
+
+```hcl
+aks_auto_scaler_profile = {
+  expander               = "least-waste"
+  new_pod_scale_up_delay = "2m"
+}
+```
+
+| Field                    | Values                                                         | AKS default |
+|--------------------------|----------------------------------------------------------------|-------------|
+| `expander`               | `least-waste`, `most-pods`, `priority`, or `random`            | `random`    |
+| `new_pod_scale_up_delay` | How old a pending pod must be before it can trigger a scale-up | `0s`        |
+
+Clusters whose GPU pools scale from zero use both settings so that CPU pods waiting briefly while the cluster starts don't add a GPU node; see [Scale-from-zero GPU Pools](../training/azureml-training.md#-scale-from-zero-gpu-pools). Removing the input later doesn't reset the cluster. Set the values you want explicitly instead.
 
 ## 📦 Modules
 
