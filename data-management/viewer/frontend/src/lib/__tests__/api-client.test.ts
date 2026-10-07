@@ -189,6 +189,10 @@ describe('fetchEpisode', () => {
     )
 
     const result = await fetchEpisode('ds-1', 5)
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/5', {
+      cache: 'no-store',
+      headers: {},
+    })
     expect(result.meta).toHaveProperty('episodeIndex', 5)
     expect(result).toHaveProperty('videoUrls')
     expect(result).toHaveProperty('trajectoryData')

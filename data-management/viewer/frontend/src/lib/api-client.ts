@@ -365,8 +365,10 @@ export async function fetchEpisodes(
  * Fetch a specific episode by index.
  */
 export async function fetchEpisode(datasetId: string, episodeIndex: number): Promise<EpisodeData> {
-  return apiRequest(`/datasets/${datasetId}/episodes/${episodeIndex}`, {}, (data) =>
-    preserveEpisodeVariableKeys(data as Record<string, unknown>),
+  return apiRequest(
+    `/datasets/${datasetId}/episodes/${episodeIndex}`,
+    { cache: 'no-store' },
+    (data) => preserveEpisodeVariableKeys(data as Record<string, unknown>),
   )
 }
 

@@ -21,7 +21,7 @@ from slowapi.errors import RateLimitExceeded
 
 from .auth import MediaSession, PrincipalContext, issue_media_session, require_auth, require_principal_context
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token, require_csrf_token
-from .middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddleware
+from .middleware import ContentSizeLimitMiddleware, EpisodeCompressionMiddleware, SecurityHeadersMiddleware
 from .rate_limiter import limiter
 from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, vlm_judge
 from .routes import ai_analysis
@@ -177,6 +177,7 @@ async def validation_exception_handler(request, exc: RequestValidationError) -> 
 # Middleware stack (last added = outermost = first to execute)
 # Order: SecurityHeaders → ContentSizeLimit → CORS → FastAPI App
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(EpisodeCompressionMiddleware, minimum_size=1024, compresslevel=1)
 app.add_middleware(
     ContentSizeLimitMiddleware,
     max_content_length=int(os.environ.get("MAX_REQUEST_BODY_BYTES", str(10 * 1024 * 1024))),
