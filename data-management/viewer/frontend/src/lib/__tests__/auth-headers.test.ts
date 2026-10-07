@@ -3,7 +3,7 @@ import type {
   AuthenticationResult,
   PublicClientApplication,
 } from '@azure/msal-browser'
-import { InteractionRequiredAuthError } from '@azure/msal-browser'
+import { BrowserAuthError, InteractionRequiredAuthError } from '@azure/msal-browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockIsAuthEnabled = vi.hoisted(() => ({ value: false }))
@@ -93,16 +93,18 @@ describe('auth-headers', () => {
     })
   })
 
-  it('returns empty headers on unexpected errors', async () => {
+  it.each([
+    new Error('network error'),
+    new BrowserAuthError('timed_out', 'iframe failure', 'redirect_bridge_timeout'),
+  ])('propagates unexpected acquisition failures unchanged: %s', async (error) => {
     mockIsAuthEnabled.value = true
     const mockAccount = { homeAccountId: 'test' } as AccountInfo
     const mockInstance = {
       getActiveAccount: vi.fn().mockReturnValue(mockAccount),
-      acquireTokenSilent: vi.fn().mockRejectedValue(new Error('network error')),
+      acquireTokenSilent: vi.fn().mockRejectedValue(error),
     } as unknown as PublicClientApplication
     setMsalInstance(mockInstance)
 
-    const headers = await getAuthHeaders()
-    expect(headers).toEqual({})
+    await expect(getAuthHeaders()).rejects.toBe(error)
   })
 })

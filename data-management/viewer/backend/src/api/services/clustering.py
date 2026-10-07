@@ -5,6 +5,8 @@ Uses trajectory features and hierarchical clustering to group
 similar episodes together.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -96,6 +98,12 @@ class EpisodeClusterer:
                 cluster_sizes={0: len(trajectories)},
                 silhouette_score=1.0,
             )
+
+        # Use a shared scale when squared statistics or path lengths could overflow.
+        magnitude = max(np.max(np.abs(trajectory), initial=0.0) for trajectory in trajectories)
+        safe_magnitude = np.sqrt(np.finfo(np.float64).max) / (4 * max(sum(t.size for t in trajectories), 1))
+        if magnitude > safe_magnitude:
+            trajectories = [trajectory / magnitude for trajectory in trajectories]
 
         # Extract features from each trajectory
         features = np.array([self._extract_features(t) for t in trajectories])

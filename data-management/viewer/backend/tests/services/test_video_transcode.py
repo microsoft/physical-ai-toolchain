@@ -91,7 +91,6 @@ def test_transcoding_available_requires_both_tools(
     assert video_transcode.transcoding_available() is expected
 
 
-@pytest.mark.asyncio
 async def test_ensure_browser_compatible_returns_source_when_tools_are_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -108,7 +107,6 @@ async def test_ensure_browser_compatible_returns_source_when_tools_are_missing(
     subprocess.assert_not_awaited()
 
 
-@pytest.mark.asyncio
 async def test_ensure_browser_compatible_returns_source_for_supported_probe_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -134,7 +132,6 @@ async def test_ensure_browser_compatible_returns_source_for_supported_probe_resu
         (_FakeProcess(0, stdout=b'{"streams": []}'), "missing video stream"),
     ],
 )
-@pytest.mark.asyncio
 async def test_ensure_browser_compatible_returns_source_when_probe_has_no_codec(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -153,7 +150,6 @@ async def test_ensure_browser_compatible_returns_source_when_probe_has_no_codec(
     _assert_probe_call(calls[0], source)
 
 
-@pytest.mark.asyncio
 async def test_ensure_browser_compatible_atomically_replaces_successful_transcode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -209,7 +205,6 @@ async def test_ensure_browser_compatible_atomically_replaces_successful_transcod
     }
 
 
-@pytest.mark.asyncio
 async def test_ensure_browser_compatible_removes_failed_transcode_partial(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -235,7 +230,6 @@ async def test_ensure_browser_compatible_removes_failed_transcode_partial(
     _assert_probe_call(calls[0], source)
 
 
-@pytest.mark.asyncio
 async def test_ensure_browser_compatible_reuses_completed_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

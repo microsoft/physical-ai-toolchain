@@ -133,6 +133,7 @@ ensure_uv() {
     temp_dir="$(mktemp -d)"
     archive="${temp_dir}/uv.tar.gz"
     for attempt in 1 2 3; do
+        # pinning-ignore: UV_SHA256 is verified after retries and before extraction
         if http_code="$(curl -LsSf --proto '=https' --proto-redir '=https' \
             --connect-timeout 10 --max-time 35 -w '%{http_code}' \
             "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \

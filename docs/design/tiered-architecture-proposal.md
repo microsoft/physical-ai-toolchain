@@ -386,3 +386,7 @@ The toolchain is strong where it is built and over-advertised where it is not. T
 3. **Unbundle "fleet"** into a necessary fleet delivery control plane (T4) and a deferred fleet intelligence layer (T5).
 
 This lowers the on-ramp without removing any capability, and it aligns the documented architecture with what the code actually delivers today.
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

@@ -13,6 +13,15 @@ on:
         required: false
         type: boolean
         default: true
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.checkov.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.checkov.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.checkov.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.checkov.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.checkov.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.checkov.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.checkov.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.checkov.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -21,6 +30,16 @@ jobs:
   checkov:
     name: Checkov
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
       security-events: write
@@ -55,3 +74,14 @@ jobs:
           name: checkov-sarif
           path: results.sarif
           retention-days: 30
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: terraform-security
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["checkov"]'
+          reports: '[{"path":"results.sarif","kind":"sarif","tool":"Checkov"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

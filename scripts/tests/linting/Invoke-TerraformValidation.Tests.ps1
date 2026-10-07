@@ -235,7 +235,7 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
             $diagnostic = @{ severity = $Severity; summary = 'Diagnostic summary' } + $Fields
             if ($HasDetail) { $diagnostic.detail = 'Diagnostic detail' }
             $expectedAnnotationLine = if ($ExpectedLine -gt 0) { $ExpectedLine } else { $null }
-            $script:ValidateResponse = @{ diagnostics = @($diagnostic) } | ConvertTo-Json -Depth 10
+            $script:ValidateResponse = @{ valid = $true; error_count = 0; diagnostics = @($diagnostic) } | ConvertTo-Json -Depth 10
             $script:ValidateExitCode = $ExitCode
             Mock terraform {
                 $global:LASTEXITCODE = $script:ValidateExitCode
@@ -308,7 +308,7 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
             Mock terraform {
                 $script:ValidatedDirectories += (Get-Location).Path
                 $global:LASTEXITCODE = 0
-                return '{"valid":true,"diagnostics":[]}'
+                return '{"valid":true,"error_count":0,"diagnostics":[]}'
             } -ParameterFilter { $args[0] -eq 'validate' }
 
             $result = Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
@@ -372,7 +372,7 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
                     return $script:InvalidValidateOutput
                 }
                 $global:LASTEXITCODE = 0
-                return '{"valid":true,"diagnostics":[]}'
+                return '{"valid":true,"error_count":0,"diagnostics":[]}'
             } -ParameterFilter { $args[0] -eq 'validate' }
 
             $result = Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
@@ -606,6 +606,25 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
     }
 
     Context 'per-directory validation' {
+        It 'Fails full validation if one expected deployment directory is missing' {
+            Remove-Item (Join-Path $script:TestTerraformDir 'vpn') -Recurse -Force
+            Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir | Should -Be 1
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.summary.directories_expected | Should -Be 4
+            $json.summary.overall_passed | Should -BeFalse
+            Should -Invoke terraform -Times 3 -Exactly -ParameterFilter { $args[0] -eq 'validate' }
+        }
+
+        It 'Fails when a zero-exit validation report declares invalid configuration' {
+            Mock terraform {
+                $global:LASTEXITCODE = 0
+                '{"valid":false,"error_count":0,"diagnostics":[]}'
+            } -ParameterFilter { $args[0] -eq 'validate' }
+            Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir | Should -Be 1
+        }
+
         It 'Validates all 4 directories by default' {
             Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
                 -TerraformDir $script:TestTerraformDir
