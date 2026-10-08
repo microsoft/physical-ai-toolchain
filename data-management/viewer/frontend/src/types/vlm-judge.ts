@@ -55,6 +55,27 @@ export interface VlmJudgeRunOptions {
   force?: boolean
 }
 
+export interface JudgeJob {
+  id: string
+  datasetId: string
+  status: 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled'
+  total: number
+  judged: number
+  applied: number
+  errors: number
+  config: { processMethod?: string }
+  targets?: Array<{
+    episodeIndex: number
+    status: string
+    input: SavedInputSnapshot
+    result: VlmJudgeResult | null
+    resultId: string | null
+    cached?: boolean
+    error: string | null
+    applied: boolean
+  }>
+}
+
 export interface SavedInputSnapshot {
   snapshotId: string
   datasetId: string

@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 import src.api.routers.labels as labels_mod
 from src.api.models.contributions import MachineOrigin
+from src.api.services import label_storage as label_storage_mod
 from src.api.services.dataset_service import get_dataset_service
 
 
@@ -39,7 +40,7 @@ class LabelBlobProvider:
 
     async def download_blob(self) -> SimpleNamespace:
         if self.content is None:
-            raise labels_mod.ResourceNotFoundError("Missing blob")
+            raise label_storage_mod.ResourceNotFoundError("Missing blob")
         return SimpleNamespace(readall=self.readall, properties=SimpleNamespace(etag=self.etag))
 
     async def readall(self) -> bytes:
@@ -848,14 +849,14 @@ async def test_local_storage_load_missing_returns_defaults(tmp_path: Path) -> No
 
 
 async def test_blob_label_storage_rejects_invalid_content(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.DEBUG, logger=labels_mod.__name__)
+    caplog.set_level(logging.DEBUG, logger=label_storage_mod.__name__)
     provider = LabelBlobProvider(b"private-annotation-content")
     storage = labels_mod.BlobLabelStorage(provider)
 
     with pytest.raises(HTTPException, match="Invalid labels data"):
         await storage.load("data\r\nset")
 
-    messages = [record.getMessage() for record in caplog.records if record.name == labels_mod.__name__]
+    messages = [record.getMessage() for record in caplog.records if record.name == label_storage_mod.__name__]
     assert any(record.levelno == logging.WARNING for record in caplog.records)
     assert any(record.levelno == logging.DEBUG for record in caplog.records)
     assert any("dataset" in message for message in messages)
@@ -929,7 +930,7 @@ async def test_given_corrupt_blob_when_loading_labels_then_fails_visibly(content
 
 async def test_blob_label_storage_load_fails_when_provider_unavailable(caplog: pytest.LogCaptureFixture) -> None:
     """An unavailable authoritative store is not an empty record or synthetic revision."""
-    caplog.set_level(logging.DEBUG, logger=labels_mod.__name__)
+    caplog.set_level(logging.DEBUG, logger=label_storage_mod.__name__)
     provider = SimpleNamespace(
         _get_client=AsyncMock(side_effect=RuntimeError("metadata unavailable")),
         container_name="datasets",
@@ -944,7 +945,7 @@ async def test_blob_label_storage_load_fails_when_provider_unavailable(caplog: p
 
 
 async def test_given_existing_blob_when_create_only_then_returns_revision_conflict() -> None:
-    error = labels_mod.HttpResponseError(message="Already exists")
+    error = label_storage_mod.HttpResponseError(message="Already exists")
     error.status_code = 409
     error.error_code = "BlobAlreadyExists"
     blob = SimpleNamespace(upload_blob=AsyncMock(side_effect=error))
@@ -984,7 +985,7 @@ async def test_blob_label_storage_save_uploads_json() -> None:
     assert json.loads(args[0]) == labels_file.model_dump()
     assert kwargs["overwrite"] is True
     assert set(kwargs) == {"overwrite", "content_settings"}
-    if labels_mod.ContentSettings is None:
+    if label_storage_mod.ContentSettings is None:
         assert kwargs["content_settings"] is None
     else:
         assert kwargs["content_settings"].content_type == "application/json"
@@ -993,7 +994,7 @@ async def test_blob_label_storage_save_uploads_json() -> None:
 async def test_blob_label_storage_save_uses_matching_revision(monkeypatch: pytest.MonkeyPatch) -> None:
     """Blob label updates use Azure native ETag matching."""
     match_conditions = SimpleNamespace(IfNotModified="if-not-modified")
-    monkeypatch.setattr(labels_mod, "MatchConditions", match_conditions)
+    monkeypatch.setattr(label_storage_mod, "MatchConditions", match_conditions)
     blob_client = SimpleNamespace(upload_blob=AsyncMock(return_value={"etag": '"revision-two"'}))
     container = MagicMock()
     container.get_blob_client.return_value = blob_client
@@ -1047,7 +1048,7 @@ async def test_blob_label_storage_save_failure_raises_500(monkeypatch: pytest.Mo
     storage = labels_mod.BlobLabelStorage(provider)
 
     monkeypatch.setattr(
-        "src.api.routers.labels.logger.error",
+        "src.api.services.label_storage.logger.error",
         lambda message, *args: logged.append((message, *args)),
     )
 

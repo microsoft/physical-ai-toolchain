@@ -10,13 +10,18 @@ import csv
 import importlib.util
 import json
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 
 import pytest
+from evaluation.vlm_judge.dataset import EpisodeRecord
 
 from src.api.storage.base import RevisionConflictError
 
 _SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "vlm_label_dataset.py"
+
+
+def _episode(episode_index: int, instruction: str, duration_s: float = 1.0) -> EpisodeRecord:
+    return EpisodeRecord(f"episode_{episode_index:06d}", episode_index, instruction, 30, 30, {}, 0, duration_s)
 
 
 @pytest.fixture(scope="session")
@@ -41,6 +46,42 @@ def test_parse_label_strips_code_fences(mod: ModuleType) -> None:
 def test_parse_label_raises_without_json(mod: ModuleType) -> None:
     with pytest.raises(ValueError, match="No JSON object"):
         mod.parse_label("the model refused to answer")
+
+
+@pytest.mark.parametrize("payload", [{}, {"object": "cube"}, {"grasp_success": "true"}])
+def test_given_malformed_task_result_when_normalized_then_rejected(mod: ModuleType, payload: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match="label|result"):
+        mod._row_from_label(payload)
+
+
+def test_given_camera_windows_when_filmstrip_built_then_each_window_preserved(
+    mod: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from evaluation.vlm_judge.dataset import EpisodeRecord
+
+    record = EpisodeRecord(
+        "synthetic/3",
+        3,
+        "Saved instruction",
+        30,
+        30,
+        {"front": tmp_path / "front.mp4", "wrist": tmp_path / "wrist.mp4"},
+        1,
+        2,
+        video_windows={"front": (10, 11), "wrist": (20, 22)},
+    )
+    windows = []
+
+    def extract(window: object, **kwargs: object) -> list[object]:
+        windows.append((window.from_s, window.to_s))
+        return [object()]
+
+    monkeypatch.setattr(mod, "extract_frames", extract)
+    monkeypatch.setattr(mod, "tile_horizontally", lambda frames: frames[0])
+
+    mod.build_filmstrip(record, views=("front", "wrist"), n_frames=4, frame_size=64)
+
+    assert windows == [(10, 11), (20, 22)]
 
 
 @pytest.mark.parametrize(
@@ -197,18 +238,8 @@ def test_label_dataset_normalizes_rows_and_preserves_nested_dataset_id(
         )
     )
     records = [
-        SimpleNamespace(
-            episode_index=0,
-            episode_id="episode_000000",
-            instruction="Pick the cube",
-            duration_s=1.25,
-        ),
-        SimpleNamespace(
-            episode_index=1,
-            episode_id="episode_000001",
-            instruction="Pick the sphere",
-            duration_s=2.5,
-        ),
+        _episode(0, "Pick the cube", 1.25),
+        _episode(1, "Pick the sphere", 2.5),
     ]
 
     class FakeBackend:
@@ -223,7 +254,7 @@ def test_label_dataset_normalizes_rows_and_preserves_nested_dataset_id(
                 {
                     "pick_from": "FRONT",
                     "object": "red cube",
-                    "grasp_success": "true",
+                    "grasp_success": True,
                     "place_success": False,
                     "movement_quality": "Smooth approach.",
                 }
@@ -255,6 +286,8 @@ def test_label_dataset_normalizes_rows_and_preserves_nested_dataset_id(
 
     assert summary == {"labeled": 1, "total": 2, "errors": 1, "grasp_success": 1, "place_success": 0}
     assert rows[0] == {
+        "input_key": rows[0]["input_key"],
+        "snapshot_id": rows[0]["snapshot_id"],
         "episode_index": 0,
         "episode_id": "episode_000000",
         "instruction": "Pick the cube",
@@ -268,7 +301,7 @@ def test_label_dataset_normalizes_rows_and_preserves_nested_dataset_id(
         "notes": "",
         "error": None,
     }
-    assert rows[1]["error"] == "RuntimeError: inference failed"
+    assert rows[1]["error"] == "RuntimeError"
     assert len(csv_rows) == 2
     assert labels["episodes"] == {"9": ["SUCCESS"]}
     assert labels["dataset_id"] == "owner--dataset"
@@ -291,7 +324,7 @@ def test_label_dataset_normalizes_rows_and_preserves_nested_dataset_id(
     assert "1" not in labels["analysis"]
 
 
-def test_label_dataset_resumes_completed_episode_without_duplication(
+def test_label_dataset_reexecutes_legacy_results_without_input_identity(
     mod: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -315,8 +348,8 @@ def test_label_dataset_resumes_completed_episode_without_duplication(
     }
     (output_dir / "labels.jsonl").write_text(json.dumps(completed) + "\n")
     records = [
-        SimpleNamespace(episode_index=0, episode_id="episode_000000", instruction="Pick the cube", duration_s=1.0),
-        SimpleNamespace(episode_index=1, episode_id="episode_000001", instruction="Pick the ball", duration_s=1.0),
+        _episode(0, "Pick the cube"),
+        _episode(1, "Pick the ball"),
     ]
     generated: list[str] = []
 
@@ -357,8 +390,8 @@ def test_label_dataset_resumes_completed_episode_without_duplication(
 
     rows = [json.loads(line) for line in (output_dir / "labels.jsonl").read_text().splitlines()]
 
-    assert generated == ["called"]
-    assert [row["episode_index"] for row in rows] == [0, 1]
+    assert generated == ["called", "called"]
+    assert [row["episode_index"] for row in rows] == [0, 0, 1]
     assert summary == {"labeled": 2, "total": 2, "errors": 0, "grasp_success": 2, "place_success": 2}
 
 
@@ -387,7 +420,7 @@ def test_label_dataset_resume_retries_error_rows_and_repairs_torn_tail(
     jsonl_path = output_dir / "labels.jsonl"
     jsonl_path.write_text(json.dumps(failed) + '\n{"episode_index": 99')
     records = [
-        SimpleNamespace(episode_index=0, episode_id="episode_000000", instruction="Pick the cube", duration_s=1.0),
+        _episode(0, "Pick the cube"),
     ]
 
     class FakeBackend:
@@ -429,3 +462,126 @@ def test_label_dataset_resume_retries_error_rows_and_repairs_torn_tail(
     assert [row["episode_index"] for row in rows] == [0, 0]
     assert rows[-1]["error"] is None
     assert summary == {"labeled": 1, "total": 1, "errors": 0, "grasp_success": 1, "place_success": 1}
+
+
+def test_given_resumed_task_run_when_inputs_change_then_only_exact_identity_skipped(
+    mod: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _write_min_dataset(tmp_path / "dataset", ["obs.front"])
+    root = tmp_path / "dataset"
+    generated = []
+
+    class FakeBackend:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def generate(self, **kwargs: object) -> str:
+            generated.append(kwargs["user_prompt"])
+            return json.dumps(
+                {
+                    "pick_from": "table",
+                    "object": "cube",
+                    "grasp_success": False,
+                    "place_success": False,
+                    "movement_quality": "Incomplete",
+                    "notes": "",
+                }
+            )
+
+    monkeypatch.setattr(mod, "Qwen3VLBackend", FakeBackend)
+    monkeypatch.setattr(mod, "iter_episodes", lambda *args, **kwargs: iter([_episode(1005, "Original instruction")]))
+    monkeypatch.setattr(mod, "build_filmstrip", lambda *args, **kwargs: [object()])
+    options = {
+        "dataset_root": root,
+        "output_dir": tmp_path / "output",
+        "views": None,
+        "n_frames": 4,
+        "frame_size": 64,
+        "model_id": "fake/model",
+        "device_map": "cpu",
+        "dtype": "float32",
+        "limit": None,
+        "resume": True,
+    }
+
+    mod.label_dataset(**options)
+    mod.label_dataset(**options)
+    assert len(generated) == 1
+    mod.label_dataset(**{**options, "n_frames": 8})
+    assert len(generated) == 2
+    annotation = root / "annotations" / "episodes" / "episode_001005.json"
+    annotation.parent.mkdir(parents=True)
+    annotation.write_text(
+        json.dumps(
+            {
+                "annotations": [
+                    {"annotator_id": "human", "language_instruction": {"instruction": "Saved new instruction"}}
+                ]
+            }
+        )
+    )
+    mod.label_dataset(**{**options, "n_frames": 8})
+    assert len(generated) == 3
+    assert "Saved new instruction" in generated[-1]
+
+
+def test_given_task_cli_when_detached_then_backend_is_lazy_and_saved_job_resumes(
+    mod: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "dataset"
+    _write_min_dataset(root, ["obs.front"])
+    (root / "meta" / "episodes.jsonl").write_text(
+        json.dumps({"episode_index": 3, "length": 30, "tasks": ["Move cube"]}) + "\n"
+    )
+    (root / "meta" / "tasks.jsonl").write_text(json.dumps({"task_index": 0, "task": "Move cube"}) + "\n")
+    video = root / "videos" / "chunk-000" / "obs.front" / "episode_000003.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"synthetic-media-generation")
+    constructions = []
+
+    class FakeBackend:
+        def __init__(self, **kwargs: object) -> None:
+            constructions.append("constructed")
+
+        def generate(self, **kwargs: object) -> str:
+            return json.dumps(
+                {
+                    "pick_from": "table",
+                    "object": "cube",
+                    "grasp_success": True,
+                    "place_success": False,
+                    "movement_quality": "One pause",
+                    "notes": "",
+                }
+            )
+
+    monkeypatch.setattr(mod, "Qwen3VLBackend", FakeBackend)
+    monkeypatch.setattr(mod, "build_filmstrip", lambda *args, **kwargs: [object()])
+    args = [
+        "--dataset-root",
+        str(root),
+        "--output-dir",
+        str(tmp_path / "output"),
+        "--job-dir",
+        str(tmp_path / "jobs"),
+        "--single",
+        "--request-id",
+        "task-cli",
+    ]
+    assert mod.main([*args, "--detach"]) == 0
+    accepted = json.loads(capsys.readouterr().out)
+    assert accepted["status"] == "queued"
+    assert constructions == []
+    assert mod.main(args) == 0
+    completed = json.loads(capsys.readouterr().out)
+    assert completed["id"] == accepted["id"]
+    assert completed["status"] == "succeeded"
+    assert completed["result_kind"] == "task-findings"
+    assert constructions == ["constructed"]
+    row = json.loads((tmp_path / "output" / "labels.jsonl").read_text())
+    assert row["instruction"] == "Move cube"
+    assert row["grasp_success"] is True
+    assert not (root / "meta" / "episode_labels.json").exists()

@@ -26,6 +26,185 @@ DATASET_ID = "synthetic-eval"
 INSTRUCTION = "Pick up the cube"
 
 
+def test_given_judge_cli_when_detached_then_same_job_resumes_with_saved_evidence(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from evaluation.vlm_judge import run as judge_run
+
+    dataset = tmp_path / DATASET_ID
+    _build_dataset(dataset, instruction=INSTRUCTION)
+    output = tmp_path / "results.jsonl"
+    arguments = [
+        "--dataset",
+        str(dataset),
+        "--dataset-id",
+        DATASET_ID,
+        "--output",
+        str(output),
+        "--job-dir",
+        str(tmp_path / "jobs"),
+        "--backend",
+        "echo",
+        "--n-frames",
+        "4",
+        "--cache-dir",
+        "",
+    ]
+    assert judge_run.main([*arguments, "--single", "--detach", "--request-id", "detached"]) == 0
+    accepted = json.loads(capsys.readouterr().out)
+    assert accepted["status"] == "queued"
+    assert not output.exists()
+    assert judge_run.main([*arguments, "--operation", "status", "--job-id", accepted["id"]]) == 0
+    assert json.loads(capsys.readouterr().out)["judged"] == 0
+    assert judge_run.main([*arguments, "--single", "--request-id", "detached"]) == 0
+    completed = json.loads(capsys.readouterr().out)
+    assert completed["id"] == accepted["id"]
+    assert completed["status"] == "succeeded"
+    assert json.loads(output.read_text())["instruction"] == INSTRUCTION
+
+
+def test_viewer_durable_job_publishes_canonical_evidence_without_labels(
+    tmp_path: Path,
+    restore_default_app: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    _build_dataset(tmp_path / DATASET_ID, instruction=INSTRUCTION)
+    client = _reload_app(restore_default_app, tmp_path)
+    response = client.post(
+        f"/api/datasets/{DATASET_ID}/episodes/0/judge", json={}, headers={"Idempotency-Key": "durable-request"}
+    )
+    assert response.status_code == 202, response.text
+    assert response.json()["status"] == "queued"
+    assert asyncio.run(client.app.state.judge_jobs.run_once())
+    completed = client.get(response.headers["Location"])
+    assert completed.json()["status"] == "succeeded", completed.text
+    assert completed.json()["judged"] == 1
+    assert completed.json()["applied"] == 0
+    evidence = client.get("/api/judge/results", params={"dataset_id": DATASET_ID, "episode_index": 0})
+    assert evidence.status_code == 200, evidence.text
+    assert evidence.json()["items"][0]["result"]["instruction"] == INSTRUCTION
+    assert evidence.json()["items"][0]["applicability"] == "current"
+    assert not (tmp_path / DATASET_ID / "meta" / "episode_labels.json").exists()
+    application = client.post(f"/api/judge/jobs/{response.json()['id']}/apply", json={"episode_indices": [0]})
+    assert application.status_code == 202, application.text
+    assert asyncio.run(client.app.state.judge_jobs.run_once())
+    applied = client.get(response.headers["Location"]).json()
+    assert applied["applied"] == 1
+    saved = json.loads((tmp_path / DATASET_ID / "meta" / "episode_labels.json").read_text())
+    assert saved["episodes"]["0"] == ["SUCCESS"]
+    assert saved["analysis"] == {}
+    assert all(
+        item["machine"]["run_id"] == response.json()["id"]
+        for item in saved["provenance"]["0"]["contributions"]
+        if item["origin"] == "machine"
+    )
+
+
+def test_viewer_recovers_accepted_job_on_startup_without_browser(
+    tmp_path: Path,
+    restore_default_app: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    _build_dataset(tmp_path / DATASET_ID, instruction=INSTRUCTION)
+    submitting = _reload_app(restore_default_app, tmp_path)
+    response = submitting.post(
+        f"/api/datasets/{DATASET_ID}/episodes/0/judge", json={}, headers={"Idempotency-Key": "restart-request"}
+    )
+    assert response.status_code == 202
+    recovered = _reload_app(restore_default_app, tmp_path)
+
+    async def recover() -> None:
+        async with recovered.app.router.lifespan_context(recovered.app):
+            jobs = recovered.app.state.judge_jobs
+            original = submitting.app.state.judge_jobs
+            job = next(iter((await original.store.read())["jobs"].values()))
+            async with asyncio.timeout(10):
+                while (await jobs.get(job["id"], job["actor"]))["status"] not in {"succeeded", "failed"}:
+                    await asyncio.sleep(0.01)
+            assert (await jobs.get(job["id"], job["actor"]))["status"] == "succeeded"
+
+    asyncio.run(recover())
+
+
+def test_configured_standalone_api_resolves_saved_inputs_without_caller_paths(tmp_path: Path) -> None:
+    import asyncio
+
+    from evaluation.vlm_judge.api import build_router
+    from evaluation.vlm_judge.job_storage import LocalJobStore
+    from evaluation.vlm_judge.saved_input import LocalDatasetResolver
+    from evaluation.vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig
+    from fastapi import FastAPI
+
+    _build_dataset(tmp_path, instruction=INSTRUCTION)
+    service = JudgeService(ServiceConfig(backend=BackendConfig(kind="echo"), frames=FrameConfig(n_frames=4)))
+    app = FastAPI()
+    app.include_router(
+        build_router(
+            service,
+            resolver=LocalDatasetResolver({DATASET_ID: tmp_path}),
+            local_actor="local-test",
+            job_store=LocalJobStore(tmp_path / "jobs"),
+        )
+    )
+    with TestClient(app) as client:
+        result = client.post("/judge", json={"dataset_id": DATASET_ID, "episode_index": 0})
+        rejected = client.post(
+            "/judge",
+            json={"dataset_id": DATASET_ID, "episode_index": 0, "video_paths": {"front": "/unconfigured/path"}},
+        )
+        assert result.status_code == 202, result.text
+
+        async def completed() -> dict[str, object]:
+            async with asyncio.timeout(10):
+                while True:
+                    job = await app.state.judge_jobs.get(result.json()["id"], "local-test")
+                    if job["status"] in {"succeeded", "failed"}:
+                        return job
+                    await asyncio.sleep(0.01)
+
+        saved = client.portal.call(completed)
+        assert saved["status"] == "succeeded", saved
+        assert saved["targets"][0]["result"]["instruction"] == INSTRUCTION
+    assert rejected.status_code == 422
+
+
+def test_judge_inventory_uses_real_sparse_ids_beyond_ui_cap(
+    tmp_path: Path,
+    restore_default_app: pytest.MonkeyPatch,
+) -> None:
+    _build_dataset(tmp_path / DATASET_ID, instruction=INSTRUCTION)
+    metadata = tmp_path / DATASET_ID / "meta" / "episodes.jsonl"
+    episode = json.loads(metadata.read_text())
+    episode["episode_index"] = 1005
+    metadata.write_text(json.dumps(episode) + "\n")
+    client = _reload_app(restore_default_app, tmp_path)
+
+    inventory = client.get("/api/judge/episodes", params={"dataset_id": DATASET_ID, "limit": 1})
+
+    assert inventory.status_code == 200, inventory.text
+    assert inventory.json()["items"] == [1005]
+    assert inventory.json()["total"] == 1
+    assert (
+        client.get("/api/judge/episodes", params={"dataset_id": DATASET_ID, "snapshot_id": "stale"}).status_code == 409
+    )
+
+
+def test_invalid_cached_result_is_not_returned_as_evidence(
+    tmp_path: Path, restore_default_app: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from evaluation.vlm_judge.cache import JudgeCache
+
+    _build_dataset(tmp_path / DATASET_ID, instruction=INSTRUCTION)
+    client = _reload_app(restore_default_app, tmp_path)
+    monkeypatch.setattr(JudgeCache, "get", lambda *args: {})
+
+    response = client.get(f"/api/datasets/{DATASET_ID}/episodes/0/judge")
+
+    assert response.status_code == 502
+
+
 def test_judge_extracts_each_view_with_its_own_window(monkeypatch: pytest.MonkeyPatch) -> None:
     from evaluation.vlm_judge import service as judge_module
 
@@ -147,11 +326,11 @@ def test_cold_blob_judge_downloads_only_selected_media_and_reuses_cache(
         assert transfers == []
         payload = {"views": ["obs.wrist"], "snapshot_id": snapshot.json()["snapshot_id"]}
         first = client.post(f"/api/datasets/{DATASET_ID}/episodes/0/judge", json=payload)
-        assert first.status_code == 200, first.text
+        assert _finish_job(client, first)["status"] == "succeeded"
         assert len(transfers) == 1 and "/obs.wrist/" in transfers[0]
         transfers.clear()
         second = client.post(f"/api/datasets/{DATASET_ID}/episodes/0/judge", json=payload)
-        assert second.status_code == 200 and second.json()["cached"] is True
+        assert _finish_job(client, second)["targets"][0]["cached"] is True
         assert transfers == []
     finally:
         client.app.dependency_overrides.clear()
@@ -330,8 +509,9 @@ def test_post_runs_judge_and_warms_cache(vlm_client: TestClient) -> None:
         path,
         json={"force": True},
     )
-    assert rsp.status_code == 200
-    body = rsp.json()
+    assert rsp.status_code == 202
+    assert rsp.json()["status"] == "queued"
+    body = _finish_job(vlm_client, rsp)["targets"][0]["result"]
     assert body["episode_id"] == f"{DATASET_ID}/episode_000000"
     assert body["instruction"] == INSTRUCTION
     assert body["outcome_success"] is True
@@ -345,6 +525,16 @@ def test_post_runs_judge_and_warms_cache(vlm_client: TestClient) -> None:
     status = rsp2.json()
     assert status["cached"] is True
     assert status["result"]["episode_id"] == body["episode_id"]
+
+
+def _finish_job(client: TestClient, response: object) -> dict[str, object]:
+    import asyncio
+
+    assert response.status_code == 202, response.text
+    assert asyncio.run(client.app.state.judge_jobs.run_once())
+    status = client.get(response.headers["Location"])
+    assert status.status_code == 200, status.text
+    return status.json()
 
 
 def test_post_rejects_unsaved_instruction_even_when_forced(vlm_client: TestClient) -> None:
@@ -403,8 +593,7 @@ def test_saved_instruction_is_used_without_dataset_instruction(
     client = _reload_app(restore_default_app, tmp_path)
     _save_instruction(client, "Saved instruction only")
     response = client.post(f"/api/datasets/{DATASET_ID}/episodes/0/judge", json={"force": True})
-    assert response.status_code == 200, response.text
-    assert response.json()["instruction"] == "Saved instruction only"
+    assert _finish_job(client, response)["targets"][0]["result"]["instruction"] == "Saved instruction only"
 
 
 def test_snapshot_rejects_source_replacement(vlm_client: TestClient, tmp_path: Path) -> None:
@@ -481,19 +670,22 @@ def test_source_change_during_inference_does_not_return_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from src.api.routers import vlm_judge as router
+    from evaluation.vlm_judge.service import JudgeService
 
-    original_run = router.run_in_threadpool
+    original_run = JudgeService.judge_episode
 
-    async def replace_after_run(*args: object, **kwargs: object) -> object:
-        result = await original_run(*args, **kwargs)
+    def replace_after_run(self: JudgeService, **kwargs: object) -> object:
+        result = original_run(self, **kwargs)
         manifest = tmp_path / DATASET_ID / "meta" / "info.json"
         manifest.write_text(manifest.read_text() + "\n")
         return result
 
-    monkeypatch.setattr(router, "run_in_threadpool", replace_after_run)
+    monkeypatch.setattr(JudgeService, "judge_episode", replace_after_run)
     response = vlm_client.post(f"/api/datasets/{DATASET_ID}/episodes/0/judge", json={"force": True})
-    assert response.status_code == 409
+    job = _finish_job(vlm_client, response)
+    assert job["status"] == "failed"
+    assert job["targets"][0]["error"] == "SavedInputError"
+    assert job["targets"][0]["result"] is None
 
 
 def test_post_falls_back_to_dataset_instruction_when_request_omits_instruction(
@@ -507,8 +699,7 @@ def test_post_falls_back_to_dataset_instruction_when_request_omits_instruction(
 
     rsp = client.post(path, json={"force": True})
 
-    assert rsp.status_code == 200
-    assert rsp.json()["instruction"] == "Dataset fallback instruction"
+    assert _finish_job(client, rsp)["targets"][0]["result"]["instruction"] == "Dataset fallback instruction"
 
 
 def test_post_accepts_safe_view_filter(vlm_client: TestClient) -> None:
@@ -517,8 +708,7 @@ def test_post_accepts_safe_view_filter(vlm_client: TestClient) -> None:
         path,
         json={"views": ["obs.front"], "force": True},
     )
-    assert rsp.status_code == 200
-    assert rsp.json()["episode_id"] == f"{DATASET_ID}/episode_000000"
+    assert _finish_job(vlm_client, rsp)["targets"][0]["result"]["episode_id"] == f"{DATASET_ID}/episode_000000"
 
 
 def test_post_rejects_invalid_process_method(vlm_client: TestClient) -> None:

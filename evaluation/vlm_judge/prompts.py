@@ -128,42 +128,25 @@ def render_chronological_process_prompt(*, instruction: str, n_frames: int) -> s
 
 _JSON_ARRAY_RE = re.compile(r"\[[^\[\]]*\]", re.DOTALL)
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-_INT_RE = re.compile(r"-?\d+")
 
 
 def parse_process_response(text: str, *, n_frames: int) -> list[int] | None:
-    """Extract a length-``n_frames`` progress array (each 0-100) from ``text``.
-
-    Tolerant of open-model output quirks: strips ``<think>`` blocks, recovers a
-    JSON array even amid prose or code fences, falls back to scanning bare
-    integers, clamps each value to 0-100, and pads/truncates to ``n_frames``
-    (small models frequently return ``n_frames - 1`` values). Returns ``None``
-    only when no integers can be recovered at all.
-    """
+    """Extract exactly the requested integer scores without inventing or coercing values."""
     if not text:
         return None
     cleaned = _THINK_RE.sub("", text)
-    values: list[float] | None = None
     match = _JSON_ARRAY_RE.search(cleaned)
-    if match is not None:
-        try:
-            parsed = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, list):
-            numeric = [v for v in parsed if isinstance(v, (int, float)) and not isinstance(v, bool)]
-            if numeric:
-                values = [float(v) for v in numeric]
-    if values is None:
-        ints = _INT_RE.findall(cleaned)
-        if ints:
-            values = [float(v) for v in ints]
-    if not values:
+    if match is None:
         return None
-    clamped = [max(0, min(100, round(v))) for v in values]
-    if len(clamped) >= n_frames:
-        return clamped[:n_frames]
-    return clamped + [clamped[-1]] * (n_frames - len(clamped))
+    try:
+        values = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(values, list) or len(values) != n_frames:
+        return None
+    if any(type(value) is not int or not 0 <= value <= 100 for value in values):
+        return None
+    return values
 
 
 def shuffle_with_anchor(

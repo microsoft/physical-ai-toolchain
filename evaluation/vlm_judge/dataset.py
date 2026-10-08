@@ -37,6 +37,7 @@ class EpisodeRecord:
     to_timestamp: float | None
     video_windows: dict[str, tuple[float, float]] = field(default_factory=dict)
     media_identity: dict[str, str] | None = None
+    snapshot_id: str | None = None
 
     @property
     def duration_s(self) -> float:

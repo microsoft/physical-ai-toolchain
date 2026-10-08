@@ -583,6 +583,7 @@ class DatasetService:
         limit: int = 100,
         has_annotations: bool | None = None,
         task_index: int | None = None,
+        require_actual: bool = False,
     ) -> list[EpisodeMeta]:
         """List episodes for a dataset with filtering."""
         dataset = self._datasets.get(dataset_id)
@@ -612,7 +613,7 @@ class DatasetService:
                 episode_indices, episode_info_map = self._hdf5_handler.list_episodes(dataset_id)
 
         # Fallback: generate indices from dataset metadata
-        if not episode_indices and dataset is not None:
+        if not episode_indices and dataset is not None and not require_actual:
             episode_indices = list(range(dataset.total_episodes))
 
         if not episode_indices:
@@ -782,7 +783,9 @@ class DatasetService:
                 sorted(
                     path
                     for path in (root / "meta").rglob("*")
-                    if path.is_file() and path.suffix in {".json", ".jsonl", ".parquet"}
+                    if path.is_file()
+                    and path.suffix in {".json", ".jsonl", ".parquet"}
+                    and path.name != "episode_labels.json"
                 )
                 if manifest == root / "meta" / "info.json"
                 else [manifest]

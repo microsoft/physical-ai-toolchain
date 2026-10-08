@@ -6,52 +6,45 @@ and managing the set of available label options per dataset.
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
-import json
 import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal
 
-import aiofiles
-import aiofiles.os
+from evaluation.vlm_judge.curation import DEFAULT_LABELS, DatasetLabelsFile, EpisodeAnalysisRecord
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
-from pydantic import Field, ValidationError
+from pydantic import Field
 
 from ..auth import PrincipalContext, require_principal_context
 from ..csrf import require_csrf_token
-from ..models.contributions import ContributionLedger, MachineOrigin
+from ..models.contributions import ContributionLedger
 from ..services.dataset_service import DatasetService, get_dataset_service
+from ..services.label_storage import (
+    BlobLabelStorage as BlobLabelStorage,
+)
+from ..services.label_storage import (
+    LabelStorage,
+    _create_label_storage,
+    _labels_path_for_base,
+)
+from ..services.label_storage import (
+    LocalLabelStorage as LocalLabelStorage,
+)
 from ..storage import RevisionConflictError, VersionedValue
-from ..storage.local_revision import write_conditional
-from ..storage.paths import dataset_id_to_blob_prefix
 from ..validation import (
     SAFE_DATASET_ID_PATTERN,
     SanitizedModel,
     path_int_param,
     path_string_param,
-    validate_path_containment,
 )
 
 if TYPE_CHECKING:
-    from ..storage.blob_dataset import BlobDatasetProvider
-
-try:
-    from azure.core import MatchConditions
-    from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
-    from azure.storage.blob import ContentSettings
-except ImportError:
-    ContentSettings = None
-    MatchConditions = None
-    HttpResponseError = None
-    ResourceNotFoundError = None
+    pass
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-DEFAULT_LABELS = ["SUCCESS", "FAILURE", "PARTIAL"]
 
 
 class EpisodeLabels(SanitizedModel):
@@ -59,118 +52,6 @@ class EpisodeLabels(SanitizedModel):
 
     episode_index: int
     labels: list[str] = Field(default_factory=list)
-
-
-class EpisodeAnalysisRecord(SanitizedModel):
-    """Structured per-episode analysis: VLM-derived labels plus computed motion metrics.
-
-    Persisted beside the dataset in ``meta/episode_labels.json`` so it loads
-    automatically with the dataset. All fields are optional so partial records
-    (VLM-only or motion-only) round-trip cleanly.
-    """
-
-    pick_from: str | None = None
-    object: str | None = None
-    grasp_success: bool | None = None
-    place_success: bool | None = None
-    movement_quality: str | None = None
-    notes: str | None = None
-    instruction: str | None = None
-    duration_s: float | None = None
-    smoothness: float | None = None
-    normalized_smoothness: float | None = None
-    efficiency: float | None = None
-    jitter: float | None = None
-    hesitation_count: int | None = None
-    correction_count: int | None = None
-    motion_score: int | None = None
-    motion_flags: list[str] = Field(default_factory=list)
-    source: str | None = None
-
-
-class DatasetLabelsFile(SanitizedModel):
-    """All episode labels and available options for a dataset."""
-
-    dataset_id: str
-    available_labels: list[str] = Field(default_factory=lambda: DEFAULT_LABELS.copy())
-    episodes: dict[str, list[str]] = Field(default_factory=dict)
-    analysis: dict[str, EpisodeAnalysisRecord] = Field(default_factory=dict)
-    provenance: dict[str, ContributionLedger] = Field(default_factory=dict)
-
-    def apply_labels(
-        self,
-        episode_idx: int,
-        labels: list[str],
-        *,
-        author_id: str,
-        machine_origin: MachineOrigin | None = None,
-        origin: Literal["human", "legacy-unknown"] | None = None,
-    ) -> None:
-        """Merge independently owned label values into the existing resource."""
-        key = str(episode_idx)
-        normalized = list(dict.fromkeys(value for label in labels if (value := _normalize_label(label))))
-        previous = self.episodes.get(key, [])
-        fields = {f"labels/{label}": True for label in previous}
-        proposed = {f"labels/{label}": label in normalized for label in set(previous) | set(normalized)}
-        ledger = self.provenance.setdefault(key, ContributionLedger())
-        ledger.record_changes(fields, proposed, author_id=author_id, machine_origin=machine_origin, origin=origin)
-        self.episodes[key] = normalized
-        self.materialize_episode(episode_idx, author_id=author_id)
-        for label in self.episodes[key]:
-            if label not in self.available_labels:
-                self.available_labels.append(label)
-
-    def apply_analysis(
-        self,
-        episode_idx: int,
-        update: EpisodeAnalysisRecord,
-        *,
-        author_id: str,
-        machine_origin: MachineOrigin | None = None,
-        origin: Literal["human", "legacy-unknown"] | None = None,
-    ) -> None:
-        """Apply only supplied analysis fields without acquiring unrelated ownership."""
-        key = str(episode_idx)
-        previous = self.analysis.get(key, EpisodeAnalysisRecord()).model_dump(mode="json")
-        changes = update.model_dump(mode="json", exclude_unset=True)
-        ledger = self.provenance.setdefault(key, ContributionLedger())
-        ledger.record_changes(
-            {f"analysis/{field}": previous[field] for field in changes},
-            {f"analysis/{field}": value for field, value in changes.items()},
-            author_id=author_id,
-            machine_origin=machine_origin,
-            origin=origin,
-        )
-        self.analysis[key] = EpisodeAnalysisRecord.model_validate(previous | changes)
-        self.materialize_episode(episode_idx, author_id=author_id)
-
-    def materialize_episode(self, episode_idx: int, *, author_id: str) -> None:
-        """Resolve stored ownership after a mutation or contribution withdrawal."""
-        key = str(episode_idx)
-        ledger = self.provenance.get(key, ContributionLedger())
-        existing = self.episodes.get(key, [])
-        label_fields = {
-            item.field.removeprefix("labels/") for item in ledger.contributions if item.field.startswith("labels/")
-        }
-        if key in self.episodes or label_fields:
-            ordered = list(dict.fromkeys([*existing, *sorted(label_fields)]))
-            self.episodes[key] = [
-                label
-                for label in ordered
-                if ledger.resolve(f"labels/{label}", human_author_id=author_id, legacy_value=label in existing).value
-                is True
-            ]
-        analysis_fields = {
-            item.field.removeprefix("analysis/") for item in ledger.contributions if item.field.startswith("analysis/")
-        }
-        if key in self.analysis or analysis_fields:
-            values = self.analysis.get(key, EpisodeAnalysisRecord()).model_dump(mode="json")
-            for field in analysis_fields:
-                value = ledger.resolve(
-                    f"analysis/{field}", human_author_id=author_id, legacy_value=values.get(field)
-                ).value
-                values[field] = [] if field == "motion_flags" and value is None else value
-            self.analysis[key] = EpisodeAnalysisRecord.model_validate(values)
 
 
 class BulkLabelUpdate(SanitizedModel):
@@ -247,204 +128,6 @@ def _analysis_value_labels(prefix: str, value: object) -> list[str]:
 # ============================================================================
 
 
-class LabelStorage(Protocol):
-    """Protocol for label persistence backends."""
-
-    async def load(self, dataset_id: str) -> DatasetLabelsFile:
-        """Load labels for a dataset."""
-
-    async def load_versioned(self, dataset_id: str) -> VersionedValue[DatasetLabelsFile]:
-        """Load labels and their strong validator."""
-
-    async def save(
-        self,
-        dataset_id: str,
-        labels_file: DatasetLabelsFile,
-        *,
-        if_match: str | None = None,
-        if_none_match: bool = False,
-    ) -> str:
-        """Persist labels for a dataset."""
-
-
-class LocalLabelStorage:
-    """Filesystem-backed label storage."""
-
-    def __init__(self, base_path: str) -> None:
-        self._base_path = base_path
-
-    def _path(self, dataset_id: str) -> Path:
-        return _labels_path_for_base(dataset_id, self._base_path)
-
-    @staticmethod
-    def _serialize(labels_file: DatasetLabelsFile) -> str:
-        return json.dumps(labels_file.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-
-    @staticmethod
-    def _etag(content: str) -> str:
-        return f'"{hashlib.sha256(content.encode()).hexdigest()}"'
-
-    async def load(self, dataset_id: str) -> DatasetLabelsFile:
-        return (await self.load_versioned(dataset_id)).value or DatasetLabelsFile(dataset_id=dataset_id)
-
-    async def load_versioned(self, dataset_id: str) -> VersionedValue[DatasetLabelsFile]:
-        path = self._path(dataset_id)
-        safe_base = os.path.realpath(self._base_path)
-        resolved = os.path.realpath(str(path))
-        if not resolved.startswith(safe_base + os.sep):
-            raise HTTPException(status_code=400, detail="Path traversal detected")
-        path = Path(resolved)
-        try:
-            async with aiofiles.open(path, encoding="utf-8", newline="") as labels_file:
-                content = await labels_file.read()
-        except FileNotFoundError:
-            return VersionedValue(value=DatasetLabelsFile(dataset_id=dataset_id), etag=None)
-        except (OSError, UnicodeError) as error:
-            logger.error("Failed to read local labels: %s", type(error).__name__)
-            raise HTTPException(status_code=500, detail="Failed to read labels") from None
-        try:
-            value = DatasetLabelsFile.model_validate_json(content)
-        except ValidationError:
-            logger.warning("Invalid local labels for dataset %s", dataset_id.replace("\r", "").replace("\n", ""))
-            raise HTTPException(status_code=500, detail="Invalid labels content") from None
-        return VersionedValue(value=value, etag=self._etag(content))
-
-    async def save(
-        self,
-        dataset_id: str,
-        labels_file: DatasetLabelsFile,
-        *,
-        if_match: str | None = None,
-        if_none_match: bool = False,
-    ) -> str:
-        path = self._path(dataset_id)
-        safe_base = os.path.realpath(self._base_path)
-        resolved = os.path.realpath(str(path))
-        if not resolved.startswith(safe_base + os.sep):
-            raise HTTPException(status_code=400, detail="Path traversal detected")
-        path = Path(resolved)
-        return await asyncio.to_thread(
-            write_conditional, path, self._serialize(labels_file), if_match=if_match, if_none_match=if_none_match
-        )
-
-
-class BlobLabelStorage:
-    """Azure Blob Storage-backed label storage. Stores in datasets container."""
-
-    def __init__(self, blob_provider: BlobDatasetProvider) -> None:
-        self._provider = blob_provider
-
-    def _blob_path(self, dataset_id: str) -> str:
-        return f"{dataset_id_to_blob_prefix(dataset_id)}/meta/episode_labels.json"
-
-    async def load(self, dataset_id: str) -> DatasetLabelsFile:
-        return (await self.load_versioned(dataset_id)).value or DatasetLabelsFile(dataset_id=dataset_id)
-
-    async def load_versioned(self, dataset_id: str) -> VersionedValue[DatasetLabelsFile]:
-        logger.debug("Reading versioned labels blob for %s", dataset_id.replace("\r", "").replace("\n", ""))
-        try:
-            client = await self._provider._get_client()
-            blob_client = client.get_container_client(self._provider.container_name).get_blob_client(
-                self._blob_path(dataset_id)
-            )
-            download = await blob_client.download_blob()
-            data = await download.readall()
-            etag = download.properties.etag
-            if not etag:
-                raise ValueError("Missing Azure label revision")
-        except Exception as error:
-            if ResourceNotFoundError is not None and isinstance(error, ResourceNotFoundError):
-                logger.debug(
-                    "Labels blob absent for %s; returning unpersisted defaults",
-                    dataset_id.replace("\r", "").replace("\n", ""),
-                )
-                return VersionedValue(value=DatasetLabelsFile(dataset_id=dataset_id), etag=None)
-            logger.error(
-                "Failed to load labels blob for %s (%s)",
-                dataset_id.replace("\r", "").replace("\n", ""),
-                type(error).__name__,
-            )
-            raise HTTPException(status_code=500, detail="Failed to load labels") from error
-        try:
-            result = VersionedValue(
-                value=DatasetLabelsFile.model_validate_json(data),
-                etag=str(etag),
-            )
-        except ValidationError as error:
-            logger.warning(
-                "Invalid labels blob for %s; refusing to substitute defaults (%d validation errors)",
-                dataset_id.replace("\r", "").replace("\n", ""),
-                error.error_count(),
-            )
-            raise HTTPException(status_code=500, detail="Invalid labels data") from error
-        logger.debug(
-            "Loaded labels blob for %s with matching download revision (%d bytes)",
-            dataset_id.replace("\r", "").replace("\n", ""),
-            len(data),
-        )
-        return result
-
-    async def save(
-        self,
-        dataset_id: str,
-        labels_file: DatasetLabelsFile,
-        *,
-        if_match: str | None = None,
-        if_none_match: bool = False,
-    ) -> str:
-        try:
-            client = await self._provider._get_client()
-            container = client.get_container_client(self._provider.container_name)
-            blob_client = container.get_blob_client(self._blob_path(dataset_id))
-            content = LocalLabelStorage._serialize(labels_file).encode("utf-8")
-            content_settings = ContentSettings(content_type="application/json") if ContentSettings is not None else None
-            conditions: dict[str, object] = {"overwrite": True}
-            if if_match is not None:
-                conditions.update(etag=if_match, match_condition=MatchConditions.IfNotModified)
-            elif if_none_match:
-                conditions.update(overwrite=False, if_none_match="*")
-            result = await blob_client.upload_blob(
-                content,
-                content_settings=content_settings,
-                **conditions,
-            )
-            result_etag = result.get("etag") if isinstance(result, dict) else getattr(result, "etag", None)
-            return str(result_etag) if result_etag else f'"{hashlib.sha256(content).hexdigest()}"'
-        except Exception as e:
-            if (
-                HttpResponseError is not None
-                and isinstance(e, HttpResponseError)
-                and (
-                    e.status_code == 412
-                    or (
-                        if_none_match and e.status_code == 409 and getattr(e, "error_code", None) == "BlobAlreadyExists"
-                    )
-                )
-            ):
-                response = getattr(e, "response", None)
-                headers = getattr(response, "headers", {})
-                raise RevisionConflictError(headers.get("ETag") if headers else None) from e
-            logger.error(
-                "Failed to save labels blob for %s: %s",
-                dataset_id.replace("\r", "").replace("\n", ""),
-                e,
-            )
-            raise HTTPException(status_code=500, detail="Failed to save labels") from e
-
-
-def _create_label_storage(
-    storage_backend: str = "local",
-    blob_provider: BlobDatasetProvider | None = None,
-) -> LabelStorage:
-    """Create label storage backend based on config."""
-    if storage_backend == "azure":
-        if blob_provider is None:
-            logger.error("Azure label storage provider unavailable; refusing local fallback")
-            raise HTTPException(status_code=503, detail="Azure label storage unavailable")
-        return BlobLabelStorage(blob_provider)
-    return LocalLabelStorage(os.environ.get("DATA_DIR", "./data"))
-
-
 _label_storage: LabelStorage | None = None
 
 
@@ -466,13 +149,6 @@ def _get_label_storage() -> LabelStorage:
 
 def _get_base_path() -> str:
     return os.environ.get("DATA_DIR", "./data")
-
-
-def _labels_path_for_base(dataset_id: str, base_path: str) -> Path:
-    """Build labels path, resolving -- to nested directories."""
-    base = Path(base_path)
-    parts = dataset_id.split("--") if "--" in dataset_id else [dataset_id]
-    return validate_path_containment(base.joinpath(*parts, "meta", "episode_labels.json"), base)
 
 
 def _labels_path(dataset_id: str) -> Path:

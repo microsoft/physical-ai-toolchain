@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -12,13 +13,13 @@ pytest.importorskip("pydantic")
 
 from vlm_judge.api import build_router
 from vlm_judge.judge import JudgeResult
+from vlm_judge.service import JudgeService
 
 
-class StubService:
+class StubService(JudgeService):
     """Lightweight stand-in for ``JudgeService`` that records calls."""
 
     def __init__(self) -> None:
-        self.model_id = "stub-model"
         self.calls: list[dict[str, Any]] = []
 
         from vlm_judge.service import (
@@ -27,10 +28,12 @@ class StubService:
             ServiceConfig,
         )
 
-        self.config = ServiceConfig(
-            backend=BackendConfig(kind="echo"),
-            frames=FrameConfig(),
-            cache_dir=None,
+        super().__init__(
+            ServiceConfig(
+                backend=BackendConfig(kind="echo", model_id="stub-model"),
+                frames=FrameConfig(),
+                cache_dir=None,
+            )
         )
 
     def judge_episode(
@@ -42,6 +45,7 @@ class StubService:
         from_s: float | None = None,
         to_s: float | None = None,
         force: bool = False,
+        **metadata: object,
     ) -> JudgeResult:
         self.calls.append(
             {
@@ -70,14 +74,49 @@ class StubService:
 
 
 @pytest.fixture
-def client():
+def client(tmp_path: Path):
     fastapi = pytest.importorskip("fastapi")
     pytest.importorskip("httpx")  # required by TestClient
     from fastapi.testclient import TestClient
+    from vlm_judge.dataset import EpisodeRecord
+    from vlm_judge.job_storage import LocalJobStore
+    from vlm_judge.saved_input import SavedInputSnapshot
 
     service = StubService()
+
+    class Resolver:
+        async def resolve(self, dataset_id: str, episode_index: int, **kwargs: object) -> tuple[object, object]:
+            return EpisodeRecord(
+                f"{dataset_id}/episode_{episode_index:06d}",
+                episode_index,
+                "pick orange",
+                30,
+                30,
+                {"front": Path("/synthetic/ep0.mp4")},
+                None,
+                None,
+                media_identity={"front": "synthetic-v1"},
+            ), SavedInputSnapshot(
+                snapshot_id="saved-revision",
+                dataset_id=dataset_id,
+                episode_index=episode_index,
+                principal_scope_id=str(kwargs["principal_scope_id"]),
+                source_id="source",
+                source_revision="version",
+                annotation_author_id=None,
+                annotation_revision=None,
+                edit_revision=None,
+                instruction="pick orange",
+                instruction_origin="dataset",
+            )
+
     app = fastapi.FastAPI()
-    app.include_router(build_router(service), prefix="/api/vlm-judge")
+    app.include_router(
+        build_router(
+            service, resolver=Resolver(), local_actor="local-test", job_store=LocalJobStore(tmp_path / "jobs")
+        ),
+        prefix="/api/vlm-judge",
+    )
     return TestClient(app), service
 
 
@@ -95,19 +134,22 @@ class TestApi:
         rsp = c.post(
             "/api/vlm-judge/judge",
             json={
-                "episode_id": "ep0",
-                "instruction": "pick orange",
-                "video_paths": {"front": "/tmp/ep0.mp4"},
+                "dataset_id": "synthetic",
+                "episode_index": 0,
             },
         )
-        assert rsp.status_code == 200
-        body = rsp.json()
-        assert body["episode_id"] == "ep0"
+        assert rsp.status_code == 202
+        assert len(service.calls) == 0
+        assert asyncio.run(c.app.state.judge_jobs.run_once())
+        job = c.get(rsp.headers["Location"]).json()
+        assert job["status"] == "succeeded"
+        body = job["targets"][0]["result"]
+        assert body["episode_id"] == "synthetic/episode_000000"
         assert body["outcome_success"] is True
         assert len(service.calls) == 1
         assert service.calls[0]["instruction"] == "pick orange"
 
-    def test_judge_404_on_missing_video(self, client) -> None:
+    def test_judge_records_missing_video_as_execution_error(self, client) -> None:
         c, service = client
 
         def raise_fnf(**kwargs: object) -> JudgeResult:
@@ -117,12 +159,15 @@ class TestApi:
         rsp = c.post(
             "/api/vlm-judge/judge",
             json={
-                "episode_id": "ep0",
-                "instruction": "x",
-                "video_paths": {"front": "/no/such/file.mp4"},
+                "dataset_id": "synthetic",
+                "episode_index": 0,
             },
         )
-        assert rsp.status_code == 404
+        assert rsp.status_code == 202
+        assert asyncio.run(c.app.state.judge_jobs.run_once())
+        job = c.get(rsp.headers["Location"]).json()
+        assert job["status"] == "failed"
+        assert job["targets"][0]["error"] == "FileNotFoundError"
 
 
 class TestAccessibilityDocumentationApps:

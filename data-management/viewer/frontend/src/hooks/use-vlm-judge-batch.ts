@@ -28,10 +28,10 @@ import { vlmJudgeKeys } from './use-vlm-judge'
 export const OUTCOME_LABELS = ['SUCCESS', 'FAILURE', 'PARTIAL'] as const
 
 /** Map a judge outcome to its canonical episode label. */
-export function outcomeToLabel(result: Pick<VlmJudgeResult, 'outcomeSuccess'>): string {
+export function outcomeToLabel(result: Pick<VlmJudgeResult, 'outcomeSuccess'>): string | null {
   if (result.outcomeSuccess === true) return 'SUCCESS'
   if (result.outcomeSuccess === false) return 'FAILURE'
-  return 'PARTIAL'
+  return null
 }
 
 /**
@@ -109,14 +109,15 @@ export function useVlmJudgeBatch(datasetId: string | null, totalEpisodes: number
             views: options?.views,
           })
           if (cancelRef.current) break
-          if (applyLabels) {
+          const outcome = outcomeToLabel(result)
+          if (applyLabels && outcome !== null) {
             assertScope()
             await assertEpisodeReadiness(queryClient, datasetId, targets)
             assertScope()
             assertSnapshotCurrent(queryClient, datasetId, index, snapshot)
             const editGeneration = useLabelStore.getState().editGeneration
             const existing = useLabelStore.getState().episodeLabels[index] ?? []
-            const next = applyOutcomeLabel(existing, outcomeToLabel(result))
+            const next = applyOutcomeLabel(existing, outcome)
             const saved = await setEpisodeLabels(
               datasetId,
               index,

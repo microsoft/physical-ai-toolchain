@@ -2221,6 +2221,7 @@ dependencies = [
     { name = "pandas" },
     { name = "pillow" },
     { name = "pyarrow" },
+    { name = "pydantic" },
 ]
 
 [package.metadata]
@@ -2233,7 +2234,7 @@ requires-dist = [
     { name = "pandas", specifier = "==3.0.5" },
     { name = "pillow", specifier = "==12.3.0" },
     { name = "pyarrow", specifier = "==25.0.1" },
-    { name = "pydantic", marker = "extra == 'api'", specifier = "==2.13.5" },
+    { name = "pydantic", specifier = "==2.13.5" },
     { name = "torch", marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'qwen3-vl'", specifier = "==2.14.0", index = "https://download.pytorch.org/whl/cu130" },
     { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'qwen3-vl'", specifier = "==2.14.0", index = "https://download.pytorch.org/whl/cu130" },
     { name = "torch", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'qwen3-vl') or (sys_platform != 'linux' and extra == 'qwen3-vl')", specifier = "==2.14.0" },

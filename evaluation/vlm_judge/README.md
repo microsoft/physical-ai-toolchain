@@ -1,8 +1,21 @@
 # VLM-as-Judge
 
 Open-weight-first harness that scores LeRobot manipulation episodes and
-policy-rollout videos with a vision-language model. Two consumption surfaces
-share the same engine:
+policy-rollout videos with a vision-language model. Dataset and rollout CLIs
+and the HTTP API share the same engine.
+
+Dataset clients resolve saved instructions and supported edit descriptors before
+execution. Malformed model output is an execution error; an inconclusive judgment
+does not become a human `PARTIAL` label. Cache identity includes the saved snapshot,
+model revision or deployment digest, selected cameras, frame settings and process
+configuration. An unpinned model or mutable remote deployment is not an immutable
+reproducibility guarantee.
+
+Local dataset storage does not imply local inference. The `openai-compat` backend
+sends selected camera frames and the effective instruction to its configured
+endpoint. Confirm that endpoint and its data-handling policy before running it.
+
+The entry points are:
 
 - **Dataset / rollout CLI** — `evaluation.vlm_judge.run` and
   `evaluation.vlm_judge.policy_eval`.
@@ -90,14 +103,9 @@ POST /judge               -> JudgeResponse
 
 ```json
 {
-  "episode_id": "leisaac-pick-orange/episode_000007",
-  "instruction": "Grab orange and place into plate",
-  "video_paths": {
-    "front": "/data/.../observation.images.front/episode_000007.mp4",
-    "wrist": "/data/.../observation.images.wrist/episode_000007.mp4"
-  },
-  "from_s": null,
-  "to_s": null,
+  "dataset_id": "example-dataset",
+  "episode_index": 7,
+  "views": ["observation.images.front", "observation.images.wrist"],
   "force": false
 }
 ```
@@ -107,6 +115,7 @@ Mount inside an existing FastAPI app (e.g., the dataviewer backend):
 ```python
 from pathlib import Path
 from evaluation.vlm_judge.api import build_router
+from evaluation.vlm_judge.saved_input import LocalDatasetResolver
 from evaluation.vlm_judge.service import (
     BackendConfig,
     FrameConfig,
@@ -121,8 +130,19 @@ service = JudgeService(
         cache_dir=Path("outputs/vlm-judge/cache"),
     )
 )
-app.include_router(build_router(service), prefix="/api/vlm-judge")
+resolver = LocalDatasetResolver({"example-dataset": Path("/data/example-dataset")})
+app.include_router(
+  build_router(service, resolver=resolver, local_actor="local-operator"),
+  prefix="/api/vlm-judge",
+)
 ```
+
+The example explicitly enables an unauthenticated local actor. Bind local-only
+services to loopback. Authenticated applications supply `principal_dependency`;
+authentication failures never fall back to that local actor. Standalone startup
+reads an operator-controlled `VLM_JUDGE_DATASETS` JSON map and requires
+`VLM_JUDGE_ALLOW_UNAUTHENTICATED=true` plus `VLM_JUDGE_LOCAL_ACTOR` for local mode.
+Requests cannot supply server paths or unsaved instructions.
 
 The HTTP service is intentionally framework-thin — all stateful work
 happens in `JudgeService` so the dataviewer backend, an Azure Container

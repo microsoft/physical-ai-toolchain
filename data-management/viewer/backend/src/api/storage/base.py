@@ -6,25 +6,11 @@ annotation persistence across different storage backends.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+
+from evaluation.vlm_judge.curation_storage import RevisionConflictError as RevisionConflictError
+from evaluation.vlm_judge.curation_storage import VersionedValue as VersionedValue
 
 from ..models.annotations import EpisodeAnnotationFile
-
-
-@dataclass(frozen=True)
-class VersionedValue[T]:
-    """A stored value and its strong revision validator."""
-
-    value: T | None
-    etag: str | None
-
-
-class RevisionConflictError(Exception):
-    """A conditional storage operation did not match the current revision."""
-
-    def __init__(self, current_etag: str | None) -> None:
-        super().__init__("Resource revision precondition failed")
-        self.current_etag = current_etag
 
 
 class StorageAdapter(ABC):

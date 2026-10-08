@@ -20,6 +20,7 @@ import type {
   VlmJudgeRunOptions,
   VlmJudgeStatus,
 } from '@/types'
+import type { JudgeJob } from '@/types/vlm-judge'
 
 import { getAuthHeaders } from './auth-headers'
 
@@ -549,17 +550,49 @@ export async function runVlmJudge(
   episodeIndex: number,
   options: VlmJudgeRunOptions = {},
 ): Promise<VlmJudgeResult> {
-  return apiRequest<VlmJudgeResult>(`/datasets/${datasetId}/episodes/${episodeIndex}/judge`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      snapshot_id: options.snapshotId,
-      annotation_author_id: options.annotationAuthorId,
-      views: options.views,
-      process_method: options.processMethod,
-      force: options.force ?? false,
-    }),
-  })
+  const accepted = await apiRequest<JudgeJob>(
+    `/datasets/${datasetId}/episodes/${episodeIndex}/judge`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({
+        snapshot_id: options.snapshotId,
+        annotation_author_id: options.annotationAuthorId,
+        views: options.views,
+        process_method: options.processMethod,
+        force: options.force ?? false,
+      }),
+    },
+  )
+  if (!accepted.id || accepted.datasetId !== datasetId) throw new Error('Judge job scope changed.')
+  for (let attempt = 0; attempt < 1800; attempt += 1) {
+    const job = await fetchJudgeJob(accepted.id)
+    if (job.datasetId !== datasetId || job.id !== accepted.id)
+      throw new Error('Judge job scope changed.')
+    if (job.status === 'succeeded') {
+      const target = job.targets?.find((item) => item.episodeIndex === episodeIndex)
+      if (
+        !target?.result ||
+        target.result.episodeId !== `${datasetId}/episode_${String(episodeIndex).padStart(6, '0')}`
+      ) {
+        throw new Error('Judge result does not match the submitted episode.')
+      }
+      return {
+        ...target.result,
+        cached: target.cached === true,
+        processMethod: job.config.processMethod,
+      }
+    }
+    if (['partial', 'failed', 'cancelled'].includes(job.status)) {
+      throw new Error(`Judge job ${job.status}.`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+  throw new Error('Judge job is still running.')
+}
+
+export async function fetchJudgeJob(jobId: string): Promise<JudgeJob> {
+  return apiRequest<JudgeJob>(`/judge/jobs/${encodeURIComponent(jobId)}`, { cache: 'no-store' })
 }
 
 export async function fetchVlmJudgeSnapshot(

@@ -42,22 +42,41 @@ function routeFetch(outcomes: Record<number, boolean | null>) {
       )
     const judgeMatch = target.match(/episodes\/(\d+)\/judge$/)
     if (judgeMatch) {
-      const idx = Number(judgeMatch[1])
+      return Promise.resolve(
+        jsonResponse({ id: `job-${judgeMatch[1]}`, dataset_id: 'ds-1', status: 'queued' }, 202),
+      )
+    }
+    const statusMatch = target.match(/judge\/jobs\/job-(\d+)$/)
+    if (statusMatch) {
+      const idx = Number(statusMatch[1])
       return Promise.resolve(
         jsonResponse({
-          episode_id: `ds-1/episode_${String(idx).padStart(6, '0')}`,
-          instruction: 'Pick',
-          judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
-          prompt_version: 'outcome-mcq-v1',
-          n_frames: 6,
-          outcome_success: outcomes[idx] ?? null,
-          outcome_confidence: 1,
-          outcome_n_valid_votes: 3,
-          progress_per_frame: [100],
-          voc: 1,
-          milestones: [],
-          failure_mode: null,
-          cached: false,
+          id: `job-${idx}`,
+          dataset_id: 'ds-1',
+          status: 'succeeded',
+          config: { process_method: 'gvl' },
+          targets: [
+            {
+              episode_index: idx,
+              status: 'succeeded',
+              cached: false,
+              result: {
+                episode_id: `ds-1/episode_${String(idx).padStart(6, '0')}`,
+                instruction: 'Pick',
+                judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
+                prompt_version: 'outcome-mcq-v1',
+                n_frames: 6,
+                outcome_success: outcomes[idx] ?? null,
+                outcome_confidence: 1,
+                outcome_n_valid_votes: 3,
+                progress_per_frame: [100],
+                voc: 1,
+                milestones: [],
+                failure_mode: null,
+                cached: false,
+              },
+            },
+          ],
         }),
       )
     }
@@ -98,7 +117,7 @@ describe('outcomeToLabel', () => {
   it('maps the judge outcome to a canonical label', () => {
     expect(outcomeToLabel({ outcomeSuccess: true })).toBe('SUCCESS')
     expect(outcomeToLabel({ outcomeSuccess: false })).toBe('FAILURE')
-    expect(outcomeToLabel({ outcomeSuccess: null })).toBe('PARTIAL')
+    expect(outcomeToLabel({ outcomeSuccess: null })).toBeNull()
   })
 })
 

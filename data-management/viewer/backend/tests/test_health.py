@@ -107,7 +107,7 @@ class TestLocalStorageStartupValidation:
         monkeypatch.setattr(
             main_mod,
             "_config",
-            SimpleNamespace(storage_backend="azure", data_path=str(tmp_path / "missing")),
+            SimpleNamespace(storage_backend="azure", data_path=str(tmp_path / "missing"), vlm_judge_enabled=False),
         )
 
         test_app = FastAPI(lifespan=main_mod.lifespan)

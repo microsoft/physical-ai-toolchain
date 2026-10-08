@@ -176,8 +176,10 @@ export const JudgePanel = memo(function JudgePanel({
 
   const handleApplyLabel = useCallback(() => {
     if (!result) return
+    const outcome = outcomeToLabel(result)
+    if (outcome === null) return
     const existing = useLabelStore.getState().episodeLabels[episodeIndex] ?? []
-    const next = applyOutcomeLabel(existing, outcomeToLabel(result))
+    const next = applyOutcomeLabel(existing, outcome)
     saveLabels.mutate({ episodeIdx: episodeIndex, labels: next })
   }, [result, episodeIndex, saveLabels])
 
@@ -395,8 +397,12 @@ export const JudgePanel = memo(function JudgePanel({
             size="sm"
             variant="outline"
             onClick={handleApplyLabel}
-            disabled={busy}
-            title={`Apply ${outcomeToLabel(result)} as this episode's label`}
+            disabled={busy || result.outcomeSuccess === null}
+            title={
+              result.outcomeSuccess === null
+                ? 'Inconclusive assessment has no outcome label'
+                : `Apply ${outcomeToLabel(result)} as this episode's label`
+            }
           >
             <Tag className="mr-1 size-3" />
             Apply label

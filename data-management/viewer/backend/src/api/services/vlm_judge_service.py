@@ -9,10 +9,24 @@ first request so importing this module does not load model weights.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 from threading import Lock
+from typing import TYPE_CHECKING, Any
 
-from ..config import AppConfig
+from fastapi import Depends, HTTPException, Request
+
+from ..config import AppConfig, get_app_config
+from ..validation import validate_path_containment
+from .annotation_service import AnnotationService, get_annotation_service
+from .dataset_service import DatasetService, get_dataset_service
+from .label_storage import BlobLabelStorage, LocalLabelStorage
+from .saved_input_service import ViewerDatasetResolver
+
+if TYPE_CHECKING:
+    from evaluation.vlm_judge.dataset import EpisodeRecord
+    from evaluation.vlm_judge.jobs import JudgeJobs
+    from evaluation.vlm_judge.saved_input import SavedInputSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -87,3 +101,76 @@ def reset_vlm_judge_service() -> None:
     global _service
     with _service_lock:
         _service = None
+
+
+def prepare_job_configuration(options: dict[str, Any]) -> dict[str, Any]:
+    from evaluation.vlm_judge.service import ServiceExecutor
+
+    service = get_vlm_judge_service(get_app_config())
+    if service is None:
+        raise HTTPException(status_code=503, detail="VLM judge is unavailable")
+    return ServiceExecutor(service).configuration(options)
+
+
+async def create_judge_jobs(config: AppConfig, datasets: DatasetService, annotations: AnnotationService) -> JudgeJobs:
+    from evaluation.vlm_judge.curation_storage import apply_judge_result
+    from evaluation.vlm_judge.job_storage import BlobJobStore, LocalJobStore
+    from evaluation.vlm_judge.jobs import JudgeJobs
+    from evaluation.vlm_judge.service import ServiceExecutor
+
+    service = get_vlm_judge_service(config)
+    if service is None:
+        raise HTTPException(status_code=503, detail="VLM judge is unavailable")
+
+    async def prepare_media(record: EpisodeRecord, snapshot: SavedInputSnapshot) -> EpisodeRecord:
+        return replace(
+            record, video_paths=await datasets.materialize_episode_media(snapshot.dataset_id, record.video_paths)
+        )
+
+    def cache_directory(snapshot: SavedInputSnapshot) -> Path:
+        root = Path(datasets.base_path)
+        return validate_path_containment(
+            root.joinpath(*snapshot.dataset_id.split("--"), "annotations", "vlm_judge", snapshot.snapshot_id), root
+        )
+
+    if config.storage_backend == "azure":
+        provider = datasets._blob_provider
+        if provider is None:
+            raise HTTPException(status_code=503, detail="Azure judge storage unavailable")
+        client = await provider._get_client()
+        store = BlobJobStore(
+            client.get_container_client(provider.container_name).get_blob_client("_curation/judge/state.json")
+        )
+        curation = BlobLabelStorage(provider)
+    else:
+        store = LocalJobStore(
+            Path(config.vlm_judge_job_dir)
+            if config.vlm_judge_job_dir
+            else Path(datasets.base_path) / ".curation" / "judge"
+        )
+        curation = LocalLabelStorage(datasets.base_path)
+
+    async def apply_result(job: dict[str, Any], target: dict[str, Any]) -> bool:
+        return await apply_judge_result(curation, job, target)
+
+    return JudgeJobs(
+        store,
+        ViewerDatasetResolver(datasets, annotations),
+        ServiceExecutor(service, prepare_media=prepare_media, cache_directory=cache_directory),
+        capacity_scope=config.vlm_judge_capacity_scope,
+        capacity=config.vlm_judge_capacity,
+        apply_result=apply_result,
+    )
+
+
+async def get_judge_jobs(
+    request: Request,
+    config: AppConfig = Depends(get_app_config),
+    datasets: DatasetService = Depends(get_dataset_service),
+    annotations: AnnotationService = Depends(get_annotation_service),
+) -> JudgeJobs:
+    jobs = getattr(request.app.state, "judge_jobs", None)
+    if jobs is None:
+        jobs = await create_judge_jobs(config, datasets, annotations)
+        request.app.state.judge_jobs = jobs
+    return jobs

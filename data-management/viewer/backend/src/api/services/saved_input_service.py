@@ -2,52 +2,130 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-from typing import Literal
+from dataclasses import replace
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from evaluation.vlm_judge.dataset import EpisodeRecord
+from evaluation.vlm_judge.saved_input import (
+    SavedInputError,
+    SavedInputSnapshot,
+    SavedResource,
+    resolve_validation_sample,
+)
+from evaluation.vlm_judge.saved_input import resolve_saved_input as resolve_snapshot
 
-from ..models.episode_edits import ImageTransform
 from .annotation_service import AnnotationService
 from .dataset_service import DatasetService
 
 
-class SavedInputError(ValueError):
-    def __init__(self, message: str, status_code: int = 409) -> None:
-        super().__init__(message)
-        self.status_code = status_code
+class ViewerSavedInputReader:
+    def __init__(self, datasets: DatasetService, annotations: AnnotationService) -> None:
+        self.datasets = datasets
+        self.annotations = annotations
 
+    async def annotation(self, dataset_id: str, episode_index: int) -> SavedResource:
+        resource = await self.annotations.get_annotation_versioned(dataset_id, episode_index)
+        return SavedResource(resource.value.model_dump(mode="json") if resource.value else None, resource.etag)
 
-class SavedInputSnapshot(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    snapshot_id: str
-    dataset_id: str
-    episode_index: int
-    principal_scope_id: str
-    source_id: str
-    source_revision: str
-    annotation_author_id: str | None
-    annotation_revision: str | None
-    edit_revision: str | None
-    instruction: str
-    instruction_origin: Literal["annotation", "dataset"]
-
-
-def _transforms_media(transform: ImageTransform | None) -> bool:
-    if transform is None:
-        return False
-    if transform.crop or transform.resize or transform.colorFilter not in (None, "none"):
-        return True
-    adjustment = transform.colorAdjustment
-    return bool(
-        adjustment
-        and any(
-            value is not None and value != (1 if name == "gamma" else 0)
-            for name, value in adjustment.model_dump().items()
+    async def edits(
+        self, dataset_id: str, episode_index: int, principal_scope_id: str, source: tuple[str, str]
+    ) -> SavedResource:
+        resource = await self.annotations.get_saved_edits(
+            dataset_id, episode_index, author_id=principal_scope_id, source_id=source[0], source_revision=source[1]
         )
-    )
+        return SavedResource(resource.value.model_dump(mode="json") if resource.value else None, resource.etag)
+
+    async def source_revision(self, dataset_id: str, episode_index: int) -> tuple[str, str]:
+        return await self.datasets.get_source_revision(dataset_id, episode_index)
+
+
+class ViewerDatasetResolver:
+    """Resolve saved viewer inputs without materializing media or importing routers."""
+
+    def __init__(self, datasets: DatasetService, annotations: AnnotationService) -> None:
+        self.datasets = datasets
+        self.annotations = annotations
+
+    async def validation_sample(
+        self,
+        dataset_id: str,
+        episode_index: int,
+        *,
+        principal_scope_id: str,
+        reference: dict[str, str],
+        views: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        _, snapshot = await self.resolve(
+            dataset_id,
+            episode_index,
+            principal_scope_id=principal_scope_id,
+            views=views,
+            annotation_author_id=reference.get("annotation_author_id"),
+            expected_snapshot_id=reference.get("snapshot_id"),
+        )
+        return await resolve_validation_sample(
+            ViewerSavedInputReader(self.datasets, self.annotations), snapshot, reference
+        )
+
+    async def episode_indices(self, dataset_id: str, *, principal_scope_id: str) -> list[int]:
+        if await self.datasets.get_dataset(dataset_id) is None:
+            raise SavedInputError("Dataset not found", 404)
+        episodes = await self.datasets.list_episodes(dataset_id, limit=10001, require_actual=True)
+        if len(episodes) > 10000:
+            raise SavedInputError("Judge selection supports at most 10000 episodes", 422)
+        return sorted({episode.index for episode in episodes})
+
+    async def resolve(
+        self,
+        dataset_id: str,
+        episode_index: int,
+        *,
+        principal_scope_id: str,
+        views: tuple[str, ...] = (),
+        annotation_author_id: str | None = None,
+        expected_snapshot_id: str | None = None,
+    ) -> tuple[EpisodeRecord, SavedInputSnapshot]:
+        if await self.datasets.get_dataset(dataset_id) is None:
+            raise SavedInputError("Dataset not found", 404)
+        source = await self.datasets.get_source_revision(dataset_id, episode_index)
+        record = await self.datasets.get_episode_media_record(dataset_id, episode_index)
+        if record is None:
+            raise SavedInputError("Episode not found", 404)
+        snapshot = await resolve_saved_input(
+            self.datasets,
+            self.annotations,
+            dataset_id,
+            episode_index,
+            principal_scope_id=principal_scope_id,
+            source=source,
+            dataset_instruction=record.instruction,
+            media_identity=record.media_identity,
+            video_windows=record.video_windows,
+            annotation_author_id=annotation_author_id,
+            expected_snapshot_id=expected_snapshot_id,
+        )
+        verified = await self.datasets.get_episode_media_record(dataset_id, episode_index)
+        if verified is None or (verified.media_identity, verified.video_windows, verified.instruction) != (
+            record.media_identity,
+            record.video_windows,
+            record.instruction,
+        ):
+            raise SavedInputError("Media changed while resolving saved inputs")
+        if views:
+            if not set(views).issubset(record.video_paths):
+                raise SavedInputError("Unknown camera selection", 422)
+            record = replace(
+                record,
+                video_paths={view: record.video_paths[view] for view in views},
+                video_windows={view: window for view, window in record.video_windows.items() if view in views},
+                media_identity={view: record.media_identity[view] for view in views} if record.media_identity else None,
+            )
+        return replace(
+            record,
+            episode_id=f"{dataset_id}/episode_{episode_index:06d}",
+            instruction=snapshot.instruction,
+            snapshot_id=snapshot.snapshot_id,
+        ), snapshot
 
 
 async def resolve_saved_input(
@@ -64,73 +142,18 @@ async def resolve_saved_input(
     annotation_author_id: str | None = None,
     expected_snapshot_id: str | None = None,
 ) -> SavedInputSnapshot:
-    """Read and recheck independent resources; stale references are not reproducible."""
-    annotation = await annotations.get_annotation_versioned(dataset_id, episode_index)
-    edits = await annotations.get_saved_edits(
+    return await resolve_snapshot(
+        ViewerSavedInputReader(datasets, annotations),
         dataset_id,
         episode_index,
-        author_id=principal_scope_id,
-        source_id=source[0],
-        source_revision=source[1],
+        principal_scope_id=principal_scope_id,
+        source=source,
+        dataset_instruction=dataset_instruction,
+        media_identity=media_identity,
+        video_windows=video_windows,
+        annotation_author_id=annotation_author_id,
+        expected_snapshot_id=expected_snapshot_id,
     )
-    candidates = (
-        [entry for entry in annotation.value.annotations if entry.language_instruction] if annotation.value else []
-    )
-    if annotation_author_id is not None:
-        candidates = [entry for entry in candidates if entry.annotator_id == annotation_author_id]
-        if not candidates:
-            raise SavedInputError("The selected saved annotation is unavailable", 404)
-    if len(candidates) > 1:
-        raise SavedInputError("Select an explicit saved annotation author; instructions are ambiguous")
-    selected = candidates[0] if candidates else None
-    instruction = selected.language_instruction.instruction if selected else dataset_instruction
-    if not instruction.strip():
-        raise SavedInputError("Save a task instruction before judging", 422)
-    if edits.value:
-        operations = edits.value.operations
-        if (
-            operations.removedFrames
-            or operations.insertedFrames
-            or operations.trajectoryAdjustments
-            or _transforms_media(operations.globalTransform)
-            or any(_transforms_media(transform) for transform in (operations.cameraTransforms or {}).values())
-        ):
-            raise SavedInputError("Saved media edits cannot be rendered for judging; clear and save them first", 422)
-    annotation_after = await annotations.get_annotation_versioned(dataset_id, episode_index)
-    edits_after = await annotations.get_saved_edits(
-        dataset_id,
-        episode_index,
-        author_id=principal_scope_id,
-        source_id=source[0],
-        source_revision=source[1],
-    )
-    if (
-        await datasets.get_source_revision(dataset_id, episode_index) != source
-        or annotation_after.etag != annotation.etag
-        or edits_after.etag != edits.etag
-    ):
-        raise SavedInputError("Saved inputs changed while resolving the snapshot; reload and retry")
-    identity = {
-        "dataset_id": dataset_id,
-        "episode_index": episode_index,
-        "principal_scope_id": principal_scope_id,
-        "source_id": source[0],
-        "source_revision": source[1],
-        "annotation_author_id": selected.annotator_id if selected else None,
-        "annotation_revision": annotation.etag,
-        "edit_revision": edits.etag,
-        "instruction": instruction,
-        "instruction_origin": "annotation" if selected else "dataset",
-    }
-    content = {
-        **identity,
-        "schema_version": 1,
-        "media_identity": media_identity,
-        "video_windows": video_windows,
-        "annotation": selected.model_dump(mode="json") if selected else None,
-        "edits": edits.value.model_dump(mode="json") if edits.value else None,
-    }
-    snapshot_id = hashlib.sha256(json.dumps(content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    if expected_snapshot_id is not None and snapshot_id != expected_snapshot_id:
-        raise SavedInputError("Saved snapshot is stale or belongs to another scope and cannot be reproduced")
-    return SavedInputSnapshot(snapshot_id=snapshot_id, **identity)
+
+
+__all__ = ["SavedInputError", "SavedInputSnapshot", "ViewerSavedInputReader", "resolve_saved_input"]
