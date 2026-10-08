@@ -408,8 +408,9 @@ variable "node_pools" {
     undrainable_node_behavior  = optional(string, null)
     max_surge                  = optional(string, null)
     max_unavailable            = optional(string, null)
+    os_sku                     = optional(string, null)
   }))
-  description = "Additional node pools for the AKS cluster. Map key is used as the node pool name. Each entry either owns a subnet through subnet_address_prefixes or shares another entry's subnet through subnet_pool_key. Non-Spot entries can set undrainable_node_behavior (Cordon or Schedule) and one of max_surge or max_unavailable; max_surge defaults to 10% when neither is set. Note: Pod subnets are not used with Azure CNI Overlay mode"
+  description = "Additional node pools for the AKS cluster. Map key is used as the node pool name. Each entry either owns a subnet through subnet_address_prefixes or shares another entry's subnet through subnet_pool_key. Non-Spot entries can set undrainable_node_behavior (Cordon or Schedule) and one of max_surge or max_unavailable; max_surge defaults to 10% when neither is set. os_sku pins the node OS (Ubuntu, Ubuntu2204, Ubuntu2404, AzureLinux, or AzureLinux3); null keeps the AKS default for the Kubernetes version. Note: Pod subnets are not used with Azure CNI Overlay mode"
   default = {
     gpu = {
       vm_size                    = "Standard_NV36ads_A10_v5"

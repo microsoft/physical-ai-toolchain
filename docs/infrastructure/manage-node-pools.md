@@ -3,7 +3,7 @@ sidebar_position: 11
 title: Manage Node Pools
 description: Add, remove, and resize AKS node pools on an existing cluster
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-01
+ms.date: 2026-10-07
 ms.topic: how-to
 keywords:
   - node-pools
@@ -58,22 +58,23 @@ Script `03` deploys the selected `osmo-platforms.yaml` as a Helm values overlay.
 
 These fields on a `node_pools` entry are `ForceNew`, so editing one destroys and recreates the pool under the same name:
 
-| Field                          | In-place? | Notes                                                                |
-|--------------------------------|-----------|----------------------------------------------------------------------|
-| `vm_size`                      | No        | VMSS SKU is immutable; AKS rejects in-place SKU changes              |
-| `subnet_address_prefixes`      | No        | The subnet itself is also a `ForceNew` resource                      |
-| `subnet_pool_key`              | No        | Moves the pool to another subnet; add a new pool instead             |
-| `zones`                        | No        | Availability zone is set at pool creation                            |
-| `priority`                     | No        | `Regular` vs `Spot` is set at pool creation                          |
-| `eviction_policy`              | No        | Tied to `priority`; only valid for `Spot`                            |
-| `gpu_driver`                   | No        | Affects pool creation flags                                          |
-| `node_count`                   | Yes       | When autoscaler is disabled                                          |
-| `min_count`, `max_count`       | Yes       | When autoscaler is enabled                                           |
-| `should_enable_auto_scaling`   | Yes       | Toggling on/off updates the existing pool                            |
-| `node_labels`                  | Yes       | Applied to existing nodes                                            |
-| `node_taints`                  | Yes       | Applied to existing nodes (workloads may be evicted)                 |
-| `max_surge`, `max_unavailable` | Yes       | Non-Spot pools only; set at most one                                 |
-| `undrainable_node_behavior`    | Yes       | Non-Spot pools only; removing it after it was set recreates the pool |
+| Field                          | In-place? | Notes                                                                 |
+|--------------------------------|-----------|-----------------------------------------------------------------------|
+| `vm_size`                      | No        | VMSS SKU is immutable; AKS rejects in-place SKU changes               |
+| `subnet_address_prefixes`      | No        | The subnet itself is also a `ForceNew` resource                       |
+| `subnet_pool_key`              | No        | Moves the pool to another subnet; add a new pool instead              |
+| `zones`                        | No        | Availability zone is set at pool creation                             |
+| `priority`                     | No        | `Regular` vs `Spot` is set at pool creation                           |
+| `eviction_policy`              | No        | Tied to `priority`; only valid for `Spot`                             |
+| `gpu_driver`                   | No        | Affects pool creation flags                                           |
+| `node_count`                   | Yes       | When autoscaler is disabled                                           |
+| `min_count`, `max_count`       | Yes       | When autoscaler is enabled                                            |
+| `should_enable_auto_scaling`   | Yes       | Toggling on/off updates the existing pool                             |
+| `node_labels`                  | Yes       | Applied to existing nodes                                             |
+| `node_taints`                  | Yes       | Applied to existing nodes (workloads may be evicted)                  |
+| `max_surge`, `max_unavailable` | Yes       | Non-Spot pools only; set at most one                                  |
+| `undrainable_node_behavior`    | Yes       | Non-Spot pools only; removing it after it was set recreates the pool  |
+| `os_sku`                       | Yes       | Between `Ubuntu*` and `AzureLinux*` SKUs; AKS rebuilds existing nodes |
 
 Anything in the "No" rows means choosing between two flows:
 

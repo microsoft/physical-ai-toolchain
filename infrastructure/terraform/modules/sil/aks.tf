@@ -152,6 +152,7 @@ resource "azurerm_kubernetes_cluster_node_pool" "gpu" {
   eviction_policy       = each.value.priority == "Spot" ? each.value.eviction_policy : null
   gpu_driver            = each.value.gpu_driver
   node_labels           = each.value.node_labels
+  os_sku                = each.value.os_sku
 
   // Spot pools do not support upgrade_settings (Azure rejects maxUnavailable for Spot)
   dynamic "upgrade_settings" {

@@ -44,6 +44,9 @@ system_node_pool_node_count = 1
 //               GRID driver that RTX PRO 6000 sizes need
 //   "None"    - No AKS-managed driver; use GPU Operator or custom installation
 //
+// os_sku: optional node OS. Kubernetes 1.35 moves the default Ubuntu SKU to Ubuntu 24.04;
+//   "Ubuntu2204" keeps a pool on Ubuntu 22.04 (supported through Kubernetes 1.36).
+//
 // node_labels: Kubernetes labels applied to nodes at provisioning time.
 //   Set nvidia.com/gpu.deploy.driver=false only on RTX PRO 6000 pools created with
 //   gpu_driver = "None". It skips GPU Operator driver management and hands the nodes
