@@ -5,7 +5,7 @@ import {
   setMetadata,
 } from '@/lib/offline-storage'
 import type { EpisodeAnnotation } from '@/types'
-import type { EpisodeEditOperations } from '@/types/episode-edit'
+import type { EpisodeEditOperations, SavedEditBaseline } from '@/types/episode-edit'
 
 const DRAFT_PREFIX = 'draft-v2'
 const LEGACY_DRAFT_PREFIXES = ['edit-draft:', 'annotation-draft:', 'label-draft:']
@@ -237,7 +237,7 @@ export function loadPersistedEditDraft(
   datasetId: string,
   episodeIndex: number,
   principalScopeId: string,
-): Promise<DraftEnvelope<null, EpisodeEditOperations> | undefined> {
+): Promise<DraftEnvelope<SavedEditBaseline | null, EpisodeEditOperations> | undefined> {
   return loadPersistedDraftEnvelope(principalScopeId, {
     kind: 'episode-edit',
     datasetId,
@@ -250,12 +250,13 @@ export function persistEditDraft(
   episodeIndex: number,
   principalScopeId: string,
   operations: EpisodeEditOperations | null,
+  baseline: SavedEditBaseline | null = null,
 ): Promise<void> {
   return persistNextEnvelope(
     principalScopeId,
     { kind: 'episode-edit', datasetId, episodeIndex },
-    null,
-    null,
+    baseline?.etag ?? null,
+    baseline,
     operations,
   )
 }
@@ -315,7 +316,14 @@ export function persistLabelDraft(
 }
 
 export async function clearPersistedEditDraftsForTests(): Promise<void> {
+  await Promise.resolve()
+  while (resourceWriteQueues.size > 0) {
+    await Promise.all(resourceWriteQueues.values())
+  }
   fallbackDraftStorage.clear()
+  if (typeof indexedDB !== 'undefined') {
+    await deleteMetadataByPrefixes([DRAFT_PREFIX, ...LEGACY_DRAFT_PREFIXES])
+  }
   resourceWriteQueues.clear()
   legacyDraftsPurged = false
 }

@@ -20,6 +20,10 @@ const hoisted = vi.hoisted(() => {
     labelsLoaded: true,
     episodeIndex: 0,
     hasEdits: false,
+    hasAnnotationChanges: false,
+    annotationRecoveryError: null as string | null,
+    annotationReadCount: 0,
+    editPersistenceError: null as string | null,
     isPlaying: false,
     autoPlay: false,
     autoLoop: false,
@@ -78,6 +82,7 @@ const hoisted = vi.hoisted(() => {
     setAutoPlay: vi.fn(),
     setAutoLoop: vi.fn(),
     saveEpisodeLabels: vi.fn(),
+    saveAnnotation: vi.fn(),
   }
 })
 
@@ -97,6 +102,7 @@ export const mockSetPlaybackSpeed = hoisted.setPlaybackSpeed
 export const mockSetAutoPlay = hoisted.setAutoPlay
 export const mockSetAutoLoop = hoisted.setAutoLoop
 export const mockSaveEpisodeLabels = hoisted.saveEpisodeLabels
+export const mockSaveAnnotation = hoisted.saveAnnotation
 
 vi.mock('@/components/annotation-panel', () => ({
   LabelPanel: () => (
@@ -296,6 +302,22 @@ vi.mock('@/hooks/use-labels', () => ({
   }),
 }))
 
+vi.mock('@/hooks/use-annotations', () => ({
+  useEpisodeAnnotations: () => {
+    hoisted.state.annotationReadCount += 1
+    return { error: null }
+  },
+  useSaveAnnotation: () => ({ mutateAsync: hoisted.saveAnnotation, isPending: false }),
+}))
+
+vi.mock('@/hooks/use-episode-edits', () => ({
+  useEpisodeEdits: () => ({
+    isReady: !hoisted.state.editPersistenceError,
+    persistenceError: hoisted.state.editPersistenceError,
+  }),
+  useSaveEpisodeEdits: () => ({ mutateAsync: hoisted.saveEpisodeDraft, isPending: false }),
+}))
+
 vi.mock('@/hooks/use-datasets', () => ({
   useCacheStats: () => ({ data: undefined }),
 }))
@@ -326,23 +348,50 @@ vi.mock('@/stores', () => ({
   useDatasetStore: (selector: (state: unknown) => unknown) =>
     selector({ currentDataset: { id: 'dataset-1', fps: 30 } }),
   useAnnotationStore: (selector: (state: unknown) => unknown) =>
-    selector({ currentAnnotation: null }),
+    selector({
+      currentAnnotation: hoisted.state.hasAnnotationChanges
+        ? { annotatorId: 'principal-test', notes: 'Changed instruction' }
+        : null,
+      isDirty: hoisted.state.hasAnnotationChanges,
+      draftHydrated: true,
+      draftError: hoisted.state.annotationRecoveryError,
+      conflict: null,
+      error: null,
+      editGeneration: 0,
+      contextGeneration: 0,
+    }),
   useEditDirtyState: () => ({ isDirty: hoisted.state.hasEdits, resetEdits: hoisted.resetEdits }),
   useFrameInsertionState: () => ({
     insertedFrames: new Map<number, { interpolationFactor?: number }>(),
   }),
-  useEditStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      subtasks: hoisted.state.subtasks,
-      addSubtask: vi.fn(),
-      removedFrames: new Set<number>(),
-      initializeEdit: hoisted.initializeEdit,
-      clearTransforms: vi.fn(),
-      saveEpisodeDraft: hoisted.saveEpisodeDraft,
-      datasetId: null,
-      episodeIndex: null,
-      globalTransform: null,
-    }),
+  useEditStore: Object.assign(
+    (selector: (state: unknown) => unknown) =>
+      selector({
+        subtasks: hoisted.state.subtasks,
+        addSubtask: vi.fn(),
+        removedFrames: new Set<number>(),
+        initializeEdit: hoisted.initializeEdit,
+        clearTransforms: vi.fn(),
+        saveEpisodeDraft: hoisted.saveEpisodeDraft,
+        datasetId: null,
+        episodeIndex: null,
+        globalTransform: null,
+      }),
+    {
+      getState: () => ({
+        serverBaseline: {
+          sourceId: 'synthetic-source',
+          sourceRevision: 'synthetic-generation',
+          principalScopeId: 'principal-test',
+          etag: 'synthetic-revision',
+        },
+        getEditOperations: () => ({
+          datasetId: 'dataset-1',
+          episodeIndex: hoisted.state.episodeIndex,
+        }),
+      }),
+    },
+  ),
   useEpisodeStore: (selector: (state: unknown) => unknown) =>
     selector({
       currentEpisode: {
@@ -397,6 +446,12 @@ export function setupAnnotationWorkspaceTestCase() {
   testState.labelsLoaded = true
   testState.episodeIndex = 0
   testState.hasEdits = false
+  testState.hasAnnotationChanges = false
+  testState.annotationRecoveryError = null
+  testState.annotationReadCount = 0
+  mockSaveAnnotation.mockReset()
+  mockSaveAnnotation.mockResolvedValue(undefined)
+  testState.editPersistenceError = null
   testState.isPlaying = false
   testState.autoPlay = false
   testState.autoLoop = false

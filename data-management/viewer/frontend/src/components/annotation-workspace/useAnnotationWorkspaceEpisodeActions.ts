@@ -16,9 +16,14 @@ interface UseAnnotationWorkspaceEpisodeActionsOptions {
   availableLabels: string[]
   labelDataLoaded: boolean
   hasEdits: boolean
+  hasAnnotationChanges?: boolean
+  onSaveEpisodeAnnotation?: () => void | Promise<unknown>
+  principalScopeId?: string
+  changeGeneration?: string
+  saveBlockedReason?: string | null
   onResetEdits: () => void
   onSetEpisodeLabels: (episodeIndex: number, labels: string[]) => void
-  onSaveEpisodeDraft: () => void
+  onSaveEpisodeDraft: () => void | Promise<unknown>
   onSaveEpisodeLabels: (input: SaveEpisodeLabelsInput) => SaveEpisodeLabelsResult
   onRecordEvent: (channel: string, type: string, data?: Record<string, unknown>) => void
   canGoNextEpisode: boolean
@@ -34,6 +39,11 @@ export function useAnnotationWorkspaceEpisodeActions({
   availableLabels,
   labelDataLoaded,
   hasEdits,
+  hasAnnotationChanges = false,
+  onSaveEpisodeAnnotation,
+  principalScopeId,
+  changeGeneration,
+  saveBlockedReason,
   onResetEdits,
   onSetEpisodeLabels,
   onSaveEpisodeDraft,
@@ -43,6 +53,18 @@ export function useAnnotationWorkspaceEpisodeActions({
   onAdvanceToNextEpisode,
 }: UseAnnotationWorkspaceEpisodeActionsOptions) {
   const [showSavedStatus, setShowSavedStatus] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const savingRef = useRef(false)
+  const contextKey = JSON.stringify([currentDatasetId, currentEpisodeIndex, principalScopeId])
+  const currentSaveContext = useRef({ contextKey, changeGeneration })
+  useEffect(() => {
+    currentSaveContext.current = { contextKey, changeGeneration }
+  }, [contextKey, changeGeneration])
+  useEffect(() => {
+    setSaveError(null)
+    setShowSavedStatus(false)
+  }, [contextKey])
   const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastLabelSignatureRef = useRef<string | null>(null)
   const lastEpisodeContextRef = useRef<string | null>(null)
@@ -67,12 +89,17 @@ export function useAnnotationWorkspaceEpisodeActions({
     return current.some((label, index) => label !== initial[index])
   }, [currentEpisodeIndex, currentEpisodeLabels, labelDataLoaded, savedLabelsForCurrentEpisode])
 
-  const hasPendingEpisodeChanges = hasLabelChanges || hasEdits
-  const saveStatusMessage = hasPendingEpisodeChanges
-    ? 'Unsaved episode changes.'
-    : showSavedStatus
-      ? 'Episode changes saved.'
-      : null
+  const hasPendingEpisodeChanges = hasLabelChanges || hasEdits || hasAnnotationChanges
+  const saveStatusMessage =
+    saveError ??
+    saveBlockedReason ??
+    (isSaving
+      ? 'Saving episode changes.'
+      : hasPendingEpisodeChanges
+        ? 'Unsaved episode changes.'
+        : showSavedStatus
+          ? 'Episode changes saved.'
+          : null)
 
   const announceSave = useCallback(() => {
     setShowSavedStatus(true)
@@ -109,7 +136,6 @@ export function useAnnotationWorkspaceEpisodeActions({
       onRecordEvent('labels', 'draft-change', {
         episodeIndex: currentEpisodeIndex,
         labelCount: currentEpisodeLabels.length,
-        labels: [...currentEpisodeLabels],
         hasLabelChanges,
       })
     }
@@ -184,61 +210,110 @@ export function useAnnotationWorkspaceEpisodeActions({
     savedLabelsForCurrentEpisode,
   ])
 
-  const handleSaveAndNextEpisode = useCallback(async () => {
-    if (currentEpisodeIndex === null) {
-      return
-    }
-
-    if (currentDatasetId && hasLabelChanges) {
-      await onSaveEpisodeLabels({
-        episodeIdx: currentEpisodeIndex,
-        labels: currentEpisodeLabels,
-      })
-
-      onRecordEvent('labels', 'saved', {
-        datasetId: currentDatasetId,
-        episodeIndex: currentEpisodeIndex,
-        labelCount: currentEpisodeLabels.length,
-      })
-    }
-
-    if (hasEdits) {
-      onSaveEpisodeDraft()
-      onRecordEvent('persistence', 'draft-saved', {
-        datasetId: currentDatasetId,
-        episodeIndex: currentEpisodeIndex,
-      })
-    }
-
-    if (hasPendingEpisodeChanges) {
-      announceSave()
-    }
-
-    const shouldAdvance = canGoNextEpisode && Boolean(onAdvanceToNextEpisode)
-    onRecordEvent('workspace', shouldAdvance ? 'save-next-episode' : 'save-episode', {
-      episodeIndex: currentEpisodeIndex,
-      hasPendingEpisodeChanges,
+  const saveEpisode = useCallback(
+    async (advance: boolean) => {
+      if (currentEpisodeIndex === null || !currentDatasetId || savingRef.current) {
+        return
+      }
+      if (saveBlockedReason) {
+        setSaveError(saveBlockedReason)
+        return
+      }
+      savingRef.current = true
+      setIsSaving(true)
+      setSaveError(null)
+      const submittedContext = { contextKey, changeGeneration }
+      try {
+        const writes: Promise<void>[] = []
+        const write = async (resource: string, operation: () => void | Promise<unknown>) => {
+          await operation()
+          onRecordEvent(
+            resource === 'labels' ? 'labels' : 'persistence',
+            resource === 'labels' ? 'saved' : `${resource}-saved`,
+            {
+              datasetId: currentDatasetId,
+              episodeIndex: currentEpisodeIndex,
+            },
+          )
+        }
+        if (hasLabelChanges)
+          writes.push(
+            write('labels', () =>
+              onSaveEpisodeLabels({
+                episodeIdx: currentEpisodeIndex,
+                labels: [...currentEpisodeLabels],
+              }),
+            ),
+          )
+        if (hasEdits) writes.push(write('edits', onSaveEpisodeDraft))
+        if (hasAnnotationChanges)
+          writes.push(
+            write('annotation', () => {
+              if (!onSaveEpisodeAnnotation) throw new Error('Annotation persistence is unavailable')
+              return onSaveEpisodeAnnotation()
+            }),
+          )
+        const results = await Promise.allSettled(writes)
+        const failures = results.filter((result) => result.status === 'rejected').length
+        const sameContext = currentSaveContext.current.contextKey === submittedContext.contextKey
+        if (failures) {
+          if (sameContext)
+            setSaveError(
+              failures === results.length
+                ? 'Episode changes could not be saved. Your draft is retained.'
+                : 'Some episode changes could not be saved. Unsaved drafts are retained.',
+            )
+          onRecordEvent('persistence', 'episode-save-failed', {
+            datasetId: currentDatasetId,
+            episodeIndex: currentEpisodeIndex,
+            failedResources: failures,
+            savedResources: results.length - failures,
+          })
+          return
+        }
+        if (
+          !sameContext ||
+          currentSaveContext.current.changeGeneration !== submittedContext.changeGeneration
+        )
+          return
+        if (hasPendingEpisodeChanges) announceSave()
+        const shouldAdvance = advance && canGoNextEpisode && Boolean(onAdvanceToNextEpisode)
+        onRecordEvent('workspace', shouldAdvance ? 'save-next-episode' : 'save-episode', {
+          datasetId: currentDatasetId,
+          episodeIndex: currentEpisodeIndex,
+          hasPendingEpisodeChanges,
+          hasEdits,
+          hasLabelChanges,
+          hasAnnotationChanges,
+        })
+        if (shouldAdvance) onAdvanceToNextEpisode?.()
+      } finally {
+        savingRef.current = false
+        setIsSaving(false)
+      }
+    },
+    [
+      announceSave,
+      canGoNextEpisode,
+      currentDatasetId,
+      currentEpisodeIndex,
+      currentEpisodeLabels,
       hasEdits,
       hasLabelChanges,
-    })
-
-    if (shouldAdvance) {
-      onAdvanceToNextEpisode?.()
-    }
-  }, [
-    announceSave,
-    canGoNextEpisode,
-    currentDatasetId,
-    currentEpisodeIndex,
-    currentEpisodeLabels,
-    hasEdits,
-    hasLabelChanges,
-    hasPendingEpisodeChanges,
-    onAdvanceToNextEpisode,
-    onRecordEvent,
-    onSaveEpisodeDraft,
-    onSaveEpisodeLabels,
-  ])
+      hasPendingEpisodeChanges,
+      onAdvanceToNextEpisode,
+      onRecordEvent,
+      onSaveEpisodeDraft,
+      onSaveEpisodeLabels,
+      hasAnnotationChanges,
+      onSaveEpisodeAnnotation,
+      contextKey,
+      changeGeneration,
+      saveBlockedReason,
+    ],
+  )
+  const handleSaveEpisode = useCallback(() => saveEpisode(false), [saveEpisode])
+  const handleSaveAndNextEpisode = useCallback(() => saveEpisode(true), [saveEpisode])
 
   return {
     hasLabelChanges,
@@ -246,5 +321,7 @@ export function useAnnotationWorkspaceEpisodeActions({
     saveStatusMessage,
     handleResetAll,
     handleSaveAndNextEpisode,
+    handleSaveEpisode,
+    isSaving,
   }
 }

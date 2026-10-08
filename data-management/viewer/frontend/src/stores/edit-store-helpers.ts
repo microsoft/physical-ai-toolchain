@@ -1,8 +1,10 @@
 import { persistEditDraft } from '@/lib/edit-draft-storage'
 import type {
+  EpisodeEditDraft,
   EpisodeEditOperations,
   FrameInsertion,
   ImageTransform,
+  SavedEditBaseline,
   SubtaskSegment,
   TrajectoryAdjustment,
 } from '@/types/episode-edit'
@@ -20,6 +22,7 @@ export interface EditStateSnapshot {
   datasetId: string | null
   episodeIndex: number | null
   principalScopeId?: string
+  serverBaseline?: SavedEditBaseline | null
   globalTransform: ImageTransform | null
   cameraTransforms: Record<string, ImageTransform>
   removedFrames: Set<number>
@@ -32,7 +35,7 @@ export interface EditStateWithDerived extends EditStateSnapshot {
   originalState: EditOriginalStateSnapshot | null
   isDirty: boolean
   validationErrors: string[]
-  savedEpisodeDrafts: Record<string, EpisodeEditOperations>
+  savedEpisodeDrafts: Record<string, EpisodeEditDraft>
 }
 
 interface EditStateUpdateOptions {
@@ -57,6 +60,24 @@ export function buildOriginalEditState(
     insertedFrames: new Map(state.insertedFrames),
     subtasks: structuredClone(state.subtasks),
     trajectoryAdjustments: new Map(state.trajectoryAdjustments),
+  }
+}
+
+export function buildEditStateFromOperations(
+  operations: EpisodeEditOperations,
+): EditOriginalStateSnapshot {
+  const snapshot = structuredClone(operations)
+  return {
+    globalTransform: snapshot.globalTransform ?? null,
+    cameraTransforms: snapshot.cameraTransforms ?? {},
+    removedFrames: new Set(snapshot.removedFrames ?? []),
+    insertedFrames: new Map(
+      (snapshot.insertedFrames ?? []).map((entry) => [entry.afterFrameIndex, entry]),
+    ),
+    subtasks: snapshot.subtasks ?? [],
+    trajectoryAdjustments: new Map(
+      (snapshot.trajectoryAdjustments ?? []).map((entry) => [entry.frameIndex, entry]),
+    ),
   }
 }
 
@@ -170,7 +191,8 @@ export function buildEditStateUpdate<T extends EditStateWithDerived>(
 
 export function buildDraftPersistencePayload(state: EditStateSnapshot) {
   const operations = buildEditOperations(state)
-  const persistedDraft = operations && hasEditContent(operations) ? operations : null
+  const persistedDraft =
+    operations && (hasEditContent(operations) || state.serverBaseline) ? operations : null
 
   return {
     datasetId: state.datasetId,
@@ -187,5 +209,11 @@ export async function persistEditStateDraft(state: EditStateSnapshot) {
     return
   }
 
-  await persistEditDraft(datasetId, episodeIndex, state.principalScopeId ?? 'local', persistedDraft)
+  await persistEditDraft(
+    datasetId,
+    episodeIndex,
+    state.principalScopeId ?? 'local',
+    persistedDraft,
+    state.serverBaseline ?? null,
+  )
 }

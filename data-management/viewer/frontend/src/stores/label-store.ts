@@ -8,6 +8,8 @@ import { devtools } from 'zustand/middleware'
 import type { EpisodeAnalysisRecord } from '@/types/api'
 
 interface LabelState {
+  contextGeneration: number
+  baseEtag: string | null
   /** Dataset whose labels currently hydrate this store */
   datasetId: string | null
   /** Available label options for the current dataset */
@@ -90,6 +92,8 @@ type LabelStore = LabelState & LabelActions
 export const DEFAULT_LABELS: string[] = ['SUCCESS', 'FAILURE', 'PARTIAL']
 
 const initialState: LabelState = {
+  contextGeneration: 0,
+  baseEtag: null,
   datasetId: null,
   availableLabels: DEFAULT_LABELS,
   episodeLabels: {},
@@ -110,6 +114,8 @@ export const useLabelStore = create<LabelStore>()(
         if (get().datasetId === datasetId) return
         set(
           {
+            contextGeneration: get().contextGeneration + 1,
+            baseEtag: null,
             datasetId,
             availableLabels: DEFAULT_LABELS,
             episodeLabels: {},
@@ -195,6 +201,7 @@ export const useLabelStore = create<LabelStore>()(
         }
         set(
           {
+            contextGeneration: get().contextGeneration + 1,
             datasetId,
             episodeLabels: parsed,
             savedEpisodeLabels: parsed,
@@ -367,7 +374,7 @@ export const useLabelStore = create<LabelStore>()(
       },
 
       reset: () => {
-        set(initialState, false, 'reset')
+        set({ ...initialState, contextGeneration: get().contextGeneration + 1 }, false, 'reset')
       },
     }),
     { name: 'label-store' },

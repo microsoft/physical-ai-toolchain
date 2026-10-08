@@ -105,8 +105,14 @@ describe('useVlmJudgeBatch', () => {
 
     const labelPuts = mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/labels'))
     expect(labelPuts).toHaveLength(2)
-    expect(JSON.parse(labelPuts[0][1].body)).toEqual({ labels: ['REVIEW', 'SUCCESS'] })
-    expect(JSON.parse(labelPuts[1][1].body)).toEqual({ labels: ['FAILURE'] })
+    expect(JSON.parse(labelPuts[0][1].body)).toEqual({
+      labels: ['REVIEW', 'SUCCESS'],
+      intent: 'legacy-unknown',
+    })
+    expect(JSON.parse(labelPuts[1][1].body)).toEqual({
+      labels: ['FAILURE'],
+      intent: 'legacy-unknown',
+    })
 
     const store = useLabelStore.getState()
     expect(store.episodeLabels[0]).toEqual(['REVIEW', 'SUCCESS'])

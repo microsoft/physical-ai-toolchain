@@ -49,7 +49,7 @@ export function DraftConflictDialog() {
             (annotation) => annotation.annotatorId === principal.scopeId,
           ) ?? annotationConflict.submitted
         const merged = mergeThreeWay(annotationBaseline, annotationDraft, server, resolution)
-        resolveAnnotationConflict(merged, server)
+        resolveAnnotationConflict(merged, server, latest.etag)
         queryClient.setQueryData(
           annotationKeys.detail(currentDataset.id, currentEpisodeIndex, principal.scopeId),
           latest,
@@ -80,6 +80,7 @@ export function DraftConflictDialog() {
           mergedEpisodes,
           serverEpisodes,
         )
+        useLabelStore.setState({ baseEtag: latest.etag })
         queryClient.setQueryData(labelKeys.dataset(currentDataset.id), latest)
       }
     } catch (cause) {

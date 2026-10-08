@@ -7,6 +7,8 @@
 import type {
   AnnotationSummary,
   AutoQualityAnalysis,
+  Contribution,
+  ContributionLedger,
   DatasetCapabilities,
   DatasetInfo,
   EpisodeAnnotation,
@@ -112,6 +114,31 @@ export function transformKeys<T>(obj: unknown): T {
     ) as T
   }
   return obj as T
+}
+
+export function preserveProvenance<T extends { provenance?: Record<string, ContributionLedger> }>(
+  data: unknown,
+): T {
+  const result = transformKeys<T>(data)
+  const raw = data as { provenance?: Record<string, Record<string, unknown>> }
+  if (raw.provenance) {
+    result.provenance = Object.fromEntries(
+      Object.entries(raw.provenance).map(([scope, ledger]) => [
+        scope,
+        {
+          ...transformKeys<ContributionLedger>(ledger),
+          acceptances: structuredClone(ledger.acceptances ?? {}) as Record<string, string[]>,
+          contributions: ((ledger.contributions ?? []) as Record<string, unknown>[]).map(
+            (contribution) => ({
+              ...transformKeys<Contribution>(contribution),
+              value: structuredClone(contribution.value),
+            }),
+          ),
+        },
+      ]),
+    )
+  }
+  return result
 }
 
 function transformKeysToSnake<T>(obj: unknown): T {
@@ -385,6 +412,8 @@ export async function fetchAnnotations(
 ): Promise<VersionedResource<EpisodeAnnotationFile>> {
   return apiRequestVersioned<EpisodeAnnotationFile>(
     `/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
+    {},
+    preserveProvenance<EpisodeAnnotationFile>,
   )
 }
 
@@ -405,8 +434,14 @@ export async function saveAnnotation(
         'Content-Type': 'application/json',
         ...mutationPreconditionHeaders(precondition),
       },
-      body: JSON.stringify(transformKeysToSnake(annotation)),
+      body: JSON.stringify({
+        ...transformKeysToSnake<Record<string, unknown>>(annotation),
+        ...(annotation.instructionAdoption
+          ? { instruction_adoption: annotation.instructionAdoption }
+          : {}),
+      }),
     },
+    preserveProvenance<EpisodeAnnotationFile>,
   )
 }
 
@@ -542,6 +577,7 @@ export async function setEpisodeLabels(
   episodeIndex: number,
   labels: string[],
   precondition: MutationPrecondition,
+  intent: 'human-edit' | 'legacy-unknown' = 'legacy-unknown',
 ): Promise<VersionedResource<EpisodeLabelsResult>> {
   return apiRequestVersioned<EpisodeLabelsResult>(
     `/datasets/${datasetId}/episodes/${episodeIndex}/labels`,
@@ -551,7 +587,7 @@ export async function setEpisodeLabels(
         'Content-Type': 'application/json',
         ...mutationPreconditionHeaders(precondition),
       },
-      body: JSON.stringify({ labels }),
+      body: JSON.stringify({ labels, intent }),
     },
   )
 }

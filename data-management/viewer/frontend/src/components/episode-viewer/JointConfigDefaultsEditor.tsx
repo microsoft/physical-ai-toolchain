@@ -35,6 +35,7 @@ export interface JointConfigDefaultsEditorProps {
   labels: Record<string, string>
   onSave: (config: { groups: JointGroup[]; labels: Record<string, string> }) => void
   isSaving?: boolean
+  saveError?: string
   colors?: string[]
 }
 
@@ -217,6 +218,7 @@ export function JointConfigDefaultsEditor({
   labels: initialLabels,
   onSave,
   isSaving,
+  saveError,
   colors = JOINT_COLORS,
 }: JointConfigDefaultsEditorProps) {
   const [groups, setGroups] = useState<DraftGroup[]>(
@@ -619,6 +621,11 @@ export function JointConfigDefaultsEditor({
           </div>
         </div>
 
+        {saveError && (
+          <Alert variant="destructive">
+            <AlertDescription>Joint defaults were not saved. {saveError}</AlertDescription>
+          </Alert>
+        )}
         <DialogFooter className="flex items-center justify-between gap-2 pt-4">
           <Button variant="outline" size="sm" onClick={handleReset}>
             Reset

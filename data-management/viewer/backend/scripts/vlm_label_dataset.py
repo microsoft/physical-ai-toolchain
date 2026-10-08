@@ -28,7 +28,6 @@ import json
 import logging
 import re
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -36,6 +35,9 @@ from typing import TYPE_CHECKING, Any
 from evaluation.vlm_judge.backend import GenerationConfig, Qwen3VLBackend
 from evaluation.vlm_judge.dataset import iter_episodes, load_dataset_spec
 from evaluation.vlm_judge.frames import FrameWindow, extract_frames, tile_horizontally
+
+from src.api.storage.base import RevisionConflictError
+from src.api.storage.local_revision import content_etag, write_conditional
 
 # cspell:ignore extrasaction keepends
 
@@ -251,9 +253,12 @@ def _write_analysis_records(
 ) -> int:
     """Merge successful labeling rows into the dataviewer analysis map."""
     labels_path = dataset_root / "meta" / "episode_labels.json"
+    etag = None
     if labels_path.exists():
         try:
-            labels_file = json.loads(labels_path.read_text(encoding="utf-8"))
+            content = labels_path.read_bytes()
+            labels_file = json.loads(content)
+            etag = content_etag(content)
         except json.JSONDecodeError as err:
             raise ValueError(f"Invalid labels file at {labels_path}: {err.msg}") from err
         if not isinstance(labels_file, dict):
@@ -285,35 +290,21 @@ def _write_analysis_records(
         existing = analysis.get(key, {})
         if not isinstance(existing, dict):
             raise ValueError(f"Invalid analysis record for episode {key}: expected a JSON object")
-        record = {field: row.get(field) for field in ANALYSIS_FIELDS}
-        record.update(
-            {
-                "instruction": row.get("instruction"),
-                "duration_s": row.get("duration_s"),
-                "source": row.get("source") or source,
-            }
-        )
+        record = {field: row[field] for field in (*ANALYSIS_FIELDS, "instruction", "duration_s") if field in row}
+        record["source"] = row.get("source") or source
         analysis[key] = {**existing, **record}
         updated += 1
 
-    labels_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=labels_path.parent,
-            prefix=f".{labels_path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary_file:
-            json.dump(labels_file, temporary_file, indent=2)
-            temporary_file.write("\n")
-            temporary_path = Path(temporary_file.name)
-        temporary_path.replace(labels_path)
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+        write_conditional(
+            labels_path,
+            json.dumps(labels_file, indent=2) + "\n",
+            if_match=etag,
+            if_none_match=etag is None,
+        )
+    except RevisionConflictError:
+        _LOGGER.warning("Analysis merge revision conflict; retained existing labels and generated output")
+        raise
     return updated
 
 

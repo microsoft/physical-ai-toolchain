@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { useEpisodeAnnotations, useSaveAnnotation } from '@/hooks/use-annotations'
+import { useEpisodeEdits, useSaveEpisodeEdits } from '@/hooks/use-episode-edits'
 import { useSaveEpisodeLabels } from '@/hooks/use-labels'
 import { usePrincipalContext } from '@/hooks/use-principal-context'
+import { ApiClientError } from '@/lib/api-client'
 import { isDiagnosticsEnabled, recordDiagnosticEvent } from '@/lib/playback-diagnostics'
 import {
+  useAnnotationStore,
   useDatasetStore,
   useEditDirtyState,
   useEditStore,
@@ -49,20 +53,32 @@ export function useAnnotationWorkspaceShell({
   const resumePlaybackRef = useRef((_: number) => {})
 
   const currentDataset = useDatasetStore((state) => state.currentDataset)
+  const annotationQuery = useEpisodeAnnotations()
+  const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation)
+  const annotationDraftHydrated = useAnnotationStore((state) => state.draftHydrated)
+  const annotationDraftError = useAnnotationStore((state) => state.draftError)
+  const hasAnnotationChanges = useAnnotationStore((state) => state.isDirty)
+  const annotationConflict = useAnnotationStore((state) => state.conflict)
+  const annotationEditGeneration = useAnnotationStore((state) => state.editGeneration)
+  const annotationContextGeneration = useAnnotationStore((state) => state.contextGeneration)
+  const resetAnnotation = useAnnotationStore((state) => state.resetAnnotation)
+  const saveAnnotation = useSaveAnnotation()
   const principalQuery = usePrincipalContext()
   const currentEpisode = useEpisodeStore((state) => state.currentEpisode)
   const labelDataLoaded = useLabelStore((state) => state.isLoaded)
+  const labelConflict = useLabelStore((state) => state.conflict)
   const availableLabels = useLabelStore((state) => state.availableLabels)
   const episodeLabels = useLabelStore((state) => state.episodeLabels)
   const savedEpisodeLabels = useLabelStore((state) => state.savedEpisodeLabels)
   const setEpisodeLabelsInStore = useLabelStore((state) => state.setEpisodeLabels)
   const removedFrames = useEditStore((state) => state.removedFrames)
-  const initializeEdit = useEditStore((state) => state.initializeEdit)
   const clearTransforms = useEditStore((state) => state.clearTransforms)
-  const saveEpisodeDraft = useEditStore((state) => state.saveEpisodeDraft)
-  const editDatasetId = useEditStore((state) => state.datasetId)
-  const editEpisodeIndex = useEditStore((state) => state.episodeIndex)
-  const editPrincipalScopeId = useEditStore((state) => state.principalScopeId)
+  const savedEdits = useEpisodeEdits(
+    currentDataset?.id ?? null,
+    currentEpisode?.meta.index ?? null,
+    principalQuery.data?.scopeId,
+  )
+  const saveEdits = useSaveEpisodeEdits()
   const subtasks = useEditStore((state) => state.subtasks)
   const addSubtask = useEditStore((state) => state.addSubtask)
   const globalTransform = useEditStore((state) => state.globalTransform)
@@ -97,48 +113,82 @@ export function useAnnotationWorkspaceShell({
   }, [currentEpisode, savedEpisodeLabels])
 
   const diagnosticsEnabled = diagnosticsVisible && isDiagnosticsEnabled()
+  const annotationAccessLost =
+    annotationQuery.error instanceof ApiClientError &&
+    [401, 403, 404].includes(annotationQuery.error.status)
+  const saveBlockedReason =
+    !principalQuery.data?.scopeId || principalQuery.error
+      ? 'Reload your identity before saving.'
+      : annotationAccessLost
+        ? 'Annotation access is unavailable. Reload before saving.'
+        : annotationConflict || labelConflict
+          ? 'Resolve conflicting changes before saving.'
+          : annotationDraftError ||
+            savedEdits.persistenceError ||
+            (!annotationDraftHydrated ? 'Loading annotation drafts.' : null) ||
+            (!savedEdits.isReady ? 'Loading saved edits.' : null) ||
+            (!labelDataLoaded ? 'Loading labels.' : null)
 
-  const { hasPendingEpisodeChanges, saveStatusMessage, handleResetAll, handleSaveAndNextEpisode } =
-    useAnnotationWorkspaceEpisodeActions({
-      diagnosticsEnabled,
-      currentDatasetId: currentDataset?.id ?? null,
-      currentEpisodeIndex: currentEpisode?.meta.index ?? null,
+  const {
+    hasPendingEpisodeChanges,
+    saveStatusMessage,
+    handleResetAll,
+    handleSaveAndNextEpisode,
+    handleSaveEpisode,
+    isSaving,
+  } = useAnnotationWorkspaceEpisodeActions({
+    diagnosticsEnabled,
+    currentDatasetId: currentDataset?.id ?? null,
+    currentEpisodeIndex: currentEpisode?.meta.index ?? null,
+    currentEpisodeLabels,
+    savedLabelsForCurrentEpisode,
+    availableLabels,
+    labelDataLoaded,
+    hasEdits,
+    hasAnnotationChanges,
+    principalScopeId: principalQuery.data?.scopeId,
+    changeGeneration: JSON.stringify([
+      annotationContextGeneration,
+      annotationEditGeneration,
       currentEpisodeLabels,
-      savedLabelsForCurrentEpisode,
-      availableLabels,
-      labelDataLoaded,
-      hasEdits,
-      onResetEdits: resetEdits,
-      onSetEpisodeLabels: setEpisodeLabelsInStore,
-      onSaveEpisodeDraft: saveEpisodeDraft,
-      onSaveEpisodeLabels: saveEpisodeLabels.mutateAsync,
-      onRecordEvent: recordDiagnosticEvent,
-      canGoNextEpisode,
-      onAdvanceToNextEpisode: onSaveAndNextEpisode ?? onNextEpisode,
-    })
-
-  useEffect(() => {
-    if (currentDataset && currentEpisode && principalQuery.data) {
-      const newDatasetId = currentDataset.id
-      const newEpisodeIndex = currentEpisode.meta.index
-
+    ]),
+    saveBlockedReason,
+    onSaveEpisodeAnnotation: async () => {
       if (
-        editDatasetId !== newDatasetId ||
-        editEpisodeIndex !== newEpisodeIndex ||
-        editPrincipalScopeId !== principalQuery.data.scopeId
+        !currentDataset ||
+        !currentEpisode ||
+        !currentAnnotation ||
+        currentAnnotation.annotatorId !== principalQuery.data?.scopeId
       ) {
-        initializeEdit(newDatasetId, newEpisodeIndex, principalQuery.data.scopeId)
+        throw new Error('Load the current annotation before saving.')
       }
-    }
-  }, [
-    currentDataset,
-    currentEpisode,
-    editDatasetId,
-    editEpisodeIndex,
-    editPrincipalScopeId,
-    initializeEdit,
-    principalQuery.data,
-  ])
+      await saveAnnotation.mutateAsync({
+        datasetId: currentDataset.id,
+        episodeIndex: currentEpisode.meta.index,
+        annotation: structuredClone(currentAnnotation),
+      })
+    },
+    onResetEdits: () => {
+      resetEdits()
+      if (hasAnnotationChanges) resetAnnotation()
+    },
+    onSetEpisodeLabels: setEpisodeLabelsInStore,
+    onSaveEpisodeDraft: async () => {
+      const current = useEditStore.getState()
+      const operations = current.getEditOperations()
+      if (!savedEdits.isReady || !current.serverBaseline || !operations) {
+        throw new Error('Load and resolve saved edits before saving.')
+      }
+      await saveEdits.mutateAsync({
+        ...current.serverBaseline,
+        operations: structuredClone(operations),
+      })
+    },
+    onSaveEpisodeLabels: saveEpisodeLabels.mutateAsync,
+    onRecordEvent: recordDiagnosticEvent,
+    canGoNextEpisode,
+    onAdvanceToNextEpisode: onSaveAndNextEpisode ?? onNextEpisode,
+  })
 
   const originalFrameCount = useMemo(() => {
     if (currentEpisode?.meta.length) {
@@ -280,6 +330,11 @@ export function useAnnotationWorkspaceShell({
     autoPlay,
     canGoNextEpisode,
     canGoPreviousEpisode,
+    canSaveEpisode:
+      !saveBlockedReason &&
+      !saveEpisodeLabels.isPending &&
+      !saveAnnotation.isPending &&
+      !saveEdits.isPending,
     clearTransforms,
     currentDataset,
     currentEpisode,
@@ -288,6 +343,7 @@ export function useAnnotationWorkspaceShell({
     diagnosticsEnabled,
     displayFilter: media.displayFilter,
     exportDialogOpen,
+    editPersistenceError: savedEdits.persistenceError,
     frameImageUrl: media.frameImageUrl,
     globalTransform,
     handleCreateSubtaskFromSelection,
@@ -295,6 +351,8 @@ export function useAnnotationWorkspaceShell({
     handleOpenExportDialog,
     handleResetAllClick,
     handleSaveAndNextEpisode,
+    handleSaveEpisode,
+    isSaving,
     handleTabChange,
     handleVideoEnded: media.handleVideoEnded,
     hasPendingEpisodeChanges,

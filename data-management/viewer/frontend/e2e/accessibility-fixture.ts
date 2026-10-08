@@ -175,6 +175,7 @@ interface ApiFixtureOptions {
   episodeList?: 'error' | 'success'
   export?: 'failure' | 'success'
   trajectoryVariables?: 'joints' | 'named'
+  jointConfig?: 'conflict' | 'success'
 }
 
 export async function installApiFixture(page: Page, options: ApiFixtureOptions = {}) {
@@ -224,10 +225,18 @@ export async function installApiFixture(page: Page, options: ApiFixtureOptions =
       })
     }
     if (path.endsWith('/joint-config') || path === '/api/joint-config/defaults') {
-      return json({
-        dataset_id: path.split('/')[3] ?? 'a11y-synthetic',
-        labels: { '0': 'shoulder_joint', '1': 'target_joint' },
-        groups: [{ id: 'arm', label: 'Arm', indices: [0, 1] }],
+      if (method === 'PUT' && options.jointConfig === 'conflict') {
+        return json({ code: 'REVISION_CONFLICT', message: 'Synthetic settings conflict' }, 412)
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { ETag: method === 'PUT' ? '"settings-saved"' : '"settings-baseline"' },
+        body: JSON.stringify({
+          dataset_id: path === '/api/joint-config/defaults' ? '_defaults' : path.split('/')[3],
+          labels: { '0': 'shoulder_joint', '1': 'target_joint' },
+          groups: [{ id: 'arm', label: 'Arm', indices: [0, 1] }],
+        }),
       })
     }
     if (path.endsWith('/annotations')) {

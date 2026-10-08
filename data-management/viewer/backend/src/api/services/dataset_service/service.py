@@ -27,6 +27,7 @@ from ...models.datasources import (
     TrajectoryPoint,
 )
 from ...storage import LocalStorageAdapter, StorageAdapter
+from ...storage.paths import dataset_id_to_blob_prefix
 from ..episode_cache import EpisodeCache
 from .base import DatasetFormatHandler, normalize_feature_names
 from .hdf5_handler import HDF5FormatHandler
@@ -84,6 +85,8 @@ class DatasetService:
         self._blob_synced: dict[str, Path] = {}
         self._blob_hdf5_synced: dict[str, Path] = {}
         self._blob_meta_synced: dict[str, Path] = {}
+        self._edit_blob_synced: tuple[str, Path] | None = None
+        self._edit_blob_sync_lock = asyncio.Lock()
         # Per-blob locks to serialize concurrent video materialization for the same blob.
         # Without this, parallel range requests race on the shared .part file and the
         # loser's tmp.replace(target) raises FileNotFoundError after the winner renames it.
@@ -96,6 +99,10 @@ class DatasetService:
         self._handlers = [self._lerobot_handler, self._hdf5_handler]
 
         self._episode_cache = EpisodeCache(
+            capacity=episode_cache_capacity,
+            max_memory_bytes=episode_cache_max_mb * 1024 * 1024 if episode_cache_max_mb > 0 else 0,
+        )
+        self._edit_context_cache = EpisodeCache(
             capacity=episode_cache_capacity,
             max_memory_bytes=episode_cache_max_mb * 1024 * 1024 if episode_cache_max_mb > 0 else 0,
         )
@@ -407,6 +414,9 @@ class DatasetService:
 
     def cleanup_temp_dirs(self) -> None:
         """Remove all blob sync temp directories. Call on shutdown."""
+        if self._edit_blob_synced is not None:
+            shutil.rmtree(self._edit_blob_synced[1], ignore_errors=True)
+            self._edit_blob_synced = None
         for path in self._blob_synced.values():
             shutil.rmtree(path, ignore_errors=True)
         self._blob_synced.clear()
@@ -581,8 +591,148 @@ class DatasetService:
 
         return episodes[offset : offset + limit]
 
-    async def get_episode(self, dataset_id: str, episode_idx: int) -> EpisodeData | None:
+    async def _get_blob_source_revision(self, dataset_id: str, episode_idx: int) -> tuple[str, str]:
+        try:
+            from azure.core.exceptions import ResourceNotFoundError
+
+            provider = self._blob_provider
+            if provider is None:
+                raise ValueError("Blob provider unavailable")
+            prefix = dataset_id_to_blob_prefix(dataset_id)
+            client = await provider._get_client()
+            container = client.get_container_client(provider.container_name)
+            candidates = [f"{prefix}/meta/info.json"]
+            candidates.extend(
+                f"{prefix}/{folder}{name}.hdf5"
+                for folder in ("", "data/", "episodes/")
+                for name in (
+                    f"episode_{episode_idx:06d}",
+                    f"episode_{episode_idx}",
+                    f"ep_{episode_idx:06d}",
+                    f"ep_{episode_idx}",
+                )
+            )
+            for blob_path in candidates:
+                try:
+                    properties = await container.get_blob_client(blob_path).get_blob_properties()
+                except ResourceNotFoundError as error:
+                    if getattr(error, "error_code", None) == "BlobNotFound":
+                        continue
+                    raise
+                if not isinstance(properties.etag, str) or not properties.etag:
+                    raise ValueError("Missing source validator")
+                identity = json.dumps(["azure", provider.account_name, provider.container_name, prefix])
+                generation = json.dumps([blob_path, properties.etag])
+                logger.debug(
+                    "Resolved Blob source generation dataset=%s episode=%d",
+                    dataset_id.replace("\r", "").replace("\n", ""),
+                    int(episode_idx),
+                )
+                return hashlib.sha256(identity.encode()).hexdigest(), hashlib.sha256(generation.encode()).hexdigest()
+            raise ValueError("Missing source object")
+        except Exception as error:
+            logger.error("Blob source generation lookup failed: %s", type(error).__name__)
+            raise ValueError("Source generation is unavailable") from None
+
+    async def get_source_revision(self, dataset_id: str, episode_idx: int) -> tuple[str, str]:
+        """Identify the source and its current dataset generation without curation files."""
+        _validate_dataset_id(dataset_id)
+        if dataset_id in self._blob_dataset_ids and dataset_id not in self._local_dataset_ids:
+            return await self._get_blob_source_revision(dataset_id, episode_idx)
+
+        def local_revision() -> tuple[str, str]:
+            root = self._get_dataset_path(dataset_id).resolve()
+            root.relative_to(Path(self.base_path).resolve())
+            manifest = root / "meta" / "info.json"
+            if not manifest.is_file():
+                if not self._hdf5_handler.get_loader(dataset_id, root):
+                    raise ValueError("Source generation is unavailable")
+                loader = self._hdf5_handler._get_loader(dataset_id)
+                if loader is None:
+                    raise ValueError("Source generation is unavailable")
+                manifest = Path(loader._find_episode_file(episode_idx))
+            manifest = manifest.resolve()
+            relative = manifest.relative_to(root).as_posix()
+            metadata = manifest.stat()
+            source_id = hashlib.sha256(f"local:{root}".encode()).hexdigest()
+            generation = json.dumps(
+                [
+                    relative,
+                    metadata.st_dev,
+                    metadata.st_ino,
+                    metadata.st_size,
+                    metadata.st_mtime_ns,
+                    metadata.st_ctime_ns,
+                ]
+            )
+            return source_id, hashlib.sha256(generation.encode()).hexdigest()
+
+        try:
+            result = await asyncio.to_thread(local_revision)
+        except (OSError, ValueError) as error:
+            logger.warning("Source generation lookup failed: %s", type(error).__name__)
+            raise ValueError("Source generation is unavailable") from None
+        logger.debug(
+            "Resolved source generation dataset=%s episode=%d",
+            dataset_id.replace("\r", "").replace("\n", ""),
+            int(episode_idx),
+        )
+        return result
+
+    async def _get_edit_episode(self, dataset_id: str, episode_idx: int) -> EpisodeData | None:
+        source_id, revision = await self.get_source_revision(dataset_id, episode_idx)
+        cache_key = json.dumps([dataset_id, source_id, revision])
+        cached = self._edit_context_cache.get(cache_key, episode_idx)
+        if cached is not None:
+            return cached
+
+        def load(path: Path) -> EpisodeData | None:
+            for handler in (LeRobotFormatHandler(), HDF5FormatHandler()):
+                if handler.get_loader(dataset_id, path):
+                    metadata = handler.discover(dataset_id, path)
+                    return handler.load_episode(dataset_id, episode_idx, dataset_info=metadata)
+            return None
+
+        if dataset_id in self._blob_dataset_ids and dataset_id not in self._local_dataset_ids:
+            provider = self._blob_provider
+            if provider is None:
+                raise ValueError("Source storage unavailable")
+            async with self._edit_blob_sync_lock:
+                if self._edit_blob_synced is None or self._edit_blob_synced[0] != cache_key:
+                    if self._edit_blob_synced is not None:
+                        await asyncio.to_thread(shutil.rmtree, self._edit_blob_synced[1], ignore_errors=True)
+                        self._edit_blob_synced = None
+                    path = Path(tempfile.mkdtemp(prefix="dvw_edit_"))
+                    try:
+                        if not await provider.sync_dataset_to_local(dataset_id, path):
+                            raise ValueError("Source synchronization unavailable")
+                        if not (path / "meta" / "info.json").is_file():
+                            if not await provider.sync_hdf5_dataset_to_local(dataset_id, path):
+                                raise ValueError("Source synchronization unavailable")
+                            if not await provider.sync_hdf5_episode_to_local(dataset_id, path, episode_idx):
+                                raise ValueError("Source synchronization unavailable")
+                    except BaseException:
+                        await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
+                        raise
+                    self._edit_blob_synced = (cache_key, path)
+                path = self._edit_blob_synced[1]
+                episode = await asyncio.to_thread(load, path)
+        else:
+            episode = await asyncio.to_thread(load, self._get_dataset_path(dataset_id))
+
+        if episode is not None:
+            self._edit_context_cache.put(cache_key, episode_idx, episode)
+        logger.debug(
+            "Loaded fresh edit context dataset=%s episode=%d",
+            dataset_id.replace("\r", "").replace("\n", ""),
+            int(episode_idx),
+        )
+        return episode
+
+    async def get_episode(self, dataset_id: str, episode_idx: int, *, fresh: bool = False) -> EpisodeData | None:
         """Get complete data for a specific episode."""
+        if fresh:
+            return await self._get_edit_episode(dataset_id, episode_idx)
         # Check cache first
         cached = self._episode_cache.get(dataset_id, episode_idx)
         if cached is not None:

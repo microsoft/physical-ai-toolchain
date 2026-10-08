@@ -86,6 +86,97 @@ def service(tmp_path: Path) -> DatasetService:
 
 class TestDatasetDiscovery:
     @pytest.mark.asyncio
+    async def test_given_blob_generation_when_loading_multiple_edits_then_sync_is_reused_until_replacement(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import shutil
+        from unittest.mock import AsyncMock, MagicMock
+
+        remote = _write_dataset(tmp_path / "remote")
+        provider = MagicMock()
+
+        async def sync(dataset_id: str, path: Path) -> bool:
+            shutil.copytree(remote, path, dirs_exist_ok=True)
+            return True
+
+        provider.sync_dataset_to_local = AsyncMock(side_effect=sync)
+        datasets = DatasetService(base_path=str(tmp_path / "local"), blob_provider=provider)
+        datasets._blob_dataset_ids.add(_DATASET_ID)
+        revision = AsyncMock(return_value=("source", "generation-one"))
+        monkeypatch.setattr(datasets, "get_source_revision", revision)
+        try:
+            first = await datasets.get_episode(_DATASET_ID, 0, fresh=True)
+            second = await datasets.get_episode(_DATASET_ID, 1, fresh=True)
+            assert first is not None and second is not None
+            assert provider.sync_dataset_to_local.await_count == 1
+            manifest = remote / "meta" / "info.json"
+            metadata = json.loads(manifest.read_text())
+            metadata["features"]["observation.images.wrist"] = metadata["features"].pop(_CAMERA)
+            manifest.write_text(json.dumps(metadata))
+            revision.return_value = ("source", "generation-two")
+            refreshed = await datasets.get_episode(_DATASET_ID, 0, fresh=True)
+            assert refreshed is not None and refreshed.cameras == ["observation.images.wrist"]
+            assert provider.sync_dataset_to_local.await_count == 2
+        finally:
+            datasets.cleanup_temp_dirs()
+
+    @pytest.mark.asyncio
+    async def test_given_replaced_manifest_when_loading_fresh_then_cached_loader_is_not_reused(
+        self,
+        service: DatasetService,
+        tmp_path: Path,
+    ) -> None:
+        await service.list_datasets()
+        initial = await service.get_episode(_DATASET_ID, 0, fresh=True)
+        assert initial is not None and initial.cameras == [_CAMERA]
+        manifest = tmp_path / _DATASET_ID / "meta" / "info.json"
+        metadata = json.loads(manifest.read_text())
+        new_camera = "observation.images.wrist"
+        metadata["features"][new_camera] = metadata["features"].pop(_CAMERA)
+        manifest.write_text(json.dumps(metadata))
+        refreshed = await service.get_episode(_DATASET_ID, 0, fresh=True)
+        assert refreshed is not None and refreshed.cameras == [new_camera]
+
+    @pytest.mark.asyncio
+    async def test_given_source_replacement_when_resolving_identity_then_revision_changes(
+        self,
+        service: DatasetService,
+        tmp_path: Path,
+    ) -> None:
+        source_id, revision = await service.get_source_revision(_DATASET_ID, 0)
+        restarted = DatasetService(base_path=str(tmp_path), episode_cache_capacity=0)
+        assert await restarted.get_source_revision(_DATASET_ID, 0) == (source_id, revision)
+        curation = tmp_path / _DATASET_ID / "annotations"
+        curation.mkdir()
+        (curation / "unrelated.json").write_text("{}")
+        assert await service.get_source_revision(_DATASET_ID, 0) == (source_id, revision)
+
+        manifest = tmp_path / _DATASET_ID / "meta" / "info.json"
+        replacement = manifest.with_suffix(".replacement")
+        replacement.write_bytes(manifest.read_bytes())
+        replacement.replace(manifest)
+
+        changed_source, changed_revision = await service.get_source_revision(_DATASET_ID, 0)
+        assert changed_source == source_id
+        assert changed_revision != revision
+        assert str(tmp_path) not in source_id
+
+    @pytest.mark.asyncio
+    async def test_given_different_local_roots_when_resolving_then_sources_are_distinct(
+        self,
+        service: DatasetService,
+        tmp_path: Path,
+    ) -> None:
+        other_root = tmp_path / "other-source"
+        _write_dataset(other_root)
+        other = DatasetService(base_path=str(other_root), episode_cache_capacity=0)
+        assert (await service.get_source_revision(_DATASET_ID, 0))[0] != (
+            await other.get_source_revision(_DATASET_ID, 0)
+        )[0]
+
+    @pytest.mark.asyncio
     async def test_lists_synthetic_dataset(self, service):
         datasets = await service.list_datasets()
 

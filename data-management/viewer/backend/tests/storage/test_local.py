@@ -5,17 +5,98 @@ Unit tests for local filesystem storage adapter.
 from __future__ import annotations
 
 import asyncio
+import multiprocessing
 import os
+from multiprocessing.connection import Connection
+from multiprocessing.synchronize import Barrier
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from src.api.models.annotations import TaskCompletenessRating
+from src.api.routers.labels import DatasetLabelsFile, LocalLabelStorage
 from src.api.storage.local import LocalStorageAdapter, RevisionConflictError, StorageError
 from src.api.validation import validate_path_containment
 
 from .conftest import create_test_annotation
+
+
+def _competing_local_writer(base: str, kind: str, barrier: Barrier, result: Connection, name: str) -> None:
+    async def write() -> list[bool]:
+        outcomes = []
+        for index in range(8):
+            dataset = f"race-{index}"
+            if kind == "labels":
+                storage = LocalLabelStorage(base)
+                current = await storage.load_versioned(dataset)
+                value = DatasetLabelsFile(dataset_id=dataset, episodes={"0": [name]})
+            else:
+                storage = LocalStorageAdapter(base)
+                current = await storage.get_annotation_versioned(dataset, 0)
+                value = create_test_annotation(episode_index=0)
+                value.annotations[0].notes = name
+            await asyncio.to_thread(barrier.wait, 10)
+            try:
+                if kind == "labels":
+                    await storage.save(dataset, value, if_match=current.etag, if_none_match=current.etag is None)
+                else:
+                    await storage.save_annotation(
+                        dataset, 0, value, if_match=current.etag, if_none_match=current.etag is None
+                    )
+                outcomes.append(True)
+            except RevisionConflictError:
+                outcomes.append(False)
+        return outcomes
+
+    try:
+        result.send(asyncio.run(write()))
+    finally:
+        result.close()
+
+
+@pytest.mark.parametrize("kind", ["labels", "annotations"])
+@pytest.mark.parametrize("existing", [False, True])
+def test_given_two_processes_when_writing_same_revision_then_only_one_wins(
+    tmp_path: Path, kind: str, existing: bool
+) -> None:
+    async def seed() -> None:
+        for index in range(8):
+            dataset = f"race-{index}"
+            if kind == "labels":
+                await LocalLabelStorage(str(tmp_path)).save(dataset, DatasetLabelsFile(dataset_id=dataset))
+            else:
+                await LocalStorageAdapter(str(tmp_path)).save_annotation(
+                    dataset, 0, create_test_annotation(episode_index=0)
+                )
+
+    if existing:
+        asyncio.run(seed())
+    context = multiprocessing.get_context("spawn")
+    barrier = context.Barrier(2)
+    channels = [context.Pipe(duplex=False) for _ in range(2)]
+    processes = [
+        context.Process(target=_competing_local_writer, args=(str(tmp_path), kind, barrier, channel[1], str(index)))
+        for index, channel in enumerate(channels)
+    ]
+
+    try:
+        for process in processes:
+            process.start()
+        for process in processes:
+            process.join(20)
+            assert process.exitcode == 0
+        outcomes = [channel[0].recv() for channel in channels]
+        assert all(sum(winners) == 1 for winners in zip(*outcomes, strict=True))
+        assert not list(tmp_path.rglob("*.tmp"))
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+                process.join()
+        for channel in channels:
+            for connection in channel:
+                connection.close()
 
 
 class TestLocalStorageAdapter:
@@ -270,25 +351,19 @@ class TestLocalStorageAdapter:
         ):
             await self.adapter.get_annotation(self.dataset_id, 3)
 
-    async def test_save_cleans_temp_file_on_replace_failure(self):
+    async def test_save_cleans_temp_file_on_replace_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When os.replace fails, the temp file is cleaned and StorageError raised."""
         annotation = create_test_annotation(episode_index=4)
 
-        original_to_thread = asyncio.to_thread
+        def fail_replace(source: Path, target: Path) -> None:
+            raise OSError("replace failed")
 
-        async def fake_to_thread(func, *args, **kwargs):
-            if func is os.replace:
-                raise OSError("replace failed")
-            return await original_to_thread(func, *args, **kwargs)
-
-        with (
-            patch("src.api.storage.local.asyncio.to_thread", side_effect=fake_to_thread),
-            pytest.raises(StorageError, match="Failed to save annotation file"),
-        ):
+        monkeypatch.setattr("src.api.storage.local_revision.os.replace", fail_replace)
+        with pytest.raises(StorageError, match="Failed to save annotation file"):
             await self.adapter.save_annotation(self.dataset_id, 4, annotation)
 
         annotations_dir = Path(self.temp_dir) / self.dataset_id / "annotations" / "episodes"
-        leftover = list(annotations_dir.glob("annotation_*.tmp"))
+        leftover = list(annotations_dir.glob("*.tmp"))
         assert leftover == []
 
     async def test_list_skips_malformed_filename(self):
@@ -319,43 +394,32 @@ class TestLocalStorageAdapter:
         ):
             await self.adapter.list_annotated_episodes(self.dataset_id)
 
-    async def test_delete_failure_wrapped(self):
-        """Failures from aiofiles.os.remove are wrapped as StorageError."""
+    async def test_delete_failure_wrapped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Filesystem deletion failures preserve the file and become StorageError."""
         annotation = create_test_annotation(episode_index=8)
         await self.adapter.save_annotation(self.dataset_id, 8, annotation)
 
-        async def _raise(*_args, **_kwargs):
+        def fail_unlink(path: Path, *, missing_ok: bool = False) -> None:
             raise OSError("remove failed")
 
-        with (
-            patch("src.api.storage.local.aiofiles.os.remove", side_effect=_raise),
-            pytest.raises(StorageError, match="Failed to delete annotation file"),
-        ):
+        monkeypatch.setattr(Path, "unlink", fail_unlink)
+        with pytest.raises(StorageError, match="Failed to delete annotation file"):
             await self.adapter.delete_annotation(self.dataset_id, 8)
+        assert await self.adapter.get_annotation(self.dataset_id, 8) == annotation
 
-    async def test_save_cleanup_skipped_when_temp_already_gone(self):
-        """If temp file is already gone when cleanup runs, unlink is not called."""
+    async def test_save_cleanup_skipped_when_temp_already_gone(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An already removed temporary file does not mask the publication error."""
         annotation = create_test_annotation(episode_index=9)
-        original_to_thread = asyncio.to_thread
-        unlink_called = {"count": 0}
 
-        async def fake_to_thread(func, *args, **kwargs):
-            if func is os.replace:
-                raise OSError("replace failed")
-            if func is os.path.exists:
-                return False
-            if func is os.unlink:
-                unlink_called["count"] += 1
-                return await original_to_thread(func, *args, **kwargs)
-            return await original_to_thread(func, *args, **kwargs)
+        def fail_replace(source: Path, target: Path) -> None:
+            source.unlink()
+            raise OSError("replace failed")
 
-        with (
-            patch("src.api.storage.local.asyncio.to_thread", side_effect=fake_to_thread),
-            pytest.raises(StorageError, match="Failed to save annotation file"),
-        ):
+        monkeypatch.setattr("src.api.storage.local_revision.os.replace", fail_replace)
+        with pytest.raises(StorageError, match="replace failed"):
             await self.adapter.save_annotation(self.dataset_id, 9, annotation)
 
-        assert unlink_called["count"] == 0
+        assert not list(self.temp_dir.rglob("*.tmp"))
 
     async def test_list_annotated_episodes_empty_directory(self):
         """An existing but empty annotations directory returns []."""

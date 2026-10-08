@@ -279,6 +279,51 @@ describe('fetchEpisode', () => {
 })
 
 describe('fetchAnnotations', () => {
+  it.each(['read', 'save'])(
+    'preserves provenance identities and opaque values on %s',
+    async (operation) => {
+      const response = jsonResponse(
+        {
+          dataset_id: 'ds',
+          episode_index: 0,
+          annotations: [],
+          provenance: {
+            user_scope: {
+              schema_version: '1.0.0',
+              acceptances: { result_key: ['user_scope'] },
+              withdrawn: [],
+              contributions: [
+                { id: 'result_key', author_id: 'user_scope', value: { camera_name: 'front' } },
+              ],
+            },
+          },
+        },
+        { headers: { ETag: '"revision"' } },
+      )
+      if (operation === 'read') mockFetch.mockResolvedValueOnce(response)
+      else mockMutationFetch(response)
+
+      const result =
+        operation === 'read'
+          ? await fetchAnnotations('ds', 0)
+          : await saveAnnotation('ds', 0, { annotatorId: 'user_scope' } as never, {
+              createOnly: true,
+            })
+
+      expect(result.data).toMatchObject({
+        provenance: {
+          user_scope: {
+            schemaVersion: '1.0.0',
+            acceptances: { result_key: ['user_scope'] },
+            contributions: [
+              { id: 'result_key', authorId: 'user_scope', value: { camera_name: 'front' } },
+            ],
+          },
+        },
+      })
+    },
+  )
+
   it('returns the camelCased annotation response with its revision', async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse(
@@ -291,7 +336,10 @@ describe('fetchAnnotations', () => {
               annotator_id: 'u1',
               language_instruction: {
                 instruction: 'Pick up the cube',
-                subtask_instructions: ['Reach', 'Grasp'],
+                subtask_instructions: [
+                  { id: 'reach', text: 'Reach' },
+                  { id: 'grasp', text: 'Grasp' },
+                ],
               },
             },
           ],
@@ -311,7 +359,10 @@ describe('fetchAnnotations', () => {
             annotatorId: 'u1',
             languageInstruction: {
               instruction: 'Pick up the cube',
-              subtaskInstructions: ['Reach', 'Grasp'],
+              subtaskInstructions: [
+                { id: 'reach', text: 'Reach' },
+                { id: 'grasp', text: 'Grasp' },
+              ],
             },
           },
         ],
@@ -330,7 +381,10 @@ describe('saveAnnotation', () => {
       annotatorId: 'u1',
       languageInstruction: {
         instruction: 'Pick up the cube',
-        subtaskInstructions: ['Reach', 'Grasp'],
+        subtaskInstructions: [
+          { id: 'reach', text: 'Reach' },
+          { id: 'grasp', text: 'Grasp' },
+        ],
       },
     }
     mockMutationFetch(
@@ -344,7 +398,10 @@ describe('saveAnnotation', () => {
               annotator_id: 'u1',
               language_instruction: {
                 instruction: 'Pick up the cube',
-                subtask_instructions: ['Reach', 'Grasp'],
+                subtask_instructions: [
+                  { id: 'reach', text: 'Reach' },
+                  { id: 'grasp', text: 'Grasp' },
+                ],
               },
             },
           ],
@@ -363,7 +420,10 @@ describe('saveAnnotation', () => {
         annotator_id: 'u1',
         language_instruction: {
           instruction: 'Pick up the cube',
-          subtask_instructions: ['Reach', 'Grasp'],
+          subtask_instructions: [
+            { id: 'reach', text: 'Reach' },
+            { id: 'grasp', text: 'Grasp' },
+          ],
         },
       }),
     })

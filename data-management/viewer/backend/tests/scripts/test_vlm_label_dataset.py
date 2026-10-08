@@ -14,6 +14,8 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from src.api.storage.base import RevisionConflictError
+
 _SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "vlm_label_dataset.py"
 
 
@@ -119,6 +121,57 @@ def test_resolve_views_rejects_unknown(mod: ModuleType, tmp_path: Path) -> None:
     _write_min_dataset(tmp_path, ["obs.front"])
     with pytest.raises(ValueError, match="not in dataset"):
         mod.resolve_views(tmp_path, ["obs.missing"])
+
+
+def test_given_partial_analysis_when_cli_merges_then_preserves_omitted_fields(
+    mod: ModuleType,
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "meta" / "episode_labels.json"
+    path.parent.mkdir()
+    path.write_text(
+        json.dumps(
+            {
+                "dataset_id": "dataset",
+                "analysis": {"0": {"notes": "Human note", "motion_score": 4, "object": "Old"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    mod._write_analysis_records(tmp_path, [{"episode_index": 0, "object": None}], "synthetic")
+
+    record = json.loads(path.read_text())["analysis"]["0"]
+    assert record["notes"] == "Human note"
+    assert record["motion_score"] == 4
+    assert record["object"] is None
+
+
+def test_given_concurrent_human_save_when_cli_publishes_then_rejects_stale_analysis(
+    mod: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    path = tmp_path / "meta" / "episode_labels.json"
+    path.parent.mkdir()
+    original = {"dataset_id": "dataset", "episodes": {"0": ["SUCCESS"]}, "analysis": {}}
+    path.write_text(json.dumps(original), encoding="utf-8")
+    read_bytes = Path.read_bytes
+    concurrent = {**original, "episodes": {"0": ["HUMAN"]}}
+
+    def interleaved_read(target: Path) -> bytes:
+        content = read_bytes(target)
+        if target == path:
+            target.write_text(json.dumps(concurrent), encoding="utf-8")
+        return content
+
+    monkeypatch.setattr(Path, "read_bytes", interleaved_read)
+    with pytest.raises(RevisionConflictError):
+        mod._write_analysis_records(tmp_path, [{"episode_index": 0, "object": "Synthetic"}], "synthetic")
+
+    assert json.loads(read_bytes(path)) == concurrent
+    assert "revision conflict" in caplog.text
 
 
 def test_label_dataset_normalizes_rows_and_preserves_nested_dataset_id(

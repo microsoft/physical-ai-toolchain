@@ -14,6 +14,43 @@ import pytest
 from .conftest import create_test_annotation
 
 
+@pytest.mark.parametrize(
+    ("status", "code", "create_only", "conflict"),
+    [
+        (409, "BlobAlreadyExists", True, True),
+        (409, "Conflict", True, False),
+        (409, "BlobAlreadyExists", False, False),
+        (412, "ConditionNotMet", False, True),
+    ],
+)
+async def test_given_azure_precondition_error_when_saving_then_classifies_conflict(
+    monkeypatch: pytest.MonkeyPatch, status: int, code: str, create_only: bool, conflict: bool
+) -> None:
+    from src.api.storage import azure
+
+    class AzureFailure(Exception):
+        status_code = status
+        error_code = code
+
+    monkeypatch.setattr(azure, "AZURE_AVAILABLE", True)
+    monkeypatch.setattr(azure, "HttpResponseError", AzureFailure)
+    monkeypatch.setattr(azure, "ContentSettings", lambda **kwargs: kwargs)
+    client = MagicMock()
+    client.get_container_client.return_value.get_blob_client.return_value.upload_blob = AsyncMock(
+        side_effect=AzureFailure("synthetic conflict")
+    )
+    adapter = azure.AzureBlobStorageAdapter(
+        account_name="testaccount", container_name="testcontainer", sas_token="test"
+    )
+    adapter._client = client
+
+    expected = azure.RevisionConflictError if conflict else azure.StorageError
+    with pytest.raises(expected):
+        await adapter.save_annotation(
+            "test-dataset", 0, create_test_annotation(episode_index=0), if_none_match=create_only
+        )
+
+
 class TestAzureBlobStorageAdapter:
     """Tests for AzureBlobStorageAdapter."""
 

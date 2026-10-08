@@ -10,6 +10,7 @@ import {
   apiRequestVersioned,
   type MutationPrecondition,
   mutationPreconditionHeaders,
+  preserveProvenance,
   setEpisodeLabels,
   type VersionedResource,
 } from '@/lib/api-client'
@@ -17,6 +18,7 @@ import { loadPersistedLabelDraft, persistLabelDraft } from '@/lib/edit-draft-sto
 import { fetchPrincipalContext } from '@/lib/principal-context'
 import { useDatasetStore } from '@/stores'
 import { useLabelStore } from '@/stores/label-store'
+import type { ContributionLedger } from '@/types/annotations'
 import type { EpisodeAnalysisRecord } from '@/types/api'
 
 interface DatasetLabelsResponse {
@@ -24,6 +26,7 @@ interface DatasetLabelsResponse {
   availableLabels: string[]
   episodes: Record<string, string[]>
   analysis?: Record<string, EpisodeAnalysisRecord>
+  provenance?: Record<string, ContributionLedger>
 }
 
 export const labelKeys = {
@@ -49,7 +52,11 @@ function retainLabelEtag(queryClient: QueryClient, datasetId: string, etag: stri
 }
 
 export async function fetchDatasetLabels(datasetId: string): Promise<VersionedDatasetLabels> {
-  return apiRequestVersioned<DatasetLabelsResponse>(`/datasets/${datasetId}/labels`)
+  return apiRequestVersioned<DatasetLabelsResponse>(
+    `/datasets/${datasetId}/labels`,
+    {},
+    preserveProvenance<DatasetLabelsResponse>,
+  )
 }
 
 async function addLabelOption(
@@ -145,7 +152,9 @@ export function useDatasetLabels() {
   const availableLabels = useLabelStore((state) => state.availableLabels)
   const episodeLabels = useLabelStore((state) => state.episodeLabels)
   const savedEpisodeLabels = useLabelStore((state) => state.savedEpisodeLabels)
+  const baseEtag = useLabelStore((state) => state.baseEtag)
   const hydratedDatasetRef = useRef<string | null>(null)
+  const lastServerBodyRef = useRef<DatasetLabelsResponse | null>(null)
   const setLoaded = useLabelStore((state) => state.setLoaded)
 
   const query = useQuery({
@@ -165,6 +174,24 @@ export function useDatasetLabels() {
     if (!labelsData || labelsData.datasetId !== currentDataset?.id || !principalScopeId) return
 
     const datasetId = labelsData.datasetId
+    if (lastServerBodyRef.current === labelsData && hydratedDatasetRef.current === datasetId) return
+    lastServerBodyRef.current = labelsData
+    const existing = useLabelStore.getState()
+    const dirtyEntry = Object.entries(existing.episodeLabels).find(
+      ([index, labels]) =>
+        JSON.stringify(labels) !== JSON.stringify(existing.savedEpisodeLabels[Number(index)] ?? []),
+    )
+    if (
+      existing.datasetId === datasetId &&
+      existing.isLoaded &&
+      (dirtyEntry || existing.conflict)
+    ) {
+      if (dirtyEntry && existing.baseEtag !== query.data?.etag) {
+        existing.setConflict(query.data?.etag ?? null, Number(dirtyEntry[0]), dirtyEntry[1])
+      }
+      return
+    }
+    useLabelStore.setState({ baseEtag: query.data?.etag ?? null })
     setAvailableLabels(labelsData.availableLabels)
     if (labelDatasetId === datasetId) {
       reconcileEpisodeLabels(datasetId, labelsData.episodes)
@@ -179,6 +206,7 @@ export function useDatasetLabels() {
     labelDatasetId,
     labelsData,
     principalScopeId,
+    query.data?.etag,
     reconcileEpisodeLabels,
     setAllEpisodeAnalysis,
     setAvailableLabels,
@@ -206,6 +234,7 @@ export function useDatasetLabels() {
           draft.draft.episodeLabels,
           draft.baseline.episodeLabels,
         )
+        useLabelStore.setState({ baseEtag: draft.baseEtag })
       }
     })
 
@@ -226,7 +255,7 @@ export function useDatasetLabels() {
             availableLabels,
             episodeLabels,
             savedEpisodeLabels,
-            baseEtag: query.data?.etag ?? null,
+            baseEtag,
           }
         : null,
     )
@@ -235,7 +264,7 @@ export function useDatasetLabels() {
     currentDataset?.id,
     episodeLabels,
     principalScopeId,
-    query.data?.etag,
+    baseEtag,
     savedEpisodeLabels,
   ])
 
@@ -250,29 +279,58 @@ export function useSaveEpisodeLabels() {
   const commitSubmittedEpisodeLabels = useLabelStore((state) => state.commitSubmittedEpisodeLabels)
   const setConflict = useLabelStore((state) => state.setConflict)
   const queryClient = useQueryClient()
+  const saveContext = () =>
+    JSON.stringify([
+      useDatasetStore.getState().currentDataset?.id,
+      useLabelStore.getState().datasetId,
+      useLabelStore.getState().contextGeneration,
+      queryClient.getQueryData(['auth', 'principal-context']),
+    ])
 
   const mutation = useMutation({
-    mutationFn: ({ episodeIdx, labels }: { episodeIdx: number; labels: string[] }) => {
+    onMutate: () => ({ scope: saveContext(), datasetId: currentDataset?.id }),
+    mutationFn: async ({ episodeIdx, labels }: { episodeIdx: number; labels: string[] }) => {
       if (!currentDataset) throw new Error('No dataset selected')
-      return setEpisodeLabels(
+      const state = useLabelStore.getState()
+      if (state.datasetId === currentDataset.id && state.conflict) {
+        throw new Error('Resolve label conflicts before saving.')
+      }
+      const precondition =
+        state.datasetId === currentDataset.id && state.isLoaded
+          ? state.baseEtag
+            ? { etag: state.baseEtag }
+            : { createOnly: true }
+          : labelPrecondition(queryClient, currentDataset.id)
+      const saved = await setEpisodeLabels(
         currentDataset.id,
         episodeIdx,
         labels,
-        labelPrecondition(queryClient, currentDataset.id),
+        precondition,
+        'human-edit',
       )
+      if (!saved.etag || saved.data.episodeIndex !== episodeIdx) {
+        throw new Error(
+          'Label save acknowledgment is missing its revision or matches another episode.',
+        )
+      }
+      return saved
     },
-    onSuccess: (versioned, variables) => {
-      commitSubmittedEpisodeLabels(
-        versioned.data.episodeIndex,
-        variables.labels,
-        versioned.data.labels,
-      )
-      if (currentDataset) {
-        retainLabelEtag(queryClient, currentDataset.id, versioned.etag)
-        queryClient.invalidateQueries({ queryKey: labelKeys.dataset(currentDataset.id) })
+    onSuccess: (versioned, variables, context) => {
+      if (context.scope === saveContext()) {
+        commitSubmittedEpisodeLabels(
+          versioned.data.episodeIndex,
+          variables.labels,
+          versioned.data.labels,
+        )
+        useLabelStore.setState({ baseEtag: versioned.etag })
+      }
+      if (context.datasetId) {
+        retainLabelEtag(queryClient, context.datasetId, versioned.etag)
+        queryClient.invalidateQueries({ queryKey: labelKeys.dataset(context.datasetId) })
       }
     },
-    onError: (error, variables) => {
+    onError: (error, variables, context) => {
+      if (!context || context.scope !== saveContext()) return
       if (error instanceof ApiClientError && error.status === 412) {
         const currentEtag =
           typeof error.details?.currentEtag === 'string' ? error.details.currentEtag : null

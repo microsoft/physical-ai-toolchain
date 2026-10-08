@@ -1,6 +1,7 @@
 import { waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import * as draftStorage from '@/lib/edit-draft-storage'
 import { clearPersistedEditDraftsForTests } from '@/lib/edit-draft-storage'
 import type { FrameInsertion } from '@/types/episode-edit'
 
@@ -102,11 +103,42 @@ describe('edit-store pure functions', () => {
 
 describe('useEditStore', () => {
   beforeEach(async () => {
-    await clearPersistedEditDraftsForTests()
+    vi.restoreAllMocks()
     useEditStore.getState().clear()
+    await clearPersistedEditDraftsForTests()
   })
 
   describe('initializeEdit', () => {
+    it('does not restore another principal in-memory draft', () => {
+      useEditStore.getState().initializeEdit('ds-1', 0, 'author-a')
+      useEditStore.getState().toggleFrameRemoval(2)
+      useEditStore.getState().saveEpisodeDraft()
+      useEditStore.getState().initializeEdit('ds-1', 0, 'author-b')
+      expect(useEditStore.getState().principalScopeId).toBe('author-b')
+      expect(useEditStore.getState().removedFrames.size).toBe(0)
+      useEditStore.getState().initializeEdit('ds-1', 0, 'author-a')
+      expect(useEditStore.getState().principalScopeId).toBe('author-a')
+      expect(useEditStore.getState().removedFrames.has(2)).toBe(true)
+    })
+
+    it('retains newer edits when a persisted draft resolves after initialization', async () => {
+      vi.spyOn(draftStorage, 'loadPersistedEditDraft').mockResolvedValueOnce({
+        schemaVersion: 2,
+        principalScopeId: 'author-a',
+        resource: { kind: 'episode-edit', datasetId: 'ds-1', episodeIndex: 0 },
+        baseEtag: null,
+        baseline: null,
+        draft: { datasetId: 'ds-1', episodeIndex: 0, removedFrames: [2] },
+        generation: 1,
+        updatedAt: new Date().toISOString(),
+      })
+      useEditStore.getState().initializeEdit('ds-1', 0, 'author-a')
+      useEditStore.getState().toggleFrameRemoval(7)
+      await Promise.resolve()
+      expect([...useEditStore.getState().removedFrames]).toEqual([7])
+      expect(useEditStore.getState().isDirty).toBe(true)
+    })
+
     it('sets up a clean edit session', () => {
       useEditStore.getState().initializeEdit('ds-1', 0)
 
@@ -271,13 +303,109 @@ describe('useEditStore', () => {
   })
 
   describe('markSaved / resetEdits', () => {
-    it('markSaved resets dirty flag', () => {
-      useEditStore.getState().initializeEdit('ds-1', 0)
-      useEditStore.getState().toggleFrameRemoval(5)
-      expect(useEditStore.getState().isDirty).toBe(true)
+    const baseline = {
+      sourceId: 'source-a',
+      sourceRevision: 'generation-a',
+      principalScopeId: 'local',
+      etag: 'revision-a',
+      operations: { datasetId: 'ds-1', episodeIndex: 0, removedFrames: [2] },
+    }
 
-      useEditStore.getState().markSaved()
+    async function initializeSavedSession() {
+      useEditStore.getState().initializeEdit('ds-1', 0)
+      await waitFor(() => expect(useEditStore.getState().draftHydrated).toBe(true))
+    }
+
+    it('loads server operations as the saved baseline', async () => {
+      await initializeSavedSession()
+      expect(useEditStore.getState().hydrateSavedEdits(baseline)).toBe(true)
+      expect([...useEditStore.getState().removedFrames]).toEqual([2])
       expect(useEditStore.getState().isDirty).toBe(false)
+      expect(useEditStore.getState().serverBaseline).toEqual(baseline)
+    })
+
+    it('acknowledges only submitted edits and retains changes made during a save', async () => {
+      await initializeSavedSession()
+      useEditStore.getState().hydrateSavedEdits(baseline)
+      useEditStore.getState().toggleFrameRemoval(5)
+      const submitted = { ...baseline, operations: useEditStore.getState().getEditOperations()! }
+      useEditStore.getState().toggleFrameRemoval(7)
+      useEditStore.getState().acknowledgeSave(submitted, { ...submitted, etag: 'revision-b' })
+      expect([...useEditStore.getState().removedFrames]).toEqual([2, 5, 7])
+      expect(useEditStore.getState().serverBaseline?.etag).toBe('revision-b')
+      expect(useEditStore.getState().isDirty).toBe(true)
+      useEditStore.getState().resetEdits()
+      expect([...useEditStore.getState().removedFrames]).toEqual([2, 5])
+      expect(useEditStore.getState().isDirty).toBe(false)
+    })
+
+    it('does not hydrate over drafts or acknowledge another source, principal or revision', async () => {
+      await initializeSavedSession()
+      useEditStore.getState().hydrateSavedEdits(baseline)
+      useEditStore.getState().toggleFrameRemoval(5)
+      expect(useEditStore.getState().hydrateSavedEdits({ ...baseline, etag: 'newer' })).toBe(false)
+      for (const changed of [
+        { sourceId: 'source-b' },
+        { sourceRevision: 'generation-b' },
+        { principalScopeId: 'someone-else' },
+        { etag: 'stale' },
+      ]) {
+        useEditStore.getState().acknowledgeSave(
+          { ...baseline, ...changed },
+          {
+            ...baseline,
+            etag: 'revision-b',
+          },
+        )
+        expect(useEditStore.getState().serverBaseline).toEqual(baseline)
+        expect(useEditStore.getState().isDirty).toBe(true)
+      }
+    })
+
+    it('restores empty clearing with its pinned server baseline and revision', async () => {
+      await initializeSavedSession()
+      useEditStore.getState().hydrateSavedEdits(baseline)
+      useEditStore.getState().clearRemovedFrames()
+      useEditStore.getState().saveEpisodeDraft()
+      expect(useEditStore.getState().isDirty).toBe(true)
+      useEditStore.getState().clear()
+      useEditStore.getState().initializeEdit('ds-1', 0)
+      await waitFor(() => expect(useEditStore.getState().serverBaseline).toEqual(baseline))
+      expect(useEditStore.getState().removedFrames.size).toBe(0)
+      expect(useEditStore.getState().isDirty).toBe(true)
+    })
+
+    it('retains the acknowledged revision when revisiting an episode', async () => {
+      await initializeSavedSession()
+      useEditStore.getState().hydrateSavedEdits(baseline)
+      useEditStore.getState().toggleFrameRemoval(5)
+      useEditStore.getState().saveEpisodeDraft()
+      const submitted = { ...baseline, operations: useEditStore.getState().getEditOperations()! }
+      useEditStore.getState().acknowledgeSave(submitted, { ...submitted, etag: 'revision-b' })
+      useEditStore.getState().initializeEdit('ds-1', 1)
+      useEditStore.getState().initializeEdit('ds-1', 0)
+      expect(useEditStore.getState().serverBaseline?.etag).toBe('revision-b')
+      expect([...useEditStore.getState().removedFrames]).toEqual([2, 5])
+      expect(useEditStore.getState().isDirty).toBe(false)
+    })
+
+    it('defers server hydration until browser draft recovery finishes', async () => {
+      await draftStorage.persistEditDraft(
+        'ds-1',
+        0,
+        'local',
+        {
+          datasetId: 'ds-1',
+          episodeIndex: 0,
+          removedFrames: [2, 5],
+        },
+        baseline,
+      )
+      useEditStore.getState().initializeEdit('ds-1', 0)
+      expect(useEditStore.getState().hydrateSavedEdits(baseline)).toBe(false)
+      await waitFor(() => expect(useEditStore.getState().draftHydrated).toBe(true))
+      expect([...useEditStore.getState().removedFrames]).toEqual([2, 5])
+      expect(useEditStore.getState().isDirty).toBe(true)
     })
 
     it('resetEdits reverts to original state', () => {
@@ -299,7 +427,7 @@ describe('useEditStore', () => {
 
       useEditStore.getState().initializeEdit('ds-1', 0)
       expect(useEditStore.getState().removedFrames.has(5)).toBe(true)
-      expect(useEditStore.getState().isDirty).toBe(false)
+      expect(useEditStore.getState().isDirty).toBe(true)
     })
 
     it('restores a saved draft after the in-memory store is cleared', async () => {

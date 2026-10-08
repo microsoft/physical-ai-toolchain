@@ -2,6 +2,37 @@ import { expect, test } from '@playwright/test'
 
 import { attachJson, installApiFixture, openViewer } from './accessibility-fixture'
 
+test('V07 joint defaults conflict retains the draft and keyboard focus with an alert', async ({
+  page,
+}, testInfo) => {
+  await openViewer(page, testInfo, { trajectoryVariables: 'joints', jointConfig: 'conflict' })
+  const openDefaults = page.getByRole('button', { name: /defaults/i })
+  await openDefaults.focus()
+  await openDefaults.press('Enter')
+  const dialog = page.getByRole('dialog', { name: 'Joint Configuration Defaults' })
+  await expect(dialog).toBeVisible()
+  const editLabel = dialog.getByRole('button', { name: 'Edit joint label' }).first()
+  await editLabel.focus()
+  await editLabel.press('Enter')
+  const input = dialog.getByRole('textbox')
+  await input.fill('Draft shoulder')
+  await input.press('Enter')
+  const save = dialog.getByRole('button', { name: 'Save', exact: true })
+  await save.focus()
+  const requestPromise = page.waitForRequest(
+    (request) => request.method() === 'PUT' && request.url().endsWith('/joint-config/defaults'),
+  )
+  await save.press('Enter')
+  const request = await requestPromise
+  expect(request.headers()['if-match']).toBe('"settings-baseline"')
+  await expect(dialog.getByRole('alert')).toContainText('Joint defaults were not saved.')
+  await expect(dialog.getByText('Draft shoulder', { exact: true })).toBeVisible()
+  await expect(save).toBeFocused()
+  await dialog.press('Escape')
+  await expect(dialog).not.toBeVisible()
+  await expect(openDefaults).toBeFocused()
+})
+
 test('V03 and V04 episode list failure is exposed as an alert', async ({ page }, testInfo) => {
   await installApiFixture(page, { episodeList: 'error' })
   await page.goto('/')

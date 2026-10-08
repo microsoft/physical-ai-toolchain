@@ -10,6 +10,7 @@ from __future__ import annotations
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock
 
@@ -103,6 +104,54 @@ def _trajectory_point(frame: int = 0) -> TrajectoryPoint:
 
 
 class TestDatasetDiscovery:
+    @pytest.mark.asyncio
+    async def test_given_blob_generation_when_etag_changes_then_revision_changes(self, tmp_path: Path) -> None:
+        blob = MagicMock()
+        blob.get_blob_properties = AsyncMock(return_value=SimpleNamespace(etag='"generation-one"'))
+        container = MagicMock()
+        container.get_blob_client.return_value = blob
+        client = MagicMock()
+        client.get_container_client.return_value = container
+        provider = _make_provider(account_name="synthetic", container_name="datasets")
+        provider._get_client = AsyncMock(return_value=client)
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        service._blob_dataset_ids.add("owner--dataset")
+
+        source_id, revision = await service.get_source_revision("owner--dataset", 0)
+        blob.get_blob_properties.return_value = SimpleNamespace(etag='"generation-two"')
+        changed_source, changed_revision = await service.get_source_revision("owner--dataset", 0)
+
+        assert changed_source == source_id
+        assert changed_revision != revision
+        assert "synthetic" not in source_id
+        assert container.get_blob_client.call_args.args[0] == "owner/dataset/meta/info.json"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", [False, True])
+    async def test_given_unavailable_blob_revision_when_resolving_then_fails_closed(
+        self,
+        tmp_path: Path,
+        failure: bool,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        blob = MagicMock()
+        blob.get_blob_properties = AsyncMock(
+            side_effect=RuntimeError("private-storage-detail") if failure else None,
+            return_value=SimpleNamespace(etag=None),
+        )
+        client = MagicMock()
+        client.get_container_client.return_value.get_blob_client.return_value = blob
+        provider = _make_provider(account_name="synthetic", container_name="datasets")
+        provider._get_client = AsyncMock(return_value=client)
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        service._blob_dataset_ids.add("dataset")
+
+        with pytest.raises(ValueError, match="Source generation is unavailable"):
+            await service.get_source_revision("dataset", 0)
+
+        assert "Blob source generation lookup failed" in caplog.text
+        assert "private-storage-detail" not in caplog.text
+
     pytestmark = pytest.mark.asyncio
 
     @pytest.mark.parametrize(

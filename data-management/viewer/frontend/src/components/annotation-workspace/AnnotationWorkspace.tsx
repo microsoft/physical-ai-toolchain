@@ -46,6 +46,11 @@ export function AnnotationWorkspace({
 
   return (
     <>
+      {shell.editPersistenceError && (
+        <p role="alert" className="text-destructive px-4 py-2 text-sm">
+          {shell.editPersistenceError}
+        </p>
+      )}
       <AnnotationWorkspaceContent shell={shell} />
       <DraftConflictDialog />
     </>

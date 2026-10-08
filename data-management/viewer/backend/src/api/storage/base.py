@@ -51,6 +51,7 @@ class StorageAdapter(ABC):
         episode_index: int,
         annotation: EpisodeAnnotationFile,
         *,
+        resource_scope: str | None = None,
         if_match: str | None = None,
         if_none_match: bool = False,
     ) -> str:
@@ -71,8 +72,12 @@ class StorageAdapter(ABC):
         self,
         dataset_id: str,
         episode_index: int,
+        *,
+        resource_scope: str | None = None,
     ) -> VersionedValue[EpisodeAnnotationFile]:
         """Retrieve an annotation with its revision validator."""
+        if resource_scope is not None:
+            raise StorageError("This storage backend does not support scoped edit resources")
         return VersionedValue(value=await self.get_annotation(dataset_id, episode_index), etag=None)
 
     @abstractmethod

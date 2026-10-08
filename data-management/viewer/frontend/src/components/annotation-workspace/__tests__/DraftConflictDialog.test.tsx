@@ -49,7 +49,7 @@ describe('DraftConflictDialog', () => {
     const local = annotation('local', 3)
     const server = annotation('server', 5)
     useAnnotationStore.getState().loadAnnotation(baseline)
-    useAnnotationStore.getState().resolveConflict(local, baseline)
+    useAnnotationStore.getState().resolveConflict(local, baseline, '"one"')
     useAnnotationStore.getState().setConflict('"two"', local)
     mockFetch
       .mockResolvedValueOnce(jsonResponse({ scope_id: 'principal-one', auth_mode: 'local' }))
@@ -69,6 +69,7 @@ describe('DraftConflictDialog', () => {
     expect(useAnnotationStore.getState().currentAnnotation?.notes).toBe('local')
     expect(useAnnotationStore.getState().currentAnnotation?.trajectoryQuality.overallScore).toBe(5)
     expect(useAnnotationStore.getState().isDirty).toBe(true)
+    expect(useAnnotationStore.getState().baseEtag).toBe('"two"')
     expect(
       queryClient.getQueryData(annotationKeys.detail('ds-1', 0, 'principal-one')),
     ).toMatchObject({ etag: '"two"' })

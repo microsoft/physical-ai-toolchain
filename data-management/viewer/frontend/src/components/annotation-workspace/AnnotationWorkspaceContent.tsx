@@ -129,10 +129,10 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
           onResetAllClick={shell.handleResetAllClick}
           onOpenExportDialog={shell.handleOpenExportDialog}
           canGoNextEpisode={shell.canGoNextEpisode}
-          canSaveAndNextEpisode={
-            Boolean(shell.onSaveAndNextEpisode) && !shell.saveEpisodeLabels.isPending
-          }
-          onSaveAndNextEpisode={() => void shell.handleSaveAndNextEpisode()}
+          canSaveEpisode={shell.canSaveEpisode}
+          onSaveEpisode={() => void shell.handleSaveEpisode()}
+          onNextEpisode={shell.onNextEpisode}
+          isSaving={shell.isSaving}
           saveStatusMessage={shell.saveStatusMessage}
         />
 

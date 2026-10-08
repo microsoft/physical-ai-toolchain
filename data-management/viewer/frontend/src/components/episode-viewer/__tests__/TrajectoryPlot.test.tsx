@@ -137,10 +137,22 @@ describe('TrajectoryPlot', () => {
     props.onSave(config)
 
     expect(mutate).toHaveBeenCalledWith(
-      { datasetId: '_defaults', ...config },
+      { config: { datasetId: '_defaults', ...config }, etag: undefined },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     )
     expect(setDefaultsOpen).toHaveBeenCalledWith(false)
     expect(onSaved).toHaveBeenCalledTimes(1)
+  })
+
+  it('announces a settings save failure without removing the trajectory controls', () => {
+    mockedState.mockReturnValue({
+      ...buildState(),
+      jointConfigSaveError: new Error('Settings changed elsewhere. Reload before saving.'),
+    } as unknown as ReturnType<typeof useTrajectoryPlotState>)
+
+    render(<TrajectoryPlot />)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Settings changed elsewhere')
+    expect(screen.getByTestId('trajectory-controls')).toBeInTheDocument()
   })
 })
