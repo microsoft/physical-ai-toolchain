@@ -34,6 +34,9 @@ DOMAIN:
     evaluation    Software-in-the-loop evaluation (evaluation), Python 3.12
     vlm-judge     VLM-as-judge optional runtime (evaluation/vlm_judge), Python 3.12
     osmo-replay   OSMO-to-AzureML replay mirror (workflows/osmo), Python 3.11
+    gpu-smoke     Azure ML GPU smoke job (training/smoke), Python 3.11, cpu mode only
+    azureml-register  Azure ML register-model component (workflows/azureml/scripts), Python 3.12, cpu mode only
+    osmo-proxy    Azure ML-to-OSMO proxy job (workflows/azureml/osmo-proxy), Python 3.12, cpu mode only
 
 OPTIONS:
     -m, --mode MODE    cpu (default) or image
@@ -71,9 +74,11 @@ done
 # project    Directory holding the domain's pyproject.toml + uv.lock.
 # py_version Interpreter the domain targets (matches its requires-python).
 # probe      Import probe run AFTER install; non-zero exit fails the smoke.
+# has_image  Whether the domain has a production runtime image for --mode image.
 
 declare project py_version
 declare -a export_args probe
+has_image=true
 
 case "$domain" in
     rl)
@@ -117,10 +122,36 @@ case "$domain" in
     vlm-judge)
         project="evaluation/vlm_judge"
         py_version="3.12"
+        has_image=false
         probe=(-c "import torch, torchvision, transformers; from transformers import AutoProcessor")
         ;;
-    *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, vlm-judge, or osmo-replay)" ;;
+    gpu-smoke)
+        project="training/smoke"
+        py_version="3.11"
+        has_image=false
+        # torch comes from the job's container image, so the probe imports the
+        # Azure/MLflow stack and the first-party module, whose imports are lazy.
+        probe=(-c "import azure.ai.ml, azure.identity, azure.storage.blob, azureml.mlflow, mlflow, jwt; import training.smoke.scripts.azureml_gpu_smoke")
+        ;;
+    azureml-register)
+        project="workflows/azureml/scripts"
+        py_version="3.12"
+        has_image=false
+        # register_model.py reads job environment variables at import, so probe
+        # only its dependency surface.
+        probe=(-c "import azure.ai.ml, azure.identity")
+        ;;
+    osmo-proxy)
+        project="workflows/azureml/osmo-proxy"
+        py_version="3.12"
+        has_image=false
+        # GitPython refuses to import without a git binary, which the CPU image lacks.
+        probe=(-c "import importlib.util, os; os.environ.setdefault('GIT_PYTHON_REFRESH', 'quiet'); import requests, yaml, git, mlflow, azureml.mlflow, azure.ai.ml, azure.identity; spec = importlib.util.spec_from_file_location('osmo_proxy', 'workflows/azureml/osmo-proxy/osmo_proxy.py'); spec.loader.exec_module(importlib.util.module_from_spec(spec))")
+        ;;
+    *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, vlm-judge, osmo-replay, gpu-smoke, azureml-register, or osmo-proxy)" ;;
 esac
+
+[[ "$mode" == "cpu" || "$has_image" == "true" ]] || fatal "${domain} has no runtime-image smoke; use --mode cpu"
 
 export_args=(--frozen --no-hashes --no-emit-project --project "$project")
 [[ "$domain" == "vlm-judge" ]] && export_args+=(--extra qwen3-vl)

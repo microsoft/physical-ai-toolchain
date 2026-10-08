@@ -9,6 +9,10 @@ model version (never ``latest``), then evaluates that model via
 Set ``E2E_AML_ISAAC_EVAL_MODEL`` (AzureML ``name:version``) to skip training and evaluate
 a pre-existing model — a fast inner loop while fixing the eval path.
 
+Both jobs request the instance type in ``E2E_AML_INSTANCE_TYPE_RL`` or ``E2E_AML_INSTANCE_TYPE``,
+read from the repository-root ``.env.local`` before the environment, or the scripts' default.
+Isaac Lab needs a GPU with RT cores, so don't choose an A100 or H100 type.
+
 ```shell
 uv run pytest -vv -s -m e2e tests/e2e/test_e2e_aml_rl_lifecycle.py
 ```
@@ -22,11 +26,15 @@ import pytest
 
 from tests.e2e._aml import (
     _AML_ISAAC_EVAL_MODEL_ENV,
+    ISAAC_EVAL_SCRIPT,
+    RL_TRAINING_SCRIPT,
+    AzureMLCompute,
     AzureMLWorkspace,
     archive_all_model_versions,
     assert_job_has_checkpoint,
     assert_job_snapshot_contains_only_training,
     cancel_aml_job,
+    require_gpu_instance_type,
     resolve_aml_isaac_eval_model_override,
     resolve_registered_model,
     submit_aml_isaaclab_eval,
@@ -73,13 +81,16 @@ def test_resolve_aml_isaac_eval_model_override_none(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.e2e
-@pytest.mark.usefixtures("aml_compute_target")
 def test_aml_rl_lifecycle_e2e(
     request: pytest.FixtureRequest,
     aml_workspace: AzureMLWorkspace,
+    aml_compute_target: AzureMLCompute,
     repo_root: Path,
 ) -> None:
     log_e2e("Starting AzureML RL (Isaac Lab) lifecycle e2e test")
+    instance_type = require_gpu_instance_type(
+        aml_compute_target, repo_root, category="rl", scripts=(RL_TRAINING_SCRIPT, ISAAC_EVAL_SCRIPT)
+    )
     model = resolve_aml_isaac_eval_model_override()
     if model is None:
         register_model_name = e2e_name("rl-e2e-aml-model")
@@ -90,6 +101,8 @@ def test_aml_rl_lifecycle_e2e(
             max_iterations=10,
             num_envs=64,
             register_model_name=register_model_name,
+            instance_type=instance_type,
+            compute=aml_compute_target.name,
         )
         request.addfinalizer(lambda: cancel_aml_job(job, repo_root))
 
@@ -115,6 +128,8 @@ def test_aml_rl_lifecycle_e2e(
         task=_TASK,
         eval_episodes=2,
         num_envs=4,
+        instance_type=instance_type,
+        compute=aml_compute_target.name,
     )
     request.addfinalizer(lambda: cancel_aml_job(eval_job, repo_root))
 
