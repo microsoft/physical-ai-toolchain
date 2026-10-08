@@ -14,7 +14,12 @@ import {
   triggerAutoAnalysis,
   type VersionedResource,
 } from '@/lib/api-client'
-import { loadPersistedAnnotationDraft, persistAnnotationDraft } from '@/lib/edit-draft-storage'
+import {
+  episodeDraftSource,
+  loadPersistedAnnotationDraft,
+  persistAnnotationDraft,
+  sameDraftSource,
+} from '@/lib/edit-draft-storage'
 import { recordDiagnosticEvent } from '@/lib/playback-diagnostics'
 import { fetchPrincipalContext } from '@/lib/principal-context'
 import { useAnnotationStore, useDatasetStore, useEpisodeStore } from '@/stores'
@@ -57,6 +62,8 @@ export function useEpisodeAnnotations() {
   const annotatorId = principalQuery.data?.scopeId
   const currentDataset = useDatasetStore((state) => state.currentDataset)
   const currentIndex = useEpisodeStore((state) => state.currentIndex)
+  const currentEpisode = useEpisodeStore((state) => state.currentEpisode)
+  const sourceBinding = useAnnotationStore((state) => state.sourceBinding)
   const loadAnnotation = useAnnotationStore((state) => state.loadAnnotation)
   const initializeAnnotation = useAnnotationStore((state) => state.initializeAnnotation)
   const restoreAnnotationDraft = useAnnotationStore((state) => state.restoreAnnotationDraft)
@@ -70,7 +77,7 @@ export function useEpisodeAnnotations() {
   const query = useQuery({
     queryKey: annotationKeys.detail(currentDataset?.id ?? '', currentIndex, annotatorId ?? ''),
     queryFn: () => fetchAnnotations(currentDataset!.id, currentIndex),
-    enabled: !!currentDataset && currentIndex >= 0 && !!annotatorId,
+    enabled: !!currentDataset && currentIndex >= 0 && !!annotatorId && !principalQuery.isError,
     staleTime: 30 * 1000,
   })
 
@@ -80,11 +87,31 @@ export function useEpisodeAnnotations() {
     let active = true
     const key = JSON.stringify([currentDataset.id, currentIndex, annotatorId])
     const existing = useAnnotationStore.getState()
+    const source = episodeDraftSource(currentEpisode)
     if (
       existing.resourceKey === key &&
       (existing.isDirty || existing.isSaving || existing.conflict)
     ) {
       if (
+        source &&
+        !sameDraftSource(existing.sourceBinding, source) &&
+        existing.currentAnnotation &&
+        !existing.conflict?.sourceChanged
+      ) {
+        useAnnotationStore.setState({
+          conflict: {
+            currentEtag: query.data.etag,
+            submitted: existing.currentAnnotation,
+            sourceChanged: true,
+          },
+        })
+        recordDiagnosticEvent('persistence', 'annotation-source-conflict', {
+          datasetId: currentDataset.id,
+          episodeIndex: currentIndex,
+        })
+      }
+      if (
+        !(source && !sameDraftSource(existing.sourceBinding, source)) &&
         !existing.isSaving &&
         existing.baseEtag !== query.data.etag &&
         existing.currentAnnotation
@@ -109,6 +136,7 @@ export function useEpisodeAnnotations() {
     hydratedKeyRef.current = key
     useAnnotationStore.setState({
       resourceKey: key,
+      sourceBinding: source,
       baseEtag: query.data.etag,
       draftHydrated: false,
       draftError: null,
@@ -124,8 +152,17 @@ export function useEpisodeAnnotations() {
         }
         if (state.editGeneration === hydrationEditGeneration && draft) {
           restoreAnnotationDraft(draft.draft, draft.baseline ?? serverBaseline)
-          useAnnotationStore.setState({ baseEtag: draft.baseEtag })
-          if (draft.baseEtag !== query.data.etag) {
+          const draftSource = draft.sourceScopes?.[currentIndex] ?? null
+          useAnnotationStore.setState({ baseEtag: draft.baseEtag, sourceBinding: draftSource })
+          if (source && !sameDraftSource(draftSource, source)) {
+            useAnnotationStore.setState({
+              conflict: {
+                currentEtag: query.data.etag,
+                submitted: draft.draft,
+                sourceChanged: true,
+              },
+            })
+          } else if (draft.baseEtag !== query.data.etag) {
             useAnnotationStore.getState().setConflict(query.data.etag, draft.draft)
           }
         }
@@ -150,6 +187,7 @@ export function useEpisodeAnnotations() {
     annotatorId,
     currentDataset,
     currentIndex,
+    currentEpisode,
     initializeAnnotation,
     loadAnnotation,
     query.data,
@@ -177,6 +215,7 @@ export function useEpisodeAnnotations() {
             draft: currentAnnotation,
             baseline: originalAnnotation,
             baseEtag,
+            sourceBinding,
           }
         : null,
     ).catch(() => {
@@ -195,6 +234,7 @@ export function useEpisodeAnnotations() {
     isDirty,
     originalAnnotation,
     baseEtag,
+    sourceBinding,
     draftHydrated,
   ])
 
@@ -219,6 +259,8 @@ function annotationSaveContext(): string {
     useEpisodeStore.getState().currentIndex,
     state.annotatorId,
     state.contextGeneration,
+    state.resourceKey,
+    episodeDraftSource(useEpisodeStore.getState().currentEpisode),
   ])
 }
 
@@ -230,6 +272,7 @@ export function useSaveAnnotation() {
   const setConflict = useAnnotationStore((state) => state.setConflict)
 
   return useMutation({
+    mutationKey: ['episode-save', 'annotation'],
     mutationFn: async ({
       datasetId,
       episodeIndex,
@@ -244,6 +287,16 @@ export function useSaveAnnotation() {
       const state = useAnnotationStore.getState()
       const sameResource =
         state.resourceKey === JSON.stringify([datasetId, episodeIndex, annotation.annotatorId])
+      if (state.resourceKey && !sameResource) {
+        throw new Error('The active annotation changed. Save from its current episode.')
+      }
+      const source = episodeDraftSource(useEpisodeStore.getState().currentEpisode)
+      if (sameResource && state.sourceBinding && !source) {
+        throw new Error('The current annotation source is unavailable. Reload before saving.')
+      }
+      if (sameResource && source && !sameDraftSource(state.sourceBinding, source)) {
+        throw new Error('Resolve the annotation source conflict before saving.')
+      }
       if (sameResource && (!state.draftHydrated || state.draftError || state.conflict)) {
         throw new Error('Resolve annotation draft recovery or conflicts before saving.')
       }

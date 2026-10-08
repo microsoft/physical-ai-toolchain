@@ -1,5 +1,9 @@
 """CLI entry point for VLM-as-judge dataset evaluation.
 
+Each output has an adjacent ``<output>.config.json`` declaration written
+before service creation. It records explicit instruction overrides and
+non-secret settings; credentials and endpoint URLs are excluded.
+
 Examples:
 
     # Local Qwen3-VL-4B against a v3.0 LeRobot dataset, first 5 episodes
@@ -74,6 +78,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         _LOGGER.error("No episodes selected; nothing to do")
         return 1
 
+    declared_config = {
+        "schema_version": 1,
+        "instruction_origin": "cli-override" if instruction_override else "dataset",
+        "instruction_override": instruction_override,
+        "backend": args.backend,
+        "model_id": args.model_id,
+        "model_revision": args.model_revision,
+        "views": views,
+        "episode_indices": [episode.episode_index for episode in episodes],
+        "n_frames": args.n_frames,
+        "frame_size": args.frame_size,
+        "n_outcome_samples": args.n_outcome_samples,
+        "milestone_threshold": args.milestone_threshold,
+        "dry_run": args.dry_run,
+    }
+    output_path.with_suffix(output_path.suffix + ".config.json").write_text(
+        json.dumps(declared_config, indent=2) + "\n", encoding="utf-8"
+    )
     service = _build_service(args)
     if not args.dry_run:
         _LOGGER.info("Backend: %s (%s)", service.config.backend.kind, service.model_id)
@@ -295,6 +317,8 @@ def _process_episode(
         video_paths=episode.video_paths,
         from_s=episode.from_timestamp,
         to_s=episode.to_timestamp,
+        video_windows=episode.video_windows,
+        media_identity=episode.media_identity,
         force=force,
     )
     payload = result.to_dict()

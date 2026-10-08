@@ -3,10 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { applyOutcomeLabel, outcomeToLabel, useVlmJudgeBatch } from '@/hooks/use-vlm-judge-batch'
 import { _resetCsrfToken } from '@/lib/api-client'
-import { useLabelStore } from '@/stores'
+import { clearPersistedEditDraftsForTests, persistLabelDraft } from '@/lib/edit-draft-storage'
+import {
+  useAnnotationStore,
+  useDatasetStore,
+  useEditStore,
+  useEpisodeStore,
+  useLabelStore,
+} from '@/stores'
 import { TEST_CSRF_TOKEN } from '@/test-utils/constants'
 import { installFetchMock, jsonResponse, mockFetch } from '@/test-utils/fetch-mocks'
-import { renderHookWithProviders } from '@/test-utils/render'
+import { createTestQueryClient, renderHookWithProviders } from '@/test-utils/render'
+
+let queryClient = createTestQueryClient()
 
 function routeFetch(outcomes: Record<number, boolean | null>) {
   mockFetch.mockImplementation((url: string, init?: RequestInit) => {
@@ -14,6 +23,23 @@ function routeFetch(outcomes: Record<number, boolean | null>) {
     if (target.includes('/csrf-token')) {
       return Promise.resolve(jsonResponse({ csrf_token: TEST_CSRF_TOKEN }))
     }
+    const snapshotMatch = target.match(/episodes\/(\d+)\/judge\/snapshot$/)
+    if (snapshotMatch)
+      return Promise.resolve(
+        jsonResponse({
+          snapshot_id: 'a'.repeat(64),
+          dataset_id: 'ds-1',
+          episode_index: Number(snapshotMatch[1]),
+          principal_scope_id: 'principal-one',
+          source_id: 'source',
+          source_revision: 'one',
+          annotation_revision: null,
+          edit_revision: null,
+          annotation_author_id: null,
+          instruction: 'Saved',
+          instruction_origin: 'dataset',
+        }),
+      )
     const judgeMatch = target.match(/episodes\/(\d+)\/judge$/)
     if (judgeMatch) {
       const idx = Number(judgeMatch[1])
@@ -39,16 +65,29 @@ function routeFetch(outcomes: Record<number, boolean | null>) {
     if (labelMatch) {
       const idx = Number(labelMatch[1])
       const body = JSON.parse(String(init?.body ?? '{}'))
-      return Promise.resolve(jsonResponse({ episode_index: idx, labels: body.labels }))
+      const response = jsonResponse({ episode_index: idx, labels: body.labels })
+      response.headers.set('ETag', `"labels-${idx}"`)
+      return Promise.resolve(response)
     }
     return Promise.resolve(jsonResponse({}))
   })
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   installFetchMock({ csrf: false })
   _resetCsrfToken()
   useLabelStore.getState().reset()
+  useAnnotationStore.getState().clear()
+  useEditStore.getState().clear()
+  useDatasetStore.getState().reset()
+  useEpisodeStore.getState().reset()
+  await clearPersistedEditDraftsForTests()
+  queryClient = createTestQueryClient()
+  queryClient.setDefaultOptions({ queries: { gcTime: Infinity } })
+  queryClient.setQueryData(['auth', 'principal-context'], {
+    scopeId: 'principal-one',
+    authMode: 'local',
+  })
 })
 
 afterEach(() => {
@@ -74,10 +113,75 @@ describe('applyOutcomeLabel', () => {
 })
 
 describe('useVlmJudgeBatch', () => {
+  it('stops writeback without acknowledging labels when the server omits its revision', async () => {
+    routeFetch({ 0: true, 1: false })
+    const route = mockFetch.getMockImplementation()!
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      const response = await route(url, init)
+      if (String(url).endsWith('/labels')) response.headers.delete('ETag')
+      return response
+    })
+    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1', 2), { queryClient })
+    await act(async () => {
+      await result.current.applyLabelsAll()
+    })
+    expect(result.current.error).toMatch(/acknowledg|revision/i)
+    expect(useLabelStore.getState().savedEpisodeLabels[0]).toBeUndefined()
+    expect(mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/labels'))).toHaveLength(1)
+  })
+
+  it('does not apply a late result after the active dataset changes', async () => {
+    routeFetch({ 0: true })
+    const route = mockFetch.getMockImplementation()!
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      const response = await route(url, init)
+      if (String(url).endsWith('/judge')) {
+        useDatasetStore.setState({
+          currentDataset: {
+            id: 'another',
+            name: 'Another',
+            totalEpisodes: 1,
+            fps: 30,
+            features: {},
+            tasks: [],
+          },
+        })
+      }
+      return response
+    })
+    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1', 1), { queryClient })
+    await act(async () => {
+      await result.current.applyLabelsAll()
+    })
+    expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith('/labels'))).toBe(false)
+    expect(result.current.error).toMatch(/context|scope/i)
+  })
+
+  it('dispatches no targets until an unmounted selected draft is resolved', async () => {
+    routeFetch({ 0: true, 1: false })
+    await persistLabelDraft('ds-1', 'principal-one', {
+      availableLabels: ['SUCCESS', 'FAILURE'],
+      episodeLabels: { 1: ['FAILURE'] },
+      savedEpisodeLabels: { 1: ['SUCCESS'] },
+      baseEtag: 'one',
+    })
+    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1', 2), { queryClient })
+    await act(async () => {
+      await result.current.runAll()
+    })
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(result.current.error).toMatch(/Episode 1/)
+    await persistLabelDraft('ds-1', 'principal-one', null)
+    await act(async () => {
+      await result.current.runAll()
+    })
+    expect(mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/judge'))).toHaveLength(2)
+  })
+
   it('runs the judge on every episode with the selected method', async () => {
     routeFetch({ 0: true, 1: false })
 
-    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1', 2))
+    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1', 2), { queryClient })
     await act(async () => {
       await result.current.runAll({ processMethod: 'chronological' })
     })
@@ -88,6 +192,7 @@ describe('useVlmJudgeBatch', () => {
       '/api/datasets/ds-1/episodes/1/judge',
     ])
     expect(JSON.parse(judgeCalls[0][1].body).process_method).toBe('chronological')
+    expect(JSON.parse(judgeCalls[0][1].body).snapshot_id).toBe('a'.repeat(64))
     // No label writes during a plain run.
     expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith('/labels'))).toBe(false)
     expect(result.current.isRunning).toBe(false)
@@ -98,7 +203,7 @@ describe('useVlmJudgeBatch', () => {
     routeFetch({ 0: true, 1: false })
     useLabelStore.getState().setEpisodeLabels(0, ['REVIEW'])
 
-    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1', 2))
+    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1', 2), { queryClient })
     await act(async () => {
       await result.current.applyLabelsAll({ processMethod: 'gvl' })
     })
@@ -118,6 +223,7 @@ describe('useVlmJudgeBatch', () => {
     expect(store.episodeLabels[0]).toEqual(['REVIEW', 'SUCCESS'])
     expect(store.episodeLabels[1]).toEqual(['FAILURE'])
     expect(store.savedEpisodeLabels[1]).toEqual(['FAILURE'])
+    expect(store.baseEtag).toBe('"labels-1"')
   })
 
   it('does nothing when the dataset has no episodes', async () => {

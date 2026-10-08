@@ -41,6 +41,88 @@ function renderPlaybackCard(overrides: Record<string, unknown> = {}) {
 }
 
 describe('AnnotationWorkspacePlaybackCard', () => {
+  it('renders selected frame-only views and identifies unavailable views', () => {
+    renderPlaybackCard({
+      cameras: ['wrist', 'overhead', 'front'],
+      selectedCameras: ['wrist', 'overhead', 'front'],
+      frameImageUrls: { wrist: '/frames/0?camera=wrist', overhead: '/frames/0?camera=overhead' },
+    })
+    expect(screen.getByAltText('Frame 0')).toBeInTheDocument()
+    expect(screen.getByAltText('overhead frame 0')).toHaveAttribute(
+      'src',
+      '/frames/0?camera=overhead',
+    )
+    expect(screen.getByText('front: preview unavailable')).toBeVisible()
+  })
+
+  it('identifies unsupported edited previews without claiming transformed output', () => {
+    renderPlaybackCard({ videoSrc: '/video.mp4', resizeOutput: { width: 640, height: 480 } })
+    expect(screen.getByText(/edited preview unavailable/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Output:/)).not.toBeInTheDocument()
+  })
+
+  it('does not report a cancelled follower play request as a media failure', async () => {
+    const onTogglePlayback = vi.fn()
+    const { container } = renderPlaybackCard({
+      cameras: ['wrist', 'overhead'],
+      selectedCameras: ['wrist', 'overhead'],
+      videoSrc: '/videos/wrist.mp4',
+      videoUrls: { wrist: '/videos/wrist.mp4', overhead: '/videos/overhead.mp4' },
+      videoTimeWindows: { wrist: [2, 3], overhead: [5, 6] },
+      isPlaying: true,
+      onTogglePlayback,
+    })
+    const follower = container.querySelector<HTMLVideoElement>('video[data-camera="overhead"]')!
+    vi.spyOn(follower, 'play').mockRejectedValueOnce(new DOMException('Cancelled', 'AbortError'))
+    await act(async () => {
+      fireEvent.loadedMetadata(follower)
+    })
+    expect(screen.queryByText(/overhead.*unavailable/i)).not.toBeInTheDocument()
+    expect(onTogglePlayback).not.toHaveBeenCalled()
+  })
+
+  it.each([1, 2])('synchronizes a follower with a %is window and stops on error', (duration) => {
+    const onTogglePlayback = vi.fn()
+    const { container } = renderPlaybackCard({
+      cameras: ['wrist', 'overhead'],
+      selectedCameras: ['wrist', 'overhead'],
+      videoSrc: '/videos/wrist.mp4',
+      videoUrls: { wrist: '/videos/wrist.mp4', overhead: '/videos/overhead.mp4' },
+      videoTimeWindows: { wrist: [2, 3], overhead: [5, 5 + duration] },
+      currentFrame: 3,
+      originalFrameIndex: 3,
+      totalFrames: 30,
+      sourceFrameCount: 30,
+      datasetFps: 30,
+      isPlaying: true,
+      playbackSpeed: 1.5,
+      onTogglePlayback,
+    })
+    const follower = container.querySelector<HTMLVideoElement>('video[data-camera="overhead"]')!
+    fireEvent.loadedMetadata(follower)
+    expect(follower.currentTime).toBeCloseTo(5 + duration / 10)
+    expect(follower.playbackRate).toBe(1.5 * duration)
+    fireEvent.error(follower)
+    expect(onTogglePlayback).toHaveBeenCalledTimes(1)
+    expect(screen.getByText(/overhead.*unavailable/i)).toBeInTheDocument()
+  })
+
+  it('mounts only selected camera videos', () => {
+    const { container } = renderPlaybackCard({
+      cameras: ['wrist', 'overhead', 'front'],
+      selectedCameras: ['wrist', 'overhead'],
+      videoSrc: '/videos/wrist.mp4',
+      videoUrls: {
+        wrist: '/videos/wrist.mp4',
+        overhead: '/videos/overhead.mp4',
+        front: '/videos/front.mp4',
+      },
+    })
+    expect(
+      Array.from(container.querySelectorAll('video')).map((video) => video.dataset.camera),
+    ).toEqual(['wrist', 'overhead'])
+  })
+
   beforeEach(() => {
     vi.useFakeTimers()
   })

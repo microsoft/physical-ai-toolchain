@@ -150,6 +150,8 @@ class FrameInsertion(BaseModel):
 class EpisodeData(BaseModel):
     """Complete episode data for viewing."""
 
+    source_id: str | None = None
+    source_revision: str | None = None
     meta: EpisodeMeta
     video_urls: dict[str, str] = Field(default_factory=dict, description="Video URLs by camera name")
     video_time_windows: dict[str, list[float]] = Field(

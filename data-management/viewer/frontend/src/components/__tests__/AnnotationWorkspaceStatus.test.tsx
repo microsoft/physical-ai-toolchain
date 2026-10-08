@@ -31,6 +31,20 @@ describe('AnnotationWorkspace status and header actions', () => {
     expect(mockSaveAnnotation).not.toHaveBeenCalled()
   })
 
+  it.each([false, true])(
+    'blocks whole-episode Save when label recovery is incomplete: %s',
+    (failed) => {
+      testState.labelDraftHydrated = false
+      testState.labelRecoveryError = failed ? 'Label draft recovery failed.' : null
+      render(<AnnotationWorkspace />)
+      expect(screen.getByRole('button', { name: /^save episode$/i })).toBeDisabled()
+      expect(screen.getByRole('status')).toHaveTextContent(
+        failed ? 'Label draft recovery failed.' : 'Loading label drafts.',
+      )
+      expect(mockSaveEpisodeLabels).not.toHaveBeenCalled()
+    },
+  )
+
   it('includes annotation-only changes in standalone Save', async () => {
     testState.hasAnnotationChanges = true
     render(<AnnotationWorkspace />)
@@ -45,6 +59,66 @@ describe('AnnotationWorkspace status and header actions', () => {
         annotation: expect.objectContaining({ annotatorId: 'principal-test' }),
       }),
     )
+  })
+
+  it('saves the whole episode through Ctrl+S', async () => {
+    testState.hasAnnotationChanges = true
+    testState.episodeLabels = { 0: ['FAILURE'] }
+    render(<AnnotationWorkspace />)
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    })
+    expect(mockSaveAnnotation).toHaveBeenCalledOnce()
+    expect(mockSaveEpisodeLabels).toHaveBeenCalledOnce()
+  })
+
+  it('retains partial failures and retries only the remaining resource', async () => {
+    testState.hasAnnotationChanges = true
+    testState.episodeLabels = { 0: ['FAILURE'] }
+    mockSaveAnnotation.mockRejectedValueOnce(new Error('Forbidden'))
+    const { rerender } = render(<AnnotationWorkspace />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^save episode$/i }))
+    })
+    expect(screen.getByRole('status')).toHaveTextContent(/some episode changes could not be saved/i)
+    expect(testState.savedEpisodeLabels[0]).toEqual(['FAILURE'])
+    mockSaveAnnotation.mockImplementationOnce(async () => {
+      testState.hasAnnotationChanges = false
+    })
+    rerender(<AnnotationWorkspace />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^save episode$/i }))
+    })
+    expect(mockSaveEpisodeLabels).toHaveBeenCalledOnce()
+    expect(mockSaveAnnotation).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('status')).toHaveTextContent(/episode changes saved/i)
+  })
+
+  it('keeps edits made during Save dirty and excludes duplicate submissions', async () => {
+    testState.episodeLabels = { 0: ['FAILURE'] }
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    mockSaveEpisodeLabels.mockImplementationOnce(async ({ labels }: { labels: string[] }) => {
+      await pending
+      testState.savedEpisodeLabels = { 0: labels }
+    })
+    const { rerender } = render(<AnnotationWorkspace />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^save episode$/i }))
+      fireEvent.click(screen.getByRole('button', { name: /^save episode$/i }))
+    })
+    expect(mockSaveEpisodeLabels).toHaveBeenCalledOnce()
+    testState.episodeLabels = { 0: ['PARTIAL'] }
+    rerender(<AnnotationWorkspace />)
+    await act(async () => {
+      finish()
+      await pending
+    })
+    expect(screen.getByRole('status')).toHaveTextContent(/unsaved episode changes/i)
+    expect(testState.episodeLabels[0]).toEqual(['PARTIAL'])
+    expect(testState.savedEpisodeLabels[0]).toEqual(['FAILURE'])
   })
 
   it('offers separate Save and Next actions without saving when Next is selected', async () => {

@@ -201,6 +201,22 @@ class TestDetectionAndDiscovery:
 
 
 class TestEpisodeBehavior:
+    def test_video_browser_version_changes_for_same_second_replacement(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        _, loader = _configured_handler(monkeypatch, tmp_path)
+        before = handler_module._video_cache_query(loader.video_path)
+        loader.video_path.write_bytes(b"replacement-video")
+        os.utime(loader.video_path, (1, 1))
+        assert handler_module._video_cache_query(loader.video_path) != before
+
+    def test_episode_video_url_ignores_old_clipped_media(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        handler, loader = _configured_handler(monkeypatch, tmp_path)
+        old_clip = tmp_path / "old-clip.mp4"
+        old_clip.write_bytes(b"old clip")
+        monkeypatch.setattr(handler, "_video_cache_path", lambda *args: old_clip)
+        episode = handler.load_episode("dataset", 0)
+        assert episode is not None
+        assert episode.video_urls[_CAMERA].endswith(handler_module._video_cache_query(loader.video_path))
+
     def test_lists_sorted_episodes_with_metadata(self, monkeypatch, tmp_path):
         handler, _ = _configured_handler(monkeypatch, tmp_path)
 
@@ -210,7 +226,7 @@ class TestEpisodeBehavior:
         )
 
     def test_loads_episode_as_public_model(self, monkeypatch, tmp_path):
-        handler, _ = _configured_handler(monkeypatch, tmp_path)
+        handler, loader = _configured_handler(monkeypatch, tmp_path)
 
         episode = handler.load_episode("dataset", 1)
 
@@ -222,7 +238,7 @@ class TestEpisodeBehavior:
             "has_annotations": False,
         }
         assert episode.cameras == [_CAMERA]
-        assert episode.video_urls == {_CAMERA: "/api/datasets/dataset/episodes/1/video/observation.images.cam0?v=1"}
+        assert episode.video_urls == {_CAMERA: f"/api/datasets/dataset/episodes/1/video/observation.images.cam0{handler_module._video_cache_query(loader.video_path)}"}
         assert [variable.key for variable in episode.trajectory_variables] == [
             "observation.state[0]",
             "observation.state[1]",
@@ -327,12 +343,19 @@ class TestEpisodeBehavior:
 
 
 class TestVideoAndFrames:
+    def test_frame_extraction_uses_the_camera_window(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        handler, loader = _configured_handler(monkeypatch, tmp_path, video_window=(2.25, 3.75))
+        extract = MagicMock(return_value=b"jpeg")
+        monkeypatch.setattr(handler, "_extract_frame_ffmpeg", extract)
+        assert handler.get_frame_image("dataset", 0, 3, _CAMERA) == b"jpeg"
+        extract.assert_called_once_with(str(loader.video_path), 48, 20.0)
+
     def test_returns_source_video_without_time_window(self, monkeypatch, tmp_path):
         handler, loader = _configured_handler(monkeypatch, tmp_path)
 
         assert handler.get_video_path("dataset", 0, _CAMERA) == str(loader.video_path)
 
-    def test_generates_episode_clip_through_ffmpeg_boundary(self, monkeypatch, tmp_path):
+    def test_returns_original_media_without_generating_a_clip(self, monkeypatch, tmp_path):
         handler, _ = _configured_handler(monkeypatch, tmp_path, video_window=(0.0, 1.0))
         cached_clip = tmp_path / "meta" / "videos" / _CAMERA / "episode_000000.mp4"
         commands: list[list[str]] = []
@@ -349,32 +372,11 @@ class TestVideoAndFrames:
         )
         monkeypatch.setattr(handler_module.subprocess, "run", run_ffmpeg)
 
-        assert handler.get_video_path("dataset", 0, _CAMERA) == str(cached_clip)
-        assert cached_clip.read_bytes() == b"valid-clip"
-        assert commands == [
-            [
-                "/fake/ffmpeg",
-                "-y",
-                "-ss",
-                "0.000000",
-                "-i",
-                str(tmp_path / "source.mp4"),
-                "-t",
-                "1.000000",
-                "-an",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-crf",
-                "23",
-                "-movflags",
-                "+faststart",
-                str(cached_clip.with_suffix(".tmp.mp4")),
-            ]
-        ]
+        assert handler.get_video_path("dataset", 0, _CAMERA) == str(tmp_path / "source.mp4")
+        assert not cached_clip.exists()
+        assert commands == []
 
-    def test_retains_decodable_cached_clip(self, monkeypatch, tmp_path):
+    def test_does_not_substitute_an_old_cached_clip(self, monkeypatch, tmp_path):
         handler, _ = _configured_handler(monkeypatch, tmp_path, video_window=(0.0, 1.0))
         cached_clip = tmp_path / "meta" / "videos" / _CAMERA / "episode_000000.mp4"
         cached_clip.parent.mkdir(parents=True)
@@ -387,11 +389,10 @@ class TestVideoAndFrames:
         )
         monkeypatch.setattr(handler_module.subprocess, "run", run_ffmpeg)
 
-        assert handler.get_video_path("dataset", 0, _CAMERA) == str(cached_clip)
-        run_ffmpeg.assert_called_once()
-        assert run_ffmpeg.call_args.args[0][-1] == "-"
+        assert handler.get_video_path("dataset", 0, _CAMERA) == str(tmp_path / "source.mp4")
+        run_ffmpeg.assert_not_called()
 
-    def test_replaces_corrupt_cached_clip(self, monkeypatch, tmp_path):
+    def test_ignores_a_corrupt_cached_clip_without_mutating_it(self, monkeypatch, tmp_path):
         handler, _ = _configured_handler(monkeypatch, tmp_path, video_window=(0.0, 1.0))
         cached_clip = tmp_path / "meta" / "videos" / _CAMERA / "episode_000000.mp4"
         cached_clip.parent.mkdir(parents=True)
@@ -412,9 +413,9 @@ class TestVideoAndFrames:
         )
         monkeypatch.setattr(handler_module.subprocess, "run", run_ffmpeg)
 
-        assert handler.get_video_path("dataset", 0, _CAMERA) == str(cached_clip)
-        assert cached_clip.read_bytes() == b"replacement"
-        assert [command[-1] for command in commands] == ["-", str(cached_clip.with_suffix(".tmp.mp4"))]
+        assert handler.get_video_path("dataset", 0, _CAMERA) == str(tmp_path / "source.mp4")
+        assert cached_clip.read_bytes() == b"corrupt"
+        assert commands == []
 
     def test_returns_source_when_clip_generation_fails(self, monkeypatch, tmp_path):
         handler, loader = _configured_handler(monkeypatch, tmp_path, video_window=(0.0, 1.0))

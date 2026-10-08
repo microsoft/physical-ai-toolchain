@@ -174,6 +174,7 @@ export function useEpisodeEdits(
 export function useSaveEpisodeEdits() {
   const queryClient = useQueryClient()
   return useMutation({
+    mutationKey: ['episode-save', 'edits'],
     mutationFn: (submitted: SavedEditBaseline) => {
       const current = useEditStore.getState()
       if (

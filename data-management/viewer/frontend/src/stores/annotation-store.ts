@@ -6,6 +6,7 @@ import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 
+import type { DraftSource } from '@/lib/edit-draft-storage'
 import type {
   Anomaly,
   DataQualityAnnotation,
@@ -20,6 +21,7 @@ import { normalizeSubtaskInstructions } from '@/types'
 const EMPTY_ANOMALIES: Anomaly[] = []
 
 interface AnnotationState {
+  sourceBinding: DraftSource | null
   resourceKey: string | null
   baseEtag: string | null
   draftHydrated: boolean
@@ -42,6 +44,7 @@ interface AnnotationState {
   editGeneration: number
   /** Stale-write conflict retained for explicit resolution */
   conflict: {
+    sourceChanged?: boolean
     currentEtag: string | null
     submitted: EpisodeAnnotation
   } | null
@@ -108,6 +111,7 @@ interface AnnotationActions {
 type AnnotationStore = AnnotationState & AnnotationActions
 
 const initialState: AnnotationState = {
+  sourceBinding: null,
   resourceKey: null,
   baseEtag: null,
   draftHydrated: false,

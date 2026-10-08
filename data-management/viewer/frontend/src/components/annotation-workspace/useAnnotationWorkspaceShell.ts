@@ -29,6 +29,7 @@ import { useAnnotationWorkspacePlayback } from './useAnnotationWorkspacePlayback
 const EMPTY_LABELS: string[] = []
 
 interface UseAnnotationWorkspaceShellOptions {
+  visible?: boolean
   diagnosticsVisible?: boolean
   canGoPreviousEpisode?: boolean
   onPreviousEpisode?: () => void
@@ -38,6 +39,7 @@ interface UseAnnotationWorkspaceShellOptions {
 }
 
 export function useAnnotationWorkspaceShell({
+  visible = true,
   diagnosticsVisible = isDiagnosticsEnabled(),
   canGoPreviousEpisode = false,
   onPreviousEpisode,
@@ -66,6 +68,9 @@ export function useAnnotationWorkspaceShell({
   const principalQuery = usePrincipalContext()
   const currentEpisode = useEpisodeStore((state) => state.currentEpisode)
   const labelDataLoaded = useLabelStore((state) => state.isLoaded)
+  const labelDraftHydrated = useLabelStore((state) => state.draftHydrated)
+  const labelDraftError = useLabelStore((state) => state.draftError)
+  const labelsSaving = useLabelStore((state) => state.isSaving)
   const labelConflict = useLabelStore((state) => state.conflict)
   const availableLabels = useLabelStore((state) => state.availableLabels)
   const episodeLabels = useLabelStore((state) => state.episodeLabels)
@@ -82,6 +87,7 @@ export function useAnnotationWorkspaceShell({
   const subtasks = useEditStore((state) => state.subtasks)
   const addSubtask = useEditStore((state) => state.addSubtask)
   const globalTransform = useEditStore((state) => state.globalTransform)
+  const cameraTransforms = useEditStore((state) => state.cameraTransforms)
   const { insertedFrames } = useFrameInsertionState()
   const { isDirty: hasEdits, resetEdits } = useEditDirtyState()
   const {
@@ -113,6 +119,9 @@ export function useAnnotationWorkspaceShell({
   }, [currentEpisode, savedEpisodeLabels])
 
   const diagnosticsEnabled = diagnosticsVisible && isDiagnosticsEnabled()
+  useEffect(() => {
+    if (!visible && isPlaying) togglePlayback()
+  }, [visible, isPlaying, togglePlayback])
   const annotationAccessLost =
     annotationQuery.error instanceof ApiClientError &&
     [401, 403, 404].includes(annotationQuery.error.status)
@@ -121,13 +130,21 @@ export function useAnnotationWorkspaceShell({
       ? 'Reload your identity before saving.'
       : annotationAccessLost
         ? 'Annotation access is unavailable. Reload before saving.'
-        : annotationConflict || labelConflict
-          ? 'Resolve conflicting changes before saving.'
-          : annotationDraftError ||
-            savedEdits.persistenceError ||
-            (!annotationDraftHydrated ? 'Loading annotation drafts.' : null) ||
-            (!savedEdits.isReady ? 'Loading saved edits.' : null) ||
-            (!labelDataLoaded ? 'Loading labels.' : null)
+        : currentEpisode?.sourceRevision &&
+            savedEdits.data &&
+            (currentEpisode.sourceId !== savedEdits.data.sourceId ||
+              currentEpisode.sourceRevision !== savedEdits.data.sourceRevision)
+          ? 'The episode source changed. Reload and resolve the draft before saving.'
+          : annotationConflict || labelConflict
+            ? 'Resolve conflicting changes before saving.'
+            : annotationDraftError ||
+              labelDraftError ||
+              savedEdits.persistenceError ||
+              (labelsSaving ? 'Saving episode labels.' : null) ||
+              (!annotationDraftHydrated ? 'Loading annotation drafts.' : null) ||
+              (!labelDraftHydrated ? 'Loading label drafts.' : null) ||
+              (!savedEdits.isReady ? 'Loading saved edits.' : null) ||
+              (!labelDataLoaded ? 'Loading labels.' : null)
 
   const {
     hasPendingEpisodeChanges,
@@ -246,9 +263,9 @@ export function useAnnotationWorkspaceShell({
     activePlaybackRange: playback.activePlaybackRange,
     playbackRangeStart: playback.playbackRangeStart,
     playbackRangeEnd: playback.playbackRangeEnd,
-    isPlaying,
+    isPlaying: visible && isPlaying,
     playbackSpeed,
-    autoPlay,
+    autoPlay: visible && autoPlay,
     autoLoop,
     shouldLoopPlaybackRange: playback.shouldLoopPlaybackRange,
     displayAdjustment,
@@ -288,12 +305,14 @@ export function useAnnotationWorkspaceShell({
   )
 
   useEffect(() => {
-    if (!playback.selectedRange) {
-      return
-    }
-
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') {
+      if (event.defaultPrevented) return
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        if (!event.repeat) void handleSaveEpisode()
+        return
+      }
+      if (event.key !== 'Escape' || !playback.selectedRange) {
         return
       }
 
@@ -305,7 +324,7 @@ export function useAnnotationWorkspaceShell({
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [playback])
+  }, [playback, handleSaveEpisode])
 
   const handleOpenExportDialog = useCallback(() => {
     setExportDialogOpen(true)
@@ -345,7 +364,9 @@ export function useAnnotationWorkspaceShell({
     exportDialogOpen,
     editPersistenceError: savedEdits.persistenceError,
     frameImageUrl: media.frameImageUrl,
+    frameImageUrls: media.frameImageUrls,
     globalTransform,
+    cameraTransforms,
     handleCreateSubtaskFromSelection,
     handleLoadedMetadata: media.handleLoadedMetadata,
     handleOpenExportDialog,
@@ -378,6 +399,9 @@ export function useAnnotationWorkspaceShell({
     videoUrls: media.videoUrls,
     canvasRef: media.canvasRef,
     cameras: media.cameras,
+    selectedCameras: media.selectedCameras,
+    setSelectedCameras: media.setSelectedCameras,
+    originalFrameIndex,
     cameraName: media.cameraName,
     setCameraName: media.setCameraName,
   }

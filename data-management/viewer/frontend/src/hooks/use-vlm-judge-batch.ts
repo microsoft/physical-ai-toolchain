@@ -14,7 +14,10 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useRef, useState } from 'react'
 
-import { runVlmJudge, setEpisodeLabels } from '@/lib/api-client'
+import { fetchVlmJudgeSnapshot, runVlmJudge, setEpisodeLabels } from '@/lib/api-client'
+import { assertEpisodeReadiness, assertSnapshotCurrent } from '@/lib/episode-readiness'
+import type { PrincipalContext } from '@/lib/principal-context'
+import { useDatasetStore } from '@/stores/dataset-store'
 import { useLabelStore } from '@/stores/label-store'
 import type { VlmJudgeResult, VlmJudgeRunOptions } from '@/types'
 
@@ -57,22 +60,61 @@ export function useVlmJudgeBatch(datasetId: string | null, totalEpisodes: number
   const [progress, setProgress] = useState<BatchProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const cancelRef = useRef(false)
+  const runningRef = useRef(false)
 
   const runBatch = useCallback(
     async (phase: BatchPhase, applyLabels: boolean, options?: VlmJudgeRunOptions) => {
-      if (!datasetId || totalEpisodes <= 0) return
+      if (!datasetId || totalEpisodes <= 0 || runningRef.current) return
+      runningRef.current = true
       cancelRef.current = false
       setError(null)
       setProgress({ phase, done: 0, total: totalEpisodes })
+      const scope = () =>
+        JSON.stringify([
+          useDatasetStore.getState().currentDataset?.id,
+          queryClient.getQueryData<PrincipalContext>(['auth', 'principal-context'])?.scopeId,
+          useLabelStore.getState().datasetId,
+          useLabelStore.getState().principalScopeId,
+          useLabelStore.getState().contextGeneration,
+        ])
+      const capturedScope = scope()
+      const assertScope = () => {
+        if (scope() !== capturedScope)
+          throw new Error('Batch context changed; no further labels were applied.')
+      }
       try {
-        const labelQueryKey = labelKeys.dataset(datasetId)
+        const targets = Array.from({ length: totalEpisodes }, (_, index) => index)
+        await assertEpisodeReadiness(queryClient, datasetId, targets)
+        assertScope()
+        const principal = queryClient.getQueryData<PrincipalContext>(['auth', 'principal-context'])
+        const labelQueryKey = labelKeys.dataset(datasetId, principal?.scopeId)
         let labelEtag = queryClient.getQueryData<{ etag: string | null }>(labelQueryKey)?.etag
         for (let index = 0; index < totalEpisodes; index += 1) {
           if (cancelRef.current) break
+          await assertEpisodeReadiness(queryClient, datasetId, targets)
+          if (cancelRef.current) break
+          const snapshot = await fetchVlmJudgeSnapshot(
+            datasetId,
+            index,
+            options?.annotationAuthorId,
+          )
+          await assertEpisodeReadiness(queryClient, datasetId, targets)
+          assertSnapshotCurrent(queryClient, datasetId, index, snapshot)
+          assertScope()
+          if (cancelRef.current) break
           const result = await runVlmJudge(datasetId, index, {
+            snapshotId: snapshot.snapshotId,
+            annotationAuthorId: options?.annotationAuthorId,
             processMethod: options?.processMethod,
+            views: options?.views,
           })
+          if (cancelRef.current) break
           if (applyLabels) {
+            assertScope()
+            await assertEpisodeReadiness(queryClient, datasetId, targets)
+            assertScope()
+            assertSnapshotCurrent(queryClient, datasetId, index, snapshot)
+            const editGeneration = useLabelStore.getState().editGeneration
             const existing = useLabelStore.getState().episodeLabels[index] ?? []
             const next = applyOutcomeLabel(existing, outcomeToLabel(result))
             const saved = await setEpisodeLabels(
@@ -81,8 +123,17 @@ export function useVlmJudgeBatch(datasetId: string | null, totalEpisodes: number
               next,
               labelEtag ? { etag: labelEtag } : { createOnly: true },
             )
-            labelEtag = saved.etag ?? labelEtag
-            commitEpisodeLabels(saved.data.episodeIndex, saved.data.labels)
+            assertScope()
+            if (!saved.etag || saved.data.episodeIndex !== index) {
+              throw new Error(
+                'Label acknowledgment is missing its revision or targets another episode. Reload before retrying.',
+              )
+            }
+            labelEtag = saved.etag
+            if (useLabelStore.getState().editGeneration === editGeneration) {
+              commitEpisodeLabels(saved.data.episodeIndex, saved.data.labels)
+              useLabelStore.setState({ baseEtag: labelEtag })
+            }
             if (labelEtag) {
               const nextEtag = labelEtag
               queryClient.setQueryData<{ etag: string | null }>(labelQueryKey, (current) =>
@@ -95,6 +146,7 @@ export function useVlmJudgeBatch(datasetId: string | null, totalEpisodes: number
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       } finally {
+        runningRef.current = false
         queryClient.invalidateQueries({ queryKey: vlmJudgeKeys.all })
         if (applyLabels) {
           queryClient.invalidateQueries({ queryKey: labelKeys.dataset(datasetId) })

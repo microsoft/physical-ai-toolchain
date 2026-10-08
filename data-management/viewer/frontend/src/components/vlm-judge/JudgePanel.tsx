@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useCapabilities } from '@/hooks/use-datasets'
+import { useEpisodeReadiness } from '@/hooks/use-episode-readiness'
 import { useSaveEpisodeLabels } from '@/hooks/use-labels'
 import { useRunVlmJudge, useVlmJudgeStatus } from '@/hooks/use-vlm-judge'
 import { applyOutcomeLabel, outcomeToLabel, useVlmJudgeBatch } from '@/hooks/use-vlm-judge-batch'
@@ -43,20 +44,10 @@ const METHOD_LABELS: Record<string, string> = {
 export interface JudgePanelProps {
   datasetId: string
   episodeIndex: number
-  /** Optional language instruction override; falls back to dataset metadata. */
-  instruction?: string
+  cameras?: string[]
   /** Episode count for the loaded dataset; enables the batch (all-episode) actions. */
   totalEpisodes?: number
   className?: string
-}
-
-function pickResult(
-  status: ReturnType<typeof useVlmJudgeStatus>['data'],
-  mutationData: VlmJudgeResult | undefined,
-): VlmJudgeResult | null {
-  if (mutationData) return mutationData
-  if (status?.result) return status.result
-  return null
 }
 
 function OutcomeBadge({ result }: { result: VlmJudgeResult }) {
@@ -131,8 +122,8 @@ function displayErrorMessage(error: Error | string): string {
 export const JudgePanel = memo(function JudgePanel({
   datasetId,
   episodeIndex,
-  instruction,
   totalEpisodes,
+  cameras = [],
   className,
 }: JudgePanelProps) {
   const capabilities = useCapabilities(datasetId)
@@ -141,16 +132,27 @@ export const JudgePanel = memo(function JudgePanel({
   const runMutation = useRunVlmJudge()
   const saveLabels = useSaveEpisodeLabels()
   const batch = useVlmJudgeBatch(datasetId, totalEpisodes ?? 0)
+  const readiness = useEpisodeReadiness(datasetId, [episodeIndex], judgeEnabled)
+  const batchReadiness = useEpisodeReadiness(
+    datasetId,
+    Array.from({ length: totalEpisodes ?? 0 }, (_, index) => index),
+    judgeEnabled && (totalEpisodes ?? 0) > 0,
+  )
 
   const [methodOverride, setMethodOverride] = useState<string | undefined>(undefined)
+  const [viewSelection, setViewSelection] = useState<{ datasetId: string; views: string[] } | null>(
+    null,
+  )
+  const judgeViews = (
+    viewSelection?.datasetId === datasetId ? viewSelection.views : cameras
+  ).filter((camera) => cameras.includes(camera))
+  const cameraOptions = judgeViews.length ? { views: judgeViews } : {}
+  const viewsReady = cameras.length === 0 || judgeViews.length > 0
   const available = status.data?.processMethods
   const methods = available && available.length > 0 ? available : ['gvl', 'chronological']
   const effectiveMethod = methodOverride ?? status.data?.processMethod ?? 'gvl'
 
-  const result = useMemo(
-    () => pickResult(status.data, runMutation.data),
-    [status.data, runMutation.data],
-  )
+  const result = status.data?.result ?? null
   const enabled = judgeEnabled && status.data?.enabled !== false
   const errorMessage = useMemo(() => {
     if (runMutation.error) return displayErrorMessage(runMutation.error)
@@ -159,20 +161,18 @@ export const JudgePanel = memo(function JudgePanel({
     return null
   }, [runMutation.error, status.error, batch.error])
 
-  const handleRun = useCallback(
-    (force: boolean) => {
-      runMutation.mutate({
-        datasetId,
-        episodeIndex,
-        options: {
-          instruction: instruction?.trim() || undefined,
-          processMethod: effectiveMethod,
-          force,
-        },
-      })
-    },
-    [runMutation, datasetId, episodeIndex, instruction, effectiveMethod],
-  )
+  const handleRun = (force: boolean) => {
+    if (!readiness.ready || !viewsReady) return
+    runMutation.mutate({
+      datasetId,
+      episodeIndex,
+      options: {
+        ...cameraOptions,
+        processMethod: effectiveMethod,
+        force,
+      },
+    })
+  }
 
   const handleApplyLabel = useCallback(() => {
     if (!result) return
@@ -335,8 +335,45 @@ export const JudgePanel = memo(function JudgePanel({
         </p>
       </div>
 
+      {cameras.length > 0 && (
+        <fieldset className="space-y-1" disabled={busy}>
+          <legend className="text-muted-foreground text-xs font-medium">Judge cameras</legend>
+          <div className="flex flex-wrap gap-3">
+            {cameras.map((camera) => (
+              <label key={camera} className="flex items-center gap-1 text-xs">
+                <input
+                  type="checkbox"
+                  checked={judgeViews.includes(camera)}
+                  disabled={judgeViews.length === 1 && judgeViews.includes(camera)}
+                  onChange={(event) =>
+                    setViewSelection({
+                      datasetId,
+                      views: event.target.checked
+                        ? [...judgeViews, camera]
+                        : judgeViews.filter((view) => view !== camera),
+                    })
+                  }
+                />
+                {camera}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
+
+      {!readiness.ready && (
+        <p role="status" className="text-muted-foreground text-xs">
+          {readiness.reason}
+        </p>
+      )}
+      {!viewsReady && <p role="status">Choose a judge camera.</p>}
       <div className="flex flex-wrap gap-2 pt-1">
-        <Button type="button" size="sm" onClick={() => handleRun(false)} disabled={busy}>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => handleRun(false)}
+          disabled={busy || !readiness.ready || !viewsReady}
+        >
           <Play className="mr-1 size-3" />
           {runMutation.isPending ? 'Running…' : result ? 'Re-evaluate' : 'Run judge'}
         </Button>
@@ -346,7 +383,7 @@ export const JudgePanel = memo(function JudgePanel({
             size="sm"
             variant="outline"
             onClick={() => handleRun(true)}
-            disabled={busy}
+            disabled={busy || !readiness.ready || !viewsReady}
           >
             <RefreshCw className="mr-1 size-3" />
             Force fresh
@@ -372,10 +409,11 @@ export const JudgePanel = memo(function JudgePanel({
           <p className="text-muted-foreground text-xs font-medium">
             Whole dataset ({totalEpisodes} episodes)
           </p>
-          <p className="text-muted-foreground text-[11px]">
-            Uses each episode&apos;s saved or dataset instruction; the current draft instruction
-            applies only to this episode.
-          </p>
+          {!batchReadiness.ready && (
+            <p role="status" className="text-muted-foreground text-xs">
+              {batchReadiness.reason}
+            </p>
+          )}
           {batch.progress ? (
             <div className="space-y-1">
               <div className="text-muted-foreground flex items-center justify-between text-[11px]">
@@ -409,8 +447,11 @@ export const JudgePanel = memo(function JudgePanel({
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => void batch.runAll({ processMethod: effectiveMethod })}
-                disabled={busy}
+                onClick={() => {
+                  if (batchReadiness.ready && viewsReady)
+                    void batch.runAll({ ...cameraOptions, processMethod: effectiveMethod })
+                }}
+                disabled={busy || !batchReadiness.ready || !viewsReady}
               >
                 <Play className="mr-1 size-3" />
                 Run all
@@ -420,16 +461,17 @@ export const JudgePanel = memo(function JudgePanel({
                 size="sm"
                 variant="outline"
                 onClick={() => {
+                  if (!batchReadiness.ready || !viewsReady) return
                   if (
                     globalThis.confirm?.(
                       `Replace the outcome label on ${totalEpisodes} episodes? Existing custom labels are preserved.`,
                     ) ??
                     true
                   ) {
-                    void batch.applyLabelsAll({ processMethod: effectiveMethod })
+                    void batch.applyLabelsAll({ ...cameraOptions, processMethod: effectiveMethod })
                   }
                 }}
-                disabled={busy}
+                disabled={busy || !batchReadiness.ready || !viewsReady}
               >
                 <Tags className="mr-1 size-3" />
                 Label all

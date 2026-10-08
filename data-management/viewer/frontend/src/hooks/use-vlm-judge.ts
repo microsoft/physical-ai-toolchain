@@ -10,13 +10,18 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { fetchVlmJudgeStatus, runVlmJudge } from '@/lib/api-client'
+import { usePrincipalContext } from '@/hooks/use-principal-context'
+import { fetchVlmJudgeSnapshot, fetchVlmJudgeStatus, runVlmJudge } from '@/lib/api-client'
+import { assertEpisodeReadiness, assertSnapshotCurrent } from '@/lib/episode-readiness'
+import type { PrincipalContext } from '@/lib/principal-context'
+import { useDatasetStore } from '@/stores/dataset-store'
+import { useEpisodeStore } from '@/stores/episode-store'
 import type { VlmJudgeResult, VlmJudgeRunOptions, VlmJudgeStatus } from '@/types'
 
 export const vlmJudgeKeys = {
   all: ['vlm-judge'] as const,
-  episode: (datasetId: string, episodeIndex: number) =>
-    [...vlmJudgeKeys.all, datasetId, episodeIndex] as const,
+  episode: (datasetId: string, episodeIndex: number, principalScopeId: string) =>
+    [...vlmJudgeKeys.all, datasetId, episodeIndex, principalScopeId] as const,
 }
 
 interface UseVlmJudgeStatusOptions {
@@ -30,11 +35,19 @@ export function useVlmJudgeStatus({
   episodeIndex,
   enabled = true,
 }: UseVlmJudgeStatusOptions) {
-  const isReady = enabled && !!datasetId && episodeIndex !== null && episodeIndex >= 0
+  const principal = usePrincipalContext()
+  const principalScopeId = principal.data?.scopeId
+  const isReady =
+    enabled &&
+    !!principalScopeId &&
+    !principal.error &&
+    !!datasetId &&
+    episodeIndex !== null &&
+    episodeIndex >= 0
   return useQuery<VlmJudgeStatus>({
     queryKey:
-      datasetId && episodeIndex !== null
-        ? vlmJudgeKeys.episode(datasetId, episodeIndex)
+      datasetId && episodeIndex !== null && principalScopeId
+        ? vlmJudgeKeys.episode(datasetId, episodeIndex, principalScopeId)
         : [...vlmJudgeKeys.all, 'idle'],
     queryFn: () => fetchVlmJudgeStatus(datasetId as string, episodeIndex as number),
     enabled: isReady,
@@ -52,11 +65,47 @@ interface RunVlmJudgeArgs {
 
 export function useRunVlmJudge() {
   const queryClient = useQueryClient()
-  return useMutation<VlmJudgeResult, Error, RunVlmJudgeArgs>({
-    mutationFn: ({ datasetId, episodeIndex, options }) =>
-      runVlmJudge(datasetId, episodeIndex, options),
-    onSuccess: (result, { datasetId, episodeIndex }) => {
-      const queryKey = vlmJudgeKeys.episode(datasetId, episodeIndex)
+  return useMutation<VlmJudgeResult, Error, RunVlmJudgeArgs, { scopeId: string | undefined }>({
+    onMutate: () => ({
+      scopeId: queryClient.getQueryData<PrincipalContext>(['auth', 'principal-context'])?.scopeId,
+    }),
+    mutationFn: async ({ datasetId, episodeIndex, options }) => {
+      const currentScope = () =>
+        JSON.stringify([
+          queryClient.getQueryData<PrincipalContext>(['auth', 'principal-context'])?.scopeId,
+          queryClient.getQueryState(['auth', 'principal-context'])?.status,
+          useDatasetStore.getState().currentDataset?.id,
+          useEpisodeStore.getState().currentIndex,
+          useEpisodeStore.getState().currentEpisode?.sourceId,
+          useEpisodeStore.getState().currentEpisode?.sourceRevision,
+        ])
+      const scope = currentScope()
+      await assertEpisodeReadiness(queryClient, datasetId, [episodeIndex])
+      const snapshot = await fetchVlmJudgeSnapshot(
+        datasetId,
+        episodeIndex,
+        options?.annotationAuthorId,
+      )
+      await assertEpisodeReadiness(queryClient, datasetId, [episodeIndex])
+      assertSnapshotCurrent(queryClient, datasetId, episodeIndex, snapshot)
+      if (currentScope() !== scope) throw new Error('Judge context changed. Reload before judging.')
+      const result = await runVlmJudge(datasetId, episodeIndex, {
+        ...options,
+        snapshotId: snapshot.snapshotId,
+      })
+      if (currentScope() !== scope) throw new Error('Judge context changed. Reload before judging.')
+      assertSnapshotCurrent(queryClient, datasetId, episodeIndex, snapshot)
+      return result
+    },
+    onSuccess: (result, { datasetId, episodeIndex }, context) => {
+      if (
+        !context?.scopeId ||
+        context.scopeId !==
+          queryClient.getQueryData<PrincipalContext>(['auth', 'principal-context'])?.scopeId
+      ) {
+        throw new Error('Judge context changed. Reload before judging.')
+      }
+      const queryKey = vlmJudgeKeys.episode(datasetId, episodeIndex, context.scopeId)
       const existing = queryClient.getQueryData<VlmJudgeStatus>(queryKey)
       const status: VlmJudgeStatus = {
         ...existing,

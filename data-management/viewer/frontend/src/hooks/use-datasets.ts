@@ -13,6 +13,7 @@ import {
   fetchEpisode,
   fetchEpisodes,
 } from '@/lib/api-client'
+import { fetchPrincipalContext } from '@/lib/principal-context'
 import { useDatasetStore } from '@/stores'
 
 /**
@@ -138,13 +139,31 @@ export function useEpisodes(datasetId: string | undefined, options?: UseEpisodes
  * ```
  */
 export function useEpisode(datasetId: string | undefined, episodeIndex: number | undefined) {
-  return useQuery({
-    queryKey: datasetKeys.episode(datasetId ?? '', episodeIndex ?? -1),
+  const enabled = !!datasetId && episodeIndex !== undefined && episodeIndex >= 0
+  const principal = useQuery({
+    queryKey: ['auth', 'principal-context'],
+    queryFn: fetchPrincipalContext,
+    staleTime: Infinity,
+    enabled,
+  })
+  const query = useQuery({
+    queryKey: [
+      ...datasetKeys.episode(datasetId ?? '', episodeIndex ?? -1),
+      principal.data?.scopeId,
+    ],
     queryFn: () => fetchEpisode(datasetId!, episodeIndex!),
-    enabled: !!datasetId && episodeIndex !== undefined && episodeIndex >= 0,
+    enabled: enabled && !!principal.data?.scopeId && !principal.isError,
     staleTime: 30 * 1000, // 30 seconds
     gcTime: 30 * 60 * 1000, // 30 minutes
   })
+  return {
+    ...query,
+    principalScopeId: principal.data?.scopeId,
+    data: principal.isError ? undefined : query.data,
+    error: principal.error ?? query.error,
+    isLoading: query.isLoading || (enabled && principal.isLoading),
+    isError: principal.isError || query.isError,
+  }
 }
 
 /**

@@ -55,7 +55,8 @@ vi.mock('@/lib/playback-diagnostics', () => ({
   isDiagnosticsEnabled: mockIsDiagnosticsEnabled,
 }))
 
-vi.mock('@/lib/api-client', () => ({
+vi.mock('@/lib/api-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api-client')>()),
   warmCache: vi.fn().mockResolvedValue(undefined),
 }))
 

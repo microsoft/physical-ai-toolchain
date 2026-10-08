@@ -14,6 +14,11 @@ const mockRunAll = vi.fn()
 const mockApplyLabelsAll = vi.fn()
 const mockCancel = vi.fn()
 const mockBatch = vi.fn()
+const mockReadiness = vi.fn()
+
+vi.mock('@/hooks/use-episode-readiness', () => ({
+  useEpisodeReadiness: (...args: unknown[]) => mockReadiness(...args),
+}))
 
 vi.mock('@/hooks/use-vlm-judge', () => ({
   useVlmJudgeStatus: (...args: unknown[]) => mockUseStatus(...args),
@@ -80,6 +85,8 @@ describe('JudgePanel', () => {
     mockApplyLabelsAll.mockReset()
     mockCancel.mockReset()
     mockBatch.mockReset()
+    mockReadiness.mockReset()
+    mockReadiness.mockReturnValue({ ready: true, reason: null })
     mockUseRun.mockReturnValue({
       mutate: mockMutate,
       isPending: false,
@@ -98,6 +105,18 @@ describe('JudgePanel', () => {
       applyLabelsAll: mockApplyLabelsAll,
       cancel: mockCancel,
     })
+  })
+
+  it('does not display a retained mutation result outside the current status scope', () => {
+    mockUseStatus.mockReturnValue({ data: status(), isLoading: false, error: null })
+    mockUseRun.mockReturnValue({
+      mutate: mockMutate,
+      isPending: false,
+      error: null,
+      data: judgeResult(),
+    })
+    render(<JudgePanel datasetId="another" episodeIndex={3} />)
+    expect(screen.queryByText('SUCCESS')).not.toBeInTheDocument()
   })
 
   it('shows a disabled hint when the judge backend is not enabled', () => {
@@ -120,17 +139,72 @@ describe('JudgePanel', () => {
     expect(screen.queryByRole('button', { name: /run judge/i })).not.toBeInTheDocument()
   })
 
+  it('blocks launch controls while keeping saved evidence visible', async () => {
+    mockReadiness.mockReturnValue({
+      ready: false,
+      reason: 'Episode 0: Save label changes before judging.',
+    })
+    mockUseStatus.mockReturnValue({
+      data: status({ result: judgeResult() }),
+      isLoading: false,
+      error: null,
+    })
+    render(<JudgePanel datasetId="demo" episodeIndex={0} totalEpisodes={2} />)
+    expect(screen.getByRole('button', { name: /force fresh/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /re-evaluate/i })).toBeDisabled()
+    expect(screen.getByText('SUCCESS')).toBeVisible()
+    expect(screen.getAllByText(/Episode 0: Save label changes/)[0]).toBeVisible()
+    expect(mockMutate).not.toHaveBeenCalled()
+  })
+
   it('renders Run button and prompts to run when no result exists yet', async () => {
     const user = userEvent.setup()
     mockUseStatus.mockReturnValue({ data: status(), isLoading: false, error: null })
-    render(<JudgePanel datasetId="demo" episodeIndex={2} instruction="Pick up cube" />)
+    render(<JudgePanel datasetId="demo" episodeIndex={2} />)
     expect(screen.getByText(/no judgment yet/i)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /run judge/i }))
     expect(mockMutate).toHaveBeenCalledWith({
       datasetId: 'demo',
       episodeIndex: 2,
-      options: { instruction: 'Pick up cube', processMethod: 'gvl', force: false },
+      options: { processMethod: 'gvl', force: false },
     })
+  })
+
+  it('keeps an explicit judge camera selection for single and batch requests', async () => {
+    const user = userEvent.setup()
+    mockUseStatus.mockReturnValue({ data: status(), isLoading: false, error: null })
+    const { rerender } = render(
+      <JudgePanel
+        datasetId="demo"
+        episodeIndex={0}
+        cameras={['front', 'wrist']}
+        totalEpisodes={2}
+      />,
+    )
+    await user.click(screen.getByRole('checkbox', { name: 'front' }))
+    expect(screen.getByRole('checkbox', { name: 'wrist' })).toBeDisabled()
+    rerender(
+      <JudgePanel
+        datasetId="demo"
+        episodeIndex={1}
+        cameras={['front', 'wrist']}
+        totalEpisodes={2}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: /run judge/i }))
+    expect(mockMutate).toHaveBeenCalledWith({
+      datasetId: 'demo',
+      episodeIndex: 1,
+      options: { processMethod: 'gvl', force: false, views: ['wrist'] },
+    })
+    await user.click(screen.getByRole('button', { name: /run all/i }))
+    expect(mockRunAll).toHaveBeenCalledWith({ processMethod: 'gvl', views: ['wrist'] })
+    rerender(<JudgePanel datasetId="demo" episodeIndex={1} cameras={['side']} totalEpisodes={2} />)
+    expect(screen.getByRole('button', { name: /run judge/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /run all/i })).toBeDisabled()
+    expect(screen.getByText('Choose a judge camera.')).toBeVisible()
+    await user.click(screen.getByRole('checkbox', { name: 'side' }))
+    expect(screen.getByRole('button', { name: /run judge/i })).toBeEnabled()
   })
 
   it('renders the cached SUCCESS result and exposes Force fresh', async () => {
@@ -150,7 +224,7 @@ describe('JudgePanel', () => {
     expect(mockMutate).toHaveBeenCalledWith({
       datasetId: 'demo',
       episodeIndex: 1,
-      options: { instruction: undefined, processMethod: 'gvl', force: true },
+      options: { processMethod: 'gvl', force: true },
     })
   })
 
@@ -184,7 +258,7 @@ describe('JudgePanel', () => {
     expect(mockMutate).toHaveBeenCalledWith({
       datasetId: 'demo',
       episodeIndex: 0,
-      options: { instruction: undefined, processMethod: 'chronological', force: false },
+      options: { processMethod: 'chronological', force: false },
     })
   })
 
@@ -258,9 +332,7 @@ describe('JudgePanel', () => {
     mockUseStatus.mockReturnValue({ data: status(), isLoading: false, error: null })
     render(<JudgePanel datasetId="demo" episodeIndex={0} totalEpisodes={3} />)
     expect(screen.getByText(/whole dataset \(3 episodes\)/i)).toBeInTheDocument()
-    expect(
-      screen.getByText(/uses each episode's saved or dataset instruction/i),
-    ).toBeInTheDocument()
+    expect(mockReadiness).toHaveBeenCalledWith('demo', [0, 1, 2], true)
     await user.click(screen.getByRole('button', { name: /run all/i }))
     expect(mockRunAll).toHaveBeenCalledWith({ processMethod: 'gvl' })
     const confirmSpy = vi.fn(() => false)

@@ -1,8 +1,14 @@
 """Integration tests for dataset API endpoints."""
 
+from __future__ import annotations
+
+from pathlib import Path
+
 import pytest
+from fastapi.testclient import TestClient
 
 from src.api.models.datasources import DatasetInfo, FeatureSchema, TaskInfo
+from src.api.services.dataset_service import DatasetService, get_dataset_service
 
 
 @pytest.fixture
@@ -92,24 +98,37 @@ class TestDatasetEndpoints:
         response = client.get("/api/datasets/nonexistent/episodes")
         assert response.status_code == 404
 
-    def test_get_episode(self, client, registered_dataset):
-        """Test getting a specific episode."""
-        response = client.get("/api/datasets/test-dataset/episodes/5")
-        assert response.status_code == 200
+    @pytest.mark.parametrize("episode_index", [5, 999])
+    def test_given_metadata_without_source_when_reading_episode_then_conflicts(
+        self, client: TestClient, registered_dataset: DatasetInfo, episode_index: int
+    ) -> None:
+        response = client.get(f"/api/datasets/test-dataset/episodes/{episode_index}")
+        assert response.status_code == 409
+        assert response.json()["detail"] == "Episode source changed or is unavailable. Reload before saving."
 
-        episode = response.json()
-        assert episode["meta"]["index"] == 5
+    @pytest.mark.asyncio
+    async def test_given_physical_source_when_reading_episode_then_returns_source_identity(
+        self, client: TestClient, accessibility_dataset_path: Path
+    ) -> None:
+        service = DatasetService(base_path=str(accessibility_dataset_path))
+        await service.list_datasets()
+        client.app.dependency_overrides[get_dataset_service] = lambda: service
+        try:
+            response = client.get("/api/datasets/a11y-synthetic/episodes/1")
+            assert response.status_code == 200
+            episode = response.json()
+            assert episode["meta"]["index"] == 1
+            assert episode["meta"]["length"] == 18
+            assert (episode["source_id"], episode["source_revision"]) == await service.get_source_revision(
+                "a11y-synthetic", 1
+            )
+        finally:
+            client.app.dependency_overrides.pop(get_dataset_service, None)
 
     def test_get_episode_dataset_not_found(self, client):
         """Test getting episode from non-existent dataset."""
         response = client.get("/api/datasets/nonexistent/episodes/0")
         assert response.status_code == 404
-
-    def test_get_episode_not_found(self, client, registered_dataset):
-        """Test getting a non-existent episode returns 404."""
-        response = client.get("/api/datasets/test-dataset/episodes/999")
-        assert response.status_code == 404
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

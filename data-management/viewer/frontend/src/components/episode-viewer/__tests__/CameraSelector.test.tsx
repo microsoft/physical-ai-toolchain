@@ -7,6 +7,24 @@ import { renderWithQuery } from '@/test-utils/render'
 import { CameraSelector } from '../CameraSelector'
 
 describe('CameraSelector', () => {
+  it('uses checked camera choices and prevents removing the last view', async () => {
+    const user = userEvent.setup()
+    const onSelectionChange = vi.fn()
+    renderWithQuery(
+      <CameraSelector
+        cameras={['front', 'wrist']}
+        selectedCamera="front"
+        selectedCameras={['front']}
+        onSelectCamera={vi.fn()}
+        onSelectionChange={onSelectionChange}
+      />,
+    )
+    await user.click(screen.getByRole('button'))
+    expect(screen.getByRole('checkbox', { name: 'Front' })).toBeDisabled()
+    await user.click(screen.getByRole('checkbox', { name: 'Wrist' }))
+    expect(onSelectionChange).toHaveBeenCalledWith(['front', 'wrist'])
+  })
+
   it('renders an empty state when no cameras are provided', () => {
     renderWithQuery(<CameraSelector cameras={[]} selectedCamera="" onSelectCamera={vi.fn()} />)
     expect(screen.getByText('No cameras available')).toBeInTheDocument()

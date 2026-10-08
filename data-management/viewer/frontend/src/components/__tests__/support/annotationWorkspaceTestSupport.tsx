@@ -18,6 +18,8 @@ const hoisted = vi.hoisted(() => {
     savedEpisodeLabels: { 0: ['SUCCESS'] } as Record<number, string[]>,
     availableLabels: ['SUCCESS', 'FAILURE', 'PARTIAL'],
     labelsLoaded: true,
+    labelDraftHydrated: true,
+    labelRecoveryError: null as string | null,
     episodeIndex: 0,
     hasEdits: false,
     hasAnnotationChanges: false,
@@ -27,6 +29,8 @@ const hoisted = vi.hoisted(() => {
     isPlaying: false,
     autoPlay: false,
     autoLoop: false,
+    cameraTransforms: {} as Record<string, { resize: { width: number; height: number } }>,
+    trajectoryData: [{ jointPositions: [1], timestamp: 0, gripperState: 0 }],
     subtasks: [{ id: 'subtask-1', frameRange: [2, 6] as [number, number] }],
   }
 
@@ -83,6 +87,7 @@ const hoisted = vi.hoisted(() => {
     setAutoLoop: vi.fn(),
     saveEpisodeLabels: vi.fn(),
     saveAnnotation: vi.fn(),
+    motionMetrics: vi.fn(),
   }
 })
 
@@ -93,6 +98,7 @@ export const mockDisableDiagnostics = hoisted.disableDiagnostics
 export const mockEnableDiagnostics = hoisted.enableDiagnostics
 export const mockRecordDiagnosticEvent = hoisted.recordDiagnosticEvent
 export const testState = hoisted.state
+export const mockMotionMetrics = hoisted.motionMetrics
 export const mockInitializeEdit = hoisted.initializeEdit
 export const mockResetEdits = hoisted.resetEdits
 export const mockSaveEpisodeDraft = hoisted.saveEpisodeDraft
@@ -138,7 +144,10 @@ vi.mock('@/components/vlm-judge', () => ({
 }))
 
 vi.mock('@/components/episode-analyzer', () => ({
-  MotionMetricsPanel: () => <div>Motion Metrics</div>,
+  MotionMetricsPanel: (props: unknown) => {
+    hoisted.motionMetrics(props)
+    return <div>Motion Metrics</div>
+  },
   EpisodeAnalysisCard: () => <div>Episode Analysis Card</div>,
 }))
 
@@ -326,6 +335,8 @@ vi.mock('@/stores/label-store', () => ({
   useLabelStore: (selector: (state: unknown) => unknown) =>
     selector({
       isLoaded: hoisted.state.labelsLoaded,
+      draftHydrated: hoisted.state.labelDraftHydrated,
+      draftError: hoisted.state.labelRecoveryError,
       availableLabels: hoisted.state.availableLabels,
       episodeLabels: hoisted.state.episodeLabels,
       savedEpisodeLabels: hoisted.state.savedEpisodeLabels,
@@ -376,6 +387,7 @@ vi.mock('@/stores', () => ({
         datasetId: null,
         episodeIndex: null,
         globalTransform: null,
+        cameraTransforms: hoisted.state.cameraTransforms,
       }),
     {
       getState: () => ({
@@ -398,7 +410,7 @@ vi.mock('@/stores', () => ({
         meta: { index: hoisted.state.episodeIndex, length: 12 },
         videoUrls: { main: '/video.mp4' },
         cameras: ['main'],
-        trajectoryData: undefined,
+        trajectoryData: hoisted.state.trajectoryData,
       },
     }),
   usePlaybackControls: () => ({
@@ -448,6 +460,8 @@ export function setupAnnotationWorkspaceTestCase() {
   testState.hasEdits = false
   testState.hasAnnotationChanges = false
   testState.annotationRecoveryError = null
+  testState.labelDraftHydrated = true
+  testState.labelRecoveryError = null
   testState.annotationReadCount = 0
   mockSaveAnnotation.mockReset()
   mockSaveAnnotation.mockResolvedValue(undefined)
@@ -455,6 +469,7 @@ export function setupAnnotationWorkspaceTestCase() {
   testState.isPlaying = false
   testState.autoPlay = false
   testState.autoLoop = false
+  testState.cameraTransforms = {}
   testState.subtasks = [{ id: 'subtask-1', frameRange: [2, 6] }]
 
   mockSaveEpisodeLabels.mockReset()

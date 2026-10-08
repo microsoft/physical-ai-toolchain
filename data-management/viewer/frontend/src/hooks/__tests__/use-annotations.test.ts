@@ -88,6 +88,56 @@ afterEach(() => {
 })
 
 describe('saved episode edits', () => {
+  it('retains an annotation draft as a conflict when the source generation changes', async () => {
+    selectDataset()
+    useEpisodeStore.setState({
+      currentEpisode: {
+        meta: { index: 0, length: 10, taskIndex: 0, hasAnnotations: true },
+        sourceId: 'source-a',
+        sourceRevision: 'generation-new',
+        cameras: [],
+        videoUrls: {},
+        trajectoryData: [],
+      },
+    })
+    const baseline = makeAnnotation('me')
+    const draft = { ...baseline, notes: 'Unsaved work' }
+    draftMocks.load.mockResolvedValue({
+      baseline,
+      draft,
+      baseEtag: 'same-revision',
+      sourceScopes: { 0: { sourceId: 'source-a', sourceRevision: 'generation-old' } },
+    })
+    mockFetch.mockResolvedValue(
+      jsonResponse(
+        { dataset_id: 'ds-1', episode_index: 0, annotations: [baseline] },
+        { headers: { ETag: 'same-revision' } },
+      ),
+    )
+    const { result } = renderHookWithProviders(() => ({
+      read: useEpisodeAnnotations(),
+      save: useSaveAnnotation(),
+    }))
+    await waitFor(() => expect(useAnnotationStore.getState().draftHydrated).toBe(true))
+    expect(useAnnotationStore.getState().currentAnnotation?.notes).toBe('Unsaved work')
+    expect(useAnnotationStore.getState().conflict).toMatchObject({ sourceChanged: true })
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ annotations: [baseline] }, { headers: { ETag: 'changed' } }),
+    )
+    await act(async () => {
+      await result.current.read.refetch()
+    })
+    expect(useAnnotationStore.getState().conflict).toMatchObject({ sourceChanged: true })
+    act(() => useAnnotationStore.setState({ conflict: null }))
+    mockFetch.mockClear()
+    await act(async () => {
+      await expect(
+        result.current.save.mutateAsync({ datasetId: 'ds-1', episodeIndex: 0, annotation: draft }),
+      ).rejects.toThrow(/source/i)
+    })
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
   const operations = {
     datasetId: 'ds-1',
     episodeIndex: 0,
@@ -344,6 +394,23 @@ describe('useEpisodeAnnotations', () => {
 })
 
 describe('useSaveAnnotation', () => {
+  it('rejects a stale save callback after another annotation resource is active', async () => {
+    const annotation = makeAnnotation('me')
+    useAnnotationStore.getState().loadAnnotation(annotation)
+    useAnnotationStore.setState({
+      resourceKey: JSON.stringify(['ds-1', 1, 'me']),
+      draftHydrated: true,
+    })
+    mockMutationFetch(jsonResponse({ annotations: [annotation] }, { headers: { ETag: 'saved' } }))
+    const { result } = renderHookWithProviders(() => useSaveAnnotation())
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({ datasetId: 'ds-1', episodeIndex: 0, annotation }),
+      ).rejects.toThrow(/active annotation/i)
+    })
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
   it('excludes duplicate annotation writes across separate Save owners', async () => {
     const annotation = makeAnnotation('me')
     useAnnotationStore.getState().loadAnnotation(annotation)

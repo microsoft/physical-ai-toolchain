@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { warmCache } from '@/lib/api-client'
+import { hasPendingWorkspaceChanges } from '@/lib/episode-readiness'
 import {
   disableDiagnostics,
   enableDiagnostics,
   isDiagnosticsEnabled,
 } from '@/lib/playback-diagnostics'
+import { queryClient } from '@/lib/query-client'
 import { useDatasetStore } from '@/stores'
 import type { DatasetInfo, EpisodeMeta } from '@/types'
 
@@ -14,9 +16,18 @@ interface UseDataviewerShellStateOptions {
   episodes?: EpisodeMeta[]
 }
 
+function allowNavigation(): boolean {
+  return (
+    !hasPendingWorkspaceChanges(queryClient) ||
+    globalThis.confirm?.(
+      'Leave with unsaved episode changes? Saved server state will not be updated.',
+    ) === true
+  )
+}
+
 export function useDataviewerShellState({ datasets, episodes }: UseDataviewerShellStateOptions) {
   const [datasetIdState, setDatasetIdState] = useState('')
-  const [selectedEpisode, setSelectedEpisode] = useState<number>(0)
+  const [selectedEpisode, setSelectedEpisodeState] = useState<number>(0)
   const [diagnosticsVisible, setDiagnosticsVisible] = useState(() => isDiagnosticsEnabled())
   const [isWarmingCache, setIsWarmingCache] = useState(false)
   const setDatasets = useDatasetStore((state) => state.setDatasets)
@@ -24,10 +35,20 @@ export function useDataviewerShellState({ datasets, episodes }: UseDataviewerShe
   const warmedRef = useRef<string | null>(null)
 
   useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasPendingWorkspaceChanges(queryClient)) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
+  }, [])
+
+  useEffect(() => {
     if (!datasets || datasets.length === 0) {
       if (datasetIdState) {
         setDatasetIdState('')
-        setSelectedEpisode(0)
+        setSelectedEpisodeState(0)
       }
       return
     }
@@ -37,7 +58,7 @@ export function useDataviewerShellState({ datasets, episodes }: UseDataviewerShe
     if (!datasetIdState || !hasSelectedDataset) {
       const autoId = datasets[0].id
       setDatasetIdState(autoId)
-      setSelectedEpisode(0)
+      setSelectedEpisodeState(0)
 
       if (autoId !== warmedRef.current) {
         warmedRef.current = autoId
@@ -69,8 +90,9 @@ export function useDataviewerShellState({ datasets, episodes }: UseDataviewerShe
   const canGoNextEpisode = totalEpisodes > 0 && selectedEpisode < totalEpisodes - 1
 
   const setDatasetId = useCallback((nextDatasetId: string) => {
+    if (!allowNavigation()) return
     setDatasetIdState(nextDatasetId)
-    setSelectedEpisode(0)
+    setSelectedEpisodeState(0)
 
     if (nextDatasetId && nextDatasetId !== warmedRef.current) {
       warmedRef.current = nextDatasetId
@@ -79,16 +101,22 @@ export function useDataviewerShellState({ datasets, episodes }: UseDataviewerShe
     }
   }, [])
 
+  const setSelectedEpisode = useCallback((episodeIndex: number) => {
+    if (!allowNavigation()) return
+    setSelectedEpisodeState(episodeIndex)
+  }, [])
+
   const handlePreviousEpisode = useCallback(() => {
-    setSelectedEpisode((currentEpisode) => Math.max(currentEpisode - 1, 0))
+    if (!allowNavigation()) return
+    setSelectedEpisodeState((currentEpisode) => Math.max(currentEpisode - 1, 0))
   }, [])
 
   const handleNextEpisode = useCallback(() => {
-    if (totalEpisodes === 0) {
+    if (totalEpisodes === 0 || !allowNavigation()) {
       return
     }
 
-    setSelectedEpisode((currentEpisode) => Math.min(currentEpisode + 1, totalEpisodes - 1))
+    setSelectedEpisodeState((currentEpisode) => Math.min(currentEpisode + 1, totalEpisodes - 1))
   }, [totalEpisodes])
 
   const toggleDiagnostics = useCallback(() => {

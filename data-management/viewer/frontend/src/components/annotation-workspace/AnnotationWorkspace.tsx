@@ -4,6 +4,7 @@ import { DraftConflictDialog } from '@/components/annotation-workspace/DraftConf
 import { useAnnotationWorkspaceShell } from '@/components/annotation-workspace/useAnnotationWorkspaceShell'
 
 interface AnnotationWorkspaceProps {
+  visible?: boolean
   diagnosticsVisible?: boolean
   canGoPreviousEpisode?: boolean
   onPreviousEpisode?: () => void
@@ -19,6 +20,7 @@ interface AnnotationWorkspaceProps {
  * frame-accurate scrubbing when paused.
  */
 export function AnnotationWorkspace({
+  visible = true,
   diagnosticsVisible,
   canGoPreviousEpisode = false,
   onPreviousEpisode,
@@ -27,6 +29,7 @@ export function AnnotationWorkspace({
   onSaveAndNextEpisode,
 }: AnnotationWorkspaceProps) {
   const shell = useAnnotationWorkspaceShell({
+    visible,
     diagnosticsVisible,
     canGoPreviousEpisode,
     onPreviousEpisode,
@@ -45,7 +48,7 @@ export function AnnotationWorkspace({
   }
 
   return (
-    <>
+    <div hidden={!visible} className="h-full">
       {shell.editPersistenceError && (
         <p role="alert" className="text-destructive px-4 py-2 text-sm">
           {shell.editPersistenceError}
@@ -53,6 +56,6 @@ export function AnnotationWorkspace({
       )}
       <AnnotationWorkspaceContent shell={shell} />
       <DraftConflictDialog />
-    </>
+    </div>
   )
 }

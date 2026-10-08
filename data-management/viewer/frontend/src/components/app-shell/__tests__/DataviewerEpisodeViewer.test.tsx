@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { ApiClientError } from '@/lib/api-client'
 import {
   clearDiagnosticEvents,
   disableDiagnostics,
@@ -84,7 +85,7 @@ describe('DataviewerEpisodeViewer', () => {
 
     await user.click(screen.getByRole('button', { name: 'Save and continue' }))
 
-    expect(status).toHaveTextContent('Episode changes saved.')
+    expect(status).toHaveTextContent('Opening next episode.')
   })
 
   it('shows the loading message while the episode is fetching', () => {
@@ -140,7 +141,7 @@ describe('DataviewerEpisodeViewer', () => {
     await user.click(screen.getByRole('button', { name: 'Save and continue' }))
     expect(onSaveAndNextEpisode).toHaveBeenCalledOnce()
     expect(screen.getByTestId('episode-navigation-status')).toHaveTextContent(
-      'Episode changes saved.',
+      'Opening next episode.',
     )
     await user.click(screen.getByRole('button', { name: 'Retry episode load' }))
     expect(refetch).toHaveBeenCalledOnce()
@@ -171,6 +172,17 @@ describe('DataviewerEpisodeViewer', () => {
     )
   })
 
+  it.each([401, 403, 404])('does not expose cached editing after access loss: %s', (status) => {
+    vi.mocked(useEpisode).mockReturnValue({
+      data: { meta: { index: 0 }, length: 10 },
+      isLoading: false,
+      error: new ApiClientError('Access unavailable', 'UNAVAILABLE', status),
+    } as unknown as ReturnType<typeof useEpisode>)
+    render(<DataviewerEpisodeViewer {...baseProps} />)
+    expect(screen.queryByTestId('annotation-workspace')).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Access unavailable')
+  })
+
   it('renders the no-data placeholder when the episode is missing', () => {
     vi.mocked(useEpisode).mockReturnValue({
       data: undefined,
@@ -194,6 +206,6 @@ describe('DataviewerEpisodeViewer', () => {
 
     render(<DataviewerEpisodeViewer {...baseProps} episodeIndex={2} />)
 
-    expect(mockSetCurrentEpisode).toHaveBeenCalledWith(episode)
+    expect(mockSetCurrentEpisode).toHaveBeenCalledWith(episode, undefined)
   })
 })

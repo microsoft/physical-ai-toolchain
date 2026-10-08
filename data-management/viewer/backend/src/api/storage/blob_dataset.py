@@ -19,6 +19,7 @@ Expected blob layout per dataset:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import logging
@@ -90,6 +91,7 @@ class BlobDatasetProvider:
         self._client: BlobServiceClient | None = None
         self._credential: AsyncDefaultAzureCredential | None = None
         self._info_cache: dict[str, dict] = {}
+        self._metadata_revisions: dict[str, str] = {}
         # Per-dataset cache of episode_index -> {camera -> (chunk, file, from_ts, to_ts)}
         self._episode_video_cache: dict[str, dict[int, dict[str, tuple[int, int, float, float]]]] = {}
 
@@ -240,6 +242,29 @@ class BlobDatasetProvider:
     # Metadata access
     # ------------------------------------------------------------------
 
+    async def get_metadata_revision(self, dataset_id: str) -> str:
+        """Revalidate the metadata set before reusing parsed info or windows."""
+        client = await self._get_client()
+        container = client.get_container_client(self.container_name)
+        prefix = f"{self.get_blob_prefix(dataset_id)}/"
+        versions = []
+        async for blob in container.list_blobs(name_starts_with=f"{prefix}meta/"):
+            relative = blob.name[len(prefix) :]
+            if self._is_directory_blob(blob) or (
+                relative not in _SYNC_META_BLOBS and not relative.startswith("meta/episodes/")
+            ):
+                continue
+            if not isinstance(blob.etag, str) or not blob.etag:
+                raise ValueError("Metadata version unavailable")
+            versions.append((blob.name, blob.etag))
+        revision = hashlib.sha256(json.dumps(sorted(versions)).encode()).hexdigest()
+        previous = self._metadata_revisions.get(dataset_id)
+        if previous is not None and previous != revision:
+            self._info_cache.pop(dataset_id, None)
+            self._episode_video_cache.pop(dataset_id, None)
+        self._metadata_revisions[dataset_id] = revision
+        return revision
+
     async def get_info_json(self, dataset_id: str) -> dict | None:
         """
         Read and cache meta/info.json for a dataset.
@@ -250,6 +275,7 @@ class BlobDatasetProvider:
         Returns:
             Parsed JSON dict or None if not found.
         """
+        await self.get_metadata_revision(dataset_id)
         if dataset_id in self._info_cache:
             return self._info_cache[dataset_id]
 
@@ -291,6 +317,7 @@ class BlobDatasetProvider:
             return {
                 "size": props.size,
                 "content_type": props.content_settings.content_type or "application/octet-stream",
+                **({"etag": props.etag} if isinstance(getattr(props, "etag", None), str) else {}),
             }
         except ResourceNotFoundError:
             return None
@@ -400,6 +427,10 @@ class BlobDatasetProvider:
         camera: str,
     ) -> tuple[int, int, float, float] | None:
         """Load per-episode video metadata (cached) and return entry for the camera."""
+        try:
+            await self.get_metadata_revision(dataset_id)
+        except Exception:
+            raise ValueError("Camera metadata unavailable") from None
         cache = self._episode_video_cache.get(dataset_id)
         if cache is None:
             cache = await self._load_episode_video_metadata(dataset_id)
@@ -520,6 +551,7 @@ class BlobDatasetProvider:
         chunk_size: int = 1024 * 1024,
         offset: int | None = None,
         length: int | None = None,
+        etag: str | None = None,
     ) -> AsyncIterator[bytes]:
         """
         Stream video bytes from blob in chunks.
@@ -536,10 +568,13 @@ class BlobDatasetProvider:
         client = await self._get_client()
         container = client.get_container_client(self.container_name)
         blob_client = container.get_blob_client(blob_path)
+        from azure.core import MatchConditions
+
         download = await blob_client.download_blob(
             offset=offset,
             length=length,
             max_concurrency=4,
+            **({"etag": etag, "match_condition": MatchConditions.IfNotModified} if etag else {}),
         )
         async for chunk in download.chunks():
             yield chunk
@@ -656,6 +691,45 @@ class BlobDatasetProvider:
         metadata = getattr(blob, "metadata", None)
         return isinstance(metadata, dict) and str(metadata.get("hdi_isfolder", "")).lower() == "true"
 
+    async def sync_episode_to_local(self, dataset_id: str, local_dir: Path, episode_index: int) -> bool:
+        """Prepare metadata and only the requested episode's trajectory shard."""
+        if not await self.sync_meta_only_to_local(dataset_id, local_dir):
+            return False
+        info = json.loads(await asyncio.to_thread((local_dir / "meta" / "info.json").read_text))
+        if not 0 <= episode_index < int(info.get("total_episodes", 0)):
+            return False
+        template = info.get("data_path", "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet")
+        if "{episode_index" in template:
+            chunk_index, file_index = episode_index // max(int(info.get("chunks_size", 1000)), 1), 0
+        else:
+            location = None
+            for metadata_path in sorted((local_dir / "meta" / "episodes").glob("**/*.parquet")):
+                table = await asyncio.to_thread(pq.read_table, metadata_path)
+                columns = ["episode_index", "data/chunk_index", "data/file_index"]
+                if not set(columns).issubset(table.column_names):
+                    continue
+                for row in table.select(columns).to_pylist():
+                    if int(row["episode_index"]) == episode_index:
+                        location = int(row["data/chunk_index"]), int(row["data/file_index"])
+                        break
+                if location is not None:
+                    break
+            if location is None:
+                return False
+            chunk_index, file_index = location
+        relative = template.format(
+            episode_index=episode_index, episode_chunk=chunk_index, chunk_index=chunk_index, file_index=file_index
+        )
+        target = (local_dir / relative).resolve()
+        if not relative.startswith("data/") or not target.is_relative_to(local_dir.resolve()):
+            raise ValueError("Invalid episode data path")
+        data = await self._read_blob_bytes(f"{self.get_blob_prefix(dataset_id)}/{relative}")
+        if data is None:
+            return False
+        await asyncio.to_thread(target.parent.mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread(target.write_bytes, data)
+        return True
+
     async def sync_meta_only_to_local(self, dataset_id: str, local_dir: Path) -> bool:
         """
         Download only meta/ files for a dataset to a local directory.
@@ -687,7 +761,9 @@ class BlobDatasetProvider:
                 if relative not in _SYNC_META_BLOBS and not relative.startswith("meta/episodes/"):
                     continue
 
-                local_path = local_dir / relative
+                local_path = (local_dir / relative).resolve()
+                if not local_path.is_relative_to(local_dir.resolve()):
+                    raise ValueError("Invalid metadata path")
                 await asyncio.to_thread(local_path.parent.mkdir, parents=True, exist_ok=True)
 
                 if await asyncio.to_thread(local_path.exists):
@@ -720,10 +796,9 @@ class BlobDatasetProvider:
     # ------------------------------------------------------------------
 
     async def sync_hdf5_dataset_to_local(self, dataset_id: str, local_dir: Path) -> bool:
-        """Download HDF5 config, video cache, and episode listing to a local directory.
+        """Download HDF5 config and episode listing without media.
 
-        Downloads JSON config files, cached MP4 videos from meta/videos/,
-        and creates empty placeholder files for each .hdf5 blob so
+        Downloads JSON config files and creates empty placeholders for each .hdf5 blob so
         HDF5Loader.list_episodes() can discover episode indices without
         downloading full episode data. Episode HDF5 files are fetched
         on-demand via sync_hdf5_episode_to_local.
@@ -749,20 +824,6 @@ class BlobDatasetProvider:
                     local_path = local_dir / filename
                     if not await asyncio.to_thread(local_path.exists):
                         await asyncio.to_thread(local_path.touch)
-                elif blob.name.endswith(".mp4") and "/meta/videos/" in blob.name:
-                    relative = blob.name[len(prefix + "/") :]
-                    local_path = local_dir / relative
-                    if await asyncio.to_thread(local_path.exists):
-                        continue
-                    await asyncio.to_thread(local_path.parent.mkdir, parents=True, exist_ok=True)
-                    blob_client = container.get_blob_client(blob.name)
-                    download = await blob_client.download_blob()
-                    tmp_path = local_path.with_suffix(".mp4.tmp")
-                    async with aiofiles.open(tmp_path, "wb") as file:
-                        async for chunk in download.chunks():
-                            await file.write(chunk)
-                    await asyncio.to_thread(tmp_path.replace, local_path)
-                    logger.info("Downloaded cached video: %s", relative)
             return found_hdf5
         except Exception as e:
             logger.warning(

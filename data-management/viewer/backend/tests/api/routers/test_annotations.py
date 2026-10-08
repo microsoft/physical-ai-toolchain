@@ -6,12 +6,12 @@ and annotation services mocked out.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest

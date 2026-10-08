@@ -39,11 +39,14 @@ class JudgeCache:
         from_s: float | None = None,
         to_s: float | None = None,
         agent_config: object | None = None,
+        media_identity: Mapping[str, str] | None = None,
+        video_windows: Mapping[str, tuple[float, float]] | None = None,
     ) -> str:
         """Return a stable hex digest for the given judgement input."""
         payload = {
-            "videos": _video_fingerprints(video_paths),
+            "videos": dict(media_identity) if media_identity is not None else _video_fingerprints(video_paths),
             "time_window": {"from_s": from_s, "to_s": to_s},
+            "video_windows": dict(video_windows or {}),
             "instruction": instruction,
             "judge_model": judge_model,
             "prompt_version": prompt_version,

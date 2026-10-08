@@ -1,4 +1,4 @@
-import { waitFor } from '@testing-library/react'
+import { act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -11,7 +11,7 @@ import {
 } from '@/hooks/use-datasets'
 import { useDatasetStore } from '@/stores'
 import { installFetchMock, jsonResponse, mockFetch } from '@/test-utils/fetch-mocks'
-import { renderHookWithProviders } from '@/test-utils/render'
+import { createTestQueryClient, renderHookWithProviders } from '@/test-utils/render'
 
 const sampleDataset = {
   id: 'ds-1',
@@ -108,6 +108,34 @@ describe('useEpisodes', () => {
 })
 
 describe('useEpisode', () => {
+  it('does not reuse the previous principal episode after an identity switch', async () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setDefaultOptions({ queries: { gcTime: Infinity, retry: false } })
+    queryClient.setQueryData(['auth', 'principal-context'], {
+      scopeId: 'principal-one',
+      authMode: 'local',
+    })
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ meta: { index: 0, length: 10 }, cameras: ['front'] }),
+    )
+    const { result, rerender } = renderHookWithProviders(() => useEpisode('ds-1', 0), {
+      queryClient,
+    })
+    await waitFor(() => expect(result.current.data?.cameras).toEqual(['front']))
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ meta: { index: 0, length: 10 }, cameras: ['wrist'] }),
+    )
+    act(() =>
+      queryClient.setQueryData(['auth', 'principal-context'], {
+        scopeId: 'principal-two',
+        authMode: 'local',
+      }),
+    )
+    rerender()
+    await waitFor(() => expect(result.current.data?.cameras).toEqual(['wrist']))
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+
   it('is disabled when datasetId is missing', () => {
     renderHookWithProviders(() => useEpisode(undefined, 0))
     expect(mockFetch).not.toHaveBeenCalled()
@@ -124,6 +152,7 @@ describe('useEpisode', () => {
   })
 
   it('fetches the episode payload and applies key transforms', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ scope_id: 'principal-one', auth_mode: 'local' }))
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         meta: { index: 0, length: 100, task_index: 0, has_annotations: false },

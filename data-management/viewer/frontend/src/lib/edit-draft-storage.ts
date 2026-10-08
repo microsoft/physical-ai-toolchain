@@ -4,7 +4,7 @@ import {
   getMetadata,
   setMetadata,
 } from '@/lib/offline-storage'
-import type { EpisodeAnnotation } from '@/types'
+import type { EpisodeAnnotation, EpisodeData } from '@/types'
 import type { EpisodeEditOperations, SavedEditBaseline } from '@/types/episode-edit'
 
 const DRAFT_PREFIX = 'draft-v2'
@@ -12,8 +12,48 @@ const LEGACY_DRAFT_PREFIXES = ['edit-draft:', 'annotation-draft:', 'label-draft:
 const fallbackDraftStorage = new Map<string, unknown>()
 const resourceWriteQueues = new Map<string, Promise<void>>()
 let legacyDraftsPurged = false
+let draftRevision = 0
+const draftListeners = new Set<() => void>()
+
+export function getDraftRevision(): number {
+  return draftRevision
+}
+
+export function hasPendingDraftWrites(): boolean {
+  return resourceWriteQueues.size > 0
+}
+
+export function subscribeDraftChanges(listener: () => void): () => void {
+  draftListeners.add(listener)
+  return () => {
+    draftListeners.delete(listener)
+  }
+}
 
 export type DraftResourceKind = 'annotation' | 'labels' | 'episode-edit'
+
+export interface DraftSource {
+  sourceId: string
+  sourceRevision: string
+}
+
+export function episodeDraftSource(episode: EpisodeData | null): DraftSource | null {
+  return episode?.sourceId && episode.sourceRevision
+    ? { sourceId: episode.sourceId, sourceRevision: episode.sourceRevision }
+    : null
+}
+
+export function sameDraftSource(
+  first: DraftSource | null | undefined,
+  second: DraftSource | null | undefined,
+): boolean {
+  return (
+    !!first &&
+    !!second &&
+    first.sourceId === second.sourceId &&
+    first.sourceRevision === second.sourceRevision
+  )
+}
 
 export interface DraftResource {
   kind: DraftResourceKind
@@ -22,6 +62,7 @@ export interface DraftResource {
 }
 
 export interface DraftEnvelope<TBaseline, TDraft> {
+  sourceScopes?: Record<number, DraftSource>
   schemaVersion: 2
   principalScopeId: string
   resource: DraftResource
@@ -38,12 +79,14 @@ export type DraftEnvelopeInput<TBaseline, TDraft> = Omit<
 >
 
 export interface PersistedAnnotationDraft {
+  sourceBinding?: DraftSource | null
   draft: EpisodeAnnotation
   baseline: EpisodeAnnotation
   baseEtag: string | null
 }
 
 export interface PersistedLabelDraft {
+  sourceScopes?: Record<number, DraftSource>
   availableLabels: string[]
   episodeLabels: Record<number, string[]>
   savedEpisodeLabels: Record<number, string[]>
@@ -141,8 +184,13 @@ async function runForResource<T>(key: string, operation: () => Promise<T>): Prom
     () => undefined,
   )
   resourceWriteQueues.set(key, settled)
-  await current
-  if (resourceWriteQueues.get(key) === settled) resourceWriteQueues.delete(key)
+  try {
+    await current
+  } finally {
+    if (resourceWriteQueues.get(key) === settled) resourceWriteQueues.delete(key)
+    draftRevision += 1
+    draftListeners.forEach((listener) => listener())
+  }
   return result
 }
 
@@ -208,6 +256,7 @@ async function persistNextEnvelope<TBaseline, TDraft>(
   baseEtag: string | null,
   baseline: TBaseline,
   draft: TDraft | null,
+  sourceScopes?: Record<number, DraftSource>,
 ): Promise<void> {
   await purgeLegacyDrafts()
   const key = getPersistedDraftKey(principalScopeId, resource)
@@ -219,6 +268,7 @@ async function persistNextEnvelope<TBaseline, TDraft>(
       return
     }
     const envelope: DraftEnvelope<TBaseline, TDraft> = {
+      sourceScopes,
       schemaVersion: 2,
       principalScopeId,
       resource,
@@ -285,6 +335,7 @@ export function persistAnnotationDraft(
     draft?.baseEtag ?? null,
     draft?.baseline ?? (null as never),
     draft?.draft ?? null,
+    draft?.sourceBinding ? { [episodeIndex]: draft.sourceBinding } : undefined,
   )
 }
 
@@ -312,6 +363,7 @@ export function persistLabelDraft(
     value?.baseEtag ?? null,
     baseline,
     draft,
+    value?.sourceScopes,
   )
 }
 

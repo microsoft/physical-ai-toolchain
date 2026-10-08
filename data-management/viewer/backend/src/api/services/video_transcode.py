@@ -13,12 +13,14 @@ support for seeking).
 from __future__ import annotations
 
 import asyncio
+import atexit
 import hashlib
 import json
 import logging
 import os
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 
 _LOGGER = logging.getLogger(__name__)
@@ -28,7 +30,12 @@ _WEB_COMPATIBLE_VIDEO_CODECS = frozenset({"h264", "vp8", "vp9", "av1", "hevc"})
 
 # Cache for transcoded outputs. Survives across requests within a process
 # lifetime; cleared when the container restarts.
-_CACHE_DIR = Path(os.environ.get("VIDEO_TRANSCODE_CACHE_DIR", tempfile.gettempdir())) / "dvw_video_cache"
+_CACHE_DIR = (
+    Path(os.environ.get("VIDEO_TRANSCODE_CACHE_DIR", tempfile.gettempdir())) / f"dvw_video_cache_{uuid.uuid4().hex}"
+)
+_CACHE_MAX_BYTES = 1024 * 1024 * 1024
+_capacity_guard = asyncio.Lock()
+atexit.register(shutil.rmtree, _CACHE_DIR, ignore_errors=True)
 
 # Per-cache-key locks so concurrent requests for the same video only run
 # ffmpeg once.
@@ -87,16 +94,19 @@ def _cache_key(source: Path) -> str:
     """Build a stable cache key from absolute path + size + mtime."""
     try:
         st = source.stat()
-        payload = f"{source.resolve()}::{st.st_size}::{int(st.st_mtime)}"
+        payload = f"{source.resolve()}::{st.st_dev}::{st.st_ino}::{st.st_size}::{st.st_mtime_ns}::{st.st_ctime_ns}"
     except OSError:
         payload = str(source.resolve())
-    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-async def _transcode_to_h264(source: Path, target: Path) -> bool:
+async def _transcode_to_h264(source: Path, target: Path, max_bytes: int) -> bool:
     """Run ffmpeg, writing H.264 + AAC MP4 with faststart to ``target``."""
     target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".part")
+    descriptor, temporary = tempfile.mkstemp(prefix=target.stem, suffix=".part", dir=target.parent)
+    os.close(descriptor)
+    tmp = Path(temporary)
+    source_key = _cache_key(source)
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -119,24 +129,28 @@ async def _transcode_to_h264(source: Path, target: Path) -> bool:
         "+faststart",
         "-f",
         "mp4",
+        "-fs",
+        str(max_bytes),
         str(tmp),
     ]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        _LOGGER.warning(
-            "ffmpeg transcode failed for %s: %s",
-            source,
-            stderr.decode("utf-8", errors="replace").strip(),
+    proc = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
+        await proc.communicate()
+        if proc.returncode != 0 or not 0 < tmp.stat().st_size < max_bytes or _cache_key(source) != source_key:
+            _LOGGER.warning("Video conversion unavailable or exceeded its source/storage boundary")
+            return False
+        tmp.replace(target)
+        return True
+    finally:
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            await proc.wait()
         tmp.unlink(missing_ok=True)
-        return False
-    tmp.replace(target)
-    return True
 
 
 async def ensure_browser_compatible(source: Path) -> Path:
@@ -160,11 +174,16 @@ async def ensure_browser_compatible(source: Path) -> Path:
         return cached
 
     lock = await _get_lock(key)
-    async with lock:
+    async with lock, _capacity_guard:
         if cached.exists() and cached.stat().st_size > 0:
             return cached
+        used = sum(path.stat().st_size for path in _CACHE_DIR.glob("*") if path.is_file())
+        available = _CACHE_MAX_BYTES - used
+        if available <= 0:
+            _LOGGER.warning("Video conversion cache capacity exhausted")
+            return source
         _LOGGER.info("Transcoding %s (codec=%s) to H.264 cache %s", source, codec, cached)
-        ok = await _transcode_to_h264(source, cached)
+        ok = await _transcode_to_h264(source, cached, available)
         if not ok:
             return source
         return cached

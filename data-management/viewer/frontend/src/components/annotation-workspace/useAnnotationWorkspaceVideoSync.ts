@@ -17,6 +17,7 @@ const PLAYBACK_RECOVERY_COOLDOWN_MS = 300
 interface UseAnnotationWorkspaceVideoSyncOptions {
   currentFrame: number
   totalFrames: number
+  sourceFrameCount?: number
   originalFrameIndex: number | null
   activePlaybackRange: [number, number] | null
   playbackRangeStart: number
@@ -46,6 +47,7 @@ interface UseAnnotationWorkspaceVideoSyncOptions {
 export function useAnnotationWorkspaceVideoSync({
   currentFrame,
   totalFrames,
+  sourceFrameCount = totalFrames,
   originalFrameIndex,
   activePlaybackRange,
   playbackRangeStart,
@@ -70,6 +72,7 @@ export function useAnnotationWorkspaceVideoSync({
   const originalFrameIndexRef = useRef<number | null>(null)
   const playbackSpeedRef = useRef(playbackSpeed)
   const shouldAutoPlayOnMetadataLoadRef = useRef(false)
+  const autoPlaySourceRef = useRef<string | null | undefined>(undefined)
   const skipNextPlaybackSyncRef = useRef(false)
   const playbackRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastPlaybackRecoveryAtRef = useRef(0)
@@ -92,7 +95,7 @@ export function useAnnotationWorkspaceVideoSync({
   const videoOffset = videoWindow ? videoWindow[0] : 0
   const videoWindowEnd = videoWindow ? videoWindow[1] : null
   const windowDuration = videoWindow ? Math.max(videoWindow[1] - videoWindow[0], 0) : null
-  const fps = computeEffectiveFps(totalFrames, windowDuration ?? videoDuration, datasetFps)
+  const fps = computeEffectiveFps(sourceFrameCount, windowDuration ?? videoDuration, datasetFps)
 
   // Convert an episode-relative time (seconds, 0 = first frame of episode)
   // to absolute video time within the (possibly concatenated) source mp4.
@@ -104,6 +107,10 @@ export function useAnnotationWorkspaceVideoSync({
 
   const ensureVideoPlaybackAtTime = useCallback(
     (video: HTMLVideoElement, targetTime: number) => {
+      if (document.hidden) {
+        video.pause()
+        return
+      }
       // targetTime is episode-relative; translate into the source mp4's
       // timeline before seeking.
       const absoluteTarget = toVideoTime(targetTime)
@@ -186,18 +193,25 @@ export function useAnnotationWorkspaceVideoSync({
   )
 
   useEffect(() => {
-    shouldAutoPlayOnMetadataLoadRef.current = autoPlay
+    const sourceKey = JSON.stringify([videoSrc, totalFrames])
+    if (!autoPlay) shouldAutoPlayOnMetadataLoadRef.current = false
+    else if (autoPlaySourceRef.current !== sourceKey) shouldAutoPlayOnMetadataLoadRef.current = true
+    autoPlaySourceRef.current = sourceKey
   }, [autoPlay, totalFrames, videoSrc])
 
   useEffect(() => {
     if (!videoSrc && shouldAutoPlayOnMetadataLoadRef.current && !isPlaying) {
       shouldAutoPlayOnMetadataLoadRef.current = false
-      onTogglePlayback()
+      if (!document.hidden) onTogglePlayback()
     }
   }, [isPlaying, onTogglePlayback, videoSrc])
 
   const syncVideoElementPlayback = useCallback(
     (video: HTMLVideoElement) => {
+      if (document.hidden) {
+        video.pause()
+        return
+      }
       const action = computeSyncAction(
         isPlaying,
         playbackSpeedRef.current,
@@ -274,6 +288,11 @@ export function useAnnotationWorkspaceVideoSync({
         video.currentTime = initialTime
       }
 
+      if (document.hidden) {
+        shouldAutoPlayOnMetadataLoadRef.current = false
+        video.pause()
+        return
+      }
       if (isPlaying) {
         skipNextPlaybackSyncRef.current = true
         syncVideoElementPlaybackRef.current(video)

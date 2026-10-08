@@ -15,6 +15,7 @@ import os
 import shutil
 import tempfile
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -34,6 +35,8 @@ from .hdf5_handler import HDF5FormatHandler
 from .lerobot_handler import LEROBOT_AVAILABLE, LeRobotFormatHandler
 
 if TYPE_CHECKING:
+    from evaluation.vlm_judge.dataset import EpisodeRecord
+
     from ...storage.blob_dataset import BlobDatasetProvider
 
 logger = logging.getLogger(__name__)
@@ -70,6 +73,7 @@ class DatasetService:
         blob_provider: BlobDatasetProvider | None = None,
         episode_cache_capacity: int = 32,
         episode_cache_max_mb: int = 100,
+        video_cache_max_bytes: int = 1024 * 1024 * 1024,
     ):
         if base_path is None:
             base_path = os.environ.get("DATA_DIR", "./data")
@@ -85,6 +89,7 @@ class DatasetService:
         self._blob_synced: dict[str, Path] = {}
         self._blob_hdf5_synced: dict[str, Path] = {}
         self._blob_meta_synced: dict[str, Path] = {}
+        self._media_metadata_revisions: dict[str, tuple[str, str]] = {}
         self._edit_blob_synced: tuple[str, Path] | None = None
         self._edit_blob_sync_lock = asyncio.Lock()
         # Per-blob locks to serialize concurrent video materialization for the same blob.
@@ -92,6 +97,9 @@ class DatasetService:
         # loser's tmp.replace(target) raises FileNotFoundError after the winner renames it.
         self._blob_video_locks: dict[str, asyncio.Lock] = {}
         self._blob_video_locks_guard = asyncio.Lock()
+        self._blob_video_cache_dir: Path | None = None
+        self._blob_video_cache_bytes = 0
+        self._blob_video_max_bytes = video_cache_max_bytes
 
         # Format handlers (ordered by priority — LeRobot checked first)
         self._lerobot_handler = LeRobotFormatHandler()
@@ -158,26 +166,25 @@ class DatasetService:
     # Blob dataset helpers
     # ------------------------------------------------------------------
 
-    async def _ensure_blob_synced(self, dataset_id: str) -> Path | None:
-        """Download blob dataset non-video files to a local temp dir."""
+    async def _ensure_blob_synced(self, dataset_id: str, episode_idx: int) -> Path | None:
+        """Prepare metadata and the requested episode shard without videos."""
         if self._blob_provider is None:
             return None
 
         dataset_id = _validate_dataset_id(dataset_id)
 
-        if dataset_id in self._blob_synced:
-            return self._blob_synced[dataset_id]
-
-        tmp_dir = Path(tempfile.mkdtemp(prefix="dvw_"))
+        existing = self._blob_synced.get(dataset_id)
+        tmp_dir = existing or Path(tempfile.mkdtemp(prefix="dvw_"))
         # codeql[py/path-injection]
-        success = await self._blob_provider.sync_dataset_to_local(dataset_id, tmp_dir)
+        success = await self._blob_provider.sync_episode_to_local(dataset_id, tmp_dir, episode_idx)
         if success:
             self._blob_synced[dataset_id] = tmp_dir
             return tmp_dir
 
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        if existing is None:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
         logger.warning(
-            "Blob sync failed for dataset '%s', tmp dir removed",
+            "Selected Blob episode preparation failed for dataset '%s'",
             dataset_id.replace("\r", "").replace("\n", ""),
         )
         return None
@@ -286,43 +293,73 @@ class DatasetService:
             return None
         return await self._blob_provider.resolve_video_blob_path(dataset_id, episode_idx, camera)
 
-    async def materialize_blob_video(self, blob_path: str) -> Path | None:
-        """Download a blob video fully to a local cache file and return the path.
+    async def blob_video_is_browser_compatible(self, dataset_id: str, camera: str) -> bool:
+        if self._blob_provider is None:
+            return False
+        info = await self._blob_provider.get_info_json(dataset_id)
+        feature = (info or {}).get("features", {}).get(camera, {})
+        video_info = feature.get("video_info") or feature.get("info") or {}
+        codec = str(video_info.get("video.codec", video_info.get("codec", ""))).lower()
+        return codec in {"h264", "vp8", "vp9", "av1", "hevc"}
 
-        Cached by blob path; subsequent calls return the existing file without
-        re-downloading. Required because on-demand transcoding needs a seekable
-        local file rather than a one-shot byte stream.
-        """
+    async def materialize_blob_video(self, blob_path: str) -> Path | None:
+        """Materialize a versioned selected video within a fixed service scratch budget."""
         if self._blob_provider is None:
             return None
-
-        cache_dir = Path(tempfile.gettempdir()) / "dvw_video_cache" / "blob"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        import hashlib
-
-        key = hashlib.sha1(blob_path.encode("utf-8")).hexdigest()
+        provider = self._blob_provider
+        properties = await provider.get_blob_properties(blob_path)
+        if not properties or not isinstance(properties.get("etag"), str) or not properties["etag"]:
+            logger.warning("Video materialization requires a source validator")
+            return None
+        size = properties.get("size", 0)
+        if not isinstance(size, int) or size <= 0 or size > self._blob_video_max_bytes:
+            logger.warning("Video exceeds the scratch byte budget")
+            return None
+        identity = json.dumps(["azure", provider.account_name, provider.container_name, blob_path, properties["etag"]])
+        key = hashlib.sha256(identity.encode()).hexdigest()
+        if self._blob_video_cache_dir is None:
+            self._blob_video_cache_dir = Path(tempfile.mkdtemp(prefix="dvw_media_"))
+        cache_dir = self._blob_video_cache_dir
         suffix = Path(blob_path).suffix or ".mp4"
         target = cache_dir / f"{key}{suffix}"
-        if target.exists() and target.stat().st_size > 0:
+        if target.exists() and target.stat().st_size == size:
             return target
-
         async with self._blob_video_locks_guard:
             lock = self._blob_video_locks.setdefault(key, asyncio.Lock())
-
         async with lock:
-            # Re-check after acquiring the lock; a concurrent caller may have just finished.
-            if target.exists() and target.stat().st_size > 0:
+            if target.exists() and target.stat().st_size == size:
                 return target
-            tmp = target.with_suffix(target.suffix + f".{os.getpid()}.part")
+            async with self._blob_video_locks_guard:
+                if self._blob_video_cache_bytes + size > self._blob_video_max_bytes:
+                    logger.warning("Video scratch capacity exhausted; existing readers retain their files")
+                    return None
+                self._blob_video_cache_bytes += size
+            temporary = None
+            published = False
             try:
-                with tmp.open("wb") as fh:
-                    async for chunk in self._blob_provider.stream_video(blob_path):
-                        fh.write(chunk)
-                tmp.replace(target)
+                descriptor, temporary_name = tempfile.mkstemp(prefix=key, suffix=".part", dir=cache_dir)
+                temporary = Path(temporary_name)
+                transferred = 0
+                with os.fdopen(descriptor, "wb") as stream:
+                    async for chunk in provider.stream_video(blob_path, etag=properties["etag"]):
+                        transferred += len(chunk)
+                        if transferred > size:
+                            raise ValueError("Video transfer exceeded declared size")
+                        stream.write(chunk)
+                after = await provider.get_blob_properties(blob_path)
+                if transferred != size or not after or after.get("etag") != properties["etag"]:
+                    raise ValueError("Video source changed during materialization")
+                temporary.replace(target)
+                published = True
+                logger.info("Materialized selected video bytes=%d reason=decoder-or-conversion", transferred)
             except Exception as exc:
-                logger.warning("Failed to materialize blob video '%s': %s", blob_path, exc)
-                tmp.unlink(missing_ok=True)
+                logger.warning("Video materialization failed: %s", type(exc).__name__)
                 return None
+            finally:
+                if not published:
+                    self._blob_video_cache_bytes -= size
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
         return target
 
     async def get_blob_video_stream(
@@ -339,6 +376,8 @@ class DatasetService:
             return None
 
         props = await self._blob_provider.get_blob_properties(blob_path)
+        if not props:
+            return None
         headers: dict[str, str] = {"Accept-Ranges": "bytes"}
         media_type = "video/mp4"
         if props:
@@ -348,19 +387,26 @@ class DatasetService:
                 media_type = mime
 
             if offset is not None:
-                actual_length = length if length is not None else (total_size - offset)
-                end_byte = offset + actual_length - 1
-                headers["Content-Length"] = str(actual_length)
-                headers["Content-Range"] = f"bytes {offset}-{end_byte}/{total_size}"
+                if offset < 0 or offset >= total_size:
+                    headers["Content-Length"] = "0"
+                    headers["Content-Range"] = f"bytes */{total_size}"
+                else:
+                    length = min(length if length is not None else total_size - offset, total_size - offset)
+                    end_byte = offset + length - 1
+                    headers["Content-Length"] = str(length)
+                    headers["Content-Range"] = f"bytes {offset}-{end_byte}/{total_size}"
             else:
                 headers["Content-Length"] = str(total_size)
+            if props.get("etag"):
+                headers["ETag"] = props["etag"]
 
         blob_provider = self._blob_provider
         if blob_provider is None:
             return None
 
         async def _stream():
-            async for chunk in blob_provider.stream_video(blob_path, offset=offset, length=length):
+            conditions = {"etag": props["etag"]} if props.get("etag") else {}
+            async for chunk in blob_provider.stream_video(blob_path, offset=offset, length=length, **conditions):
                 yield chunk
 
         return headers, media_type, _stream()
@@ -414,6 +460,11 @@ class DatasetService:
 
     def cleanup_temp_dirs(self) -> None:
         """Remove all blob sync temp directories. Call on shutdown."""
+        if self._blob_video_cache_dir is not None:
+            shutil.rmtree(self._blob_video_cache_dir, ignore_errors=True)
+            self._blob_video_cache_dir = None
+            self._blob_video_cache_bytes = 0
+            self._blob_video_locks.clear()
         if self._edit_blob_synced is not None:
             shutil.rmtree(self._edit_blob_synced[1], ignore_errors=True)
             self._edit_blob_synced = None
@@ -423,6 +474,10 @@ class DatasetService:
         for path in self._blob_meta_synced.values():
             shutil.rmtree(path, ignore_errors=True)
         self._blob_meta_synced.clear()
+        self._media_metadata_revisions.clear()
+        for path in self._blob_hdf5_synced.values():
+            shutil.rmtree(path, ignore_errors=True)
+        self._blob_hdf5_synced.clear()
 
     def _prune_missing_local_datasets(self, discovered_ids: set[str]) -> None:
         """Evict cached local datasets that no longer exist on disk."""
@@ -622,7 +677,10 @@ class DatasetService:
                 if not isinstance(properties.etag, str) or not properties.etag:
                     raise ValueError("Missing source validator")
                 identity = json.dumps(["azure", provider.account_name, provider.container_name, prefix])
-                generation = json.dumps([blob_path, properties.etag])
+                metadata_revision = (
+                    await provider.get_metadata_revision(dataset_id) if blob_path.endswith("/meta/info.json") else None
+                )
+                generation = json.dumps([blob_path, properties.etag, metadata_revision])
                 logger.debug(
                     "Resolved Blob source generation dataset=%s episode=%d",
                     dataset_id.replace("\r", "").replace("\n", ""),
@@ -633,6 +691,75 @@ class DatasetService:
         except Exception as error:
             logger.error("Blob source generation lookup failed: %s", type(error).__name__)
             raise ValueError("Source generation is unavailable") from None
+
+    async def get_episode_media_record(self, dataset_id: str, episode_idx: int) -> EpisodeRecord | None:
+        """Resolve versioned camera references without downloading any video."""
+        from evaluation.vlm_judge.dataset import iter_episodes
+
+        if await self.get_dataset(dataset_id) is None:
+            return None
+        source = await self.get_source_revision(dataset_id, episode_idx)
+        remote = dataset_id in self._blob_dataset_ids and dataset_id not in self._local_dataset_ids
+        if remote:
+            async with self._edit_blob_sync_lock:
+                if self._media_metadata_revisions.get(dataset_id) != source:
+                    previous = self._blob_meta_synced.pop(dataset_id, None)
+                    if previous is not None:
+                        await asyncio.to_thread(shutil.rmtree, previous, ignore_errors=True)
+                root = await self._ensure_blob_meta_synced(dataset_id)
+                if root is None:
+                    raise ValueError("Media metadata unavailable")
+                self._media_metadata_revisions[dataset_id] = source
+                record = await asyncio.to_thread(
+                    lambda: next(iter_episodes(root, indices=[episode_idx], limit=1), None)
+                )
+        else:
+            root = self._get_dataset_path(dataset_id)
+            record = await asyncio.to_thread(lambda: next(iter_episodes(root, indices=[episode_idx], limit=1), None))
+        if record is None:
+            return None
+        paths = {}
+        identities = {}
+        for camera, path in record.video_paths.items():
+            path = path.resolve()
+            if not path.is_relative_to(root.resolve()):
+                raise ValueError("Invalid media path")
+            if remote:
+                provider = self._blob_provider
+                if provider is None:
+                    raise ValueError("Media storage unavailable")
+                blob_path = f"{provider.get_blob_prefix(dataset_id)}/{path.relative_to(root.resolve()).as_posix()}"
+                properties = await provider.get_blob_properties(blob_path)
+                if not properties or not isinstance(properties.get("etag"), str):
+                    raise ValueError("Versioned media unavailable")
+                identity = ["azure", provider.account_name, provider.container_name, blob_path, properties["etag"]]
+                paths[camera] = Path(blob_path)
+            else:
+                stat = path.stat()
+                identity = [
+                    "local",
+                    str(path),
+                    stat.st_dev,
+                    stat.st_ino,
+                    stat.st_size,
+                    stat.st_mtime_ns,
+                    stat.st_ctime_ns,
+                ]
+                paths[camera] = path
+            identities[camera] = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+        return replace(record, video_paths=paths, media_identity=identities)
+
+    async def materialize_episode_media(self, dataset_id: str, paths: dict[str, Path]) -> dict[str, Path]:
+        """Provide decoder paths for selected views only."""
+        if dataset_id not in self._blob_dataset_ids or dataset_id in self._local_dataset_ids:
+            return paths
+        materialized = {}
+        for camera, path in paths.items():
+            local = await self.materialize_blob_video(path.as_posix())
+            if local is None:
+                raise ValueError("Selected camera media unavailable")
+            materialized[camera] = local
+        return materialized
 
     async def get_source_revision(self, dataset_id: str, episode_idx: int) -> tuple[str, str]:
         """Identify the source and its current dataset generation without curation files."""
@@ -651,20 +778,32 @@ class DatasetService:
                 if loader is None:
                     raise ValueError("Source generation is unavailable")
                 manifest = Path(loader._find_episode_file(episode_idx))
-            manifest = manifest.resolve()
-            relative = manifest.relative_to(root).as_posix()
-            metadata = manifest.stat()
-            source_id = hashlib.sha256(f"local:{root}".encode()).hexdigest()
-            generation = json.dumps(
-                [
-                    relative,
-                    metadata.st_dev,
-                    metadata.st_ino,
-                    metadata.st_size,
-                    metadata.st_mtime_ns,
-                    metadata.st_ctime_ns,
-                ]
+            metadata_paths = (
+                sorted(
+                    path
+                    for path in (root / "meta").rglob("*")
+                    if path.is_file() and path.suffix in {".json", ".jsonl", ".parquet"}
+                )
+                if manifest == root / "meta" / "info.json"
+                else [manifest]
             )
+            versions = []
+            for metadata_path in metadata_paths:
+                metadata_path = metadata_path.resolve()
+                relative = metadata_path.relative_to(root).as_posix()
+                metadata = metadata_path.stat()
+                versions.append(
+                    [
+                        relative,
+                        metadata.st_dev,
+                        metadata.st_ino,
+                        metadata.st_size,
+                        metadata.st_mtime_ns,
+                        metadata.st_ctime_ns,
+                    ]
+                )
+            source_id = hashlib.sha256(f"local:{root}".encode()).hexdigest()
+            generation = json.dumps(versions)
             return source_id, hashlib.sha256(generation.encode()).hexdigest()
 
         try:
@@ -681,7 +820,7 @@ class DatasetService:
 
     async def _get_edit_episode(self, dataset_id: str, episode_idx: int) -> EpisodeData | None:
         source_id, revision = await self.get_source_revision(dataset_id, episode_idx)
-        cache_key = json.dumps([dataset_id, source_id, revision])
+        cache_key = json.dumps([dataset_id, source_id, revision, episode_idx])
         cached = self._edit_context_cache.get(cache_key, episode_idx)
         if cached is not None:
             return cached
@@ -704,9 +843,7 @@ class DatasetService:
                         self._edit_blob_synced = None
                     path = Path(tempfile.mkdtemp(prefix="dvw_edit_"))
                     try:
-                        if not await provider.sync_dataset_to_local(dataset_id, path):
-                            raise ValueError("Source synchronization unavailable")
-                        if not (path / "meta" / "info.json").is_file():
+                        if not await provider.sync_episode_to_local(dataset_id, path, episode_idx):
                             if not await provider.sync_hdf5_dataset_to_local(dataset_id, path):
                                 raise ValueError("Source synchronization unavailable")
                             if not await provider.sync_hdf5_episode_to_local(dataset_id, path, episode_idx):
@@ -721,6 +858,15 @@ class DatasetService:
             episode = await asyncio.to_thread(load, self._get_dataset_path(dataset_id))
 
         if episode is not None:
+            if await self.get_source_revision(dataset_id, episode_idx) != (source_id, revision):
+                logger.warning(
+                    "Source changed during episode read dataset=%s episode=%d",
+                    dataset_id.replace("\r", "").replace("\n", ""),
+                    int(episode_idx),
+                )
+                raise ValueError("Source changed during episode read")
+            episode.source_id = source_id
+            episode.source_revision = revision
             self._edit_context_cache.put(cache_key, episode_idx, episode)
         logger.debug(
             "Loaded fresh edit context dataset=%s episode=%d",
@@ -731,8 +877,12 @@ class DatasetService:
 
     async def get_episode(self, dataset_id: str, episode_idx: int, *, fresh: bool = False) -> EpisodeData | None:
         """Get complete data for a specific episode."""
-        if fresh:
-            return await self._get_edit_episode(dataset_id, episode_idx)
+        if fresh or (dataset_id in self._blob_dataset_ids and dataset_id not in self._local_dataset_ids):
+            episode = await self._get_edit_episode(dataset_id, episode_idx)
+            if episode is not None:
+                annotated_indices = set(await self._storage.list_annotated_episodes(dataset_id))
+                episode.meta.has_annotations = episode_idx in annotated_indices
+            return episode
         # Check cache first
         cached = self._episode_cache.get(dataset_id, episode_idx)
         if cached is not None:
@@ -748,7 +898,7 @@ class DatasetService:
 
         # If no local handler, try blob-synced LeRobot
         if handler is None and self._blob_provider is not None and LEROBOT_AVAILABLE:
-            synced_path = await self._ensure_blob_synced(dataset_id)
+            synced_path = await self._ensure_blob_synced(dataset_id, episode_idx)
             if synced_path is not None and self._lerobot_handler.get_loader(dataset_id, synced_path):
                 handler = self._lerobot_handler
 
@@ -806,6 +956,8 @@ class DatasetService:
 
     def _schedule_prefetch(self, dataset_id: str, episode_idx: int) -> None:
         """Schedule background loading of adjacent episodes into the cache."""
+        if dataset_id in self._blob_dataset_ids and dataset_id not in self._local_dataset_ids:
+            return
         if not self._episode_cache.enabled:
             return
 
@@ -834,7 +986,7 @@ class DatasetService:
 
                 # For blob datasets, ensure data files are synced locally first
                 if handler is None and dataset_id in self._blob_dataset_ids and LEROBOT_AVAILABLE:
-                    synced_path = await self._ensure_blob_synced(dataset_id)
+                    synced_path = await self._ensure_blob_synced(dataset_id, idx)
                     if synced_path is not None and self._lerobot_handler.get_loader(dataset_id, synced_path):
                         handler = self._lerobot_handler
 
@@ -1051,6 +1203,11 @@ class DatasetService:
 
         dataset = self._datasets.get(dataset_id)
         fps = float(dataset.fps) if dataset and dataset.fps else 30.0
+        window = await self._blob_provider.get_episode_video_window(dataset_id, episode_idx, camera)
+        if frame_idx < 0 or (window is not None and frame_idx / fps >= window[1] - window[0]):
+            return None
+        if window is not None:
+            frame_idx += round(window[0] * fps)
         frame = await asyncio.to_thread(self._lerobot_handler._extract_frame_ffmpeg, str(local_path), frame_idx, fps)
         if frame is not None:
             return frame
@@ -1058,7 +1215,14 @@ class DatasetService:
 
     async def get_episode_cameras(self, dataset_id: str, episode_idx: int) -> list[str]:
         """Get list of available cameras for an episode."""
-        return self._try_handlers(dataset_id, "get_cameras", episode_idx) or []
+        cameras = self._try_handlers(dataset_id, "get_cameras", episode_idx)
+        if cameras:
+            return cameras
+        if self._blob_provider is not None:
+            info = await self._blob_provider.get_info_json(dataset_id)
+            if info and 0 <= episode_idx < int(info.get("total_episodes", 0)):
+                return [name for name, feature in info.get("features", {}).items() if feature.get("dtype") == "video"]
+        return []
 
     def get_video_file_path(self, dataset_id: str, episode_idx: int, camera: str) -> str | None:
         """Get the filesystem path to a video file, generating on-demand for HDF5.

@@ -45,12 +45,26 @@ export interface VlmJudgeStatus {
 }
 
 export interface VlmJudgeRunOptions {
-  /** Override the dataset-supplied instruction. */
-  instruction?: string
+  snapshotId?: string
+  annotationAuthorId?: string
   /** Restrict the judge to a subset of camera views. */
   views?: string[]
   /** Process-reward scoring technique: 'gvl' or 'chronological'. */
   processMethod?: string
   /** Bypass the disk cache and force a fresh inference run. */
   force?: boolean
+}
+
+export interface SavedInputSnapshot {
+  snapshotId: string
+  datasetId: string
+  episodeIndex: number
+  principalScopeId: string
+  sourceId: string
+  sourceRevision: string
+  annotationAuthorId: string | null
+  annotationRevision: string | null
+  editRevision: string | null
+  instruction: string
+  instructionOrigin: 'annotation' | 'dataset'
 }

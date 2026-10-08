@@ -16,6 +16,7 @@ backend is configured but not yet provisioned.
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -97,6 +98,8 @@ class JudgeService:
         force: bool = False,
         cache_dir: Path | None = None,
         process_method: str | None = None,
+        media_identity: Mapping[str, str] | None = None,
+        video_windows: Mapping[str, tuple[float, float]] | None = None,
     ) -> JudgeResult:
         """Score a single episode given one or more view MP4 paths.
 
@@ -119,6 +122,8 @@ class JudgeService:
             from_s=from_s,
             to_s=to_s,
             agent_config=agent_config,
+            media_identity=media_identity,
+            video_windows=video_windows,
         )
         if not force and cache.enabled:
             cached = cache.get(cache_key)
@@ -126,7 +131,7 @@ class JudgeService:
                 _LOGGER.info("Cache hit for %s (%s)", episode_id, cache_key[:12])
                 return _result_from_dict(cached)
 
-        frames = self._extract(video_paths=video_paths, from_s=from_s, to_s=to_s)
+        frames = self._extract(video_paths=video_paths, from_s=from_s, to_s=to_s, video_windows=video_windows)
         agent = self._ensure_agent()
         result = agent.judge(
             episode_id=episode_id,
@@ -165,16 +170,24 @@ class JudgeService:
         video_paths: Mapping[str, Path | str],
         from_s: float | None,
         to_s: float | None,
-    ):
+        video_windows: Mapping[str, tuple[float, float]] | None = None,
+    ) -> list[Any]:
         if not video_paths:
             raise ValueError("video_paths must contain at least one entry")
         frame_cfg = self._config.frames
         per_view = []
         for view in sorted(video_paths):
+            start, end = (video_windows or {}).get(view, (from_s, to_s))
+            if (
+                start is not None
+                and end is not None
+                and (not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start)
+            ):
+                raise ValueError("Invalid per-camera video window")
             window = FrameWindow(
                 path=Path(video_paths[view]),
-                from_s=from_s,
-                to_s=to_s,
+                from_s=start,
+                to_s=end,
             )
             per_view.append(
                 extract_frames(

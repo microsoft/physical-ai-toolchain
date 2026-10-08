@@ -15,7 +15,8 @@ import { SpeedControl } from '@/components/playback/SpeedControl'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ViewerDisplayControls } from '@/components/viewer-display'
-import { cn } from '@/lib/utils'
+import { recordDiagnosticEvent } from '@/lib/playback-diagnostics'
+import { computeEffectiveFps } from '@/lib/playback-utils'
 
 interface AnnotationWorkspacePlaybackCardProps {
   compact?: boolean
@@ -23,9 +24,7 @@ interface AnnotationWorkspacePlaybackCardProps {
   videoRef: RefObject<HTMLVideoElement | null>
   videoSrc: string | null
   /**
-   * Map of camera name -> video URL for every camera in the current episode.
-   * Used to pre-mount a `<video>` element per camera so switching is instant
-   * (parallel preload + persistent decoder pipelines).
+   * Available video URLs; only selected cameras are mounted.
    */
   videoUrls?: Record<string, string>
   onVideoEnded: () => void
@@ -36,9 +35,17 @@ interface AnnotationWorkspacePlaybackCardProps {
   currentFrame: number
   totalFrames: number
   resizeOutput: { width: number; height: number } | null
+  previewUnavailable?: boolean
   frameImageUrl: string | null
+  frameImageUrls?: Record<string, string>
   cameras: string[]
   selectedCamera: string | null
+  selectedCameras?: string[]
+  onSelectionChange?: (cameras: string[]) => void
+  videoTimeWindows?: Record<string, [number, number]>
+  originalFrameIndex?: number | null
+  sourceFrameCount?: number
+  datasetFps?: number
   onSelectCamera: (camera: string) => void
   isPlaying: boolean
   onTogglePlayback: () => void
@@ -70,9 +77,17 @@ export function AnnotationWorkspacePlaybackCard({
   currentFrame,
   totalFrames,
   resizeOutput,
+  previewUnavailable = false,
   frameImageUrl,
+  frameImageUrls = {},
   cameras,
   selectedCamera,
+  selectedCameras,
+  onSelectionChange,
+  videoTimeWindows,
+  originalFrameIndex = currentFrame,
+  sourceFrameCount = totalFrames,
+  datasetFps = 30,
   onSelectCamera,
   isPlaying,
   onTogglePlayback,
@@ -107,9 +122,6 @@ export function AnnotationWorkspacePlaybackCard({
       return
     }
 
-    // With every camera's <video> pre-mounted, the new active video is
-    // typically already loaded (readyState >= HAVE_METADATA) when the user
-    // switches cameras. In that case, skip the loading flicker entirely.
     const activeVideo = videoRef.current
     if (activeVideo && activeVideo.readyState >= 1) {
       setVideoLoaded(true)
@@ -141,39 +153,128 @@ export function AnnotationWorkspacePlaybackCard({
     }
   }, [episodeBase, videoSrc])
 
-  // Build the list of videos to mount. Pre-mounting every camera's <video>
-  // (with preload="auto") keeps each camera's decode pipeline warm so
-  // switching cameras is effectively instant — no fresh HTTP fetch, no
-  // decoder cold start. Inactive videos are kept mounted but hidden and
-  // never receive play() calls, so they sit on their first frame at zero
-  // CPU cost.
   const videoEntries = useMemo<Array<{ camera: string; url: string }>>(() => {
     if (!videoUrls) {
       return videoSrc && selectedCamera ? [{ camera: selectedCamera, url: videoSrc }] : []
     }
     return Object.entries(videoUrls)
-      .filter(([, url]) => Boolean(url))
-      .map(([camera, url]) => ({ camera, url }))
-  }, [selectedCamera, videoSrc, videoUrls])
-
-  // Pause inactive videos when the user switches cameras. We don't restore
-  // playback on the previous camera; the active video resumes from the
-  // current frame via useAnnotationWorkspaceVideoSync.
-  const previousActiveCameraRef = useRef<string | null>(null)
-  useEffect(() => {
-    const previous = previousActiveCameraRef.current
-    if (previous && previous !== selectedCamera) {
-      const inactive = document.querySelector<HTMLVideoElement>(
-        `video[data-camera="${CSS.escape(previous)}"]`,
+      .filter(
+        ([camera, url]) => Boolean(url) && (selectedCameras ?? [selectedCamera]).includes(camera),
       )
-      if (inactive && !inactive.paused) {
-        inactive.pause()
-      }
+      .map(([camera, url]) => ({ camera, url }))
+  }, [selectedCamera, selectedCameras, videoSrc, videoUrls])
+  const videoElements = useRef(new Map<string, HTMLVideoElement>())
+  const stopped = useRef(false)
+  const [failedCameras, setFailedCameras] = useState<string[]>([])
+  useEffect(() => {
+    stopped.current = !isPlaying
+  }, [isPlaying])
+  const stopGroup = useCallback(() => {
+    for (const video of videoElements.current.values()) video.pause()
+    if (isPlaying && !stopped.current) {
+      stopped.current = true
+      onTogglePlayback()
     }
-    previousActiveCameraRef.current = selectedCamera ?? null
-  }, [selectedCamera])
+  }, [isPlaying, onTogglePlayback])
+  const failCamera = useCallback(
+    (camera: string) => {
+      recordDiagnosticEvent('playback', 'camera-preview-unavailable', { camera, status: 'failed' })
+      if (camera === selectedCamera) {
+        setVideoLoaded(true)
+        setShowVideoLoading(false)
+      }
+      setFailedCameras((previous) => (previous.includes(camera) ? previous : [...previous, camera]))
+      stopGroup()
+    },
+    [selectedCamera, stopGroup],
+  )
+  const syncFollower = useCallback(
+    (camera: string, video: HTMLVideoElement, metadataLoaded = false) => {
+      if (camera === selectedCamera || (!metadataLoaded && video.readyState < 1)) return
+      const window = videoTimeWindows?.[camera]
+      const primaryWindow = selectedCamera ? videoTimeWindows?.[selectedCamera] : undefined
+      const primaryFps = computeEffectiveFps(
+        sourceFrameCount,
+        primaryWindow ? primaryWindow[1] - primaryWindow[0] : (videoRef.current?.duration ?? 0),
+        datasetFps,
+      )
+      const cameraFps = computeEffectiveFps(
+        sourceFrameCount,
+        window ? window[1] - window[0] : video.duration,
+        datasetFps,
+      )
+      const target = (window?.[0] ?? 0) + (originalFrameIndex ?? currentFrame) / cameraFps
+      const end = window?.[1] ?? video.duration
+      const bounded = Number.isFinite(end) && end > 0 ? Math.min(target, end - 0.001) : target
+      if (Math.abs(video.currentTime - bounded) > 0.5 / cameraFps) video.currentTime = bounded
+      video.playbackRate = (playbackSpeed * primaryFps) / cameraFps
+      if (isPlaying && !stopped.current && !document.hidden && originalFrameIndex !== null) {
+        if (video.paused)
+          void video.play().catch((cause: unknown) => {
+            if (cause instanceof DOMException && cause.name === 'AbortError') return
+            if (!stopped.current && videoElements.current.get(camera) === video) failCamera(camera)
+          })
+      } else video.pause()
+    },
+    [
+      selectedCamera,
+      videoTimeWindows,
+      sourceFrameCount,
+      videoRef,
+      datasetFps,
+      originalFrameIndex,
+      currentFrame,
+      playbackSpeed,
+      isPlaying,
+      failCamera,
+    ],
+  )
+  useEffect(() => {
+    for (const [camera, video] of videoElements.current) syncFollower(camera, video)
+  }, [syncFollower, videoEntries])
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.hidden) stopGroup()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [stopGroup])
+  const videoRefs = useMemo(
+    () =>
+      Object.fromEntries(
+        videoEntries.map(({ camera }) => [
+          camera,
+          (element: HTMLVideoElement | null) => {
+            const previous = videoElements.current.get(camera)
+            if (previous && previous !== element) {
+              previous.pause()
+              videoElements.current.delete(camera)
+              if (videoRef.current === previous) videoRef.current = null
+            }
+            if (element) {
+              videoElements.current.set(camera, element)
+              if (camera === selectedCamera) videoRef.current = element
+            }
+          },
+        ]),
+      ),
+    [selectedCamera, videoEntries, videoRef],
+  )
 
   const hasAnyVideo = videoEntries.length > 0
+  const displayCameras = selectedCameras ?? (selectedCamera ? [selectedCamera] : [])
+  const frameEntries = displayCameras.filter(
+    (camera) =>
+      !videoEntries.some((entry) => entry.camera === camera) &&
+      (hasAnyVideo || camera !== selectedCamera) &&
+      frameImageUrls[camera],
+  )
+  const unavailableCameras = displayCameras.filter(
+    (camera) =>
+      !videoEntries.some((entry) => entry.camera === camera) &&
+      !frameImageUrls[camera] &&
+      !(camera === selectedCamera && (frameImageUrl || interpolatedImageUrl)),
+  )
   return (
     <Card className={compact ? 'mx-auto h-full min-h-0 w-full max-w-[44rem]' : 'shrink-0'}>
       <CardContent className={compact ? 'flex h-full min-h-0 flex-col p-3' : 'p-4'}>
@@ -182,15 +283,19 @@ export function AnnotationWorkspacePlaybackCard({
             cameras={cameras}
             selectedCamera={selectedCamera ?? ''}
             onSelectCamera={onSelectCamera}
+            selectedCameras={selectedCameras}
+            onSelectionChange={onSelectionChange}
           />
           <ViewerDisplayControls />
         </div>
         <div
           data-testid={compact ? 'trajectory-compact-media-frame' : undefined}
           className={
-            compact
-              ? 'relative mx-auto mt-2 flex aspect-video max-h-[18rem] min-h-0 w-full max-w-[40rem] items-center justify-center overflow-hidden rounded-lg bg-black'
-              : 'relative mt-2 flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-black'
+            displayCameras.length > 1
+              ? 'relative mt-2 grid min-h-0 grid-cols-1 gap-1 overflow-y-auto rounded-lg bg-black sm:grid-cols-2'
+              : compact
+                ? 'relative mx-auto mt-2 flex aspect-video max-h-[18rem] min-h-0 w-full max-w-[40rem] items-center justify-center overflow-hidden rounded-lg bg-black'
+                : 'relative mt-2 flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-black'
           }
         >
           <canvas ref={canvasRef} className="hidden" />
@@ -199,23 +304,40 @@ export function AnnotationWorkspacePlaybackCard({
             videoEntries.map(({ camera, url }) => {
               const isActive = camera === selectedCamera
               return (
-                <video
-                  key={camera}
-                  ref={isActive ? videoRef : null}
-                  data-camera={camera}
-                  src={url}
-                  onEnded={isActive ? onVideoEnded : undefined}
-                  onLoadedMetadata={isActive ? handleVideoLoadedMetadata : undefined}
-                  muted
-                  playsInline
-                  preload="auto"
-                  className={cn(
-                    'absolute inset-0 m-auto max-h-full max-w-full object-contain',
-                    isActive ? 'z-10 opacity-100' : 'pointer-events-none z-0 opacity-0',
+                <div key={camera} className="relative w-full min-w-0">
+                  <video
+                    key={camera}
+                    ref={videoRefs[camera]}
+                    data-camera={camera}
+                    src={url}
+                    onEnded={isActive ? onVideoEnded : stopGroup}
+                    onError={() => failCamera(camera)}
+                    onLoadedMetadata={(event) => {
+                      setFailedCameras((previous) => previous.filter((failed) => failed !== camera))
+                      if (isActive) handleVideoLoadedMetadata(event)
+                      else syncFollower(camera, event.currentTarget, true)
+                    }}
+                    muted
+                    playsInline
+                    preload="metadata"
+                    className="m-auto aspect-video max-h-full w-full min-w-0 object-contain"
+                    style={displayFilter ? { filter: displayFilter } : undefined}
+                    aria-label={camera}
+                  />
+                  {videoEntries.length > 1 && (
+                    <span className="absolute top-1 left-1 max-w-full truncate bg-black/70 px-1 text-xs text-white">
+                      {camera}
+                    </span>
                   )}
-                  style={isActive && displayFilter ? { filter: displayFilter } : undefined}
-                  aria-hidden={!isActive}
-                />
+                  {failedCameras.includes(camera) && (
+                    <p
+                      role="status"
+                      className="absolute inset-0 flex items-center justify-center bg-black/80 p-2 text-sm text-white"
+                    >
+                      {camera}: video unavailable
+                    </p>
+                  )}
+                </div>
               )
             })
           ) : isInsertedFrame && interpolatedImageUrl ? (
@@ -231,12 +353,58 @@ export function AnnotationWorkspacePlaybackCard({
               alt={`Frame ${currentFrame}`}
               className="max-h-full max-w-full object-contain"
               style={displayFilter ? { filter: displayFilter } : undefined}
-              onLoad={() => setImageLoaded(true)}
+              onLoad={() => {
+                setImageLoaded(true)
+                setFailedCameras((previous) =>
+                  previous.filter((camera) => camera !== selectedCamera),
+                )
+              }}
+              onError={() => {
+                setImageLoaded(true)
+                if (selectedCamera) failCamera(selectedCamera)
+              }}
             />
           ) : (
             <span className="text-white">
               Frame {currentFrame + 1} of {totalFrames}
             </span>
+          )}
+
+          {frameEntries.map((camera) => (
+            <div key={camera} className="relative w-full min-w-0">
+              <img
+                src={frameImageUrls[camera]}
+                alt={`${camera} frame ${currentFrame}`}
+                className="aspect-video w-full object-contain"
+                style={displayFilter ? { filter: displayFilter } : undefined}
+                onLoad={() =>
+                  setFailedCameras((previous) => previous.filter((failed) => failed !== camera))
+                }
+                onError={() => failCamera(camera)}
+              />
+              {failedCameras.includes(camera) && (
+                <p role="status" className="text-white">
+                  {camera}: preview unavailable
+                </p>
+              )}
+            </div>
+          ))}
+          {unavailableCameras.map((camera) => (
+            <div
+              key={camera}
+              role="status"
+              className="flex aspect-video items-center justify-center p-2 text-sm text-white"
+            >
+              {camera}: preview unavailable
+            </div>
+          ))}
+          {!hasAnyVideo && selectedCamera && failedCameras.includes(selectedCamera) && (
+            <p
+              role="status"
+              className="absolute inset-0 flex items-center justify-center bg-black/80 text-white"
+            >
+              {selectedCamera}: preview unavailable
+            </p>
           )}
 
           {isInsertedFrame && (
@@ -245,9 +413,12 @@ export function AnnotationWorkspacePlaybackCard({
             </div>
           )}
 
-          {resizeOutput && (
-            <div className="absolute top-2 right-2 rounded-sm bg-green-600/80 px-2 py-1 text-xs text-white">
-              Output: {resizeOutput.width} × {resizeOutput.height}
+          {(resizeOutput || previewUnavailable || (isInsertedFrame && hasAnyVideo)) && (
+            <div
+              role="status"
+              className="absolute right-2 bottom-2 rounded-sm bg-black/80 px-2 py-1 text-xs text-white"
+            >
+              Edited preview unavailable; original media
             </div>
           )}
 

@@ -15,6 +15,7 @@ import type {
   EpisodeAnnotationFile,
   EpisodeData,
   EpisodeMeta,
+  SavedInputSnapshot,
   VlmJudgeResult,
   VlmJudgeRunOptions,
   VlmJudgeStatus,
@@ -552,12 +553,25 @@ export async function runVlmJudge(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      instruction: options.instruction,
+      snapshot_id: options.snapshotId,
+      annotation_author_id: options.annotationAuthorId,
       views: options.views,
       process_method: options.processMethod,
       force: options.force ?? false,
     }),
   })
+}
+
+export async function fetchVlmJudgeSnapshot(
+  datasetId: string,
+  episodeIndex: number,
+  authorId?: string,
+): Promise<SavedInputSnapshot> {
+  const query = authorId ? `?annotation_author_id=${encodeURIComponent(authorId)}` : ''
+  return apiRequest<SavedInputSnapshot>(
+    `/datasets/${datasetId}/episodes/${episodeIndex}/judge/snapshot${query}`,
+    { cache: 'no-store' },
+  )
 }
 
 // ============================================================================

@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +35,8 @@ class EpisodeRecord:
     video_paths: dict[str, Path]
     from_timestamp: float | None
     to_timestamp: float | None
+    video_windows: dict[str, tuple[float, float]] = field(default_factory=dict)
+    media_identity: dict[str, str] | None = None
 
     @property
     def duration_s(self) -> float:
@@ -211,6 +213,7 @@ def _iter_v3(spec: DatasetSpec, views: tuple[str, ...]) -> Iterator[EpisodeRecor
             length = int(row["length"])
             instruction = _resolve_instruction_v3(row, tasks_by_index)
             video_paths: dict[str, Path] = {}
+            video_windows = {}
             from_ts: float | None = None
             to_ts: float | None = None
             for view in views:
@@ -218,6 +221,7 @@ def _iter_v3(spec: DatasetSpec, views: tuple[str, ...]) -> Iterator[EpisodeRecor
                 v_file = int(row[f"videos/{view}/file_index"])
                 from_ts = float(row[f"videos/{view}/from_timestamp"])
                 to_ts = float(row[f"videos/{view}/to_timestamp"])
+                video_windows[view] = (from_ts, to_ts)
                 video_paths[view] = spec.root / spec.video_path.format(
                     chunk_index=v_chunk,
                     file_index=v_file,
@@ -232,6 +236,7 @@ def _iter_v3(spec: DatasetSpec, views: tuple[str, ...]) -> Iterator[EpisodeRecor
                 video_paths=video_paths,
                 from_timestamp=from_ts,
                 to_timestamp=to_ts,
+                video_windows=video_windows,
             )
 
 

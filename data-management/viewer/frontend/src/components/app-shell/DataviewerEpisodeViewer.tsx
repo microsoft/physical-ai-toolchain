@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { AnnotationWorkspace } from '@/components/annotation-workspace/AnnotationWorkspace'
 import { Button } from '@/components/ui/button'
 import { useEpisode } from '@/hooks/use-datasets'
+import { ApiClientError } from '@/lib/api-client'
 import { recordDiagnosticEvent } from '@/lib/playback-diagnostics'
 import { useEpisodeStore } from '@/stores'
 
@@ -30,6 +31,7 @@ export function DataviewerEpisodeViewer({
 }: DataviewerEpisodeViewerProps) {
   const {
     data: episode,
+    principalScopeId,
     isLoading,
     isFetching,
     error,
@@ -38,6 +40,7 @@ export function DataviewerEpisodeViewer({
   const setCurrentEpisode = useEpisodeStore((state) => state.setCurrentEpisode)
   const [navigationStatus, setNavigationStatus] = useState<string | null>(null)
   const hasCachedEpisode = !!episode
+  const accessLost = error instanceof ApiClientError && [401, 403, 404].includes(error.status)
 
   useEffect(() => {
     if (error) {
@@ -60,10 +63,10 @@ export function DataviewerEpisodeViewer({
   }
 
   useEffect(() => {
-    if (episode) {
-      setCurrentEpisode(episode)
+    if (episode && !accessLost) {
+      setCurrentEpisode(episode, principalScopeId ? { datasetId, principalScopeId } : undefined)
     }
-  }, [episode, setCurrentEpisode])
+  }, [episode, setCurrentEpisode, accessLost, datasetId, principalScopeId])
 
   useEffect(() => {
     if (!navigationStatus) return
@@ -80,7 +83,7 @@ export function DataviewerEpisodeViewer({
         </div>
       </div>
     )
-  } else if (error && !episode) {
+  } else if (error && (!episode || accessLost)) {
     content = (
       <div className="flex h-full flex-col items-center justify-center gap-2">
         <div role="alert" className="text-status-danger-foreground">
@@ -114,7 +117,7 @@ export function DataviewerEpisodeViewer({
         canGoNextEpisode={canGoNextEpisode}
         onNextEpisode={onNextEpisode}
         onSaveAndNextEpisode={() => {
-          setNavigationStatus('Episode changes saved.')
+          setNavigationStatus('Opening next episode.')
           onSaveAndNextEpisode()
         }}
       />
@@ -123,7 +126,7 @@ export function DataviewerEpisodeViewer({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {episode && error && (
+      {episode && error && !accessLost && (
         <div className="bg-background flex shrink-0 items-center gap-2 border-b px-3 py-2">
           <div role="alert" className="text-status-danger-foreground min-w-0 flex-1 text-sm">
             Could not refresh episode. Showing previously loaded data.

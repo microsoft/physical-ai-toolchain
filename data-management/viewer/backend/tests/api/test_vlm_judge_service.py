@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import sys
 import time
+import argparse
+import json
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from threading import Lock
 
 import pytest
@@ -41,6 +44,36 @@ def _config_with_process_method(monkeypatch: pytest.MonkeyPatch, process_method:
 
 def test_returns_none_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     assert vjs.get_vlm_judge_service(_config(monkeypatch, enabled=False)) is None
+
+
+@pytest.mark.parametrize("override", ["", "Declared experiment instruction"])
+def test_cli_persists_declared_instruction_before_service_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, override: str
+) -> None:
+    from evaluation.vlm_judge import run as judge_run
+    from evaluation.vlm_judge.dataset import EpisodeRecord
+    from evaluation.vlm_judge.service import JudgeService
+
+    episode = EpisodeRecord("synthetic/episode_000000", 0, "Saved dataset instruction", 30, 30, {}, None, None)
+    monkeypatch.setattr(judge_run, "iter_episodes", lambda *args, **kwargs: iter([episode]))
+    output = tmp_path / "results.jsonl"
+    original_build = judge_run._build_service
+
+    def build_with_declared_configuration(args: argparse.Namespace) -> JudgeService:
+        declared = json.loads(output.with_suffix(".jsonl.config.json").read_text())
+        assert declared["instruction_override"] == (override or None)
+        assert declared["instruction_origin"] == ("cli-override" if override else "dataset")
+        assert declared["backend"] == "echo"
+        assert "api_key" not in declared
+        assert "base_url" not in declared
+        return original_build(args)
+
+    monkeypatch.setattr(judge_run, "_build_service", build_with_declared_configuration)
+    assert judge_run.main([
+        "--dataset", str(tmp_path), "--output", str(output), "--backend", "echo",
+        "--dry-run", "--instruction", override, "--api-key", "synthetic-not-a-credential",
+    ]) == 0
+    assert json.loads(output.read_text())["instruction"] == (override or episode.instruction)
 
 
 def test_builds_and_memoizes_singleton(monkeypatch: pytest.MonkeyPatch) -> None:

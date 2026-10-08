@@ -205,6 +205,6 @@ class TestGetEpisodeHandlerChain:
         result = await service.get_episode("blob-dataset", 0)
 
         assert result is episode
-        ensure_blob_synced.assert_awaited_once_with("blob-dataset")
+        ensure_blob_synced.assert_awaited_once_with("blob-dataset", 0)
         primary.get_loader.assert_called_once_with("blob-dataset", synced_path)
         primary.load_episode.assert_called_once_with("blob-dataset", 0, dataset_info=None)
