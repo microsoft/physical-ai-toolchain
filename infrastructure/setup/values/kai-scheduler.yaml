@@ -25,3 +25,10 @@ replicaCount: 1
 
 # Priority class for scheduler pods
 priorityClassName: system-cluster-critical
+
+# Don't inject a runtime class into GPU pods. KAI otherwise adds the NVIDIA
+# runtime class to every pod that names nvidia.com/gpu, even with a zero count,
+# including OSMO CPU tasks on system nodes. NVIDIA's KAI values for OSMO set
+# the same.
+admission:
+  gpuPodRuntimeClassName: ""

@@ -4,7 +4,7 @@ sidebar_label: GPU Configuration
 sidebar_position: 1
 description: GPU driver and operator configuration for H100 and RTX PRO 6000 nodes.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-29
+ms.date: 2026-10-08
 ms.topic: concept
 ---
 
@@ -71,6 +71,26 @@ Without both of these, all downstream GPU Operator pods remain stuck in `Init:0/
 > The GPU Operator supports [custom vGPU driver containers](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/install-gpu-operator-vgpu.html),
 > but this requires building a private container image, a private registry, and NVIDIA vGPU licensing infrastructure.
 > The DaemonSet approach is functionally equivalent without that overhead.
+
+### Node OS on Kubernetes 1.35
+
+Kubernetes 1.35 moves node pools that use the default `Ubuntu` OS SKU to Ubuntu 24.04 and containerd 2.3. On that image, the GPU Operator v25.10 container toolkit writes `/etc/containerd/conf.d/99-nvidia.toml` with `version = 4` next to AKS's `version = 2` root config, and containerd refuses to start:
+
+```text
+containerd: drop-in config version 4 higher than root config version 2
+```
+
+The node then stays `NotReady` with `ContainerRuntimeProblem` and never advertises a GPU. The toolkit runs on every GPU node, including pools with AKS-installed drivers. Set `os_sku = "Ubuntu2204"` on GPU pools until the GPU Operator release you deploy handles this layout. AKS supports `Ubuntu2204` through Kubernetes 1.36, and changing `os_sku` between Ubuntu versions updates a pool in place. CPU pools can run Ubuntu 24.04.
+
+### Driver Auto-upgrade on AKS-installed Drivers
+
+The GPU Operator chart enables driver auto-upgrade (`driver.upgradePolicy.autoUpgrade: true`). On a new node with an AKS-installed driver, the upgrade controller can cordon the node and leave it at `nvidia.com/gpu-driver-upgrade-state=pod-restart-required`, waiting for a driver pod that never returns because the node is labeled `nvidia.com/gpu.deploy.driver=pre-installed`. Work that scaled the pool up can't schedule on it. Label pools that set `gpu_driver = "Install"` so the controller skips them:
+
+```hcl
+node_labels = { "nvidia.com/gpu-driver-upgrade.skip" = "true" }
+```
+
+AKS updates those drivers through node image upgrades, not through the GPU Operator.
 
 ## MIG Strategy
 
