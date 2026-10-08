@@ -208,7 +208,8 @@ async def test_ensure_browser_compatible_atomically_replaces_successful_transcod
 
 
 async def test_transcode_budget_rejects_new_conversion_without_evicting_readers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = tmp_path / "input.mp4"
     source.write_bytes(b"source")

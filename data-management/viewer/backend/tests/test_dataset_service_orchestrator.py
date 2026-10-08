@@ -543,12 +543,23 @@ class TestFrameAndCameraAccess:
     pytestmark = pytest.mark.asyncio
 
     async def test_cold_blob_camera_inventory_preserves_canonical_names(self, tmp_path: Path) -> None:
-        provider = _make_provider(get_info_json=AsyncMock(return_value={"total_episodes": 1, "features": {
-            "observation.images.front": {"dtype": "video"}, "observation.images.wrist": {"dtype": "video"},
-            "observation.state": {"dtype": "float32"},
-        }}))
+        provider = _make_provider(
+            get_info_json=AsyncMock(
+                return_value={
+                    "total_episodes": 1,
+                    "features": {
+                        "observation.images.front": {"dtype": "video"},
+                        "observation.images.wrist": {"dtype": "video"},
+                        "observation.state": {"dtype": "float32"},
+                    },
+                }
+            )
+        )
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        assert await service.get_episode_cameras("dataset", 0) == ["observation.images.front", "observation.images.wrist"]
+        assert await service.get_episode_cameras("dataset", 0) == [
+            "observation.images.front",
+            "observation.images.wrist",
+        ]
 
     async def test_get_frame_image_returns_handler_frame(self, tmp_path: Path) -> None:
         handler = _make_handler()
@@ -687,7 +698,9 @@ class TestBlobVideoAccess:
             yield b"chunk-1"
             yield b"chunk-2"
 
-        provider = _make_provider(stream_video=stream_video, get_blob_properties=AsyncMock(return_value={"size": 14, "etag": '"one"'}))
+        provider = _make_provider(
+            stream_video=stream_video, get_blob_properties=AsyncMock(return_value={"size": 14, "etag": '"one"'})
+        )
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
         monkeypatch.setattr(
             "src.api.services.dataset_service.service.tempfile.gettempdir",
@@ -721,7 +734,9 @@ class TestBlobVideoAccess:
             await release.wait()
             yield b"video"
 
-        provider = _make_provider(stream_video=stream_video, get_blob_properties=AsyncMock(return_value={"size": 5, "etag": '"one"'}))
+        provider = _make_provider(
+            stream_video=stream_video, get_blob_properties=AsyncMock(return_value={"size": 5, "etag": '"one"'})
+        )
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
         first_task = asyncio.create_task(service.materialize_blob_video("dataset/video.mp4"))
         await started.wait()
@@ -737,11 +752,15 @@ class TestBlobVideoAccess:
         service.cleanup_temp_dirs()
 
     async def test_materialization_releases_reservation_when_temporary_file_creation_fails(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         provider = _make_provider(get_blob_properties=AsyncMock(return_value={"size": 5, "etag": '"one"'}))
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider, video_cache_max_bytes=5)
-        monkeypatch.setattr("src.api.services.dataset_service.service.tempfile.mkstemp", MagicMock(side_effect=OSError("disk full")))
+        monkeypatch.setattr(
+            "src.api.services.dataset_service.service.tempfile.mkstemp", MagicMock(side_effect=OSError("disk full"))
+        )
         assert await service.materialize_blob_video("dataset/video.mp4") is None
         assert service._blob_video_cache_bytes == 0
         service.cleanup_temp_dirs()
@@ -760,7 +779,9 @@ class TestBlobVideoAccess:
             yield b"partial"
             raise RuntimeError("network failure")
 
-        provider = _make_provider(stream_video=stream_video, get_blob_properties=AsyncMock(return_value={"size": 14, "etag": '"one"'}))
+        provider = _make_provider(
+            stream_video=stream_video, get_blob_properties=AsyncMock(return_value={"size": 14, "etag": '"one"'})
+        )
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
         monkeypatch.setattr(
             "src.api.services.dataset_service.service.tempfile.gettempdir",

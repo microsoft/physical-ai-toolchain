@@ -5,11 +5,10 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pyarrow as pa
 import pyarrow.parquet as pq
-from urllib.parse import parse_qs, urlsplit
-
 import pytest
 
 from src.api.services.dataset_service import DatasetService

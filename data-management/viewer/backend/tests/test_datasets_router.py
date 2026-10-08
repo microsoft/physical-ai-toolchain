@@ -282,7 +282,9 @@ class TestListEpisodes:
 
 class TestGetEpisode:
     def test_given_source_change_when_reading_episode_then_fails_visibly(
-        self, client: TestClient, override_service: MagicMock,
+        self,
+        client: TestClient,
+        override_service: MagicMock,
     ) -> None:
         override_service.get_dataset.return_value = _make_dataset()
         override_service.get_episode.side_effect = ValueError("Source changed during episode read")
@@ -378,22 +380,35 @@ class TestGetCameras:
 
 
 class TestGetVideo:
-    @pytest.mark.parametrize(("range_header", "status", "body", "content_range"), [
-        (None, 200, b"abcdefghij", None),
-        ("bytes=2-4", 206, b"cde", "bytes 2-4/10"),
-        ("bytes=8-99", 206, b"ij", "bytes 8-9/10"),
-        ("bytes=20-", 416, b"", "bytes */10"),
-    ])
+    @pytest.mark.parametrize(
+        ("range_header", "status", "body", "content_range"),
+        [
+            (None, 200, b"abcdefghij", None),
+            ("bytes=2-4", 206, b"cde", "bytes 2-4/10"),
+            ("bytes=8-99", 206, b"ij", "bytes 8-9/10"),
+            ("bytes=20-", 416, b"", "bytes */10"),
+        ],
+    )
     def test_compatible_blob_uses_actual_range_route(
-        self, client: TestClient, override_service: MagicMock, tmp_path: Path,
-        range_header: str | None, status: int, body: bytes, content_range: str | None,
+        self,
+        client: TestClient,
+        override_service: MagicMock,
+        tmp_path: Path,
+        range_header: str | None,
+        status: int,
+        body: bytes,
+        content_range: str | None,
     ) -> None:
         provider = MagicMock()
-        provider.get_blob_properties = AsyncMock(return_value={"size": 10, "content_type": "video/mp4", "etag": '"one"'})
+        provider.get_blob_properties = AsyncMock(
+            return_value={"size": 10, "content_type": "video/mp4", "etag": '"one"'}
+        )
 
-        async def chunks(blob_path: str, offset: int | None = None, length: int | None = None, **kwargs: object) -> AsyncIterator[bytes]:
+        async def chunks(
+            blob_path: str, offset: int | None = None, length: int | None = None, **kwargs: object
+        ) -> AsyncIterator[bytes]:
             start = offset or 0
-            yield b"abcdefghij"[start:start + length if length is not None else None]
+            yield b"abcdefghij"[start : start + length if length is not None else None]
 
         provider.stream_video = MagicMock(side_effect=chunks)
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
@@ -402,7 +417,9 @@ class TestGetVideo:
         override_service.blob_video_is_browser_compatible.return_value = True
         override_service.get_blob_video_stream = service.get_blob_video_stream
         override_service.materialize_blob_video = AsyncMock(side_effect=AssertionError("Compatible media must stream"))
-        response = client.get("/api/datasets/ds-1/episodes/0/video/front", headers={"Range": range_header} if range_header else {})
+        response = client.get(
+            "/api/datasets/ds-1/episodes/0/video/front", headers={"Range": range_header} if range_header else {}
+        )
         assert response.status_code == status
         assert response.content == body
         assert response.headers.get("content-range") == content_range

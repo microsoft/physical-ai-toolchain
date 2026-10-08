@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import json
-from io import BytesIO
 from collections.abc import AsyncIterator, Iterable
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 from .conftest import create_blob_dataset_provider
 
@@ -591,22 +591,34 @@ class TestSyncDatasetToLocal:
     @pytest.mark.parametrize(
         ("template", "selected"),
         [
-            ("data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet", "data/chunk-001/episode_000003.parquet"),
+            (
+                "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
+                "data/chunk-001/episode_000003.parquet",
+            ),
             ("data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet", "data/chunk-002/file-007.parquet"),
         ],
     )
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
-    async def test_selected_episode_prepares_only_its_shard(
-        self, tmp_path: Path, template: str, selected: str
-    ) -> None:
+    async def test_selected_episode_prepares_only_its_shard(self, tmp_path: Path, template: str, selected: str) -> None:
         metadata = BytesIO()
-        pq.write_table(pa.table({
-            "episode_index": [0, 3], "data/chunk_index": [0, 2], "data/file_index": [0, 7],
-        }), metadata)
+        pq.write_table(
+            pa.table(
+                {
+                    "episode_index": [0, 3],
+                    "data/chunk_index": [0, 2],
+                    "data/file_index": [0, 7],
+                }
+            ),
+            metadata,
+        )
         payloads = {
-            "org/repo/meta/info.json": json.dumps({
-                "total_episodes": 4, "chunks_size": 2, "data_path": template,
-            }).encode(),
+            "org/repo/meta/info.json": json.dumps(
+                {
+                    "total_episodes": 4,
+                    "chunks_size": 2,
+                    "data_path": template,
+                }
+            ).encode(),
             "org/repo/meta/episodes/chunk-000/file-000.parquet": metadata.getvalue(),
             f"org/repo/{selected}": b"selected-shard",
             "org/repo/data/chunk-000/episode_000000.parquet": b"unselected-shard",
@@ -667,9 +679,11 @@ class TestSyncMetaOnly:
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_metadata_cannot_escape_scratch_directory(self, tmp_path: Path) -> None:
         client = MagicMock()
-        client.get_container_client.return_value.list_blobs.return_value = _AsyncIter([
-            _make_blob("org/repo/meta/episodes/../../../escaped.json"),
-        ])
+        client.get_container_client.return_value.list_blobs.return_value = _AsyncIter(
+            [
+                _make_blob("org/repo/meta/episodes/../../../escaped.json"),
+            ]
+        )
         provider = create_blob_dataset_provider(client)
         with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=b"{}")) as reader:
             assert not await provider.sync_meta_only_to_local("org--repo", tmp_path / "scratch")

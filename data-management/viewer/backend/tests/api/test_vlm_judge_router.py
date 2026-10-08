@@ -39,7 +39,9 @@ def test_judge_extracts_each_view_with_its_own_window(monkeypatch: pytest.Monkey
     monkeypatch.setattr(judge_module, "tile_horizontally", lambda frames: frames)
     judge_module.JudgeService()._extract(
         video_paths={"front": Path("front.mp4"), "wrist": Path("wrist.mp4")},
-        from_s=None, to_s=None, video_windows={"front": (2.0, 3.0), "wrist": (5.0, 6.0)},
+        from_s=None,
+        to_s=None,
+        video_windows={"front": (2.0, 3.0), "wrist": (5.0, 6.0)},
     )
     assert [(window.from_s, window.to_s) for window in windows] == [(2.0, 3.0), (5.0, 6.0)]
 
@@ -50,8 +52,12 @@ def test_remote_judge_cache_uses_source_versions_not_scratch_paths(tmp_path: Pat
     cache = JudgeCache(tmp_path)
     options = {"instruction": INSTRUCTION, "judge_model": "echo", "prompt_version": "test"}
     first = cache.key(video_paths={"front": Path("first.mp4")}, media_identity={"front": "source-one"}, **options)
-    assert first == cache.key(video_paths={"front": Path("second.mp4")}, media_identity={"front": "source-one"}, **options)
-    assert first != cache.key(video_paths={"front": Path("first.mp4")}, media_identity={"front": "source-two"}, **options)
+    assert first == cache.key(
+        video_paths={"front": Path("second.mp4")}, media_identity={"front": "source-one"}, **options
+    )
+    assert first != cache.key(
+        video_paths={"front": Path("first.mp4")}, media_identity={"front": "source-two"}, **options
+    )
 
 
 def test_v3_metadata_preserves_different_camera_windows(tmp_path: Path) -> None:
@@ -60,7 +66,9 @@ def test_v3_metadata_preserves_different_camera_windows(tmp_path: Path) -> None:
     _build_dataset(tmp_path, instruction=INSTRUCTION)
     info_path = tmp_path / "meta" / "info.json"
     info = json.loads(info_path.read_text())
-    info.update(codebase_version="v3.0", video_path="videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4")
+    info.update(
+        codebase_version="v3.0", video_path="videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
+    )
     info["features"]["obs.wrist"] = info["features"]["obs.front"]
     info_path.write_text(json.dumps(info))
     (tmp_path / "meta" / "episodes.jsonl").unlink()
@@ -68,19 +76,28 @@ def test_v3_metadata_preserves_different_camera_windows(tmp_path: Path) -> None:
     metadata.parent.mkdir(parents=True)
     row = {"episode_index": [0], "length": [12], "tasks": [[INSTRUCTION]]}
     for camera, start in (("obs.front", 2.0), ("obs.wrist", 5.0)):
-        row.update({f"videos/{camera}/chunk_index": [0], f"videos/{camera}/file_index": [0],
-                    f"videos/{camera}/from_timestamp": [start], f"videos/{camera}/to_timestamp": [start + 0.4]})
+        row.update(
+            {
+                f"videos/{camera}/chunk_index": [0],
+                f"videos/{camera}/file_index": [0],
+                f"videos/{camera}/from_timestamp": [start],
+                f"videos/{camera}/to_timestamp": [start + 0.4],
+            }
+        )
     pq.write_table(pa.table(row), metadata)
     record = next(iter_episodes(tmp_path))
     assert record.video_windows == {"obs.front": (2.0, 2.4), "obs.wrist": (5.0, 5.4)}
 
 
 def test_cold_blob_judge_downloads_only_selected_media_and_reuses_cache(
-    tmp_path: Path, restore_default_app: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    restore_default_app: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import shutil
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock
+
     from src.api.services.dataset_service import DatasetService, get_dataset_service
     from src.api.storage.blob_dataset import BlobDatasetProvider
 
@@ -110,13 +127,17 @@ def test_cold_blob_judge_downloads_only_selected_media_and_reuses_cache(
         return SimpleNamespace(etag=str(info_path.stat().st_mtime_ns))
 
     sdk = MagicMock()
-    sdk.get_container_client.return_value.get_blob_client.return_value.get_blob_properties = AsyncMock(side_effect=sdk_properties)
+    sdk.get_container_client.return_value.get_blob_client.return_value.get_blob_properties = AsyncMock(
+        side_effect=sdk_properties
+    )
     monkeypatch.setattr(provider, "_get_client", AsyncMock(return_value=sdk))
     monkeypatch.setattr(provider, "get_info_json", AsyncMock(return_value=info))
     monkeypatch.setattr(provider, "sync_meta_only_to_local", sync_meta)
     monkeypatch.setattr(provider, "get_blob_properties", properties)
     monkeypatch.setattr(provider, "stream_video", stream)
-    monkeypatch.setattr(provider, "_read_blob_bytes", AsyncMock(side_effect=lambda path: (tmp_path / "remote" / path).read_bytes()))
+    monkeypatch.setattr(
+        provider, "_read_blob_bytes", AsyncMock(side_effect=lambda path: (tmp_path / "remote" / path).read_bytes())
+    )
     client = _reload_app(restore_default_app, tmp_path / "local")
     datasets = DatasetService(base_path=str(tmp_path / "local"), blob_provider=provider)
     client.app.dependency_overrides[get_dataset_service] = lambda: datasets
@@ -160,11 +181,18 @@ def _build_dataset(root: Path, *, instruction: str | None, n_frames: int = 12) -
     (root / "meta").mkdir(parents=True, exist_ok=True)
     data_path = root / "data" / "chunk-000" / "episode_000000.parquet"
     data_path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(pa.table({
-        "frame_index": list(range(n_frames)), "episode_index": [0] * n_frames,
-        "timestamp": np.arange(n_frames) / 30,
-        "observation.state": [[0.0]] * n_frames, "action": [[0.0]] * n_frames,
-    }), data_path)
+    pq.write_table(
+        pa.table(
+            {
+                "frame_index": list(range(n_frames)),
+                "episode_index": [0] * n_frames,
+                "timestamp": np.arange(n_frames) / 30,
+                "observation.state": [[0.0]] * n_frames,
+                "action": [[0.0]] * n_frames,
+            }
+        ),
+        data_path,
+    )
     _write_mp4(root / "videos" / "chunk-000" / "obs.front" / "episode_000000.mp4", n_frames=n_frames)
     (root / "meta" / "info.json").write_text(
         json.dumps(
@@ -333,13 +361,23 @@ def _save_instruction(client: TestClient, instruction: str) -> None:
     path = f"/api/datasets/{DATASET_ID}/episodes/0/annotations"
     current = client.get(path)
     headers = {"If-Match": current.headers["ETag"]} if "ETag" in current.headers else {"If-None-Match": "*"}
-    response = client.put(path, headers=headers, json={
-        "annotator_id": "ignored-client-author", "timestamp": "2026-10-08T00:00:00Z",
-        "task_completeness": {"rating": "success", "confidence": 3},
-        "trajectory_quality": {"overall_score": 3, "metrics": {"smoothness": 3, "efficiency": 3, "safety": 3, "precision": 3}, "flags": []},
-        "data_quality": {"overall_quality": "good", "issues": []}, "anomalies": {"anomalies": []},
-        "language_instruction": {"instruction": instruction, "source": "human"},
-    })
+    response = client.put(
+        path,
+        headers=headers,
+        json={
+            "annotator_id": "ignored-client-author",
+            "timestamp": "2026-10-08T00:00:00Z",
+            "task_completeness": {"rating": "success", "confidence": 3},
+            "trajectory_quality": {
+                "overall_score": 3,
+                "metrics": {"smoothness": 3, "efficiency": 3, "safety": 3, "precision": 3},
+                "flags": [],
+            },
+            "data_quality": {"overall_quality": "good", "issues": []},
+            "anomalies": {"anomalies": []},
+            "language_instruction": {"instruction": instruction, "source": "human"},
+        },
+    )
     assert response.status_code == 200, response.text
 
 
@@ -358,7 +396,8 @@ def test_saved_instruction_snapshot_rejects_later_human_revision(vlm_client: Tes
 
 
 def test_saved_instruction_is_used_without_dataset_instruction(
-    tmp_path: Path, restore_default_app: pytest.MonkeyPatch,
+    tmp_path: Path,
+    restore_default_app: pytest.MonkeyPatch,
 ) -> None:
     _build_dataset(tmp_path / DATASET_ID, instruction=None)
     client = _reload_app(restore_default_app, tmp_path)
@@ -384,7 +423,9 @@ def test_snapshot_is_principal_scoped(vlm_client: TestClient) -> None:
 
     path = f"/api/datasets/{DATASET_ID}/episodes/0/judge"
     snapshot = vlm_client.get(f"{path}/snapshot").json()
-    vlm_client.app.dependency_overrides[require_principal_context] = lambda: PrincipalContext(scope_id="another-principal", auth_mode="local")
+    vlm_client.app.dependency_overrides[require_principal_context] = lambda: PrincipalContext(
+        scope_id="another-principal", auth_mode="local"
+    )
     try:
         response = vlm_client.post(path, json={"snapshot_id": snapshot["snapshot_id"], "force": True})
         assert response.status_code == 409
@@ -396,7 +437,9 @@ def test_conflicting_authors_require_explicit_selection(vlm_client: TestClient) 
     from src.api.auth import PrincipalContext, require_principal_context
 
     _save_instruction(vlm_client, "First author's instruction")
-    vlm_client.app.dependency_overrides[require_principal_context] = lambda: PrincipalContext(scope_id="another-principal", auth_mode="local")
+    vlm_client.app.dependency_overrides[require_principal_context] = lambda: PrincipalContext(
+        scope_id="another-principal", auth_mode="local"
+    )
     try:
         _save_instruction(vlm_client, "Second author's instruction")
         path = f"/api/datasets/{DATASET_ID}/episodes/0/judge"
@@ -413,22 +456,30 @@ def test_saved_media_edits_block_judging_and_clearing_invalidates_snapshot(vlm_c
     original = vlm_client.get(f"{path}/judge/snapshot").json()
     state = vlm_client.get(f"{path}/edits")
     assert state.status_code == 200, state.text
-    body = {"source_id": state.json()["source_id"], "source_revision": state.json()["source_revision"],
-            "operations": {"datasetId": DATASET_ID, "episodeIndex": 0, "removedFrames": [1]}}
+    body = {
+        "source_id": state.json()["source_id"],
+        "source_revision": state.json()["source_revision"],
+        "operations": {"datasetId": DATASET_ID, "episodeIndex": 0, "removedFrames": [1]},
+    }
     saved = vlm_client.put(f"{path}/edits", headers={"If-None-Match": "*"}, json=body)
     assert saved.status_code == 200, saved.text
     assert vlm_client.post(f"{path}/judge", json={"force": True}).status_code == 422
     body["operations"]["removedFrames"] = []
     cleared = vlm_client.put(f"{path}/edits", headers={"If-Match": saved.headers["ETag"]}, json=body)
     assert cleared.status_code == 200, cleared.text
-    assert vlm_client.post(f"{path}/judge", json={"snapshot_id": original["snapshot_id"], "force": True}).status_code == 409
+    assert (
+        vlm_client.post(f"{path}/judge", json={"snapshot_id": original["snapshot_id"], "force": True}).status_code
+        == 409
+    )
     fresh = vlm_client.get(f"{path}/judge/snapshot")
     assert fresh.status_code == 200
     assert fresh.json()["edit_revision"] == cleared.headers["ETag"]
 
 
 def test_source_change_during_inference_does_not_return_success(
-    vlm_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    vlm_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from src.api.routers import vlm_judge as router
 

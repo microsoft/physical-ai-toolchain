@@ -201,7 +201,9 @@ class TestDetectionAndDiscovery:
 
 
 class TestEpisodeBehavior:
-    def test_video_browser_version_changes_for_same_second_replacement(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_video_browser_version_changes_for_same_second_replacement(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         _, loader = _configured_handler(monkeypatch, tmp_path)
         before = handler_module._video_cache_query(loader.video_path)
         loader.video_path.write_bytes(b"replacement-video")
@@ -238,7 +240,9 @@ class TestEpisodeBehavior:
             "has_annotations": False,
         }
         assert episode.cameras == [_CAMERA]
-        assert episode.video_urls == {_CAMERA: f"/api/datasets/dataset/episodes/1/video/observation.images.cam0{handler_module._video_cache_query(loader.video_path)}"}
+        assert episode.video_urls == {
+            _CAMERA: f"/api/datasets/dataset/episodes/1/video/observation.images.cam0{handler_module._video_cache_query(loader.video_path)}"
+        }
         assert [variable.key for variable in episode.trajectory_variables] == [
             "observation.state[0]",
             "observation.state[1]",

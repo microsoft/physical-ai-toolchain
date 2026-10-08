@@ -7,10 +7,10 @@ datasets are present.
 
 from __future__ import annotations
 
-import sys
-import time
 import argparse
 import json
+import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
@@ -69,10 +69,24 @@ def test_cli_persists_declared_instruction_before_service_creation(
         return original_build(args)
 
     monkeypatch.setattr(judge_run, "_build_service", build_with_declared_configuration)
-    assert judge_run.main([
-        "--dataset", str(tmp_path), "--output", str(output), "--backend", "echo",
-        "--dry-run", "--instruction", override, "--api-key", "synthetic-not-a-credential",
-    ]) == 0
+    assert (
+        judge_run.main(
+            [
+                "--dataset",
+                str(tmp_path),
+                "--output",
+                str(output),
+                "--backend",
+                "echo",
+                "--dry-run",
+                "--instruction",
+                override,
+                "--api-key",
+                "synthetic-not-a-credential",
+            ]
+        )
+        == 0
+    )
     assert json.loads(output.read_text())["instruction"] == (override or episode.instruction)
 
 
