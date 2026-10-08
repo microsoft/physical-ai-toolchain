@@ -276,6 +276,7 @@ Before using or uploading the bundle:
 - Recalculate and compare every artifact SHA-256.
 - Validate `osmo-images.json` against `verify_acr_image_manifest` when ACR is used.
 - Run `kubectl apply --dry-run=client -f` for the Azure ML InstanceTypes when kubectl is available.
+- For every OSMO pool whose node pool can reach zero nodes, confirm `osmo-platforms.yaml` gives it resource validations without `K8_` values, such as `{{K8_CPU}}`, and a pod template that selects `agentpool` when another pool shares its VM size. This applies to exported bundles too. Stop if either is missing: node-capacity rules make OSMO reject workflows for an empty pool, and an instance-type selector alone can wake the wrong pool.
 - Search the bundle for private keys, bearer tokens, password fields, Docker auth, kubeconfig client data, and absolute home-directory paths. Stop if any are found.
 - Confirm `git check-ignore infrastructure/setup/generated/<environment>/deployment.json` succeeds.
 
