@@ -19,12 +19,21 @@ FROM base AS build
 
 COPY pyproject.toml uv.lock ./
 
-# Runtime feature extras, separated by commas or spaces.
+# Runtime feature extras, separated by commas. The yolo extra pulls CUDA torch,
+# so Azure Container Apps builds pass a smaller list to fit the Consumption
+# profile image limit.
 ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"
+ARG UV_DEFAULT_INDEX="https://pypi.org/simple"
 # Keep installation caches out of the runtime image.
-RUN extras=""; \
-    for extra in $(echo "${BACKEND_EXTRAS}" | tr ',' ' '); do extras="${extras} --extra ${extra}"; done; \
-    uv sync --frozen --no-dev ${extras}
+RUN set -eu; \
+    set --; \
+    old_ifs="$IFS"; \
+    IFS=','; \
+    for extra in $BACKEND_EXTRAS; do \
+        set -- "$@" --extra "$extra"; \
+    done; \
+    IFS="$old_ifs"; \
+    uv sync --frozen --no-dev "$@"
 
 FROM base AS runtime
 

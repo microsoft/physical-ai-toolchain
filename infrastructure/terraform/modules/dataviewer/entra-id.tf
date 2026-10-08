@@ -26,6 +26,12 @@ resource "random_uuid" "dataviewer_role_admin" {
   count = var.should_deploy_dataviewer_auth ? 1 : 0
 }
 
+resource "random_password" "dataviewer_proxy_key" {
+  count   = var.should_deploy_dataviewer_auth ? 1 : 0
+  length  = 64
+  special = false
+}
+
 // ============================================================
 // App Registration
 // ============================================================
@@ -45,7 +51,9 @@ resource "azuread_application" "dataviewer" {
 
   // Easy Auth server-directed flow requires web redirect URIs and ID tokens
   web {
-    redirect_uris = ["https://${azurerm_container_app.frontend.ingress[0].fqdn}/.auth/login/aad/callback"]
+    redirect_uris = [
+      "https://ca-frontend-${local.resource_name_suffix}.${azurerm_container_app_environment.main.default_domain}/.auth/login/aad/callback"
+    ]
 
     implicit_grant {
       id_token_issuance_enabled = true
@@ -106,6 +114,13 @@ resource "azuread_application" "dataviewer" {
   feature_tags {
     enterprise = true
   }
+}
+
+resource "azuread_application_password" "dataviewer_easy_auth" {
+  count = var.should_deploy_dataviewer_auth ? 1 : 0
+
+  application_id = azuread_application.dataviewer[0].id
+  display_name   = "Container Apps Easy Auth"
 }
 
 // ============================================================

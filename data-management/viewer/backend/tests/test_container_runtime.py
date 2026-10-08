@@ -10,10 +10,12 @@ def test_dependency_installation_is_isolated_from_runtime_layers() -> None:
     base, stages = dockerfile.split("FROM base AS build\n", maxsplit=1)
     build, runtime = stages.split("FROM base AS runtime\n", maxsplit=1)
 
-    install = "uv sync --frozen --no-dev ${extras}"
+    install = 'uv sync --frozen --no-dev "$@"'
     assert install in build
     assert 'ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"' in build
-    assert "tr ',' ' '" in build
+    assert 'ARG UV_DEFAULT_INDEX="https://pypi.org/simple"' in build
+    assert "IFS=','" in build
+    assert 'set -- "$@" --extra "$extra"' in build
     assert "uv sync" not in base
     assert "uv sync" not in runtime
     assert "COPY --from=build --chown=appuser:appuser /app/.venv /app/.venv" in runtime
