@@ -307,7 +307,9 @@ from src.api.services.annotation_service import AnnotationService, get_annotatio
 from src.api.services.dataset_service import DatasetService, get_dataset_service
 app.dependency_overrides[get_dataset_service] = lambda: DatasetService(base_path=sys.argv[1], episode_cache_capacity=0)
 app.dependency_overrides[get_annotation_service] = lambda: AnnotationService(base_path=sys.argv[2])
-app.dependency_overrides[require_principal_context] = lambda: PrincipalContext(scope_id='author-a', auth_mode='azure_ad')
+app.dependency_overrides[require_principal_context] = lambda: PrincipalContext(
+    scope_id='author-a', auth_mode='azure_ad'
+)
 with TestClient(app) as client:
     response = client.get('/api/datasets/a11y-synthetic/episodes/0/edits')
     assert response.status_code == 200

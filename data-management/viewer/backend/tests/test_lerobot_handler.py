@@ -241,7 +241,10 @@ class TestEpisodeBehavior:
         }
         assert episode.cameras == [_CAMERA]
         assert episode.video_urls == {
-            _CAMERA: f"/api/datasets/dataset/episodes/1/video/observation.images.cam0{handler_module._video_cache_query(loader.video_path)}"
+            _CAMERA: (
+                f"/api/datasets/dataset/episodes/1/video/observation.images.cam0"
+                f"{handler_module._video_cache_query(loader.video_path)}"
+            )
         }
         assert [variable.key for variable in episode.trajectory_variables] == [
             "observation.state[0]",

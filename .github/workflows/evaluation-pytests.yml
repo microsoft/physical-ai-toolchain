@@ -72,7 +72,7 @@ jobs:
 
       - name: Run pytest
         id: test
-        run: uv run --frozen --only-group dev pytest -v --junitxml=logs/evaluation-pytest-results.xml
+        run: PYTHONPATH=.. uv run --frozen --only-group dev pytest -v --junitxml=logs/evaluation-pytest-results.xml
 
       - name: Upload coverage.xml artifact
         if: ${{ inputs.code-coverage && !cancelled() }}
