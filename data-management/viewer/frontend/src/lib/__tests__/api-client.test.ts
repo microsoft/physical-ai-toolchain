@@ -29,6 +29,12 @@ import {
   triggerAutoAnalysis,
   warmCache,
 } from '../api-client'
+import {
+  clearDiagnosticEvents,
+  disableDiagnostics,
+  enableDiagnostics,
+  readDiagnosticEvents,
+} from '../playback-diagnostics'
 
 beforeEach(() => {
   installFetchMock({ csrf: false })
@@ -36,6 +42,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  disableDiagnostics()
+  clearDiagnosticEvents()
   vi.useRealTimers()
   vi.restoreAllMocks()
 })
@@ -179,6 +187,78 @@ describe('fetchEpisodes', () => {
 })
 
 describe('fetchEpisode', () => {
+  it('does not start a read that is already cancelled', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(fetchEpisode('ds-1', 5, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('keeps the deadline active until the response body is read', async () => {
+    vi.useFakeTimers()
+    const response = jsonResponse({})
+    vi.spyOn(response, 'json').mockImplementation(() => new Promise(() => {}))
+    mockFetch.mockResolvedValueOnce(response)
+    const failure = expect(fetchEpisode('ds-1', 5)).rejects.toMatchObject({
+      code: 'EPISODE_TIMEOUT',
+    })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await failure
+    expect(response.json).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('bounds a stalled episode read and permits a fresh retry without leaking timers', async () => {
+    vi.useFakeTimers()
+    enableDiagnostics('workspace')
+    mockFetch.mockImplementationOnce(() => new Promise<Response>(() => {}))
+    const request = fetchEpisode('ds-1', 5)
+    const failure = expect(request).rejects.toMatchObject({ code: 'EPISODE_TIMEOUT', status: 0 })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await failure
+    expect(mockFetch.mock.calls[0][1]?.signal?.aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+    mockFetch.mockResolvedValueOnce(jsonResponse({ meta: { index: 5 } }))
+    await expect(fetchEpisode('ds-1', 5)).resolves.toMatchObject({ meta: { index: 5 } })
+    expect(vi.getTimerCount()).toBe(0)
+    expect(readDiagnosticEvents('workspace').map((event) => event.data?.outcome)).toEqual([
+      'timeout',
+      'success',
+    ])
+  })
+
+  it('cancels an obsolete read without waiting for the deadline', async () => {
+    vi.useFakeTimers()
+    enableDiagnostics('workspace')
+    const controller = new AbortController()
+    mockFetch.mockImplementationOnce(() => new Promise<Response>(() => {}))
+    const request = fetchEpisode('ds-1', 5, controller.signal)
+    const failure = expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort()
+    await failure
+    expect(mockFetch.mock.calls[0][1]?.signal?.aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(readDiagnosticEvents('workspace')[0].data?.outcome).toBe('cancelled')
+  })
+
+  it('records safe HTTP failure details and duration without provider content', async () => {
+    enableDiagnostics('workspace')
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ code: 'private-provider-detail', detail: 'private-body' }, 503),
+    )
+    await expect(fetchEpisode('ds-1', 5)).rejects.toMatchObject({ status: 503 })
+    expect(readDiagnosticEvents('workspace')[0]).toMatchObject({
+      type: 'episode-request-completed',
+      data: { outcome: 'http-error', status: 503, durationMs: expect.any(Number) },
+    })
+    expect(JSON.stringify(readDiagnosticEvents('workspace'))).not.toContain('private')
+  })
+
   it('calls GET /api/datasets/:id/episodes/:index and transforms keys', async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
@@ -192,6 +272,7 @@ describe('fetchEpisode', () => {
     expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/5', {
       cache: 'no-store',
       headers: {},
+      signal: expect.any(AbortSignal),
     })
     expect(result.meta).toHaveProperty('episodeIndex', 5)
     expect(result).toHaveProperty('videoUrls')

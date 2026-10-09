@@ -778,8 +778,14 @@ class BlobDatasetProvider:
                     continue
 
                 data = await self._read_blob_bytes(blob.name)
-                if data is not None:
-                    await asyncio.to_thread(local_path.write_bytes, data)
+                if data is None:
+                    logger.warning(
+                        "Metadata blob download incomplete for dataset '%s' category=%s",
+                        dataset_id.replace("\r", "").replace("\n", ""),
+                        "manifest" if relative == "meta/info.json" else "episode-metadata",
+                    )
+                    return False
+                await asyncio.to_thread(local_path.write_bytes, data)
 
             info_path = local_dir / "meta" / "info.json"
             if not await asyncio.to_thread(info_path.exists):

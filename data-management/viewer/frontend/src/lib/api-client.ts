@@ -23,6 +23,7 @@ import type {
 import type { JudgeJob } from '@/types/vlm-judge'
 
 import { getAuthHeaders } from './auth-headers'
+import { recordDiagnosticEvent } from './playback-diagnostics'
 
 export const API_BASE = '/api'
 
@@ -433,12 +434,59 @@ export async function fetchEpisodes(
 /**
  * Fetch a specific episode by index.
  */
-export async function fetchEpisode(datasetId: string, episodeIndex: number): Promise<EpisodeData> {
-  return apiRequest(
-    `/datasets/${datasetId}/episodes/${episodeIndex}`,
-    { cache: 'no-store' },
-    (data) => preserveEpisodeVariableKeys(data as Record<string, unknown>),
+export async function fetchEpisode(
+  datasetId: string,
+  episodeIndex: number,
+  signal?: AbortSignal,
+): Promise<EpisodeData> {
+  const controller = new AbortController()
+  const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
+  const started = performance.now()
+  const timeout = setTimeout(
+    () => controller.abort(new DOMException('Episode read timed out', 'TimeoutError')),
+    60_000,
   )
+  let onAbort: (() => void) | undefined
+  let outcome = 'success'
+  let status: number | undefined
+  try {
+    requestSignal.throwIfAborted()
+    const aborted = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(requestSignal.reason)
+      requestSignal.addEventListener('abort', onAbort, { once: true })
+    })
+    return await Promise.race([
+      apiRequest(
+        `/datasets/${datasetId}/episodes/${episodeIndex}`,
+        { cache: 'no-store', signal: requestSignal },
+        (data) => preserveEpisodeVariableKeys(data as Record<string, unknown>),
+      ),
+      aborted,
+    ])
+  } catch (error) {
+    if (requestSignal.aborted) {
+      const timedOut =
+        controller.signal.aborted && requestSignal.reason === controller.signal.reason
+      outcome = timedOut ? 'timeout' : 'cancelled'
+      if (timedOut) {
+        throw new ApiClientError('Episode loading timed out. Try again.', 'EPISODE_TIMEOUT', 0)
+      }
+      throw requestSignal.reason
+    }
+    status = error instanceof ApiClientError ? error.status : undefined
+    outcome = status ? 'http-error' : 'request-error'
+    throw error
+  } finally {
+    clearTimeout(timeout)
+    if (onAbort) requestSignal.removeEventListener('abort', onAbort)
+    recordDiagnosticEvent('workspace', 'episode-request-completed', {
+      datasetId,
+      episodeIndex,
+      outcome,
+      status,
+      durationMs: Math.round(performance.now() - started),
+    })
+  }
 }
 
 // ============================================================================

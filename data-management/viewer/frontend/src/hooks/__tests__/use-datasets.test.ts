@@ -1,3 +1,4 @@
+import { focusManager } from '@tanstack/react-query'
 import { act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -29,6 +30,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  focusManager.setFocused(undefined)
   vi.restoreAllMocks()
 })
 
@@ -135,6 +137,42 @@ describe('useEpisodes', () => {
 })
 
 describe('useEpisode', () => {
+  it('cancels the old episode request when navigating', async () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(['auth', 'principal-context'], { scopeId: 'principal-one' })
+    mockFetch.mockImplementationOnce(() => new Promise<Response>(() => {}))
+    let index = 0
+    const { result, rerender } = renderHookWithProviders(() => useEpisode('ds-1', index), {
+      queryClient,
+    })
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledOnce())
+    const signal = mockFetch.mock.calls[0][1]?.signal
+    expect(signal).toBeDefined()
+    mockFetch.mockResolvedValueOnce(jsonResponse({ meta: { index: 1 } }))
+    index = 1
+    rerender()
+    await waitFor(() => expect(result.current.data?.meta.index).toBe(1))
+    expect(signal?.aborted).toBe(true)
+  })
+
+  it('does not refetch stale episode data on focus but honors explicit refresh', async () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(['auth', 'principal-context'], { scopeId: 'principal-one' })
+    mockFetch.mockImplementation(() => Promise.resolve(jsonResponse({ meta: { index: 0 } })))
+    const { result } = renderHookWithProviders(() => useEpisode('ds-1', 0), { queryClient })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['datasets'], refetchType: 'none' })
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+    })
+    expect(mockFetch).toHaveBeenCalledOnce()
+    await act(async () => {
+      await result.current.refetch()
+    })
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+
   it('does not reuse the previous principal episode after an identity switch', async () => {
     const queryClient = createTestQueryClient()
     queryClient.setDefaultOptions({ queries: { gcTime: Infinity, retry: false } })

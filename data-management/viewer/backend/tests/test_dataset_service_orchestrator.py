@@ -338,6 +338,31 @@ class TestGetAndRegisterDataset:
 class TestListEpisodes:
     pytestmark = pytest.mark.asyncio
 
+    @pytest.mark.parametrize("indices", [[], [3, 8]])
+    async def test_local_dataset_listing_does_not_probe_blob_metadata(self, tmp_path: Path, indices: list[int]) -> None:
+        (tmp_path / "dataset").mkdir()
+        info = DatasetInfo(id="dataset", name="Dataset", total_episodes=len(indices), fps=30.0)
+        handler = _make_handler()
+        handler.can_handle.return_value = True
+        handler.discover.return_value = info
+        handler.has_loader.return_value = True
+        handler.list_episodes.return_value = (
+            indices,
+            {index: {"length": 10, "task_index": 1} for index in indices},
+        )
+        provider = _make_provider()
+        service = DatasetService(base_path=str(tmp_path), storage_adapter=_make_storage(), blob_provider=provider)
+        _install_handlers(service, handler)
+        await service.list_datasets()
+
+        episodes = await service.list_episodes("dataset")
+
+        assert [(episode.index, episode.length, episode.task_index) for episode in episodes] == [
+            (index, 10, 1) for index in indices
+        ]
+        provider.sync_meta_only_to_local.assert_not_awaited()
+        provider.sync_hdf5_dataset_to_local.assert_not_awaited()
+
     async def test_lists_registered_episode_range_with_filters_and_pagination(self, tmp_path: Path) -> None:
         storage = _make_storage([0, 3])
         service = DatasetService(base_path=str(tmp_path), storage_adapter=storage)

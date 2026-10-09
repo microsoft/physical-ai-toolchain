@@ -696,6 +696,36 @@ class TestSyncDatasetToLocal:
 
 
 class TestSyncMetaOnly:
+    @pytest.mark.parametrize("failed_relative", ["meta/info.json", "meta/episodes/chunk-0.parquet"])
+    async def test_failed_metadata_download_is_not_missing_or_complete(
+        self,
+        tmp_path: Path,
+        failed_relative: str,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        names = ["org/repo/meta/info.json", "org/repo/meta/episodes/chunk-0.parquet"]
+        client = MagicMock()
+        client.get_container_client.return_value.list_blobs.return_value = _AsyncIter(
+            [_make_blob(name) for name in names]
+        )
+        provider = create_blob_dataset_provider(client)
+
+        async def read_blob(blob_path: str) -> bytes | None:
+            return None if blob_path == f"org/repo/{failed_relative}" else b"{}"
+
+        monkeypatch.setattr(provider, "_read_blob_bytes", read_blob)
+        assert not await provider.sync_meta_only_to_local("org--repo", tmp_path)
+        assert "Metadata blob download incomplete" in caplog.text
+        assert "meta/info.json not found" not in caplog.text
+
+        async def retry_blob(blob_path: str) -> bytes:
+            return b"{}"
+
+        monkeypatch.setattr(provider, "_read_blob_bytes", retry_blob)
+        assert await provider.sync_meta_only_to_local("org--repo", tmp_path)
+        assert all((tmp_path / name.removeprefix("org/repo/")).exists() for name in names)
+
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     async def test_metadata_cannot_escape_scratch_directory(self, tmp_path: Path) -> None:
         client = MagicMock()

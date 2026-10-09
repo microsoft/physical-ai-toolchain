@@ -137,7 +137,7 @@ describe('DataviewerEpisodeViewer', () => {
     expect(screen.getByRole('textbox', { name: 'Unsaved annotation' })).toHaveValue(
       'Keep this draft',
     )
-    expect(screen.getByRole('alert')).toHaveTextContent('Could not refresh episode')
+    expect(screen.getByText(/Could not refresh episode/)).toHaveAttribute('role', 'status')
     await user.click(screen.getByRole('button', { name: 'Save and continue' }))
     expect(onSaveAndNextEpisode).toHaveBeenCalledOnce()
     expect(screen.getByTestId('episode-navigation-status')).toHaveTextContent(
@@ -157,8 +157,29 @@ describe('DataviewerEpisodeViewer', () => {
       error: new Error('Failed to fetch'),
     } as unknown as ReturnType<typeof useEpisode>)
     rerender(<DataviewerEpisodeViewer {...props} />)
-    expect(screen.getByRole('button', { name: 'Retry episode load' })).toBeDisabled()
+    const retry = screen.getByRole('button', { name: 'Retry episode load' })
+    expect(retry).toHaveAttribute('aria-disabled', 'true')
+    expect(retry).toHaveAttribute('aria-busy', 'true')
+    expect(retry).toHaveFocus()
+    expect(screen.getByText('Refreshing episode. Showing previously loaded data.')).toHaveAttribute(
+      'role',
+      'status',
+    )
+    expect(screen.queryByText(/Could not refresh episode/)).not.toBeInTheDocument()
+    await user.click(retry)
+    expect(refetch).toHaveBeenCalledOnce()
     expect(screen.getByRole('button', { name: 'Save and continue' })).toBeEnabled()
+
+    vi.mocked(useEpisode).mockReturnValue({
+      ...query,
+      isFetching: false,
+      error: new Error('private-response-body'),
+    } as unknown as ReturnType<typeof useEpisode>)
+    rerender(<DataviewerEpisodeViewer {...props} />)
+    expect(screen.getByText(/Could not refresh episode/)).toBeVisible()
+    expect(retry).toHaveAttribute('aria-disabled', 'false')
+    expect(retry).toHaveAttribute('aria-busy', 'false')
+    expect(JSON.stringify(readDiagnosticEvents('workspace'))).not.toContain('private-response-body')
 
     vi.mocked(useEpisode).mockReturnValue({
       ...query,
@@ -166,6 +187,7 @@ describe('DataviewerEpisodeViewer', () => {
     } as unknown as ReturnType<typeof useEpisode>)
     rerender(<DataviewerEpisodeViewer {...props} />)
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry episode load' })).not.toBeInTheDocument()
     expect(screen.getByTestId('annotation-workspace')).toBe(workspace)
     expect(screen.getByRole('textbox', { name: 'Unsaved annotation' })).toHaveValue(
       'Keep this draft',

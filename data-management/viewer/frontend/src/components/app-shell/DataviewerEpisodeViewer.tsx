@@ -48,12 +48,19 @@ export function DataviewerEpisodeViewer({
         datasetId,
         episodeIndex,
         hasCachedEpisode,
-        message: error.message,
+        category:
+          error instanceof ApiClientError
+            ? error.code === 'EPISODE_TIMEOUT'
+              ? 'timeout'
+              : 'http-error'
+            : 'request-error',
+        status: error instanceof ApiClientError ? error.status : undefined,
       })
     }
   }, [datasetId, episodeIndex, error, hasCachedEpisode])
 
   const retryEpisode = () => {
+    if (isFetching) return
     recordDiagnosticEvent('workspace', 'episode-fetch-retry', {
       datasetId,
       episodeIndex,
@@ -91,12 +98,16 @@ export function DataviewerEpisodeViewer({
         </div>
         <Button
           variant="outline"
-          disabled={isFetching}
+          aria-disabled={isFetching}
+          aria-busy={isFetching}
           onClick={retryEpisode}
           aria-label="Retry episode load"
         >
-          <RefreshCw className="mr-2 size-4" aria-hidden="true" />
-          Retry
+          <RefreshCw
+            className={`mr-2 size-4 ${isFetching ? 'motion-safe:animate-spin' : ''}`}
+            aria-hidden="true"
+          />
+          {isFetching ? 'Retrying...' : 'Retry'}
         </Button>
       </div>
     )
@@ -128,18 +139,29 @@ export function DataviewerEpisodeViewer({
     <div className="flex h-full min-h-0 flex-col">
       {episode && error && !accessLost && (
         <div className="bg-background flex shrink-0 items-center gap-2 border-b px-3 py-2">
-          <div role="alert" className="text-status-danger-foreground min-w-0 flex-1 text-sm">
-            Could not refresh episode. Showing previously loaded data.
+          <div
+            role="status"
+            aria-atomic="true"
+            className="text-muted-foreground min-w-0 flex-1 text-sm"
+          >
+            {isFetching
+              ? 'Refreshing episode. Showing previously loaded data.'
+              : 'Could not refresh episode. Showing previously loaded data.'}
           </div>
           <Button
             variant="outline"
             size="sm"
-            disabled={isFetching}
+            aria-disabled={isFetching}
+            aria-busy={isFetching}
+            className="min-w-24"
             onClick={retryEpisode}
             aria-label="Retry episode load"
           >
-            <RefreshCw className="mr-2 size-4" aria-hidden="true" />
-            Retry
+            <RefreshCw
+              className={`mr-2 size-4 ${isFetching ? 'motion-safe:animate-spin' : ''}`}
+              aria-hidden="true"
+            />
+            {isFetching ? 'Retrying...' : 'Retry'}
           </Button>
         </div>
       )}

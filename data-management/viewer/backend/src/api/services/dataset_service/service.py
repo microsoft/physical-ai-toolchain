@@ -714,9 +714,10 @@ class DatasetService:
 
         episode_indices: list[int] = []
         episode_info_map: dict[int, dict] = {}
+        use_blob_metadata = self._blob_provider is not None and dataset_id not in self._local_dataset_ids
 
         # Blob datasets: sync only meta/ files, build episode list from meta/episodes
-        if self._blob_provider is not None:
+        if use_blob_metadata:
             meta_path = await self._ensure_blob_meta_synced(dataset_id)
             if meta_path is not None and LEROBOT_AVAILABLE:
                 info_path = meta_path / "meta" / "info.json"
@@ -730,7 +731,7 @@ class DatasetService:
                 episode_indices, episode_info_map = handler.list_episodes(dataset_id)
 
         # Blob HDF5 datasets: sync placeholders and list via HDF5 handler
-        if not episode_indices and self._blob_provider is not None:
+        if not episode_indices and use_blob_metadata:
             synced_path = await self._ensure_blob_hdf5_synced(dataset_id)
             if synced_path is not None and self._hdf5_handler.get_loader(dataset_id, synced_path):
                 episode_indices, episode_info_map = self._hdf5_handler.list_episodes(dataset_id)

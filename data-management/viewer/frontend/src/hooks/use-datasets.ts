@@ -194,10 +194,11 @@ export function useEpisode(datasetId: string | undefined, episodeIndex: number |
       ...datasetKeys.episode(datasetId ?? '', episodeIndex ?? -1),
       principal.data?.scopeId,
     ],
-    queryFn: () => fetchEpisode(datasetId!, episodeIndex!),
+    queryFn: ({ signal }) => fetchEpisode(datasetId!, episodeIndex!, signal),
     enabled: enabled && !!principal.data?.scopeId && !principal.isError,
     staleTime: 30 * 1000, // 30 seconds
     gcTime: 30 * 60 * 1000, // 30 minutes
+    refetchOnWindowFocus: false,
   })
   return {
     ...query,
