@@ -2,7 +2,7 @@
 title: Scripts
 description: CI/CD scripts, shared libraries, linting, security, and Pester tests for the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-07
+ms.date: 2026-10-09
 ms.topic: reference
 keywords:
   - scripts
@@ -107,6 +107,10 @@ or superseded run never produces a successful release gate.
 
 Public dependency feed validation is mandatory on PRs and main. Its receipt requires the
 checker to succeed and publish the native JSON report before either summary can pass.
+Each reported violation records `file`, `line`, `rule`, and `reason`; the checker never
+copies source URLs into reports, so credentials cannot leak. Line `0` marks a file-level
+diagnostic, such as an unparseable manifest. The receipt counts every violation as a
+finding and fails when any are present.
 
 Accessibility validation participates in both required summaries. The Docusaurus accessibility
 collector retains its 90-minute budget for provenance checks, browser collection, and evidence
