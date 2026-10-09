@@ -264,6 +264,63 @@ describe('JudgePanel', () => {
       previewId: 'preview-id',
     })
   })
+  it('explains a completed withdrawal conflict and offers a missing-run preview', async () => {
+    const user = userEvent.setup()
+    const summary = {
+      removableFields: 1,
+      acceptedUnchanged: 0,
+      preservedHuman: 0,
+      legacyUnknown: 0,
+      conflicts: 1,
+      episodes: 1,
+      unlistedRunIds: ['lost-run'],
+      fields: [
+        {
+          episodeIndex: 2,
+          field: 'labels/SUCCESS',
+          disposition: 'removable_fields',
+          runIds: ['kept'],
+        },
+        {
+          episodeIndex: 1,
+          field: 'labels/SUCCESS',
+          disposition: 'conflicts',
+          reason: 'unlisted_machine_run',
+          blockingRunIds: ['lost-run'],
+        },
+      ],
+    }
+    mockDatasetAction.mockResolvedValue({ id: 'preview-id', summary })
+    mockDatasetJobs.mockReturnValue({
+      inventory: {},
+      jobs: {},
+      approvals: {},
+      reset: {
+        data: {
+          id: 'reset',
+          status: 'conflicted',
+          resources: [{ key: 'labels', status: 'succeeded' }],
+          summary,
+        },
+      },
+      review: {},
+      act: mockDatasetAction,
+      refresh: vi.fn(),
+    })
+    mockBatch.mockReturnValue({ submit: vi.fn(), isPending: false })
+    render(<DatasetWorkspace datasetId="demo" open enabled onToggle={vi.fn()} />)
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('1 AI value(s) were removed and 1 were left unchanged')
+    expect(alert).toHaveTextContent(/Episode 1, labels\/SUCCESS: Not removed: .*missing.*lost-run/)
+    expect(alert).not.toHaveTextContent('Episode 2')
+    await user.click(screen.getByRole('button', { name: 'Preview label removal' }))
+    await user.click(screen.getByRole('button', { name: 'Preview including missing runs' }))
+    expect(mockDatasetAction).toHaveBeenLastCalledWith({
+      kind: 'preview-reset',
+      includeUnlistedRuns: true,
+    })
+  })
+
   it('uses actual dataset targets, gates unapproved launches and cancels durable jobs', async () => {
     const user = userEvent.setup()
     mockDatasetAction.mockResolvedValue({})

@@ -2,8 +2,19 @@ import { act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useEpisodeReadiness } from '@/hooks/use-episode-readiness'
-import { useJudgeEvidence, useRunVlmJudge, vlmJudgeKeys } from '@/hooks/use-vlm-judge'
-import { fetchJudgeEvidence, fetchVlmJudgeSnapshot, runVlmJudge } from '@/lib/api-client'
+import {
+  useApplyJudgeResult,
+  useJudgeEvidence,
+  useRunVlmJudge,
+  vlmJudgeKeys,
+} from '@/hooks/use-vlm-judge'
+import {
+  fetchJudgeEvidence,
+  fetchJudgeJob,
+  fetchVlmJudgeSnapshot,
+  mutateJudgeDataset,
+  runVlmJudge,
+} from '@/lib/api-client'
 import * as draftStorage from '@/lib/edit-draft-storage'
 import {
   clearPersistedEditDraftsForTests,
@@ -27,6 +38,7 @@ vi.mock('@/lib/api-client', () => ({
   fetchVlmJudgeSnapshot: vi.fn(),
   runVlmJudge: vi.fn(),
   fetchJudgeEvidence: vi.fn(),
+  fetchJudgeJob: vi.fn(),
   mutateJudgeDataset: vi.fn(),
 }))
 
@@ -412,6 +424,29 @@ describe('selected episode readiness', () => {
     expect(await checkEpisodeReadiness(createTestQueryClient(), 'ds-1', [0])).toMatchObject({
       ready: false,
     })
+  })
+})
+
+describe('useApplyJudgeResult', () => {
+  it('refreshes labels only after the queued server application completes', async () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setDefaultOptions({ queries: { gcTime: Infinity } })
+    queryClient.setQueryData(['auth', 'principal-context'], {
+      scopeId: 'principal-one',
+      authMode: 'local',
+    })
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+    vi.mocked(mutateJudgeDataset).mockResolvedValueOnce({ id: 'run', status: 'queued' } as never)
+    vi.mocked(fetchJudgeJob).mockImplementationOnce(async () => {
+      expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['labels', 'ds-1'] })
+      return { id: 'run', status: 'succeeded', applied: 1, applicationErrors: 0 } as never
+    })
+    const { result } = renderHookWithProviders(() => useApplyJudgeResult(), { queryClient })
+    await act(async () => {
+      await result.current.mutateAsync({ datasetId: 'ds-1', episodeIndex: 0, runId: 'run' })
+    })
+    expect(fetchJudgeJob).toHaveBeenCalledWith('run')
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['labels', 'ds-1'] })
   })
 })
 

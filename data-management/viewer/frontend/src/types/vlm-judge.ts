@@ -63,6 +63,7 @@ export interface JudgeJob {
   judged: number
   applied: number
   errors: number
+  applicationErrors?: number
   mode?: 'sample' | 'judge' | 'judge-and-label'
   configRevision?: string
   config: { processMethod?: string; views?: string[]; model?: string }
@@ -87,8 +88,22 @@ export interface JudgeApproval {
   current: boolean
 }
 
+export interface JudgeWithdrawalField {
+  episodeIndex: number
+  field: string
+  disposition: string
+  origin?: string
+  reason?: 'multiple_human_authors' | 'unlisted_machine_run' | 'legacy_value_restored'
+  contributionIds?: string[]
+  runIds?: string[]
+  blockingContributionIds?: string[]
+  blockingRunIds?: string[]
+  humanAuthors?: number
+}
+
 export interface JudgeResetPreview {
   id: string
+  runIds?: string[]
   summary: {
     removableFields: number
     acceptedUnchanged: number
@@ -96,19 +111,23 @@ export interface JudgeResetPreview {
     legacyUnknown: number
     conflicts: number
     episodes: number
-    fields: Array<{ episodeIndex: number; field: string; disposition: string }>
+    fields: JudgeWithdrawalField[]
+    unlistedRunIds?: string[]
   }
 }
 
 export interface JudgeReset extends JudgeResetPreview {
   status: 'idle' | 'running' | 'partial' | 'conflicted' | 'succeeded'
+  error?: string | null
+  resources?: Array<{ key: string; status: string }>
 }
 
 export type JudgeDatasetAction =
   | { kind: 'cancel' | 'retry'; jobId: string }
   | { kind: 'apply'; jobId: string; indices: number[] }
   | { kind: 'approve'; jobId: string; acknowledgeExceptions: boolean }
-  | { kind: 'preview-reset' | 'retry-reset' }
+  | { kind: 'preview-reset'; includeUnlistedRuns?: boolean }
+  | { kind: 'retry-reset' }
   | { kind: 'confirm-reset'; previewId: string }
 
 interface JudgeEvidenceIdentity {

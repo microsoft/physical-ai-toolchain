@@ -92,7 +92,9 @@ class JudgeJobs:
         )
         return [run[0] for run in runs], fingerprint(runs)
 
-    async def preview_reset(self, dataset_id: str, actor: str) -> dict[str, Any]:
+    async def preview_reset(
+        self, dataset_id: str, actor: str, *, include_unlisted_runs: bool = False
+    ) -> dict[str, Any]:
         if self.curation_storage is None:
             raise ValueError("Contribution storage is unavailable")
         async with self.store.transaction() as state:
@@ -101,6 +103,9 @@ class JudgeJobs:
             resource = await self.curation_storage.load_versioned(dataset_id)
             labels = resource.value or DatasetLabelsFile(dataset_id=dataset_id)
             run_ids, scope = self._reset_scope(state, dataset_id)
+            if include_unlisted_runs:
+                # Machine output from runs missing in this job history, e.g. after a job directory change.
+                run_ids = sorted(set(run_ids) | set(plan_withdrawal(labels, set(run_ids))[1]["unlisted_run_ids"]))
             projected, summary = plan_withdrawal(labels, set(run_ids))
             preview = {
                 "id": uuid4().hex,
@@ -301,7 +306,9 @@ class JudgeJobs:
                     if job["payload_key"] != payload_key:
                         raise ValueError("Idempotency key was used with another payload")
                     return deepcopy(job)
-            if state["resets"].get(dataset_id, {}).get("status") in {"running", "partial", "conflicted"}:
+            reset = state["resets"].get(dataset_id, {})
+            published = reset.get("resources", [{}])[0].get("status") == "succeeded"
+            if reset.get("status") in {"running", "partial"} or (reset.get("status") == "conflicted" and not published):
                 raise ValueError("Dataset withdrawal is running")
             return None
 

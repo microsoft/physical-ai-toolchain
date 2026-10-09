@@ -90,13 +90,18 @@ export function useAnnotationWorkspaceEpisodeActions({
   }, [currentEpisodeIndex, currentEpisodeLabels, labelDataLoaded, savedLabelsForCurrentEpisode])
 
   const hasPendingEpisodeChanges = hasLabelChanges || hasEdits || hasAnnotationChanges
+  const pendingResources = [
+    hasLabelChanges && 'labels',
+    hasAnnotationChanges && 'annotation',
+    hasEdits && 'frame or subtask edits',
+  ].filter(Boolean)
   const saveStatusMessage =
     saveError ??
     saveBlockedReason ??
     (isSaving
       ? 'Saving episode changes.'
       : hasPendingEpisodeChanges
-        ? 'Unsaved episode changes.'
+        ? `Unsaved episode changes (${pendingResources.join(', ')}). Save to keep them or discard them.`
         : showSavedStatus
           ? 'Episode changes saved.'
           : null)

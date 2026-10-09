@@ -26,6 +26,7 @@ const hoisted = vi.hoisted(() => {
     annotationRecoveryError: null as string | null,
     annotationReadCount: 0,
     editPersistenceError: null as string | null,
+    resolveRecoveredEdits: null as ((choice: 'keep' | 'discard') => void) | null,
     isPlaying: false,
     autoPlay: false,
     autoLoop: false,
@@ -323,6 +324,7 @@ vi.mock('@/hooks/use-episode-edits', () => ({
   useEpisodeEdits: () => ({
     isReady: !hoisted.state.editPersistenceError,
     persistenceError: hoisted.state.editPersistenceError,
+    resolveRecoveredEdits: hoisted.state.resolveRecoveredEdits,
   }),
   useSaveEpisodeEdits: () => ({ mutateAsync: hoisted.saveEpisodeDraft, isPending: false }),
 }))
@@ -466,6 +468,7 @@ export function setupAnnotationWorkspaceTestCase() {
   mockSaveAnnotation.mockReset()
   mockSaveAnnotation.mockResolvedValue(undefined)
   testState.editPersistenceError = null
+  testState.resolveRecoveredEdits = null
   testState.isPlaying = false
   testState.autoPlay = false
   testState.autoLoop = false

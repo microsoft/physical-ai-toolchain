@@ -124,6 +124,17 @@ export function useEpisodeAnnotations() {
       })
       return
     }
+    // A save acknowledgment already synchronized the store; rehydrating would re-read the pre-save draft.
+    if (
+      existing.resourceKey === key &&
+      existing.draftHydrated &&
+      !existing.draftError &&
+      existing.baseEtag === query.data.etag &&
+      (!source || sameDraftSource(existing.sourceBinding, source))
+    ) {
+      hydratedKeyRef.current = key
+      return
+    }
     const userAnnotation = query.data.data.annotations.find(
       (annotation) => annotation.annotatorId === annotatorId,
     )
@@ -150,7 +161,16 @@ export function useEpisodeAnnotations() {
         if (hydratedKeyRef.current !== key || state.annotatorId !== annotatorId) {
           return
         }
-        if (state.editGeneration === hydrationEditGeneration && draft) {
+        if (
+          state.editGeneration === hydrationEditGeneration &&
+          draft &&
+          canonicalJson(draft.draft) === canonicalJson(serverBaseline)
+        ) {
+          recordDiagnosticEvent('persistence', 'annotation-draft-already-saved', {
+            datasetId: currentDataset.id,
+            episodeIndex: currentIndex,
+          })
+        } else if (state.editGeneration === hydrationEditGeneration && draft) {
           restoreAnnotationDraft(draft.draft, draft.baseline ?? serverBaseline)
           const draftSource = draft.sourceScopes?.[currentIndex] ?? null
           useAnnotationStore.setState({ baseEtag: draft.baseEtag, sourceBinding: draftSource })
@@ -252,6 +272,16 @@ export function useEpisodeAnnotations() {
  * save({ datasetId: 'my-dataset', episodeIndex: 5, annotation });
  * ```
  */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, nested: unknown) =>
+    nested && typeof nested === 'object' && !Array.isArray(nested)
+      ? Object.fromEntries(
+          Object.entries(nested).sort(([first], [second]) => (first < second ? -1 : 1)),
+        )
+      : nested,
+  )
+}
+
 function annotationSaveContext(): string {
   const state = useAnnotationStore.getState()
   return JSON.stringify([

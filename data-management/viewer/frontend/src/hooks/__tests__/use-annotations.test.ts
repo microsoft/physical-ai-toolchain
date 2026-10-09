@@ -385,6 +385,54 @@ describe('useEpisodeAnnotations', () => {
 
     expect(useAnnotationStore.getState().currentAnnotation?.notes).toBe('newer edit')
   })
+  it('does not resurrect the pre-save draft as a conflict after a successful save', async () => {
+    selectDataset()
+    const saved = makeAnnotation('me')
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ annotations: [saved] }, { headers: { ETag: '"one"' } }),
+    )
+    const { result } = renderHookWithProviders(() => ({
+      read: useEpisodeAnnotations(),
+      save: useSaveCurrentAnnotation(),
+    }))
+    await waitFor(() => expect(useAnnotationStore.getState().draftHydrated).toBe(true))
+    act(() => useAnnotationStore.getState().updateNotes('Saved note'))
+    const edited = useAnnotationStore.getState().currentAnnotation!
+    // Storage still holds the pre-save draft until its asynchronous deletion runs.
+    draftMocks.load.mockResolvedValue({ baseline: saved, draft: edited, baseEtag: '"one"' })
+    mockMutationFetch(jsonResponse({ annotations: [edited] }, { headers: { ETag: '"two"' } }))
+    await act(async () => {
+      await result.current.save.save()
+    })
+    await waitFor(() => expect(draftMocks.persist).toHaveBeenLastCalledWith('ds-1', 0, 'me', null))
+    expect(useAnnotationStore.getState()).toMatchObject({
+      conflict: null,
+      isDirty: false,
+      baseEtag: '"two"',
+    })
+  })
+
+  it('discards a recovered draft that already matches the saved server annotation', async () => {
+    selectDataset()
+    const saved = { ...makeAnnotation('me'), notes: 'Saved note' }
+    draftMocks.load.mockResolvedValue({
+      baseline: makeAnnotation('me'),
+      draft: saved,
+      baseEtag: '"one"',
+    })
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ annotations: [saved] }, { headers: { ETag: '"two"' } }),
+    )
+    renderHookWithProviders(() => useEpisodeAnnotations())
+    await waitFor(() => expect(useAnnotationStore.getState().draftHydrated).toBe(true))
+    expect(useAnnotationStore.getState()).toMatchObject({
+      conflict: null,
+      isDirty: false,
+      baseEtag: '"two"',
+    })
+    await waitFor(() => expect(draftMocks.persist).toHaveBeenLastCalledWith('ds-1', 0, 'me', null))
+  })
+
   it('does not fetch when no dataset is selected', async () => {
     renderHookWithProviders(() => useEpisodeAnnotations())
 

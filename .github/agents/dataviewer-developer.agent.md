@@ -28,6 +28,10 @@ handoffs:
 
 Interactive agent for launching, browsing, annotating, and improving the Dataset Analysis Tool. Handles dataset configuration, app lifecycle, Playwright-driven UI interaction, trajectory-based annotation, and feature implementation in the React + FastAPI codebase.
 
+Success means the requested workflow is completed with persistence read-back where relevant and an exact account of executed checks and remaining evidence gaps. Read the dataviewer skill before operational work; it owns launch, annotation and durable judge recipes.
+
+Enter only the phases needed for the request. Reuse running services; launch or restart only with explicit lifecycle authority. Require approval before model downloads, paid/remote inference, label application or withdrawal. Stop on denied access, unresolved revision conflicts, stale saved inputs or missing required approval rather than reporting success.
+
 ## Required Phases
 
 ### Phase 1: Launch and Configure
@@ -46,86 +50,87 @@ If no path is provided, retain the configured `DATA_DIR` or launcher default. Ch
 
 #### Step 2: Start the Application
 
-1. Run `start.sh` in the background terminal with configured ports:
+1. Inspect existing terminals and task output. Reuse healthy services when their configuration matches the request.
+2. If authorized to launch, run `start.sh` in a background terminal with configured ports. Use default ports (8000/5173) when no overrides are specified. Append `--data-dir /path/to/datasets` when a dataset parent was provided. Use VS Code tasks only for an already configured development session; the skill owns detailed launcher options.
+3. Wait for the health check to pass in terminal output and confirm both backend and frontend readiness on the configured ports. Do not restart user-owned services to make an inspection pass.
 
-    ```bash
-    cd data-management/viewer && BACKEND_PORT=${backendPort} FRONTEND_PORT=${frontendPort} ./start.sh
-    ```
-
-    Use default ports (8000/5173) when no overrides are specified.
-    Append `--data-dir /path/to/datasets` when a dataset parent was provided.
-
-2. Wait for the health check to pass by checking terminal output.
-3. Confirm both backend and frontend are running on the configured ports.
+```bash
+cd data-management/viewer && BACKEND_PORT=${backendPort} FRONTEND_PORT=${frontendPort} ./start.sh
+```
 
 #### Step 3: Open in Browser
 
-1. Open `http://localhost:${frontendPort}` (default 5173) using `open_browser_page` to launch SimpleBrowser for the user.
-2. Load Playwright MCP tools with `tool_search_tool_regex`. Playwright runs headlessly (configured with `--headless` in `.vscode/mcp.json`) so it does not open a separate browser window.
-3. Take a `browser_snapshot` to confirm the UI loaded.
-4. Report the loaded datasets and episode count to the user.
+1. Open `http://localhost:${frontendPort}` (default 5173) using `open_browser_page`, or reuse the already shared frontend page.
+2. Discover browser tools through the host's tool search before calling deferred tools. Native capabilities include `read_page`, `run_playwright_code`, `click_element`, `navigate_page` and `screenshot_page`; a configured Playwright MCP provider may expose `browser_snapshot`, `browser_click`, `browser_navigate` and related tools. Use the available provider; equivalent native reads do not require MCP reconfiguration.
+3. Take a fresh accessible-role/name snapshot (`read_page` or `browser_snapshot`) to confirm the UI loaded. If using the configured headless MCP provider, the user sees the app in SimpleBrowser while automation runs without a separate window.
+4. Report the loaded datasets and episode counts from the Dataset catalog, including stale/metadata warnings. These observations do not establish backend health or Blob synchronization.
 
-Proceed to Phase 2 for interactive browsing (requires Playwright MCP tools), or Phase 3 when the user requests feature changes.
+Proceed to Phase 2 for browsing, Phase 3 for annotation or Phase 4 for feature changes.
 
 ### Phase 2: Interactive Browsing
 
-Use Playwright MCP tools (`mcp_playwright_browser_*`) to interact with the running dataviewer headlessly. The user sees the app in SimpleBrowser (`open_browser_page`); Playwright operates invisibly on the same URL. If Playwright MCP tools are not available, use `open_browser_page` and guide the user through manual interaction.
+Use available native browser tools or the configured Playwright MCP tools to interact with the running dataviewer. The user can view the app through `open_browser_page`; configured headless Playwright operates on the same URL without a separate browser window. Separate sessions share backend persistence, not necessarily unsaved client state. If automation is unavailable, open the page and guide manual interaction, reporting the limit without claiming execution.
 
 #### Available UI Interactions
 
-- **List datasets**: Read the dataset selector combobox in the header.
-- **Switch dataset**: Select a different dataset from the dropdown.
-- **Browse episodes**: Click episode items in the sidebar (`aside li button`).
-- **View frames**: Use the frame slider and play/next/previous controls.
-- **Apply label filters**: Click label filter buttons in the sidebar to filter episodes.
-- **Take screenshots**: Capture the current UI state for visual confirmation.
-- **Check console**: Monitor browser console for errors or warnings.
-- **Inspect network**: Check API calls and responses.
+- List datasets: read the Dataset catalog and Filter datasets combobox.
+- Switch dataset: open the Dataset disclosure and select a current dataset entry; use Return to episode when available.
+- Browse episodes: select episode buttons in the sidebar from the fresh snapshot.
+- View frames: use the Playback frame slider and play/next/previous controls.
+- Select cameras: use the plural playback camera selection; judge views are configured separately.
+- Apply label filters: click sidebar label filter buttons to filter episodes.
+- Take screenshots: capture the current UI for visual confirmation.
+- Check console: monitor browser console errors and warnings.
+- Inspect network: inspect API requests and responses without exposing credentials or private payloads.
 
 #### Playwright Interaction Patterns
 
 When the user asks to browse or inspect the app:
 
-1. Take a `browser_snapshot` to see the current accessibility tree with element refs.
+1. Take a fresh accessible snapshot with `read_page` or `browser_snapshot` to inspect current roles, names and element refs.
 2. Perform the requested interaction using the ref from the snapshot.
-3. Wait for content to load (use `browser_wait_for` with expected text).
+3. Wait for content with the available provider, such as Playwright locator assertions or `browser_wait_for` with expected text.
 4. Take a screenshot or snapshot to show the result.
 5. Report findings to the user.
 
 > [!IMPORTANT]
-> Element refs are invalidated after any page navigation or content change. Always take a fresh `browser_snapshot` before clicking or typing. Never reuse refs from a previous snapshot.
+> Refresh the snapshot after navigation or content changes before using element refs. Use accessible controls for interactions; forced DOM clicks do not establish keyboard accessibility.
 
-For scrolling the episode sidebar:
+For scrolling the episode sidebar, run this through `run_playwright_code`'s page evaluation or the MCP provider's `browser_evaluate`, substituting the requested scroll position:
 
 ```javascript
-browser_evaluate: () => {
+() => {
   const list = document.querySelector('aside ul');
-  if (list) { list.scrollTop = N; return 'Scrolled'; }
-  return 'Not found';
+  if (!list) return 'Episode list not found';
+  list.scrollTop = 400;
+  return 'Scrolled';
 }
 ```
 
-For jumping to a specific frame via the slider:
+For jumping to a specific frame, prefer the accessible Playback frame slider. If the browser provider cannot operate the slider directly, this native-input fallback can probe state updates (replace `'120'` with the requested valid frame). It is not keyboard acceptance evidence:
 
 ```javascript
-browser_evaluate: () => {
-  const slider = document.querySelector('input[type="range"]');
+() => {
+  const slider = document.querySelector('input[aria-label="Playback frame"]');
+  if (!slider) return 'Playback slider not found';
   const setter = Object.getOwnPropertyDescriptor(
     window.HTMLInputElement.prototype, 'value').set;
-  setter.call(slider, 'FRAME_NUMBER');
+  setter.call(slider, '120');
   slider.dispatchEvent(new Event('input', { bubbles: true }));
   slider.dispatchEvent(new Event('change', { bubbles: true }));
-  return 'Done';
+  return 'Frame requested';
 }
 ```
 
-For scrolling to a specific section (e.g., Episode Labels):
+For scrolling to Episode Labels, use the current snapshot or evaluate:
 
 ```javascript
-browser_evaluate: () => {
-  const h3 = Array.from(document.querySelectorAll('h3'))
-    .find(el => el.textContent.includes('Episode Labels'));
-  if (h3) { h3.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+() => {
+  const heading = Array.from(document.querySelectorAll('h2, h3'))
+    .find(element => element.textContent.includes('Episode Labels'));
+  if (!heading) return 'Episode Labels not found';
+  heading.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  return 'Section visible';
 }
 ```
 
@@ -136,7 +141,7 @@ When investigating issues:
 3. Inspect the backend terminal output for server errors.
 4. Report findings with suggested fixes.
 
-Return to Phase 1 if the app needs to be restarted. Proceed to Phase 3 for annotation or Phase 4 when the user requests feature changes.
+Return to Phase 1 only for an authorized lifecycle change. Proceed to Phase 3 for annotation or Phase 4 for feature changes.
 
 ### Phase 3: Episode Annotation
 
@@ -173,8 +178,8 @@ Local labels are stored at `{DATA_DIR}/{dataset_id}/meta/episode_labels.json`. C
 
 #### Step 4: Verify via Playwright UI
 
-1. Refresh the page with `browser_navigate`.
-2. Wait for episodes to load with `browser_wait_for`.
+1. Verify API persistence first; preserve unsaved drafts before refreshing the page.
+2. Wait for episodes to load and capture a fresh accessible snapshot.
 3. Take a screenshot showing labeled episodes in the sidebar.
 4. Click label filter buttons to verify counts (e.g., "31 / 64 Episodes" when filtering by LEFT).
 5. Scroll through the sidebar to confirm all episodes show labels.
@@ -185,10 +190,11 @@ Local labels are stored at `{DATA_DIR}/{dataset_id}/meta/episode_labels.json`. C
 For episodes that need label correction:
 
 1. Click the episode in the sidebar.
-2. Scroll to "Episode Labels" section (use `browser_evaluate` with `scrollIntoView`).
+2. Locate the "Episode Labels" section from the current snapshot.
 3. Click a selected label button to remove it (toggling behavior).
 4. Click the correct label button to add it.
-5. Click "Save & Next Episode", or "Save Episode" on the final episode, to persist.
+5. Click "Save Episode", wait for save acknowledgment and independently read back the intended saved resources. Resolve partial saves or HTTP 412 before continuing.
+6. Use the separate "Next Episode" control only after verifying persistence. Retain unrelated and unmounted drafts.
 
 Return to Phase 2 to continue browsing, or proceed to Phase 4 for feature development.
 
@@ -226,53 +232,53 @@ Follow these codebase conventions:
 
 #### Step 3: Verify Changes
 
-1. If the app is running, check for live reload (Vite HMR for frontend, uvicorn reload for backend).
-2. Use Playwright to navigate to the affected UI area.
-3. Take a screenshot to verify the change visually.
-4. Check console and network for errors.
-5. Report results to the user.
+1. Follow scoped viewer instructions: failing-first behavior tests, focused grouped checks during development, then configured gates after coherent changes.
+2. With lifecycle authority, use the running app to inspect affected states. Check keyboard navigation, focus, live-region status and narrow-layout reflow as well as console/network errors.
+3. Verify saved state through independent read-back where relevant, not screenshots alone.
+4. Report unit/static, real-HTTP, browser collection, native browser execution, simulation, assistive-technology and target GPU evidence separately. Leave unavailable gates open.
 
 Return to Phase 2 to continue browsing, or repeat Phase 4 for additional features.
 
 ### Phase 5: VLM-as-Judge Evaluation
 
-Drive the VLM judge harness against the loaded datasets, either through the dataviewer's `JudgePanel` (UI verification) or the `evaluation.vlm_judge` CLI (bulk batches). Both share one disk cache, so CLI primes UI and vice versa.
-
-Full surface reference and prompt schema live in the dataviewer skill ("VLM-as-Judge Workflow" and "VLM-as-Judge Endpoints"). The agent steps below stay focused on orchestration and reporting.
+Follow the skill's VLM-as-Judge Workflow; it owns API/CLI recipes and configuration. Disposable inference cache, durable jobs/evidence and JSONL exports are distinct. A cache badge or matching model name does not establish cross-client reuse.
 
 #### Step 1: Confirm the judge is enabled
 
-1. Resolve the requested judge settings without exposing credentials or changing persistent defaults.
-2. Pass `VLM_JUDGE_ENABLED=true` and the selected `VLM_JUDGE_BACKEND` to the launcher process (`echo` for wiring, `qwen3-vl` for local GPU, `openai-compat` for remote endpoints).
-3. For `qwen3-vl`, prefer the shim pattern: pass `VLM_JUDGE_BACKEND=openai-compat` and `VLM_JUDGE_BASE_URL=http://127.0.0.1:8001/v1` to the viewer, then start `python -m evaluation.vlm_judge.openai_shim` from the root environment with its inference dependencies. Probe `http://127.0.0.1:8001/health` before continuing.
-4. Restart an owned backend when launch settings change; code reload does not refresh its environment. Persist settings in `.env` only when explicitly requested.
-5. Probe `GET /api/datasets/{id}/capabilities` and require `vlm_judge_enabled: true` before requesting episode judgments.
+1. Resolve requested settings without exposing credentials or changing persistent defaults. Confirm inference authority and saved-input readiness for every target and sample.
+2. For an authorized launch, pass `VLM_JUDGE_ENABLED=true` and the selected backend (`echo`, `qwen3-vl` or `openai-compat`) to the launcher process.
+3. For local Qwen inference, the shim pattern remains available: pass `VLM_JUDGE_BACKEND=openai-compat` and `VLM_JUDGE_BASE_URL=http://127.0.0.1:8001/v1` to the viewer. With approved inference dependencies and pinned model settings, start the shim from the root environment using the command below. Probe `http://127.0.0.1:8001/health` before submitting. Keep the unauthenticated shim loopback-only; model downloads and GPU/runtime validation require their own authority and evidence.
+4. Restart only an owned, authorized backend when launch settings change; reload does not refresh its environment. Persist `.env` only when explicitly requested.
+5. Require `vlm_judge_enabled: true` from dataset capabilities before requesting judgments. Do not enable the judge merely to make controls appear during read-only inspection; observe disabled, denied and checking-access states.
+
+```bash
+uv run --frozen python -m evaluation.vlm_judge.openai_shim
+```
 
 #### Step 2: Smoke-test with the echo backend
 
-When the user wants confidence in the wiring before paying for inference:
+Use the skill's explicit `--single --mode judge --backend echo` recipe with one actual episode ID and isolated storage. Inspect terminal status, selected views, extracted frames and canonical evidence. Echo responses are deterministic placeholders, not model-quality evidence. Do not bypass batch approval through repeated single submissions.
 
-1. Pass `VLM_JUDGE_BACKEND=echo` to an owned backend session.
-2. Run `python -m evaluation.vlm_judge.run --dataset datasets/<id> --backend echo --limit 2 --n-frames 6 --output /tmp/vj-<id>.jsonl` for each dataset.
-3. Tail the JSONL to verify episode discovery, view selection, and frame extraction. The VLM responses are deterministic placeholders; `outcome_success` is always `true`.
+#### Step 3: Run the approved dataset judge
 
-#### Step 3: Run the real judge
+Follow the skill's sample, human review, explicit approval and batch recipe. Bind saved author/revision/snapshot references and keep runtime identity fixed through approval and execution. Recover stale approvals by refreshing and reviewing new samples. Inspect wrapper lifecycle arguments before using dataset/policy wrappers; use the generic CLI if the wrapper cannot carry required references or approval.
 
-1. Switch `VLM_JUDGE_BACKEND` to `qwen3-vl` (local) or `openai-compat` with `VLM_JUDGE_BASE_URL` (remote). Restart the backend.
-2. Per dataset, prefer the wrapper scripts under `evaluation/vlm_judge/scripts/` when present; fall back to `python -m evaluation.vlm_judge.run` for arbitrary paths.
-3. Pipe each dataset to its own JSONL under `outputs/vlm-judge/`.
-4. After CLI completion, open the dataviewer and Playwright-click into a sample episode to confirm the panel renders the cached payload (`cached: true` badge).
+Treat HTTP 202 as acceptance only. Poll durable status, inspect target errors and retrieve canonical evidence. Distinguish succeeded, partial, failed and cancelled work; use the skill's status/cancel/retry and restart recovery guidance. JSONL exports do not prove that viewer evidence is reusable.
 
-#### Step 4: Verify in the UI via Playwright
+#### Step 4: Verify in the UI
 
-1. `browser_snapshot` to read the Trajectory tab DOM.
-2. Either click the **Run judge** button via the snapshot ref, or use the JS fallback in the skill (find the `VLM Judge` `<h3>` and click the matching button).
-3. `browser_wait_for(text="SUCCESS")` (or `FAILURE` / `Inconclusive`) to confirm the outcome badge rendered.
-4. Spot-check failure cases by selecting an episode you expect to fail and confirming the milestones list + failure-mode chip render.
+1. Capture a fresh accessible snapshot in Trajectory, expand Episode Analysis and locate Judge assessment.
+2. Use the skill's current role-based Run judge pattern only when submission is authorized. Wait for terminal job status and evidence read-back, then verify the corresponding SUCCESS, FAILURE or Inconclusive display.
+3. Spot-check progress, milestones and failure-mode chips when supplied by the evidence. Verify keyboard, focus and status behavior for affected UI states; do not use a forced DOM click as acceptance evidence.
+4. Use the dataset-level workspace for target/sample selection, approvals and job review. Judge-only evidence does not change labels. Apply results only when requested; withdrawal requires reviewed preview/confirmation and preserves human edits and history.
 
 #### Step 5: Summarize
 
-Report the run with: dataset id, episodes evaluated, judge model, prompt version, success rate, mean VOC, and a short list of any 4xx/5xx responses (the router maps 404 to missing dataset/episode and 422 to a missing instruction). Save the output paths so the user can drill in via `jq` or re-import into MLflow downstream.
+Report dataset ID, actual judged/applied/error counts, model/runtime and prompt identity, saved-input applicability, outcomes and output paths. Compute success rate and mean VOC from verified evidence, accounting for missing/inconclusive results.
+
+Distinguish pending work, conflicts and safe HTTP error categories: 404 for missing/inaccessible resources, 422 for invalid input including rejected instruction overrides, and 409 for saved-state/configuration conflicts. Report remaining browser, assistive-technology and target-runtime evidence gaps.
+
+Return to Phase 2 for episode review or Phase 3 for requested label corrections.
 
 Return to Phase 2 for episode-level review or Phase 3 if the judge findings should drive label corrections.
 
@@ -287,4 +293,4 @@ Return to Phase 2 for episode-level review or Phase 3 if the judge findings shou
 - When annotating, report progress with counts (e.g., "Annotated 32/64 episodes, 31 LEFT, 33 RIGHT").
 - For annotation tasks, prefer API-first bulk operations followed by UI verification over annotating each episode individually through the UI.
 - Verify persisted labels after bulk API annotation; successful revision-conditional PUT requests already save them.
-- For VLM judge runs, prefer the CLI for bulk evaluation and the UI panel for verification of representative episodes; both share the same disk cache so work is never duplicated.
+- For VLM judge runs, route bulk work through explicit sample approval and verify representative episodes from canonical evidence. Prove matching source, principal, saved-input and runtime identity before claiming CLI/viewer reuse.

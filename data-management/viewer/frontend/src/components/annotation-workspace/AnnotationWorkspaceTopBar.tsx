@@ -62,7 +62,7 @@ export function AnnotationWorkspaceTopBar({
               disabled={isSaving || !hasPendingEpisodeChanges}
             >
               <RotateCcw className="mr-2 h-4 w-4" />
-              Reset All
+              Discard changes
             </Button>
             <Button variant="outline" onClick={onOpenExportDialog}>
               <Download className="mr-2 h-4 w-4" />

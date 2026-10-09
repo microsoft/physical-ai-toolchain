@@ -131,7 +131,7 @@ test('V05 save status preserves focus and reports completion', async ({ page }, 
   const labelsPanel = page.getByTestId('trajectory-labels-panel')
   await labelsPanel.getByRole('button', { name: 'REVIEWED', exact: true }).click()
   const saveStatus = page.getByTestId('workspace-save-status-slot')
-  await expect(saveStatus).toContainText('Unsaved episode changes.')
+  await expect(saveStatus).toContainText('Unsaved episode changes')
 
   const saveButton = page.getByRole('button', { name: 'Save Episode', exact: true })
   await saveButton.focus()
@@ -203,7 +203,7 @@ test('J04 completes a representative local Viewer process', async ({ page }, tes
   const labelsPanel = page.getByTestId('trajectory-labels-panel')
   await labelsPanel.getByRole('button', { name: 'NEEDS_ATTENTION', exact: true }).click()
   await expect(page.getByTestId('workspace-save-status-slot')).toContainText(
-    'Unsaved episode changes.',
+    'Unsaved episode changes (labels)',
   )
   transitions.push('V11 annotation changed')
 

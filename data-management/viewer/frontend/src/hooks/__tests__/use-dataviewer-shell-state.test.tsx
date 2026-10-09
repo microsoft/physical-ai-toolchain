@@ -2,7 +2,13 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useDataviewerShellState } from '@/hooks/use-dataviewer-shell-state'
-import { useAnnotationStore, useDatasetStore, useEditStore, useLabelStore } from '@/stores'
+import {
+  useAnnotationStore,
+  useDatasetStore,
+  useEditStore,
+  useEpisodeStore,
+  useLabelStore,
+} from '@/stores'
 import type { DatasetInfo } from '@/types'
 
 const { mockEnableDiagnostics, mockDisableDiagnostics, mockIsDiagnosticsEnabled } = vi.hoisted(
@@ -75,7 +81,26 @@ describe('useDataviewerShellState', () => {
     act(() => result.current.setDatasetId('dataset-b'))
     expect(result.current.datasetId).toBe('dataset-a')
     expect(confirm).toHaveBeenCalledTimes(4)
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('(annotation changes)'))
     expect(useAnnotationStore.getState().currentAnnotation?.notes).toBe('Unsaved')
+  })
+
+  it('lets episode navigation leave retained label drafts on other episodes but guards dataset switches', async () => {
+    const confirm = vi.fn(() => false)
+    vi.stubGlobal('confirm', confirm)
+    const { result } = renderHook(() => useDataviewerShellState({ datasets }))
+    act(() => result.current.setDatasetId('dataset-a'))
+    await waitFor(() => expect(result.current.isWarmingCache).toBe(false))
+    act(() => {
+      useEpisodeStore.setState({ currentIndex: 3 })
+      useLabelStore.setState({ episodeLabels: { 1: ['PARTIAL'] }, savedEpisodeLabels: {} })
+    })
+    act(() => result.current.setSelectedEpisode(2))
+    expect(result.current.selectedEpisode).toBe(2)
+    expect(confirm).not.toHaveBeenCalled()
+    act(() => result.current.setDatasetId('dataset-b'))
+    expect(result.current.datasetId).toBe('dataset-a')
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('label changes for episode 1'))
   })
 
   it('warns before browser unload with dirty labels and removes the listener on unmount', async () => {

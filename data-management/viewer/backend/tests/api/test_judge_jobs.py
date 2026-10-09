@@ -149,6 +149,136 @@ def test_withdrawal_clears_derived_findings_without_reviving_overlapping_runs() 
     assert plan_withdrawal(projected, {"older", "newer"})[0] == projected
 
 
+@pytest.mark.asyncio
+async def test_given_withdrawn_outcome_label_when_previewed_again_then_absent_flags_are_not_listed(
+    tmp_path: Path,
+) -> None:
+    from evaluation.vlm_judge.curation import DatasetLabelsFile
+    from evaluation.vlm_judge.curation_storage import LocalCurationStorage, apply_judge_result, plan_withdrawal
+
+    storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
+    await storage.save("dataset", DatasetLabelsFile(dataset_id="dataset"), if_none_match=True)
+    result = JudgeResult("dataset/episode_000002", "Pick", "echo", "test", 2, True, 1.0, 3, [0, 100], 1.0)
+    job = {"id": "run", "run_order": 1, "config_revision": "config", "actor": "actor", "dataset_id": "dataset"}
+    target = {
+        "episode_index": 2,
+        "result": result.to_dict(),
+        "result_id": "result",
+        "input": {"source_revision": "source", "snapshot_id": "snapshot"},
+    }
+    assert await apply_judge_result(storage, job, target)
+    labels = (await storage.load_versioned("dataset")).value
+    assert labels.episodes["2"] == ["SUCCESS"]
+
+    withdrawn, summary = plan_withdrawal(labels, {"run"})
+    assert withdrawn.episodes["2"] == []
+    assert [item["field"] for item in summary["fields"]] == ["labels/SUCCESS"]
+    assert summary["removable_fields"] == 1
+
+    _, fresh = plan_withdrawal(withdrawn, {"run"})
+    assert fresh["fields"] == []
+    assert fresh["legacy_unknown"] == 0
+    assert fresh["removable_fields"] == 0
+
+
+def test_given_present_unprovenanced_label_when_previewed_then_it_remains_legacy_unknown() -> None:
+    from evaluation.vlm_judge.curation import DatasetLabelsFile
+    from evaluation.vlm_judge.curation_storage import plan_withdrawal
+
+    labels = DatasetLabelsFile(dataset_id="dataset", episodes={"2": ["SUCCESS"]})
+    projected, summary = plan_withdrawal(labels, {"run"})
+    assert projected.episodes["2"] == ["SUCCESS"]
+    assert summary["fields"] == [
+        {
+            "episode_index": 2,
+            "field": "labels/SUCCESS",
+            "disposition": "legacy_unknown",
+            "origin": "legacy-unknown",
+            "contribution_ids": [],
+            "run_ids": [],
+        }
+    ]
+
+
+async def _apply_success(storage: object, run_id: str, run_order: int, episode: int = 3) -> None:
+    from evaluation.vlm_judge.curation_storage import apply_judge_result
+
+    result = JudgeResult(f"dataset/episode_{episode:06d}", "Pick", "echo", "test", 2, True, 1.0, 3, [0, 100], 1.0)
+    job = {"id": run_id, "run_order": run_order, "config_revision": "config", "actor": "actor", "dataset_id": "dataset"}
+    target = {
+        "episode_index": episode,
+        "result": result.to_dict(),
+        "result_id": f"result-{run_id}",
+        "input": {"source_revision": "source", "snapshot_id": "snapshot"},
+    }
+    assert await apply_judge_result(storage, job, target)
+
+
+@pytest.mark.asyncio
+async def test_given_output_from_unlisted_run_when_withdrawing_then_conflict_is_explained_and_recoverable(
+    tmp_path: Path,
+) -> None:
+    from evaluation.vlm_judge.curation_storage import LocalCurationStorage
+
+    storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
+    jobs = manager(tmp_path / "jobs", curation_storage=storage)
+    listed = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="listed")
+    await _apply_success(storage, "lost-run", 99)
+    await _apply_success(storage, listed["id"], 1, episode=1005)
+
+    preview = await jobs.preview_reset("dataset", "actor")
+    conflict = next(item for item in preview["summary"]["fields"] if item["disposition"] == "conflicts")
+    assert conflict == {
+        "episode_index": 3,
+        "field": "labels/SUCCESS",
+        "disposition": "conflicts",
+        "origin": "machine",
+        "contribution_ids": [],
+        "run_ids": [],
+        "reason": "unlisted_machine_run",
+        "blocking_contribution_ids": conflict["blocking_contribution_ids"],
+        "blocking_run_ids": ["lost-run"],
+    }
+    assert preview["summary"]["unlisted_run_ids"] == ["lost-run"]
+    await jobs.confirm_reset("dataset", "actor", preview["id"])
+    assert await jobs.reset_once()
+    completed = await jobs.reset_status("dataset", "actor")
+    assert completed["status"] == "conflicted"
+    withdrawn = [item for item in completed["summary"]["fields"] if item["disposition"] == "removable_fields"]
+    assert [item["episode_index"] for item in withdrawn] == [1005]
+    saved = (await storage.load_versioned("dataset")).value
+    assert saved.episodes["1005"] == [] and saved.episodes["3"] == ["SUCCESS"]
+    assert (await jobs.submit("dataset", "actor", [1005], {}, idempotency_key="after"))["status"] == "queued"
+
+    recovery = await jobs.preview_reset("dataset", "actor", include_unlisted_runs=True)
+    assert "lost-run" in recovery["run_ids"]
+    assert recovery["summary"]["conflicts"] == 0
+    await jobs.confirm_reset("dataset", "actor", recovery["id"])
+    assert await jobs.reset_once()
+    assert (await jobs.reset_status("dataset", "actor"))["status"] == "succeeded"
+    assert (await storage.load_versioned("dataset")).value.episodes["3"] == []
+
+
+@pytest.mark.asyncio
+async def test_given_unprovenanced_label_before_ai_application_when_withdrawn_then_it_is_restored_not_conflicted(
+    tmp_path: Path,
+) -> None:
+    from evaluation.vlm_judge.curation import DatasetLabelsFile
+    from evaluation.vlm_judge.curation_storage import LocalCurationStorage, plan_withdrawal
+
+    storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
+    legacy = DatasetLabelsFile(dataset_id="dataset", episodes={"3": ["SUCCESS"]})
+    await storage.save("dataset", legacy, if_none_match=True)
+    await _apply_success(storage, "run", 1)
+    projected, summary = plan_withdrawal((await storage.load_versioned("dataset")).value, {"run"})
+    assert summary["conflicts"] == 0
+    restored = next(item for item in summary["fields"] if item["field"] == "labels/SUCCESS")
+    assert restored["disposition"] == "legacy_unknown"
+    assert restored["reason"] == "legacy_value_restored"
+    assert restored["run_ids"] == ["run"]
+    assert projected.episodes["3"] == ["SUCCESS"]
+
+
 def manager(root: Path, **kwargs: object) -> object:
     from evaluation.vlm_judge.job_storage import LocalJobStore
     from evaluation.vlm_judge.jobs import JudgeJobs

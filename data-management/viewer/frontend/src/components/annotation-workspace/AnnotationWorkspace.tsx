@@ -2,6 +2,7 @@ import { AnnotationWorkspaceContent } from '@/components/annotation-workspace/An
 import { AnnotationWorkspaceEmptyState } from '@/components/annotation-workspace/AnnotationWorkspaceEmptyState'
 import { DraftConflictDialog } from '@/components/annotation-workspace/DraftConflictDialog'
 import { useAnnotationWorkspaceShell } from '@/components/annotation-workspace/useAnnotationWorkspaceShell'
+import { Button } from '@/components/ui/button'
 
 interface AnnotationWorkspaceProps {
   visible?: boolean
@@ -50,9 +51,30 @@ export function AnnotationWorkspace({
   return (
     <div hidden={!visible} className="h-full">
       {shell.editPersistenceError && (
-        <p role="alert" className="text-destructive px-4 py-2 text-sm">
-          {shell.editPersistenceError}
-        </p>
+        <div
+          role="alert"
+          className="text-destructive flex flex-wrap items-center gap-2 px-4 py-2 text-sm"
+        >
+          <p>{shell.editPersistenceError}</p>
+          {shell.resolveRecoveredEdits && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => shell.resolveRecoveredEdits?.('keep')}
+              >
+                Keep recovered edits
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => shell.resolveRecoveredEdits?.('discard')}
+              >
+                Discard recovered edits
+              </Button>
+            </>
+          )}
+        </div>
       )}
       <AnnotationWorkspaceContent shell={shell} />
       <DraftConflictDialog />

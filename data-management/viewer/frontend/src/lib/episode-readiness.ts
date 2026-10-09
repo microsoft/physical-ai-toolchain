@@ -36,25 +36,31 @@ function different(first: unknown, second: unknown): boolean {
   return JSON.stringify(first) !== JSON.stringify(second)
 }
 
-export function hasPendingWorkspaceChanges(queryClient?: QueryClient): boolean {
+export function pendingWorkspaceChanges(
+  queryClient?: QueryClient,
+  options: { episodeIndex?: number } = {},
+): string[] {
   const annotation = useAnnotationStore.getState()
   const labels = useLabelStore.getState()
   const edits = useEditStore.getState()
-  return Boolean(
-    queryClient?.isMutating({ mutationKey: ['episode-save'] }) ||
-    annotation.isDirty ||
-    annotation.isSaving ||
-    annotation.conflict ||
-    annotation.draftError ||
-    labels.isSaving ||
-    labels.conflict ||
-    labels.draftError ||
-    edits.isDirty ||
-    edits.draftError ||
-    Object.entries(labels.episodeLabels).some(([index, values]) =>
-      different(values, labels.savedEpisodeLabels[Number(index)] ?? []),
-    ),
-  )
+  // Label drafts are dataset-wide and survive episode navigation, so only the current episode's matter there.
+  const dirtyLabels = Object.entries(labels.episodeLabels)
+    .filter(([index, values]) => different(values, labels.savedEpisodeLabels[Number(index)] ?? []))
+    .map(([index]) => Number(index))
+    .filter((index) => options.episodeIndex === undefined || index === options.episodeIndex)
+  return [
+    queryClient?.isMutating({ mutationKey: ['episode-save'] }) ? 'a save in progress' : null,
+    annotation.isDirty || annotation.isSaving ? 'annotation changes' : null,
+    annotation.conflict || labels.conflict ? 'an unresolved conflict' : null,
+    annotation.draftError || labels.draftError || edits.draftError ? 'draft recovery errors' : null,
+    labels.isSaving ? 'a label save in progress' : null,
+    dirtyLabels.length ? `label changes for episode ${dirtyLabels.join(', ')}` : null,
+    edits.isDirty ? 'frame or subtask edits' : null,
+  ].filter((reason): reason is string => reason !== null)
+}
+
+export function hasPendingWorkspaceChanges(queryClient?: QueryClient): boolean {
+  return pendingWorkspaceChanges(queryClient).length > 0
 }
 
 export async function checkEpisodeReadiness(

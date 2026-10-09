@@ -145,6 +145,22 @@ describe('AnnotationWorkspace status and header actions', () => {
     expect(screen.getByRole('heading', { name: /episode 0/i })).toBeVisible()
   })
 
+  it.each(['keep', 'discard'] as const)(
+    'lets the user %s recovered edits based on an older saved version',
+    (choice) => {
+      const resolve = vi.fn()
+      testState.editPersistenceError = 'Recovered edits are based on an older saved version.'
+      testState.resolveRecoveredEdits = resolve
+      render(<AnnotationWorkspace />)
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: choice === 'keep' ? 'Keep recovered edits' : 'Discard recovered edits',
+        }),
+      )
+      expect(resolve).toHaveBeenCalledWith(choice)
+    },
+  )
+
   it('keeps the save status hidden until a save occurs', () => {
     render(<AnnotationWorkspace />)
 
@@ -355,7 +371,7 @@ describe('AnnotationWorkspace status and header actions', () => {
     await act(async () => {
       fireEvent.click(
         within(screen.getByTestId('workspace-header-actions')).getByRole('button', {
-          name: /^reset all$/i,
+          name: /^discard changes$/i,
         }),
       )
       await Promise.resolve()

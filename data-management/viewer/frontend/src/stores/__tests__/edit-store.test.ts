@@ -375,19 +375,89 @@ describe('useEditStore', () => {
       expect(useEditStore.getState().isDirty).toBe(true)
     })
 
-    it('retains the acknowledged revision when revisiting an episode', async () => {
+    it('rehydrates the acknowledged revision from the server when revisiting an episode', async () => {
       await initializeSavedSession()
       useEditStore.getState().hydrateSavedEdits(baseline)
       useEditStore.getState().toggleFrameRemoval(5)
       useEditStore.getState().saveEpisodeDraft()
       const submitted = { ...baseline, operations: useEditStore.getState().getEditOperations()! }
-      useEditStore.getState().acknowledgeSave(submitted, { ...submitted, etag: 'revision-b' })
+      const saved = { ...submitted, etag: 'revision-b' }
+      useEditStore.getState().acknowledgeSave(submitted, saved)
       useEditStore.getState().initializeEdit('ds-1', 1)
       useEditStore.getState().initializeEdit('ds-1', 0)
+      await waitFor(() => expect(useEditStore.getState().draftHydrated).toBe(true))
+      expect(useEditStore.getState().hydrateSavedEdits(saved)).toBe(true)
       expect(useEditStore.getState().serverBaseline?.etag).toBe('revision-b')
       expect([...useEditStore.getState().removedFrames]).toEqual([2, 5])
       expect(useEditStore.getState().isDirty).toBe(false)
     })
+
+    it('does not persist a clean state as a recoverable browser draft', async () => {
+      await initializeSavedSession()
+      useEditStore.getState().hydrateSavedEdits(baseline)
+      useEditStore.getState().toggleFrameRemoval(5)
+      useEditStore.getState().toggleFrameRemoval(5)
+      expect(useEditStore.getState().isDirty).toBe(false)
+      await waitFor(async () =>
+        expect(await draftStorage.loadPersistedEditDraft('ds-1', 0, 'local')).toBeUndefined(),
+      )
+    })
+
+    it('replaces a stale recovered draft whose edits already match the server', async () => {
+      await draftStorage.persistEditDraft(
+        'ds-1',
+        0,
+        'local',
+        { datasetId: 'ds-1', episodeIndex: 0, removedFrames: [2, 5] },
+        baseline,
+      )
+      await initializeSavedSession()
+      expect(useEditStore.getState().isDirty).toBe(true)
+      const newer = {
+        ...baseline,
+        etag: 'revision-b',
+        operations: { ...baseline.operations, removedFrames: [2, 5] },
+      }
+      expect(useEditStore.getState().hydrateSavedEdits(newer)).toBe(true)
+      expect(useEditStore.getState()).toMatchObject({ isDirty: false, serverBaseline: newer })
+    })
+
+    it('rebases edits made before any saved revision loaded onto an empty server descriptor', async () => {
+      await draftStorage.persistEditDraft('ds-1', 0, 'local', {
+        datasetId: 'ds-1',
+        episodeIndex: 0,
+        removedFrames: [5],
+      })
+      await initializeSavedSession()
+      const empty = { ...baseline, etag: null, operations: { datasetId: 'ds-1', episodeIndex: 0 } }
+      expect(useEditStore.getState().hydrateSavedEdits(empty)).toBe(true)
+      expect(useEditStore.getState()).toMatchObject({ isDirty: true, serverBaseline: empty })
+      expect([...useEditStore.getState().removedFrames]).toEqual([5])
+    })
+
+    it.each(['keep', 'discard'] as const)(
+      'resolves a recovered draft from an older revision by choosing %s',
+      async (choice) => {
+        await draftStorage.persistEditDraft(
+          'ds-1',
+          0,
+          'local',
+          { datasetId: 'ds-1', episodeIndex: 0, removedFrames: [9] },
+          baseline,
+        )
+        await initializeSavedSession()
+        const newer = { ...baseline, etag: 'revision-b' }
+        expect(useEditStore.getState().hydrateSavedEdits(newer)).toBe(false)
+        useEditStore.getState().resolveRecoveredEdits(newer, choice)
+        expect(useEditStore.getState().serverBaseline).toEqual(newer)
+        expect([...useEditStore.getState().removedFrames]).toEqual(choice === 'keep' ? [9] : [2])
+        expect(useEditStore.getState().isDirty).toBe(choice === 'keep')
+        if (choice === 'discard')
+          await waitFor(async () =>
+            expect(await draftStorage.loadPersistedEditDraft('ds-1', 0, 'local')).toBeUndefined(),
+          )
+      },
+    )
 
     it('defers server hydration until browser draft recovery finishes', async () => {
       await draftStorage.persistEditDraft(

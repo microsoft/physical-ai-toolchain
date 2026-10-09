@@ -149,9 +149,14 @@ class LocalCurationStorage:
         )
 
 
+def _present(namespace: str, value: Any) -> bool:
+    # Label flags are absent when False; an analysis False is a real finding.
+    return value is True if namespace == "labels" else value is not None and value != []
+
+
 def plan_withdrawal(labels: DatasetLabelsFile, run_ids: set[str]) -> tuple[DatasetLabelsFile, dict[str, Any]]:
     projected = labels.model_copy(deep=True)
-    summary = {
+    summary: dict[str, Any] = {
         "removable_fields": 0,
         "accepted_unchanged": 0,
         "preserved_human": 0,
@@ -159,6 +164,14 @@ def plan_withdrawal(labels: DatasetLabelsFile, run_ids: set[str]) -> tuple[Datas
         "conflicts": 0,
         "episodes": 0,
         "fields": [],
+        "unlisted_run_ids": sorted(
+            {
+                item.machine.run_id
+                for ledger in labels.provenance.values()
+                for item in ledger.contributions
+                if item.machine and item.machine.run_id not in run_ids and item.id not in ledger.withdrawn
+            }
+        ),
     }
     for episode_key in sorted(labels.provenance.keys() | labels.episodes.keys() | labels.analysis.keys()):
         ledger = labels.provenance.get(episode_key, ContributionLedger())
@@ -178,18 +191,31 @@ def plan_withdrawal(labels: DatasetLabelsFile, run_ids: set[str]) -> tuple[Datas
         for field in sorted(fields):
             namespace, name = field.split("/", 1)
             current = name in labels.episodes.get(episode_key, []) if namespace == "labels" else analysis.get(name)
+            field_items = [item for item in ledger.contributions if item.field == field]
+            withdrawn_items = [item for item in field_items if item.id in covered]
+            detail: dict[str, Any] = {
+                "contribution_ids": [item.id for item in withdrawn_items],
+                "run_ids": sorted({item.machine.run_id for item in withdrawn_items if item.machine}),
+            }
             try:
                 before = ledger.resolve(field, legacy_value=current)
                 after = updated.resolve(field, legacy_value=current)
             except ValueError:
                 disposition = "conflicts"
+                detail.update(
+                    origin="human",
+                    reason="multiple_human_authors",
+                    human_authors=len({item.author_id for item in field_items if item.origin == "human"}),
+                )
             else:
+                if not any(_present(namespace, value) for value in (current, before.value, after.value)):
+                    continue
+                detail["origin"] = before.origin
                 if before.origin == "human":
                     disposition = "preserved_human"
                 elif covered.intersection(before.contribution_ids):
-                    if after.origin == "machine" or (
-                        after.origin == "legacy-unknown" and after.value not in (None, False, [])
-                    ):
+                    if after.origin == "machine":
+                        blocking = [item for item in field_items if item.id in after.contribution_ids]
                         updated.withdrawn = [
                             identity
                             for identity in updated.withdrawn
@@ -197,6 +223,18 @@ def plan_withdrawal(labels: DatasetLabelsFile, run_ids: set[str]) -> tuple[Datas
                             or not any(item.id == identity and item.field == field for item in ledger.contributions)
                         ]
                         disposition = "conflicts"
+                        detail.update(
+                            reason="unlisted_machine_run",
+                            blocking_contribution_ids=[item.id for item in blocking],
+                            blocking_run_ids=sorted({item.machine.run_id for item in blocking if item.machine}),
+                        )
+                    elif after.origin == "legacy-unknown" and _present(namespace, after.value):
+                        # The pre-existing unprovenanced value is restored rather than guessed removable.
+                        disposition = "legacy_unknown"
+                        detail["reason"] = "legacy_value_restored"
+                        if namespace == "analysis":
+                            analysis[name] = after.value
+                            projected.analysis[episode_key] = EpisodeAnalysisRecord.model_validate(analysis)
                     else:
                         disposition = "removable_fields"
                         removed = True
@@ -209,12 +247,22 @@ def plan_withdrawal(labels: DatasetLabelsFile, run_ids: set[str]) -> tuple[Datas
                         elif namespace == "analysis":
                             analysis[name] = [] if name == "motion_flags" and after.value is None else after.value
                             projected.analysis[episode_key] = EpisodeAnalysisRecord.model_validate(analysis)
-                elif before.origin == "legacy-unknown" and current is not None and current != []:
+                elif before.origin == "machine":
+                    blocking = [item for item in field_items if item.id in before.contribution_ids]
+                    disposition = "conflicts"
+                    detail.update(
+                        reason="unlisted_machine_run",
+                        blocking_contribution_ids=[item.id for item in blocking],
+                        blocking_run_ids=sorted({item.machine.run_id for item in blocking if item.machine}),
+                    )
+                elif before.origin == "legacy-unknown" and _present(namespace, current):
                     disposition = "legacy_unknown"
                 else:
                     continue
             summary[disposition] += 1
-            summary["fields"].append({"episode_index": int(episode_key), "field": field, "disposition": disposition})
+            summary["fields"].append(
+                {"episode_index": int(episode_key), "field": field, "disposition": disposition, **detail}
+            )
         if removed:
             summary["episodes"] += 1
     return projected, summary

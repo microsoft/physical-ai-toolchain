@@ -157,16 +157,21 @@ export function useEpisodeEdits(
     }
   }, [query.data, query.isFetching, query.isError, draftHydrated])
   const scopeMatches = !!baseline && !!query.data && sameScope(baseline, query.data)
+  const recoveredDraftStale = !!query.data && draftHydrated && !scopeMatches && !query.isFetching
   const persistenceError =
     draftError ??
     (query.error
       ? 'Saved edits could not be loaded.'
-      : query.data && draftHydrated && !scopeMatches
-        ? 'Recovered edits do not match the saved revision. Resolve the draft before saving.'
+      : recoveredDraftStale
+        ? 'Frame or subtask edits recovered from this browser are based on an older saved version. Keep them on the latest version or discard them before saving.'
         : null)
   return {
     ...query,
     persistenceError,
+    resolveRecoveredEdits: recoveredDraftStale
+      ? (choice: 'keep' | 'discard') =>
+          useEditStore.getState().resolveRecoveredEdits(query.data!, choice)
+      : null,
     isReady: scopeMatches && draftHydrated && !persistenceError && !query.isFetching,
   }
 }

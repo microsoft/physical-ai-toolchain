@@ -128,6 +128,10 @@ class ResetConfirmRequest(ResetPreviewRequest):
     preview_id: str = Field(pattern=r"^[a-f0-9]{32}$")
 
 
+class ResetPlanRequest(ResetPreviewRequest):
+    include_unlisted_runs: bool = False
+
+
 class ApplicationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     episode_indices: list[Annotated[int, Field(strict=True, ge=0)]] | None = Field(
@@ -167,12 +171,14 @@ def build_job_router(
 
     @router.post("/resets/preview", status_code=201, dependencies=mutation_dependencies or [])
     async def preview_reset(
-        payload: ResetPreviewRequest,
+        payload: ResetPlanRequest,
         actor: str = Depends(actor_dependency),
         jobs: JudgeJobs = jobs_dependency,
     ) -> dict[str, Any]:
         await invoke(jobs.resolver.episode_indices(payload.dataset_id, principal_scope_id=actor))
-        result = await invoke(jobs.preview_reset(payload.dataset_id, actor))
+        result = await invoke(
+            jobs.preview_reset(payload.dataset_id, actor, include_unlisted_runs=payload.include_unlisted_runs)
+        )
         return {key: value for key, value in result.items() if key != "actor"}
 
     @router.post("/resets", status_code=202, dependencies=mutation_dependencies or [])

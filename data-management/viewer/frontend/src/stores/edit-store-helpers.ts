@@ -23,6 +23,7 @@ export interface EditStateSnapshot {
   episodeIndex: number | null
   principalScopeId?: string
   serverBaseline?: SavedEditBaseline | null
+  isDirty?: boolean
   globalTransform: ImageTransform | null
   cameraTransforms: Record<string, ImageTransform>
   removedFrames: Set<number>
@@ -192,7 +193,9 @@ export function buildEditStateUpdate<T extends EditStateWithDerived>(
 export function buildDraftPersistencePayload(state: EditStateSnapshot) {
   const operations = buildEditOperations(state)
   const persistedDraft =
-    operations && (hasEditContent(operations) || state.serverBaseline) ? operations : null
+    operations && state.isDirty !== false && (hasEditContent(operations) || state.serverBaseline)
+      ? operations
+      : null
 
   return {
     datasetId: state.datasetId,

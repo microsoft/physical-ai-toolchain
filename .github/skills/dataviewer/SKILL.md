@@ -5,7 +5,7 @@ description: 'Start and interact with the Dataset Analysis Tool (dataviewer) for
 
 # Dataviewer Skill
 
-Launch and interact with the Dataset Analysis Tool — a full-stack application for analyzing and annotating robotic training data from episode-based datasets.
+Launch and interact with the Dataset Analysis Tool, a full-stack application for analyzing and annotating robotic training data from episode-based datasets. Complete requested operations with persistence read-back; job acceptance is not inference completion or label application.
 
 ## Prerequisites
 
@@ -17,7 +17,7 @@ The backend virtual environment and repository-root npm workspace dependencies a
 
 ## Launch and Connect Workflow
 
-Follow these steps in order every time the dataviewer is started.
+Follow these steps when a launch is required and authorized. Inspect existing terminals/task output first and reuse healthy services with matching configuration. Read-only inspection does not authorize restarts, inference or dataset writes. Use VS Code tasks for an already configured development session; use the launcher for requested overrides and readiness checks.
 
 ### Step 1 — Start the app
 
@@ -43,13 +43,15 @@ After confirming both services are running (look for `[OK] Backend is healthy` i
 open_browser_page("http://localhost:5173")
 ```
 
-SimpleBrowser is the primary visual interface for the user. All Playwright automation operates headlessly in the background — the user sees results in SimpleBrowser.
+SimpleBrowser is the visual interface for the user when that provider is available. Configured headless Playwright automation runs in the background. Native browser tools can operate a shared page directly; separate browser sessions share persisted backend state, not necessarily unsaved drafts.
 
 If a non-default `FRONTEND_PORT` was set, substitute that port instead of `5173`.
 
-### Step 3 — Load the Playwright MCP tools
+### Step 3 — Load available browser tools
 
-Playwright runs in **headless mode** so it does not open a separate browser window. All visual feedback goes through SimpleBrowser (Step 2). The Playwright MCP server must be declared in `.vscode/mcp.json` with the `--headless` flag:
+Use the host's tool search to discover available browser capabilities before calling deferred tools. Native tools include `read_page`, `run_playwright_code`, `navigate_page`, `click_element`, `type_in_page` and `screenshot_page`. Use those when available; an equivalent native read does not require MCP reconfiguration.
+
+If using Playwright MCP, configure **headless mode** so it does not open a separate browser window. Its visual feedback goes through SimpleBrowser (Step 2). A Playwright MCP server configuration in `.vscode/mcp.json` can use:
 
 ```json
 // .vscode/mcp.json
@@ -64,15 +66,15 @@ Playwright runs in **headless mode** so it does not open a separate browser wind
 ```
 
 > [!IMPORTANT]
-> The `--headless` flag is required. Without it, Playwright opens a separate Chromium window instead of working invisibly behind SimpleBrowser.
+> Use `--headless` for the MCP background workflow. Reconfiguring or installing a browser provider requires approval; do not change it merely to obtain inspection evidence.
 
-Before issuing any browser actions, always load the Playwright tools with:
+Search by capability using the host's available tool-search schema, for example:
 
 ```text
-tool_search_tool_regex("playwright|browser_snapshot|browser_navigate|browser_click|browser_type")
+Find browser tools to read an accessible page snapshot, navigate, click, type and capture screenshots.
 ```
 
-If the search returns no results the MCP server has not started. Ask the user to open the VS Code Command Palette and run **MCP: Start Server** → **playwright**, then retry the search.
+If no suitable provider is available, report the limit and guide manual inspection. When the user chooses the configured MCP provider, they can run **MCP: Start Server** then select **playwright** in the Command Palette. An empty tool search alone does not prove that a server is stopped.
 
 ### Step 4 — Interact via Playwright MCP
 
@@ -80,15 +82,15 @@ Playwright operates headlessly on the same URL as SimpleBrowser. Both see the sa
 
 Once the tools are available, use the following patterns for all UI interaction:
 
-| Action             | Playwright MCP Tool       | Notes                                      |
-|--------------------|---------------------------|--------------------------------------------|
-| Capture page state | `browser_snapshot`        | Call first before any click/type to orient |
-| Navigate to URL    | `browser_navigate`        | Use to reload or go to a route             |
-| Click an element   | `browser_click`           | Target `aside li button` for episodes      |
-| Type into input    | `browser_type`            | For search or label inputs                 |
-| Take a screenshot  | `browser_take_screenshot` | Use to verify visual state                 |
+| Action             | Playwright MCP Tool                           | Notes                                                   |
+|--------------------|-----------------------------------------------|---------------------------------------------------------|
+| Capture page state | `read_page` / `browser_snapshot`              | Call first to inspect current accessible roles/names    |
+| Navigate to URL    | `navigate_page` / `browser_navigate`          | Preserve unsaved drafts before reload                   |
+| Click an element   | `click_element` / `browser_click`             | Use current snapshot refs and names                     |
+| Type into input    | `type_in_page` / `browser_type`               | For dataset filters or label inputs                     |
+| Take a screenshot  | `screenshot_page` / `browser_take_screenshot` | Verify appearance, not persistence or keyboard behavior |
 
-Always call `browser_snapshot` first to inspect the current DOM before issuing click or type actions. Reference the selector patterns in the [Frontend UI Structure](#frontend-ui-structure) section below.
+Take a fresh accessible snapshot before click/type actions and refresh refs after content changes. Use the [Frontend UI Structure](#frontend-ui-structure) below to orient; forced DOM clicks are not keyboard accessibility evidence.
 
 ## Quick Start
 
@@ -218,12 +220,50 @@ data-management/viewer/
 > Mounted only when `VLM_JUDGE_ENABLED=true`. Dataset capabilities advertise this
 > state, and the frontend does not request an episode judge status while disabled.
 
-| Endpoint                                  | Method | Description                                                                                         |
-|-------------------------------------------|--------|-----------------------------------------------------------------------------------------------------|
-| `/api/datasets/{id}/episodes/{idx}/judge` | GET    | Cache lookup: returns any persisted judgment for the episode without invoking the model             |
-| `/api/datasets/{id}/episodes/{idx}/judge` | POST   | Run the multi-step judge (cache-first unless `force: true`); body: `{instruction?, views?, force?}` |
+| Endpoint                                                 | Method | Description                                                                                   |
+|----------------------------------------------------------|--------|-----------------------------------------------------------------------------------------------|
+| `/api/datasets/{id}/episodes/{idx}/judge/snapshot`       | GET    | Resolve saved inputs and snapshot identity; optionally select `annotation_author_id`          |
+| `/api/datasets/{id}/episodes/{idx}/judge`                | GET    | Current configuration/cache status and optional cached inference payload; not durable history |
+| `/api/datasets/{id}/episodes/{idx}/judge`                | POST   | Accept one job with saved `snapshot_id`, optional author, `views`, `process_method`, `force`  |
+| `/api/judge/episodes?dataset_id={id}`                    | GET    | Paginated actual episode IDs and inventory revision                                           |
+| `/api/judge/jobs`                                        | POST   | Accept a sample or approved dataset job                                                       |
+| `/api/judge/jobs/{job_id}`                               | GET    | Durable status, counts and paginated targets                                                  |
+| `/api/judge/jobs/{job_id}/approve`                       | POST   | Approve reviewed sample evidence/configuration                                                |
+| `/api/judge/jobs/{job_id}/cancel`                        | POST   | Cancel pending work without deleting saved evidence                                           |
+| `/api/judge/jobs/{job_id}/retry`                         | POST   | Retry eligible unfinished work after revalidation                                             |
+| `/api/judge/jobs/{job_id}/apply`                         | POST   | Explicit label application, optionally selected episode IDs                                   |
+| `/api/judge/results?dataset_id={id}&episode_index={idx}` | GET    | Canonical evidence with current/stale/withdrawn applicability                                 |
+| `/api/judge/approvals?dataset_id={id}`                   | GET    | Saved approvals for the current principal                                                     |
+| `/api/judge/resets/preview`                              | POST   | Preview removal of AI-applied labels                                                          |
+| `/api/judge/resets`                                      | POST   | Confirm a reviewed `preview_id`                                                               |
+| `/api/judge/resets?dataset_id={id}`                      | GET    | Withdrawal status                                                                             |
+| `/api/judge/resets/retry`                                | POST   | Retry eligible withdrawal work                                                                |
 
-`POST` response (snake_case on the wire, camelCased by the frontend client) is the composite `JudgeResult`:
+POST submission returns HTTP `202` with a durable job summary, `Location` and `Retry-After`, not a finished result. Use a stable `Idempotency-Key` for retries of the same payload; changed requests need a new key. Request-body instruction overrides are rejected with `422`: save instruction edits first and bind the resolved snapshot.
+
+Poll the returned location, respecting `Retry-After`, until `succeeded`, `partial`, `failed` or `cancelled`. Paginate targets and separately retrieve canonical episode evidence before interpreting outcomes. Job success can contain an inconclusive model assessment; acceptance or a cache badge alone is not success. The evidence's result payload contains outcome votes/confidence, progress/VOC, milestones and failure mode, with run/result and saved-input identity on its canonical record.
+
+#### Acceptance response
+
+The HTTP `202` body is a job summary. This illustrative subset shows acceptance, not a completed judgment:
+
+```json
+{
+  "id": "00000000000000000000000000000001",
+  "dataset_id": "leisaac-pick-orange",
+  "status": "queued",
+  "total": 1,
+  "judged": 0,
+  "applied": 0,
+  "errors": 0
+}
+```
+
+`id` identifies the durable job to poll. `total` counts selected targets, `judged` counts successful judgments, `applied` counts applied label contributions and `errors` counts failed judgments. Inspect application status/errors separately; judged evidence is not proof that labels were applied.
+
+#### Completed judgment fields
+
+After terminal status, GET `/api/judge/results?dataset_id={id}&episode_index={idx}` returns a paginated `{items, total}` response. Each evidence item wraps `result` with `run_id`, `result_id`, saved `input`, runtime `config`, `config_revision`, `applicability` and `applied`. The following example is the composite `JudgeResult` inside `items[].result`, not the POST response (snake_case on the wire, camelCased by the frontend client):
 
 ```json
 {
@@ -235,27 +275,36 @@ data-management/viewer/
   "outcome_success": true,
   "outcome_confidence": 0.83,
   "outcome_n_valid_votes": 3,
-  "progress_per_frame": [0, 14, 28, 42, 57, 71, 85, 100],
+  "progress_per_frame": [0, 9, 18, 27, 36, 45, 55, 64, 73, 82, 91, 100],
   "voc": 0.92,
   "milestones": [
-    {"name": "approach_object", "completed": true, "frame_range": "0-3", "evidence": "..."}
+    {
+      "name": "approach_object",
+      "completed": true,
+      "frame_range": "0-3",
+      "evidence": "Gripper moves toward the orange in the sampled frames."
+    }
   ],
-  "failure_mode": null,
-  "cached": false
+  "failure_mode": null
 }
 ```
 
-Key knobs (`backend/.env`):
+| Field                                         | Meaning                                                                                         |
+|-----------------------------------------------|-------------------------------------------------------------------------------------------------|
+| `episode_id`                                  | Dataset-qualified episode identity                                                              |
+| `instruction`                                 | Saved task instruction evaluated by the judge                                                   |
+| `judge_model`, `prompt_version`               | Model and scoring-prompt identity; inspect evidence configuration for the full runtime identity |
+| `n_frames`                                    | Number of sampled frames                                                                        |
+| `outcome_success`                             | `true` for success, `false` for failure, `null` for inconclusive                                |
+| `outcome_confidence`, `outcome_n_valid_votes` | Outcome confidence in 0-1 and number of valid outcome votes                                     |
+| `progress_per_frame`                          | Per-sampled-frame progress in 0-100; a populated curve contains `n_frames` values               |
+| `voc`                                         | Value-order correlation in -1 to 1; it is process-order evidence, not a success probability     |
+| `milestones`                                  | Optional completed-step evidence with sampled-frame ranges; can be empty                        |
+| `failure_mode`                                | Failure attribution when available, otherwise `null`                                            |
 
-| Variable              | Default                     | Purpose                                                                      |
-|-----------------------|-----------------------------|------------------------------------------------------------------------------|
-| `VLM_JUDGE_ENABLED`   | `false`                     | Mount the router                                                             |
-| `VLM_JUDGE_BACKEND`   | `echo`                      | `qwen3-vl` (local HF) / `openai-compat` (vLLM, NIM, AOAI) / `echo` (offline) |
-| `VLM_JUDGE_MODEL_ID`  | `Qwen/Qwen3-VL-4B-Instruct` | HF id or remote model name                                                   |
-| `VLM_JUDGE_BASE_URL`  | _(unset)_                   | OpenAI-compatible server URL (`openai-compat` only)                          |
-| `VLM_JUDGE_API_KEY`   | _(unset)_                   | Bearer token for the remote backend                                          |
-| `VLM_JUDGE_N_FRAMES`  | `12`                        | Frames sampled per episode                                                   |
-| `VLM_JUDGE_CACHE_DIR` | `outputs/vlm-judge/cache`   | SHA256-keyed result cache; empty disables disk cache                         |
+The canonical `result` does not contain `cached`: read that flag from GET episode cache status or the job-status target. Cache status can also expose an optional result, but it is not the canonical evidence/history response. Check evidence `applicability` (`current`, `stale` or `withdrawn`) and saved-input identity before using an outcome.
+
+Read the [backend environment example](../../../data-management/viewer/backend/.env.example) for runtime settings, `VLM_JUDGE_JOB_DIR`, `VLM_JUDGE_CAPACITY`, capacity scope and storage permissions. An empty `VLM_JUDGE_CACHE_DIR` disables only the fallback cache, not viewer per-dataset/snapshot caches. The [Storage and identity](#storage-and-identity) section distinguishes persistence from cache and export.
 
 ### Annotation Endpoints
 
@@ -295,7 +344,7 @@ The annotation panel exposes three structured surfaces in addition to free-form 
 
 ### Multi-camera selection
 
-Datasets that record multiple camera streams expose a camera selector in the annotation workspace header. Default selection is `episode.cameras[0]` (or the first key of `videoUrls` when `cameras` is empty). User selections persist for the current episode; switching to an episode that no longer contains the selected camera resets selection back to `cameras[0]`. Both video playback and `/frames/{idx}` thumbnail extraction follow the active camera.
+The annotation workspace supports multiple selected playback cameras. Read available controls from the current episode; selection is reconciled when media sources change. Video and frame extraction follow their selected sources. Judge `views` are separate saved-input configuration: playback selection does not prove which views a job evaluated.
 
 ### Language instruction (VLA annotation)
 
@@ -447,8 +496,8 @@ files behind a running server.
 
 After applying labels via API, refresh the browser and verify using Playwright:
 
-1. Navigate to the app: `browser_navigate` to `http://localhost:5173`.
-2. Wait for episode list to load: `browser_wait_for` with text like `"64 Episodes"`.
+1. Preserve unsaved drafts before refreshing. Navigate to the app using `navigate_page` or `browser_navigate` on the configured port.
+2. Wait for the episode list using the available provider and take a fresh accessible snapshot.
 3. Take a screenshot to confirm labels appear in the sidebar.
 4. Use label filter buttons in the sidebar to verify counts match expectations.
 5. Click individual episodes and scroll to the "Episode Labels" section to verify correct labels are applied.
@@ -457,42 +506,61 @@ After applying labels via API, refresh the browser and verify using Playwright:
 
 For individual episode review or correction:
 
-1. Click an episode in the sidebar (`aside li button` elements).
-2. Scroll to the "Edit Tools" / "Episode Labels" section using `browser_evaluate` with `scrollIntoView`.
-3. Toggle label buttons (SUCCESS, FAILURE, PARTIAL, or custom labels) — clicking a selected label removes it.
-4. Click "Save & Next Episode" to persist and continue, or "Save Episode" on the final episode.
+1. Click an episode button in the sidebar using the current snapshot.
+2. Scroll to "Episode Labels" through the provider or the agent's `scrollIntoView` example.
+3. Toggle requested labels (SUCCESS, FAILURE, PARTIAL or custom labels); clicking a selected label removes it.
+4. Click "Save Episode", wait for acknowledgment and independently GET the saved resources. Resolve partial saves and HTTP 412 before continuing.
+5. Use the separate "Next Episode" control after persistence is verified. Retain unrelated and unmounted drafts.
+
+Before judging, check saved-input readiness for every selected target and validation sample under the current source and principal. A clean active episode does not establish readiness elsewhere. Failed refreshes retain drafts and do not authorize work from stale acknowledgments. Interpret metadata warnings by source; HTTP 200, local-origin listings or provider availability do not prove Blob metadata synchronization.
 
 ## Frontend UI Structure
 
 The React app has these key areas for Playwright interaction:
 
-| Area             | Selector Pattern                  | Description                                     |
-|------------------|-----------------------------------|-------------------------------------------------|
-| Header           | `header`                          | Contains title and dataset selector dropdown    |
-| Dataset selector | `header select` or `header input` | Dropdown (multi-dataset) or text input (single) |
-| Episode sidebar  | `aside`                           | Scrollable episode list with selection state    |
-| Episode item     | `aside li button`                 | Clickable episode entry with index and metadata |
-| Main workspace   | `main`                            | Annotation workspace with frame viewer          |
-| Label filter     | Label filter component in sidebar | Filter episodes by annotation labels            |
+| Area               | Selector Pattern                                     | Description                                                 |
+|--------------------|------------------------------------------------------|-------------------------------------------------------------|
+| Dataset catalog    | Region "Dataset catalog", combobox "Filter datasets" | Browse/filter datasets; inspect stale warnings              |
+| Dataset disclosure | Button "Dataset", dialog "Select dataset"            | Choose current dataset entries                              |
+| Dataset batch      | Region "Dataset workspace" and its disclosure        | Targets, validation samples, approvals, jobs and withdrawal |
+| Episode sidebar    | Current episode button roles/names within `aside`    | Select actual episode IDs and label filters                 |
+| Main workspace     | `main`, Playback frame slider and camera controls    | Annotation and multi-camera playback                        |
+| Save/navigation    | "Save Episode", "Previous Episode", "Next Episode"   | Separate persistence/navigation with busy/status states     |
+| Analysis           | "Expand Episode Analysis", region "Judge assessment" | Episode judge controls when available                       |
+| Workspace return   | "Return to episode" when present                     | Return while preserving retained drafts                     |
+
+Use fresh roles/names, not fixed header selectors or heading-based clicks. Observe disabled, denied and checking-access states without enabling features merely to make controls appear. Check affected keyboard navigation, focus restoration, live-region announcements and narrow-layout reflow; visual inspection alone is not accessibility acceptance.
 
 ## Troubleshooting
 
-| Issue                                    | Solution                                                                                                                             |
-|------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| Backend fails to start                   | Recreate the locked environment with `cd backend && uv sync --frozen --python 3.12 --group dev --extra analysis --extra export`      |
-| Frontend shows "Loading..." indefinitely | Verify backend is healthy: `curl http://localhost:8000/health`                                                                        |
-| No datasets visible                      | Check `DATA_DIR` in `backend/.env` points to a directory with dataset subdirectories                                                  |
-| Port conflict                            | Set `BACKEND_PORT` or `FRONTEND_PORT` environment variables                                                                           |
-| CORS errors                              | Backend allows localhost ports 5173-5177; check the frontend port is in range                                                         |
-| Labels not persisted after restart       | Check the PUT response; resolve any HTTP 412 revision conflict, then verify the saved labels with GET                                 |
-| Playwright opens separate Chrome window  | Ensure `--headless` is in the Playwright MCP args in `.vscode/mcp.json`; restart the MCP server after changing                        |
-| Snapshot refs stale after navigation     | Always take a fresh `browser_snapshot` before clicking; refs change on page updates                                                   |
-| Slider not responding to Playwright      | Use `browser_evaluate` with native input value setter and dispatch `input` + `change` events                                          |
-| Sidebar not scrolling                    | Scroll the `aside ul` element directly via `browser_evaluate` with `element.scrollTop = N`                                            |
+| Issue                                    | Solution                                                                                                                        |
+|------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| Backend fails to start                   | Recreate the locked environment with `cd backend && uv sync --frozen --python 3.12 --group dev --extra analysis --extra export` |
+| Frontend shows "Loading..." indefinitely | Verify backend is healthy: `curl http://localhost:8000/health`                                                                  |
+| No datasets visible                      | Check `DATA_DIR` in `backend/.env` points to a directory with dataset subdirectories                                            |
+| Port conflict                            | Set `BACKEND_PORT` or `FRONTEND_PORT` environment variables                                                                     |
+| CORS errors                              | Backend allows localhost ports 5173-5177; check the frontend port is in range                                                   |
+| Labels not persisted after restart       | Check the PUT response; resolve any HTTP 412 revision conflict, then verify the saved labels with GET                           |
+| Playwright opens separate Chrome window  | For the MCP background workflow, use `--headless`; reconfigure/restart only with authority                                      |
+| Snapshot refs stale after navigation     | Take a fresh `read_page` or `browser_snapshot` before clicking                                                                  |
+| Slider not responding to automation      | Use the agent's native input setter fallback as a state probe, not keyboard acceptance                                          |
+| Sidebar not scrolling                    | Use the agent's `aside ul` scrolling example through the available evaluation tool                                              |
 
 ## VLM-as-Judge Workflow
 
-The VLM judge scores each episode with an outcome MCQ (success/fail with N-sample self-consistency), a GVL process reward (per-frame 0-100 progress + Spearman VOC), milestone decomposition, and failure-mode attribution. Both the dataviewer UI and the CLI under `evaluation/vlm_judge/` consume the same `JudgeService`, so cache hits and prompt versions stay aligned across surfaces.
+The VLM judge scores each episode with an outcome MCQ (success/fail with N-sample self-consistency), process reward (per-frame progress + Spearman VOC), milestone decomposition and failure-mode attribution. Viewer and CLI share evaluator code, not automatically storage or identity.
+
+### Storage and identity
+
+| Surface               | Purpose                                          | Boundary                                                                     |
+|-----------------------|--------------------------------------------------|------------------------------------------------------------------------------|
+| Inference cache       | Disposable optimization                          | Viewer jobs select per-dataset/snapshot caches independently of fallback     |
+| Durable jobs/evidence | Restart-safe lifecycle, approvals and provenance | Local job root or Azure dataset-container job store; source/principal scoped |
+| JSONL export          | Portable result export with run/result IDs       | Not a job store, approval or proof of viewer reuse                           |
+
+CLI local defaults use the dataset parent's `.curation/judge`; viewer local defaults use `DATA_DIR/.curation/judge`. Azure viewer jobs use the dataset container. Keep durable stores on persistent writable storage separate from scratch cache.
+
+Cross-client reuse requires matching canonical dataset/source, principal scope, saved author/revision/snapshot, media identity/windows and runtime configuration (model revision, prompt, views and scoring settings), plus access to the same canonical evidence store. Prove matching run/result and snapshot identity through a CLI-to-viewer evidence read. Matching model names, a cache badge or JSONL filename is insufficient.
 
 ### Enable the judge
 
@@ -511,81 +579,136 @@ VLM_JUDGE_CACHE_DIR=outputs/vlm-judge/cache
 ```
 
 > [!IMPORTANT]
-> Restart an owned backend after changing launch settings. Uvicorn `--reload` re-reads code, not env vars. The frontend reads `vlm_judge_enabled` from `GET /api/datasets/{id}/capabilities` before requesting an episode judgment.
+> Restart only an owned, authorized backend after changing launch settings. Code reload does not refresh environment variables. Require `vlm_judge_enabled` from capabilities before submission; do not enable the judge for read-only inspection. Approve downloads and remote transmission of frames/saved instructions before inference.
 
 ### Backends at a glance
 
 | Backend         | Use case                         | Notes                                                                           |
 |-----------------|----------------------------------|---------------------------------------------------------------------------------|
 | `echo`          | UI smoke / wiring tests          | Deterministic stub, no GPU, no network                                          |
-| `qwen3-vl`      | Local HF inference               | First call downloads weights; ~10 GB GPU for `Qwen3-VL-4B-Instruct` BF16        |
+| `qwen3-vl`      | Local HF inference               | Requires approved pinned weights and target GPU/runtime validation              |
 | `openai-compat` | vLLM / NVIDIA NIM / Azure OpenAI | Set `VLM_JUDGE_BASE_URL` (+ `VLM_JUDGE_API_KEY` if needed); identical code path |
 
 ### UI workflow (Trajectory tab)
 
-1. Open the dataviewer (`open_browser_page("http://localhost:5173")`).
-2. Pick a dataset, select an episode, switch to the **Trajectory** tab.
-3. The **VLM Judge** panel sits between **Episode Labels** and **Language Instructions**.
-4. Click **Run judge** → outcome badge, progress sparkline, VOC, optional milestones + failure mode appear. The result also lands on disk under `VLM_JUDGE_CACHE_DIR`.
-5. Re-visiting the same episode shows a `cached` badge. Click **Force fresh** to bypass the cache and re-run.
+1. Open or reuse the dataviewer page on the configured port.
+2. Choose a dataset, select an episode and switch to **Trajectory**.
+3. Expand **Episode Analysis** and locate **Judge assessment**. A "VLM Judge" heading may instead identify an unavailable state.
+4. Observe checking, disabled and denied states. If authorized and ready, save edits, verify read-back and resolve the saved snapshot before clicking **Run judge**.
+5. Track the durable job to terminal status, then read canonical evidence/applicability before interpreting the outcome badge, progress, VOC, milestones and failure mode.
+6. **Force fresh** bypasses inference cache, not saved-input or approval checks. Judge-only evidence does not apply labels.
 
 ### Playwright UI verification
 
-Use the same MCP tooling as the rest of the skill, but route through the new panel selectors. After a `browser_snapshot`, click using element refs from the snapshot. As a JS-fallback when the snapshot lacks button refs:
+Use a fresh `read_page` or `browser_snapshot`, then click current accessible controls. With `run_playwright_code`, a locator-based pattern is:
 
 ```javascript
-browser_evaluate: () => {
-  const headers = Array.from(document.querySelectorAll('h3'))
-  const judge = headers.find((el) => el.textContent?.includes('VLM Judge'))
-  judge?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  const run = Array.from(judge?.parentElement?.querySelectorAll('button') ?? [])
-    .find((b) => /run judge|re-evaluate/i.test(b.textContent ?? ''))
-  run?.click()
-  return run ? 'clicked' : 'panel not visible'
-}
+const assessment = page.getByRole('region', { name: 'Judge assessment' });
+await assessment.scrollIntoViewIfNeeded();
+await assessment.getByRole('button', { name: 'Run judge', exact: true }).click();
 ```
 
-To assert the result rendered, wait for the outcome badge text:
+Use that pattern only when submission is authorized and the control is available. Do not force clicks or use an unavailable-state heading to find the action. After terminal status and evidence read-back, wait for the evidence's outcome text through the provider:
 
 ```text
-browser_wait_for(text="SUCCESS")  # or "FAILURE", "Inconclusive"
+Wait for SUCCESS, FAILURE or Inconclusive, matching the retrieved evidence.
 ```
 
 ### Direct API calls (curl / Python)
 
-CSRF must be honored on POST. The frontend hook does this transparently; for ad-hoc shell:
+Authenticated POST requires authentication and CSRF headers; the frontend hook handles those. Keep credentials/cookies outside Git and model-visible output. The example below uses loopback-only development with `DATAVIEWER_AUTH_DISABLED=true`, one actual inventory ID and an approved saved instruction:
 
 ```bash
-CSRF=$(curl -s http://localhost:8000/api/csrf-token -c /tmp/dv-cookie | jq -r .csrf_token)
-
-# Cache lookup (no inference)
-curl -s http://localhost:8000/api/datasets/leisaac-pick-orange/episodes/0/judge | jq
-
-# Run the judge (cache-first)
-curl -s -X POST http://localhost:8000/api/datasets/leisaac-pick-orange/episodes/0/judge \
-  -H "Content-Type: application/json" -H "X-CSRF-Token: $CSRF" -b /tmp/dv-cookie \
-  -d '{"force": false}' | jq
+API=http://localhost:8000
+DATASET_ID='<dataset-id>'
+EPISODE_ID='<actual-episode-id>'
+EPISODE_URL="$API/api/datasets/$DATASET_ID/episodes/$EPISODE_ID/judge"
+SNAPSHOT_ID=$(curl -fsS "$EPISODE_URL/snapshot" | jq -r .snapshot_id)
+REQUEST_ID='<stable-request-id>'
+curl -fsS "$EPISODE_URL" | jq
+curl -i -fsS -X POST "$EPISODE_URL" \
+  -H 'Content-Type: application/json' -H "Idempotency-Key: $REQUEST_ID" \
+  -d "$(jq -n --arg snapshot "$SNAPSHOT_ID" '{snapshot_id: $snapshot, force: false}')"
 ```
 
-### Bulk evaluation via the CLI (no dataviewer needed)
+Read `Location` and `Retry-After` from acceptance, poll that location through the client's polling facility until terminal and retrieve canonical evidence separately:
 
 ```bash
-# Single dataset
-evaluation/vlm_judge/scripts/evaluate-leisaac-pick-orange.sh --limit 5
-
-# Generic
-python -m evaluation.vlm_judge.run \
-  --dataset datasets/cnc_lerobot \
-  --views observation.images.color \
-  --backend qwen3-vl \
-  --model-id Qwen/Qwen3-VL-4B-Instruct \
-  --output outputs/vlm-judge/cnc_lerobot.jsonl \
-  --limit 5
-
-# Policy-rollout MP4s (e.g. leisaac-tests/pickup-orange/)
-evaluation/vlm_judge/scripts/evaluate-policy-rollouts.sh
+JOB_ID='<accepted-job-id>'
+curl -fsS "$API/api/judge/jobs/$JOB_ID" | jq
+curl -fsS --get "$API/api/judge/results" \
+  --data-urlencode "dataset_id=$DATASET_ID" \
+  --data-urlencode "episode_index=$EPISODE_ID" | jq
 ```
 
-The CLI writes a JSONL with the same composite schema as the API, keyed on the same SHA256 cache, so a CLI run primes the dataviewer's cache (and vice versa).
+Paginate status/results as needed. `404` indicates missing/inaccessible resources; `422` indicates invalid input including instruction overrides; `409` requires saved-state/configuration reconciliation. Never report `202` as inference success.
+
+### Single-episode CLI smoke (no dataviewer needed)
+
+Use the existing frozen root evaluator environment. Set `DATASET` to an approved isolated fixture, `EPISODE_ID` to one actual inventory ID, and `JOB_DIR`/`OUTPUT` to isolated paths. Commands write durable state and exports; do not test on user datasets without permission.
+
+```bash
+uv run --frozen python -m evaluation.vlm_judge.run \
+  --dataset "$DATASET" --indices "$EPISODE_ID" \
+  --single --mode judge --backend echo --n-frames 6 \
+  --job-dir "$JOB_DIR" --request-id "$REQUEST_ID" --output "$OUTPUT"
+```
+
+Inspect terminal status and use `--operation results --episode-index "$EPISODE_ID"` with matching dataset/principal/store arguments to retrieve evidence. Echo proves wiring, not model quality or GPU readiness. Never issue repeated single submissions to bypass dataset approval.
+
+### Bulk evaluation via the CLI
+
+1. Enumerate actual target and sample IDs from dataset metadata, not a count-derived range. HTTP users can paginate `/api/judge/episodes`, retaining its inventory revision across pages.
+2. Save human sample annotations. Resolve saved `annotation_author_id`, `annotation_revision` and `snapshot_id` with the matching saved-input resolver. Use viewer snapshot references for CLI only after proving source/principal identity equivalence. Store a JSON object keyed by actual sample episode ID; each value contains exactly those three non-empty fields. Drafts or guessed revisions are not valid references.
+3. Define `SAMPLE_IDS`/`TARGET_IDS` as comma-separated actual IDs, `SAMPLE_REFERENCES` as the saved JSON path and `PRINCIPAL_ID` as the matching scope. Keep shared runtime arguments unchanged throughout sample, approval and batch. For real inference, replace echo with the approved backend and pinned model/runtime before sampling; an echo approval does not approve another runtime.
+
+```bash
+JUDGE_ARGS=(--dataset "$DATASET" --job-dir "$JOB_DIR" \
+  --principal-scope-id "$PRINCIPAL_ID" --backend echo --n-frames 6)
+uv run --frozen python -m evaluation.vlm_judge.run "${JUDGE_ARGS[@]}" \
+  --mode sample --indices "$SAMPLE_IDS" --sample-references "$SAMPLE_REFERENCES" \
+  --request-id "$SAMPLE_REQUEST_ID" --output "$SAMPLE_OUTPUT"
+```
+
+Read the returned sample job ID, terminal status and evidence for each sample. Compare with saved human outcomes and review disagreements/inconclusive evidence. Only after explicit review, approve the sample job. Add `--acknowledge-exceptions` only when the reviewer explicitly accepts those exceptions.
+
+```bash
+uv run --frozen python -m evaluation.vlm_judge.run "${JUDGE_ARGS[@]}" \
+  --operation approve --job-id "$SAMPLE_JOB_ID"
+```
+
+Read the returned approval `id` and submit the selected batch. Judge mode produces evidence only; `--mode judge-and-label` additionally requires explicit label-write authority.
+
+```bash
+uv run --frozen python -m evaluation.vlm_judge.run "${JUDGE_ARGS[@]}" \
+  --mode judge --indices "$TARGET_IDS" --approval-id "$APPROVAL_ID" \
+  --request-id "$BATCH_REQUEST_ID" --output "$BATCH_OUTPUT"
+```
+
+If approval is stale, stop, refresh saved inputs/configuration, rerun samples and review a new approval. Do not force or fan out single submissions. HTTP follows the same sequence: sample POST `/api/judge/jobs` with `episode_indices`, `samples` and `snapshot_ids`, review evidence, POST `/jobs/{id}/approve`, then submit judge/judge-and-label with `approval_id` and current snapshots. Dataset submissions require `Idempotency-Key`.
+
+Dataset/policy wrapper scripts under `evaluation/vlm_judge/scripts/` are conveniences, not approval bypasses. Inspect their accepted lifecycle arguments before use; fall back to the generic CLI when a wrapper cannot carry the required selection, references or approval.
+
+### Status, cancellation and restart recovery
+
+Use the same dataset/principal/job root with `--operation status --job-id`, `--operation cancel --job-id` or `--operation retry --job-id`. Status describes saved work, not worker health. Cancellation fences queued/running work and queued application; saved evidence remains. Retry queues eligible failed/cancelled targets in partial, failed or cancelled jobs; the worker revalidates saved inputs/approval during execution. Withdrawn jobs cannot be retried.
+
+Submit/retry normally runs a local worker until terminal and exports available results. `--detach` returns acceptance only and requires a matching `--operation worker` process. Client interruption is not cancellation. After restart, inspect the existing job before resubmitting; retain durable storage and allow worker lease recovery rather than deleting jobs. Workers sharing inference capacity must use the same store, capacity limit and scope.
+
+### Apply or withdraw AI labels
+
+After reviewing evidence and obtaining label-write authority, use HTTP `/jobs/{id}/apply` (optionally selected `episode_indices`) or CLI `--operation apply --job-id`. Application has separate counts/errors and conditional persistence: verify saved labels and provenance independently. Judge-only success is not applied-label success.
+
+For requested withdrawal, obtain CLI `--operation reset-preview` or HTTP `/resets/preview`; review affected AI-applied labels and conflicts, then confirm that exact preview with `--operation reset-confirm --preview-id` or HTTP `/resets`. Read `reset-status` and use `reset-retry` for eligible failures. A stale/changed preview requires a new preview and confirmation.
+
+Withdrawal selectively removes AI-applied values while preserving human edits and retained evidence/history; do not clear all labels or delete cache/job files as a substitute.
+
+### Verification and reporting
+
+Use isolated echo cases for single acceptance/polling/evidence, approved batch, stale approval rejection and preview-bound withdrawal preserving human edits/history. Prove CLI-to-viewer reuse with matching canonical evidence identity. Source inspection alone does not claim these cases executed.
+
+For behavior changes, follow scoped viewer guidance: failing-first tests, focused grouped development checks and configured gates after coherent changes. Use frozen dependencies and isolated storage, without changing user `.env` or restarting user-owned services for evidence.
+
+Report terminal judged/applied/error counts, evidence applicability, runtime/model/prompt identity and output paths. Separate unit/static, real-HTTP, browser collection, native browser execution, simulation, assistive-technology and target GPU evidence. Missing prerequisites remain explicit gaps; prior passing counts or browser collection do not close unexecuted acceptance gates.
 
 > Brought to you by physical-ai-toolchain

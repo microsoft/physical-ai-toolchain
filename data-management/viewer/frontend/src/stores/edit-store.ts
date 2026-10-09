@@ -147,6 +147,8 @@ interface EditActions {
   getEditOperations: () => EpisodeEditOperations | null
   saveEpisodeDraft: () => void
   hydrateSavedEdits: (baseline: SavedEditBaseline) => boolean
+  /** Keep a recovered draft on the latest saved revision, or discard it for the saved edits */
+  resolveRecoveredEdits: (baseline: SavedEditBaseline, choice: 'keep' | 'discard') => void
   acknowledgeSave: (submitted: SavedEditBaseline, saved: SavedEditBaseline) => void
   /** Reset to original state */
   resetEdits: () => void
@@ -177,6 +179,17 @@ const initialState: EditState = {
 
 function getEpisodeDraftKey(datasetId: string, episodeIndex: number, principalScopeId: string) {
   return JSON.stringify([principalScopeId, datasetId, episodeIndex])
+}
+
+function sameEditScope(
+  state: Pick<EditState, 'datasetId' | 'episodeIndex' | 'principalScopeId'>,
+  baseline: SavedEditBaseline,
+): boolean {
+  return (
+    state.datasetId === baseline.operations.datasetId &&
+    state.episodeIndex === baseline.operations.episodeIndex &&
+    state.principalScopeId === baseline.principalScopeId
+  )
 }
 
 function sameEditRevision(first: SavedEditBaseline, second: SavedEditBaseline): boolean {
@@ -267,6 +280,31 @@ export const useEditStore = create<EditStore>()(
       const transformActions = createEditStoreTransformActions<EditStore>(updateState)
       const frameActions = createEditStoreFrameActions<EditStore>(updateState)
       const subtaskActions = createEditStoreSubtaskActions<EditStore>(updateState, get)
+
+      const adoptServerEdits = (baseline: SavedEditBaseline) => {
+        const snapshot = structuredClone(baseline)
+        const operations = buildEditStateFromOperations(snapshot.operations)
+        set(
+          {
+            ...operations,
+            serverBaseline: snapshot,
+            originalState: buildOriginalEditState(operations),
+            isDirty: false,
+            validationErrors: validateSegments(operations.subtasks),
+          },
+          false,
+          'hydrateSavedEdits',
+        )
+        persistCurrentDraft()
+      }
+
+      const rebaseRecoveredEdits = (baseline: SavedEditBaseline) => {
+        const snapshot = structuredClone(baseline)
+        updateState('rebaseRecoveredEdits', () => ({
+          serverBaseline: snapshot,
+          originalState: buildEditStateFromOperations(snapshot.operations),
+        }))
+      }
 
       return {
         ...initialState,
@@ -399,34 +437,47 @@ export const useEditStore = create<EditStore>()(
 
         hydrateSavedEdits: (baseline) => {
           const current = get()
-          if (
-            current.datasetId !== baseline.operations.datasetId ||
-            current.episodeIndex !== baseline.operations.episodeIndex ||
-            current.principalScopeId !== baseline.principalScopeId ||
-            !current.draftHydrated ||
-            current.draftError ||
-            current.isDirty ||
-            (current.serverBaseline && !sameEditRevision(current.serverBaseline, baseline))
-          ) {
+          // A recovered draft based on an older revision is safe to replace when it already equals the server.
+          const matchesServer =
+            JSON.stringify(buildEditOperations(current)) ===
+            JSON.stringify(
+              buildEditOperations({
+                ...current,
+                ...buildEditStateFromOperations(baseline.operations),
+              }),
+            )
+          if (!sameEditScope(current, baseline) || !current.draftHydrated || current.draftError) {
             recordDiagnosticEvent('persistence', 'edit-server-hydration-skipped', {
-              reason: 'scope-or-draft-changed',
+              reason: 'scope-changed',
             })
             return false
           }
-          const snapshot = structuredClone(baseline)
-          const operations = buildEditStateFromOperations(snapshot.operations)
-          set(
-            {
-              ...operations,
-              serverBaseline: snapshot,
-              originalState: buildOriginalEditState(operations),
-              isDirty: false,
-              validationErrors: validateSegments(operations.subtasks),
-            },
-            false,
-            'hydrateSavedEdits',
-          )
-          return true
+          if (
+            matchesServer ||
+            (!current.isDirty &&
+              (!current.serverBaseline || sameEditRevision(current.serverBaseline, baseline)))
+          ) {
+            adoptServerEdits(baseline)
+            return true
+          }
+          // Edits made before any saved descriptor existed cannot overwrite server work.
+          if (!current.serverBaseline && baseline.etag === null) {
+            rebaseRecoveredEdits(baseline)
+            return true
+          }
+          recordDiagnosticEvent('persistence', 'edit-server-hydration-skipped', {
+            reason: current.serverBaseline
+              ? 'recovered-draft-revision-changed'
+              : 'recovered-draft-unversioned',
+          })
+          return false
+        },
+
+        resolveRecoveredEdits: (baseline, choice) => {
+          if (!sameEditScope(get(), baseline)) return
+          recordDiagnosticEvent('persistence', 'edit-recovered-draft-resolved', { choice })
+          if (choice === 'keep') rebaseRecoveredEdits(baseline)
+          else adoptServerEdits(baseline)
         },
 
         acknowledgeSave: (submitted, saved) => {

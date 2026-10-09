@@ -14,6 +14,7 @@ import { useEffect } from 'react'
 import { usePrincipalContext } from '@/hooks/use-principal-context'
 import {
   fetchJudgeEvidence,
+  fetchJudgeJob,
   fetchVlmJudgeSnapshot,
   fetchVlmJudgeStatus,
   mutateJudgeDataset,
@@ -24,7 +25,7 @@ import { recordDiagnosticEvent } from '@/lib/playback-diagnostics'
 import type { PrincipalContext } from '@/lib/principal-context'
 import { useDatasetStore } from '@/stores/dataset-store'
 import { useEpisodeStore } from '@/stores/episode-store'
-import type { VlmJudgeResult, VlmJudgeRunOptions, VlmJudgeStatus } from '@/types'
+import type { JudgeJob, VlmJudgeResult, VlmJudgeRunOptions, VlmJudgeStatus } from '@/types'
 
 export const vlmJudgeKeys = {
   all: ['vlm-judge'] as const,
@@ -119,7 +120,16 @@ export function useApplyJudgeResult() {
       })
       if (scope() !== capturedScope)
         throw new Error('Application context changed. Refresh saved evidence.')
-      return result
+      // The worker writes labels after the 202; refreshing earlier leaves a stale label revision.
+      let job = result as JudgeJob
+      for (let attempt = 0; job.status === 'queued' && attempt < 60; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        job = await fetchJudgeJob(runId)
+      }
+      if (job.status === 'queued')
+        throw new Error('the server has not applied it yet. Check the dataset job list.')
+      if (job.applicationErrors) throw new Error('the server could not write the label.')
+      return job
     },
     onSuccess: (_result, { datasetId }) => {
       void client.invalidateQueries({ queryKey: ['judge-dataset', datasetId] })

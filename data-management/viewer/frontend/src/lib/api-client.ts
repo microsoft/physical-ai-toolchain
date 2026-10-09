@@ -791,9 +791,11 @@ export function mutateJudgeDataset(
         ? { episode_indices: action.indices }
         : action.kind === 'confirm-reset'
           ? { dataset_id: datasetId, preview_id: action.previewId }
-          : 'jobId' in action
-            ? {}
-            : { dataset_id: datasetId }
+          : action.kind === 'preview-reset'
+            ? { dataset_id: datasetId, include_unlisted_runs: action.includeUnlistedRuns ?? false }
+            : 'jobId' in action
+              ? {}
+              : { dataset_id: datasetId }
   return apiRequest<
     | JudgeJob
     | import('@/types/vlm-judge').JudgeApproval

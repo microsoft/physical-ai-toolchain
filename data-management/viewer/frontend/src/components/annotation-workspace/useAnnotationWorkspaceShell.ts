@@ -365,6 +365,7 @@ export function useAnnotationWorkspaceShell({
     displayFilter: media.displayFilter,
     exportDialogOpen,
     editPersistenceError: savedEdits.persistenceError,
+    resolveRecoveredEdits: savedEdits.resolveRecoveredEdits,
     frameImageUrl: media.frameImageUrl,
     frameImageUrls: media.frameImageUrls,
     globalTransform,

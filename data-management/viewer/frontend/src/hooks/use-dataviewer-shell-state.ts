@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { warmCache } from '@/lib/api-client'
-import { hasPendingWorkspaceChanges } from '@/lib/episode-readiness'
+import { hasPendingWorkspaceChanges, pendingWorkspaceChanges } from '@/lib/episode-readiness'
 import {
   disableDiagnostics,
   enableDiagnostics,
   isDiagnosticsEnabled,
 } from '@/lib/playback-diagnostics'
 import { queryClient } from '@/lib/query-client'
-import { useDatasetStore } from '@/stores'
+import { useDatasetStore, useEpisodeStore } from '@/stores'
 import type { DatasetInfo, EpisodeMeta } from '@/types'
 
 interface UseDataviewerShellStateOptions {
@@ -16,11 +16,15 @@ interface UseDataviewerShellStateOptions {
   episodes?: EpisodeMeta[]
 }
 
-function allowNavigation(): boolean {
+function allowNavigation(scope: 'dataset' | 'episode' = 'dataset'): boolean {
+  const pending = pendingWorkspaceChanges(
+    queryClient,
+    scope === 'episode' ? { episodeIndex: useEpisodeStore.getState().currentIndex } : {},
+  )
   return (
-    !hasPendingWorkspaceChanges(queryClient) ||
+    pending.length === 0 ||
     globalThis.confirm?.(
-      'Leave with unsaved episode changes? Saved server state will not be updated.',
+      `Leave with unsaved episode changes (${pending.join('; ')})? Saved server state will not be updated.`,
     ) === true
   )
 }
@@ -89,17 +93,17 @@ export function useDataviewerShellState({ datasets, episodes }: UseDataviewerShe
   }, [])
 
   const setSelectedEpisode = useCallback((episodeIndex: number) => {
-    if (!allowNavigation()) return
+    if (!allowNavigation('episode')) return
     setSelectedEpisodeState(episodeIndex)
   }, [])
 
   const handlePreviousEpisode = useCallback(() => {
-    if (!allowNavigation()) return
+    if (!allowNavigation('episode')) return
     setSelectedEpisodeState((currentEpisode) => Math.max(currentEpisode - 1, 0))
   }, [])
 
   const handleNextEpisode = useCallback(() => {
-    if (totalEpisodes === 0 || !allowNavigation()) {
+    if (totalEpisodes === 0 || !allowNavigation('episode')) {
       return
     }
 

@@ -793,7 +793,7 @@ describe('judge JSON mutations', () => {
       { acknowledge_exceptions: true },
     ],
     [{ kind: 'cancel', jobId: 'job-1' }, {}],
-    [{ kind: 'preview-reset' }, { dataset_id: 'ds-1' }],
+    [{ kind: 'preview-reset' }, { dataset_id: 'ds-1', include_unlisted_runs: false }],
   ] as const)('sends %o as an application/json object', async (action, body) => {
     mockMutationFetch(jsonResponse({ id: 'job-1' }, 202))
     await mutateJudgeDataset('ds-1', action as never)

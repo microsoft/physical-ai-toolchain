@@ -6,7 +6,45 @@ import { useEpisodeReadiness } from '@/hooks/use-episode-readiness'
 import { usePrincipalContext } from '@/hooks/use-principal-context'
 import { useJudgeDataset, useJudgeSamples, useVlmJudgeBatch } from '@/hooks/use-vlm-judge-batch'
 import { useEpisodeStore } from '@/stores'
-import type { JudgeResetPreview, JudgeSampleReference } from '@/types/vlm-judge'
+import type {
+  JudgeResetPreview,
+  JudgeSampleReference,
+  JudgeWithdrawalField,
+} from '@/types/vlm-judge'
+
+function describeWithdrawal(field: JudgeWithdrawalField, completed: boolean): string {
+  const runs = (ids?: string[]) => (ids?.length ? ` Runs: ${ids.join(', ')}.` : '')
+  if (field.disposition === 'removable_fields')
+    return `${completed ? 'Removed' : 'Will be removed'}: AI value.${runs(field.runIds)}`
+  if (field.disposition === 'preserved_human') return 'Kept: a person edited this value.'
+  if (field.reason === 'legacy_value_restored')
+    return `Kept: the value existed before AI labeling; only the AI contribution is withdrawn.${runs(field.runIds)}`
+  if (field.disposition === 'legacy_unknown') return 'Kept: origin unknown (saved before tracking).'
+  if (field.reason === 'unlisted_machine_run')
+    return `Not removed: written by AI runs missing from this job history.${runs(field.blockingRunIds)}`
+  if (field.reason === 'multiple_human_authors')
+    return `Not removed: ${field.humanAuthors ?? 'several'} people edited this value; edit the episode labels directly.`
+  return 'Not removed: ownership could not be resolved.'
+}
+
+function WithdrawalFields({
+  fields,
+  completed,
+}: {
+  fields: JudgeWithdrawalField[]
+  completed: boolean
+}) {
+  return (
+    <ul className="max-h-48 space-y-1 overflow-y-auto text-sm">
+      {fields.map((field) => (
+        <li key={`${field.episodeIndex}:${field.field}`} className="break-words">
+          Episode {field.episodeIndex}, <span>{field.field}</span>:{' '}
+          {describeWithdrawal(field, completed)}
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 interface DatasetWorkspaceProps {
   datasetId: string
@@ -72,7 +110,10 @@ function DatasetWorkspaceContent({
   const busy = batch.isPending || workspace.isPending
   const canMutate = enabled && !workspace.denied
   const resetStatus = workspace.reset.data?.status
-  const resetBlocked = ['running', 'partial', 'conflicted'].includes(resetStatus ?? '')
+  const resetPublished = workspace.reset.data?.resources?.[0]?.status === 'succeeded'
+  const resetBlocked =
+    ['running', 'partial'].includes(resetStatus ?? '') ||
+    (resetStatus === 'conflicted' && !resetPublished)
   const approved = workspace.approvals.data?.items.find(
     (approval) => approval.id === approvalId && approval.current,
   )
@@ -148,11 +189,11 @@ function DatasetWorkspaceContent({
       })
       .catch(() => undefined)
   }
-  const previewReset = () => {
+  const previewReset = (includeUnlistedRuns = false) => {
     setPreview(null)
     setAcknowledgeReset(false)
     void workspace
-      .act({ kind: 'preview-reset' })
+      .act({ kind: 'preview-reset', includeUnlistedRuns })
       .then((result) => {
         if ('summary' in result) setPreview(result)
       })
@@ -535,7 +576,11 @@ function DatasetWorkspaceContent({
             </section>
             <section aria-label="Remove AI-applied labels" className="space-y-3 border-t pt-4">
               <h3 className="font-semibold">Remove AI-applied labels</h3>
-              <Button variant="outline" disabled={busy || !canMutate} onClick={previewReset}>
+              <Button
+                variant="outline"
+                disabled={busy || !canMutate}
+                onClick={() => previewReset()}
+              >
                 Preview label removal
               </Button>
               {preview && (
@@ -566,14 +611,23 @@ function DatasetWorkspaceContent({
                       <dd>{preview.summary.episodes}</dd>
                     </div>
                   </dl>
-                  <ul className="max-h-48 overflow-y-auto text-sm">
-                    {preview.summary.fields.map((field) => (
-                      <li key={`${field.episodeIndex}:${field.field}`}>
-                        Episode {field.episodeIndex}: <span>{field.field}</span> (
-                        {field.disposition})
-                      </li>
-                    ))}
-                  </ul>
+                  <WithdrawalFields fields={preview.summary.fields} completed={false} />
+                  {(preview.summary.unlistedRunIds?.length ?? 0) > 0 && (
+                    <div className="space-y-2 text-sm">
+                      <p>
+                        AI output from {preview.summary.unlistedRunIds!.length} run(s) is not in
+                        this job history, for example after the job directory changed:{' '}
+                        {preview.summary.unlistedRunIds!.join(', ')}.
+                      </p>
+                      <Button
+                        variant="outline"
+                        disabled={busy || !canMutate}
+                        onClick={() => previewReset(true)}
+                      >
+                        Preview including missing runs
+                      </Button>
+                    </div>
+                  )}
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -609,10 +663,25 @@ function DatasetWorkspaceContent({
                   Retry label removal
                 </Button>
               )}
-              {resetStatus === 'conflicted' && (
-                <p role="alert">
-                  Label removal has conflicts. Review saved fields and create a new preview.
-                </p>
+              {resetStatus === 'conflicted' && workspace.reset.data && (
+                <div role="alert" className="space-y-2 text-sm">
+                  <p>
+                    {resetPublished
+                      ? `Label removal finished with conflicts: ${workspace.reset.data.summary.removableFields} AI value(s) were removed and ${workspace.reset.data.summary.conflicts} were left unchanged.`
+                      : 'Labels changed after the preview, so nothing was removed. Create a new preview.'}
+                  </p>
+                  {resetPublished && (
+                    <WithdrawalFields
+                      fields={workspace.reset.data.summary.fields.filter(
+                        (field) => field.disposition === 'conflicts',
+                      )}
+                      completed
+                    />
+                  )}
+                </div>
+              )}
+              {resetStatus === 'succeeded' && workspace.reset.data && !preview && (
+                <WithdrawalFields fields={workspace.reset.data.summary.fields} completed />
               )}
             </section>
           </>
