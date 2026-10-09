@@ -12,7 +12,7 @@ from collections.abc import Mapping
 
 from ..models.annotations import EpisodeAnnotationFile
 from .base import RevisionConflictError, StorageAdapter, StorageError, VersionedValue
-from .paths import dataset_id_to_blob_prefix
+from .paths import dataset_id_to_blob_prefix, resource_directory
 from .serializers import DateTimeEncoder
 
 # Azure SDK imports are optional - only required when using this adapter
@@ -106,10 +106,10 @@ class AzureBlobStorageAdapter(StorageAdapter):
 
         return self._client
 
-    def _get_blob_path(self, dataset_id: str, episode_index: int) -> str:
+    def _get_blob_path(self, dataset_id: str, episode_index: int, resource_scope: str | None = None) -> str:
         """Get the blob path for an episode's annotations. Resolves -- to /."""
         blob_prefix = dataset_id_to_blob_prefix(dataset_id)
-        return f"{blob_prefix}/annotations/episodes/episode_{episode_index:06d}.json"
+        return f"{blob_prefix}/annotations/{resource_directory(resource_scope)}/episode_{episode_index:06d}.json"
 
     @staticmethod
     def _fallback_etag(content: bytes) -> str:
@@ -162,9 +162,11 @@ class AzureBlobStorageAdapter(StorageAdapter):
         self,
         dataset_id: str,
         episode_index: int,
+        *,
+        resource_scope: str | None = None,
     ) -> VersionedValue[EpisodeAnnotationFile]:
         """Retrieve an annotation with its Azure ETag."""
-        blob_path = self._get_blob_path(dataset_id, episode_index)
+        blob_path = self._get_blob_path(dataset_id, episode_index, resource_scope)
         try:
             client = await self._get_client()
             blob_client = client.get_container_client(self.container_name).get_blob_client(blob_path)
@@ -196,6 +198,7 @@ class AzureBlobStorageAdapter(StorageAdapter):
         episode_index: int,
         annotation: EpisodeAnnotationFile,
         *,
+        resource_scope: str | None = None,
         if_match: str | None = None,
         if_none_match: bool = False,
     ) -> str:
@@ -212,7 +215,7 @@ class AzureBlobStorageAdapter(StorageAdapter):
         Raises:
             StorageError: If the save operation fails.
         """
-        blob_path = self._get_blob_path(dataset_id, episode_index)
+        blob_path = self._get_blob_path(dataset_id, episode_index, resource_scope)
 
         try:
             client = await self._get_client()
@@ -240,7 +243,9 @@ class AzureBlobStorageAdapter(StorageAdapter):
             return self._response_etag(result, self._fallback_etag(content))
 
         except HttpResponseError as e:
-            if e.status_code == 412:
+            if e.status_code == 412 or (
+                if_none_match and e.status_code == 409 and getattr(e, "error_code", None) == "BlobAlreadyExists"
+            ):
                 response = getattr(e, "response", None)
                 headers = getattr(response, "headers", {})
                 current_etag = headers.get("ETag") if headers else None

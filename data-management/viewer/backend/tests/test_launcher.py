@@ -153,6 +153,24 @@ def _option_value(args: list[str], option: str) -> str | None:
     return args[args.index(option) + 1] if option in args else None
 
 
+@pytest.mark.parametrize(("backend", "extra"), [("qwen3-vl", "qwen3-vl"), ("openai-compat", "openai")])
+def test_judge_runtime_uses_frozen_evaluator_profile(
+    launcher: Path, monkeypatch: pytest.MonkeyPatch, backend: str, extra: str
+) -> None:
+    monkeypatch.setenv("VLM_JUDGE_ENABLED", "true")
+    monkeypatch.setenv("VLM_JUDGE_BACKEND", backend)
+    result = subprocess.run(
+        ["bash", str(launcher), "--backend"], capture_output=True, text=True, timeout=10, check=False
+    )
+    assert result.returncode == 23, result.stdout + result.stderr
+    calls = [shlex.split(line) for line in (launcher.parent / "backend" / "uv-calls.txt").read_text().splitlines()]
+    assert len(calls) == 2
+    assert all(args[0] == "sync" and "--frozen" in args and "--inexact" in args for args in calls)
+    assert "vlm-judge" not in calls[0]
+    assert _option_value(calls[1], "--extra") == extra
+    assert _option_value(calls[1], "--project") == str(launcher.parents[2] / "evaluation" / "vlm_judge")
+
+
 @pytest.mark.parametrize(("log_level", "expected_level"), [(None, "info"), ("debug", "debug")])
 def test_backend_runs_on_loopback_with_logging_config(
     launcher: Path, monkeypatch: pytest.MonkeyPatch, log_level: str | None, expected_level: str

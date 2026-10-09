@@ -106,6 +106,15 @@ class AppConfig:
     vlm_judge_cache_dir: str | None = None
     """Directory for the SHA256-keyed result cache; None disables disk cache."""
 
+    vlm_judge_job_dir: str | None = None
+    """Shared durable local job root; defaults to DATA_DIR/.curation/judge."""
+
+    vlm_judge_capacity: int = 1
+    """Shared inference capacity, not a per-replica multiplier."""
+
+    vlm_judge_capacity_scope: str = "configured-inference-device"
+    """Common ownership scope for workers sharing the same inference device."""
+
 
 def load_config(env_path: Path | None = None) -> AppConfig:
     """
@@ -181,6 +190,9 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         vlm_judge_n_frames=vlm_judge_n_frames,
         vlm_judge_process_method=vlm_judge_process_method,
         vlm_judge_cache_dir=vlm_judge_cache_dir,
+        vlm_judge_job_dir=os.environ.get("VLM_JUDGE_JOB_DIR") or None,
+        vlm_judge_capacity=_positive_int_env("VLM_JUDGE_CAPACITY", 1),
+        vlm_judge_capacity_scope=os.environ.get("VLM_JUDGE_CAPACITY_SCOPE", "configured-inference-device"),
     )
 
 

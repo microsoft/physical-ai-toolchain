@@ -6,6 +6,12 @@ and annotation services mocked out.
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
+from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -29,7 +35,7 @@ from src.api.models.annotations import (
     TrajectoryQualityMetrics,
 )
 from src.api.models.datasources import DatasetInfo, EpisodeData, EpisodeMeta
-from src.api.storage import RevisionConflictError, VersionedValue
+from src.api.storage import LocalStorageAdapter, RevisionConflictError, StorageError, VersionedValue
 
 
 def _make_dataset(dataset_id: str = "ds-1", total_episodes: int = 10) -> DatasetInfo:
@@ -99,9 +105,229 @@ def override_services():
         app.dependency_overrides.pop(require_principal_context, None)
 
 
+@pytest.fixture
+def real_edit_services(accessibility_dataset_path: Path, tmp_path: Path) -> Iterator[dict[str, str]]:
+    from src.api.main import app
+    from src.api.services.annotation_service import AnnotationService, get_annotation_service
+    from src.api.services.dataset_service import DatasetService, get_dataset_service
+
+    datasets = DatasetService(base_path=str(accessibility_dataset_path), episode_cache_capacity=0)
+    annotations = AnnotationService(base_path=str(tmp_path))
+    principal = {"scope_id": "author-a"}
+    app.dependency_overrides[get_dataset_service] = lambda: datasets
+    app.dependency_overrides[get_annotation_service] = lambda: annotations
+    app.dependency_overrides[require_principal_context] = lambda: PrincipalContext(
+        scope_id=principal["scope_id"],
+        auth_mode="azure_ad",
+    )
+    try:
+        yield principal
+    finally:
+        app.dependency_overrides.pop(get_dataset_service, None)
+        app.dependency_overrides.pop(get_annotation_service, None)
+        app.dependency_overrides.pop(require_principal_context, None)
+
+
+def test_given_cached_episode_when_source_replaced_then_edit_validation_uses_current_metadata(
+    client: TestClient,
+    real_edit_services: dict[str, str],
+    accessibility_dataset_path: Path,
+    tmp_path: Path,
+) -> None:
+    import shutil
+
+    from src.api.main import app
+    from src.api.services.dataset_service import DatasetService, get_dataset_service
+
+    h5py = pytest.importorskip("h5py")
+    root = tmp_path / "source"
+    shutil.copytree(accessibility_dataset_path, root)
+    datasets = DatasetService(base_path=str(root))
+    app.dependency_overrides[get_dataset_service] = lambda: datasets
+    url = "/api/datasets/a11y-synthetic/episodes/0/edits"
+    initial = client.get(url)
+    assert initial.status_code == 200
+    episode = root / "a11y-synthetic" / "episode_0.hdf5"
+    shutil.copyfile(root / "a11y-synthetic" / "episode_1.hdf5", episode)
+    with h5py.File(episode, "r+") as source:
+        del source["observations/images/wrist"]
+    fresh = client.get(url)
+    assert fresh.status_code == 200
+    assert fresh.json()["source_revision"] != initial.json()["source_revision"]
+    payload = {
+        "source_id": fresh.json()["source_id"],
+        "source_revision": fresh.json()["source_revision"],
+        "operations": {
+            "datasetId": "a11y-synthetic",
+            "episodeIndex": 0,
+            "cameraTransforms": {"wrist": {"resize": {"width": 16, "height": 16}}},
+        },
+    }
+    assert client.put(url, json=payload, headers={"If-None-Match": "*"}).status_code == 422
+    payload["operations"] = {"datasetId": "a11y-synthetic", "episodeIndex": 0, "removedFrames": [15]}
+    assert client.put(url, json=payload, headers={"If-None-Match": "*"}).status_code == 200
+
+
+def test_given_real_episode_when_saving_edits_then_conditional_author_scoped_state_survives(
+    client: TestClient,
+    real_edit_services: dict[str, str],
+) -> None:
+    url = "/api/datasets/a11y-synthetic/episodes/0/edits"
+    initial = client.get(url)
+    assert initial.status_code == 200
+    assert initial.json()["saved"] is None
+    assert "etag" not in initial.headers
+    payload = {
+        "source_id": initial.json()["source_id"],
+        "source_revision": initial.json()["source_revision"],
+        "operations": {"datasetId": "a11y-synthetic", "episodeIndex": 0, "removedFrames": [2]},
+    }
+    assert client.put(url, json=payload).status_code == 428
+    saved = client.put(url, json=payload, headers={"If-None-Match": "*"})
+    assert saved.status_code == 200
+    assert saved.json()["saved"]["author_id"] == "author-a"
+    assert client.get(url).json() == saved.json()
+    assert client.put(url, json=payload, headers={"If-None-Match": "*"}).status_code == 412
+    assert (
+        client.put(
+            url,
+            json={**payload, "source_revision": "obsolete"},
+            headers={"If-Match": saved.headers["etag"]},
+        ).status_code
+        == 409
+    )
+    assert (
+        client.put(
+            url,
+            json={**payload, "author_id": "forged"},
+            headers={"If-Match": saved.headers["etag"]},
+        ).status_code
+        == 422
+    )
+
+    real_edit_services["scope_id"] = "author-b"
+    other = client.get(url)
+    assert other.status_code == 200
+    assert other.json()["saved"] is None
+    assert "etag" not in other.headers
+
+
 # ----------------------------------------------------------------------------
 # GET /datasets/{id}/episodes/{idx}/annotations
 # ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"removedFrames": [12]},
+        {"removedFrames": [-1]},
+        {"cameraTransforms": {"missing": {}}},
+        {"insertedFrames": [{"afterFrameIndex": 11, "interpolationFactor": 0.5}]},
+        {"trajectoryAdjustments": [{"frameIndex": 12}]},
+        {"globalTransform": {"resize": {"width": 0, "height": 20}}},
+        {"globalTransform": {"unsupported": True}},
+        {"episodeIndex": 1},
+    ],
+)
+def test_given_invalid_edit_when_saving_then_no_descriptor_is_created(
+    client: TestClient,
+    real_edit_services: dict[str, str],
+    invalid: dict,
+) -> None:
+    url = "/api/datasets/a11y-synthetic/episodes/0/edits"
+    initial = client.get(url).json()
+    response = client.put(
+        url,
+        headers={"If-None-Match": "*"},
+        json={
+            "source_id": initial["source_id"],
+            "source_revision": initial["source_revision"],
+            "operations": {"datasetId": "a11y-synthetic", "episodeIndex": 0, **invalid},
+        },
+    )
+    assert response.status_code == 422
+    assert client.get(url).json()["saved"] is None
+
+
+def test_given_failed_edit_write_when_saving_then_error_is_visible_without_payloads(
+    client: TestClient,
+    real_edit_services: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def fail_write(*_args: object, **_kwargs: object) -> str:
+        raise StorageError("private-edit-payload")
+
+    monkeypatch.setattr(LocalStorageAdapter, "save_annotation", fail_write)
+    url = "/api/datasets/a11y-synthetic/episodes/0/edits"
+    initial = client.get(url).json()
+    response = client.put(
+        url,
+        headers={"If-None-Match": "*"},
+        json={
+            "source_id": initial["source_id"],
+            "source_revision": initial["source_revision"],
+            "operations": {"datasetId": "a11y-synthetic", "episodeIndex": 0, "removedFrames": [2]},
+        },
+    )
+    assert response.status_code == 500
+    assert "persistence unavailable" in caplog.text
+    assert "private-edit-payload" not in caplog.text + response.text
+    assert client.get(url).json()["saved"] is None
+
+
+def test_given_saved_edits_when_backend_process_restarts_then_state_survives(
+    client: TestClient,
+    real_edit_services: dict[str, str],
+    accessibility_dataset_path: Path,
+    tmp_path: Path,
+) -> None:
+    url = "/api/datasets/a11y-synthetic/episodes/0/edits"
+    initial = client.get(url).json()
+    saved = client.put(
+        url,
+        headers={"If-None-Match": "*"},
+        json={
+            "source_id": initial["source_id"],
+            "source_revision": initial["source_revision"],
+            "operations": {"datasetId": "a11y-synthetic", "episodeIndex": 0, "removedFrames": [2]},
+        },
+    )
+    assert saved.status_code == 200
+    result_path = tmp_path / "restarted-response.json"
+    program = """
+import json
+import sys
+from pathlib import Path
+from fastapi.testclient import TestClient
+from src.api.main import app
+from src.api.auth import PrincipalContext, require_principal_context
+from src.api.services.annotation_service import AnnotationService, get_annotation_service
+from src.api.services.dataset_service import DatasetService, get_dataset_service
+app.dependency_overrides[get_dataset_service] = lambda: DatasetService(base_path=sys.argv[1], episode_cache_capacity=0)
+app.dependency_overrides[get_annotation_service] = lambda: AnnotationService(base_path=sys.argv[2])
+app.dependency_overrides[require_principal_context] = lambda: PrincipalContext(
+    scope_id='author-a', auth_mode='azure_ad'
+)
+with TestClient(app) as client:
+    response = client.get('/api/datasets/a11y-synthetic/episodes/0/edits')
+    assert response.status_code == 200
+    Path(sys.argv[3]).write_text(json.dumps({'body': response.json(), 'etag': response.headers['etag']}))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", program, str(accessibility_dataset_path), str(tmp_path), str(result_path)],
+        cwd=Path(__file__).resolve().parents[3],
+        env={**os.environ, "STORAGE_BACKEND": "local", "DATA_DIR": str(accessibility_dataset_path)},
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    restored = json.loads(result_path.read_text())
+    assert restored["body"] == saved.json()
+    assert restored["etag"] == saved.headers["etag"]
 
 
 def test_get_annotations_dataset_not_found_returns_404(client: TestClient, override_services) -> None:

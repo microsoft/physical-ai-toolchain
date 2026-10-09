@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,7 +14,43 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import src.api.routers.labels as labels_mod
+from src.api.models.contributions import MachineOrigin
+from src.api.services import label_storage as label_storage_mod
 from src.api.services.dataset_service import get_dataset_service
+
+
+class LabelBlobProvider:
+    container_name = "datasets"
+
+    def __init__(self, content: bytes | None, etag: str = '"revision"') -> None:
+        self.content = content
+        self.etag = etag
+        self.requested_paths = []
+
+    async def _get_client(self) -> LabelBlobProvider:
+        return self
+
+    def get_container_client(self, name: str) -> LabelBlobProvider:
+        assert name == self.container_name
+        return self
+
+    def get_blob_client(self, path: str) -> LabelBlobProvider:
+        self.requested_paths.append(path)
+        return self
+
+    async def download_blob(self) -> SimpleNamespace:
+        if self.content is None:
+            raise label_storage_mod.ResourceNotFoundError("Missing blob")
+        return SimpleNamespace(readall=self.readall, properties=SimpleNamespace(etag=self.etag))
+
+    async def readall(self) -> bytes:
+        assert self.content is not None
+        return self.content
+
+    async def upload_blob(self, content: bytes, **kwargs: object) -> dict[str, str]:
+        self.content = content
+        self.etag = '"written"'
+        return {"etag": self.etag}
 
 
 @pytest.fixture
@@ -32,6 +68,170 @@ def _revision_headers(client: TestClient, dataset_id: str) -> dict[str, str]:
     return {"If-Match": etag} if etag else {"If-None-Match": "*"}
 
 
+async def test_given_equal_label_owners_when_machine_withdrawn_then_human_label_persists(tmp_path: Path) -> None:
+    storage = labels_mod.LocalLabelStorage(str(tmp_path))
+    document = labels_mod.DatasetLabelsFile(dataset_id="ownership")
+    document.apply_labels(0, ["SUCCESS"], author_id="alice")
+    origin = MachineOrigin(
+        run_id="run",
+        result_id="result",
+        run_order=1,
+        source_revision="source",
+        input_revision="input",
+        config_revision="config",
+    )
+    document.apply_labels(0, ["SUCCESS"], author_id="alice", machine_origin=origin)
+    await storage.save("ownership", document, if_none_match=True)
+
+    loaded = await storage.load_versioned("ownership")
+    ledger = loaded.value.provenance["0"]
+    assert {item.origin for item in ledger.contributions if item.field == "labels/SUCCESS"} >= {"human", "machine"}
+    ledger.withdraw([item.id for item in ledger.contributions if item.origin == "machine"])
+    loaded.value.materialize_episode(0, author_id="alice")
+    await storage.save("ownership", loaded.value, if_match=loaded.etag)
+
+    assert (await storage.load("ownership")).episodes["0"] == ["SUCCESS"]
+
+
+async def test_given_overlapping_analysis_when_partial_human_save_then_origins_remain_independent(
+    tmp_path: Path,
+) -> None:
+    storage = labels_mod.LocalLabelStorage(str(tmp_path))
+    document = labels_mod.DatasetLabelsFile(dataset_id="ownership")
+    for order, notes in ((2, "new result"), (1, "old result")):
+        document.apply_analysis(
+            0,
+            labels_mod.EpisodeAnalysisRecord(notes=notes),
+            author_id="alice",
+            machine_origin=MachineOrigin(
+                run_id=f"run-{order}",
+                result_id=f"result-{order}",
+                run_order=order,
+                source_revision="source",
+                input_revision="input",
+                config_revision="config",
+            ),
+        )
+    document.apply_analysis(0, labels_mod.EpisodeAnalysisRecord(motion_score=85), author_id="alice")
+    assert document.analysis["0"].notes == "new result"
+    assert document.provenance["0"].resolve("analysis/notes").origin == "machine"
+    await storage.save("ownership", document, if_none_match=True)
+
+    loaded = await storage.load("ownership")
+    loaded.provenance["0"].withdraw(
+        [item.id for item in loaded.provenance["0"].contributions if item.origin == "machine"]
+    )
+    loaded.materialize_episode(0, author_id="alice")
+
+    assert loaded.analysis["0"].notes is None
+    assert loaded.analysis["0"].motion_score == 85
+
+
+async def test_given_provenance_timestamps_when_blob_roundtrip_then_identity_survives() -> None:
+    provider = LabelBlobProvider(None)
+    storage = labels_mod.BlobLabelStorage(provider)
+    document = labels_mod.DatasetLabelsFile(dataset_id="ownership")
+    document.apply_labels(0, ["SUCCESS"], author_id="alice")
+
+    etag = await storage.save("ownership", document, if_none_match=True)
+    loaded = await storage.load_versioned("ownership")
+
+    assert loaded.etag == etag
+    assert loaded.value.provenance == document.provenance
+
+
+@pytest.mark.parametrize("intent,origin", [("human-edit", "human"), ("legacy-unknown", "legacy-unknown")])
+def test_given_label_intent_when_saved_then_only_explicit_human_edit_claims_authorship(
+    client: TestClient, dataset_service: MagicMock, intent: str, origin: str
+) -> None:
+    response = client.put(
+        "/api/datasets/ownership/episodes/0/labels",
+        headers=_revision_headers(client, "ownership"),
+        json={"labels": ["SUCCESS"], "intent": intent, "author_id": "forged"},
+    )
+    assert response.status_code == 200
+
+    saved = client.get("/api/datasets/ownership/labels").json()
+    contribution = saved["provenance"]["0"]["contributions"][-1]
+    assert contribution["origin"] == origin
+    assert contribution["author_id"] != "forged"
+    assert bool(contribution["author_id"]) == (origin == "human")
+
+
+@pytest.mark.parametrize("intent,origin", [("human-edit", "human"), ("legacy-unknown", "legacy-unknown")])
+def test_given_analysis_source_text_when_saved_then_intent_controls_authorship(
+    client: TestClient, dataset_service: MagicMock, intent: str, origin: str
+) -> None:
+    response = client.put(
+        "/api/datasets/ownership/episodes/0/analysis",
+        headers=_revision_headers(client, "ownership") | {"X-Curation-Intent": intent},
+        json={"notes": "observed", "source": "human"},
+    )
+    assert response.status_code == 200
+
+    saved = client.get("/api/datasets/ownership/labels").json()
+    contributions = saved["provenance"]["0"]["contributions"]
+    notes = [item for item in contributions if item["field"] == "analysis/notes"][-1]
+    assert notes["origin"] == origin
+    assert bool(notes["author_id"]) == (origin == "human")
+
+
+async def test_given_machine_analysis_when_promoted_then_lineage_and_human_labels_survive(
+    client: TestClient, dataset_service: MagicMock, tmp_path: Path
+) -> None:
+    created = client.put(
+        "/api/datasets/ownership/episodes/0/labels",
+        headers={"If-None-Match": "*"},
+        json={"labels": ["OBJECT: RED"], "intent": "human-edit"},
+    )
+    assert created.status_code == 200
+    storage = labels_mod.LocalLabelStorage(str(tmp_path))
+    current = await storage.load_versioned("ownership")
+    ledger = current.value.provenance["0"]
+    author = next(item.author_id for item in ledger.contributions if item.origin == "human")
+    origin = MachineOrigin(
+        run_id="run",
+        result_id="result",
+        run_order=1,
+        source_revision="source",
+        input_revision="input",
+        config_revision="config",
+    )
+    current.value.apply_analysis(
+        0, labels_mod.EpisodeAnalysisRecord(object="blue"), author_id=author, machine_origin=origin
+    )
+    source_id = ledger.resolve("analysis/object", human_author_id=author).contribution_ids[0]
+    await storage.save("ownership", current.value, if_match=current.etag)
+
+    response = client.post(
+        "/api/datasets/ownership/labels/import-from-analysis",
+        headers=_revision_headers(client, "ownership"),
+        json={"field": "object", "overwrite": True},
+    )
+
+    assert response.status_code == 200
+    assert set(response.json()["episodes"]["0"]) == {"OBJECT: RED", "OBJECT: BLUE"}
+    loaded = await storage.load("ownership")
+    ledger = loaded.provenance["0"]
+    contribution = next(item for item in ledger.contributions if item.field == "labels/OBJECT: BLUE")
+    assert contribution.origin == "machine" and contribution.machine == origin
+    assert contribution.derived_from == [source_id]
+    assert ledger.acceptances[contribution.id] == [author]
+
+    repeated = client.post(
+        "/api/datasets/ownership/labels/import-from-analysis",
+        headers={"If-Match": response.headers["ETag"]},
+        json={"field": "object", "overwrite": True},
+    )
+    assert repeated.status_code == 200
+    assert repeated.headers["ETag"] == response.headers["ETag"]
+
+    ledger.withdraw([source_id])
+    loaded.materialize_episode(0, author_id=author)
+    assert loaded.episodes["0"] == ["OBJECT: RED"]
+    assert contribution.id in ledger.withdrawn
+
+
 def test_get_dataset_labels_returns_defaults(client: TestClient) -> None:
     """GET /labels returns default available_labels for an unknown dataset."""
     response = client.get("/api/datasets/new-dataset/labels")
@@ -41,6 +241,7 @@ def test_get_dataset_labels_returns_defaults(client: TestClient) -> None:
         "available_labels": ["SUCCESS", "FAILURE", "PARTIAL"],
         "episodes": {},
         "analysis": {},
+        "provenance": {},
     }
 
 
@@ -143,7 +344,11 @@ def test_save_all_labels_roundtrip(client: TestClient, dataset_service: MagicMoc
     assert update_response.json() == {"episode_index": 1, "labels": ["SUCCESS"]}
     dataset_service.invalidate_episode_cache.assert_called_once_with("test", 1)
     assert response.status_code == 200
-    assert response.json() == {
+    projection = response.json()
+    provenance = projection.pop("provenance")
+    effective = labels_mod.ContributionLedger.model_validate(provenance["1"]).resolve("labels/SUCCESS")
+    assert effective.value is True and effective.origin == "legacy-unknown"
+    assert projection == {
         "dataset_id": "test",
         "available_labels": ["SUCCESS", "FAILURE", "PARTIAL"],
         "episodes": {"1": ["SUCCESS"]},
@@ -182,7 +387,12 @@ def test_delete_label_option_removes_assignments(client: TestClient, dataset_ser
 
     labels_response = client.get("/api/datasets/test-dataset/labels")
     assert labels_response.status_code == 200
-    assert labels_response.json() == {
+    projection = labels_response.json()
+    provenance = projection.pop("provenance")
+    for ledger_data in provenance.values():
+        ledger = labels_mod.ContributionLedger.model_validate(ledger_data)
+        assert all(item.id in ledger.withdrawn for item in ledger.contributions if item.field == "labels/REVIEW")
+    assert projection == {
         "dataset_id": "test-dataset",
         "available_labels": ["SUCCESS", "FAILURE", "PARTIAL"],
         "episodes": {"1": ["SUCCESS"], "2": []},
@@ -216,6 +426,26 @@ def test_get_episode_analysis_unknown_returns_null(client: TestClient) -> None:
     response = client.get("/api/datasets/test/episodes/4/analysis")
     assert response.status_code == 200
     assert response.json() is None
+
+
+@pytest.mark.parametrize("patch", [{"notes": "reviewed"}, {"notes": None}, {"motion_flags": []}, {}])
+def test_given_saved_analysis_when_partial_update_then_preserves_omitted_fields(
+    client: TestClient, patch: dict[str, object]
+) -> None:
+    created = client.put(
+        "/api/datasets/test/episodes/5/analysis",
+        json={"notes": "original", "motion_score": 3, "grasp_success": True, "motion_flags": ["jittery"]},
+        headers={"If-None-Match": "*"},
+    )
+
+    updated = client.put(
+        "/api/datasets/test/episodes/5/analysis", json=patch, headers={"If-Match": created.headers["etag"]}
+    )
+
+    assert updated.status_code == 200
+    expected = created.json() | patch
+    assert updated.json() == expected
+    assert client.get("/api/datasets/test/episodes/5/analysis").json() == expected
 
 
 def test_set_and_get_episode_analysis_roundtrip(
@@ -270,7 +500,11 @@ def test_set_and_get_episode_analysis_roundtrip(
 
     labels_response = client.get("/api/datasets/test/labels")
     assert labels_response.status_code == 200
-    assert labels_response.json() == {
+    projection = labels_response.json()
+    provenance = projection.pop("provenance")
+    ledger = labels_mod.ContributionLedger.model_validate(provenance["5"])
+    assert ledger.resolve("analysis/notes").origin == "legacy-unknown"
+    assert projection == {
         "dataset_id": "test",
         "available_labels": ["SUCCESS", "FAILURE", "PARTIAL"],
         "episodes": {},
@@ -555,7 +789,10 @@ def test_label_update_resolves_nested_dataset_id(
     labels_path = tmp_path / "owner" / "dataset" / "meta" / "episode_labels.json"
     assert labels_path.relative_to(tmp_path) == Path("owner/dataset/meta/episode_labels.json")
     assert list(tmp_path.rglob("episode_labels.json")) == [labels_path]
-    assert json.loads(labels_path.read_text(encoding="utf-8")) == {
+    persisted = json.loads(labels_path.read_text(encoding="utf-8"))
+    provenance = persisted.pop("provenance")
+    assert labels_mod.ContributionLedger.model_validate(provenance["2"]).resolve("labels/INSPECT").value is True
+    assert persisted == {
         "dataset_id": "owner--dataset",
         "available_labels": ["SUCCESS", "FAILURE", "PARTIAL", "INSPECT"],
         "episodes": {"2": ["INSPECT"]},
@@ -569,24 +806,16 @@ def test_azure_configuration_loads_labels_from_blob_provider(
 ) -> None:
     """Azure configuration selects blob-backed labels through the API boundary."""
 
-    class DeterministicBlobProvider:
-        container_name = "datasets"
-
-        def __init__(self) -> None:
-            self.requested_paths: list[str] = []
-
-        async def _read_blob_bytes(self, blob_path: str) -> bytes:
-            self.requested_paths.append(blob_path)
-            return json.dumps(
-                {
-                    "dataset_id": "owner--dataset",
-                    "available_labels": ["SUCCESS", "REVIEWED"],
-                    "episodes": {"4": ["REVIEWED"]},
-                    "analysis": {},
-                }
-            ).encode()
-
-    provider = DeterministicBlobProvider()
+    provider = LabelBlobProvider(
+        json.dumps(
+            {
+                "dataset_id": "owner--dataset",
+                "available_labels": ["SUCCESS", "REVIEWED"],
+                "episodes": {"4": ["REVIEWED"]},
+                "analysis": {},
+            }
+        ).encode()
+    )
     config = SimpleNamespace(storage_backend="azure")
     provider_factory = MagicMock(return_value=provider)
     monkeypatch.setattr("src.api.config.get_app_config", lambda: config)
@@ -600,6 +829,7 @@ def test_azure_configuration_loads_labels_from_blob_provider(
         "available_labels": ["SUCCESS", "REVIEWED"],
         "episodes": {"4": ["REVIEWED"]},
         "analysis": {},
+        "provenance": {},
     }
     provider_factory.assert_called_once_with(config)
     assert provider.requested_paths == ["owner/dataset/meta/episode_labels.json"]
@@ -614,50 +844,52 @@ async def test_local_storage_load_missing_returns_defaults(tmp_path: Path) -> No
         "available_labels": ["SUCCESS", "FAILURE", "PARTIAL"],
         "episodes": {},
         "analysis": {},
+        "provenance": {},
     }
 
 
-async def test_blob_label_storage_logs_sanitized_dataset_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Invalid blob content should log a sanitized dataset identifier."""
-    logged: list[tuple[object, ...]] = []
-    provider = SimpleNamespace(_read_blob_bytes=AsyncMock(return_value=b"not-json"))
+async def test_blob_label_storage_rejects_invalid_content(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG, logger=label_storage_mod.__name__)
+    provider = LabelBlobProvider(b"private-annotation-content")
     storage = labels_mod.BlobLabelStorage(provider)
 
-    monkeypatch.setattr(
-        "src.api.routers.labels.logger.warning",
-        lambda message, *args: logged.append((message, *args)),
-    )
+    with pytest.raises(HTTPException, match="Invalid labels data"):
+        await storage.load("data\r\nset")
 
-    result = await storage.load("dataset\r\nname")
-
-    provider._read_blob_bytes.assert_awaited_once_with("dataset\r\nname/meta/episode_labels.json")
-    assert result.model_dump() == {
-        "dataset_id": "datasetname",
-        "available_labels": ["SUCCESS", "FAILURE", "PARTIAL"],
-        "episodes": {},
-        "analysis": {},
-    }
-    assert logged == [("Invalid labels blob for %s, returning defaults", "datasetname")]
+    messages = [record.getMessage() for record in caplog.records if record.name == label_storage_mod.__name__]
+    assert any(record.levelno == logging.WARNING for record in caplog.records)
+    assert any(record.levelno == logging.DEBUG for record in caplog.records)
+    assert any("dataset" in message for message in messages)
+    assert all("\r" not in message and "\n" not in message for message in messages)
+    assert "private-annotation-content" not in caplog.text
 
 
 async def test_blob_label_storage_load_missing_returns_defaults() -> None:
     """BlobLabelStorage.load returns defaults when blob is absent."""
-    provider = SimpleNamespace(_read_blob_bytes=AsyncMock(return_value=None))
+    provider = LabelBlobProvider(None)
     storage = labels_mod.BlobLabelStorage(provider)
 
     result = await storage.load("ds")
-    provider._read_blob_bytes.assert_awaited_once_with("ds/meta/episode_labels.json")
+    assert provider.requested_paths == ["ds/meta/episode_labels.json"]
     assert result.model_dump() == {
         "dataset_id": "ds",
         "available_labels": ["SUCCESS", "FAILURE", "PARTIAL"],
         "episodes": {},
         "analysis": {},
+        "provenance": {},
     }
 
 
 async def test_blob_label_storage_load_uses_provider_etag() -> None:
-    """BlobLabelStorage prefers the provider's native ETag when available."""
-    blob_client = SimpleNamespace(get_blob_properties=AsyncMock(return_value=SimpleNamespace(etag='"azure-revision"')))
+    """The validator belongs to the downloaded body, not a later blob version."""
+    content = json.dumps(labels_mod.DatasetLabelsFile(dataset_id="ds").model_dump()).encode()
+    download = SimpleNamespace(
+        readall=AsyncMock(return_value=content), properties=SimpleNamespace(etag='"body-revision"')
+    )
+    blob_client = SimpleNamespace(
+        download_blob=AsyncMock(return_value=download),
+        get_blob_properties=AsyncMock(return_value=SimpleNamespace(etag='"newer-revision"')),
+    )
     container = MagicMock()
     container.get_blob_client.return_value = blob_client
     client = MagicMock()
@@ -673,25 +905,58 @@ async def test_blob_label_storage_load_uses_provider_etag() -> None:
 
     result = await storage.load_versioned("ds")
 
-    assert result.etag == '"azure-revision"'
+    assert result.etag == '"body-revision"'
     assert result.value is not None
     assert result.value.dataset_id == "ds"
 
 
-async def test_blob_label_storage_load_falls_back_when_provider_etag_fails() -> None:
-    """BlobLabelStorage retains its content ETag when provider metadata fails."""
-    content = json.dumps(labels_mod.DatasetLabelsFile(dataset_id="ds").model_dump()).encode()
+@pytest.mark.parametrize("content", [b"not-json", b'{"dataset_id":"ds","episodes":[]}'])
+async def test_given_corrupt_blob_when_loading_labels_then_fails_visibly(content: bytes) -> None:
+    download = SimpleNamespace(readall=AsyncMock(return_value=content), properties=SimpleNamespace(etag='"revision"'))
+    blob_client = SimpleNamespace(download_blob=AsyncMock(return_value=download))
+    container = SimpleNamespace(get_blob_client=lambda path: blob_client)
+    client = SimpleNamespace(get_container_client=lambda name: container)
     provider = SimpleNamespace(
         _read_blob_bytes=AsyncMock(return_value=content),
+        _get_client=AsyncMock(return_value=client),
+        container_name="datasets",
+    )
+
+    with pytest.raises(HTTPException) as error:
+        await labels_mod.BlobLabelStorage(provider).load_versioned("ds")
+
+    assert error.value.status_code == 500
+
+
+async def test_blob_label_storage_load_fails_when_provider_unavailable(caplog: pytest.LogCaptureFixture) -> None:
+    """An unavailable authoritative store is not an empty record or synthetic revision."""
+    caplog.set_level(logging.DEBUG, logger=label_storage_mod.__name__)
+    provider = SimpleNamespace(
         _get_client=AsyncMock(side_effect=RuntimeError("metadata unavailable")),
         container_name="datasets",
     )
     storage = labels_mod.BlobLabelStorage(provider)
 
-    result = await storage.load_versioned("ds")
+    with pytest.raises(HTTPException, match="Failed to load labels"):
+        await storage.load_versioned("ds")
 
-    assert result.etag == f'"{hashlib.sha256(content).hexdigest()}"'
-    assert result.value is not None
+    assert any(record.levelno == logging.ERROR for record in caplog.records)
+    assert any(record.levelno == logging.DEBUG for record in caplog.records)
+
+
+async def test_given_existing_blob_when_create_only_then_returns_revision_conflict() -> None:
+    error = label_storage_mod.HttpResponseError(message="Already exists")
+    error.status_code = 409
+    error.error_code = "BlobAlreadyExists"
+    blob = SimpleNamespace(upload_blob=AsyncMock(side_effect=error))
+    container = SimpleNamespace(get_blob_client=lambda path: blob)
+    client = SimpleNamespace(get_container_client=lambda name: container)
+    provider = SimpleNamespace(_get_client=AsyncMock(return_value=client), container_name="datasets")
+
+    with pytest.raises(labels_mod.RevisionConflictError):
+        await labels_mod.BlobLabelStorage(provider).save(
+            "ds", labels_mod.DatasetLabelsFile(dataset_id="ds"), if_none_match=True
+        )
 
 
 async def test_blob_label_storage_save_uploads_json() -> None:
@@ -720,7 +985,7 @@ async def test_blob_label_storage_save_uploads_json() -> None:
     assert json.loads(args[0]) == labels_file.model_dump()
     assert kwargs["overwrite"] is True
     assert set(kwargs) == {"overwrite", "content_settings"}
-    if labels_mod.ContentSettings is None:
+    if label_storage_mod.ContentSettings is None:
         assert kwargs["content_settings"] is None
     else:
         assert kwargs["content_settings"].content_type == "application/json"
@@ -729,7 +994,7 @@ async def test_blob_label_storage_save_uploads_json() -> None:
 async def test_blob_label_storage_save_uses_matching_revision(monkeypatch: pytest.MonkeyPatch) -> None:
     """Blob label updates use Azure native ETag matching."""
     match_conditions = SimpleNamespace(IfNotModified="if-not-modified")
-    monkeypatch.setattr(labels_mod, "MatchConditions", match_conditions)
+    monkeypatch.setattr(label_storage_mod, "MatchConditions", match_conditions)
     blob_client = SimpleNamespace(upload_blob=AsyncMock(return_value={"etag": '"revision-two"'}))
     container = MagicMock()
     container.get_blob_client.return_value = blob_client
@@ -783,7 +1048,7 @@ async def test_blob_label_storage_save_failure_raises_500(monkeypatch: pytest.Mo
     storage = labels_mod.BlobLabelStorage(provider)
 
     monkeypatch.setattr(
-        "src.api.routers.labels.logger.error",
+        "src.api.services.label_storage.logger.error",
         lambda message, *args: logged.append((message, *args)),
     )
 
@@ -832,6 +1097,23 @@ def test_create_label_storage_returns_local_when_no_provider():
     assert isinstance(storage, labels_mod.LocalLabelStorage)
 
 
+@pytest.mark.asyncio
+async def test_given_corrupt_local_labels_when_reading_then_fails_with_safe_warning(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    path = tmp_path / "ds" / "meta" / "episode_labels.json"
+    path.parent.mkdir(parents=True)
+    path.write_text('{"dataset_id":"ds","analysis":"private-invalid-input"}', encoding="utf-8")
+
+    with pytest.raises(HTTPException) as error:
+        await labels_mod.LocalLabelStorage(str(tmp_path)).load_versioned("ds")
+
+    assert error.value.status_code == 500
+    assert "Invalid local labels" in caplog.text
+    assert "private-invalid-input" not in caplog.text
+
+
 def test_create_label_storage_returns_blob_for_azure():
     """azure backend with a provider yields BlobLabelStorage."""
     provider = SimpleNamespace()
@@ -839,10 +1121,14 @@ def test_create_label_storage_returns_blob_for_azure():
     assert isinstance(storage, labels_mod.BlobLabelStorage)
 
 
-def test_create_label_storage_falls_back_when_azure_without_provider():
-    """azure backend without provider falls back to LocalLabelStorage."""
-    storage = labels_mod._create_label_storage("azure", None)
-    assert isinstance(storage, labels_mod.LocalLabelStorage)
+def test_given_azure_without_provider_when_creating_label_storage_then_refuses_local_fallback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with pytest.raises(HTTPException) as error:
+        labels_mod._create_label_storage("azure", None)
+
+    assert error.value.status_code == 503
+    assert "refusing local fallback" in caplog.text
 
 
 def test_get_label_storage_singleton(monkeypatch):

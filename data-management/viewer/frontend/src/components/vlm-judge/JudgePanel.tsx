@@ -6,20 +6,10 @@
  * configured (``VLM_JUDGE_ENABLED=false``), so it can ship enabled by default.
  */
 
-import {
-  AlertCircle,
-  CheckCircle2,
-  Database,
-  Play,
-  RefreshCw,
-  Tag,
-  Tags,
-  XCircle,
-} from 'lucide-react'
-import { memo, useCallback, useMemo, useState } from 'react'
+import { AlertCircle, CheckCircle2, Database, Play, RefreshCw, Tag, XCircle } from 'lucide-react'
+import { memo, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { Progress } from '@/components/ui/progress'
 import {
   Select,
   SelectContent,
@@ -28,11 +18,16 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useCapabilities } from '@/hooks/use-datasets'
-import { useSaveEpisodeLabels } from '@/hooks/use-labels'
-import { useRunVlmJudge, useVlmJudgeStatus } from '@/hooks/use-vlm-judge'
-import { applyOutcomeLabel, outcomeToLabel, useVlmJudgeBatch } from '@/hooks/use-vlm-judge-batch'
+import { useEpisodeReadiness } from '@/hooks/use-episode-readiness'
+import {
+  useApplyJudgeResult,
+  useJudgeEvidence,
+  useRunVlmJudge,
+  useVlmJudgeStatus,
+} from '@/hooks/use-vlm-judge'
+import { outcomeToLabel } from '@/hooks/use-vlm-judge-batch'
+import { ApiClientError } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
-import { useLabelStore } from '@/stores/label-store'
 import type { VlmJudgeResult } from '@/types'
 
 const METHOD_LABELS: Record<string, string> = {
@@ -43,20 +38,9 @@ const METHOD_LABELS: Record<string, string> = {
 export interface JudgePanelProps {
   datasetId: string
   episodeIndex: number
-  /** Optional language instruction override; falls back to dataset metadata. */
-  instruction?: string
-  /** Episode count for the loaded dataset; enables the batch (all-episode) actions. */
+  cameras?: string[]
   totalEpisodes?: number
   className?: string
-}
-
-function pickResult(
-  status: ReturnType<typeof useVlmJudgeStatus>['data'],
-  mutationData: VlmJudgeResult | undefined,
-): VlmJudgeResult | null {
-  if (mutationData) return mutationData
-  if (status?.result) return status.result
-  return null
 }
 
 function OutcomeBadge({ result }: { result: VlmJudgeResult }) {
@@ -128,65 +112,93 @@ function displayErrorMessage(error: Error | string): string {
   return message
 }
 
+function applicationErrorMessage(error: Error): string {
+  if (error instanceof ApiClientError) {
+    if (error.status === 409 || error.status === 412) {
+      return 'Label application conflicts with newer saved inputs or withdrawn evidence. Refresh saved evidence, then judge the current inputs again if needed.'
+    }
+    if (error.status === 400 || error.status === 422) {
+      return 'The server rejected the label application request as invalid. Refreshing will not resolve this; record Diagnostics and report the issue.'
+    }
+    if (error.status === 401 || error.status === 403) {
+      return 'You are not authorized to apply this label. Sign in again or request access.'
+    }
+    if (error.status === 404) {
+      return 'The judge run was not found. Refresh saved evidence before retrying.'
+    }
+    return 'Label application failed on the server. Retry later; saved evidence is unchanged.'
+  }
+  return `Label application failed: ${error.message}`
+}
+
 export const JudgePanel = memo(function JudgePanel({
   datasetId,
   episodeIndex,
-  instruction,
-  totalEpisodes,
+  cameras = [],
   className,
 }: JudgePanelProps) {
   const capabilities = useCapabilities(datasetId)
   const judgeEnabled = capabilities.data?.vlmJudgeEnabled === true
   const status = useVlmJudgeStatus({ datasetId, episodeIndex, enabled: judgeEnabled })
   const runMutation = useRunVlmJudge()
-  const saveLabels = useSaveEpisodeLabels()
-  const batch = useVlmJudgeBatch(datasetId, totalEpisodes ?? 0)
+  const application = useApplyJudgeResult()
+  const evidence = useJudgeEvidence(datasetId, episodeIndex, judgeEnabled)
+  const readiness = useEpisodeReadiness(datasetId, [episodeIndex], judgeEnabled)
 
   const [methodOverride, setMethodOverride] = useState<string | undefined>(undefined)
+  const [viewSelection, setViewSelection] = useState<{ datasetId: string; views: string[] } | null>(
+    null,
+  )
+  const judgeViews = (
+    viewSelection?.datasetId === datasetId ? viewSelection.views : cameras
+  ).filter((camera) => cameras.includes(camera))
+  const cameraOptions = judgeViews.length ? { views: judgeViews } : {}
+  const viewsReady = cameras.length === 0 || judgeViews.length > 0
   const available = status.data?.processMethods
   const methods = available && available.length > 0 ? available : ['gvl', 'chronological']
   const effectiveMethod = methodOverride ?? status.data?.processMethod ?? 'gvl'
 
-  const result = useMemo(
-    () => pickResult(status.data, runMutation.data),
-    [status.data, runMutation.data],
+  const assessment = evidence.data?.items.find(
+    (item) => item.resultKind === 'judge' && item.applicability !== 'withdrawn',
   )
+  const result = assessment?.resultKind === 'judge' ? assessment.result : null
   const enabled = judgeEnabled && status.data?.enabled !== false
   const errorMessage = useMemo(() => {
     if (runMutation.error) return displayErrorMessage(runMutation.error)
     if (status.error) return displayErrorMessage(status.error as Error)
-    if (batch.error) return displayErrorMessage(batch.error)
     return null
-  }, [runMutation.error, status.error, batch.error])
+  }, [runMutation.error, status.error])
 
-  const handleRun = useCallback(
-    (force: boolean) => {
-      runMutation.mutate({
-        datasetId,
-        episodeIndex,
-        options: {
-          instruction: instruction?.trim() || undefined,
-          processMethod: effectiveMethod,
-          force,
-        },
-      })
-    },
-    [runMutation, datasetId, episodeIndex, instruction, effectiveMethod],
-  )
+  const handleRun = (force: boolean) => {
+    if (!enabled || !readiness.ready || !viewsReady) return
+    runMutation.mutate({
+      datasetId,
+      episodeIndex,
+      options: {
+        ...cameraOptions,
+        processMethod: effectiveMethod,
+        force,
+      },
+    })
+  }
 
-  const handleApplyLabel = useCallback(() => {
-    if (!result) return
-    const existing = useLabelStore.getState().episodeLabels[episodeIndex] ?? []
-    const next = applyOutcomeLabel(existing, outcomeToLabel(result))
-    saveLabels.mutate({ episodeIdx: episodeIndex, labels: next })
-  }, [result, episodeIndex, saveLabels])
+  const handleApplyLabel = () => {
+    if (
+      !enabled ||
+      !readiness.ready ||
+      !result ||
+      assessment?.applicability !== 'current' ||
+      result.outcomeSuccess === null
+    )
+      return
+    application.mutate({ datasetId, episodeIndex, runId: assessment.runId })
+  }
 
-  const hasBatch = (totalEpisodes ?? 0) > 0
-  const busy = runMutation.isPending || batch.isRunning || saveLabels.isPending
+  const busy = runMutation.isPending || application.isPending
 
   if (capabilities.isLoading || (judgeEnabled && status.isLoading)) {
     return (
-      <section className={cn('rounded-md border p-3 text-sm', className)} aria-busy="true">
+      <section className={cn('text-sm', className)} aria-busy="true">
         <header className="flex items-center justify-between">
           <h3 className="text-sm font-medium">VLM Judge</h3>
         </header>
@@ -195,9 +207,9 @@ export const JudgePanel = memo(function JudgePanel({
     )
   }
 
-  if (!enabled) {
+  if (!enabled && !evidence.data?.items.length) {
     return (
-      <section className={cn('rounded-md border p-3 text-sm', className)}>
+      <section className={cn('text-sm', className)}>
         <header className="flex items-center justify-between">
           <h3 className="text-sm font-medium">VLM Judge</h3>
         </header>
@@ -213,9 +225,9 @@ export const JudgePanel = memo(function JudgePanel({
   }
 
   return (
-    <section className={cn('space-y-3 rounded-md border p-3 text-sm', className)}>
+    <section aria-label="Judge assessment" className={cn('space-y-3 text-sm', className)}>
       <header className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium">VLM Judge</h3>
+        <h3 className="text-sm font-medium">Judge assessment</h3>
         {status.data?.judgeModel && (
           <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
             <Database className="size-3" />
@@ -223,6 +235,61 @@ export const JudgePanel = memo(function JudgePanel({
           </span>
         )}
       </header>
+
+      {evidence.error && (
+        <div role="alert" className="text-sm">
+          Saved evidence refresh failed. Previously loaded evidence remains visible.
+          <Button size="sm" variant="outline" onClick={() => void evidence.refetch()}>
+            Retry evidence
+          </Button>
+        </div>
+      )}
+      {application.error && <p role="alert">{applicationErrorMessage(application.error)}</p>}
+      {assessment && (
+        <p className="text-xs break-all">
+          Run {assessment.runId}; model {result?.judgeModel}; input {assessment.input.snapshotId};{' '}
+          {assessment.applicability}
+        </p>
+      )}
+      {(evidence.data?.items.length ?? 0) > 0 && (
+        <details>
+          <summary>Run history</summary>
+          <ul className="space-y-2 text-xs">
+            {evidence.data?.items.map((item) => (
+              <li key={item.resultId ?? item.runId} className="break-all">
+                {item.runId}: {item.resultKind}, {item.applicability},{' '}
+                {item.applied ? 'applied' : 'not applied'}; input {item.input.snapshotId}
+                <p>Model: {item.result.judgeModel}</p>
+                {item.resultKind === 'judge' ? (
+                  <p>
+                    Overall outcome:{' '}
+                    {item.result.outcomeSuccess === null
+                      ? 'inconclusive'
+                      : String(item.result.outcomeSuccess)}
+                    ; confidence: {item.result.outcomeConfidence}; process:{' '}
+                    {item.result.progressPerFrame.join(', ')}
+                  </p>
+                ) : (
+                  <dl>
+                    <dt>Object</dt>
+                    <dd>{item.result.findings.object}</dd>
+                    <dt>Pick from</dt>
+                    <dd>{item.result.findings.pickFrom}</dd>
+                    <dt>Grasp</dt>
+                    <dd>{String(item.result.findings.graspSuccess)}</dd>
+                    <dt>Place</dt>
+                    <dd>{String(item.result.findings.placeSuccess)}</dd>
+                    <dt>Movement quality</dt>
+                    <dd>{item.result.findings.movementQuality}</dd>
+                    <dt>Notes</dt>
+                    <dd>{item.result.findings.notes}</dd>
+                  </dl>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       {errorMessage && (
         <p className="text-destructive flex items-center gap-1 text-xs">
@@ -335,8 +402,45 @@ export const JudgePanel = memo(function JudgePanel({
         </p>
       </div>
 
+      {cameras.length > 0 && (
+        <fieldset className="space-y-1" disabled={busy}>
+          <legend className="text-muted-foreground text-xs font-medium">Judge cameras</legend>
+          <div className="flex flex-wrap gap-3">
+            {cameras.map((camera) => (
+              <label key={camera} className="flex items-center gap-1 text-xs">
+                <input
+                  type="checkbox"
+                  checked={judgeViews.includes(camera)}
+                  disabled={judgeViews.length === 1 && judgeViews.includes(camera)}
+                  onChange={(event) =>
+                    setViewSelection({
+                      datasetId,
+                      views: event.target.checked
+                        ? [...judgeViews, camera]
+                        : judgeViews.filter((view) => view !== camera),
+                    })
+                  }
+                />
+                {camera}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
+
+      {!readiness.ready && (
+        <p role="status" className="text-muted-foreground text-xs">
+          {readiness.reason}
+        </p>
+      )}
+      {!viewsReady && <p role="status">Choose a judge camera.</p>}
       <div className="flex flex-wrap gap-2 pt-1">
-        <Button type="button" size="sm" onClick={() => handleRun(false)} disabled={busy}>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => handleRun(false)}
+          disabled={!enabled || busy || !readiness.ready || !viewsReady}
+        >
           <Play className="mr-1 size-3" />
           {runMutation.isPending ? 'Running…' : result ? 'Re-evaluate' : 'Run judge'}
         </Button>
@@ -346,7 +450,7 @@ export const JudgePanel = memo(function JudgePanel({
             size="sm"
             variant="outline"
             onClick={() => handleRun(true)}
-            disabled={busy}
+            disabled={!enabled || busy || !readiness.ready || !viewsReady}
           >
             <RefreshCw className="mr-1 size-3" />
             Force fresh
@@ -358,86 +462,24 @@ export const JudgePanel = memo(function JudgePanel({
             size="sm"
             variant="outline"
             onClick={handleApplyLabel}
-            disabled={busy}
-            title={`Apply ${outcomeToLabel(result)} as this episode's label`}
+            disabled={
+              !enabled ||
+              busy ||
+              !readiness.ready ||
+              assessment?.applicability !== 'current' ||
+              result.outcomeSuccess === null
+            }
+            title={
+              result.outcomeSuccess === null
+                ? 'Inconclusive assessment has no outcome label'
+                : `Apply ${outcomeToLabel(result)} as this episode's label`
+            }
           >
             <Tag className="mr-1 size-3" />
             Apply label
           </Button>
         )}
       </div>
-
-      {hasBatch && (
-        <div className="space-y-2 border-t pt-2">
-          <p className="text-muted-foreground text-xs font-medium">
-            Whole dataset ({totalEpisodes} episodes)
-          </p>
-          <p className="text-muted-foreground text-[11px]">
-            Uses each episode&apos;s saved or dataset instruction; the current draft instruction
-            applies only to this episode.
-          </p>
-          {batch.progress ? (
-            <div className="space-y-1">
-              <div className="text-muted-foreground flex items-center justify-between text-[11px]">
-                <span>
-                  {batch.progress.phase === 'judging'
-                    ? 'Running judge on all episodes'
-                    : 'Applying labels to all episodes'}
-                </span>
-                <span>
-                  {batch.progress.done} / {batch.progress.total}
-                </span>
-              </div>
-              <Progress
-                value={(batch.progress.done / batch.progress.total) * 100}
-                className="h-1.5"
-                aria-label="Batch judge progress"
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-6 px-2 text-[11px]"
-                onClick={batch.cancel}
-              >
-                Cancel
-              </Button>
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => void batch.runAll({ processMethod: effectiveMethod })}
-                disabled={busy}
-              >
-                <Play className="mr-1 size-3" />
-                Run all
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  if (
-                    globalThis.confirm?.(
-                      `Replace the outcome label on ${totalEpisodes} episodes? Existing custom labels are preserved.`,
-                    ) ??
-                    true
-                  ) {
-                    void batch.applyLabelsAll({ processMethod: effectiveMethod })
-                  }
-                }}
-                disabled={busy}
-              >
-                <Tags className="mr-1 size-3" />
-                Label all
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
     </section>
   )
 })

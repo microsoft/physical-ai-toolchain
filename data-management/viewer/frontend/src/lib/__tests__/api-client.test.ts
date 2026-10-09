@@ -22,13 +22,21 @@ import {
   fetchEpisode,
   fetchEpisodes,
   fetchVlmJudgeStatus,
+  mutateJudgeDataset,
   mutationFetch,
   mutationHeaders,
   runVlmJudge,
   saveAnnotation,
+  submitJudgeJob,
   triggerAutoAnalysis,
   warmCache,
 } from '../api-client'
+import {
+  clearDiagnosticEvents,
+  disableDiagnostics,
+  enableDiagnostics,
+  readDiagnosticEvents,
+} from '../playback-diagnostics'
 
 beforeEach(() => {
   installFetchMock({ csrf: false })
@@ -36,6 +44,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  disableDiagnostics()
+  clearDiagnosticEvents()
   vi.useRealTimers()
   vi.restoreAllMocks()
 })
@@ -179,6 +189,78 @@ describe('fetchEpisodes', () => {
 })
 
 describe('fetchEpisode', () => {
+  it('does not start a read that is already cancelled', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(fetchEpisode('ds-1', 5, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('keeps the deadline active until the response body is read', async () => {
+    vi.useFakeTimers()
+    const response = jsonResponse({})
+    vi.spyOn(response, 'json').mockImplementation(() => new Promise(() => {}))
+    mockFetch.mockResolvedValueOnce(response)
+    const failure = expect(fetchEpisode('ds-1', 5)).rejects.toMatchObject({
+      code: 'EPISODE_TIMEOUT',
+    })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await failure
+    expect(response.json).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('bounds a stalled episode read and permits a fresh retry without leaking timers', async () => {
+    vi.useFakeTimers()
+    enableDiagnostics('workspace')
+    mockFetch.mockImplementationOnce(() => new Promise<Response>(() => {}))
+    const request = fetchEpisode('ds-1', 5)
+    const failure = expect(request).rejects.toMatchObject({ code: 'EPISODE_TIMEOUT', status: 0 })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await failure
+    expect(mockFetch.mock.calls[0][1]?.signal?.aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+    mockFetch.mockResolvedValueOnce(jsonResponse({ meta: { index: 5 } }))
+    await expect(fetchEpisode('ds-1', 5)).resolves.toMatchObject({ meta: { index: 5 } })
+    expect(vi.getTimerCount()).toBe(0)
+    expect(readDiagnosticEvents('workspace').map((event) => event.data?.outcome)).toEqual([
+      'timeout',
+      'success',
+    ])
+  })
+
+  it('cancels an obsolete read without waiting for the deadline', async () => {
+    vi.useFakeTimers()
+    enableDiagnostics('workspace')
+    const controller = new AbortController()
+    mockFetch.mockImplementationOnce(() => new Promise<Response>(() => {}))
+    const request = fetchEpisode('ds-1', 5, controller.signal)
+    const failure = expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort()
+    await failure
+    expect(mockFetch.mock.calls[0][1]?.signal?.aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(readDiagnosticEvents('workspace')[0].data?.outcome).toBe('cancelled')
+  })
+
+  it('records safe HTTP failure details and duration without provider content', async () => {
+    enableDiagnostics('workspace')
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ code: 'private-provider-detail', detail: 'private-body' }, 503),
+    )
+    await expect(fetchEpisode('ds-1', 5)).rejects.toMatchObject({ status: 503 })
+    expect(readDiagnosticEvents('workspace')[0]).toMatchObject({
+      type: 'episode-request-completed',
+      data: { outcome: 'http-error', status: 503, durationMs: expect.any(Number) },
+    })
+    expect(JSON.stringify(readDiagnosticEvents('workspace'))).not.toContain('private')
+  })
+
   it('calls GET /api/datasets/:id/episodes/:index and transforms keys', async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
@@ -189,6 +271,11 @@ describe('fetchEpisode', () => {
     )
 
     const result = await fetchEpisode('ds-1', 5)
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/5', {
+      cache: 'no-store',
+      headers: {},
+      signal: expect.any(AbortSignal),
+    })
     expect(result.meta).toHaveProperty('episodeIndex', 5)
     expect(result).toHaveProperty('videoUrls')
     expect(result).toHaveProperty('trajectoryData')
@@ -275,6 +362,51 @@ describe('fetchEpisode', () => {
 })
 
 describe('fetchAnnotations', () => {
+  it.each(['read', 'save'])(
+    'preserves provenance identities and opaque values on %s',
+    async (operation) => {
+      const response = jsonResponse(
+        {
+          dataset_id: 'ds',
+          episode_index: 0,
+          annotations: [],
+          provenance: {
+            user_scope: {
+              schema_version: '1.0.0',
+              acceptances: { result_key: ['user_scope'] },
+              withdrawn: [],
+              contributions: [
+                { id: 'result_key', author_id: 'user_scope', value: { camera_name: 'front' } },
+              ],
+            },
+          },
+        },
+        { headers: { ETag: '"revision"' } },
+      )
+      if (operation === 'read') mockFetch.mockResolvedValueOnce(response)
+      else mockMutationFetch(response)
+
+      const result =
+        operation === 'read'
+          ? await fetchAnnotations('ds', 0)
+          : await saveAnnotation('ds', 0, { annotatorId: 'user_scope' } as never, {
+              createOnly: true,
+            })
+
+      expect(result.data).toMatchObject({
+        provenance: {
+          user_scope: {
+            schemaVersion: '1.0.0',
+            acceptances: { result_key: ['user_scope'] },
+            contributions: [
+              { id: 'result_key', authorId: 'user_scope', value: { camera_name: 'front' } },
+            ],
+          },
+        },
+      })
+    },
+  )
+
   it('returns the camelCased annotation response with its revision', async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse(
@@ -287,7 +419,10 @@ describe('fetchAnnotations', () => {
               annotator_id: 'u1',
               language_instruction: {
                 instruction: 'Pick up the cube',
-                subtask_instructions: ['Reach', 'Grasp'],
+                subtask_instructions: [
+                  { id: 'reach', text: 'Reach' },
+                  { id: 'grasp', text: 'Grasp' },
+                ],
               },
             },
           ],
@@ -307,7 +442,10 @@ describe('fetchAnnotations', () => {
             annotatorId: 'u1',
             languageInstruction: {
               instruction: 'Pick up the cube',
-              subtaskInstructions: ['Reach', 'Grasp'],
+              subtaskInstructions: [
+                { id: 'reach', text: 'Reach' },
+                { id: 'grasp', text: 'Grasp' },
+              ],
             },
           },
         ],
@@ -326,7 +464,10 @@ describe('saveAnnotation', () => {
       annotatorId: 'u1',
       languageInstruction: {
         instruction: 'Pick up the cube',
-        subtaskInstructions: ['Reach', 'Grasp'],
+        subtaskInstructions: [
+          { id: 'reach', text: 'Reach' },
+          { id: 'grasp', text: 'Grasp' },
+        ],
       },
     }
     mockMutationFetch(
@@ -340,7 +481,10 @@ describe('saveAnnotation', () => {
               annotator_id: 'u1',
               language_instruction: {
                 instruction: 'Pick up the cube',
-                subtask_instructions: ['Reach', 'Grasp'],
+                subtask_instructions: [
+                  { id: 'reach', text: 'Reach' },
+                  { id: 'grasp', text: 'Grasp' },
+                ],
               },
             },
           ],
@@ -359,7 +503,10 @@ describe('saveAnnotation', () => {
         annotator_id: 'u1',
         language_instruction: {
           instruction: 'Pick up the cube',
-          subtask_instructions: ['Reach', 'Grasp'],
+          subtask_instructions: [
+            { id: 'reach', text: 'Reach' },
+            { id: 'grasp', text: 'Grasp' },
+          ],
         },
       }),
     })
@@ -608,6 +755,60 @@ describe('mutationFetch', () => {
     expect(headers.get('X-CSRF-Token')).toBe('caller-override')
     expect([...headers.keys()].filter((name) => name === 'x-csrf-token')).toHaveLength(1)
   })
+
+  it('declares JSON for string bodies while keeping CSRF and caller overrides', async () => {
+    mockMutationFetch(jsonResponse({ ok: true }))
+    await mutationFetch('/api/thing', { method: 'POST', body: '{"a":1}' })
+    const headers = new Headers((mockFetch.mock.calls[1][1] as RequestInit).headers)
+    expect(headers.get('Content-Type')).toBe('application/json')
+    expect(headers.get('X-CSRF-Token')).toBe('test-csrf-token')
+
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
+    await mutationFetch('/api/thing', {
+      method: 'POST',
+      body: 'plain',
+      headers: { 'content-type': 'text/plain' },
+    })
+    expect(
+      new Headers((mockFetch.mock.calls[2][1] as RequestInit).headers).get('Content-Type'),
+    ).toBe('text/plain')
+  })
+
+  it('leaves FormData and bodiless requests without a JSON content type', async () => {
+    mockMutationFetch(jsonResponse({ ok: true }))
+    await mutationFetch('/api/upload', { method: 'POST', body: new FormData() })
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
+    await mutationFetch('/api/thing', { method: 'POST' })
+    for (const call of mockFetch.mock.calls.slice(1)) {
+      expect(new Headers((call[1] as RequestInit).headers).has('Content-Type')).toBe(false)
+    }
+  })
+})
+
+describe('judge JSON mutations', () => {
+  it.each([
+    [{ kind: 'apply', jobId: 'job-1', indices: [0] }, { episode_indices: [0] }],
+    [
+      { kind: 'approve', jobId: 'job-1', acknowledgeExceptions: true },
+      { acknowledge_exceptions: true },
+    ],
+    [{ kind: 'cancel', jobId: 'job-1' }, {}],
+    [{ kind: 'preview-reset' }, { dataset_id: 'ds-1', include_unlisted_runs: false }],
+  ] as const)('sends %o as an application/json object', async (action, body) => {
+    mockMutationFetch(jsonResponse({ id: 'job-1' }, 202))
+    await mutateJudgeDataset('ds-1', action as never)
+    const init = mockFetch.mock.calls[1][1] as RequestInit
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/json')
+    expect(JSON.parse(init.body as string)).toEqual(body)
+  })
+
+  it('declares JSON when submitting dataset jobs', async () => {
+    mockMutationFetch(jsonResponse({ id: 'job-1' }, 202))
+    await submitJudgeJob('ds-1', { indices: [0], mode: 'judge' } as never, 'request-1')
+    const headers = new Headers((mockFetch.mock.calls[1][1] as RequestInit).headers)
+    expect(headers.get('Content-Type')).toBe('application/json')
+    expect(headers.get('Idempotency-Key')).toBe('request-1')
+  })
 })
 
 describe('fetchVlmJudgeStatus', () => {
@@ -640,33 +841,52 @@ describe('fetchVlmJudgeStatus', () => {
 })
 
 describe('runVlmJudge', () => {
-  it('returns the completed synchronous judge response without polling', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse({ csrf_token: 'csrf-1' })).mockResolvedValueOnce(
-      jsonResponse({
-        episode_id: 'ds-1/episode_000000',
-        instruction: 'Pick',
-        judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
-        prompt_version: 'outcome-mcq-v1',
-        n_frames: 6,
-        outcome_success: true,
-        outcome_confidence: 1,
-        outcome_n_valid_votes: 3,
-        progress_per_frame: [100],
-        voc: 1,
-        milestones: [],
-        failure_mode: null,
-        cached: true,
-      }),
-    )
+  it('submits durable work and reads its saved result through status polling', async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ csrf_token: 'csrf-1' }))
+      .mockResolvedValueOnce(
+        jsonResponse({ id: 'job-1', dataset_id: 'ds-1', status: 'queued' }, 202),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 'job-1',
+          dataset_id: 'ds-1',
+          status: 'succeeded',
+          config: { process_method: 'gvl' },
+          targets: [
+            {
+              episode_index: 0,
+              status: 'succeeded',
+              input: { snapshot_id: 'snapshot-1' },
+              cached: true,
+              result: {
+                episode_id: 'ds-1/episode_000000',
+                instruction: 'Pick',
+                judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
+                prompt_version: 'outcome-mcq-v1',
+                n_frames: 6,
+                outcome_success: true,
+                outcome_confidence: 1,
+                outcome_n_valid_votes: 3,
+                progress_per_frame: [100],
+                voc: 1,
+                milestones: [],
+                failure_mode: null,
+                cached: true,
+              },
+            },
+          ],
+        }),
+      )
 
     await expect(runVlmJudge('ds-1', 0, { processMethod: 'gvl' })).resolves.toMatchObject({
       episodeId: 'ds-1/episode_000000',
       cached: true,
     })
-    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(mockFetch).toHaveBeenCalledTimes(3)
     expect(mockFetch).toHaveBeenLastCalledWith(
-      '/api/datasets/ds-1/episodes/0/judge',
-      expect.objectContaining({ method: 'POST' }),
+      '/api/judge/jobs/job-1',
+      expect.objectContaining({ cache: 'no-store' }),
     )
   })
 })

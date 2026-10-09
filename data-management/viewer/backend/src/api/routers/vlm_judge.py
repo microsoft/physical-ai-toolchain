@@ -19,16 +19,25 @@ import logging
 import re
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field, field_validator
+from evaluation.vlm_judge.api import build_job_router, job_summary
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from ..auth import PrincipalContext, require_principal_context
+from ..services.annotation_service import AnnotationService, get_annotation_service
+from ..services.saved_input_service import SavedInputError, SavedInputSnapshot, resolve_saved_input
+from ..storage import StorageError
+
+if TYPE_CHECKING:
+    from evaluation.vlm_judge.dataset import EpisodeRecord
 
 from ..config import AppConfig, get_app_config
 from ..csrf import require_csrf_token
 from ..services.dataset_service import DatasetService, get_dataset_service
-from ..services.vlm_judge_service import get_vlm_judge_service
+from ..services.vlm_judge_service import get_judge_jobs, get_vlm_judge_service, prepare_job_configuration
 from ..validation import (
     SAFE_CAMERA_NAME_PATTERN,
     SAFE_DATASET_ID_PATTERN,
@@ -44,6 +53,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _job_actor(principal: PrincipalContext = Depends(require_principal_context)) -> str:
+    return principal.scope_id
+
+
+job_router = build_job_router(
+    get_judge_jobs,
+    actor_dependency=_job_actor,
+    prepare_config=prepare_job_configuration,
+    mutation_dependencies=[Depends(require_csrf_token)],
+)
+
+
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
@@ -55,6 +76,10 @@ _VIEW_NAME_RE = re.compile(SAFE_CAMERA_NAME_PATTERN)
 
 class JudgeRequest(SanitizedModel):
     """Optional overrides on a per-call basis."""
+
+    model_config = ConfigDict(extra="forbid")
+    snapshot_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    annotation_author_id: str | None = Field(default=None, min_length=1, max_length=256)
 
     instruction: str | None = Field(
         default=None,
@@ -103,6 +128,7 @@ class JudgeStatus(BaseModel):
 
 
 class JudgeResponse(BaseModel):
+    snapshot_id: str | None = None
     episode_id: str
     instruction: str
     judge_model: str
@@ -124,6 +150,21 @@ class JudgeResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+@router.get("/{dataset_id}/episodes/{episode_idx}/judge/snapshot", response_model=SavedInputSnapshot)
+async def get_saved_input_snapshot(
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0)),
+    annotation_author_id: str | None = None,
+    principal: PrincipalContext = Depends(require_principal_context),
+    service: DatasetService = Depends(get_dataset_service),
+    annotations: AnnotationService = Depends(get_annotation_service),
+) -> SavedInputSnapshot:
+    _, snapshot = await _resolve_saved_episode(
+        service, annotations, dataset_id, episode_idx, principal.scope_id, annotation_author_id=annotation_author_id
+    )
+    return snapshot
+
+
 @router.get(
     "/{dataset_id}/episodes/{episode_idx}/judge",
     response_model=JudgeStatus,
@@ -133,27 +174,41 @@ async def get_episode_judgment(
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0)),
     service: DatasetService = Depends(get_dataset_service),
     config: AppConfig = Depends(get_app_config),
+    principal: PrincipalContext = Depends(require_principal_context),
+    annotations: AnnotationService = Depends(get_annotation_service),
 ) -> JudgeStatus:
     """Return any cached judgment for ``(dataset_id, episode_idx)`` without inference."""
     judge_service = get_vlm_judge_service(config)
     if judge_service is None:
         return JudgeStatus(enabled=False, cached=False)
 
-    record = _resolve_episode(service, dataset_id, episode_idx)
-    if record is None:
-        raise HTTPException(status_code=404, detail=f"Episode {episode_idx} not found")
+    record, snapshot = await _resolve_saved_episode(service, annotations, dataset_id, episode_idx, principal.scope_id)
 
-    cache = judge_service.cache_for(_judge_cache_dir(service, dataset_id))
+    cache = judge_service.cache_for(_judge_cache_dir(service, dataset_id) / snapshot.snapshot_id)
     cache_key = cache.key(
+        episode_id=f"{dataset_id}/episode_{episode_idx:06d}",
+        snapshot_id=snapshot.snapshot_id,
         video_paths=record.video_paths,
-        instruction=record.instruction,
+        instruction=snapshot.instruction,
         judge_model=judge_service.model_id,
         prompt_version=_prompt_version(),
         from_s=record.from_timestamp,
         to_s=record.to_timestamp,
         agent_config=judge_service.config.agent,
+        video_windows=record.video_windows,
+        media_identity=record.media_identity,
     )
     cached_payload = cache.get(cache_key)
+    if cached_payload is not None:
+        from evaluation.vlm_judge.judge import JudgeResult
+
+        try:
+            cached_payload = JudgeResult.from_dict(cached_payload).to_dict()
+        except ValueError as error:
+            logger.warning("Saved judge evidence validation failed")
+            raise HTTPException(
+                status_code=502, detail="Saved judge evidence is invalid; run again to replace it"
+            ) from error
     return JudgeStatus(
         enabled=True,
         cached=cached_payload is not None,
@@ -170,17 +225,22 @@ async def get_episode_judgment(
 
 @router.post(
     "/{dataset_id}/episodes/{episode_idx}/judge",
-    response_model=JudgeResponse,
+    status_code=202,
     dependencies=[Depends(require_csrf_token)],
 )
 async def run_episode_judgment(
     payload: JudgeRequest,
+    request: Request,
+    response: Response,
+    idempotency_key: str | None = Header(default=None, min_length=1, max_length=200),
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0)),
     service: DatasetService = Depends(get_dataset_service),
     config: AppConfig = Depends(get_app_config),
-) -> JudgeResponse:
-    """Run the VLM judge on ``(dataset_id, episode_idx)`` (cache-first)."""
+    principal: PrincipalContext = Depends(require_principal_context),
+    annotations: AnnotationService = Depends(get_annotation_service),
+) -> dict[str, Any]:
+    """Persist a one-target job before responding; the worker owns inference."""
     judge_service = get_vlm_judge_service(config)
     if judge_service is None:
         raise HTTPException(
@@ -188,69 +248,104 @@ async def run_episode_judgment(
             detail="VLM judge is disabled. Set VLM_JUDGE_ENABLED=true to enable.",
         )
 
-    record = _resolve_episode(service, dataset_id, episode_idx, views=tuple(payload.views or ()))
-    if record is None:
-        raise HTTPException(status_code=404, detail=f"Episode {episode_idx} not found")
-
-    instruction = payload.instruction or record.instruction or ""
-    if not instruction:
-        raise HTTPException(
-            status_code=422,
-            detail="No task instruction available; provide one via the request body",
-        )
-
+    if payload.instruction is not None:
+        raise HTTPException(status_code=422, detail="Use a saved instruction; request-body overrides are not supported")
+    _, snapshot = await _resolve_saved_episode(
+        service,
+        annotations,
+        dataset_id,
+        episode_idx,
+        principal.scope_id,
+        views=tuple(payload.views or ()),
+        annotation_author_id=payload.annotation_author_id,
+        expected_snapshot_id=payload.snapshot_id,
+    )
     if payload.process_method is not None and payload.process_method not in PROCESS_METHODS:
         raise HTTPException(
             status_code=422,
             detail=f"process_method must be one of {list(PROCESS_METHODS)}",
         )
-    effective_method = payload.process_method or judge_service.config.agent.process_method
-
-    # Detect cache hit before invoking the backend so we can flag it on the wire.
-    cache = judge_service.cache_for(_judge_cache_dir(service, dataset_id))
-    cache_key = cache.key(
-        video_paths=record.video_paths,
-        instruction=instruction,
-        judge_model=judge_service.model_id,
-        prompt_version=_prompt_version(),
-        from_s=record.from_timestamp,
-        to_s=record.to_timestamp,
-        agent_config=replace(judge_service.config.agent, process_method=effective_method),
-    )
-    was_cached = not payload.force and cache.get(cache_key) is not None
-
+    jobs = await get_judge_jobs(request, config, service, annotations)
     try:
-        # Model inference is blocking and GPU-bound; run it in a worker thread so
-        # the single event loop stays free to serve episode/video requests while
-        # a judgment is in flight (otherwise the whole backend stalls per run).
-        result = await run_in_threadpool(
-            judge_service.judge_episode,
-            episode_id=f"{dataset_id}/episode_{episode_idx:06d}",
-            instruction=instruction,
-            video_paths=record.video_paths,
-            from_s=record.from_timestamp,
-            to_s=record.to_timestamp,
-            force=payload.force,
-            cache_dir=_judge_cache_dir(service, dataset_id),
-            process_method=payload.process_method,
+        job = await jobs.submit(
+            dataset_id,
+            principal.scope_id,
+            [int(episode_idx)],
+            prepare_job_configuration(payload.model_dump(exclude={"instruction", "snapshot_id"}, exclude_none=True)),
+            idempotency_key=(idempotency_key or uuid4().hex).replace("\r", "").replace("\n", ""),
+            expected_snapshots={int(episode_idx): snapshot.snapshot_id},
         )
-    except FileNotFoundError as err:
-        raise HTTPException(status_code=404, detail=str(err)) from err
-    except ValueError as err:
-        raise HTTPException(status_code=400, detail=str(err)) from err
-    except Exception as err:  # backend / model errors surface as 502
-        safe_dataset_id = dataset_id.replace("\r", "").replace("\n", "")
-        safe_episode_idx = int(episode_idx)
-        logger.exception("VLM judge failed for %s/%d", safe_dataset_id, safe_episode_idx)
-        raise HTTPException(status_code=502, detail=f"VLM backend error: {err}") from err
-
-    payload_out = result.to_dict()
-    return JudgeResponse(cached=was_cached, process_method=effective_method, **payload_out)
+    except SavedInputError as error:
+        raise HTTPException(status_code=error.status_code, detail=str(error)) from None
+    except ValueError:
+        raise HTTPException(status_code=409, detail="Judge request conflicts with saved state") from None
+    response.headers["Location"] = str(request.url_for("judge_job_status", job_id=job["id"]))
+    response.headers["Retry-After"] = "1"
+    return job_summary(job)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+async def _resolve_saved_episode(
+    service: DatasetService,
+    annotations: AnnotationService,
+    dataset_id: str,
+    episode_idx: int,
+    principal_scope_id: str,
+    *,
+    views: tuple[str, ...] = (),
+    annotation_author_id: str | None = None,
+    expected_snapshot_id: str | None = None,
+) -> tuple[EpisodeRecord, SavedInputSnapshot]:
+    _dataset_path_parts(dataset_id)
+    if await service.get_dataset(dataset_id) is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    try:
+        source = await service.get_source_revision(dataset_id, episode_idx)
+        record = await service.get_episode_media_record(dataset_id, episode_idx)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Episode not found")
+        snapshot = await resolve_saved_input(
+            service,
+            annotations,
+            dataset_id,
+            episode_idx,
+            principal_scope_id=principal_scope_id,
+            source=source,
+            dataset_instruction=record.instruction,
+            media_identity=record.media_identity,
+            video_windows=record.video_windows,
+            annotation_author_id=annotation_author_id,
+            expected_snapshot_id=expected_snapshot_id,
+        )
+        verified = await service.get_episode_media_record(dataset_id, episode_idx)
+        if verified is None or (verified.media_identity, verified.video_windows, verified.instruction) != (
+            record.media_identity,
+            record.video_windows,
+            record.instruction,
+        ):
+            raise SavedInputError("Media changed while resolving saved inputs")
+        if views:
+            if not set(views).issubset(record.video_paths):
+                raise SavedInputError("Unknown camera selection", 422)
+            record = replace(
+                record,
+                video_paths={view: record.video_paths[view] for view in views},
+                video_windows={view: window for view, window in record.video_windows.items() if view in views},
+                media_identity={view: record.media_identity[view] for view in views} if record.media_identity else None,
+            )
+        return record, snapshot
+    except SavedInputError as error:
+        logger.warning("Saved judge input rejected for episode %d", episode_idx)
+        raise HTTPException(status_code=error.status_code, detail=str(error)) from None
+    except ValueError:
+        raise HTTPException(status_code=409, detail="Saved input source changed or is unavailable") from None
+    except StorageError:
+        logger.error("Saved judge input storage unavailable")
+        raise HTTPException(status_code=503, detail="Saved input storage unavailable") from None
 
 
 def _resolve_episode(

@@ -8,6 +8,7 @@ import { AnnotationWorkspace } from '@/components/annotation-workspace/Annotatio
 import {
   mediaSpies,
   mockComputeSyncAction,
+  mockMotionMetrics,
   mockSetCurrentFrame,
   mockTogglePlayback,
   setupAnnotationWorkspaceTestCase,
@@ -18,6 +19,42 @@ import {
 describe('AnnotationWorkspace playback and trajectory tab flows', () => {
   beforeEach(setupAnnotationWorkspaceTestCase)
   afterEach(teardownAnnotationWorkspaceTestCase)
+
+  it('identifies a selected camera transform that the source preview cannot render', () => {
+    testState.cameraTransforms = { main: { resize: { width: 128, height: 128 } } }
+    render(<AnnotationWorkspace />)
+    expect(screen.getByText(/edited preview unavailable/i)).toBeInTheDocument()
+  })
+
+  it('pauses a hidden retained workspace without resuming when shown', () => {
+    testState.isPlaying = true
+    testState.autoPlay = true
+    const { rerender, container } = render(<AnnotationWorkspace visible />)
+    const video = container.querySelector('video')!
+    video.currentTime = 0.2
+    rerender(<AnnotationWorkspace visible={false} />)
+    expect(mockTogglePlayback).toHaveBeenCalledTimes(1)
+    expect(video).toBe(container.querySelector('video'))
+    testState.isPlaying = false
+    rerender(<AnnotationWorkspace visible />)
+    expect(mockTogglePlayback).toHaveBeenCalledTimes(1)
+    expect(video).toBe(container.querySelector('video'))
+  })
+
+  it('retains trajectory-derived metric inputs across playback renders', () => {
+    const { rerender } = render(<AnnotationWorkspace />)
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /episode analyzer/i }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    const before = mockMotionMetrics.mock.lastCall![0]
+    testState.isPlaying = true
+    rerender(<AnnotationWorkspace />)
+    const after = mockMotionMetrics.mock.lastCall![0]
+    expect(after.positions).toBe(before.positions)
+    expect(after.timestamps).toBe(before.timestamps)
+    expect(after.gripperStates).toBe(before.gripperStates)
+  })
 
   it('defaults the workspace to the trajectory viewer without an episode tab', () => {
     render(<AnnotationWorkspace />)
@@ -142,7 +179,7 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
     expect(labelsPanel).toContainElement(screen.getByText('Trajectory Adjustment'))
   })
 
-  it('places the VLM judge controls after the language instruction panel', () => {
+  it('places the single judge flow inside Episode Analysis before language instructions', () => {
     render(<AnnotationWorkspace />)
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: /trajectory viewer/i }), {
@@ -151,7 +188,11 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
     })
 
     const panelText = screen.getByTestId('trajectory-labels-panel').textContent ?? ''
-    expect(panelText.indexOf('Language Instructions')).toBeLessThan(panelText.indexOf('VLM Judge'))
+    expect(panelText.indexOf('Episode Analysis')).toBeLessThan(panelText.indexOf('VLM Judge'))
+    expect(panelText.indexOf('VLM Judge')).toBeLessThan(panelText.indexOf('Language Instructions'))
+    expect(
+      screen.queryByRole('button', { name: /^(Expand|Collapse) VLM Judge$/ }),
+    ).not.toBeInTheDocument()
   })
 
   it('constrains the compact trajectory playback media frame so it does not dominate the viewer', () => {

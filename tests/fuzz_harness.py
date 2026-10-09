@@ -58,10 +58,12 @@ _extract_from_tracking_data = _metrics._extract_from_tracking_data
 _DATA_TYPES = ["raw", "converted", "reports", "checkpoints"]
 
 # Dataviewer backend modules loaded via importlib to avoid full FastAPI import chain.
-# We import only the pure functions that don't require the FastAPI app context.
+# Sanitization lives in curation; validation re-exports only its public string helper.
+_curation = _load_module("curation_fuzz", "evaluation/vlm_judge/curation.py")
+_sanitize_user_string = _curation.sanitize_user_string
+_sanitize_nested_value = _curation._sanitize_nested_value
+
 _validation = _load_module("validation_fuzz", "data-management/viewer/backend/src/api/validation.py")
-_sanitize_user_string = _validation.sanitize_user_string
-_sanitize_nested_value = _validation._sanitize_nested_value
 _validate_safe_string = _validation.validate_safe_string
 _SAFE_DATASET_ID_PATTERN = _validation.SAFE_DATASET_ID_PATTERN
 _SAFE_CAMERA_NAME_PATTERN = _validation.SAFE_CAMERA_NAME_PATTERN

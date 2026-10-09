@@ -1,9 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
+import { useEpisodeAnnotations, useSaveAnnotation } from '@/hooks/use-annotations'
+import { useEpisodeEdits, useSaveEpisodeEdits } from '@/hooks/use-episode-edits'
+import { KeyboardShortcutsContext } from '@/hooks/use-keyboard-shortcuts'
 import { useSaveEpisodeLabels } from '@/hooks/use-labels'
 import { usePrincipalContext } from '@/hooks/use-principal-context'
+import { ApiClientError } from '@/lib/api-client'
 import { isDiagnosticsEnabled, recordDiagnosticEvent } from '@/lib/playback-diagnostics'
 import {
+  useAnnotationStore,
   useDatasetStore,
   useEditDirtyState,
   useEditStore,
@@ -25,6 +30,7 @@ import { useAnnotationWorkspacePlayback } from './useAnnotationWorkspacePlayback
 const EMPTY_LABELS: string[] = []
 
 interface UseAnnotationWorkspaceShellOptions {
+  visible?: boolean
   diagnosticsVisible?: boolean
   canGoPreviousEpisode?: boolean
   onPreviousEpisode?: () => void
@@ -34,6 +40,7 @@ interface UseAnnotationWorkspaceShellOptions {
 }
 
 export function useAnnotationWorkspaceShell({
+  visible = true,
   diagnosticsVisible = isDiagnosticsEnabled(),
   canGoPreviousEpisode = false,
   onPreviousEpisode,
@@ -41,6 +48,7 @@ export function useAnnotationWorkspaceShell({
   onNextEpisode,
   onSaveAndNextEpisode,
 }: UseAnnotationWorkspaceShellOptions) {
+  const shortcutsEnabled = useContext(KeyboardShortcutsContext)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('trajectory')
   const seekVideoFrameRef = useRef(
@@ -49,23 +57,39 @@ export function useAnnotationWorkspaceShell({
   const resumePlaybackRef = useRef((_: number) => {})
 
   const currentDataset = useDatasetStore((state) => state.currentDataset)
+  const annotationQuery = useEpisodeAnnotations()
+  const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation)
+  const annotationDraftHydrated = useAnnotationStore((state) => state.draftHydrated)
+  const annotationDraftError = useAnnotationStore((state) => state.draftError)
+  const hasAnnotationChanges = useAnnotationStore((state) => state.isDirty)
+  const annotationConflict = useAnnotationStore((state) => state.conflict)
+  const annotationEditGeneration = useAnnotationStore((state) => state.editGeneration)
+  const annotationContextGeneration = useAnnotationStore((state) => state.contextGeneration)
+  const resetAnnotation = useAnnotationStore((state) => state.resetAnnotation)
+  const saveAnnotation = useSaveAnnotation()
   const principalQuery = usePrincipalContext()
   const currentEpisode = useEpisodeStore((state) => state.currentEpisode)
   const labelDataLoaded = useLabelStore((state) => state.isLoaded)
+  const labelDraftHydrated = useLabelStore((state) => state.draftHydrated)
+  const labelDraftError = useLabelStore((state) => state.draftError)
+  const labelsSaving = useLabelStore((state) => state.isSaving)
+  const labelConflict = useLabelStore((state) => state.conflict)
   const availableLabels = useLabelStore((state) => state.availableLabels)
   const episodeLabels = useLabelStore((state) => state.episodeLabels)
   const savedEpisodeLabels = useLabelStore((state) => state.savedEpisodeLabels)
   const setEpisodeLabelsInStore = useLabelStore((state) => state.setEpisodeLabels)
   const removedFrames = useEditStore((state) => state.removedFrames)
-  const initializeEdit = useEditStore((state) => state.initializeEdit)
   const clearTransforms = useEditStore((state) => state.clearTransforms)
-  const saveEpisodeDraft = useEditStore((state) => state.saveEpisodeDraft)
-  const editDatasetId = useEditStore((state) => state.datasetId)
-  const editEpisodeIndex = useEditStore((state) => state.episodeIndex)
-  const editPrincipalScopeId = useEditStore((state) => state.principalScopeId)
+  const savedEdits = useEpisodeEdits(
+    currentDataset?.id ?? null,
+    currentEpisode?.meta.index ?? null,
+    principalQuery.data?.scopeId,
+  )
+  const saveEdits = useSaveEpisodeEdits()
   const subtasks = useEditStore((state) => state.subtasks)
   const addSubtask = useEditStore((state) => state.addSubtask)
   const globalTransform = useEditStore((state) => state.globalTransform)
+  const cameraTransforms = useEditStore((state) => state.cameraTransforms)
   const { insertedFrames } = useFrameInsertionState()
   const { isDirty: hasEdits, resetEdits } = useEditDirtyState()
   const {
@@ -97,48 +121,93 @@ export function useAnnotationWorkspaceShell({
   }, [currentEpisode, savedEpisodeLabels])
 
   const diagnosticsEnabled = diagnosticsVisible && isDiagnosticsEnabled()
-
-  const { hasPendingEpisodeChanges, saveStatusMessage, handleResetAll, handleSaveAndNextEpisode } =
-    useAnnotationWorkspaceEpisodeActions({
-      diagnosticsEnabled,
-      currentDatasetId: currentDataset?.id ?? null,
-      currentEpisodeIndex: currentEpisode?.meta.index ?? null,
-      currentEpisodeLabels,
-      savedLabelsForCurrentEpisode,
-      availableLabels,
-      labelDataLoaded,
-      hasEdits,
-      onResetEdits: resetEdits,
-      onSetEpisodeLabels: setEpisodeLabelsInStore,
-      onSaveEpisodeDraft: saveEpisodeDraft,
-      onSaveEpisodeLabels: saveEpisodeLabels.mutateAsync,
-      onRecordEvent: recordDiagnosticEvent,
-      canGoNextEpisode,
-      onAdvanceToNextEpisode: onSaveAndNextEpisode ?? onNextEpisode,
-    })
-
   useEffect(() => {
-    if (currentDataset && currentEpisode && principalQuery.data) {
-      const newDatasetId = currentDataset.id
-      const newEpisodeIndex = currentEpisode.meta.index
+    if (!visible && isPlaying) togglePlayback()
+  }, [visible, isPlaying, togglePlayback])
+  const annotationAccessLost =
+    annotationQuery.error instanceof ApiClientError &&
+    [401, 403, 404].includes(annotationQuery.error.status)
+  const saveBlockedReason =
+    !principalQuery.data?.scopeId || principalQuery.error
+      ? 'Reload your identity before saving.'
+      : annotationAccessLost
+        ? 'Annotation access is unavailable. Reload before saving.'
+        : currentEpisode?.sourceRevision &&
+            savedEdits.data &&
+            (currentEpisode.sourceId !== savedEdits.data.sourceId ||
+              currentEpisode.sourceRevision !== savedEdits.data.sourceRevision)
+          ? 'The episode source changed. Reload and resolve the draft before saving.'
+          : annotationConflict || labelConflict
+            ? 'Resolve conflicting changes before saving.'
+            : annotationDraftError ||
+              labelDraftError ||
+              savedEdits.persistenceError ||
+              (labelsSaving ? 'Saving episode labels.' : null) ||
+              (!annotationDraftHydrated ? 'Loading annotation drafts.' : null) ||
+              (!labelDraftHydrated ? 'Loading label drafts.' : null) ||
+              (!savedEdits.isReady ? 'Loading saved edits.' : null) ||
+              (!labelDataLoaded ? 'Loading labels.' : null)
 
+  const {
+    hasPendingEpisodeChanges,
+    saveStatusMessage,
+    handleResetAll,
+    handleSaveAndNextEpisode,
+    handleSaveEpisode,
+    isSaving,
+  } = useAnnotationWorkspaceEpisodeActions({
+    diagnosticsEnabled,
+    currentDatasetId: currentDataset?.id ?? null,
+    currentEpisodeIndex: currentEpisode?.meta.index ?? null,
+    currentEpisodeLabels,
+    savedLabelsForCurrentEpisode,
+    availableLabels,
+    labelDataLoaded,
+    hasEdits,
+    hasAnnotationChanges,
+    principalScopeId: principalQuery.data?.scopeId,
+    changeGeneration: JSON.stringify([
+      annotationContextGeneration,
+      annotationEditGeneration,
+      currentEpisodeLabels,
+    ]),
+    saveBlockedReason,
+    onSaveEpisodeAnnotation: async () => {
       if (
-        editDatasetId !== newDatasetId ||
-        editEpisodeIndex !== newEpisodeIndex ||
-        editPrincipalScopeId !== principalQuery.data.scopeId
+        !currentDataset ||
+        !currentEpisode ||
+        !currentAnnotation ||
+        currentAnnotation.annotatorId !== principalQuery.data?.scopeId
       ) {
-        initializeEdit(newDatasetId, newEpisodeIndex, principalQuery.data.scopeId)
+        throw new Error('Load the current annotation before saving.')
       }
-    }
-  }, [
-    currentDataset,
-    currentEpisode,
-    editDatasetId,
-    editEpisodeIndex,
-    editPrincipalScopeId,
-    initializeEdit,
-    principalQuery.data,
-  ])
+      await saveAnnotation.mutateAsync({
+        datasetId: currentDataset.id,
+        episodeIndex: currentEpisode.meta.index,
+        annotation: structuredClone(currentAnnotation),
+      })
+    },
+    onResetEdits: () => {
+      resetEdits()
+      if (hasAnnotationChanges) resetAnnotation()
+    },
+    onSetEpisodeLabels: setEpisodeLabelsInStore,
+    onSaveEpisodeDraft: async () => {
+      const current = useEditStore.getState()
+      const operations = current.getEditOperations()
+      if (!savedEdits.isReady || !current.serverBaseline || !operations) {
+        throw new Error('Load and resolve saved edits before saving.')
+      }
+      await saveEdits.mutateAsync({
+        ...current.serverBaseline,
+        operations: structuredClone(operations),
+      })
+    },
+    onSaveEpisodeLabels: saveEpisodeLabels.mutateAsync,
+    onRecordEvent: recordDiagnosticEvent,
+    canGoNextEpisode,
+    onAdvanceToNextEpisode: onSaveAndNextEpisode ?? onNextEpisode,
+  })
 
   const originalFrameCount = useMemo(() => {
     if (currentEpisode?.meta.length) {
@@ -196,9 +265,9 @@ export function useAnnotationWorkspaceShell({
     activePlaybackRange: playback.activePlaybackRange,
     playbackRangeStart: playback.playbackRangeStart,
     playbackRangeEnd: playback.playbackRangeEnd,
-    isPlaying,
+    isPlaying: visible && isPlaying,
     playbackSpeed,
-    autoPlay,
+    autoPlay: visible && autoPlay,
     autoLoop,
     shouldLoopPlaybackRange: playback.shouldLoopPlaybackRange,
     displayAdjustment,
@@ -238,12 +307,14 @@ export function useAnnotationWorkspaceShell({
   )
 
   useEffect(() => {
-    if (!playback.selectedRange) {
-      return
-    }
-
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') {
+      if (!shortcutsEnabled || event.defaultPrevented) return
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        if (!event.repeat) void handleSaveEpisode()
+        return
+      }
+      if (event.key !== 'Escape' || !playback.selectedRange) {
         return
       }
 
@@ -255,7 +326,7 @@ export function useAnnotationWorkspaceShell({
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [playback])
+  }, [playback, handleSaveEpisode, shortcutsEnabled])
 
   const handleOpenExportDialog = useCallback(() => {
     setExportDialogOpen(true)
@@ -280,6 +351,11 @@ export function useAnnotationWorkspaceShell({
     autoPlay,
     canGoNextEpisode,
     canGoPreviousEpisode,
+    canSaveEpisode:
+      !saveBlockedReason &&
+      !saveEpisodeLabels.isPending &&
+      !saveAnnotation.isPending &&
+      !saveEdits.isPending,
     clearTransforms,
     currentDataset,
     currentEpisode,
@@ -288,13 +364,19 @@ export function useAnnotationWorkspaceShell({
     diagnosticsEnabled,
     displayFilter: media.displayFilter,
     exportDialogOpen,
+    editPersistenceError: savedEdits.persistenceError,
+    resolveRecoveredEdits: savedEdits.resolveRecoveredEdits,
     frameImageUrl: media.frameImageUrl,
+    frameImageUrls: media.frameImageUrls,
     globalTransform,
+    cameraTransforms,
     handleCreateSubtaskFromSelection,
     handleLoadedMetadata: media.handleLoadedMetadata,
     handleOpenExportDialog,
     handleResetAllClick,
     handleSaveAndNextEpisode,
+    handleSaveEpisode,
+    isSaving,
     handleTabChange,
     handleVideoEnded: media.handleVideoEnded,
     hasPendingEpisodeChanges,
@@ -320,6 +402,9 @@ export function useAnnotationWorkspaceShell({
     videoUrls: media.videoUrls,
     canvasRef: media.canvasRef,
     cameras: media.cameras,
+    selectedCameras: media.selectedCameras,
+    setSelectedCameras: media.setSelectedCameras,
+    originalFrameIndex,
     cameraName: media.cameraName,
     setCameraName: media.setCameraName,
   }

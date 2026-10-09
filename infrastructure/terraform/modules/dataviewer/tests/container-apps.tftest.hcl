@@ -55,6 +55,17 @@ run "default_placeholder_images" {
     condition     = azurerm_container_app.backend.ingress[0].allow_insecure_connections == false
     error_message = "Backend ingress must reject insecure connections"
   }
+
+  assert {
+    condition = alltrue([
+      for name, value in {
+        VLM_JUDGE_ENABLED   = "false"
+        VLM_JUDGE_BACKEND   = "echo"
+        VLM_JUDGE_CACHE_DIR = "/scratch/judge"
+      } : lookup({ for setting in azurerm_container_app.backend.template[0].container[0].env : setting.name => setting.value }, name, null) == value
+    ])
+    error_message = "Bootstrap must keep judging disabled and use explicit echo and writable scratch defaults"
+  }
 }
 
 run "custom_images" {

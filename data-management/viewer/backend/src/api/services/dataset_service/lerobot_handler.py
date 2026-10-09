@@ -7,6 +7,7 @@ parquet data files, mp4 video files, and meta/info.json metadata.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import shutil
@@ -36,18 +37,15 @@ except ImportError:
 
 
 def _video_cache_query(video_path: Path | str | None) -> str:
-    """Return ``?v=<mtime>`` for a video clip, or empty when unavailable.
-
-    The mtime changes when the cached clip is regenerated, which forces
-    browsers to refetch instead of reusing a previously-cached corrupt body.
-    """
+    """Return an opaque filesystem generation for browser media cache identity."""
     if video_path is None:
         return ""
     try:
-        mtime = int(Path(video_path).stat().st_mtime)
+        metadata = Path(video_path).stat()
     except OSError:
         return ""
-    return f"?v={mtime}"
+    version = (metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns)
+    return f"?v={hashlib.sha256(str(version).encode()).hexdigest()}"
 
 
 class LeRobotFormatHandler:
@@ -197,16 +195,9 @@ class LeRobotFormatHandler:
             )
 
             video_urls: dict[str, str] = {}
-            # Append a content-derived cache-buster (file mtime of the cached
-            # per-episode clip) so the URL changes whenever the on-disk clip is
-            # regenerated. Without this, browsers can keep using a previously
-            # cached corrupt response because Chromium's HTML <video> element
-            # does not always honor ETag/Last-Modified revalidation for media.
             for camera, video_path in lr_data.video_paths.items():
-                cache_path = self._video_cache_path(dataset_id, episode_idx, camera)
-                buster_path = cache_path if cache_path and cache_path.exists() else video_path
                 video_urls[camera] = (
-                    f"/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{camera}{_video_cache_query(buster_path)}"
+                    f"/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{camera}{_video_cache_query(video_path)}"
                 )
 
             # For blob datasets, add video URLs for cameras without local files.
@@ -308,6 +299,11 @@ class LeRobotFormatHandler:
 
         info = loader.get_dataset_info()
         fps = info.fps or 30.0
+        window = loader.get_video_time_window(episode_idx, camera)
+        if frame_idx < 0 or (window is not None and frame_idx / fps >= window[1] - window[0]):
+            return None
+        if window is not None:
+            frame_idx += round(window[0] * fps)
 
         result = self._extract_frame_ffmpeg(str(video_path), frame_idx, fps)
         if result is not None:
@@ -466,21 +462,6 @@ class LeRobotFormatHandler:
             video_path = loader.get_video_path(episode_idx, camera)
             if video_path is None:
                 return None
-
-            window = loader.get_video_time_window(episode_idx, camera)
-            if window is None:
-                return str(video_path)
-
-            clip_path = self._video_cache_path(dataset_id, episode_idx, camera)
-            if clip_path is None:
-                return str(video_path)
-
-            if clip_path.exists() and self._is_valid_video_file(clip_path):
-                return str(clip_path)
-            clip_path.unlink(missing_ok=True)
-
-            if self._generate_episode_video_clip(video_path, window, clip_path):
-                return str(clip_path)
 
             return str(video_path)
         except Exception as e:

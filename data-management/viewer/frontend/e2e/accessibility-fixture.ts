@@ -27,6 +27,8 @@ export const riskComponentRegistry = [
     id: 'viewer-risk-selects',
     category: 'select',
     sourcePaths: [
+      'app-shell/DatasetCatalog.tsx',
+      'app-shell/DatasetWorkspace.tsx',
       'annotation-panel/AddAnomalyDialog.tsx',
       'annotation-panel/AddIssueDialog.tsx',
       'annotation-panel/LanguageInstructionWidget.tsx',
@@ -71,6 +73,8 @@ export const riskComponentRegistry = [
     id: 'viewer-risk-live-regions',
     category: 'live-region',
     sourcePaths: [
+      'app-shell/DatasetCatalog.tsx',
+      'app-shell/DatasetWorkspace.tsx',
       'annotation-panel/ObjectDetectionWidget.tsx',
       'annotation-workspace/AnnotationWorkspacePlaybackCard.tsx',
       'annotation-workspace/AnnotationWorkspaceTopBar.tsx',
@@ -84,6 +88,7 @@ export const riskComponentRegistry = [
     id: 'viewer-risk-keyboard-shortcuts',
     category: 'keyboard-shortcut',
     sourcePaths: [
+      'app-shell/DatasetCatalog.tsx',
       'annotation-panel/TaskCompletenessWidget.tsx',
       'annotation-panel/TrajectoryQualityWidget.tsx',
       'annotation-workspace/useAnnotationWorkspaceShell.ts',
@@ -175,6 +180,7 @@ interface ApiFixtureOptions {
   episodeList?: 'error' | 'success'
   export?: 'failure' | 'success'
   trajectoryVariables?: 'joints' | 'named'
+  jointConfig?: 'conflict' | 'success'
 }
 
 export async function installApiFixture(page: Page, options: ApiFixtureOptions = {}) {
@@ -193,6 +199,31 @@ export async function installApiFixture(page: Page, options: ApiFixtureOptions =
       return json({ scope_id: 'a11y-local-scope', auth_mode: 'local' })
     }
     if (path === '/api/datasets') return json(activeDatasets)
+    if (path === '/api/datasets/catalog') {
+      const query = (url.searchParams.get('query') ?? '').toLowerCase()
+      const filtered = activeDatasets.filter((dataset) =>
+        `${dataset.id} ${dataset.name}`.toLowerCase().includes(query),
+      )
+      const offset = Number(url.searchParams.get('offset') ?? 0)
+      const limit = Math.min(100, Number(url.searchParams.get('limit') ?? 25))
+      return json({
+        items: filtered.slice(offset, offset + limit).map(({ id, name, total_episodes }) => ({
+          id,
+          name,
+          total_episodes,
+          group: null,
+          format: 'hdf5',
+        })),
+        total: filtered.length,
+        catalog_total: activeDatasets.length,
+        groups: [],
+        snapshot_id: 'synthetic-catalog',
+        offset,
+        limit,
+        stale: false,
+        refresh_failed: false,
+      })
+    }
     if (/^\/api\/datasets\/[^/]+$/.test(path)) {
       const datasetId = path.split('/').at(-1)
       return json(activeDatasets.find((dataset) => dataset.id === datasetId) ?? activeDatasets[0])
@@ -208,6 +239,7 @@ export async function installApiFixture(page: Page, options: ApiFixtureOptions =
         vlm_judge_enabled: false,
       })
     }
+    if (path === '/api/judge/results') return json({ items: [], total: 0 })
     if (/\/episodes$/.test(path)) {
       if (options.episodeList === 'error') {
         return json({ code: 'SYNTHETIC_FAILURE', message: 'Synthetic episode list failure' }, 500)
@@ -224,10 +256,18 @@ export async function installApiFixture(page: Page, options: ApiFixtureOptions =
       })
     }
     if (path.endsWith('/joint-config') || path === '/api/joint-config/defaults') {
-      return json({
-        dataset_id: path.split('/')[3] ?? 'a11y-synthetic',
-        labels: { '0': 'shoulder_joint', '1': 'target_joint' },
-        groups: [{ id: 'arm', label: 'Arm', indices: [0, 1] }],
+      if (method === 'PUT' && options.jointConfig === 'conflict') {
+        return json({ code: 'REVISION_CONFLICT', message: 'Synthetic settings conflict' }, 412)
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { ETag: method === 'PUT' ? '"settings-saved"' : '"settings-baseline"' },
+        body: JSON.stringify({
+          dataset_id: path === '/api/joint-config/defaults' ? '_defaults' : path.split('/')[3],
+          labels: { '0': 'shoulder_joint', '1': 'target_joint' },
+          groups: [{ id: 'arm', label: 'Arm', indices: [0, 1] }],
+        }),
       })
     }
     if (path.endsWith('/annotations')) {
@@ -318,7 +358,7 @@ export async function openViewer(page: Page, testInfo: TestInfo, options: ApiFix
   })
   page.on('pageerror', (error) => pageErrors.push(error.message))
   await installApiFixture(page, options)
-  await page.goto('/')
+  await page.goto(`/?dataset=${encodeURIComponent(datasets[0].id)}`)
   await expect(page.getByRole('banner')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Episode 0' })).toBeVisible()
   await attachJson(testInfo, 'state-proof', {
@@ -344,13 +384,13 @@ export async function openEmptyViewer(page: Page, testInfo: TestInfo) {
   await installApiFixture(page, { catalog: 'empty' })
   await page.goto('/')
   await expect(page.getByRole('banner')).toBeVisible()
-  await expect(page.getByText('No episode data', { exact: true })).toBeVisible()
+  await expect(page.getByText('No datasets available.', { exact: true })).toBeVisible()
   await attachJson(testInfo, 'state-proof', {
     journeyIds: ['V02', 'V03', 'V04'],
     route: '/',
     fixture: 'a11y-empty',
     expected: 'Viewer shell renders an empty catalog without an episode workspace',
-    observed: 'Banner and No episode data status are visible',
+    observed: 'Banner and No datasets available status are visible',
   })
   return { consoleErrors, pageErrors }
 }

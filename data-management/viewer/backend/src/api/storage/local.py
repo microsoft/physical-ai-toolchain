@@ -5,11 +5,12 @@ Stores annotations in the dataset's annotations/ directory structure
 following the LeRobot v3 format specification.
 """
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json
 import os
-import tempfile
 from pathlib import Path
 
 import aiofiles
@@ -19,6 +20,8 @@ from fastapi import HTTPException
 from ..models.annotations import EpisodeAnnotationFile
 from ..validation import validate_path_containment
 from .base import RevisionConflictError, StorageAdapter, StorageError, VersionedValue
+from .local_revision import delete_conditional, write_conditional
+from .paths import resource_directory
 from .serializers import DateTimeEncoder
 
 
@@ -38,11 +41,6 @@ class LocalStorageAdapter(StorageAdapter):
             base_path: Base path to the dataset directory.
         """
         self.base_path = Path(base_path)
-        self._resource_locks: dict[Path, asyncio.Lock] = {}
-
-    def _resource_lock(self, path: Path) -> asyncio.Lock:
-        """Return the lock that serializes one annotation resource."""
-        return self._resource_locks.setdefault(path, asyncio.Lock())
 
     @staticmethod
     def _etag(content: str) -> str:
@@ -80,9 +78,15 @@ class LocalStorageAdapter(StorageAdapter):
         except HTTPException as exc:
             raise StorageError(f"Invalid dataset_id: path traversal detected in '{dataset_id}'", cause=exc) from exc
 
-    def _get_annotation_path(self, dataset_id: str, episode_index: int) -> Path:
+    def _get_annotation_path(
+        self,
+        dataset_id: str,
+        episode_index: int,
+        resource_scope: str | None = None,
+    ) -> Path:
         """Get the file path for an episode's annotations."""
-        return self._get_annotations_dir(dataset_id) / f"episode_{episode_index:06d}.json"
+        directory = self._get_annotations_dir(dataset_id).parent / resource_directory(resource_scope)
+        return validate_path_containment(directory / f"episode_{episode_index:06d}.json", self.base_path)
 
     async def _ensure_directory(self, path: Path) -> None:
         """Ensure a directory exists, creating it if necessary."""
@@ -122,9 +126,11 @@ class LocalStorageAdapter(StorageAdapter):
         self,
         dataset_id: str,
         episode_index: int,
+        *,
+        resource_scope: str | None = None,
     ) -> VersionedValue[EpisodeAnnotationFile]:
         """Retrieve an annotation and its strong content ETag."""
-        file_path = await asyncio.to_thread(self._get_annotation_path, dataset_id, episode_index)
+        file_path = await asyncio.to_thread(self._get_annotation_path, dataset_id, episode_index, resource_scope)
         try:
             content = await self._read_content(file_path)
             if content is None:
@@ -146,6 +152,7 @@ class LocalStorageAdapter(StorageAdapter):
         episode_index: int,
         annotation: EpisodeAnnotationFile,
         *,
+        resource_scope: str | None = None,
         if_match: str | None = None,
         if_none_match: bool = False,
     ) -> str:
@@ -162,39 +169,18 @@ class LocalStorageAdapter(StorageAdapter):
         Raises:
             StorageError: If the save operation fails.
         """
-        file_path = await asyncio.to_thread(self._get_annotation_path, dataset_id, episode_index)
+        file_path = await asyncio.to_thread(self._get_annotation_path, dataset_id, episode_index, resource_scope)
         annotations_dir = file_path.parent
 
         try:
-            async with self._resource_lock(file_path):
-                await self._ensure_directory(annotations_dir)
-                current_content = await self._read_content(file_path)
-                current_etag = self._etag(current_content) if current_content is not None else None
-                if if_none_match and current_content is not None:
-                    raise RevisionConflictError(current_etag)
-                if if_match is not None and if_match != current_etag:
-                    raise RevisionConflictError(current_etag)
-
-                json_content = self._serialize(annotation)
-                next_etag = self._etag(json_content)
-
-                temp_fd, temp_path = await asyncio.to_thread(
-                    tempfile.mkstemp,
-                    dir=str(annotations_dir),
-                    suffix=".tmp",
-                    prefix="annotation_",
-                )
-                try:
-                    async with aiofiles.open(temp_fd, "w", encoding="utf-8") as f:
-                        await f.write(json_content)
-
-                    await asyncio.to_thread(os.replace, temp_path, str(file_path))
-                except Exception:
-                    if await asyncio.to_thread(os.path.exists, temp_path):
-                        await asyncio.to_thread(os.unlink, temp_path)
-                    raise
-
-                return next_etag
+            await self._ensure_directory(annotations_dir)
+            return await asyncio.to_thread(
+                write_conditional,
+                file_path,
+                self._serialize(annotation),
+                if_match=if_match,
+                if_none_match=if_none_match,
+            )
 
         except RevisionConflictError:
             raise
@@ -254,18 +240,7 @@ class LocalStorageAdapter(StorageAdapter):
         file_path = await asyncio.to_thread(self._get_annotation_path, dataset_id, episode_index)
 
         try:
-            async with self._resource_lock(file_path):
-                current_content = await self._read_content(file_path)
-                if current_content is None:
-                    if if_match is not None:
-                        raise RevisionConflictError(None)
-                    return False
-                current_etag = self._etag(current_content)
-                if if_match is not None and if_match != current_etag:
-                    raise RevisionConflictError(current_etag)
-
-                await aiofiles.os.remove(file_path)
-                return True
+            return await asyncio.to_thread(delete_conditional, file_path, if_match=if_match)
 
         except RevisionConflictError:
             raise

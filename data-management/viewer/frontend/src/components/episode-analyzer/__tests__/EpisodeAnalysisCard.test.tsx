@@ -1,9 +1,15 @@
 import { render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useLabelStore } from '@/stores/label-store'
 
 import { EpisodeAnalysisCard } from '../EpisodeAnalysisCard'
+
+vi.mock('@/hooks/use-labels', () => ({
+  useSavedEpisodeAnalysis: (index: number) => ({
+    record: useLabelStore((state) => state.episodeAnalysis[index]),
+  }),
+}))
 
 beforeEach(() => {
   useLabelStore.getState().reset()
@@ -14,9 +20,19 @@ afterEach(() => {
 })
 
 describe('EpisodeAnalysisCard', () => {
+  it('keeps motion-only evidence distinct from absent task findings without a duplicate title', () => {
+    useLabelStore
+      .getState()
+      .setAllEpisodeAnalysis({ '0': { motionScore: 4, motionFlags: ['smooth'] } })
+    render(<EpisodeAnalysisCard episodeIndex={0} />)
+    expect(screen.getByRole('heading', { name: 'Motion analysis' })).toBeInTheDocument()
+    expect(screen.getByText('No saved task-specific findings.')).toBeInTheDocument()
+    expect(screen.queryByTestId('grasp-outcome')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Episode Analysis' })).not.toBeInTheDocument()
+  })
   it('shows a placeholder when no analysis exists for the episode', () => {
     render(<EpisodeAnalysisCard episodeIndex={0} />)
-    expect(screen.getByText(/no saved analysis/i)).toBeInTheDocument()
+    expect(screen.getByText(/no saved task-specific findings/i)).toBeInTheDocument()
   })
 
   it('renders the persisted VLM labels for the episode', () => {

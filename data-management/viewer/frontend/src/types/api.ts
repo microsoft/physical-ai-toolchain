@@ -139,6 +139,8 @@ export interface TrajectoryVariable {
 
 /** Complete episode data for viewing */
 export interface EpisodeData {
+  sourceId?: string | null
+  sourceRevision?: string | null
   /** Episode metadata */
   meta: EpisodeMeta
   /** Video URLs by camera name */

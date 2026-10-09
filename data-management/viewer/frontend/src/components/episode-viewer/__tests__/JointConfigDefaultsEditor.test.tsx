@@ -14,6 +14,7 @@ interface RenderOptions {
   groups?: JointGroup[]
   labels?: Record<string, string>
   isSaving?: boolean
+  saveError?: string
   onSave?: MockedFunction<OnSaveFn>
   onOpenChange?: MockedFunction<OnOpenChangeFn>
 }
@@ -29,6 +30,7 @@ function renderEditor(options: RenderOptions = {}) {
       labels={options.labels ?? { '0': 'shoulder' }}
       onSave={onSave}
       isSaving={options.isSaving}
+      saveError={options.saveError}
     />,
   )
   return { ...utils, onSave, onOpenChange }
@@ -93,6 +95,17 @@ describe('JointConfigDefaultsEditor', () => {
     renderEditor({ isSaving: true })
     const saveButton = screen.getByRole('button', { name: 'Saving…' })
     expect(saveButton).toBeDisabled()
+  })
+
+  it('announces a failed save within the open dialog and keeps the draft available', () => {
+    renderEditor({ saveError: 'Settings changed elsewhere.' })
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Joint defaults were not saved. Settings changed elsewhere.',
+    )
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByText('shoulder')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
   })
 
   it('shows duplicate-index alert and disables Save when indices collide', async () => {

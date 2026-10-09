@@ -5,7 +5,13 @@ Provides CRUD operations for annotations and aggregation logic
 for annotation summaries.
 """
 
+from __future__ import annotations
+
+import logging
 from collections import defaultdict
+from datetime import UTC, datetime
+
+from pydantic import JsonValue
 
 from ..models.annotations import (
     AnnotationSummary,
@@ -15,8 +21,32 @@ from ..models.annotations import (
     EpisodeAnnotationFile,
     TrajectoryFlag,
 )
+from ..models.contributions import ContributionLedger, MachineOrigin
 from ..models.datasources import EpisodeData
-from ..storage import LocalStorageAdapter, StorageAdapter, VersionedValue
+from ..models.episode_edits import EpisodeEditOperations, SavedEpisodeEdits
+from ..storage import LocalStorageAdapter, RevisionConflictError, StorageAdapter, StorageError, VersionedValue
+from ..storage.paths import edit_resource_scope
+
+logger = logging.getLogger(__name__)
+
+
+def _annotation_fields(value: JsonValue, prefix: str = "") -> dict[str, JsonValue]:
+    if prefix.endswith("/subtask_instructions") and isinstance(value, list):
+        return {f"{prefix}/{item['id']}": item["text"] for item in value}
+    if not isinstance(value, dict):
+        return {prefix: value}
+    fields = {}
+    for key, child in value.items():
+        fields.update(_annotation_fields(child, f"{prefix}/{key}" if prefix else key))
+    return fields
+
+
+class EditSourceChangedError(ValueError):
+    """Saved edits belong to an older source generation."""
+
+    def __init__(self, etag: str | None) -> None:
+        super().__init__("Saved edit source revision changed")
+        self.etag = etag
 
 
 class AnnotationService:
@@ -64,12 +94,111 @@ class AnnotationService:
         """Get an annotation resource with its strong validator."""
         return await self._storage.get_annotation_versioned(dataset_id, episode_idx)
 
+    async def get_saved_edits(
+        self,
+        dataset_id: str,
+        episode_idx: int,
+        *,
+        author_id: str,
+        source_id: str,
+        source_revision: str,
+    ) -> VersionedValue[SavedEpisodeEdits]:
+        """Read one source/author descriptor with its independent resource revision."""
+        logger.debug(
+            "Reading saved edits dataset=%s episode=%d",
+            dataset_id.replace("\r", "").replace("\n", ""),
+            int(episode_idx),
+        )
+        try:
+            current = await self._storage.get_annotation_versioned(
+                dataset_id,
+                episode_idx,
+                resource_scope=edit_resource_scope(source_id, author_id),
+            )
+        except StorageError as error:
+            logger.error("Saved edit read failed: %s", type(error).__name__)
+            raise
+        descriptor = current.value.saved_edits.get(source_id, {}).get(author_id) if current.value else None
+        if descriptor is not None:
+            if (descriptor.dataset_id, descriptor.episode_index, descriptor.source_id, descriptor.author_id) != (
+                dataset_id,
+                episode_idx,
+                source_id,
+                author_id,
+            ):
+                logger.warning("Saved edit scope mismatch")
+                raise ValueError("Saved edit scope mismatch")
+            if descriptor.source_revision != source_revision:
+                logger.warning("Saved edit source revision changed")
+                raise EditSourceChangedError(current.etag)
+        return VersionedValue(value=descriptor, etag=current.etag)
+
+    async def save_edits(
+        self,
+        dataset_id: str,
+        episode_idx: int,
+        operations: EpisodeEditOperations,
+        *,
+        author_id: str,
+        source_id: str,
+        source_revision: str,
+        frame_count: int,
+        cameras: set[str],
+        if_match: str | None = None,
+        if_none_match: bool = False,
+    ) -> VersionedValue[SavedEpisodeEdits]:
+        """Conditionally replace one descriptor, retaining every other contribution."""
+        if (if_match is None and not if_none_match) or (if_match is not None and if_none_match):
+            raise ValueError("Exactly one revision precondition is required")
+        if operations.datasetId != dataset_id or operations.episodeIndex != episode_idx:
+            raise ValueError("Edit operation identity does not match the resource")
+        try:
+            operations.validate_context(frame_count, cameras)
+        except ValueError:
+            logger.warning("Invalid saved edit operations")
+            raise
+        descriptor = SavedEpisodeEdits(
+            dataset_id=dataset_id,
+            episode_index=episode_idx,
+            source_id=source_id,
+            source_revision=source_revision,
+            author_id=author_id,
+            operations=operations,
+            updated_at=datetime.now(UTC),
+        )
+        try:
+            scope = edit_resource_scope(source_id, author_id)
+            current = await self._storage.get_annotation_versioned(dataset_id, episode_idx, resource_scope=scope)
+            envelope = current.value or EpisodeAnnotationFile(dataset_id=dataset_id, episode_index=episode_idx)
+            envelope.saved_edits.setdefault(source_id, {})[author_id] = descriptor
+            etag = await self._storage.save_annotation(
+                dataset_id,
+                episode_idx,
+                envelope,
+                resource_scope=scope,
+                if_match=if_match,
+                if_none_match=if_none_match,
+            )
+        except RevisionConflictError:
+            logger.warning("Saved edit revision conflict")
+            raise
+        except StorageError as error:
+            logger.error("Saved edit write failed: %s", type(error).__name__)
+            raise
+        logger.info(
+            "Saved edits dataset=%s episode=%d",
+            dataset_id.replace("\r", "").replace("\n", ""),
+            int(episode_idx),
+        )
+        return VersionedValue(value=descriptor, etag=etag)
+
     async def save_annotation(
         self,
         dataset_id: str,
         episode_idx: int,
         annotation: EpisodeAnnotation,
         *,
+        machine_origin: MachineOrigin | None = None,
         if_match: str | None = None,
         if_none_match: bool = False,
     ) -> VersionedValue[EpisodeAnnotationFile]:
@@ -95,6 +224,67 @@ class AnnotationService:
                 episode_index=episode_idx,
                 dataset_id=dataset_id,
             )
+
+        previous = next(
+            (item for item in annotation_file.annotations if item.annotator_id == annotation.annotator_id), None
+        )
+        excluded = {"annotator_id", "timestamp"}
+        previous_fields = _annotation_fields(previous.model_dump(mode="json", exclude=excluded)) if previous else {}
+        proposed_fields = _annotation_fields(annotation.model_dump(mode="json", exclude=excluded))
+        ledger = annotation_file.provenance.setdefault(annotation.annotator_id, ContributionLedger())
+        adopted_fields = {
+            "language_instruction/instruction"
+            if field == "instruction"
+            else f"language_instruction/subtask_instructions/{field.removeprefix('subtasks/')}": origin
+            for field, origin in annotation.instruction_adoption.items()
+        }
+        if adopted_fields and (machine_origin is not None or not adopted_fields.keys() <= proposed_fields.keys()):
+            logger.warning("Rejected invalid instruction adoption scope")
+            raise ValueError("Invalid instruction adoption scope")
+        if machine_origin is not None and any(
+            ledger.resolve(field, human_author_id=annotation.annotator_id).origin == "human"
+            for field in previous_fields.keys() - proposed_fields.keys()
+        ):
+            logger.warning("Rejected machine proposal removing human-authored annotation fields")
+            raise ValueError("Machine proposal would remove human-authored fields")
+        ledger.record_changes(
+            {field: value for field, value in previous_fields.items() if field not in adopted_fields},
+            {field: value for field, value in proposed_fields.items() if field not in adopted_fields},
+            author_id=annotation.annotator_id,
+            machine_origin=machine_origin,
+        )
+        for field, origin in adopted_fields.items():
+            ledger.record_changes(
+                {field: previous_fields[field]} if field in previous_fields else {},
+                {field: proposed_fields[field]},
+                author_id=annotation.annotator_id,
+                origin=origin,
+            )
+            ledger.accept(ledger.contributions[-1].id, annotation.annotator_id)
+        annotation = annotation.model_copy(update={"instruction_adoption": {}})
+        if machine_origin is not None or adopted_fields:
+            effective = annotation.model_dump(mode="json")
+            for field in sorted(proposed_fields, key=lambda name: (name.count("/"), name)):
+                resolved = ledger.resolve(field, human_author_id=annotation.annotator_id)
+                target = effective
+                parts = field.split("/")
+                if len(parts) == 3 and parts[1] == "subtask_instructions":
+                    for item in effective[parts[0]][parts[1]]:
+                        if item["id"] == parts[2]:
+                            item["text"] = resolved.value
+                    continue
+                for part in parts[:-1]:
+                    if not isinstance(target.get(part), dict):
+                        target[part] = {}
+                    target = target[part]
+                target[parts[-1]] = resolved.value
+            annotation = EpisodeAnnotation.model_validate(effective)
+        logger.debug(
+            "Recording annotation provenance dataset=%s episode=%d origin=%s",
+            dataset_id.replace("\r", "").replace("\n", ""),
+            int(episode_idx),
+            "machine" if machine_origin else "human",
+        )
 
         # Find and update existing annotation from same annotator, or append
         updated = False
@@ -137,22 +327,29 @@ class AnnotationService:
         Returns:
             True if annotations were deleted, False otherwise.
         """
-        if annotator_id is None:
-            # Delete entire annotation file
-            return await self._storage.delete_annotation(dataset_id, episode_idx, if_match=if_match)
-
         # Remove specific annotator's contribution
         annotation_file = await self._storage.get_annotation(dataset_id, episode_idx)
         if annotation_file is None:
             return False
 
+        if annotator_id is None and not annotation_file.saved_edits:
+            return await self._storage.delete_annotation(dataset_id, episode_idx, if_match=if_match)
+
         original_count = len(annotation_file.annotations)
-        annotation_file.annotations = [a for a in annotation_file.annotations if a.annotator_id != annotator_id]
+        annotation_file.annotations = [
+            annotation
+            for annotation in annotation_file.annotations
+            if annotator_id is not None and annotation.annotator_id != annotator_id
+        ]
 
         if len(annotation_file.annotations) == original_count:
             return False  # Annotator not found
 
-        if len(annotation_file.annotations) == 0:
+        for author, ledger in annotation_file.provenance.items():
+            if annotator_id is None or author == annotator_id:
+                ledger.withdraw([item.id for item in ledger.contributions])
+
+        if len(annotation_file.annotations) == 0 and not annotation_file.saved_edits:
             # No annotations left, delete file
             return await self._storage.delete_annotation(dataset_id, episode_idx, if_match=if_match)
 

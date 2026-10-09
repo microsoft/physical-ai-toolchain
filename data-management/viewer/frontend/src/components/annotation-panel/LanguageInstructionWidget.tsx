@@ -21,12 +21,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { useEpisodeAnnotations, useSaveCurrentAnnotation } from '@/hooks/use-annotations'
+import { useSaveCurrentAnnotation } from '@/hooks/use-annotations'
 import { cn } from '@/lib/utils'
 import { useAnnotationStore } from '@/stores'
 import { useDatasetStore } from '@/stores/dataset-store'
 import { useEpisodeStore } from '@/stores/episode-store'
-import { type InstructionSource, normalizeLanguageTag } from '@/types'
+import { type InstructionSource, normalizeLanguageTag, normalizeSubtaskInstructions } from '@/types'
 
 import { FormSection } from './FormSection'
 
@@ -40,7 +40,6 @@ const SOURCE_OPTIONS: { value: InstructionSource; label: string }[] = [
 const LANGUAGE_GUIDANCE_ID = 'lang-language-guidance'
 
 export function LanguageInstructionWidget() {
-  useEpisodeAnnotations()
   const saveAnnotation = useSaveCurrentAnnotation()
 
   const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation)
@@ -85,16 +84,21 @@ export function LanguageInstructionWidget() {
     const trimmed = subtaskInput.trim()
     if (!trimmed || !langInst) return
     updateLanguageInstruction({
-      subtaskInstructions: [...langInst.subtaskInstructions, trimmed],
+      subtaskInstructions: [
+        ...normalizeSubtaskInstructions(langInst.subtaskInstructions),
+        { id: crypto.randomUUID(), text: trimmed },
+      ],
     })
     setSubtaskInput('')
   }, [subtaskInput, langInst, updateLanguageInstruction])
 
   const handleRemoveSubtask = useCallback(
-    (index: number) => {
+    (id: string) => {
       if (!langInst) return
       updateLanguageInstruction({
-        subtaskInstructions: langInst.subtaskInstructions.filter((_, i) => i !== index),
+        subtaskInstructions: normalizeSubtaskInstructions(langInst.subtaskInstructions).filter(
+          (item) => item.id !== id,
+        ),
       })
     },
     [langInst, updateLanguageInstruction],
@@ -129,10 +133,13 @@ export function LanguageInstructionWidget() {
                 size="sm"
                 className="w-full"
                 onClick={() =>
-                  updateLanguageInstruction({
-                    instruction: datasetTaskDescription,
-                    source: 'template' as InstructionSource,
-                  })
+                  updateLanguageInstruction(
+                    {
+                      instruction: datasetTaskDescription,
+                      source: 'template' as InstructionSource,
+                    },
+                    { instruction: 'template' },
+                  )
                 }
               >
                 <Plus className="mr-2 h-3 w-3" />
@@ -263,6 +270,7 @@ export function LanguageInstructionWidget() {
                   }
                 }}
                 placeholder="Add alternative phrasing..."
+                aria-label="Alternative phrasing"
                 className="text-xs"
               />
               <Button
@@ -270,6 +278,8 @@ export function LanguageInstructionWidget() {
                 size="icon"
                 className="shrink-0"
                 onClick={handleAddParaphrase}
+                aria-label="Add paraphrase"
+                title="Add paraphrase"
                 disabled={!paraphraseInput.trim()}
               >
                 <Plus className="h-3 w-3" />
@@ -280,18 +290,18 @@ export function LanguageInstructionWidget() {
 
         <FormSection label={`Subtask Instructions (${langInst.subtaskInstructions.length})`}>
           <div className="space-y-2">
-            {langInst.subtaskInstructions.map((s, i) => (
+            {normalizeSubtaskInstructions(langInst.subtaskInstructions).map((subtask, i) => (
               <div
-                key={i}
+                key={subtask.id}
                 className="bg-muted/30 flex items-start gap-2 rounded-md border px-2 py-1.5"
               >
                 <span className="text-muted-foreground shrink-0 text-xs font-medium">{i + 1}.</span>
                 <span lang={renderedLanguage} className="flex-1 text-xs">
-                  {s}
+                  {subtask.text}
                 </span>
                 <button
                   type="button"
-                  onClick={() => handleRemoveSubtask(i)}
+                  onClick={() => handleRemoveSubtask(subtask.id)}
                   className="text-muted-foreground hover:text-destructive shrink-0"
                   aria-label={`Remove subtask ${i + 1}`}
                 >
@@ -310,6 +320,7 @@ export function LanguageInstructionWidget() {
                   }
                 }}
                 placeholder="Add subtask step..."
+                aria-label="Subtask step"
                 className="text-xs"
               />
               <Button
@@ -317,6 +328,8 @@ export function LanguageInstructionWidget() {
                 size="icon"
                 className="shrink-0"
                 onClick={handleAddSubtask}
+                aria-label="Add subtask"
+                title="Add subtask"
                 disabled={!subtaskInput.trim()}
               >
                 <Plus className="h-3 w-3" />

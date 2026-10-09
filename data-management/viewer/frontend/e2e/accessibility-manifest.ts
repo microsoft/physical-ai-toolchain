@@ -21,6 +21,14 @@ const entry = (
 
 export const viewerAccessibilityManifest: ViewerAccessibilityCase[] = [
   entry(
+    'viewer-joint-defaults-conflict',
+    'V07 joint defaults conflict retains the draft and keyboard focus with an alert',
+    ['joint-defaults-dialog'],
+    ['dirty', 'conflict'],
+    ['WCAG22-2.1.1', 'WCAG22-2.4.3', 'WCAG22-4.1.3'],
+    ['PLAYWRIGHT_KEYBOARD', 'PLAYWRIGHT_LIVE_REGION', 'PLAYWRIGHT_TREE'],
+  ),
+  entry(
     'viewer-adaptive-content',
     'V19 preserves loaded and transient content under adaptive rendering',
     ['workspace'],

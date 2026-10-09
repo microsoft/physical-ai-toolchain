@@ -18,11 +18,20 @@ const hoisted = vi.hoisted(() => {
     savedEpisodeLabels: { 0: ['SUCCESS'] } as Record<number, string[]>,
     availableLabels: ['SUCCESS', 'FAILURE', 'PARTIAL'],
     labelsLoaded: true,
+    labelDraftHydrated: true,
+    labelRecoveryError: null as string | null,
     episodeIndex: 0,
     hasEdits: false,
+    hasAnnotationChanges: false,
+    annotationRecoveryError: null as string | null,
+    annotationReadCount: 0,
+    editPersistenceError: null as string | null,
+    resolveRecoveredEdits: null as ((choice: 'keep' | 'discard') => void) | null,
     isPlaying: false,
     autoPlay: false,
     autoLoop: false,
+    cameraTransforms: {} as Record<string, { resize: { width: number; height: number } }>,
+    trajectoryData: [{ jointPositions: [1], timestamp: 0, gripperState: 0 }],
     subtasks: [{ id: 'subtask-1', frameRange: [2, 6] as [number, number] }],
   }
 
@@ -78,6 +87,8 @@ const hoisted = vi.hoisted(() => {
     setAutoPlay: vi.fn(),
     setAutoLoop: vi.fn(),
     saveEpisodeLabels: vi.fn(),
+    saveAnnotation: vi.fn(),
+    motionMetrics: vi.fn(),
   }
 })
 
@@ -88,6 +99,7 @@ export const mockDisableDiagnostics = hoisted.disableDiagnostics
 export const mockEnableDiagnostics = hoisted.enableDiagnostics
 export const mockRecordDiagnosticEvent = hoisted.recordDiagnosticEvent
 export const testState = hoisted.state
+export const mockMotionMetrics = hoisted.motionMetrics
 export const mockInitializeEdit = hoisted.initializeEdit
 export const mockResetEdits = hoisted.resetEdits
 export const mockSaveEpisodeDraft = hoisted.saveEpisodeDraft
@@ -97,6 +109,7 @@ export const mockSetPlaybackSpeed = hoisted.setPlaybackSpeed
 export const mockSetAutoPlay = hoisted.setAutoPlay
 export const mockSetAutoLoop = hoisted.setAutoLoop
 export const mockSaveEpisodeLabels = hoisted.saveEpisodeLabels
+export const mockSaveAnnotation = hoisted.saveAnnotation
 
 vi.mock('@/components/annotation-panel', () => ({
   LabelPanel: () => (
@@ -132,7 +145,10 @@ vi.mock('@/components/vlm-judge', () => ({
 }))
 
 vi.mock('@/components/episode-analyzer', () => ({
-  MotionMetricsPanel: () => <div>Motion Metrics</div>,
+  MotionMetricsPanel: (props: unknown) => {
+    hoisted.motionMetrics(props)
+    return <div>Motion Metrics</div>
+  },
   EpisodeAnalysisCard: () => <div>Episode Analysis Card</div>,
 }))
 
@@ -296,6 +312,23 @@ vi.mock('@/hooks/use-labels', () => ({
   }),
 }))
 
+vi.mock('@/hooks/use-annotations', () => ({
+  useEpisodeAnnotations: () => {
+    hoisted.state.annotationReadCount += 1
+    return { error: null }
+  },
+  useSaveAnnotation: () => ({ mutateAsync: hoisted.saveAnnotation, isPending: false }),
+}))
+
+vi.mock('@/hooks/use-episode-edits', () => ({
+  useEpisodeEdits: () => ({
+    isReady: !hoisted.state.editPersistenceError,
+    persistenceError: hoisted.state.editPersistenceError,
+    resolveRecoveredEdits: hoisted.state.resolveRecoveredEdits,
+  }),
+  useSaveEpisodeEdits: () => ({ mutateAsync: hoisted.saveEpisodeDraft, isPending: false }),
+}))
+
 vi.mock('@/hooks/use-datasets', () => ({
   useCacheStats: () => ({ data: undefined }),
 }))
@@ -304,6 +337,8 @@ vi.mock('@/stores/label-store', () => ({
   useLabelStore: (selector: (state: unknown) => unknown) =>
     selector({
       isLoaded: hoisted.state.labelsLoaded,
+      draftHydrated: hoisted.state.labelDraftHydrated,
+      draftError: hoisted.state.labelRecoveryError,
       availableLabels: hoisted.state.availableLabels,
       episodeLabels: hoisted.state.episodeLabels,
       savedEpisodeLabels: hoisted.state.savedEpisodeLabels,
@@ -326,30 +361,58 @@ vi.mock('@/stores', () => ({
   useDatasetStore: (selector: (state: unknown) => unknown) =>
     selector({ currentDataset: { id: 'dataset-1', fps: 30 } }),
   useAnnotationStore: (selector: (state: unknown) => unknown) =>
-    selector({ currentAnnotation: null }),
+    selector({
+      currentAnnotation: hoisted.state.hasAnnotationChanges
+        ? { annotatorId: 'principal-test', notes: 'Changed instruction' }
+        : null,
+      isDirty: hoisted.state.hasAnnotationChanges,
+      draftHydrated: true,
+      draftError: hoisted.state.annotationRecoveryError,
+      conflict: null,
+      error: null,
+      editGeneration: 0,
+      contextGeneration: 0,
+    }),
   useEditDirtyState: () => ({ isDirty: hoisted.state.hasEdits, resetEdits: hoisted.resetEdits }),
   useFrameInsertionState: () => ({
     insertedFrames: new Map<number, { interpolationFactor?: number }>(),
   }),
-  useEditStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      subtasks: hoisted.state.subtasks,
-      addSubtask: vi.fn(),
-      removedFrames: new Set<number>(),
-      initializeEdit: hoisted.initializeEdit,
-      clearTransforms: vi.fn(),
-      saveEpisodeDraft: hoisted.saveEpisodeDraft,
-      datasetId: null,
-      episodeIndex: null,
-      globalTransform: null,
-    }),
+  useEditStore: Object.assign(
+    (selector: (state: unknown) => unknown) =>
+      selector({
+        subtasks: hoisted.state.subtasks,
+        addSubtask: vi.fn(),
+        removedFrames: new Set<number>(),
+        initializeEdit: hoisted.initializeEdit,
+        clearTransforms: vi.fn(),
+        saveEpisodeDraft: hoisted.saveEpisodeDraft,
+        datasetId: null,
+        episodeIndex: null,
+        globalTransform: null,
+        cameraTransforms: hoisted.state.cameraTransforms,
+      }),
+    {
+      getState: () => ({
+        serverBaseline: {
+          sourceId: 'synthetic-source',
+          sourceRevision: 'synthetic-generation',
+          principalScopeId: 'principal-test',
+          etag: 'synthetic-revision',
+        },
+        getEditOperations: () => ({
+          datasetId: 'dataset-1',
+          episodeIndex: hoisted.state.episodeIndex,
+        }),
+      }),
+    },
+  ),
   useEpisodeStore: (selector: (state: unknown) => unknown) =>
     selector({
       currentEpisode: {
         meta: { index: hoisted.state.episodeIndex, length: 12 },
         videoUrls: { main: '/video.mp4' },
         cameras: ['main'],
-        trajectoryData: undefined,
+        trajectoryData: hoisted.state.trajectoryData,
       },
     }),
   usePlaybackControls: () => ({
@@ -397,9 +460,19 @@ export function setupAnnotationWorkspaceTestCase() {
   testState.labelsLoaded = true
   testState.episodeIndex = 0
   testState.hasEdits = false
+  testState.hasAnnotationChanges = false
+  testState.annotationRecoveryError = null
+  testState.labelDraftHydrated = true
+  testState.labelRecoveryError = null
+  testState.annotationReadCount = 0
+  mockSaveAnnotation.mockReset()
+  mockSaveAnnotation.mockResolvedValue(undefined)
+  testState.editPersistenceError = null
+  testState.resolveRecoveredEdits = null
   testState.isPlaying = false
   testState.autoPlay = false
   testState.autoLoop = false
+  testState.cameraTransforms = {}
   testState.subtasks = [{ id: 'subtask-1', frameRange: [2, 6] }]
 
   mockSaveEpisodeLabels.mockReset()

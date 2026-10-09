@@ -38,6 +38,21 @@ function defaultOptions(episode: EpisodeData) {
 }
 
 describe('useAnnotationWorkspaceMediaSources camera override', () => {
+  it('retains a selected camera and preserves multi-view selection on refresh', () => {
+    const episode = buildEpisode(['wrist', 'overhead', 'front'])
+    const { result, rerender } = renderHook(
+      (props: ReturnType<typeof defaultOptions>) => useAnnotationWorkspaceMediaSources(props),
+      { initialProps: defaultOptions(episode) },
+    )
+    expect(result.current.selectedCameras).toEqual(['wrist'])
+    act(() => result.current.setSelectedCameras(['wrist', 'overhead']))
+    expect(result.current.selectedCameras).toEqual(['wrist', 'overhead'])
+    act(() => result.current.setSelectedCameras([]))
+    expect(result.current.selectedCameras).toEqual(['wrist', 'overhead'])
+    rerender(defaultOptions({ ...episode }))
+    expect(result.current.selectedCameras).toEqual(['wrist', 'overhead'])
+  })
+
   it('returns cameras[0] synchronously on first render', () => {
     const episode = buildEpisode(['wrist', 'overhead'])
 

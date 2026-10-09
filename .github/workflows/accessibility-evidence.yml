@@ -239,6 +239,11 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Install Dataviewer API dependencies
+        run: >-
+          uv sync --project data-management/viewer/backend --frozen --group dev
+          --extra analysis --extra hdf5 --extra export --extra auth --extra azure
+
       - name: Run deterministic product evidence
         id: product-evidence
         shell: bash

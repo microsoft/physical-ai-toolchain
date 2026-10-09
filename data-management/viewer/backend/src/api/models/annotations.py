@@ -10,11 +10,13 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal, Self
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from ..validation import SanitizedModel
+from .contributions import ContributionLedger
+from .episode_edits import SavedEpisodeEdits
 
 _BCP47_LANGUAGE = r"(?:[a-z]{2,3}(?:-[a-z]{3}){0,3}|[a-z]{4}|[a-z]{5,8})"
 _BCP47_SCRIPT = r"(?:-[a-z]{4})?"
@@ -229,6 +231,13 @@ class InstructionSource(StrEnum):
     RETROACTIVE = "retroactive"
 
 
+class SubtaskInstruction(SanitizedModel):
+    """Textual subtask identity retained across edits and reordering."""
+
+    id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
+    text: str = Field(max_length=1000)
+
+
 class LanguageInstructionAnnotation(SanitizedModel):
     """Natural language instruction for VLA-conditioned training.
 
@@ -250,7 +259,24 @@ class LanguageInstructionAnnotation(SanitizedModel):
         return language
 
     paraphrases: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=50)
-    subtask_instructions: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=100)
+    subtask_instructions: list[SubtaskInstruction] = Field(default_factory=list, max_length=100)
+
+    @field_validator("subtask_instructions", mode="before")
+    @classmethod
+    def normalize_legacy_subtasks(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        return [
+            {"id": f"legacy-{index}", "text": item} if isinstance(item, str) else item
+            for index, item in enumerate(value)
+        ]
+
+    @field_validator("subtask_instructions")
+    @classmethod
+    def validate_subtask_ids(cls, value: list[SubtaskInstruction]) -> list[SubtaskInstruction]:
+        if len({item.id for item in value}) != len(value):
+            raise ValueError("Subtask identities must be unique")
+        return value
 
     model_config: ClassVar = {"use_enum_values": True}
 
@@ -293,8 +319,23 @@ class EpisodeAnnotation(SanitizedModel):
     data_quality: DataQualityAnnotation
     anomalies: AnomalyAnnotation
     language_instruction: LanguageInstructionAnnotation | None = None
+    instruction_adoption: dict[
+        Annotated[str, Field(pattern=r"^(instruction|subtasks/[a-zA-Z0-9][a-zA-Z0-9._-]{0,127})$")],
+        Literal["template", "retroactive"],
+    ] = Field(default_factory=dict, exclude=True)
     object_detections: list[ObjectDetectionAnnotation] = Field(default_factory=list, max_length=32)
     notes: str | None = None
+
+    @model_validator(mode="after")
+    def validate_instruction_adoption(self) -> Self:
+        allowed = set()
+        if self.language_instruction is not None:
+            allowed = {"instruction"} | {
+                f"subtasks/{item.id}" for item in self.language_instruction.subtask_instructions
+            }
+        if not self.instruction_adoption.keys() <= allowed:
+            raise ValueError("Instruction adoption must reference existing fields")
+        return self
 
 
 class EpisodeConsensus(SanitizedModel):
@@ -316,6 +357,8 @@ class EpisodeAnnotationFile(SanitizedModel):
     dataset_id: str
     annotations: list[EpisodeAnnotation] = Field(default_factory=list)
     consensus: EpisodeConsensus | None = None
+    saved_edits: dict[str, dict[str, SavedEpisodeEdits]] = Field(default_factory=dict)
+    provenance: dict[str, ContributionLedger] = Field(default_factory=dict)
 
 
 # ============================================================================

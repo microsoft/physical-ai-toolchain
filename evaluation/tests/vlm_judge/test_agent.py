@@ -142,7 +142,9 @@ class TestJudgeAgent:
         # Successful outcome -> no failure attribution
         assert result.failure_mode is None
 
-    def test_format_violations_do_not_crash(self) -> None:
+    def test_format_violations_are_execution_errors(self) -> None:
+        import pytest
+
         backend = ScriptedBackend()
         for _ in range(3):
             backend.queue("SUCCESSFULLY completed", "<answer>B</answer>")
@@ -151,13 +153,5 @@ class TestJudgeAgent:
         backend.queue("Failure modes", "no answer tag")
 
         agent = JudgeAgent(backend, config=AgentConfig(n_outcome_samples=3))
-        result = agent.judge(
-            episode_id="ep3",
-            instruction="pick",
-            frames=_make_frames(6),
-        )
-        assert result.outcome_success is False
-        assert result.progress_per_frame == [0] * 6
-        assert result.voc == 0.0
-        assert result.milestones == []
-        assert result.failure_mode is None
+        with pytest.raises(ValueError, match="process result"):
+            agent.judge(episode_id="ep3", instruction="pick", frames=_make_frames(6))

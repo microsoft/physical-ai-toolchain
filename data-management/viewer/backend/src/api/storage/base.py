@@ -6,25 +6,11 @@ annotation persistence across different storage backends.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+
+from evaluation.vlm_judge.curation_storage import RevisionConflictError as RevisionConflictError
+from evaluation.vlm_judge.curation_storage import VersionedValue as VersionedValue
 
 from ..models.annotations import EpisodeAnnotationFile
-
-
-@dataclass(frozen=True)
-class VersionedValue[T]:
-    """A stored value and its strong revision validator."""
-
-    value: T | None
-    etag: str | None
-
-
-class RevisionConflictError(Exception):
-    """A conditional storage operation did not match the current revision."""
-
-    def __init__(self, current_etag: str | None) -> None:
-        super().__init__("Resource revision precondition failed")
-        self.current_etag = current_etag
 
 
 class StorageAdapter(ABC):
@@ -51,6 +37,7 @@ class StorageAdapter(ABC):
         episode_index: int,
         annotation: EpisodeAnnotationFile,
         *,
+        resource_scope: str | None = None,
         if_match: str | None = None,
         if_none_match: bool = False,
     ) -> str:
@@ -71,8 +58,12 @@ class StorageAdapter(ABC):
         self,
         dataset_id: str,
         episode_index: int,
+        *,
+        resource_scope: str | None = None,
     ) -> VersionedValue[EpisodeAnnotationFile]:
         """Retrieve an annotation with its revision validator."""
+        if resource_scope is not None:
+            raise StorageError("This storage backend does not support scoped edit resources")
         return VersionedValue(value=await self.get_annotation(dataset_id, episode_index), etag=None)
 
     @abstractmethod

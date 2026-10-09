@@ -8,12 +8,12 @@ dependencies = [
     "pandas==3.0.5",
     "Pillow==12.3.0",
     "pyarrow==25.0.1",
+    "pydantic==2.13.5",
 ]
 
 [project.optional-dependencies]
 api = [
     "fastapi==0.141.1",
-    "pydantic==2.13.5",
     "uvicorn[standard]==0.52.4",
 ]
 openai = [

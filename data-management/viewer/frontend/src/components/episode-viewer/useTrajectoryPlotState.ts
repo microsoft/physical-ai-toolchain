@@ -14,7 +14,7 @@ import {
   type TrajectoryPlotArea,
 } from '@/lib/trajectory-graph-geometry'
 import { useEpisodeStore, useTrajectoryAdjustmentState } from '@/stores'
-import { useJointConfigStore } from '@/stores/joint-config-store'
+import { type JointConfig, useJointConfigStore } from '@/stores/joint-config-store'
 import type { TrajectoryVariable } from '@/types'
 
 import { getJointLabel, type JointGroup } from './joint-constants'
@@ -116,14 +116,27 @@ export function useTrajectoryPlotState({
   const createGroup = useJointConfigStore((state) => state.createGroup)
   const deleteGroup = useJointConfigStore((state) => state.deleteGroup)
   const moveJoint = useJointConfigStore((state) => state.moveJoint)
-  const { save: saveJointConfig } = useSaveJointConfig()
-  const { data: defaults } = useJointConfigDefaults()
+  const { save: saveJointConfig, error: jointConfigSaveError } = useSaveJointConfig()
+  const defaultsQuery = useJointConfigDefaults()
   const saveDefaults = useSaveJointConfigDefaults()
 
   const [selectedJoints, setSelectedJoints] = useState<number[]>([])
   const [showVelocity, setShowVelocity] = useState(false)
   const [showNormalized, setShowNormalized] = useState(true)
-  const [defaultsOpen, setDefaultsOpen] = useState(false)
+  const [defaultsOpen, setDefaultsOpenState] = useState(false)
+  const [defaultsSnapshot, setDefaultsSnapshot] = useState<{
+    data: JointConfig | undefined
+    etag: string | null | undefined
+  } | null>(null)
+  const defaults = defaultsOpen ? defaultsSnapshot?.data : defaultsQuery.data
+  const defaultsEtag = defaultsSnapshot?.etag
+  const setDefaultsOpen = (open: boolean) => {
+    if (open) {
+      setDefaultsSnapshot({ data: defaultsQuery.data, etag: defaultsQuery.etag })
+      saveDefaults.reset()
+    }
+    setDefaultsOpenState(open)
+  }
   const [plotArea, setPlotArea] = useState<TrajectoryPlotArea | null>(null)
   const selectionSurfaceRef = useRef<HTMLDivElement>(null)
   const namedTrajectoryVariables = currentEpisode?.trajectoryVariables ?? EMPTY_TRAJECTORY_VARIABLES
@@ -395,6 +408,8 @@ export function useTrajectoryPlotState({
     resolveLabel,
     resolveDataKey,
     saveDefaults,
+    defaultsEtag,
+    jointConfigSaveError,
     selectedJoints,
     selection,
     selectionHighlight,

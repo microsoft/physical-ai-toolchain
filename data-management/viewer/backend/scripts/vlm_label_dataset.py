@@ -4,10 +4,10 @@ Loads a Qwen3-VL model once and, for every episode, tiles all (or selected)
 camera views into a temporal filmstrip and asks the model for a structured
 manipulation label: where the object is picked from, the target object, grasp
 and place success, an overall movement-quality statement, and short notes.
-Results are written as JSONL (full) and CSV (flat summary).
-Use ``--resume`` to skip episode indices already present in JSONL. Use
-``--write-analysis`` to merge successful rows into the dataset's
-``meta/episode_labels.json`` analysis map for the dataviewer.
+Accepted work is persisted before execution. JSONL and CSV export saved results.
+Use ``--resume --job-id ID`` to retry failed targets. Dataset execution requires
+explicit sample approval; ``--single`` runs one judge-only episode.
+Use ``--write-analysis`` for approved, contribution-aware application.
 
 This is the reusable, dataset-agnostic version of the one-off SO-101 labeling
 script: views are auto-detected from ``meta/info.json`` and every parameter is
@@ -17,27 +17,33 @@ Example:
     python scripts/vlm_label_dataset.py \\
         --dataset-root /data/my-dataset \\
         --output-dir /data/my-dataset-vlm-labels \\
-        --n-frames 16 --limit 5
+        --n-frames 16 --limit 1 --single
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import csv
 import json
 import logging
 import re
 import sys
-import tempfile
-import time
 from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from evaluation.vlm_judge.backend import GenerationConfig, Qwen3VLBackend
+from evaluation.vlm_judge.curation_storage import LocalCurationStorage, apply_judge_result
 from evaluation.vlm_judge.dataset import iter_episodes, load_dataset_spec
 from evaluation.vlm_judge.frames import FrameWindow, extract_frames, tile_horizontally
-
-# cspell:ignore extrasaction keepends
+from evaluation.vlm_judge.job_cli import add_job_arguments, execute_job_command
+from evaluation.vlm_judge.job_storage import LocalJobStore
+from evaluation.vlm_judge.jobs import JudgeJobs
+from evaluation.vlm_judge.saved_input import (
+    LocalDatasetResolver,
+    SavedInputSnapshot,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -133,7 +139,7 @@ def parse_label(text: str) -> dict[str, Any]:
         stripped = re.sub(r"\n?```$", "", stripped).strip()
     match = _JSON_RE.search(stripped)
     if not match:
-        raise ValueError(f"No JSON object in model output: {text!r}")
+        raise ValueError("No JSON object in model output")
     return json.loads(match.group(0))
 
 
@@ -172,10 +178,11 @@ def build_filmstrip(
     target = (frame_size, frame_size)
     per_view = []
     for view in views:
+        start, end = record.video_windows.get(view, (record.from_timestamp, record.to_timestamp))
         window = FrameWindow(
             path=record.video_paths[view],
-            from_s=record.from_timestamp,
-            to_s=record.to_timestamp,
+            from_s=start,
+            to_s=end,
         )
         per_view.append(extract_frames(window, n_frames=n_frames, target_size=target))
     return tile_horizontally(per_view) if len(per_view) > 1 else per_view[0]
@@ -194,13 +201,23 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _row_from_label(label: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(label, dict):
+        raise ValueError("Invalid task label result")
+    for name in ("pick_from", "object", "movement_quality"):
+        if not isinstance(label.get(name), str) or not label[name].strip():
+            raise ValueError(f"Invalid task label result field: {name}")
+    for name in ("grasp_success", "place_success"):
+        if type(label.get(name)) is not bool:
+            raise ValueError(f"Invalid task label result field: {name}")
+    if not isinstance(label.get("notes", ""), str):
+        raise ValueError("Invalid task label result field: notes")
     return {
-        "pick_from": (str(label.get("pick_from", "uncertain")).lower() or "uncertain"),
-        "object": str(label.get("object", "unclear")),
-        "grasp_success": as_bool(label.get("grasp_success")),
-        "place_success": as_bool(label.get("place_success")),
-        "movement_quality": str(label.get("movement_quality", "")),
-        "notes": str(label.get("notes", "")),
+        "pick_from": label["pick_from"].lower(),
+        "object": label["object"],
+        "grasp_success": label["grasp_success"],
+        "place_success": label["place_success"],
+        "movement_quality": label["movement_quality"],
+        "notes": label.get("notes", ""),
         "error": None,
     }
 
@@ -209,234 +226,148 @@ def _empty_row(error: str) -> dict[str, Any]:
     return {field: None for field in ANALYSIS_FIELDS} | {"error": error}
 
 
-def _load_jsonl_rows(path: Path) -> list[dict[str, Any]]:
-    """Load prior rows, removing an incomplete final write when present."""
-    if not path.exists():
-        return []
+class TaskExecutor:
+    """Execute only the configured task-findings family with lazy model loading."""
 
-    content = path.read_text(encoding="utf-8")
-    lines = content.splitlines(keepends=True)
-    rows: list[dict[str, Any]] = []
-    valid_length = 0
-    for index, line in enumerate(lines):
-        line_number = index + 1
-        if not line.strip():
-            valid_length += len(line)
-            continue
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError as err:
-            is_incomplete_tail = index == len(lines) - 1 and not line.endswith(("\n", "\r"))
-            if not is_incomplete_tail:
-                raise ValueError(f"Invalid JSONL at {path}:{line_number}: {err.msg}") from err
-            _LOGGER.warning("Discarding incomplete final JSONL row at %s:%d", path, line_number)
-            path.write_text(content[:valid_length], encoding="utf-8")
-            break
-        if not isinstance(row, dict) or "episode_index" not in row:
-            raise ValueError(f"Invalid JSONL row at {path}:{line_number}: missing episode_index")
-        rows.append(row)
-        valid_length += len(line)
+    def __init__(self, config: dict[str, Any]) -> None:
+        self.config = config
+        self.backend = None
+        self.lock = Lock()
 
-    if rows and path.stat().st_size > 0 and not path.read_bytes().endswith((b"\n", b"\r")):
-        with path.open("a", encoding="utf-8") as jsonl_file:
-            jsonl_file.write("\n")
-    return rows
-
-
-def _write_analysis_records(
-    dataset_root: Path,
-    rows: list[dict[str, Any]],
-    source: str,
-    dataset_id: str | None = None,
-) -> int:
-    """Merge successful labeling rows into the dataviewer analysis map."""
-    labels_path = dataset_root / "meta" / "episode_labels.json"
-    if labels_path.exists():
-        try:
-            labels_file = json.loads(labels_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as err:
-            raise ValueError(f"Invalid labels file at {labels_path}: {err.msg}") from err
-        if not isinstance(labels_file, dict):
-            raise ValueError(f"Invalid labels file at {labels_path}: expected a JSON object")
-    else:
-        labels_file = {
-            "dataset_id": dataset_id or dataset_root.name,
-            "available_labels": ["SUCCESS", "FAILURE", "PARTIAL"],
-            "episodes": {},
-            "analysis": {},
+    def _infer(self, record: EpisodeRecord, snapshot: SavedInputSnapshot) -> dict[str, Any]:
+        with self.lock:
+            if self.backend is None:
+                self.backend = Qwen3VLBackend(
+                    model_id=self.config["model_id"],
+                    revision=self.config["model_revision"],
+                    device_map=self.config["device_map"],
+                    dtype=self.config["dtype"],
+                )
+        frames = build_filmstrip(
+            record, views=self.config["views"], n_frames=self.config["n_frames"], frame_size=self.config["frame_size"]
+        )
+        raw = self.backend.generate(
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=build_user_prompt(
+                n_frames=self.config["n_frames"],
+                views=self.config["views"],
+                instruction=snapshot.instruction,
+                scene_context=self.config["scene_context"],
+            ),
+            images=frames,
+            config=GenerationConfig(**self.config["generation"]),
+        )
+        row = _row_from_label(parse_label(raw))
+        return {
+            "episode_id": record.episode_id,
+            "instruction": snapshot.instruction,
+            "judge_model": self.config["model_id"],
+            "prompt_version": self.config["prompt_version"],
+            "findings": {field: row[field] for field in ANALYSIS_FIELDS},
         }
 
-    existing_dataset_id = labels_file.get("dataset_id")
-    if dataset_id:
-        labels_file["dataset_id"] = dataset_id
-    elif not isinstance(existing_dataset_id, str) or not existing_dataset_id.strip():
-        labels_file["dataset_id"] = dataset_root.name
-    labels_file.setdefault("available_labels", ["SUCCESS", "FAILURE", "PARTIAL"])
-    labels_file.setdefault("episodes", {})
-    analysis = labels_file.setdefault("analysis", {})
-    if not isinstance(analysis, dict):
-        raise ValueError(f"Invalid labels file at {labels_path}: analysis must be a JSON object")
+    async def __call__(
+        self, record: EpisodeRecord, snapshot: SavedInputSnapshot, config: dict[str, Any]
+    ) -> dict[str, Any]:
+        if {key: value for key, value in config.items() if key != "force"} != {
+            key: value for key, value in self.config.items() if key != "force"
+        }:
+            raise ValueError("Saved task-finding runtime configuration is unavailable")
+        execution = asyncio.create_task(asyncio.to_thread(self._infer, record, snapshot))
+        try:
+            return await asyncio.shield(execution)
+        except asyncio.CancelledError:
+            await execution
+            raise
 
-    updated = 0
-    for row in rows:
-        if row.get("error") is not None:
-            continue
-        key = str(int(row["episode_index"]))
-        existing = analysis.get(key, {})
-        if not isinstance(existing, dict):
-            raise ValueError(f"Invalid analysis record for episode {key}: expected a JSON object")
-        record = {field: row.get(field) for field in ANALYSIS_FIELDS}
-        record.update(
-            {
-                "instruction": row.get("instruction"),
-                "duration_s": row.get("duration_s"),
-                "source": row.get("source") or source,
-            }
+
+async def _durable_label_dataset(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
+    if args.resume:
+        if not args.job_id or args.operation not in {"submit", "retry"}:
+            raise ValueError("Resume requires --job-id and the submit or retry operation")
+        args.operation = "retry"
+    root = args.dataset_root.resolve()
+    dataset_id = args.dataset_id or root.name
+    output = args.output_dir or root / "vlm-labels"
+    config = {
+        "backend": "qwen3-vl",
+        "model_id": args.model_id,
+        "model_revision": args.model_revision,
+        "device_map": args.device_map,
+        "dtype": args.dtype,
+        "n_frames": args.n_frames,
+        "frame_size": args.frame_size,
+        "views": list(resolve_views(root, args.views)),
+        "scene_context": args.scene_context,
+        "prompt_version": "task-findings-v1",
+        "generation": {"max_new_tokens": 512, "temperature": 0.0},
+        "annotation_author_id": args.annotation_author_id,
+        "force": args.force,
+    }
+    if args.write_analysis and args.operation == "submit":
+        args.mode = "judge-and-label"
+    resolver = LocalDatasetResolver({dataset_id: root})
+    storage = LocalCurationStorage({dataset_id: root})
+
+    async def apply_result(job: dict[str, Any], target: dict[str, Any]) -> bool:
+        return await apply_judge_result(storage, job, target)
+
+    jobs = JudgeJobs(
+        LocalJobStore(args.job_dir or root.parent / ".curation" / "judge"),
+        resolver,
+        TaskExecutor(config),
+        capacity=args.capacity,
+        capacity_scope=args.capacity_scope,
+        result_kind="task-findings",
+        apply_result=apply_result,
+        curation_storage=storage,
+    )
+    indices = []
+    if args.operation == "submit":
+        records = list(
+            iter_episodes(
+                root,
+                views=config["views"],
+                limit=args.limit,
+                indices=[args.episode_index] if args.episode_index is not None else None,
+            )
         )
-        analysis[key] = {**existing, **record}
-        updated += 1
-
-    labels_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=labels_path.parent,
-            prefix=f".{labels_path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary_file:
-            json.dump(labels_file, temporary_file, indent=2)
-            temporary_file.write("\n")
-            temporary_path = Path(temporary_file.name)
-        temporary_path.replace(labels_path)
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
-    return updated
-
-
-def label_dataset(
-    *,
-    dataset_root: Path,
-    output_dir: Path,
-    views: Sequence[str] | None,
-    n_frames: int,
-    frame_size: int,
-    model_id: str,
-    device_map: str,
-    dtype: str,
-    limit: int | None,
-    scene_context: str | None = None,
-    resume: bool = False,
-    write_analysis: bool = False,
-    dataset_id: str | None = None,
-) -> dict[str, Any]:
-    """Label every (or ``limit``) episode and write JSONL + CSV to ``output_dir``."""
-    selected_views = resolve_views(dataset_root, views)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    jsonl_path = output_dir / "labels.jsonl"
-    csv_path = output_dir / "labels.csv"
-
-    episodes = list(iter_episodes(dataset_root, views=selected_views, limit=limit))
-    prior_rows = _load_jsonl_rows(jsonl_path) if resume else []
-    latest_rows = {int(row["episode_index"]): row for row in prior_rows}
-    completed_indices = {episode_index for episode_index, row in latest_rows.items() if row.get("error") is None}
-    pending_episodes = [record for record in episodes if record.episode_index not in completed_indices]
-    _LOGGER.info(
-        "Labeling %d episodes from %s (views: %s, skipped: %d)",
-        len(pending_episodes),
-        dataset_root.name,
-        list(selected_views),
-        len(episodes) - len(pending_episodes),
+        indices = [record.episode_index for record in records]
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "labels.config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    code, result = await execute_job_command(
+        jobs, args, dataset_id=dataset_id, actor=args.principal_scope_id, config=config, indices=indices
     )
-
-    backend = None
-    gen_cfg = None
-    if pending_episodes:
-        _LOGGER.info("Loading %s ...", model_id)
-        backend = Qwen3VLBackend(model_id=model_id, device_map=device_map, dtype=dtype)
-        gen_cfg = GenerationConfig(max_new_tokens=512, temperature=0.0)
-
-    mode = "a" if resume else "w"
-    with jsonl_path.open(mode, encoding="utf-8") as jf:
-        for i, record in enumerate(pending_episodes):
-            started = time.time()
-            row: dict[str, Any] = {
-                "episode_index": record.episode_index,
-                "episode_id": record.episode_id,
-                "instruction": record.instruction,
-                "duration_s": round(record.duration_s, 2),
-                "source": model_id,
+    if args.operation in {"submit", "retry", "apply"} and not args.detach and "targets" in result:
+        output.mkdir(parents=True, exist_ok=True)
+        rows = []
+        for target in result["targets"]:
+            evidence = target["result"]
+            row = {
+                "episode_index": target["episode_index"],
+                "instruction": target["input"]["instruction"],
+                "snapshot_id": target["input"]["snapshot_id"],
+                "input_key": target["input_key"],
+                "run_id": result["id"],
+                "result_id": target["result_id"],
+                "source": config["model_id"],
             }
-            try:
-                if backend is None or gen_cfg is None:
-                    raise RuntimeError("VLM backend was not initialized")
-                frames = build_filmstrip(
-                    record,
-                    views=selected_views,
-                    n_frames=n_frames,
-                    frame_size=frame_size,
-                )
-                raw = backend.generate(
-                    system_prompt=SYSTEM_PROMPT,
-                    user_prompt=build_user_prompt(
-                        n_frames=n_frames,
-                        views=selected_views,
-                        instruction=record.instruction,
-                        scene_context=scene_context,
-                    ),
-                    images=frames,
-                    config=gen_cfg,
-                )
-                row.update(_row_from_label(parse_label(raw)))
-            except Exception as err:
-                row.update(_empty_row(f"{type(err).__name__}: {err}"))
-
-            elapsed = time.time() - started
-            jf.write(json.dumps(row) + "\n")
-            jf.flush()
-            latest_rows[record.episode_index] = row
-            status = row["error"] or (
-                f"pick={row['pick_from']!s:<10} object={row['object']!r:<20} "
-                f"grasp={row['grasp_success']} place={row['place_success']}"
-            )
-            _LOGGER.info(
-                "[%2d/%d] ep%3d (%4.1fs) %s",
-                i + 1,
-                len(pending_episodes),
-                record.episode_index,
-                elapsed,
-                status,
-            )
-
-    rows = list(latest_rows.values())
-    with csv_path.open("w", newline="", encoding="utf-8") as cf:
-        writer = csv.DictWriter(cf, fieldnames=CSV_FIELDS, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
-
-    if write_analysis:
-        updated = _write_analysis_records(dataset_root, rows, model_id, dataset_id)
-        _LOGGER.info("Merged %d analysis records into %s", updated, dataset_root / "meta" / "episode_labels.json")
-
-    summary = summarize(rows)
-    _LOGGER.info(
-        "Labeled %d/%d episodes (%d errors) | grasp %d, place %d | JSONL %s | CSV %s",
-        summary["labeled"],
-        summary["total"],
-        summary["errors"],
-        summary["grasp_success"],
-        summary["place_success"],
-        jsonl_path,
-        csv_path,
-    )
-    return summary
+            row.update({**evidence["findings"], "error": None} if evidence else _empty_row(target["error"]))
+            rows.append(row)
+        with (output / "labels.jsonl").open("w", encoding="utf-8") as stream:
+            for row in rows:
+                stream.write(json.dumps(row) + "\n")
+        with (output / "labels.csv").open("w", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(stream, fieldnames=CSV_FIELDS, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+    return code, result
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_job_arguments(parser)
+    parser.add_argument("--force", action="store_true", help="Recompute instead of reusing identical saved evidence")
     parser.add_argument("--dataset-root", type=Path, required=True, help="Path to the LeRobot dataset directory.")
     parser.add_argument(
         "--dataset-id",
@@ -458,13 +389,16 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--n-frames", type=int, default=DEFAULT_N_FRAMES, help="Frames sampled per episode.")
     parser.add_argument("--frame-size", type=int, default=DEFAULT_FRAME_SIZE, help="Per-view letterbox size (px).")
     parser.add_argument("--model-id", default=DEFAULT_MODEL_ID, help="Hugging Face Qwen3-VL model id.")
+    parser.add_argument("--model-revision", default=None, help="Immutable model revision.")
+    parser.add_argument("--principal-scope-id", default="local", help="Saved edit author scope for local operation.")
+    parser.add_argument("--annotation-author-id", default=None, help="Select one saved instruction author.")
     parser.add_argument("--device-map", default="auto", help="transformers device_map.")
     parser.add_argument("--dtype", default="bfloat16", help="Model dtype (e.g. bfloat16, float16).")
     parser.add_argument("--limit", type=int, default=None, help="Label only the first N episodes.")
     parser.add_argument(
         "--resume",
         action="store_true",
-        help="Append attempts, retry failed rows, and skip successful episode indices in labels.jsonl.",
+        help="Retry an existing --job-id, retaining successful targets and validating saved inputs.",
     )
     parser.add_argument(
         "--write-analysis",
@@ -487,23 +421,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not dataset_root.exists():
         _LOGGER.error("Dataset root does not exist: %s", dataset_root)
         return 2
-    output_dir: Path = args.output_dir or (dataset_root / "vlm-labels")
-    label_dataset(
-        dataset_root=dataset_root,
-        output_dir=output_dir,
-        views=args.views,
-        n_frames=args.n_frames,
-        frame_size=args.frame_size,
-        model_id=args.model_id,
-        device_map=args.device_map,
-        dtype=args.dtype,
-        limit=args.limit,
-        scene_context=args.scene_context,
-        resume=args.resume,
-        write_analysis=args.write_analysis,
-        dataset_id=args.dataset_id,
-    )
-    return 0
+    try:
+        code, result = asyncio.run(_durable_label_dataset(args))
+    except KeyboardInterrupt:
+        _LOGGER.info("Client interrupted; accepted jobs remain available through status")
+        return 130
+    except (ValueError, OSError, KeyError) as error:
+        _LOGGER.error("Task-label command failed category=%s", type(error).__name__)
+        return 2
+    sys.stdout.write(json.dumps(result) + "\n")
+    return code
 
 
 if __name__ == "__main__":

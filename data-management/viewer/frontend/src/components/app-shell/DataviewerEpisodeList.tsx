@@ -10,11 +10,13 @@ const EpisodeListItem = memo(function EpisodeListItem({
   isSelected,
   onSelect,
   labels,
+  unsaved,
 }: {
   episode: EpisodeMeta
   isSelected: boolean
   onSelect: (index: number) => void
   labels: string[]
+  unsaved: boolean
 }) {
   const handleClick = useCallback(() => {
     onSelect(episode.index)
@@ -34,6 +36,7 @@ const EpisodeListItem = memo(function EpisodeListItem({
           {episode.hasAnnotations && (
             <span className="text-status-success-foreground ml-2">✓ Annotated</span>
           )}
+          {unsaved && <span className="text-status-warning-foreground ml-2">• Unsaved labels</span>}
         </div>
         {labels.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
@@ -65,6 +68,7 @@ export function DataviewerEpisodeList({
 }: DataviewerEpisodeListProps) {
   const { data: episodes, isLoading, error } = useEpisodes(datasetId, { limit: 1000 })
   const episodeLabels = useLabelStore((state) => state.episodeLabels)
+  const savedEpisodeLabels = useLabelStore((state) => state.savedEpisodeLabels)
   const filterLabels = useLabelStore((state) => state.filterLabels)
 
   if (isLoading) {
@@ -113,6 +117,10 @@ export function DataviewerEpisodeList({
             isSelected={selectedIndex === episode.index}
             onSelect={onSelectEpisode}
             labels={episodeLabels[episode.index] || []}
+            unsaved={
+              JSON.stringify([...(episodeLabels[episode.index] ?? [])].sort()) !==
+              JSON.stringify([...(savedEpisodeLabels[episode.index] ?? [])].sort())
+            }
           />
         ))}
       </ul>

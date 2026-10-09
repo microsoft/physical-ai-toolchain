@@ -11,6 +11,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import tempfile
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -22,8 +24,9 @@ _LOGGER = logging.getLogger("evaluation.vlm_judge")
 class JudgeCache:
     """Filesystem-backed JSON cache for ``JudgeResult.to_dict()`` payloads."""
 
-    def __init__(self, root: Path | None) -> None:
+    def __init__(self, root: Path | None, *, execution_config: Mapping[str, object] | None = None) -> None:
         self._root = Path(root) if root is not None else None
+        self._execution_config = dict(execution_config or {})
 
     @property
     def enabled(self) -> bool:
@@ -39,11 +42,20 @@ class JudgeCache:
         from_s: float | None = None,
         to_s: float | None = None,
         agent_config: object | None = None,
+        media_identity: Mapping[str, str] | None = None,
+        video_windows: Mapping[str, tuple[float, float]] | None = None,
+        episode_id: str | None = None,
+        snapshot_id: str | None = None,
     ) -> str:
         """Return a stable hex digest for the given judgement input."""
         payload = {
-            "videos": _video_fingerprints(video_paths),
+            "schema_version": 2,
+            "execution_config": self._execution_config,
+            "episode_id": episode_id,
+            "snapshot_id": snapshot_id,
+            "videos": dict(media_identity) if media_identity is not None else _video_fingerprints(video_paths),
             "time_window": {"from_s": from_s, "to_s": to_s},
+            "video_windows": dict(video_windows or {}),
             "instruction": instruction,
             "judge_model": judge_model,
             "prompt_version": prompt_version,
@@ -69,9 +81,21 @@ class JudgeCache:
             return
         self._root.mkdir(parents=True, exist_ok=True)
         path = self._path_for(key)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload, sort_keys=True))
-        tmp.replace(path)
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=self._root, suffix=".tmp", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            try:
+                json.dump(payload, stream, sort_keys=True, allow_nan=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            except BaseException:
+                temporary.unlink(missing_ok=True)
+                raise
+        try:
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _path_for(self, key: str) -> Path:
         assert self._root is not None

@@ -45,12 +45,145 @@ export interface VlmJudgeStatus {
 }
 
 export interface VlmJudgeRunOptions {
-  /** Override the dataset-supplied instruction. */
-  instruction?: string
+  snapshotId?: string
+  annotationAuthorId?: string
   /** Restrict the judge to a subset of camera views. */
   views?: string[]
   /** Process-reward scoring technique: 'gvl' or 'chronological'. */
   processMethod?: string
   /** Bypass the disk cache and force a fresh inference run. */
   force?: boolean
+}
+
+export interface JudgeJob {
+  id: string
+  datasetId: string
+  status: 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled'
+  total: number
+  judged: number
+  applied: number
+  errors: number
+  applicationErrors?: number
+  mode?: 'sample' | 'judge' | 'judge-and-label'
+  configRevision?: string
+  config: { processMethod?: string; views?: string[]; model?: string }
+  targets?: Array<{
+    episodeIndex: number
+    status: string
+    input: SavedInputSnapshot
+    result: VlmJudgeResult | null
+    resultId: string | null
+    cached?: boolean
+    error: string | null
+    applied: boolean
+    comparison?: 'agreement' | 'disagreement' | 'inconclusive'
+    sample?: { humanOutcome: 'success' | 'failure' | 'partial' }
+  }>
+}
+
+export interface JudgeApproval {
+  id: string
+  sampleJobId: string
+  configRevision: string
+  current: boolean
+}
+
+export interface JudgeWithdrawalField {
+  episodeIndex: number
+  field: string
+  disposition: string
+  origin?: string
+  reason?: 'multiple_human_authors' | 'unlisted_machine_run' | 'legacy_value_restored'
+  contributionIds?: string[]
+  runIds?: string[]
+  blockingContributionIds?: string[]
+  blockingRunIds?: string[]
+  humanAuthors?: number
+}
+
+export interface JudgeResetPreview {
+  id: string
+  runIds?: string[]
+  summary: {
+    removableFields: number
+    acceptedUnchanged: number
+    preservedHuman: number
+    legacyUnknown: number
+    conflicts: number
+    episodes: number
+    fields: JudgeWithdrawalField[]
+    unlistedRunIds?: string[]
+  }
+}
+
+export interface JudgeReset extends JudgeResetPreview {
+  status: 'idle' | 'running' | 'partial' | 'conflicted' | 'succeeded'
+  error?: string | null
+  resources?: Array<{ key: string; status: string }>
+}
+
+export type JudgeDatasetAction =
+  | { kind: 'cancel' | 'retry'; jobId: string }
+  | { kind: 'apply'; jobId: string; indices: number[] }
+  | { kind: 'approve'; jobId: string; acknowledgeExceptions: boolean }
+  | { kind: 'preview-reset'; includeUnlistedRuns?: boolean }
+  | { kind: 'retry-reset' }
+  | { kind: 'confirm-reset'; previewId: string }
+
+interface JudgeEvidenceIdentity {
+  runId: string
+  resultId: string
+  configRevision: string
+  input: SavedInputSnapshot
+  applicability: 'current' | 'stale' | 'withdrawn'
+  applied: boolean
+}
+
+export type JudgeEvidence = JudgeEvidenceIdentity &
+  (
+    | { resultKind: 'judge'; result: VlmJudgeResult }
+    | {
+        resultKind: 'task-findings'
+        result: {
+          judgeModel: string
+          instruction: string
+          findings: {
+            pickFrom: string
+            object: string
+            graspSuccess: boolean
+            placeSuccess: boolean
+            movementQuality: string
+            notes: string
+          }
+        }
+      }
+  )
+
+export interface JudgeSampleReference {
+  annotationAuthorId: string
+  annotationRevision: string
+  snapshotId: string
+}
+
+export interface JudgeSubmission {
+  indices: number[]
+  mode: 'sample' | 'judge' | 'judge-and-label'
+  options?: VlmJudgeRunOptions
+  approvalId?: string
+  samples?: Record<number, JudgeSampleReference>
+  snapshotIds?: Record<number, string>
+}
+
+export interface SavedInputSnapshot {
+  snapshotId: string
+  datasetId: string
+  episodeIndex: number
+  principalScopeId: string
+  sourceId: string
+  sourceRevision: string
+  annotationAuthorId: string | null
+  annotationRevision: string | null
+  editRevision: string | null
+  instruction: string
+  instructionOrigin: 'annotation' | 'dataset'
 }

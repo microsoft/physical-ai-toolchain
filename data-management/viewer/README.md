@@ -242,92 +242,97 @@ card on the trajectory tab:
 
 #### How to use it
 
-1. Enable the judge and start the viewer with `./start.sh`. It installs the
-  lightweight `physical-ai-vlm-judge` package into the backend environment and
-  adds local model dependencies only when `VLM_JUDGE_BACKEND=qwen3-vl`:
+Choose where inference runs:
+
+| Backend         | Runs the model on              | Viewer needs a GPU?                     |
+|-----------------|--------------------------------|-----------------------------------------|
+| `qwen3-vl`      | The viewer host                | Yes, a suitable CUDA-capable NVIDIA GPU |
+| `openai-compat` | A separate inference server    | No                                      |
+| `echo`          | No model; returns test results | No                                      |
+
+RTX is not required; Azure A10 is also a candidate. For local Qwen3-VL-4B, start
+validation with a full 24 GB GPU and concurrency one. Actual memory use depends on
+the model and frame settings. See [GPU and Azure deployment guidance](../../evaluation/vlm_judge/README.md).
+
+1. Enable the selected backend and start the viewer. For local Qwen:
 
    ```bash
    VLM_JUDGE_ENABLED=true VLM_JUDGE_BACKEND=qwen3-vl ./start.sh
    ```
 
-2. Open a dataset, select an episode, and switch to the **Trajectory** tab.
-3. Click **Run judge**. The first run invokes the model; results are cached per
-   dataset under `annotations/vlm_judge/`, so re-opening the episode is instant.
-   Use **Re-evaluate** / **Force fresh** to ignore the cache and run again.
+2. Select an episode and save its changes. Resolve any unsaved-input or conflict warnings.
+3. Open Episode Analysis on the Trajectory Viewer tab and run the judge.
+4. Review progress and the saved result. Apply the result separately to update labels.
 
 > [!NOTE]
-> The default `echo` backend returns deterministic placeholder judgments (no model
-> is loaded). It exists to verify the wiring end-to-end and for tests — switch to
-> `qwen3-vl` (local GPU) or `openai-compat` (a remote vLLM/NIM/Azure OpenAI server)
-> for real scores.
+> The launcher restores frozen dependencies; approve restoration and model downloads
+> before first use. The default `echo` backend tests the workflow, not model quality.
+> Reopening saved results does not run inference again. Force a new evaluation only
+> when you intend to recompute.
 
 #### Applying judgments as episode labels
 
-The judge's outcome maps directly onto the viewer's episode label set
-(`SUCCESS` / `FAILURE` / `PARTIAL`), so a judgment can be promoted to a saved label:
+Judging alone does not change labels. Explicit application saves a machine-owned
+contribution linked to the result, while protecting human revisions and unrelated fields.
 
-- **Apply label** writes the current episode's outcome as its label
-  (`SUCCESS` → `SUCCESS`, `FAILURE` → `FAILURE`, `Inconclusive` → `PARTIAL`). It
-  replaces any existing outcome label while preserving other custom labels on the
-  episode, then persists via the labels API.
+| Judge outcome  | Label application        |
+|----------------|--------------------------|
+| `SUCCESS`      | Can apply `SUCCESS`      |
+| `FAILURE`      | Can apply `FAILURE`      |
+| `Inconclusive` | Does not apply `PARTIAL` |
 
 #### Scoring every episode
 
-The **Whole dataset** controls run the judge across all episodes — sequentially,
-one episode at a time, not as a single batched model call. Each episode reuses the
-per-episode endpoint and its cache, so episodes already scored return instantly and
-only those not yet scored invoke the model. A progress indicator shows
-`done / total`, and **Cancel** stops the run after the in-flight episode.
+1. Open Dataset workspace and select sample episodes with their saved human references.
+2. Evaluate the samples using the chosen model, cameras and scoring method.
+3. Review disagreements or inconclusive results, then approve the configuration.
+4. Select target episodes and submit either judge-only or judge-and-label work.
+5. Follow the saved job's progress. You can close the browser and reconnect later.
 
-- **Run all** scores every episode with the selected scoring technique but writes
-  no labels. It uses each episode's saved instruction, or the instruction from
-  dataset metadata when no saved annotation exists.
-- **Label all** scores every episode and writes each outcome as that episode's
-  label, using the same outcome → label mapping as **Apply label** above.
+| Operation       | Effect                                                                                    |
+|-----------------|-------------------------------------------------------------------------------------------|
+| Judge-only      | Saves results without changing labels                                                     |
+| Judge-and-label | Judges and conditionally applies results                                                  |
+| Cancel          | Prevents late results from publishing; an active GPU call may continue                    |
+| Retry           | Retries eligible failed work through the saved job                                        |
+| Withdraw        | Previews and removes covered machine contributions; preserves human revisions and history |
 
-> [!NOTE]
-> Sequential scoring with a local backend is slow: the model loads on the first
-> episode and each subsequent episode runs a full judgment chain. Prefer a hosted
-> `openai-compat` backend for whole-dataset runs, and leave results cached so reruns
-> skip already-scored episodes.
+Changing the configuration, source or samples invalidates the corresponding approval.
 
 #### "Run judge" vs. "Language instruction"
 
-The judge scores the episode against a **task instruction** — the natural-language
-goal for the episode, such as *"Grab orange and place into plate"*. **Run judge** uses
-the instruction currently shown in the viewer's **Language Instruction** panel (your
-saved or in-progress edit), so refining that text changes what the judge grades against.
-In short:
+| Action or input      | Meaning                                                                           |
+|----------------------|-----------------------------------------------------------------------------------|
+| Language Instruction | The goal against which the episode is judged; save edits before judging           |
+| Save                 | Persists episode changes and stays on the episode                                 |
+| Next                 | Navigates; it is not a save action                                                |
+| Run judge            | Uses the selected saved instruction and supported saved edits, not browser drafts |
+| Dataset job          | Uses each target's own saved inputs, not the active episode's text                |
 
-- **Language Instruction** = *what the robot was asked to do* (the goal the
-  judge grades against).
-- **Run judge** = *grade this episode against that goal* and report the outcome,
-  progress, milestones, and any failure mode.
-
-When the Language Instruction is left empty, **Run judge** falls back to the task
-instruction stored in the dataset's metadata. If neither is available, it returns an
-error asking you to add or save a Language Instruction.
-
-Whole-dataset actions do not reuse the current unsaved Language Instruction for every
-episode. They score each episode against that episode's saved annotation text, falling
-back to dataset metadata when needed.
+Dataset metadata supplies the instruction when no saved instruction exists. Missing
+or ambiguous inputs block judging. Unsupported media transformations also block
+judging rather than silently substituting the original video.
 
 #### Settings
 
-Enable the judge via `start.sh`, or install the backend `vlm-judge` extra before
-launching the backend manually. Install `vlm-judge-local` when using the
-in-process `qwen3-vl` backend without `start.sh`.
+The launcher selects the evaluator dependencies for the configured backend. For
+container build profiles and Azure setup, see the
+[deployment guide](../../evaluation/vlm_judge/README.md).
 
-| Variable                   | Default                     | Description                                                                           |
-|----------------------------|-----------------------------|---------------------------------------------------------------------------------------|
-| `VLM_JUDGE_ENABLED`        | `false`                     | Mount the `/judge` router                                                             |
-| `VLM_JUDGE_BACKEND`        | `echo`                      | `qwen3-vl` (local HF), `openai-compat` (vLLM, NIM, Azure OpenAI), or `echo`           |
-| `VLM_JUDGE_MODEL_ID`       | `Qwen/Qwen3-VL-4B-Instruct` | HF model id or remote model name                                                      |
-| `VLM_JUDGE_BASE_URL`       | —                           | OpenAI-compatible server URL (`openai-compat` only)                                   |
-| `VLM_JUDGE_API_KEY`        | —                           | Bearer token for the remote backend                                                   |
-| `VLM_JUDGE_N_FRAMES`       | `12`                        | Frames sampled per episode                                                            |
-| `VLM_JUDGE_PROCESS_METHOD` | `gvl`                       | Process-reward method: `gvl` (shuffle-and-rank) or `chronological`                    |
-| `VLM_JUDGE_CACHE_DIR`      | —                           | Fallback judgment cache; the viewer caches per dataset under `annotations/vlm_judge/` |
+| Variable                   | Default                       | Description                                                                            |
+|----------------------------|-------------------------------|----------------------------------------------------------------------------------------|
+| `VLM_JUDGE_ENABLED`        | `false`                       | Enable the viewer judge and durable `/api/judge` lifecycle routes                      |
+| `VLM_JUDGE_BACKEND`        | `echo`                        | `qwen3-vl` (local HF), `openai-compat` (vLLM, NIM, Azure OpenAI), or `echo`            |
+| `VLM_JUDGE_MODEL_ID`       | `Qwen/Qwen3-VL-4B-Instruct`   | HF model id or remote model name                                                       |
+| `VLM_JUDGE_MODEL_REVISION` | Unset                         | Immutable model revision matching the deployed weights                                 |
+| `VLM_JUDGE_BASE_URL`       | —                             | OpenAI-compatible server URL (`openai-compat` only)                                    |
+| `VLM_JUDGE_API_KEY`        | —                             | Bearer token for the remote backend                                                    |
+| `VLM_JUDGE_N_FRAMES`       | `12`                          | Frames sampled per episode                                                             |
+| `VLM_JUDGE_PROCESS_METHOD` | `gvl`                         | Process-reward method: `gvl` (shuffle-and-rank) or `chronological`                     |
+| `VLM_JUDGE_CACHE_DIR`      | Unset                         | Disposable inference cache, not durable job authority                                  |
+| `VLM_JUDGE_JOB_DIR`        | Derived local default         | Durable local job root; Compose uses `/state/judge`, Azure mode uses shared Blob state |
+| `VLM_JUDGE_CAPACITY`       | `1`                           | Shared maximum concurrent judgment work for a capacity scope                           |
+| `VLM_JUDGE_CAPACITY_SCOPE` | `configured-inference-device` | Shared identity for workers using the same inference capacity                          |
 
 > [!NOTE]
 > **Process-reward method (`VLM_JUDGE_PROCESS_METHOD`).** The per-frame progress
@@ -348,11 +353,10 @@ in-process `qwen3-vl` backend without `start.sh`.
 
 #### Request timeouts
 
-The `/judge` request stays open until model loading and inference finish. Local
-`qwen3-vl` runs can take minutes on the first request because the backend loads
-the model in-process. Configure any reverse proxy, ingress, or browser-facing
-gateway timeout above the expected first-run latency, or run the model through the
-`openai-compat` shim so the dataviewer backend remains lightweight.
+Submission returns a job acknowledgment; the browser polls for completion. Model
+loading does not hold that browser request open. The worker's inference request still
+needs sufficient server/proxy timeouts. Keep at least one worker replica running while
+jobs are pending; queued jobs cannot wake a scaled-to-zero service.
 
 #### Local model via the openai-compat shim
 
@@ -362,11 +366,15 @@ the bundled OpenAI-compatible shim — and point the dataviewer at it with
 `VLM_JUDGE_BACKEND=openai-compat` and `VLM_JUDGE_BASE_URL=http://127.0.0.1:8001/v1`:
 
 ```bash
-uv run --project ../../evaluation/vlm_judge --extra api --extra qwen3-vl \
+uv run --project ../../evaluation/vlm_judge --frozen --no-sync --extra api --extra qwen3-vl \
   python -m evaluation.vlm_judge.openai_shim \
   --port 8001 \
   --model-id Qwen/Qwen3-VL-4B-Instruct
 ```
+
+Run this from the viewer directory after an approved frozen restore of the evaluator's
+`api` and `qwen3-vl` extras. Local Qwen still requires the GPU host and compatible
+runtime; moving inference into a separate process does not remove that requirement.
 
 The shim reads these variables ([`evaluation/vlm_judge/openai_shim.py`](../../evaluation/vlm_judge/openai_shim.py)):
 

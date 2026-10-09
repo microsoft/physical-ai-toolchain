@@ -21,7 +21,7 @@ from slowapi.errors import RateLimitExceeded
 
 from .auth import MediaSession, PrincipalContext, issue_media_session, require_auth, require_principal_context
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token, require_csrf_token
-from .middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddleware
+from .middleware import ContentSizeLimitMiddleware, EpisodeCompressionMiddleware, SecurityHeadersMiddleware
 from .rate_limiter import limiter
 from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, vlm_judge
 from .routes import ai_analysis
@@ -101,8 +101,24 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     if _config.storage_backend == "local":
         await asyncio.to_thread(_validate_local_storage_writable, _config.data_path)
 
-    yield
     from .services.dataset_service import get_dataset_service
+
+    workers = []
+    if _config.vlm_judge_enabled:
+        from .services.annotation_service import get_annotation_service
+        from .services.vlm_judge_service import create_judge_jobs
+
+        jobs = await create_judge_jobs(_config, get_dataset_service(), get_annotation_service())
+        _app.state.judge_jobs = jobs
+        workers = [asyncio.create_task(jobs.run_forever()) for _ in range(_config.vlm_judge_capacity)]
+    try:
+        yield
+    finally:
+        for worker in workers:
+            worker.cancel()
+        for worker in workers:
+            with suppress(asyncio.CancelledError):
+                await worker
 
     try:
         service = get_dataset_service()
@@ -177,6 +193,7 @@ async def validation_exception_handler(request, exc: RequestValidationError) -> 
 # Middleware stack (last added = outermost = first to execute)
 # Order: SecurityHeaders → ContentSizeLimit → CORS → FastAPI App
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(EpisodeCompressionMiddleware, minimum_size=1024, compresslevel=1)
 app.add_middleware(
     ContentSizeLimitMiddleware,
     max_content_length=int(os.environ.get("MAX_REQUEST_BODY_BYTES", str(10 * 1024 * 1024))),
@@ -201,6 +218,7 @@ app.include_router(labels.router, prefix="/api/datasets", tags=["labels"], depen
 app.include_router(joint_config.router, prefix="/api/datasets", tags=["joint-config"], dependencies=api_auth)
 app.include_router(joint_config.defaults_router, prefix="/api", tags=["joint-config"], dependencies=api_auth)
 if _config.vlm_judge_enabled:
+    app.include_router(vlm_judge.job_router, prefix="/api/judge", dependencies=api_auth)
     app.include_router(
         vlm_judge.router,
         prefix="/api/datasets",

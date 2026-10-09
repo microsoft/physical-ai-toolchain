@@ -8,14 +8,23 @@ and accessing episode information with HDF5 and LeRobot parquet support.
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from ..config import AppConfig, get_app_config
-from ..models.datasources import AcceptedDatasetContract, DatasetInfo, EpisodeData, EpisodeMeta, TrajectoryPoint
+from ..models.datasources import (
+    AcceptedDatasetContract,
+    DatasetCatalogPage,
+    DatasetInfo,
+    EpisodeData,
+    EpisodeMeta,
+    TrajectoryPoint,
+)
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..services.video_transcode import ensure_browser_compatible
 from ..validation import (
@@ -29,6 +38,7 @@ from ..validation import (
     range_header_param,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -68,6 +78,40 @@ async def list_datasets(
     FPS, features, and available tasks.
     """
     return await service.list_datasets()
+
+
+@router.get("/catalog", response_model=DatasetCatalogPage)
+async def query_catalog(
+    query: str = Query(default="", max_length=200),
+    group: str | None = Query(default=None, max_length=300),
+    sort: Literal["name", "episodes", "episodes-desc"] = "name",
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=25, ge=1, le=100),
+    snapshot_id: str | None = Query(default=None, max_length=64),
+    refresh: bool = False,
+    service: DatasetService = Depends(get_dataset_service),
+) -> DatasetCatalogPage:
+    query = query.replace("\r", "").replace("\n", "")
+    group = group.replace("\r", "").replace("\n", "") if group is not None else None
+    snapshot_id = snapshot_id.replace("\r", "").replace("\n", "") if snapshot_id is not None else None
+    try:
+        return await service.query_catalog(
+            query=query,
+            group=group,
+            sort=sort,
+            offset=int(offset),
+            limit=int(limit),
+            snapshot_id=snapshot_id,
+            refresh=bool(refresh),
+        )
+    except ValueError as error:
+        if snapshot_id is not None:
+            raise HTTPException(status_code=409, detail="Catalog snapshot expired; refresh the catalog") from error
+        logger.warning("Catalog unavailable category=%s", type(error).__name__)
+        raise HTTPException(status_code=503, detail="Catalog discovery unavailable") from error
+    except Exception as error:
+        logger.warning("Catalog unavailable category=%s", type(error).__name__)
+        raise HTTPException(status_code=503, detail="Catalog discovery unavailable") from error
 
 
 @router.get("/{dataset_id}", response_model=DatasetInfo)
@@ -168,7 +212,19 @@ async def get_episode(
     dataset = await service.get_dataset(dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
-    episode = await service.get_episode(dataset_id, episode_idx)
+    try:
+        episode = await service.get_episode(
+            dataset_id.replace("\r", "").replace("\n", ""), int(episode_idx), fresh=True
+        )
+    except ValueError:
+        logger.warning(
+            "Episode source validation failed dataset=%s episode=%d",
+            dataset_id.replace("\r", "").replace("\n", ""),
+            int(episode_idx),
+        )
+        raise HTTPException(
+            status_code=409, detail="Episode source changed or is unavailable. Reload before saving."
+        ) from None
     if episode is None:
         raise HTTPException(
             status_code=404,
@@ -334,6 +390,18 @@ async def get_episode_video(
                 status_code=404,
                 detail=f"Video not found in blob storage for episode {episode_idx}, camera '{camera}'",
             )
+
+        if await service.blob_video_is_browser_compatible(dataset_id, camera):
+            streamed = await service.get_blob_video_stream(blob_path, offset=range_values[0], length=range_values[1])
+            if streamed is None:
+                raise HTTPException(status_code=502, detail="Blob video is unavailable")
+            headers, media_type, chunks = streamed
+            headers["Cache-Control"] = "private, no-cache"
+            content_range = headers.get("Content-Range", "")
+            status_code = 416 if content_range.startswith("bytes */") else 206 if content_range else 200
+            if request.method == "HEAD" or status_code == 416:
+                return Response(status_code=status_code, media_type=media_type, headers=headers)
+            return StreamingResponse(chunks, status_code=status_code, media_type=media_type, headers=headers)
 
         local_path = await service.materialize_blob_video(blob_path)
         if local_path is None:

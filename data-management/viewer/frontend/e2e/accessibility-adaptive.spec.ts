@@ -217,7 +217,8 @@ test('V02 V03 V05 and V19 primary focus stops stay visible and unobscured', asyn
     page.getByRole('button', { name: /Episode 0/ }),
     page.getByRole('button', { name: /Episode 1/ }),
     page.getByRole('button', { name: 'Export', exact: true }),
-    page.getByRole('button', { name: 'Save & Next Episode' }),
+    page.getByRole('button', { name: 'Save Episode', exact: true }),
+    page.getByRole('button', { name: 'Next Episode', exact: true }),
     page.getByRole('tab', { name: 'Trajectory Viewer' }),
   ]
   const findings = []

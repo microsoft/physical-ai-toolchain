@@ -1,4 +1,21 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { defineConfig, devices } from '@playwright/test'
+
+const dataDirectory = mkdtempSync(join(tmpdir(), 'dataviewer-e2e-'))
+process.once('exit', () => rmSync(dataDirectory, { recursive: true, force: true }))
+const isolatedEnvironment = {
+  DATAVIEWER_AUTH_DISABLED: 'true',
+  STORAGE_BACKEND: 'local',
+  DATA_DIR: dataDirectory,
+  VLM_JUDGE_ENABLED: 'false',
+  VLM_JUDGE_BACKEND: 'echo',
+  VLM_JUDGE_CACHE_DIR: join(dataDirectory, 'cache'),
+  VLM_JUDGE_JOB_DIR: join(dataDirectory, 'jobs'),
+}
+const seedDataset = `uv run --directory ../backend --no-sync --frozen python -c "import os; from pathlib import Path; from tests.api.test_vlm_judge_router import _build_dataset; _build_dataset(Path(os.environ['DATA_DIR']) / 'integration-fixture', instruction='Place the block')"`
 
 export default defineConfig({
   testDir: './e2e',
@@ -33,30 +50,34 @@ export default defineConfig({
       url: 'http://127.0.0.1:4173',
       reuseExistingServer: false,
       timeout: 120_000,
+      env: {
+        VITE_API_BASE_URL: 'http://127.0.0.1:18000',
+        VITE_AZURE_CLIENT_ID: '',
+        VITE_AZURE_TENANT_ID: '',
+      },
+    },
+    {
+      command: `${seedDataset} && uv run --project ../backend --no-sync --frozen python -m uvicorn src.api.main:app --app-dir ../backend --log-config ../backend/logging.json --host 127.0.0.1 --port 18000`,
+      url: 'http://127.0.0.1:18000/docs',
+      reuseExistingServer: false,
+      timeout: 180_000,
+      env: isolatedEnvironment,
     },
     {
       command:
-        'uv run --project ../backend --frozen python -m uvicorn src.api.main:app --app-dir ../backend --log-config ../backend/logging.json --host 127.0.0.1 --port 8000',
-      url: 'http://127.0.0.1:8000/docs',
-      reuseExistingServer: !process.env.CI,
+        'uv run --project ../backend --no-sync --frozen python -m uvicorn evaluation.vlm_judge.api:app --host 127.0.0.1 --port 18001',
+      url: 'http://127.0.0.1:18001/docs',
+      reuseExistingServer: false,
       timeout: 180_000,
-      env: { DATAVIEWER_AUTH_DISABLED: 'true', DATA_DIR: '.' },
+      env: isolatedEnvironment,
     },
     {
       command:
-        'uv run --no-project --with fastapi==0.141.1 --with uvicorn==0.52.4 --with pydantic==2.13.5 --with Pillow==12.3.0 --with av==15.1.0 python -m uvicorn vlm_judge.api:app --app-dir ../../../evaluation --host 127.0.0.1 --port 8001',
-      url: 'http://127.0.0.1:8001/docs',
-      reuseExistingServer: !process.env.CI,
+        'uv run --project ../backend --no-sync --frozen python -m uvicorn evaluation.vlm_judge.openai_shim:build_echo_app --factory --host 127.0.0.1 --port 18002',
+      url: 'http://127.0.0.1:18002/docs',
+      reuseExistingServer: false,
       timeout: 180_000,
-      env: { VLM_JUDGE_BACKEND: 'echo', VLM_JUDGE_CACHE_DIR: '' },
-    },
-    {
-      command:
-        'uv run --no-project --with fastapi==0.141.1 --with uvicorn==0.52.4 --with pydantic==2.13.5 --with Pillow==12.3.0 python -m uvicorn vlm_judge.openai_shim:build_echo_app --factory --app-dir ../../../evaluation --host 127.0.0.1 --port 8002',
-      url: 'http://127.0.0.1:8002/docs',
-      reuseExistingServer: !process.env.CI,
-      timeout: 180_000,
-      env: { VLM_SHIM_ALLOW_REMOTE_IMAGES: 'false' },
+      env: { ...isolatedEnvironment, VLM_SHIM_ALLOW_REMOTE_IMAGES: 'false' },
     },
   ],
 })

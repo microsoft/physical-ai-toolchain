@@ -194,6 +194,19 @@ export interface ExportResult {
   }
 }
 
+export interface SavedEditBaseline {
+  sourceId: string
+  sourceRevision: string
+  principalScopeId: string
+  etag: string | null
+  operations: EpisodeEditOperations
+}
+
+export interface EpisodeEditDraft {
+  operations: EpisodeEditOperations
+  baseline: SavedEditBaseline | null
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================

@@ -81,6 +81,30 @@ class DatasetInfo(BaseModel):
     tasks: list[TaskInfo] = Field(default_factory=list, description="Available tasks")
 
 
+class DatasetSummary(BaseModel):
+    """Compact, discovery-backed catalog entry."""
+
+    id: str
+    name: str
+    group: str | None = None
+    total_episodes: int = Field(ge=0)
+    format: str | None = None
+
+
+class DatasetCatalogPage(BaseModel):
+    """Stable catalog page with explicit freshness and refresh failure."""
+
+    items: list[DatasetSummary]
+    total: int
+    catalog_total: int
+    groups: list[str]
+    snapshot_id: str
+    offset: int
+    limit: int
+    stale: bool
+    refresh_failed: bool
+
+
 class AcceptedDatasetContract(BaseModel):
     """Dataset adapter identities and verified capture artifact digests."""
 
@@ -150,6 +174,8 @@ class FrameInsertion(BaseModel):
 class EpisodeData(BaseModel):
     """Complete episode data for viewing."""
 
+    source_id: str | None = None
+    source_revision: str | None = None
     meta: EpisodeMeta
     video_urls: dict[str, str] = Field(default_factory=dict, description="Video URLs by camera name")
     video_time_windows: dict[str, list[float]] = Field(

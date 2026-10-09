@@ -317,6 +317,7 @@ describe('edit-store-helpers', () => {
         0,
         'local',
         expect.objectContaining({ datasetId: 'ds-1', episodeIndex: 0, removedFrames: [2, 4] }),
+        null,
       )
     })
 

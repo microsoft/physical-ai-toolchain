@@ -14,7 +14,13 @@ import {
   triggerAutoAnalysis,
   type VersionedResource,
 } from '@/lib/api-client'
-import { loadPersistedAnnotationDraft, persistAnnotationDraft } from '@/lib/edit-draft-storage'
+import {
+  episodeDraftSource,
+  loadPersistedAnnotationDraft,
+  persistAnnotationDraft,
+  sameDraftSource,
+} from '@/lib/edit-draft-storage'
+import { recordDiagnosticEvent } from '@/lib/playback-diagnostics'
 import { fetchPrincipalContext } from '@/lib/principal-context'
 import { useAnnotationStore, useDatasetStore, useEpisodeStore } from '@/stores'
 import type { EpisodeAnnotation, EpisodeAnnotationFile } from '@/types'
@@ -56,18 +62,22 @@ export function useEpisodeAnnotations() {
   const annotatorId = principalQuery.data?.scopeId
   const currentDataset = useDatasetStore((state) => state.currentDataset)
   const currentIndex = useEpisodeStore((state) => state.currentIndex)
+  const currentEpisode = useEpisodeStore((state) => state.currentEpisode)
+  const sourceBinding = useAnnotationStore((state) => state.sourceBinding)
   const loadAnnotation = useAnnotationStore((state) => state.loadAnnotation)
   const initializeAnnotation = useAnnotationStore((state) => state.initializeAnnotation)
   const restoreAnnotationDraft = useAnnotationStore((state) => state.restoreAnnotationDraft)
   const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation)
   const originalAnnotation = useAnnotationStore((state) => state.originalAnnotation)
   const isDirty = useAnnotationStore((state) => state.isDirty)
+  const draftHydrated = useAnnotationStore((state) => state.draftHydrated)
+  const baseEtag = useAnnotationStore((state) => state.baseEtag)
   const hydratedKeyRef = useRef<string | null>(null)
 
   const query = useQuery({
     queryKey: annotationKeys.detail(currentDataset?.id ?? '', currentIndex, annotatorId ?? ''),
     queryFn: () => fetchAnnotations(currentDataset!.id, currentIndex),
-    enabled: !!currentDataset && currentIndex >= 0 && !!annotatorId,
+    enabled: !!currentDataset && currentIndex >= 0 && !!annotatorId && !principalQuery.isError,
     staleTime: 30 * 1000,
   })
 
@@ -75,34 +85,120 @@ export function useEpisodeAnnotations() {
     if (!query.data || !currentDataset || !annotatorId) return
 
     let active = true
-    const key = `${currentDataset.id}:${currentIndex}:${annotatorId}`
+    const key = JSON.stringify([currentDataset.id, currentIndex, annotatorId])
+    const existing = useAnnotationStore.getState()
+    const source = episodeDraftSource(currentEpisode)
+    if (
+      existing.resourceKey === key &&
+      (existing.isDirty || existing.isSaving || existing.conflict)
+    ) {
+      if (
+        source &&
+        !sameDraftSource(existing.sourceBinding, source) &&
+        existing.currentAnnotation &&
+        !existing.conflict?.sourceChanged
+      ) {
+        useAnnotationStore.setState({
+          conflict: {
+            currentEtag: query.data.etag,
+            submitted: existing.currentAnnotation,
+            sourceChanged: true,
+          },
+        })
+        recordDiagnosticEvent('persistence', 'annotation-source-conflict', {
+          datasetId: currentDataset.id,
+          episodeIndex: currentIndex,
+        })
+      }
+      if (
+        !(source && !sameDraftSource(existing.sourceBinding, source)) &&
+        !existing.isSaving &&
+        existing.baseEtag !== query.data.etag &&
+        existing.currentAnnotation
+      ) {
+        existing.setConflict(query.data.etag, existing.currentAnnotation)
+      }
+      recordDiagnosticEvent('persistence', 'annotation-refresh-draft-retained', {
+        datasetId: currentDataset.id,
+        episodeIndex: currentIndex,
+      })
+      return
+    }
+    // A save acknowledgment already synchronized the store; rehydrating would re-read the pre-save draft.
+    if (
+      existing.resourceKey === key &&
+      existing.draftHydrated &&
+      !existing.draftError &&
+      existing.baseEtag === query.data.etag &&
+      (!source || sameDraftSource(existing.sourceBinding, source))
+    ) {
+      hydratedKeyRef.current = key
+      return
+    }
     const userAnnotation = query.data.data.annotations.find(
       (annotation) => annotation.annotatorId === annotatorId,
     )
 
     if (!userAnnotation) {
-      hydratedKeyRef.current = key
       initializeAnnotation(annotatorId)
-      return
+    } else {
+      loadAnnotation(userAnnotation)
     }
-
-    loadAnnotation(userAnnotation)
     hydratedKeyRef.current = key
+    useAnnotationStore.setState({
+      resourceKey: key,
+      sourceBinding: source,
+      baseEtag: query.data.etag,
+      draftHydrated: false,
+      draftError: null,
+    })
     const hydrationEditGeneration = useAnnotationStore.getState().editGeneration
-    void loadPersistedAnnotationDraft(currentDataset.id, currentIndex, annotatorId).then(
-      (draft) => {
+    const serverBaseline = useAnnotationStore.getState().currentAnnotation!
+    void loadPersistedAnnotationDraft(currentDataset.id, currentIndex, annotatorId)
+      .then((draft) => {
         if (!active) return
         const state = useAnnotationStore.getState()
-        if (
-          hydratedKeyRef.current !== key ||
-          state.annotatorId !== annotatorId ||
-          state.editGeneration !== hydrationEditGeneration
-        ) {
+        if (hydratedKeyRef.current !== key || state.annotatorId !== annotatorId) {
           return
         }
-        if (draft) restoreAnnotationDraft(draft.draft, userAnnotation)
-      },
-    )
+        if (
+          state.editGeneration === hydrationEditGeneration &&
+          draft &&
+          canonicalJson(draft.draft) === canonicalJson(serverBaseline)
+        ) {
+          recordDiagnosticEvent('persistence', 'annotation-draft-already-saved', {
+            datasetId: currentDataset.id,
+            episodeIndex: currentIndex,
+          })
+        } else if (state.editGeneration === hydrationEditGeneration && draft) {
+          restoreAnnotationDraft(draft.draft, draft.baseline ?? serverBaseline)
+          const draftSource = draft.sourceScopes?.[currentIndex] ?? null
+          useAnnotationStore.setState({ baseEtag: draft.baseEtag, sourceBinding: draftSource })
+          if (source && !sameDraftSource(draftSource, source)) {
+            useAnnotationStore.setState({
+              conflict: {
+                currentEtag: query.data.etag,
+                submitted: draft.draft,
+                sourceChanged: true,
+              },
+            })
+          } else if (draft.baseEtag !== query.data.etag) {
+            useAnnotationStore.getState().setConflict(query.data.etag, draft.draft)
+          }
+        }
+        useAnnotationStore.setState({ draftHydrated: true })
+      })
+      .catch(() => {
+        if (!active || useAnnotationStore.getState().resourceKey !== key) return
+        useAnnotationStore.setState({
+          draftError: 'Annotation draft recovery failed.',
+          draftHydrated: false,
+        })
+        recordDiagnosticEvent('persistence', 'annotation-draft-read-failed', {
+          datasetId: currentDataset.id,
+          episodeIndex: currentIndex,
+        })
+      })
 
     return () => {
       active = false
@@ -111,6 +207,7 @@ export function useEpisodeAnnotations() {
     annotatorId,
     currentDataset,
     currentIndex,
+    currentEpisode,
     initializeAnnotation,
     loadAnnotation,
     query.data,
@@ -119,8 +216,15 @@ export function useEpisodeAnnotations() {
 
   useEffect(() => {
     if (!currentDataset || !currentAnnotation || !annotatorId) return
-    const key = `${currentDataset.id}:${currentIndex}:${annotatorId}`
-    if (hydratedKeyRef.current !== key) return
+    const key = JSON.stringify([currentDataset.id, currentIndex, annotatorId])
+    if (hydratedKeyRef.current !== key || !draftHydrated) return
+    const state = useAnnotationStore.getState()
+    if (
+      state.resourceKey !== key ||
+      !state.draftHydrated ||
+      state.currentAnnotation !== currentAnnotation
+    )
+      return
 
     void persistAnnotationDraft(
       currentDataset.id,
@@ -130,10 +234,18 @@ export function useEpisodeAnnotations() {
         ? {
             draft: currentAnnotation,
             baseline: originalAnnotation,
-            baseEtag: query.data?.etag ?? null,
+            baseEtag,
+            sourceBinding,
           }
         : null,
-    )
+    ).catch(() => {
+      if (useAnnotationStore.getState().resourceKey !== key) return
+      useAnnotationStore.setState({ draftError: 'Annotation draft recovery storage failed.' })
+      recordDiagnosticEvent('persistence', 'annotation-draft-write-failed', {
+        datasetId: currentDataset.id,
+        episodeIndex: currentIndex,
+      })
+    })
   }, [
     annotatorId,
     currentAnnotation,
@@ -141,7 +253,9 @@ export function useEpisodeAnnotations() {
     currentIndex,
     isDirty,
     originalAnnotation,
-    query.data?.etag,
+    baseEtag,
+    sourceBinding,
+    draftHydrated,
   ])
 
   return query
@@ -158,6 +272,28 @@ export function useEpisodeAnnotations() {
  * save({ datasetId: 'my-dataset', episodeIndex: 5, annotation });
  * ```
  */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, nested: unknown) =>
+    nested && typeof nested === 'object' && !Array.isArray(nested)
+      ? Object.fromEntries(
+          Object.entries(nested).sort(([first], [second]) => (first < second ? -1 : 1)),
+        )
+      : nested,
+  )
+}
+
+function annotationSaveContext(): string {
+  const state = useAnnotationStore.getState()
+  return JSON.stringify([
+    useDatasetStore.getState().currentDataset?.id,
+    useEpisodeStore.getState().currentIndex,
+    state.annotatorId,
+    state.contextGeneration,
+    state.resourceKey,
+    episodeDraftSource(useEpisodeStore.getState().currentEpisode),
+  ])
+}
+
 export function useSaveAnnotation() {
   const queryClient = useQueryClient()
   const setSaving = useAnnotationStore((state) => state.setSaving)
@@ -166,7 +302,8 @@ export function useSaveAnnotation() {
   const setConflict = useAnnotationStore((state) => state.setConflict)
 
   return useMutation({
-    mutationFn: ({
+    mutationKey: ['episode-save', 'annotation'],
+    mutationFn: async ({
       datasetId,
       episodeIndex,
       annotation,
@@ -177,17 +314,58 @@ export function useSaveAnnotation() {
     }) => {
       const queryKey = annotationKeys.detail(datasetId, episodeIndex, annotation.annotatorId)
       const current = queryClient.getQueryData<VersionedResource<EpisodeAnnotationFile>>(queryKey)
-      const precondition = current?.etag ? { etag: current.etag } : { createOnly: true }
-      return saveAnnotation(datasetId, episodeIndex, annotation, precondition)
+      const state = useAnnotationStore.getState()
+      const sameResource =
+        state.resourceKey === JSON.stringify([datasetId, episodeIndex, annotation.annotatorId])
+      if (state.resourceKey && !sameResource) {
+        throw new Error('The active annotation changed. Save from its current episode.')
+      }
+      const source = episodeDraftSource(useEpisodeStore.getState().currentEpisode)
+      if (sameResource && state.sourceBinding && !source) {
+        throw new Error('The current annotation source is unavailable. Reload before saving.')
+      }
+      if (sameResource && source && !sameDraftSource(state.sourceBinding, source)) {
+        throw new Error('Resolve the annotation source conflict before saving.')
+      }
+      if (sameResource && (!state.draftHydrated || state.draftError || state.conflict)) {
+        throw new Error('Resolve annotation draft recovery or conflicts before saving.')
+      }
+      const etag = sameResource ? state.baseEtag : current?.etag
+      const precondition = etag ? { etag } : { createOnly: true }
+      const saved = await saveAnnotation(datasetId, episodeIndex, annotation, precondition)
+      if (
+        !saved.etag ||
+        !saved.data.annotations.some((entry) => entry.annotatorId === annotation.annotatorId)
+      ) {
+        throw new Error('Annotation save acknowledgment is missing its revision or author record.')
+      }
+      return saved
     },
 
     onMutate: () => {
+      if (useAnnotationStore.getState().isSaving) {
+        throw new Error('An annotation save is already in progress.')
+      }
       setSaving(true)
-      return { submittedEditGeneration: useAnnotationStore.getState().editGeneration }
+      return {
+        submittedEditGeneration: useAnnotationStore.getState().editGeneration,
+        scope: annotationSaveContext(),
+      }
     },
 
     onSuccess: (versioned, variables, context) => {
-      markSubmittedSaved(variables.annotation, context.submittedEditGeneration)
+      if (annotationSaveContext() === context.scope) {
+        const canonical = versioned.data.annotations.find(
+          (entry) => entry.annotatorId === variables.annotation.annotatorId,
+        )!
+        markSubmittedSaved(canonical, context.submittedEditGeneration)
+        useAnnotationStore.setState({ baseEtag: versioned.etag })
+      } else {
+        recordDiagnosticEvent('persistence', 'annotation-save-ack-skipped', {
+          datasetId: variables.datasetId,
+          episodeIndex: variables.episodeIndex,
+        })
+      }
 
       // Update cache
       queryClient.setQueryData(
@@ -205,7 +383,13 @@ export function useSaveAnnotation() {
       })
     },
 
-    onError: (error, variables) => {
+    onError: (error, variables, context) => {
+      recordDiagnosticEvent('persistence', 'annotation-save-failed', {
+        datasetId: variables.datasetId,
+        episodeIndex: variables.episodeIndex,
+        status: error instanceof ApiClientError ? error.status : undefined,
+      })
+      if (!context || annotationSaveContext() !== context.scope) return
       if (error instanceof ApiClientError && error.status === 412) {
         const currentEtag =
           typeof error.details?.currentEtag === 'string' ? error.details.currentEtag : null
@@ -243,7 +427,7 @@ export function useSaveCurrentAnnotation() {
     return mutation.mutateAsync({
       datasetId: currentDataset.id,
       episodeIndex: currentIndex,
-      annotation: currentAnnotation,
+      annotation: structuredClone(currentAnnotation),
     })
   }
 

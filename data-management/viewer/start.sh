@@ -235,7 +235,7 @@ start_backend() {
     require_port_available "${BACKEND_PORT}" "Backend"
     log_info "Starting backend on port ${BACKEND_PORT}..."
     local backend_sync_args=(--frozen --python 3.12 --group dev --extra analysis --extra export)
-    local vlm_judge_package_spec="${REPO_ROOT}/evaluation/vlm_judge"
+    local judge_extra=""
     local should_install_vlm_judge=false
 
     # Resolve VLM_JUDGE_ENABLED from shell env first, then fall back to backend/.env
@@ -259,10 +259,9 @@ start_backend() {
     if [[ "${VLM_JUDGE_ENABLED:-false}" == "true" ]]; then
         should_install_vlm_judge=true
         if [[ "${VLM_JUDGE_BACKEND:-echo}" == "qwen3-vl" ]]; then
-            vlm_judge_package_spec="${vlm_judge_package_spec}[qwen3-vl]"
-            backend_sync_args+=(--extra vlm-judge)
+            judge_extra="qwen3-vl"
         elif [[ "${VLM_JUDGE_BACKEND:-echo}" == "openai-compat" ]]; then
-            vlm_judge_package_spec="${vlm_judge_package_spec}[openai]"
+            judge_extra="openai"
         fi
     fi
 
@@ -293,24 +292,14 @@ start_backend() {
     export DATA_DIR
     log_info "Using DATA_DIR=${DATA_DIR}"
 
-    if [[ ! -d "${BACKEND_DIR}/.venv" ]]; then
-        log_warn "Virtual environment not found at ${BACKEND_DIR}/.venv"
-        log_info "Creating virtual environment..."
-        if command -v uv &>/dev/null; then
-            (cd "${BACKEND_DIR}" && uv sync "${backend_sync_args[@]}")
-            if [[ "${should_install_vlm_judge}" == "true" ]]; then
-                # shellcheck source=/dev/null
-                (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${vlm_judge_package_spec}")
-            fi
-        else
-            log_error "uv not found. Please install uv or create venv manually."
-            exit 1
-        fi
-    elif [[ "${should_install_vlm_judge}" == "true" ]]; then
-        log_info "Ensuring VLM judge package dependencies are installed..."
+    if [[ ! -d "${BACKEND_DIR}/.venv" ]] || [[ "${should_install_vlm_judge}" == "true" ]]; then
+        log_info "Restoring frozen backend dependencies..."
         (cd "${BACKEND_DIR}" && uv sync --inexact "${backend_sync_args[@]}")
-        # shellcheck source=/dev/null
-        (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${vlm_judge_package_spec}")
+        if [[ -n "${judge_extra}" ]]; then
+            UV_PROJECT_ENVIRONMENT="${BACKEND_DIR}/.venv" uv sync \
+                --project "${REPO_ROOT}/evaluation/vlm_judge" \
+                --frozen --inexact --no-dev --extra "${judge_extra}"
+        fi
     fi
 
     (

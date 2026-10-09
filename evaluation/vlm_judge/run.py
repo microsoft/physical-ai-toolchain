@@ -1,5 +1,9 @@
 """CLI entry point for VLM-as-judge dataset evaluation.
 
+Each output has an adjacent ``<output>.config.json`` declaration written
+before service creation. It records explicit instruction overrides and
+non-secret settings; credentials and endpoint URLs are excluded.
+
 Examples:
 
     # Local Qwen3-VL-4B against a v3.0 LeRobot dataset, first 5 episodes
@@ -27,20 +31,28 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import sys
 import time
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from .agent import AgentConfig
+from .curation_storage import LocalCurationStorage, apply_judge_result
 from .dataset import EpisodeRecord, iter_episodes
+from .job_cli import add_job_arguments, execute_job_command, read_sample_references
+from .job_storage import LocalJobStore
+from .jobs import JudgeJobs
+from .saved_input import LocalDatasetResolver, LocalSavedInputReader, SavedInputSnapshot, resolve_saved_input
 from .service import (
     BackendConfig,
     FrameConfig,
     JudgeService,
     ServiceConfig,
+    ServiceExecutor,
 )
 
 _LOGGER = logging.getLogger("evaluation.vlm_judge")
@@ -53,6 +65,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.config_preview:
         _print_config(args)
         return 0
+
+    if not args.dry_run:
+        try:
+            return asyncio.run(_durable_main(args))
+        except KeyboardInterrupt:
+            _LOGGER.info("Client interrupted; accepted jobs remain available through status")
+            return 130
+        except (ValueError, OSError, KeyError) as error:
+            _LOGGER.error("Judge command failed category=%s", type(error).__name__)
+            return 2
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -74,6 +96,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         _LOGGER.error("No episodes selected; nothing to do")
         return 1
 
+    declared_config = {
+        "schema_version": 1,
+        "instruction_origin": "cli-override" if instruction_override else "saved-input",
+        "instruction_override": instruction_override,
+        "backend": args.backend,
+        "model_id": args.model_id,
+        "model_revision": args.model_revision,
+        "views": views,
+        "episode_indices": [episode.episode_index for episode in episodes],
+        "n_frames": args.n_frames,
+        "frame_size": args.frame_size,
+        "n_outcome_samples": args.n_outcome_samples,
+        "milestone_threshold": args.milestone_threshold,
+        "dry_run": args.dry_run,
+    }
+    reader = LocalSavedInputReader(Path(args.dataset))
+    snapshots = [
+        asyncio.run(_resolve_episode_input(reader, episode, args, instruction_override)) for episode in episodes
+    ]
+    declared_config["saved_inputs"] = [snapshot.model_dump(mode="json") for snapshot in snapshots]
+    episodes = [
+        replace(episode, instruction=snapshot.instruction, snapshot_id=snapshot.snapshot_id)
+        for episode, snapshot in zip(episodes, snapshots, strict=True)
+    ]
+    output_path.with_suffix(output_path.suffix + ".config.json").write_text(
+        json.dumps(declared_config, indent=2) + "\n", encoding="utf-8"
+    )
     service = _build_service(args)
     if not args.dry_run:
         _LOGGER.info("Backend: %s (%s)", service.config.backend.kind, service.model_id)
@@ -91,6 +140,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     dry_run=args.dry_run,
                     force=args.force,
                 )
+                asyncio.run(_resolve_episode_input(reader, ep, args, instruction_override, ep.snapshot_id))
             except Exception:
                 _LOGGER.exception("Episode %s failed; skipping", ep.episode_id)
                 n_fail += 1
@@ -108,12 +158,100 @@ def main(argv: Sequence[str] | None = None) -> int:
         elapsed / max(1, n_ok),
         output_path,
     )
-    return 0 if n_ok > 0 else 1
+    return 0 if n_ok > 0 and n_fail == 0 else 1
 
 
 # -------------------------------------------------------------------------
 # Argument parsing
 # -------------------------------------------------------------------------
+
+
+async def _durable_main(args: argparse.Namespace) -> int:
+    root = Path(args.dataset).resolve()
+    dataset_id = args.dataset_id or root.name
+    output = Path(args.output)
+    override = args.instruction.strip() or None
+    if override and not args.single and args.operation == "submit":
+        raise ValueError("Declared instruction overrides require the explicit single-episode action")
+    resolver = LocalDatasetResolver({dataset_id: root}, instruction_override=override)
+    indices = []
+    if args.operation == "submit":
+        records = list(
+            iter_episodes(
+                root,
+                views=tuple(args.views) if args.views else None,
+                indices=_parse_indices(args.indices),
+                limit=args.limit,
+            )
+        )
+        indices = [record.episode_index for record in records]
+        samples = read_sample_references(args.sample_references)
+        snapshots = []
+        for index in indices:
+            reference = samples.get(index, {}) if args.mode == "sample" else {}
+            _, snapshot = await resolver.resolve(
+                dataset_id,
+                index,
+                principal_scope_id=args.principal_scope_id,
+                views=tuple(args.views or ()),
+                annotation_author_id=reference.get("annotation_author_id", args.annotation_author_id),
+                expected_snapshot_id=reference.get("snapshot_id"),
+            )
+            snapshots.append(snapshot.model_dump(mode="json"))
+        output.parent.mkdir(parents=True, exist_ok=True)
+        declaration = {key: value for key, value in vars(args).items() if key not in {"api_key", "base_url"}}
+        declaration.update(
+            instruction_origin="cli-override" if override else "saved-input",
+            instruction_override=override,
+            saved_inputs=snapshots,
+        )
+        output.with_suffix(output.suffix + ".config.json").write_text(
+            json.dumps(declaration, indent=2, default=str) + "\n",
+            encoding="utf-8",
+        )
+    service = _build_service(args)
+    executor = ServiceExecutor(service)
+    config = executor.configuration(
+        {
+            "views": args.views,
+            "annotation_author_id": args.annotation_author_id,
+            "force": args.force,
+            "instruction_override": override,
+        }
+    )
+    storage = LocalCurationStorage({dataset_id: root})
+
+    async def apply_result(job: dict[str, object], target: dict[str, object]) -> bool:
+        return await apply_judge_result(storage, job, target)
+
+    jobs = JudgeJobs(
+        LocalJobStore(args.job_dir or root.parent / ".curation" / "judge"),
+        resolver,
+        executor,
+        capacity=args.capacity,
+        capacity_scope=args.capacity_scope,
+        apply_result=apply_result,
+        curation_storage=storage,
+    )
+    code, result = await execute_job_command(
+        jobs,
+        args,
+        dataset_id=dataset_id,
+        actor=args.principal_scope_id,
+        config=config,
+        indices=indices,
+    )
+    if args.operation in {"submit", "retry"} and not args.detach and "targets" in result:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with output.open("w", encoding="utf-8") as stream:
+            for target in result["targets"]:
+                if target["result"] is not None:
+                    stream.write(
+                        json.dumps({**target["result"], "run_id": result["id"], "result_id": target["result_id"]})
+                        + "\n"
+                    )
+    print(json.dumps(result))
+    return code
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -122,7 +260,13 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         description="VLM-as-judge evaluation over a LeRobot dataset",
     )
     parser.add_argument("--dataset", required=True, help="LeRobot dataset directory")
-    parser.add_argument("--output", required=True, help="Output JSONL file")
+    parser.add_argument("--output", default="outputs/vlm-judge/results.jsonl", help="Saved result JSONL export")
+    add_job_arguments(parser)
+    parser.add_argument("--dataset-id", default=None, help="Canonical dataset ID; defaults to the root directory name")
+    parser.add_argument(
+        "--principal-scope-id", default="local", help="Saved edit author scope for explicit local operation"
+    )
+    parser.add_argument("--annotation-author-id", default=None, help="Select one saved instruction author")
     parser.add_argument(
         "--backend",
         choices=("qwen3-vl", "openai-compat", "echo"),
@@ -235,7 +379,7 @@ def _configure_logging(level: str) -> None:
 
 
 def _print_config(args: argparse.Namespace) -> None:
-    cfg = {k: v for k, v in vars(args).items() if k != "config_preview"}
+    cfg = {k: v for k, v in vars(args).items() if k not in {"config_preview", "api_key", "base_url"}}
     print(json.dumps(cfg, indent=2, default=str))
 
 
@@ -268,6 +412,30 @@ def _build_service(args: argparse.Namespace) -> JudgeService:
     )
 
 
+async def _resolve_episode_input(
+    reader: LocalSavedInputReader,
+    episode: EpisodeRecord,
+    args: argparse.Namespace,
+    instruction_override: str | None,
+    expected_snapshot_id: str | None = None,
+) -> SavedInputSnapshot:
+    dataset_id = args.dataset_id or Path(args.dataset).resolve().name
+    source = await reader.source_revision(dataset_id, episode.episode_index)
+    return await resolve_saved_input(
+        reader,
+        dataset_id,
+        episode.episode_index,
+        principal_scope_id=args.principal_scope_id,
+        source=source,
+        dataset_instruction=episode.instruction,
+        media_identity=episode.media_identity,
+        video_windows=episode.video_windows,
+        annotation_author_id=args.annotation_author_id,
+        expected_snapshot_id=expected_snapshot_id,
+        declared_instruction_override=instruction_override,
+    )
+
+
 def _process_episode(
     *,
     episode: EpisodeRecord,
@@ -295,6 +463,9 @@ def _process_episode(
         video_paths=episode.video_paths,
         from_s=episode.from_timestamp,
         to_s=episode.to_timestamp,
+        video_windows=episode.video_windows,
+        media_identity=episode.media_identity,
+        snapshot_id=episode.snapshot_id,
         force=force,
     )
     payload = result.to_dict()

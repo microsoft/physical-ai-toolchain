@@ -8,6 +8,7 @@ warmup endpoints with the dataset service mocked out.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -35,6 +36,7 @@ def mock_service() -> MagicMock:
     svc.has_blob_provider = MagicMock(return_value=False)
     svc.get_blob_video_path = AsyncMock(return_value=None)
     svc.get_blob_video_stream = AsyncMock(return_value=None)
+    svc.blob_video_is_browser_compatible = AsyncMock(return_value=False)
     svc.dataset_has_hdf5 = MagicMock(return_value=False)
     svc.dataset_is_lerobot = MagicMock(return_value=True)
     svc.get_dataset_contract = MagicMock(return_value=None)
@@ -82,6 +84,121 @@ def _make_trajectory_point(frame: int = 0) -> TrajectoryPoint:
 
 
 class TestListAndGetDataset:
+    @pytest.mark.asyncio
+    async def test_concurrent_catalog_refreshes_share_unchanged_discovery(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        service = DatasetService(base_path=str(tmp_path))
+        await service.query_catalog()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        calls = []
+
+        async def delayed_discovery(**kwargs: Any) -> list[DatasetInfo]:
+            calls.append(1)
+            entered.set()
+            await release.wait()
+            return []
+
+        monkeypatch.setattr(service, "list_datasets", delayed_discovery)
+        first = asyncio.create_task(service.query_catalog(refresh=True))
+        await entered.wait()
+        second = asyncio.create_task(service.query_catalog(refresh=True))
+        release.set()
+        await asyncio.gather(first, second)
+        assert len(calls) == 1
+
+    def test_catalog_api_bounds_pages_and_rejects_expired_snapshots(self, client: TestClient, tmp_path: Path) -> None:
+        from src.api.main import app
+        from src.api.services.dataset_service import get_dataset_service
+
+        service = DatasetService(base_path=str(tmp_path))
+        app.dependency_overrides[get_dataset_service] = lambda: service
+        try:
+            response = client.get("/api/datasets/catalog")
+            assert response.status_code == 200
+            assert response.json()["items"] == []
+            assert client.get("/api/datasets/catalog", params={"limit": 101}).status_code == 422
+            assert client.get("/api/datasets/catalog", params={"snapshot_id": "old"}).status_code == 409
+        finally:
+            app.dependency_overrides.pop(get_dataset_service, None)
+
+    @pytest.mark.asyncio
+    async def test_catalog_search_pages_full_inventory_without_warm_rescans(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+        for index in range(1000):
+            await service.register_dataset(
+                DatasetInfo(
+                    id=f"group--{index:04d}",
+                    name="Repeated name",
+                    group="group",
+                    total_episodes=index,
+                    fps=30,
+                )
+            )
+        scans = []
+        scan = service._scan_directory
+
+        def counted_scan(*args: Any) -> None:
+            scans.append(1)
+            scan(*args)
+
+        monkeypatch.setattr(service, "_scan_directory", counted_scan)
+        first = await service.query_catalog(limit=20, sort="episodes-desc")
+        second = await service.query_catalog(limit=20, offset=20, sort="episodes-desc", snapshot_id=first.snapshot_id)
+        match = await service.query_catalog(query="0999", group="group")
+
+        assert first.total == 1000
+        assert first.items[0].id == "group--0999"
+        assert second.items[0].id == "group--0979"
+        assert [item.id for item in match.items] == ["group--0999"]
+        assert len(scans) == 1
+        assert "features" not in first.items[0].model_dump()
+        assert "tasks" not in first.items[0].model_dump()
+
+    @pytest.mark.asyncio
+    async def test_catalog_keeps_pinned_pages_and_reports_failed_refresh(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+        await service.register_dataset(_make_dataset("before"))
+        initial = await service.query_catalog()
+        await service.register_dataset(_make_dataset("after"))
+        refreshed = await service.query_catalog(refresh=True)
+        pinned = await service.query_catalog(snapshot_id=initial.snapshot_id)
+        assert refreshed.total == 2
+        assert [item.id for item in pinned.items] == ["before"]
+
+        def unavailable(*args: Any) -> None:
+            raise OSError("private storage details")
+
+        monkeypatch.setattr(service, "_scan_directory", unavailable)
+        failed = await service.query_catalog(refresh=True)
+        assert failed.total == 2
+        assert failed.stale and failed.refresh_failed
+        assert "private" not in failed.model_dump_json()
+        with pytest.raises(ValueError, match="snapshot"):
+            await service.query_catalog(snapshot_id="expired")
+
+    @pytest.mark.asyncio
+    async def test_catalog_empty_and_initial_failure_are_distinct(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+        assert (await service.query_catalog()).total == 0
+        fresh = DatasetService(base_path=str(tmp_path))
+
+        def unavailable(*args: Any) -> None:
+            raise OSError("unavailable")
+
+        monkeypatch.setattr(fresh, "_scan_directory", unavailable)
+        with pytest.raises(OSError):
+            await fresh.query_catalog()
+
     def test_list_datasets_returns_list(self, client: TestClient, override_service) -> None:
         override_service.list_datasets = AsyncMock(return_value=[_make_dataset("a"), _make_dataset("b")])
         resp = client.get("/api/datasets")
@@ -279,6 +396,17 @@ class TestListEpisodes:
 
 
 class TestGetEpisode:
+    def test_given_source_change_when_reading_episode_then_fails_visibly(
+        self,
+        client: TestClient,
+        override_service: MagicMock,
+    ) -> None:
+        override_service.get_dataset.return_value = _make_dataset()
+        override_service.get_episode.side_effect = ValueError("Source changed during episode read")
+        response = client.get("/api/datasets/ds-1/episodes/0")
+        assert response.status_code == 409
+        override_service.get_episode.assert_awaited_once_with("ds-1", 0, fresh=True)
+
     def test_get_episode_returns_data_and_cache_header(self, client: TestClient, override_service) -> None:
         override_service.get_dataset = AsyncMock(return_value=_make_dataset("ds-1"))
         override_service.get_episode = AsyncMock(return_value=_make_episode(0))
@@ -367,6 +495,53 @@ class TestGetCameras:
 
 
 class TestGetVideo:
+    @pytest.mark.parametrize(
+        ("range_header", "status", "body", "content_range"),
+        [
+            (None, 200, b"abcdefghij", None),
+            ("bytes=2-4", 206, b"cde", "bytes 2-4/10"),
+            ("bytes=8-99", 206, b"ij", "bytes 8-9/10"),
+            ("bytes=20-", 416, b"", "bytes */10"),
+        ],
+    )
+    def test_compatible_blob_uses_actual_range_route(
+        self,
+        client: TestClient,
+        override_service: MagicMock,
+        tmp_path: Path,
+        range_header: str | None,
+        status: int,
+        body: bytes,
+        content_range: str | None,
+    ) -> None:
+        provider = MagicMock()
+        provider.get_blob_properties = AsyncMock(
+            return_value={"size": 10, "content_type": "video/mp4", "etag": '"one"'}
+        )
+
+        async def chunks(
+            blob_path: str, offset: int | None = None, length: int | None = None, **kwargs: object
+        ) -> AsyncIterator[bytes]:
+            start = offset or 0
+            yield b"abcdefghij"[start : start + length if length is not None else None]
+
+        provider.stream_video = MagicMock(side_effect=chunks)
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        override_service.has_blob_provider.return_value = True
+        override_service.get_blob_video_path.return_value = "dataset/video.mp4"
+        override_service.blob_video_is_browser_compatible.return_value = True
+        override_service.get_blob_video_stream = service.get_blob_video_stream
+        override_service.materialize_blob_video = AsyncMock(side_effect=AssertionError("Compatible media must stream"))
+        response = client.get(
+            "/api/datasets/ds-1/episodes/0/video/front", headers={"Range": range_header} if range_header else {}
+        )
+        assert response.status_code == status
+        assert response.content == body
+        assert response.headers.get("content-range") == content_range
+        assert response.headers["content-length"] == str(len(body))
+        assert "content-encoding" not in response.headers
+        override_service.materialize_blob_video.assert_not_called()
+
     def test_video_file_response(self, client: TestClient, override_service, tmp_path: Path) -> None:
         video = tmp_path / "ep0.mp4"
         video.write_bytes(b"\x00\x00\x00\x18ftypmp42")

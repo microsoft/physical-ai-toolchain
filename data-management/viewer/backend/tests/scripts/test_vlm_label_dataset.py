@@ -6,11 +6,10 @@ summarization, view resolution) without loading any model or GPU.
 
 from __future__ import annotations
 
-import csv
 import importlib.util
 import json
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 
 import pytest
 
@@ -39,6 +38,42 @@ def test_parse_label_strips_code_fences(mod: ModuleType) -> None:
 def test_parse_label_raises_without_json(mod: ModuleType) -> None:
     with pytest.raises(ValueError, match="No JSON object"):
         mod.parse_label("the model refused to answer")
+
+
+@pytest.mark.parametrize("payload", [{}, {"object": "cube"}, {"grasp_success": "true"}])
+def test_given_malformed_task_result_when_normalized_then_rejected(mod: ModuleType, payload: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match=r"label|result"):
+        mod._row_from_label(payload)
+
+
+def test_given_camera_windows_when_filmstrip_built_then_each_window_preserved(
+    mod: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from evaluation.vlm_judge.dataset import EpisodeRecord
+
+    record = EpisodeRecord(
+        "synthetic/3",
+        3,
+        "Saved instruction",
+        30,
+        30,
+        {"front": tmp_path / "front.mp4", "wrist": tmp_path / "wrist.mp4"},
+        1,
+        2,
+        video_windows={"front": (10, 11), "wrist": (20, 22)},
+    )
+    windows = []
+
+    def extract(window: object, **kwargs: object) -> list[object]:
+        windows.append((window.from_s, window.to_s))
+        return [object()]
+
+    monkeypatch.setattr(mod, "extract_frames", extract)
+    monkeypatch.setattr(mod, "tile_horizontally", lambda frames: frames[0])
+
+    mod.build_filmstrip(record, views=("front", "wrist"), n_frames=4, frame_size=64)
+
+    assert windows == [(10, 11), (20, 22)]
 
 
 @pytest.mark.parametrize(
@@ -121,258 +156,188 @@ def test_resolve_views_rejects_unknown(mod: ModuleType, tmp_path: Path) -> None:
         mod.resolve_views(tmp_path, ["obs.missing"])
 
 
-def test_label_dataset_normalizes_rows_and_preserves_nested_dataset_id(
-    mod: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.asyncio
+async def test_given_partial_analysis_when_conditionally_saved_then_preserves_omitted_fields(tmp_path: Path) -> None:
+    from evaluation.vlm_judge.curation import DatasetLabelsFile, EpisodeAnalysisRecord
+    from evaluation.vlm_judge.curation_storage import LocalCurationStorage
+
+    storage = LocalCurationStorage({"owner--dataset": tmp_path})
+    labels = DatasetLabelsFile(dataset_id="owner--dataset")
+    labels.apply_analysis(0, EpisodeAnalysisRecord(notes="Human note", smoothness=0.8, object="Old"), author_id="human")
+    revision = await storage.save("owner--dataset", labels, if_none_match=True)
+    loaded = await storage.load_versioned("owner--dataset")
+    loaded.value.apply_analysis(0, EpisodeAnalysisRecord(object=None), author_id="human")
+    await storage.save("owner--dataset", loaded.value, if_match=revision)
+
+    record = (await storage.load_versioned("owner--dataset")).value.analysis["0"]
+    assert record.notes == "Human note"
+    assert record.smoothness == 0.8
+    assert record.object is None
+
+
+@pytest.mark.asyncio
+async def test_given_concurrent_human_save_when_cli_storage_publishes_then_rejects_stale_analysis(
     tmp_path: Path,
 ) -> None:
-    dataset_root = tmp_path / "owner" / "dataset"
-    output_dir = tmp_path / "output"
-    _write_min_dataset(dataset_root, ["obs.front"])
-    labels_path = dataset_root / "meta" / "episode_labels.json"
-    labels_path.write_text(
-        json.dumps(
-            {
-                "dataset_id": "owner--dataset",
-                "available_labels": ["SUCCESS"],
-                "episodes": {"9": ["SUCCESS"]},
-                "analysis": {
-                    "0": {"motion_score": 4, "motion_flags": ["hesitant"]},
-                    "9": {"object": "existing"},
-                },
-            }
-        )
-    )
-    records = [
-        SimpleNamespace(
-            episode_index=0,
-            episode_id="episode_000000",
-            instruction="Pick the cube",
-            duration_s=1.25,
-        ),
-        SimpleNamespace(
-            episode_index=1,
-            episode_id="episode_000001",
-            instruction="Pick the sphere",
-            duration_s=2.5,
-        ),
-    ]
+    from evaluation.vlm_judge.curation import DatasetLabelsFile, EpisodeAnalysisRecord
+    from evaluation.vlm_judge.curation_storage import LocalCurationStorage, RevisionConflictError
 
-    class FakeBackend:
-        def __init__(self, **_kwargs: object) -> None:
-            self.calls = 0
+    storage = LocalCurationStorage({"dataset": tmp_path})
+    labels = DatasetLabelsFile(dataset_id="dataset")
+    revision = await storage.save("dataset", labels, if_none_match=True)
+    concurrent = labels.model_copy(deep=True)
+    concurrent.episodes["0"] = ["HUMAN"]
+    await storage.save("dataset", concurrent, if_match=revision)
+    labels.apply_analysis(0, EpisodeAnalysisRecord(object="Synthetic"), author_id="human")
 
-        def generate(self, **_kwargs: object) -> str:
-            self.calls += 1
-            if self.calls == 2:
-                raise RuntimeError("inference failed")
-            return json.dumps(
-                {
-                    "pick_from": "FRONT",
-                    "object": "red cube",
-                    "grasp_success": "true",
-                    "place_success": False,
-                    "movement_quality": "Smooth approach.",
-                }
-            )
-
-    monkeypatch.setattr(mod, "Qwen3VLBackend", FakeBackend)
-    monkeypatch.setattr(mod, "resolve_views", lambda *_args, **_kwargs: ("obs.front",))
-    monkeypatch.setattr(mod, "iter_episodes", lambda *_args, **_kwargs: iter(records))
-    monkeypatch.setattr(mod, "build_filmstrip", lambda *_args, **_kwargs: [object()])
-
-    summary = mod.label_dataset(
-        dataset_root=dataset_root,
-        output_dir=output_dir,
-        views=None,
-        n_frames=4,
-        frame_size=64,
-        model_id="fake/model",
-        device_map="cpu",
-        dtype="float32",
-        limit=None,
-        write_analysis=True,
-        dataset_id=None,
-    )
-
-    rows = [json.loads(line) for line in (output_dir / "labels.jsonl").read_text().splitlines()]
-    with (output_dir / "labels.csv").open(newline="") as csv_file:
-        csv_rows = list(csv.DictReader(csv_file))
-    labels = json.loads(labels_path.read_text())
-
-    assert summary == {"labeled": 1, "total": 2, "errors": 1, "grasp_success": 1, "place_success": 0}
-    assert rows[0] == {
-        "episode_index": 0,
-        "episode_id": "episode_000000",
-        "instruction": "Pick the cube",
-        "duration_s": 1.25,
-        "source": "fake/model",
-        "pick_from": "front",
-        "object": "red cube",
-        "grasp_success": True,
-        "place_success": False,
-        "movement_quality": "Smooth approach.",
-        "notes": "",
-        "error": None,
-    }
-    assert rows[1]["error"] == "RuntimeError: inference failed"
-    assert len(csv_rows) == 2
-    assert labels["episodes"] == {"9": ["SUCCESS"]}
-    assert labels["dataset_id"] == "owner--dataset"
-    assert labels["analysis"]["9"] == {"object": "existing"}
-    assert labels["analysis"]["0"]["motion_score"] == 4
-    assert labels["analysis"]["0"]["motion_flags"] == ["hesitant"]
-    assert labels["analysis"]["0"] == {
-        "pick_from": "front",
-        "object": "red cube",
-        "grasp_success": True,
-        "place_success": False,
-        "movement_quality": "Smooth approach.",
-        "notes": "",
-        "instruction": "Pick the cube",
-        "duration_s": 1.25,
-        "source": "fake/model",
-        "motion_score": 4,
-        "motion_flags": ["hesitant"],
-    }
-    assert "1" not in labels["analysis"]
+    with pytest.raises(RevisionConflictError):
+        await storage.save("dataset", labels, if_match=revision)
+    saved = (await storage.load_versioned("dataset")).value
+    assert saved.episodes == {"0": ["HUMAN"]}
+    assert saved.analysis == {}
 
 
-def test_label_dataset_resumes_completed_episode_without_duplication(
+def test_given_resume_without_job_when_task_cli_submits_then_rejected(
     mod: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    dataset_root = tmp_path / "dataset"
-    output_dir = tmp_path / "output"
-    output_dir.mkdir()
-    _write_min_dataset(dataset_root, ["obs.front"])
-    completed = {
-        "episode_index": 0,
-        "episode_id": "episode_000000",
-        "instruction": "Pick the cube",
-        "duration_s": 1.0,
-        "pick_from": "front",
-        "object": "cube",
-        "grasp_success": True,
-        "place_success": True,
-        "movement_quality": "Smooth.",
-        "notes": "",
-        "error": None,
-    }
-    (output_dir / "labels.jsonl").write_text(json.dumps(completed) + "\n")
-    records = [
-        SimpleNamespace(episode_index=0, episode_id="episode_000000", instruction="Pick the cube", duration_s=1.0),
-        SimpleNamespace(episode_index=1, episode_id="episode_000001", instruction="Pick the ball", duration_s=1.0),
-    ]
-    generated: list[str] = []
+    root = tmp_path / "dataset"
+    _write_min_dataset(root, ["obs.front"])
+    (root / "meta" / "episodes.jsonl").write_text(
+        json.dumps({"episode_index": 3, "length": 30, "tasks": ["Move cube"]}) + "\n"
+    )
+    video = root / "videos" / "chunk-000" / "obs.front" / "episode_000003.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"synthetic-media-generation")
 
-    class FakeBackend:
-        def __init__(self, **_kwargs: object) -> None:
-            pass
-
-        def generate(self, **_kwargs: object) -> str:
-            generated.append("called")
-            return json.dumps(
-                {
-                    "pick_from": "left",
-                    "object": "ball",
-                    "grasp_success": True,
-                    "place_success": True,
-                    "movement_quality": "Smooth.",
-                    "notes": "",
-                }
-            )
-
-    monkeypatch.setattr(mod, "Qwen3VLBackend", FakeBackend)
-    monkeypatch.setattr(mod, "resolve_views", lambda *_args, **_kwargs: ("obs.front",))
-    monkeypatch.setattr(mod, "iter_episodes", lambda *_args, **_kwargs: iter(records))
-    monkeypatch.setattr(mod, "build_filmstrip", lambda *_args, **_kwargs: [object()])
-
-    summary = mod.label_dataset(
-        dataset_root=dataset_root,
-        output_dir=output_dir,
-        views=None,
-        n_frames=4,
-        frame_size=64,
-        model_id="fake/model",
-        device_map="cpu",
-        dtype="float32",
-        limit=None,
-        resume=True,
+    code = mod.main(
+        ["--dataset-root", str(root), "--job-dir", str(tmp_path / "jobs"), "--single", "--resume", "--detach"]
     )
 
-    rows = [json.loads(line) for line in (output_dir / "labels.jsonl").read_text().splitlines()]
-
-    assert generated == ["called"]
-    assert [row["episode_index"] for row in rows] == [0, 1]
-    assert summary == {"labeled": 2, "total": 2, "errors": 0, "grasp_success": 2, "place_success": 2}
+    assert code == 2
+    assert capsys.readouterr().out == ""
+    assert not (tmp_path / "jobs").exists()
 
 
-def test_label_dataset_resume_retries_error_rows_and_repairs_torn_tail(
+def test_given_task_cli_when_detached_then_backend_is_lazy_and_saved_job_resumes(
     mod: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    dataset_root = tmp_path / "dataset"
-    output_dir = tmp_path / "output"
-    output_dir.mkdir()
-    _write_min_dataset(dataset_root, ["obs.front"])
-    failed = {
-        "episode_index": 0,
-        "episode_id": "episode_000000",
-        "instruction": "Pick the cube",
-        "duration_s": 1.0,
-        "pick_from": None,
-        "object": None,
-        "grasp_success": None,
-        "place_success": None,
-        "movement_quality": None,
-        "notes": None,
-        "error": "RuntimeError: temporary failure",
-    }
-    jsonl_path = output_dir / "labels.jsonl"
-    jsonl_path.write_text(json.dumps(failed) + '\n{"episode_index": 99')
-    records = [
-        SimpleNamespace(episode_index=0, episode_id="episode_000000", instruction="Pick the cube", duration_s=1.0),
-    ]
+    root = tmp_path / "dataset"
+    _write_min_dataset(root, ["obs.front"])
+    (root / "meta" / "episodes.jsonl").write_text(
+        json.dumps({"episode_index": 3, "length": 30, "tasks": ["Move cube"]}) + "\n"
+    )
+    (root / "meta" / "tasks.jsonl").write_text(json.dumps({"task_index": 0, "task": "Move cube"}) + "\n")
+    video = root / "videos" / "chunk-000" / "obs.front" / "episode_000003.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"synthetic-media-generation")
+    constructions = []
 
     class FakeBackend:
-        def __init__(self, **_kwargs: object) -> None:
-            pass
+        def __init__(self, **kwargs: object) -> None:
+            constructions.append("constructed")
 
-        def generate(self, **_kwargs: object) -> str:
+        def generate(self, **kwargs: object) -> str:
             return json.dumps(
                 {
-                    "pick_from": "front",
+                    "pick_from": "table",
                     "object": "cube",
                     "grasp_success": True,
-                    "place_success": True,
-                    "movement_quality": "Smooth.",
+                    "place_success": False,
+                    "movement_quality": "One pause",
                     "notes": "",
                 }
             )
 
     monkeypatch.setattr(mod, "Qwen3VLBackend", FakeBackend)
-    monkeypatch.setattr(mod, "resolve_views", lambda *_args, **_kwargs: ("obs.front",))
-    monkeypatch.setattr(mod, "iter_episodes", lambda *_args, **_kwargs: iter(records))
-    monkeypatch.setattr(mod, "build_filmstrip", lambda *_args, **_kwargs: [object()])
+    monkeypatch.setattr(mod, "build_filmstrip", lambda *args, **kwargs: [object()])
+    args = [
+        "--dataset-root",
+        str(root),
+        "--output-dir",
+        str(tmp_path / "output"),
+        "--job-dir",
+        str(tmp_path / "jobs"),
+        "--single",
+        "--request-id",
+        "task-cli",
+    ]
+    assert mod.main([*args, "--detach"]) == 0
+    accepted = json.loads(capsys.readouterr().out)
+    assert accepted["status"] == "queued"
+    assert constructions == []
+    assert mod.main(args) == 0
+    completed = json.loads(capsys.readouterr().out)
+    assert completed["id"] == accepted["id"]
+    assert completed["status"] == "succeeded"
+    assert completed["result_kind"] == "task-findings"
+    assert constructions == ["constructed"]
+    row = json.loads((tmp_path / "output" / "labels.jsonl").read_text())
+    assert row["instruction"] == "Move cube"
+    assert row["grasp_success"] is True
+    assert not (root / "meta" / "episode_labels.json").exists()
 
-    summary = mod.label_dataset(
-        dataset_root=dataset_root,
-        output_dir=output_dir,
-        views=None,
-        n_frames=4,
-        frame_size=64,
-        model_id="fake/model",
-        device_map="cpu",
-        dtype="float32",
-        limit=None,
-        resume=True,
+
+def test_given_task_failure_when_cli_resumes_then_same_job_retries_with_safe_diagnostics(
+    mod: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    root = tmp_path / "dataset"
+    _write_min_dataset(root, ["obs.front"])
+    (root / "meta" / "episodes.jsonl").write_text(
+        json.dumps({"episode_index": 3, "length": 30, "tasks": ["Private instruction"]}) + "\n"
     )
+    video = root / "videos" / "chunk-000" / "obs.front" / "episode_000003.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"synthetic-media-generation")
+    attempts = []
 
-    rows = [json.loads(line) for line in jsonl_path.read_text().splitlines()]
+    class FakeBackend:
+        def __init__(self, **kwargs: object) -> None:
+            pass
 
-    assert [row["episode_index"] for row in rows] == [0, 0]
-    assert rows[-1]["error"] is None
-    assert summary == {"labeled": 1, "total": 1, "errors": 0, "grasp_success": 1, "place_success": 1}
+        def generate(self, **kwargs: object) -> str:
+            attempts.append(kwargs["user_prompt"])
+            if len(attempts) == 1:
+                raise RuntimeError("Private provider payload")
+            return json.dumps(
+                {
+                    "pick_from": "table",
+                    "object": "cube",
+                    "grasp_success": False,
+                    "place_success": False,
+                    "movement_quality": "Incomplete",
+                    "notes": "",
+                }
+            )
+
+    monkeypatch.setattr(mod, "Qwen3VLBackend", FakeBackend)
+    monkeypatch.setattr(mod, "build_filmstrip", lambda *args, **kwargs: [object()])
+    args = [
+        "--dataset-root",
+        str(root),
+        "--job-dir",
+        str(tmp_path / "jobs"),
+        "--output-dir",
+        str(tmp_path / "output"),
+        "--single",
+    ]
+
+    assert mod.main(args) == 1
+    failed = json.loads(capsys.readouterr().out)
+    assert failed["status"] == "failed"
+    assert "category=RuntimeError" in caplog.text
+    assert "Private" not in caplog.text
+    assert mod.main([*args, "--resume", "--job-id", failed["id"]]) == 0
+    completed = json.loads(capsys.readouterr().out)
+    assert completed["id"] == failed["id"]
+    assert completed["retry_count"] == 1
+    assert completed["status"] == "succeeded"
+    assert len(attempts) == 2

@@ -5,6 +5,10 @@ Provides CRUD endpoints for episode annotations and aggregated
 annotation summaries.
 """
 
+from __future__ import annotations
+
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Response
 
 from ..auth import PrincipalContext, require_principal_context
@@ -15,11 +19,133 @@ from ..models.annotations import (
     EpisodeAnnotation,
     EpisodeAnnotationFile,
 )
-from ..services.annotation_service import AnnotationService, get_annotation_service
+from ..models.datasources import EpisodeData
+from ..models.episode_edits import EpisodeEditState, SaveEpisodeEditsRequest
+from ..services.annotation_service import AnnotationService, EditSourceChangedError, get_annotation_service
 from ..services.dataset_service import DatasetService, get_dataset_service
+from ..storage import StorageError
 from ..validation import SAFE_DATASET_ID_PATTERN, path_int_param, path_string_param
+from .labels import RevisionPrecondition, require_revision_precondition
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+async def _edit_source(
+    dataset_id: str,
+    episode_idx: int,
+    datasets: DatasetService,
+) -> tuple[str, str, EpisodeData]:
+    if await datasets.get_dataset(dataset_id) is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    try:
+        source_id, source_revision = await datasets.get_source_revision(dataset_id, episode_idx)
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Episode source revision unavailable") from None
+    try:
+        episode = await datasets.get_episode(dataset_id, episode_idx, fresh=True)
+    except ValueError:
+        logger.error("Episode edit context unavailable")
+        raise HTTPException(status_code=503, detail="Episode source unavailable") from None
+    if episode is None or episode.meta.length <= 0:
+        raise HTTPException(status_code=404, detail="Episode source not found")
+    try:
+        after = await datasets.get_source_revision(dataset_id, episode_idx)
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Episode source revision unavailable") from None
+    if after != (source_id, source_revision):
+        logger.warning("Episode source changed while resolving edit context")
+        raise HTTPException(status_code=409, detail="Episode source changed; reload before editing")
+    return source_id, source_revision, episode
+
+
+@router.get("/datasets/{dataset_id}/episodes/{episode_idx}/edits", response_model=EpisodeEditState)
+async def get_episode_edits(
+    response: Response,
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
+    principal: PrincipalContext = Depends(require_principal_context),
+    service: AnnotationService = Depends(get_annotation_service),
+    datasets: DatasetService = Depends(get_dataset_service),
+) -> EpisodeEditState:
+    """Read the authenticated author's descriptor, including explicit missing state."""
+    source_id, source_revision, _episode = await _edit_source(dataset_id, int(episode_idx), datasets)
+    try:
+        result = await service.get_saved_edits(
+            dataset_id,
+            int(episode_idx),
+            source_id=source_id,
+            source_revision=source_revision,
+            author_id=principal.scope_id,
+        )
+    except EditSourceChangedError as error:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": str(error), "source_id": source_id, "source_revision": source_revision},
+            headers={"ETag": error.etag} if error.etag else None,
+        ) from None
+    except (StorageError, ValueError):
+        logger.error("Saved edit read unavailable")
+        raise HTTPException(status_code=500, detail="Saved edits unavailable") from None
+    if result.etag:
+        response.headers["ETag"] = result.etag
+    return EpisodeEditState(
+        source_id=source_id,
+        source_revision=source_revision,
+        author_id=principal.scope_id,
+        saved=result.value,
+    )
+
+
+@router.put(
+    "/datasets/{dataset_id}/episodes/{episode_idx}/edits",
+    response_model=EpisodeEditState,
+    dependencies=[Depends(require_csrf_token)],
+)
+async def save_episode_edits(
+    response: Response,
+    body: SaveEpisodeEditsRequest,
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
+    principal: PrincipalContext = Depends(require_principal_context),
+    precondition: RevisionPrecondition = Depends(require_revision_precondition),
+    service: AnnotationService = Depends(get_annotation_service),
+    datasets: DatasetService = Depends(get_dataset_service),
+) -> EpisodeEditState:
+    """Conditionally save complete edits against the current source generation."""
+    source_id, source_revision, episode = await _edit_source(dataset_id, int(episode_idx), datasets)
+    if (body.source_id, body.source_revision) != (source_id, source_revision):
+        logger.warning("Saved edit input source is stale")
+        raise HTTPException(status_code=409, detail="Episode source changed; reload before saving")
+    try:
+        result = await service.save_edits(
+            dataset_id,
+            int(episode_idx),
+            body.operations,
+            author_id=principal.scope_id,
+            source_id=source_id,
+            source_revision=source_revision,
+            frame_count=episode.meta.length,
+            cameras=set(episode.cameras),
+            if_match=precondition.if_match,
+            if_none_match=precondition.if_none_match,
+        )
+    except ValueError:
+        logger.warning("Rejected invalid saved edit descriptor")
+        raise HTTPException(status_code=422, detail="Invalid edit descriptor for this episode") from None
+    except StorageError:
+        logger.error("Saved edit persistence unavailable")
+        raise HTTPException(status_code=500, detail="Failed to save edits") from None
+    if result.value is None or not result.etag:
+        logger.error("Saved edit acknowledgment is incomplete")
+        raise HTTPException(status_code=500, detail="Saved edit acknowledgment unavailable")
+    response.headers["ETag"] = result.etag
+    return EpisodeEditState(
+        source_id=source_id,
+        source_revision=source_revision,
+        author_id=principal.scope_id,
+        saved=result.value,
+    )
 
 
 # ============================================================================
