@@ -63,6 +63,84 @@ def test_given_judge_cli_when_detached_then_same_job_resumes_with_saved_evidence
     assert json.loads(output.read_text())["instruction"] == INSTRUCTION
 
 
+def test_given_explicit_sample_author_when_cli_submits_then_ambiguous_global_author_is_not_used(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import asyncio
+
+    from evaluation.vlm_judge import run as judge_run
+    from evaluation.vlm_judge.curation import ContributionLedger
+    from evaluation.vlm_judge.saved_input import LocalDatasetResolver
+
+    dataset = tmp_path / DATASET_ID
+    _build_dataset(dataset, instruction=INSTRUCTION)
+    annotations = []
+    provenance = {}
+    for author in ("first", "selected"):
+        instruction = f"Saved instruction from {author}"
+        annotations.append(
+            {
+                "annotator_id": author,
+                "language_instruction": {"instruction": instruction, "source": "human"},
+                "task_completeness": {"rating": "success"},
+            }
+        )
+        ledger = ContributionLedger()
+        ledger.record_changes(
+            {},
+            {"language_instruction/instruction": instruction, "task_completeness/rating": "success"},
+            author_id=author,
+            origin="human",
+        )
+        provenance[author] = ledger.model_dump(mode="json")
+    path = dataset / "annotations" / "episodes" / "episode_000000.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps({"dataset_id": DATASET_ID, "episode_index": 0, "annotations": annotations, "provenance": provenance})
+    )
+    resolver = LocalDatasetResolver({DATASET_ID: dataset})
+    _, snapshot = asyncio.run(
+        resolver.resolve(DATASET_ID, 0, principal_scope_id="local", annotation_author_id="selected")
+    )
+    references = tmp_path / "samples.json"
+    references.write_text(
+        json.dumps(
+            {
+                "0": {
+                    "annotation_author_id": "selected",
+                    "annotation_revision": snapshot.annotation_revision,
+                    "snapshot_id": snapshot.snapshot_id,
+                }
+            }
+        )
+    )
+    output = tmp_path / "results.jsonl"
+
+    code = judge_run.main(
+        [
+            "--dataset",
+            str(dataset),
+            "--output",
+            str(output),
+            "--backend",
+            "echo",
+            "--mode",
+            "sample",
+            "--sample-references",
+            str(references),
+            "--detach",
+            "--job-dir",
+            str(tmp_path / "jobs"),
+        ]
+    )
+
+    assert code == 0
+    accepted = json.loads(capsys.readouterr().out)
+    assert accepted["status"] == "queued"
+    declaration = json.loads(output.with_suffix(".jsonl.config.json").read_text())
+    assert declaration["saved_inputs"][0]["annotation_author_id"] == "selected"
+
+
 def test_viewer_durable_job_publishes_canonical_evidence_without_labels(
     tmp_path: Path,
     restore_default_app: pytest.MonkeyPatch,

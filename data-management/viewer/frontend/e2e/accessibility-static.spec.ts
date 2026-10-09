@@ -67,11 +67,11 @@ test('V05 and V15 analyzer state has no axe violations', async ({ page }, testIn
 test('V02 dataset chooser has no axe violations', async ({ page }, testInfo) => {
   const errors = await openViewer(page, testInfo)
   await page.getByRole('button', { name: 'Dataset' }).click()
-  await expect(page.getByRole('dialog', { name: 'Select dataset' })).toBeVisible()
+  await expect(page.getByRole('main', { name: 'Dataset catalog' })).toBeVisible()
   await attachJson(testInfo, 'state-proof-dataset-open', {
     journeyIds: ['V02'],
     expected: 'Dataset chooser is open and focused',
-    observed: 'Select dataset dialog is visible',
+    observed: 'Dataset catalog landmark is visible',
   })
   await expectNoAxeViolations(page, testInfo, 'dataset-open', ['V02'])
   expect(errors.consoleErrors).toEqual([])

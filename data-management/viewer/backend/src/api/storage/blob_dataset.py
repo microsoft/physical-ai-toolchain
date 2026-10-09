@@ -149,7 +149,7 @@ class BlobDatasetProvider:
         result = await self.scan_all_dataset_ids()
         return result["hdf5"]
 
-    async def scan_all_dataset_ids(self) -> dict[str, list[str]]:
+    async def scan_all_dataset_ids(self, *, strict: bool = False) -> dict[str, list[str]]:
         """Discover LeRobot and HDF5 datasets via prefix-only enumeration.
 
         Walks virtual directories with a '/' delimiter (cost proportional to
@@ -169,6 +169,8 @@ class BlobDatasetProvider:
             client = await self._get_client()
             container = client.get_container_client(self.container_name)
         except Exception as e:
+            if strict:
+                raise
             logger.warning("Failed to open blob container '%s': %s", self.container_name, e)
             return {"lerobot": [], "hdf5": []}
 
@@ -179,6 +181,8 @@ class BlobDatasetProvider:
             except ResourceNotFoundError:
                 return False
             except Exception as e:
+                if strict:
+                    raise
                 logger.warning("info.json probe failed for prefix '%s': %s", prefix, e)
                 return False
 
@@ -203,6 +207,8 @@ class BlobDatasetProvider:
                     elif name.endswith(".hdf5"):
                         found_hdf5 = True
             except Exception as e:
+                if strict:
+                    raise
                 logger.warning("Failed to walk blob prefix '%s': %s", prefix, e)
                 return
 
@@ -216,6 +222,8 @@ class BlobDatasetProvider:
         try:
             await _walk("", 0)
         except Exception as e:
+            if strict:
+                raise
             logger.warning("Failed to scan blob container '%s': %s", self.container_name, e)
 
         hdf5_ids -= lerobot_ids

@@ -19,13 +19,29 @@ _TERMINAL = {"succeeded", "partial", "failed", "cancelled"}
 def add_job_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--operation",
-        choices=("submit", "status", "list", "cancel", "retry", "results", "approve", "approvals", "worker", "apply"),
+        choices=(
+            "submit",
+            "status",
+            "list",
+            "cancel",
+            "retry",
+            "results",
+            "approve",
+            "approvals",
+            "worker",
+            "apply",
+            "reset-preview",
+            "reset-confirm",
+            "reset-status",
+            "reset-retry",
+        ),
         default="submit",
     )
     parser.add_argument("--job-dir", type=Path, help="Durable job root shared with matching workers")
     parser.add_argument("--job-id", help="Accepted durable job identifier")
     parser.add_argument("--request-id", help="Idempotency key for submission")
     parser.add_argument("--approval-id", help="Explicit saved configuration approval")
+    parser.add_argument("--preview-id", help="Reviewed dataset withdrawal preview identifier")
     parser.add_argument(
         "--sample-references",
         type=Path,
@@ -55,7 +71,27 @@ def add_job_arguments(parser: argparse.ArgumentParser) -> None:
 def job_exit_code(job: dict[str, Any]) -> int:
     if job["status"] == "cancelled":
         return 130
-    return 1 if job["status"] in {"partial", "failed"} else 0
+    return 1 if job["status"] in {"partial", "failed", "conflicted"} else 0
+
+
+def read_sample_references(path: Path | None) -> dict[int, dict[str, str]]:
+    if path is None:
+        return {}
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("Sample references must be an object keyed by episode ID")
+    references = {}
+    for index, reference in value.items():
+        if (
+            not index.isdecimal()
+            or not isinstance(reference, dict)
+            or set(reference) != {"annotation_author_id", "annotation_revision", "snapshot_id"}
+            or any(not isinstance(item, str) or not item.strip() for item in reference.values())
+            or int(index) in references
+        ):
+            raise ValueError("Every sample requires a unique episode ID and explicit saved references")
+        references[int(index)] = reference
+    return references
 
 
 async def execute_job_command(
@@ -70,6 +106,23 @@ async def execute_job_command(
     operation = args.operation
     if args.offset < 0 or not 1 <= args.page_size <= 100:
         raise ValueError("Invalid result page")
+    if operation == "reset-preview":
+        return 0, await jobs.preview_reset(dataset_id, actor)
+    if operation in {"reset-confirm", "reset-status", "reset-retry"}:
+        if operation == "reset-confirm":
+            if not args.preview_id:
+                raise ValueError("Withdrawal confirmation requires --preview-id")
+            result = await jobs.confirm_reset(dataset_id, actor, args.preview_id)
+        elif operation == "reset-retry":
+            result = await jobs.retry_reset(dataset_id, actor)
+        else:
+            result = await jobs.reset_status(dataset_id, actor)
+        if operation != "reset-status" and not args.detach:
+            while result["status"] == "running":
+                _LOGGER.info("Withdrawal progress status=%s", result["status"])
+                await jobs.reset_once()
+                result = await jobs.reset_status(dataset_id, actor)
+        return job_exit_code(result), result
     if operation in {"status", "cancel", "retry", "approve", "apply"} and not args.job_id:
         raise ValueError("This operation requires --job-id")
     if operation == "list":
@@ -117,12 +170,7 @@ async def execute_job_command(
         indices = indices or []
         if args.single and (len(indices) != 1 or args.mode != "judge"):
             raise ValueError("The single action requires exactly one episode in judge mode")
-        samples = {}
-        if args.sample_references is not None:
-            value = json.loads(args.sample_references.read_text(encoding="utf-8"))
-            if not isinstance(value, dict):
-                raise ValueError("Sample references must be an object keyed by episode ID")
-            samples = {int(index): reference for index, reference in value.items()}
+        samples = read_sample_references(args.sample_references)
         job = await jobs.submit(
             dataset_id,
             actor,

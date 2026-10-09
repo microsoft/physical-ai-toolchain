@@ -14,7 +14,8 @@ from copy import deepcopy
 from typing import Any, Protocol
 from uuid import uuid4
 
-from .curation import validate_task_result
+from .curation import DatasetLabelsFile, validate_task_result
+from .curation_storage import CurationStorage, plan_withdrawal
 from .dataset import EpisodeRecord
 from .job_storage import JobStore
 from .judge import JudgeResult
@@ -61,6 +62,7 @@ class JudgeJobs:
         clock: Callable[[], float] = time.time,
         apply_result: Callable[[dict[str, Any], dict[str, Any]], Awaitable[bool]] | None = None,
         result_kind: str = "judge",
+        curation_storage: CurationStorage | None = None,
     ) -> None:
         if not 1 <= capacity <= 16 or not 5 <= lease_seconds <= 600:
             raise ValueError("Invalid judge capacity or lease duration")
@@ -68,6 +70,7 @@ class JudgeJobs:
         self.capacity_scope, self.capacity, self.lease_seconds = capacity_scope, capacity, lease_seconds
         self.clock = clock
         self.apply_result = apply_result
+        self.curation_storage = curation_storage
         if result_kind not in {"judge", "task-findings"}:
             raise ValueError("Invalid judge result kind")
         self.result_kind = result_kind
@@ -81,6 +84,175 @@ class JudgeJobs:
         if job["actor"] != actor:
             raise PermissionError("Judge job belongs to another principal")
         return job
+
+    @staticmethod
+    def _reset_scope(state: dict[str, Any], dataset_id: str) -> tuple[list[str], str]:
+        runs = sorted(
+            (job["id"], job["generation"]) for job in state["jobs"].values() if job["dataset_id"] == dataset_id
+        )
+        return [run[0] for run in runs], fingerprint(runs)
+
+    async def preview_reset(self, dataset_id: str, actor: str) -> dict[str, Any]:
+        if self.curation_storage is None:
+            raise ValueError("Contribution storage is unavailable")
+        async with self.store.transaction() as state:
+            if state["resets"].get(dataset_id, {}).get("status") == "running":
+                raise ValueError("Dataset withdrawal is running")
+            resource = await self.curation_storage.load_versioned(dataset_id)
+            labels = resource.value or DatasetLabelsFile(dataset_id=dataset_id)
+            run_ids, scope = self._reset_scope(state, dataset_id)
+            projected, summary = plan_withdrawal(labels, set(run_ids))
+            preview = {
+                "id": uuid4().hex,
+                "dataset_id": dataset_id,
+                "actor": actor,
+                "created_at": self.clock(),
+                "run_ids": run_ids,
+                "scope": scope,
+                "generation": state["generations"].get(dataset_id, 0),
+                "etag": resource.etag,
+                "projected_hash": fingerprint(projected.model_dump(mode="json")),
+                "summary": summary,
+            }
+            previews = state.setdefault("reset_previews", {})
+            previews[preview["id"]] = preview
+            while len(previews) > 128:
+                previews.pop(next(iter(previews)))
+        _LOGGER.info(
+            "Withdrawal preview runs=%d removable=%d conflicts=%d",
+            len(run_ids),
+            summary["removable_fields"],
+            summary["conflicts"],
+        )
+        return deepcopy(preview)
+
+    async def confirm_reset(self, dataset_id: str, actor: str, preview_id: str) -> dict[str, Any]:
+        if self.curation_storage is None:
+            raise ValueError("Contribution storage is unavailable")
+        async with self.store.transaction() as state:
+            preview = state.get("reset_previews", {}).get(preview_id)
+            if not preview or preview["dataset_id"] != dataset_id:
+                raise KeyError("Withdrawal preview not found")
+            if preview["actor"] != actor:
+                raise PermissionError("Withdrawal preview belongs to another principal")
+            existing = state["resets"].get(dataset_id)
+            if existing and existing["preview_id"] == preview_id:
+                return deepcopy(existing)
+            if existing and existing["status"] == "running":
+                raise ValueError("Dataset withdrawal is running")
+            resource = await self.curation_storage.load_versioned(dataset_id)
+            _, scope = self._reset_scope(state, dataset_id)
+            if (
+                scope != preview["scope"]
+                or resource.etag != preview["etag"]
+                or preview["generation"] != state["generations"].get(dataset_id, 0)
+            ):
+                raise ValueError("Withdrawal scope changed; create a new preview")
+            state["generations"][dataset_id] = preview["generation"] + 1
+            for job in state["jobs"].values():
+                if job["dataset_id"] != dataset_id:
+                    continue
+                if job["status"] not in _TERMINAL:
+                    job.update(status="cancelled", updated_at=self.clock())
+                for target in job["targets"]:
+                    if target["status"] in {"queued", "running"}:
+                        target["status"] = "cancelled"
+                    if target.get("application_status") == "queued":
+                        target["application_status"] = "withdrawn"
+            reset = {
+                "id": uuid4().hex,
+                "preview_id": preview_id,
+                "dataset_id": dataset_id,
+                "actor": actor,
+                "status": "running",
+                "generation": state["generations"][dataset_id],
+                "capacity_scope": self.capacity_scope,
+                "created_at": self.clock(),
+                "updated_at": self.clock(),
+                "run_ids": preview["run_ids"],
+                "summary": preview["summary"],
+                "error": None,
+                "resources": [
+                    {
+                        "key": "labels",
+                        "status": "pending",
+                        "etag": resource.etag,
+                        "projected_hash": preview["projected_hash"],
+                    }
+                ],
+            }
+            state["resets"][dataset_id] = reset
+        _LOGGER.info("Withdrawal accepted runs=%d", len(reset["run_ids"]))
+        return deepcopy(reset)
+
+    async def reset_status(self, dataset_id: str, actor: str) -> dict[str, Any]:
+        reset = (await self.store.read())["resets"].get(dataset_id)
+        if reset is None:
+            raise KeyError("Dataset withdrawal not found")
+        if reset["actor"] != actor:
+            raise PermissionError("Dataset withdrawal belongs to another principal")
+        return deepcopy(reset)
+
+    async def retry_reset(self, dataset_id: str, actor: str) -> dict[str, Any]:
+        await self.reset_status(dataset_id, actor)
+        retried = False
+        async with self.store.transaction() as state:
+            reset = state["resets"][dataset_id]
+            if reset["actor"] != actor:
+                raise PermissionError("Dataset withdrawal belongs to another principal")
+            if reset["status"] == "conflicted":
+                raise ValueError("Withdrawal conflicts require a new preview")
+            if reset["status"] == "partial":
+                reset.update(status="running", error=None, updated_at=self.clock())
+                retried = True
+            result = deepcopy(reset)
+        if retried:
+            _LOGGER.info("Withdrawal retry accepted")
+        return result
+
+    async def reset_once(self) -> bool:
+        if self.curation_storage is None:
+            return False
+        pending = [
+            reset
+            for reset in (await self.store.read())["resets"].values()
+            if reset["status"] == "running" and reset["capacity_scope"] == self.capacity_scope
+        ]
+        if not pending:
+            return False
+        dataset_id = pending[0]["dataset_id"]
+        async with self.store.transaction() as state:
+            reset = state["resets"][dataset_id]
+            if reset["status"] != "running":
+                return False
+            checkpoint = reset["resources"][0]
+            try:
+                resource = await self.curation_storage.load_versioned(dataset_id)
+                labels = resource.value or DatasetLabelsFile(dataset_id=dataset_id)
+                current_hash = fingerprint(labels.model_dump(mode="json"))
+                if current_hash == checkpoint["projected_hash"]:
+                    checkpoint.update(status="succeeded", published_etag=resource.etag)
+                elif resource.etag != checkpoint["etag"]:
+                    reset.update(status="conflicted", error="RevisionConflictError")
+                else:
+                    projected, summary = plan_withdrawal(labels, set(reset["run_ids"]))
+                    if fingerprint(projected.model_dump(mode="json")) != checkpoint["projected_hash"]:
+                        raise ValueError("Withdrawal projection changed")
+                    etag = await self.curation_storage.save(
+                        dataset_id, projected, if_match=resource.etag, if_none_match=resource.etag is None
+                    )
+                    checkpoint.update(status="succeeded", published_etag=etag)
+                    reset["summary"] = summary
+                if checkpoint["status"] == "succeeded":
+                    reset["status"] = "conflicted" if reset["summary"]["conflicts"] else "succeeded"
+            except Exception as error:
+                reset.update(status="partial", error=type(error).__name__)
+                _LOGGER.warning("Withdrawal failed category=%s", type(error).__name__)
+            reset["updated_at"] = self.clock()
+        if reset["status"] == "conflicted":
+            _LOGGER.warning("Withdrawal conflicted category=%s", reset.get("error") or "ContributionConflict")
+        _LOGGER.info("Withdrawal checkpoint status=%s", reset["status"])
+        return True
 
     async def submit(
         self,
@@ -129,7 +301,7 @@ class JudgeJobs:
                     if job["payload_key"] != payload_key:
                         raise ValueError("Idempotency key was used with another payload")
                     return deepcopy(job)
-            if state["resets"].get(dataset_id, {}).get("status") == "running":
+            if state["resets"].get(dataset_id, {}).get("status") in {"running", "partial", "conflicted"}:
                 raise ValueError("Dataset withdrawal is running")
             return None
 
@@ -229,7 +401,6 @@ class JudgeJobs:
             or approval["actor"] != actor
             or approval["dataset_id"] != dataset_id
             or approval["config_revision"] != config_revision
-            or approval["generation"] != state["generations"].get(dataset_id, 0)
             or approval.get("withdrawn", False)
         ):
             raise ValueError("Configuration approval is unavailable or stale")
@@ -561,10 +732,10 @@ class JudgeJobs:
     async def retry(self, job_id: str, actor: str) -> dict[str, Any]:
         async with self.store.transaction() as state:
             job = self._owned(state, job_id, actor)
-            if job["status"] not in {"partial", "failed", "cancelled"}:
-                raise ValueError("Only failed or cancelled targets can be retried")
             if job["generation"] != state["generations"].get(job["dataset_id"], 0):
                 raise ValueError("Withdrawn jobs cannot be retried")
+            if job["status"] not in {"partial", "failed", "cancelled"}:
+                raise ValueError("Only failed or cancelled targets can be retried")
             for target in job["targets"]:
                 if target["status"] in {"failed", "cancelled"}:
                     target.update(status="queued", error=None, fence=target["fence"] + 1)
@@ -660,6 +831,8 @@ class JudgeJobs:
         return True
 
     async def run_once(self) -> bool:
+        if await self.reset_once():
+            return True
         if await self.apply_once():
             return True
         claim = await self.claim()

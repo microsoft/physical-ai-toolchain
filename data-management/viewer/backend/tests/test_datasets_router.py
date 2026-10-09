@@ -84,6 +84,121 @@ def _make_trajectory_point(frame: int = 0) -> TrajectoryPoint:
 
 
 class TestListAndGetDataset:
+    @pytest.mark.asyncio
+    async def test_concurrent_catalog_refreshes_share_unchanged_discovery(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        service = DatasetService(base_path=str(tmp_path))
+        await service.query_catalog()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        calls = []
+
+        async def delayed_discovery(**kwargs: Any) -> list[DatasetInfo]:
+            calls.append(1)
+            entered.set()
+            await release.wait()
+            return []
+
+        monkeypatch.setattr(service, "list_datasets", delayed_discovery)
+        first = asyncio.create_task(service.query_catalog(refresh=True))
+        await entered.wait()
+        second = asyncio.create_task(service.query_catalog(refresh=True))
+        release.set()
+        await asyncio.gather(first, second)
+        assert len(calls) == 1
+
+    def test_catalog_api_bounds_pages_and_rejects_expired_snapshots(self, client: TestClient, tmp_path: Path) -> None:
+        from src.api.main import app
+        from src.api.services.dataset_service import get_dataset_service
+
+        service = DatasetService(base_path=str(tmp_path))
+        app.dependency_overrides[get_dataset_service] = lambda: service
+        try:
+            response = client.get("/api/datasets/catalog")
+            assert response.status_code == 200
+            assert response.json()["items"] == []
+            assert client.get("/api/datasets/catalog", params={"limit": 101}).status_code == 422
+            assert client.get("/api/datasets/catalog", params={"snapshot_id": "old"}).status_code == 409
+        finally:
+            app.dependency_overrides.pop(get_dataset_service, None)
+
+    @pytest.mark.asyncio
+    async def test_catalog_search_pages_full_inventory_without_warm_rescans(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+        for index in range(1000):
+            await service.register_dataset(
+                DatasetInfo(
+                    id=f"group--{index:04d}",
+                    name="Repeated name",
+                    group="group",
+                    total_episodes=index,
+                    fps=30,
+                )
+            )
+        scans = []
+        scan = service._scan_directory
+
+        def counted_scan(*args: Any) -> None:
+            scans.append(1)
+            scan(*args)
+
+        monkeypatch.setattr(service, "_scan_directory", counted_scan)
+        first = await service.query_catalog(limit=20, sort="episodes-desc")
+        second = await service.query_catalog(limit=20, offset=20, sort="episodes-desc", snapshot_id=first.snapshot_id)
+        match = await service.query_catalog(query="0999", group="group")
+
+        assert first.total == 1000
+        assert first.items[0].id == "group--0999"
+        assert second.items[0].id == "group--0979"
+        assert [item.id for item in match.items] == ["group--0999"]
+        assert len(scans) == 1
+        assert "features" not in first.items[0].model_dump()
+        assert "tasks" not in first.items[0].model_dump()
+
+    @pytest.mark.asyncio
+    async def test_catalog_keeps_pinned_pages_and_reports_failed_refresh(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+        await service.register_dataset(_make_dataset("before"))
+        initial = await service.query_catalog()
+        await service.register_dataset(_make_dataset("after"))
+        refreshed = await service.query_catalog(refresh=True)
+        pinned = await service.query_catalog(snapshot_id=initial.snapshot_id)
+        assert refreshed.total == 2
+        assert [item.id for item in pinned.items] == ["before"]
+
+        def unavailable(*args: Any) -> None:
+            raise OSError("private storage details")
+
+        monkeypatch.setattr(service, "_scan_directory", unavailable)
+        failed = await service.query_catalog(refresh=True)
+        assert failed.total == 2
+        assert failed.stale and failed.refresh_failed
+        assert "private" not in failed.model_dump_json()
+        with pytest.raises(ValueError, match="snapshot"):
+            await service.query_catalog(snapshot_id="expired")
+
+    @pytest.mark.asyncio
+    async def test_catalog_empty_and_initial_failure_are_distinct(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+        assert (await service.query_catalog()).total == 0
+        fresh = DatasetService(base_path=str(tmp_path))
+
+        def unavailable(*args: Any) -> None:
+            raise OSError("unavailable")
+
+        monkeypatch.setattr(fresh, "_scan_directory", unavailable)
+        with pytest.raises(OSError):
+            await fresh.query_catalog()
+
     def test_list_datasets_returns_list(self, client: TestClient, override_service) -> None:
         override_service.list_datasets = AsyncMock(return_value=[_make_dataset("a"), _make_dataset("b")])
         resp = client.get("/api/datasets")

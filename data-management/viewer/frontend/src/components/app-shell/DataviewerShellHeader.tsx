@@ -149,6 +149,8 @@ function DatasetSelector({
 }
 
 interface DataviewerShellHeaderProps {
+  catalogOpen?: boolean
+  onOpenCatalog?: () => void
   datasetId: string
   datasets: DatasetInfo[]
   diagnosticsVisible: boolean
@@ -162,6 +164,8 @@ interface DataviewerShellHeaderProps {
 }
 
 export function DataviewerShellHeader({
+  catalogOpen,
+  onOpenCatalog,
   datasetId,
   datasets,
   diagnosticsVisible,
@@ -185,11 +189,25 @@ export function DataviewerShellHeader({
           <label htmlFor="dataset-selector" className="text-sm">
             Dataset:
           </label>
-          <DatasetSelector
-            datasetId={datasetId}
-            datasets={datasets}
-            onSelectDataset={onSelectDataset}
-          />
+          {onOpenCatalog ? (
+            <Button
+              id="dataset-selector"
+              variant="outline"
+              aria-label="Dataset"
+              aria-expanded={catalogOpen}
+              aria-controls="dataset-catalog"
+              className="max-w-72 truncate"
+              onClick={onOpenCatalog}
+            >
+              {datasetId || 'Select a dataset'}
+            </Button>
+          ) : (
+            <DatasetSelector
+              datasetId={datasetId}
+              datasets={datasets}
+              onSelectDataset={onSelectDataset}
+            />
+          )}
           <Button
             variant={diagnosticsVisible ? 'default' : 'outline'}
             size="sm"

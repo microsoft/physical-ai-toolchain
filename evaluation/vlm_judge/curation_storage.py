@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from .curation import ContributionLedger, DatasetLabelsFile, MachineOrigin
+from .curation import ContributionLedger, DatasetLabelsFile, EpisodeAnalysisRecord, MachineOrigin
 
 
 @dataclass(frozen=True)
@@ -147,6 +147,77 @@ class LocalCurationStorage:
             if_match=if_match,
             if_none_match=if_none_match,
         )
+
+
+def plan_withdrawal(labels: DatasetLabelsFile, run_ids: set[str]) -> tuple[DatasetLabelsFile, dict[str, Any]]:
+    projected = labels.model_copy(deep=True)
+    summary = {
+        "removable_fields": 0,
+        "accepted_unchanged": 0,
+        "preserved_human": 0,
+        "legacy_unknown": 0,
+        "conflicts": 0,
+        "episodes": 0,
+        "fields": [],
+    }
+    for episode_key in sorted(labels.provenance.keys() | labels.episodes.keys() | labels.analysis.keys()):
+        ledger = labels.provenance.get(episode_key, ContributionLedger())
+        updated = projected.provenance.get(episode_key, ContributionLedger())
+        covered = {
+            item.id
+            for item in ledger.contributions
+            if item.machine and item.machine.run_id in run_ids and item.id not in ledger.withdrawn
+        }
+        updated.withdraw(sorted(covered))
+        covered.update(set(updated.withdrawn) - set(ledger.withdrawn))
+        fields = {item.field for item in ledger.contributions}
+        fields.update(f"labels/{label}" for label in labels.episodes.get(episode_key, []))
+        analysis = labels.analysis.get(episode_key, EpisodeAnalysisRecord()).model_dump(mode="json")
+        fields.update(f"analysis/{name}" for name, value in analysis.items() if value is not None and value != [])
+        removed = False
+        for field in sorted(fields):
+            namespace, name = field.split("/", 1)
+            current = name in labels.episodes.get(episode_key, []) if namespace == "labels" else analysis.get(name)
+            try:
+                before = ledger.resolve(field, legacy_value=current)
+                after = updated.resolve(field, legacy_value=current)
+            except ValueError:
+                disposition = "conflicts"
+            else:
+                if before.origin == "human":
+                    disposition = "preserved_human"
+                elif covered.intersection(before.contribution_ids):
+                    if after.origin == "machine" or (
+                        after.origin == "legacy-unknown" and after.value not in (None, False, [])
+                    ):
+                        updated.withdrawn = [
+                            identity
+                            for identity in updated.withdrawn
+                            if identity in ledger.withdrawn
+                            or not any(item.id == identity and item.field == field for item in ledger.contributions)
+                        ]
+                        disposition = "conflicts"
+                    else:
+                        disposition = "removable_fields"
+                        removed = True
+                        if any(ledger.acceptances.get(identity) for identity in before.contribution_ids):
+                            summary["accepted_unchanged"] += 1
+                        if namespace == "labels":
+                            projected.episodes[episode_key] = [
+                                label for label in projected.episodes.get(episode_key, []) if label != name
+                            ]
+                        elif namespace == "analysis":
+                            analysis[name] = [] if name == "motion_flags" and after.value is None else after.value
+                            projected.analysis[episode_key] = EpisodeAnalysisRecord.model_validate(analysis)
+                elif before.origin == "legacy-unknown" and current is not None and current != []:
+                    disposition = "legacy_unknown"
+                else:
+                    continue
+            summary[disposition] += 1
+            summary["fields"].append({"episode_index": int(episode_key), "field": field, "disposition": disposition})
+        if removed:
+            summary["episodes"] += 1
+    return projected, summary
 
 
 async def apply_judge_result(storage: CurationStorage, job: dict[str, Any], target: dict[str, Any]) -> bool:

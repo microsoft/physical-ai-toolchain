@@ -160,6 +160,7 @@ async def create_judge_jobs(config: AppConfig, datasets: DatasetService, annotat
         capacity_scope=config.vlm_judge_capacity_scope,
         capacity=config.vlm_judge_capacity,
         apply_result=apply_result,
+        curation_storage=curation,
     )
 
 

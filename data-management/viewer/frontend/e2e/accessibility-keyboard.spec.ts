@@ -7,7 +7,7 @@ import { attachJson, openEmptyViewer, openViewer } from './accessibility-fixture
 
 interface FocusExpectation {
   scope: string
-  role: 'button' | 'link' | 'tab'
+  role: 'button' | 'link' | 'tab' | 'combobox'
   name: string | RegExp
   description: string
 }
@@ -22,15 +22,39 @@ const focusableSelector = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ')
 
-const emptyShellExpectations: FocusExpectation[] = [
+const headerExpectations: FocusExpectation[] = [
   { scope: 'header', role: 'button', name: 'Dataset', description: 'Dataset' },
   { scope: 'header', role: 'button', name: 'Toggle Diagnostics', description: 'Diagnostics' },
   { scope: 'header', role: 'link', name: 'Help', description: 'Help' },
   { scope: 'header', role: 'link', name: 'Report problem', description: 'Report problem' },
 ]
 
+const emptyShellExpectations: FocusExpectation[] = [
+  ...headerExpectations,
+  {
+    scope: '#dataset-catalog',
+    role: 'button',
+    name: 'Refresh catalog',
+    description: 'Refresh catalog',
+  },
+  { scope: '#dataset-catalog', role: 'combobox', name: 'Group', description: 'Group filter' },
+  { scope: '#dataset-catalog', role: 'combobox', name: 'Sort', description: 'Catalog sort' },
+  {
+    scope: '#dataset-catalog',
+    role: 'combobox',
+    name: 'Filter datasets',
+    description: 'Catalog search',
+  },
+]
+
 const loadedPrimaryExpectations: FocusExpectation[] = [
-  ...emptyShellExpectations,
+  ...headerExpectations,
+  {
+    scope: 'section[aria-label="Dataset workspace"]',
+    role: 'button',
+    name: 'Dataset workspace',
+    description: 'Dataset workspace disclosure',
+  },
   { scope: 'aside', role: 'button', name: 'REVIEWED', description: 'Filter REVIEWED' },
   {
     scope: 'aside',
@@ -49,8 +73,14 @@ const loadedPrimaryExpectations: FocusExpectation[] = [
   {
     scope: '[data-testid="workspace-top-bar"]',
     role: 'button',
-    name: 'Save & Next Episode',
-    description: 'Save and next',
+    name: 'Save Episode',
+    description: 'Save episode',
+  },
+  {
+    scope: '[data-testid="workspace-top-bar"]',
+    role: 'button',
+    name: 'Next Episode',
+    description: 'Next episode',
   },
   {
     scope: '[data-testid="workspace-top-bar"]',
@@ -139,8 +169,10 @@ async function assertBidirectionalOrder(
     expectations.map((_, index) => `focus-${index}`),
   )
 
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
-  const forward = await traceDirection(page, expectations, 'Tab')
+  await page.locator('[data-a11y-focus-key="focus-0"]').focus()
+  const forward = ['focus-0', ...(await traceDirection(page, expectations, 'Tab'))].filter(
+    (key, index, values) => values.indexOf(key) === index,
+  )
   expect(forward).toEqual(expectations.map((_, index) => `focus-${index}`))
 
   const lastKey = `focus-${expectations.length - 1}`

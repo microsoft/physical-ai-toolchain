@@ -69,7 +69,14 @@ the CLI and the HTTP API import the service — no parallel paths.
 
 ## 🚀 Quick Start
 
-A 24GB GPU (A10 / A100 / RTX A5000) fits `Qwen/Qwen3-VL-4B-Instruct` in bfloat16.
+| Backend         | Hardware required on this host                           |
+|-----------------|----------------------------------------------------------|
+| `qwen3-vl`      | CUDA-capable NVIDIA GPU; RTX or Azure A10 are candidates |
+| `openai-compat` | CPU client; the remote endpoint hosts the model          |
+| `echo`          | CPU only; no model execution                             |
+
+For Qwen3-VL-4B in bfloat16, start validation with a full 24 GB GPU and concurrency
+one. This is not a guaranteed minimum: model, frame and generation settings affect VRAM.
 
 ```sh
 # 1. Smoke test (no model load, no GPU)
@@ -91,6 +98,108 @@ VLM_JUDGE_MODEL_ID=Qwen/Qwen3-VL-30B-A3B-Instruct \
 evaluation/vlm_judge/scripts/evaluate-cnc-lerobot.sh \
     --base-url http://localhost:8000/v1
 ```
+
+## ☁️ Azure Deployment
+
+Keep the existing CPU Container Apps deployment. Add a separate private GPU inference
+service, starting with an existing suitable A10 VM.
+
+| Component               | Host              | Responsibility                                           |
+|-------------------------|-------------------|----------------------------------------------------------|
+| Viewer frontend         | CPU Container App | UI                                                       |
+| Viewer backend          | CPU Container App | Saved inputs, frame extraction, durable jobs and results |
+| Qwen model server       | GPU host          | Inference through `/v1/chat/completions`                 |
+| Dataset and job storage | Azure Blob        | Source data, annotations and shared durable job state    |
+
+The viewer sends selected frames and saved instructions to the model server. Approve
+the endpoint's data-handling policy before use. The model server does not own judge jobs.
+
+> [!IMPORTANT]
+> The current viewer Terraform and Compose configurations do not deploy a GPU server.
+> Installing Qwen dependencies or setting `VLM_JUDGE_BACKEND=qwen3-vl` does not attach
+> a GPU. GPU serving must be deployed and validated separately.
+
+### Select the GPU Host
+
+| Host                                           | When to choose it                         | What to verify                                                  |
+|------------------------------------------------|-------------------------------------------|-----------------------------------------------------------------|
+| Existing A10 VM                                | Initial validation and single-GPU serving | Driver, VRAM, process supervision, private ingress and patching |
+| Existing AKS GPU pool                          | Shared, sustained inference               | GPU scheduling, ingress and scaling                             |
+| Managed endpoint or Container Apps GPU profile | Managed operations or burst demand        | Region, quota, VRAM, model/API/auth support and cold starts     |
+
+For a full A10, evaluate `Standard_NV36ads_A10_v5`. Smaller A10 sizes may expose
+only fractional GPU memory. Check `nvidia-smi`, regional quota and cost before use;
+see [Azure A10 sizes](https://learn.microsoft.com/azure/virtual-machines/sizes/gpu-accelerated/nvadsa10v5-series)
+and [GPU infrastructure guidance](../../infrastructure/README.md).
+
+### Configure the Viewer
+
+1. Deploy and validate the GPU endpoint with authenticated private TLS ingress.
+2. Build the CPU viewer image from the repository root:
+
+   ```bash
+   docker build -f data-management/viewer/backend/Dockerfile \
+     --build-arg BACKEND_EXTRAS=azure,analysis,export,auth \
+     --build-arg JUDGE_EXTRAS=openai \
+     -t dataviewer-backend:validation .
+   ```
+
+3. Configure the following runtime settings and deploy the viewer image.
+4. Test endpoint access from the viewer network before enabling the judge.
+
+| Setting                    | Remote GPU deployment                                         |
+|----------------------------|---------------------------------------------------------------|
+| `STORAGE_BACKEND`          | `azure` with the configured dataset and annotation containers |
+| `VLM_JUDGE_ENABLED`        | `false` during setup; `true` after endpoint validation        |
+| `VLM_JUDGE_BACKEND`        | `openai-compat`                                               |
+| `VLM_JUDGE_BASE_URL`       | Private inference base URL, including `/v1` where required    |
+| `VLM_JUDGE_MODEL_ID`       | Model name accepted by the server                             |
+| `VLM_JUDGE_MODEL_REVISION` | Immutable identity matching the deployed weights              |
+| `VLM_JUDGE_API_KEY`        | Platform secret reference for endpoint authentication         |
+| `VLM_JUDGE_CAPACITY`       | `1` initially                                                 |
+| `VLM_JUDGE_CAPACITY_SCOPE` | Same value for workers sharing inference capacity             |
+| `VLM_JUDGE_CACHE_DIR`      | Writable disposable scratch                                   |
+
+The build extra is `openai`; the runtime backend is `openai-compat`. For inference
+inside the viewer process, use `JUDGE_EXTRAS=qwen3-vl` on a GPU-equipped host with
+NVIDIA device passthrough and a compatible driver/CUDA runtime. Do not combine these
+profiles with the backend's `vlm-judge` extra, which pins a different Transformers version.
+
+### Deployment Boundaries
+
+| Area                   | Requirement or limitation                                                                     |
+|------------------------|-----------------------------------------------------------------------------------------------|
+| GPU endpoint           | Deploy separately; the viewer deployment script only builds and rolls out viewer images       |
+| Existing Container App | Roll out environment and secret changes explicitly; Terraform ignores later template changes  |
+| Shared jobs            | Workers must share Blob job storage, capacity scope and capacity limit                        |
+| Availability           | Keep a worker replica running while jobs are pending; no job-triggered scale-from-zero exists |
+| GPU capacity           | Limit other inference clients separately; drain work before deallocating the GPU              |
+| Model identity         | Pin weights on the model server; the viewer's revision setting does not pin them remotely     |
+| Credentials            | The current inference client uses an API key, not managed-identity token acquisition          |
+
+> [!WARNING]
+> The bundled [shim](openai_shim.py) has no authentication. Keep it on loopback
+> behind an authenticated proxy for cross-host access; never expose it publicly.
+> Leave remote image fetching disabled. Setting an API key on the client does not
+> secure a server that ignores it.
+
+### Validate Before Enabling
+
+Use disposable data and record results separately from production configuration.
+
+| Check           | Required evidence                                                                                       |
+|-----------------|---------------------------------------------------------------------------------------------------------|
+| GPU runtime     | Allocated VRAM; compatible pinned Python, NumPy, Torch, torchvision, CUDA, cuDNN, Transformers and PyAV |
+| Qwen inference  | One episode, then realistic camera/frame settings; peak VRAM, latency and valid results                 |
+| Installed image | Imports and echo execution outside the checkout                                                         |
+| Remote endpoint | Authenticated image-and-text requests from the viewer network                                           |
+| Job lifecycle   | Submit, status, cancel, retry, restart, sample approval, application and withdrawal                     |
+| Persistence     | Job recovery after worker replacement and disposable scratch loss                                       |
+| Browser         | Saved-state recovery, keyboard/focus, responsive layout and assistive technology                        |
+
+Restore frozen dependencies and download weights only with operator approval. Keep
+endpoint values, resource identifiers and validation evidence outside Git. Echo and
+unit tests do not establish GPU compatibility or model quality.
 
 ## 🌐 HTTP API
 

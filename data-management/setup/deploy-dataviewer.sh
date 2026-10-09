@@ -99,6 +99,7 @@ fi
 # ACR Tasks passes build arguments to docker build unquoted, so the extras list
 # is normalized to commas with no spaces.
 backend_extras=$(printf '%s' "$DATAVIEWER_BACKEND_EXTRAS" | tr -s ', ' ',,' | sed -e 's/^,//' -e 's/,$//')
+judge_extras=$(printf '%s' "$DATAVIEWER_JUDGE_EXTRAS" | tr -s ', ' ',,' | sed -e 's/^,//' -e 's/,$//')
 
 buildkit_images=()
 if [[ "$skip_build" == "false" ]]; then
@@ -258,22 +259,34 @@ if [[ "$skip_build" == "false" ]]; then
 
   if [[ "$skip_backend" == "false" ]]; then
     section "Building Backend Image"
+    backend_context="$(mktemp -d)"
+    trap 'rm -rf -- "$backend_context"' EXIT
+    mkdir -p "$backend_context/data-management/viewer/backend" "$backend_context/evaluation/vlm_judge"
+    tar -C "$SRC_DIR/backend" --exclude='__pycache__' --exclude='*.pyc' --exclude='.env*' \
+      -cf - pyproject.toml uv.lock logging.json src \
+      | tar -C "$backend_context/data-management/viewer/backend" -xf -
+    cp "$backend_dockerfile" "$backend_context/data-management/viewer/backend/Dockerfile"
+    cp "$REPO_ROOT/evaluation/vlm_judge/"*.py \
+      "$REPO_ROOT/evaluation/vlm_judge/pyproject.toml" "$REPO_ROOT/evaluation/vlm_judge/uv.lock" \
+      "$backend_context/evaluation/vlm_judge/"
     info "Building $backend_image ($build_mode)..."
     if [[ "$local_build" == "true" ]]; then
       docker buildx build \
         --platform "$DATAVIEWER_BUILD_PLATFORM" \
         --build-arg "BACKEND_EXTRAS=${backend_extras}" \
-        --file "$backend_dockerfile" \
+        --build-arg "JUDGE_EXTRAS=${judge_extras}" \
+        --file "$backend_context/data-management/viewer/backend/Dockerfile" \
         --tag "$backend_image" \
         --push \
-        "$SRC_DIR/backend/"
+        "$backend_context"
     else
       az acr build \
         --registry "$acr_name" \
         --image "${DATAVIEWER_BACKEND_IMAGE}:${image_tag}" \
         --build-arg "BACKEND_EXTRAS=${backend_extras}" \
-        --file "$backend_dockerfile" \
-        "$SRC_DIR/backend/"
+        --build-arg "JUDGE_EXTRAS=${judge_extras}" \
+        --file "data-management/viewer/backend/Dockerfile" \
+        "$backend_context"
     fi
   fi
 

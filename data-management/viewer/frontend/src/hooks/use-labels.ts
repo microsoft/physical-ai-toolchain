@@ -5,6 +5,7 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef } from 'react'
 
+import { usePrincipalContext } from '@/hooks/use-principal-context'
 import {
   ApiClientError,
   apiRequestVersioned,
@@ -47,6 +48,95 @@ export const labelKeys = {
 }
 
 type VersionedDatasetLabels = VersionedResource<DatasetLabelsResponse>
+
+export function useSavedEpisodeAnalysis(episodeIndex: number) {
+  const queryClient = useQueryClient()
+  const datasetId = useDatasetStore((state) => state.currentDataset?.id)
+  const source = useEpisodeStore((state) => state.currentEpisode)
+  const principal = usePrincipalContext()
+  const ready =
+    !!datasetId &&
+    !!principal.data?.scopeId &&
+    !principal.error &&
+    source?.meta.index === episodeIndex
+  const query = useQuery({
+    queryKey: [
+      ...labelKeys.dataset(datasetId ?? '', principal.data?.scopeId),
+      'analysis',
+      source?.sourceId,
+      source?.sourceRevision,
+      episodeIndex,
+    ],
+    queryFn: async () => {
+      const value = await fetchDatasetLabels(datasetId!)
+      const currentSource = useEpisodeStore.getState().currentEpisode
+      const currentPrincipal = queryClient.getQueryData<{ scopeId: string }>([
+        'auth',
+        'principal-context',
+      ])
+      if (
+        useDatasetStore.getState().currentDataset?.id === datasetId &&
+        currentPrincipal?.scopeId === principal.data?.scopeId &&
+        currentSource?.sourceId === source?.sourceId &&
+        currentSource?.sourceRevision === source?.sourceRevision
+      ) {
+        queryClient.setQueryData(labelKeys.dataset(datasetId!, principal.data?.scopeId), value)
+      }
+      return value
+    },
+    enabled: ready,
+    retry: false,
+  })
+  const denied =
+    !ready ||
+    (query.error instanceof ApiClientError && [401, 403, 404].includes(query.error.status))
+  const ledger = query.data?.data.provenance?.[episodeIndex]
+  const active = ledger?.contributions.filter((item) => !ledger.withdrawn.includes(item.id)) ?? []
+  const staleIds = new Set(
+    active
+      .filter((item) => item.machine && item.machine.sourceRevision !== source?.sourceRevision)
+      .map((item) => item.id),
+  )
+  let previousSize = -1
+  while (previousSize !== staleIds.size) {
+    previousSize = staleIds.size
+    for (const item of active) {
+      if (item.origin !== 'human' && item.derivedFrom?.some((parent) => staleIds.has(parent)))
+        staleIds.add(item.id)
+    }
+  }
+  const savedRecord = denied ? undefined : query.data?.data.analysis?.[episodeIndex]
+  const record = savedRecord
+    ? (Object.fromEntries(
+        Object.entries(savedRecord).filter(([key]) => {
+          const field = `analysis/${key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)}`
+          const owners = active.filter((item) => item.field === field)
+          if (owners.some((item) => item.origin === 'human')) return true
+          const latest = owners.sort(
+            (first, second) =>
+              (second.machine?.runOrder ?? -1) - (first.machine?.runOrder ?? -1) ||
+              second.sequence - first.sequence,
+          )[0]
+          return !latest || !staleIds.has(latest.id)
+        }),
+      ) as EpisodeAnalysisRecord)
+    : undefined
+  const replaced = !denied && staleIds.size > 0
+  const retained = !!record
+  useEffect(() => {
+    if (query.error) recordDiagnosticEvent('workspace', 'analysis-refresh-error', { retained })
+  }, [query.error, retained])
+  return {
+    ...query,
+    record,
+    ledger: denied ? undefined : ledger,
+    replaced,
+    refetch: () => {
+      recordDiagnosticEvent('workspace', 'analysis-refresh-retry')
+      return query.refetch()
+    },
+  }
+}
 
 function labelPrecondition(queryClient: QueryClient, datasetId: string): MutationPrecondition {
   const principal = queryClient.getQueryData<{ scopeId: string }>(['auth', 'principal-context'])

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useEpisodeAnnotations, useSaveAnnotation } from '@/hooks/use-annotations'
 import { useEpisodeEdits, useSaveEpisodeEdits } from '@/hooks/use-episode-edits'
+import { KeyboardShortcutsContext } from '@/hooks/use-keyboard-shortcuts'
 import { useSaveEpisodeLabels } from '@/hooks/use-labels'
 import { usePrincipalContext } from '@/hooks/use-principal-context'
 import { ApiClientError } from '@/lib/api-client'
@@ -47,6 +48,7 @@ export function useAnnotationWorkspaceShell({
   onNextEpisode,
   onSaveAndNextEpisode,
 }: UseAnnotationWorkspaceShellOptions) {
+  const shortcutsEnabled = useContext(KeyboardShortcutsContext)
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('trajectory')
   const seekVideoFrameRef = useRef(
@@ -306,7 +308,7 @@ export function useAnnotationWorkspaceShell({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return
+      if (!shortcutsEnabled || event.defaultPrevented) return
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault()
         if (!event.repeat) void handleSaveEpisode()
@@ -324,7 +326,7 @@ export function useAnnotationWorkspaceShell({
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [playback, handleSaveEpisode])
+  }, [playback, handleSaveEpisode, shortcutsEnabled])
 
   const handleOpenExportDialog = useCallback(() => {
     setExportDialogOpen(true)

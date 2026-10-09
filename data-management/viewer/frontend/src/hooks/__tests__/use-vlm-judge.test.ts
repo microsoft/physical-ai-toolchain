@@ -2,8 +2,8 @@ import { act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useEpisodeReadiness } from '@/hooks/use-episode-readiness'
-import { useRunVlmJudge, vlmJudgeKeys } from '@/hooks/use-vlm-judge'
-import { fetchVlmJudgeSnapshot, runVlmJudge } from '@/lib/api-client'
+import { useJudgeEvidence, useRunVlmJudge, vlmJudgeKeys } from '@/hooks/use-vlm-judge'
+import { fetchJudgeEvidence, fetchVlmJudgeSnapshot, runVlmJudge } from '@/lib/api-client'
 import * as draftStorage from '@/lib/edit-draft-storage'
 import {
   clearPersistedEditDraftsForTests,
@@ -26,6 +26,8 @@ vi.mock('@/lib/api-client', () => ({
   fetchVlmJudgeStatus: vi.fn(),
   fetchVlmJudgeSnapshot: vi.fn(),
   runVlmJudge: vi.fn(),
+  fetchJudgeEvidence: vi.fn(),
+  mutateJudgeDataset: vi.fn(),
 }))
 
 const mockRunVlmJudge = vi.mocked(runVlmJudge)
@@ -93,6 +95,81 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks())
 
 describe('selected episode readiness', () => {
+  it('retains evidence on refresh failure, excludes denied or replaced sources, and never runs inference', async () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setDefaultOptions({ queries: { gcTime: Infinity, retry: false } })
+    queryClient.setQueryData(['auth', 'principal-context'], {
+      scopeId: 'principal-one',
+      authMode: 'local',
+    })
+    useDatasetStore.setState({
+      currentDataset: {
+        id: 'ds-1',
+        name: 'Dataset',
+        totalEpisodes: 2,
+        fps: 30,
+        features: {},
+        tasks: [],
+      },
+    })
+    const episode = {
+      sourceId: 'source',
+      sourceRevision: 'one',
+      meta: { index: 0, length: 3, taskIndex: 0, hasAnnotations: false },
+      cameras: [],
+      videoUrls: {},
+      trajectoryData: [],
+    }
+    useEpisodeStore.setState({ currentEpisode: episode })
+    const input = await vi.mocked(fetchVlmJudgeSnapshot)('ds-1', 0)
+    vi.mocked(fetchJudgeEvidence)
+      .mockReset()
+      .mockResolvedValue({
+        items: [
+          {
+            runId: 'run',
+            resultId: 'result',
+            resultKind: 'judge',
+            configRevision: 'config',
+            input,
+            applicability: 'current',
+            applied: false,
+            result: judgeResult(),
+          },
+        ],
+        total: 1,
+      })
+    let enabled = false
+    const { result, rerender } = renderHookWithProviders(
+      () => useJudgeEvidence('ds-1', 0, enabled),
+      {
+        queryClient,
+      },
+    )
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['judge-evidence', 'ds-1'] })
+    })
+    expect(fetchJudgeEvidence).not.toHaveBeenCalled()
+    expect(result.current.data).toBeUndefined()
+    enabled = true
+    rerender()
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(1))
+    vi.mocked(fetchJudgeEvidence).mockRejectedValueOnce(new Error('temporary'))
+    await act(async () => {
+      await result.current.refetch()
+    })
+    expect(result.current.data?.items).toHaveLength(1)
+    vi.mocked(fetchJudgeEvidence).mockRejectedValueOnce(
+      Object.assign(new Error('Denied'), { status: 403 }),
+    )
+    await act(async () => {
+      await result.current.refetch()
+    })
+    await waitFor(() => expect(result.current.data).toBeUndefined())
+    act(() => useEpisodeStore.setState({ currentEpisode: { ...episode, sourceRevision: 'two' } }))
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(0))
+    expect(mockRunVlmJudge).not.toHaveBeenCalled()
+  })
   it.each(['identity', 'dataset'])(
     'blocks %s access failure during the persisted draft scan',
     async (scope) => {

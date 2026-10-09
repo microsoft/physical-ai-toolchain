@@ -59,6 +59,7 @@ describe('useDataviewerShellState', () => {
     const confirm = vi.fn(() => false)
     vi.stubGlobal('confirm', confirm)
     const { result } = renderHook(() => useDataviewerShellState({ datasets }))
+    act(() => result.current.setDatasetId('dataset-a'))
     await waitFor(() => expect(result.current.isWarmingCache).toBe(false))
     act(() => result.current.setSelectedEpisode(1))
     act(() => {
@@ -90,7 +91,7 @@ describe('useDataviewerShellState', () => {
     expect(after.defaultPrevented).toBe(false)
   })
 
-  it('selects the first available dataset and keeps the dataset store in sync', async () => {
+  it('waits for explicit dataset selection and keeps the dataset store in sync', async () => {
     const { result } = renderHook(() =>
       useDataviewerShellState({
         datasets,
@@ -102,6 +103,9 @@ describe('useDataviewerShellState', () => {
       }),
     )
 
+    expect(result.current.datasetId).toBe('')
+    expect(useDatasetStore.getState().currentDataset).toBeNull()
+    act(() => result.current.setDatasetId('dataset-a'))
     expect(result.current.datasetId).toBe('dataset-a')
     expect(useDatasetStore.getState().datasets).toHaveLength(2)
     expect(useDatasetStore.getState().currentDataset?.id).toBe('dataset-a')
@@ -111,7 +115,7 @@ describe('useDataviewerShellState', () => {
     await waitFor(() => expect(result.current.isWarmingCache).toBe(false))
   })
 
-  it('resets to the next available dataset when the selected dataset disappears and toggles diagnostics', async () => {
+  it('returns to explicit selection when the selected dataset disappears and toggles diagnostics', async () => {
     const { result, rerender } = renderHook(
       ({ nextDatasets }) =>
         useDataviewerShellState({
@@ -141,7 +145,7 @@ describe('useDataviewerShellState', () => {
       })
     })
 
-    await waitFor(() => expect(result.current.datasetId).toBe('dataset-a'))
+    await waitFor(() => expect(result.current.datasetId).toBe(''))
     expect(result.current.selectedEpisode).toBe(0)
 
     act(() => {

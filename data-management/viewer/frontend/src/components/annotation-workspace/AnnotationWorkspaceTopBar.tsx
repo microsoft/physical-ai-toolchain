@@ -69,9 +69,13 @@ export function AnnotationWorkspaceTopBar({
               Export
             </Button>
             <Button
-              onClick={onSaveEpisode}
-              disabled={!canSaveEpisode || isSaving}
+              onClick={() => {
+                if (canSaveEpisode && !isSaving) onSaveEpisode()
+              }}
+              disabled={!canSaveEpisode && !isSaving}
+              aria-disabled={!canSaveEpisode || isSaving}
               aria-busy={isSaving}
+              className="aria-disabled:opacity-50"
             >
               <Save className="mr-2 h-4 w-4" />
               Save Episode

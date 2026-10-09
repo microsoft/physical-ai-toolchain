@@ -5,6 +5,7 @@ import {
   useCacheStats,
   useCapabilities,
   useDataset,
+  useDatasetCatalog,
   useDatasets,
   useEpisode,
   useEpisodes,
@@ -32,6 +33,32 @@ afterEach(() => {
 })
 
 describe('useDatasets', () => {
+  it('queries bounded catalog summaries without fetching episodes or full dataset detail', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ scope_id: 'principal-one', auth_mode: 'local' }))
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        items: [{ id: 'group--0999', name: 'Repeated', total_episodes: 999, format: 'lerobot' }],
+        total: 1,
+        catalog_total: 1000,
+        groups: ['group'],
+        snapshot_id: 'revision',
+        offset: 0,
+        limit: 25,
+        stale: false,
+        refresh_failed: false,
+      }),
+    )
+    const { result } = renderHookWithProviders(() =>
+      useDatasetCatalog({ query: '0999', limit: 25 }),
+    )
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data?.items[0].totalEpisodes).toBe(999)
+    expect(mockFetch).toHaveBeenCalledWith(
+      '/api/datasets/catalog?query=0999&limit=25',
+      expect.any(Object),
+    )
+    expect(useDatasetStore.getState().currentDataset).toBeNull()
+  })
   it('fetches the dataset list and syncs the store', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse([sampleDataset]))
 

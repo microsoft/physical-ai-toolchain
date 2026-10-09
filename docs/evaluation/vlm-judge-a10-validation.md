@@ -2,7 +2,7 @@
 title: VLM Judge Validation on an Azure A10 VM
 description: Validate the pinned Qwen runtime and durable judge lifecycle on an operator-managed Azure A10 VM.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-08
+ms.date: 2026-10-09
 ms.topic: how-to
 ---
 
@@ -13,8 +13,9 @@ Use this guide to validate Qwen inference on an existing Azure A10 VM after tran
 This is an incremental validation handoff, not a release acceptance record.
 
 * Available: durable single judging, sample evaluation and explicit approval APIs, conditional result application, and judge CLI submit/status/list/cancel/retry/results/approve/approvals/worker operations.
-* In progress: migration of the task-label CLI to the shared lifecycle. Do not treat its existing direct execution path as approval-gated.
-* Pending: dataset catalog, withdrawal workflow, dataset workspace and unified Episode Analysis. Do not claim these workflows passed from lifecycle unit tests.
+* Available: the task-label CLI uses the same durable lifecycle and conditional contribution application. `--resume --job-id <id>` retries failed targets; JSONL exports are not resume authority. Its task findings remain distinct from overall judge outcomes.
+* Available: bounded dataset catalog search, group/sort/page controls, explicit refresh and deliberate dataset selection. Read-only Azure catalog requests passed locally; browser accessibility and rendered-layout acceptance remain outstanding.
+* Implemented, awaiting final acceptance: revision-bound withdrawal API/CLI/UI, dataset sample/target workspace, approval and durable job controls, and unified Episode Analysis with canonical run history. Model-free checks do not establish browser or GPU acceptance.
 * Deferred: all Qwen execution and target-GPU compatibility checks. Final browser workflow and accessibility acceptance remain outstanding.
 
 ## Prerequisites
@@ -34,6 +35,62 @@ uv sync --project evaluation/vlm_judge --frozen --extra api --extra qwen3-vl
 ```
 
 Use canonical public feeds and the checked-in explicit PyTorch index. Stop on unavailable public versions or incompatible wheels; do not regenerate the lockfile through a private mirror or hand-edit it.
+
+## Delivery Profiles
+
+Build the backend from the repository root, not the backend directory. The
+[Dockerfile](../../data-management/viewer/backend/Dockerfile) installs both packages
+without editable links and excludes checkout source from the runtime image. Its upload allowlist
+excludes datasets, local environments and credentials. Building requires approved image
+downloads and public package access; the development container has not completed an image build.
+
+| Profile                     | `BACKEND_EXTRAS`             | `JUDGE_EXTRAS` | Runtime selection                                                                |
+|-----------------------------|------------------------------|----------------|----------------------------------------------------------------------------------|
+| Disabled or model-free echo | `azure,analysis,export,auth` | Empty          | Disabled by default; enable with `VLM_JUDGE_BACKEND=echo` for disposable tests   |
+| Remote inference            | `azure,analysis,export,auth` | `openai`       | Enable with `VLM_JUDGE_BACKEND=openai` and operator-managed endpoint credentials |
+| Local Qwen validation       | `azure,analysis,export,auth` | `qwen3-vl`     | Enable with `VLM_JUDGE_BACKEND=qwen3-vl` on the approved GPU runtime             |
+
+Do not include the backend's `vlm-judge` extra: its Transformers pin differs from the
+evaluator profile. Add `yolo` only when detection is needed. These are explicit build
+profiles, not claims of target compatibility; require the image's dependency check and
+the GPU checks below before accepting a Qwen image. Local and Azure dataset storage are
+independent of the inference profile. Remote inference sends selected frames and saved
+instructions to the configured endpoint; approve that transfer before enabling it.
+
+After approval, build the echo profile and check installed imports outside the checkout:
+
+```bash
+docker build -f data-management/viewer/backend/Dockerfile \
+  --build-arg BACKEND_EXTRAS=azure,analysis,export,auth \
+  --build-arg JUDGE_EXTRAS= -t dataviewer-validation .
+docker run --rm --workdir /tmp -e VLM_JUDGE_ENABLED=false \
+  -e VLM_JUDGE_BACKEND=echo dataviewer-validation python -c \
+  'import src.api.main, evaluation.vlm_judge.api, evaluation.vlm_judge.jobs; print("Installed imports passed")'
+```
+
+Then run the single-episode checklist with `--backend echo` against an approved disposable
+dataset mounted into that image and durable job/output volumes. Import success alone is
+not the required installed-image echo execution check. No GPU or model download is needed
+for echo; its results are test fixtures, not model-quality evidence.
+
+The [Compose configuration](../../data-management/viewer/docker-compose.yml) separates
+source data at `/data`, durable local jobs at `/state/judge`, and disposable cache/model
+scratch at `/scratch`. Confirm volume ownership for the configured UID/GID. Do not use
+scratch as job authority. Azure storage selects the shared Blob job adapter in the
+annotation container; replicas must share storage, capacity scope and capacity settings.
+
+The local [launcher](../../data-management/viewer/start.sh) uses frozen backend and
+evaluator profiles in the backend environment. An enabled Qwen or remote profile may
+need an approved restore; echo does not require either inference extra. Never approve
+an automatic lockfile update or replacement of the existing environment configuration.
+
+Terraform bootstraps a disabled echo judge and scratch path. Its Container App template
+is ignored after creation. The deployment script's image rollout does not automatically
+reconcile all judge settings: the operator must explicitly review and roll out
+`VLM_JUDGE_ENABLED`, backend, immutable model revision, capacity settings, cache location
+and, for remote inference, base URL and an API-key secret reference. Use the platform's
+secret mechanism, not plaintext Terraform values, tracked files or chat. No deployment
+or environment mutation is part of this validation handoff.
 
 ## Runtime Check
 
@@ -104,7 +161,57 @@ Use disposable data and record expected versus observed outcomes:
 
 Use the [common API](../../evaluation/vlm_judge/api.py) for authenticated or viewer-managed runs. The viewer mounts lifecycle routes under `/api/judge`; standalone routes are mounted by the operator. Preserve existing principal and CSRF requirements. Do not substitute an unauthenticated local actor for failed authentication.
 
+## Model-Free Browser Checks
+
+The isolated runner uses temporary synthetic data and dedicated ports 4173 and
+18000 through 18002. It never reuses existing servers or resolves Python dependencies.
+The installed backend development environment and Chrome are prerequisites; obtain
+approval for missing prerequisites instead of installing them automatically.
+
+```bash
+cd data-management/viewer/frontend
+npm run test:a11y -- --grep 'P06 real backend'
+npm run test:a11y -- --grep 'P06 fresh browser'
+npm run test:a11y
+```
+
+The first request-only case runs without Chrome and verifies real HTTP label persistence,
+stale-write rejection and explicit clearing. The second uses separate browser contexts to
+verify label persistence without shared browser drafts. The complete suite also covers
+keyboard, adaptive layout and API documentation; collection is not execution evidence.
+These cases do not replace complete edit-descriptor recovery, unmounted dirty-selection
+readiness, real-process recovery or assistive-technology checks.
+
+Save persists supported episode resources and stays on the episode. Next is a separate
+navigation action, not a save. Browser drafts are recovery copies, not saved judge input.
+Review saved inputs before judging; merely viewing Episode Analysis must not run inference
+or apply labels. Explicit application is a separate conditional operation. Saved edit
+descriptors are not rendered videos: unsupported transformed judge inputs must fail, and
+export behavior must be verified for each supported operation rather than assumed.
+
 ## Evidence and Agent Handoff
+
+### Withdrawal and Workspace Checks
+
+On disposable data only, inspect and confirm a bound withdrawal preview:
+
+```bash
+judge_cli --operation reset-preview
+export PREVIEW_ID='<returned-preview-id>'
+judge_cli --operation reset-confirm --preview-id "$PREVIEW_ID"
+judge_cli --operation reset-status
+judge_cli --operation reset-retry
+```
+
+Use retry only after partial completion. A conflict requires a fresh preview after reviewing the changed saved fields. Verify removable fields, accepted-but-unchanged removals, preserved human revisions, legacy unknowns and conflicts. Start a reset while a disposable job is running; its late completion must not republish withdrawn output. Repeat confirmation of the same preview and verify idempotency. Preserve independent motion analysis and human validation evidence.
+
+Open the viewer through the existing approved `start.sh` configuration. Verify catalog selection, dataset disclosure, separate sample/target IDs, explicit saved-author references, camera/method configuration, sample disagreement acknowledgment, approval staleness, durable progress and reconnect after reload.
+
+Confirm that closing the disclosure preserves the selected episode, filters, camera state, frame and unsaved drafts without automatic playback. Test keyboard focus, hidden controls, live announcements and narrow layouts independently of model accuracy.
+
+In Episode Analysis, verify judge-only results without label changes, explicit conditional application, distinct motion/task findings and marked withdrawn history. A transient refresh failure must retain prior evidence with retry; access loss or source/principal changes must not expose unrelated cached evidence. Refreshing results must not clear dirty drafts or reapply old machine contributions.
+
+### Report Format
 
 Keep results in an operator-approved location outside tracked source. Record commit, runtime versions, model revision, synthetic or permitted dataset description, selected IDs/views, run/result references, exit codes, timings, peak device memory and sanitized error categories. Do not publish credentials, service endpoints, raw model responses, private annotations or environment paths.
 
@@ -120,11 +227,12 @@ Run implemented Qwen/lifecycle checks and preserve exact exit codes and evidence
 Do not bypass assertions, coverage, pinned dependencies or public-feed policy.
 Report Passed, Failed, Deferred or Unavailable for each check. Distinguish
 model quality, GPU compatibility, storage contracts and browser accessibility.
-Do not implement pending features or claim the dataset workspace, withdrawal
-or Episode Analysis acceptance passed until those interfaces are delivered.
+Do not implement new features. Validate the delivered dataset workspace,
+withdrawal and Episode Analysis separately from model inference, and record
+unavailable browser or runtime checks without claiming acceptance.
 Return actionable failures and sanitized evidence; do not load secrets into chat.
 ```
 
-Browser keyboard/focus, screen-reader announcements, mobile layout and rendered-media timing require separate runtime checks. Local storage tests and in-memory Blob contracts do not establish live Blob lease or reset behavior. Keep those results separate from GPU validation.
+Browser keyboard/focus, screen-reader announcements, mobile layout and rendered-media timing require separate runtime checks. A live disposable Blob probe has verified persisted jobs, competing claims, cancellation fencing, retry and evidence retrieval, with exact cleanup. It does not establish lease-renewal/expiry, real-process Azure recovery or dataset reset behavior. Keep those results separate from GPU validation.
 
 This guide was prepared with AI assistance and requires operator review before execution.

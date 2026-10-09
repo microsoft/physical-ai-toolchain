@@ -5,11 +5,12 @@
  * ``meta/episode_labels.json``.
  */
 
-import { CheckCircle2, HelpCircle, Sparkles, XCircle } from 'lucide-react'
+import { CheckCircle2, HelpCircle, XCircle } from 'lucide-react'
 import { memo } from 'react'
 
+import { Button } from '@/components/ui/button'
+import { useSavedEpisodeAnalysis } from '@/hooks/use-labels'
 import { cn } from '@/lib/utils'
-import { useLabelStore } from '@/stores/label-store'
 
 export interface EpisodeAnalysisCardProps {
   episodeIndex: number
@@ -60,23 +61,62 @@ export const EpisodeAnalysisCard = memo(function EpisodeAnalysisCard({
   episodeIndex,
   className,
 }: EpisodeAnalysisCardProps) {
-  const record = useLabelStore((state) => state.episodeAnalysis[episodeIndex])
+  const saved = useSavedEpisodeAnalysis(episodeIndex)
+  const record = saved.record
+  const contributions =
+    saved.ledger?.contributions.filter(
+      (item) => item.field.startsWith('analysis/') && !saved.ledger?.withdrawn.includes(item.id),
+    ) ?? []
+  const origins = [...new Set(contributions.map((item) => item.origin))]
+  const hasTask =
+    record &&
+    [
+      record.pickFrom,
+      record.object,
+      record.graspSuccess,
+      record.placeSuccess,
+      record.movementQuality,
+      record.notes,
+    ].some((value) => value != null)
+  const hasMotion =
+    record &&
+    (record.motionScore != null ||
+      !!record.motionFlags?.length ||
+      record.smoothness != null ||
+      record.efficiency != null ||
+      record.jitter != null)
 
   return (
-    <section className={cn('space-y-3 rounded-md border p-3 text-sm', className)}>
+    <section
+      aria-label="Saved task and motion evidence"
+      className={cn('space-y-3 border-t pt-3 text-sm', className)}
+    >
+      {saved.error && (
+        <div role="alert">
+          Saved analysis refresh failed.{record && ' Previously loaded analysis remains visible.'}
+          <Button variant="outline" size="sm" onClick={() => void saved.refetch()}>
+            Retry analysis
+          </Button>
+        </div>
+      )}
+      {saved.isLoading && <p role="status">Loading saved analysis...</p>}
+      {saved.replaced && (
+        <p role="status">Machine findings from another source revision are excluded.</p>
+      )}
+      {record && (
+        <p className="text-muted-foreground text-xs">
+          Origin: {origins.length ? origins.join(', ') : 'legacy / unknown'}
+          {contributions.some((item) => saved.ledger?.acceptances[item.id]?.length) &&
+            '; accepted without changing authorship'}
+        </p>
+      )}
       <header className="flex items-center justify-between gap-2">
-        <h3 className="flex items-center gap-1.5 text-sm font-medium">
-          <Sparkles className="size-4" />
-          Episode Analysis
-        </h3>
+        <h3 className="flex items-center gap-1.5 text-sm font-medium">Task-specific findings</h3>
         {record?.source && <span className="text-muted-foreground text-xs">{record.source}</span>}
       </header>
 
-      {!record ? (
-        <p className="text-muted-foreground text-xs">
-          No saved analysis for this episode yet. Persist an analysis record through the API or the
-          VLM dataset-labeling script to show it here.
-        </p>
+      {!record || !hasTask ? (
+        <p className="text-muted-foreground text-xs">No saved task-specific findings.</p>
       ) : (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -96,27 +136,37 @@ export const EpisodeAnalysisCard = memo(function EpisodeAnalysisCard({
             <Field label="Movement quality" value={record.movementQuality} />
           )}
           {record.notes && <Field label="Notes" value={record.notes} />}
-
-          {(record.motionScore != null ||
-            (record.motionFlags && record.motionFlags.length > 0)) && (
-            <div className="flex flex-wrap items-center gap-2 border-t pt-2">
-              {record.motionScore != null && (
-                <span className="text-muted-foreground text-xs">
-                  Motion score <strong className="text-foreground">{record.motionScore}</strong>/5
-                </span>
-              )}
-              {record.motionFlags?.map((flag) => (
-                <span
-                  key={flag}
-                  className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800"
-                >
-                  {flag}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
       )}
+      <section aria-label="Motion analysis" className="space-y-2 border-t pt-3">
+        <h3 className="text-sm font-medium">Motion analysis</h3>
+        {!record || !hasMotion ? (
+          <p className="text-muted-foreground text-xs">No saved motion analysis.</p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            {record.motionScore != null && (
+              <span className="text-muted-foreground text-xs">
+                Motion score <strong className="text-foreground">{record.motionScore}</strong>/5
+              </span>
+            )}
+            {record.motionFlags?.map((flag) => (
+              <span
+                key={flag}
+                className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800"
+              >
+                {flag}
+              </span>
+            ))}
+            {record.smoothness != null && (
+              <Field label="Smoothness" value={String(record.smoothness)} />
+            )}
+            {record.efficiency != null && (
+              <Field label="Efficiency" value={String(record.efficiency)} />
+            )}
+            {record.jitter != null && <Field label="Jitter" value={String(record.jitter)} />}
+          </div>
+        )}
+      </section>
     </section>
   )
 })

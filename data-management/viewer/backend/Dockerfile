@@ -2,7 +2,7 @@
 
 FROM python:3.13.15-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS base
 
-WORKDIR /app
+WORKDIR /app/data-management/viewer/backend
 
 # Install system dependencies (ffmpeg for HDF5 video generation)
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
@@ -13,26 +13,41 @@ COPY --from=ghcr.io/astral-sh/uv:0.10.9@sha256:10902f58a1606787602f303954cea0996
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
     PATH=/app/.venv/bin:$PATH
 
 FROM base AS build
 
-COPY pyproject.toml uv.lock ./
+COPY data-management/viewer/backend/pyproject.toml data-management/viewer/backend/uv.lock ./
+COPY data-management/viewer/backend/src/ ./src/
+COPY evaluation/vlm_judge/ /app/evaluation/vlm_judge/
 
 # Runtime feature extras, separated by commas or spaces.
 ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"
+ARG JUDGE_EXTRAS=""
 # Keep installation caches out of the runtime image.
-RUN extras=""; \
-    for extra in $(echo "${BACKEND_EXTRAS}" | tr ',' ' '); do extras="${extras} --extra ${extra}"; done; \
-    uv sync --frozen --no-dev ${extras}
+RUN set -eu; extras=""; \
+    for extra in $(echo "${JUDGE_EXTRAS}" | tr ',' ' '); do \
+        case "${extra}" in openai|qwen3-vl) ;; *) echo "Unsupported JUDGE_EXTRAS profile" >&2; exit 1 ;; esac; \
+        extras="${extras} --extra ${extra}"; \
+    done; \
+    uv sync --project /app/evaluation/vlm_judge --frozen --no-dev --no-editable ${extras}; \
+    extras=""; \
+    for extra in $(echo "${BACKEND_EXTRAS}" | tr ',' ' '); do \
+        case "${extra}" in vlm-judge) echo "Select the judge runtime with JUDGE_EXTRAS" >&2; exit 1 ;; esac; \
+        extras="${extras} --extra ${extra}"; \
+    done; \
+    uv sync --frozen --no-dev --no-editable --inexact ${extras}; \
+    uv pip check --python /app/.venv/bin/python
 
 FROM base AS runtime
 
-RUN useradd --system --no-create-home appuser && chown appuser /app
+RUN useradd --system --no-create-home appuser \
+    && mkdir -p /state/judge /scratch \
+    && chown appuser /app /state /state/judge /scratch
 
 COPY --from=build --chown=appuser:appuser /app/.venv /app/.venv
-COPY --chown=appuser:appuser pyproject.toml uv.lock logging.json ./
-COPY --chown=appuser:appuser src/ ./src/
+COPY --chown=appuser:appuser data-management/viewer/backend/logging.json ./
 USER appuser
 
 # Expose the API port (override with BACKEND_PORT env var at runtime)

@@ -2,13 +2,15 @@
  * TanStack Query hooks for dataset data fetching.
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 
 import {
+  type DatasetCatalogOptions,
   fetchCacheStats,
   fetchCapabilities,
   fetchDataset,
+  fetchDatasetCatalog,
   fetchDatasets,
   fetchEpisode,
   fetchEpisodes,
@@ -33,6 +35,47 @@ export const datasetKeys = {
 export const capabilityKeys = {
   all: ['capabilities'] as const,
   detail: (datasetId: string) => [...capabilityKeys.all, datasetId] as const,
+}
+
+export function useDatasetCatalog(options: DatasetCatalogOptions, enabled = true) {
+  const client = useQueryClient()
+  const principal = useQuery({
+    queryKey: ['auth', 'principal-context'],
+    queryFn: fetchPrincipalContext,
+    staleTime: Infinity,
+    enabled,
+  })
+  const catalogKey = [...datasetKeys.all, 'catalog', principal.data?.scopeId]
+  const query = useQuery({
+    queryKey: [...catalogKey, options],
+    queryFn: () => fetchDatasetCatalog(options),
+    enabled: enabled && !!principal.data?.scopeId && !principal.isError,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  })
+  const denied =
+    principal.isError ||
+    (query.error && 'status' in query.error && [401, 403].includes(Number(query.error.status)))
+  return {
+    ...query,
+    data: denied ? undefined : query.data,
+    error: principal.error ?? query.error,
+    isLoading: principal.isLoading || query.isLoading,
+    refreshCatalog: async () => {
+      const page = await fetchDatasetCatalog({
+        ...options,
+        offset: 0,
+        snapshotId: undefined,
+        refresh: true,
+      })
+      client.setQueryData(
+        [...catalogKey, { ...options, offset: 0, snapshotId: page.snapshotId }],
+        page,
+      )
+      return page
+    },
+  }
 }
 
 /**

@@ -9,10 +9,18 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect } from 'react'
 
 import { usePrincipalContext } from '@/hooks/use-principal-context'
-import { fetchVlmJudgeSnapshot, fetchVlmJudgeStatus, runVlmJudge } from '@/lib/api-client'
+import {
+  fetchJudgeEvidence,
+  fetchVlmJudgeSnapshot,
+  fetchVlmJudgeStatus,
+  mutateJudgeDataset,
+  runVlmJudge,
+} from '@/lib/api-client'
 import { assertEpisodeReadiness, assertSnapshotCurrent } from '@/lib/episode-readiness'
+import { recordDiagnosticEvent } from '@/lib/playback-diagnostics'
 import type { PrincipalContext } from '@/lib/principal-context'
 import { useDatasetStore } from '@/stores/dataset-store'
 import { useEpisodeStore } from '@/stores/episode-store'
@@ -22,6 +30,105 @@ export const vlmJudgeKeys = {
   all: ['vlm-judge'] as const,
   episode: (datasetId: string, episodeIndex: number, principalScopeId: string) =>
     [...vlmJudgeKeys.all, datasetId, episodeIndex, principalScopeId] as const,
+}
+
+export function useJudgeEvidence(datasetId: string | null, episodeIndex: number, enabled = true) {
+  const principal = usePrincipalContext()
+  const source = useEpisodeStore((state) => state.currentEpisode)
+  const activeDataset = useDatasetStore((state) => state.currentDataset?.id)
+  const ready =
+    enabled &&
+    !!datasetId &&
+    activeDataset === datasetId &&
+    source?.meta.index === episodeIndex &&
+    !!source.sourceId &&
+    !!source.sourceRevision &&
+    !!principal.data?.scopeId &&
+    !principal.error
+  const query = useQuery({
+    queryKey: [
+      'judge-evidence',
+      datasetId,
+      principal.data?.scopeId,
+      source?.sourceId,
+      source?.sourceRevision,
+      episodeIndex,
+    ],
+    queryFn: () => fetchJudgeEvidence(datasetId!, episodeIndex),
+    enabled: ready,
+    retry: false,
+  })
+  const denied =
+    !ready ||
+    (query.error && 'status' in query.error && [401, 403, 404].includes(Number(query.error.status)))
+  useEffect(() => {
+    if (ready && query.error)
+      recordDiagnosticEvent('workspace', 'evidence-refresh-error', {
+        retained: !!query.data && !denied,
+      })
+  }, [ready, query.error, query.data, denied])
+  const data =
+    denied || !query.data
+      ? undefined
+      : {
+          ...query.data,
+          items: query.data.items.filter(
+            (item) =>
+              item.input.sourceId === source?.sourceId &&
+              item.input.sourceRevision === source?.sourceRevision,
+          ),
+        }
+  return {
+    ...query,
+    data,
+    refetch: () => {
+      recordDiagnosticEvent('workspace', 'evidence-refresh-retry')
+      return query.refetch()
+    },
+  }
+}
+
+export function useApplyJudgeResult() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      datasetId,
+      episodeIndex,
+      runId,
+    }: {
+      datasetId: string
+      episodeIndex: number
+      runId: string
+    }) => {
+      const scope = () =>
+        JSON.stringify([
+          client.getQueryData<PrincipalContext>(['auth', 'principal-context'])?.scopeId,
+          client.getQueryState(['auth', 'principal-context'])?.status,
+          useDatasetStore.getState().currentDataset?.id,
+          useEpisodeStore.getState().currentIndex,
+          useEpisodeStore.getState().currentEpisode?.sourceRevision,
+        ])
+      const capturedScope = scope()
+      await assertEpisodeReadiness(client, datasetId, [episodeIndex])
+      if (scope() !== capturedScope)
+        throw new Error('Application context changed. Refresh before applying.')
+      const result = await mutateJudgeDataset(datasetId, {
+        kind: 'apply',
+        jobId: runId,
+        indices: [episodeIndex],
+      })
+      if (scope() !== capturedScope)
+        throw new Error('Application context changed. Refresh saved evidence.')
+      return result
+    },
+    onSuccess: (_result, { datasetId }) => {
+      void client.invalidateQueries({ queryKey: ['judge-dataset', datasetId] })
+      void client.invalidateQueries({ queryKey: ['judge-evidence', datasetId] })
+      void client.invalidateQueries({ queryKey: ['labels', datasetId] })
+      recordDiagnosticEvent('workspace', 'judge-application-requested')
+    },
+    onError: () => recordDiagnosticEvent('workspace', 'judge-application-error'),
+  })
 }
 
 interface UseVlmJudgeStatusOptions {
@@ -119,6 +226,12 @@ export function useRunVlmJudge() {
         result,
       }
       queryClient.setQueryData(queryKey, status)
+      void queryClient.invalidateQueries({
+        queryKey: ['judge-evidence', datasetId, context.scopeId],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: ['judge-dataset', datasetId, context.scopeId],
+      })
     },
   })
 }

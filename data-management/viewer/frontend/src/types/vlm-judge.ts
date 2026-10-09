@@ -63,7 +63,9 @@ export interface JudgeJob {
   judged: number
   applied: number
   errors: number
-  config: { processMethod?: string }
+  mode?: 'sample' | 'judge' | 'judge-and-label'
+  configRevision?: string
+  config: { processMethod?: string; views?: string[]; model?: string }
   targets?: Array<{
     episodeIndex: number
     status: string
@@ -73,7 +75,84 @@ export interface JudgeJob {
     cached?: boolean
     error: string | null
     applied: boolean
+    comparison?: 'agreement' | 'disagreement' | 'inconclusive'
+    sample?: { humanOutcome: 'success' | 'failure' | 'partial' }
   }>
+}
+
+export interface JudgeApproval {
+  id: string
+  sampleJobId: string
+  configRevision: string
+  current: boolean
+}
+
+export interface JudgeResetPreview {
+  id: string
+  summary: {
+    removableFields: number
+    acceptedUnchanged: number
+    preservedHuman: number
+    legacyUnknown: number
+    conflicts: number
+    episodes: number
+    fields: Array<{ episodeIndex: number; field: string; disposition: string }>
+  }
+}
+
+export interface JudgeReset extends JudgeResetPreview {
+  status: 'idle' | 'running' | 'partial' | 'conflicted' | 'succeeded'
+}
+
+export type JudgeDatasetAction =
+  | { kind: 'cancel' | 'retry'; jobId: string }
+  | { kind: 'apply'; jobId: string; indices: number[] }
+  | { kind: 'approve'; jobId: string; acknowledgeExceptions: boolean }
+  | { kind: 'preview-reset' | 'retry-reset' }
+  | { kind: 'confirm-reset'; previewId: string }
+
+interface JudgeEvidenceIdentity {
+  runId: string
+  resultId: string
+  configRevision: string
+  input: SavedInputSnapshot
+  applicability: 'current' | 'stale' | 'withdrawn'
+  applied: boolean
+}
+
+export type JudgeEvidence = JudgeEvidenceIdentity &
+  (
+    | { resultKind: 'judge'; result: VlmJudgeResult }
+    | {
+        resultKind: 'task-findings'
+        result: {
+          judgeModel: string
+          instruction: string
+          findings: {
+            pickFrom: string
+            object: string
+            graspSuccess: boolean
+            placeSuccess: boolean
+            movementQuality: string
+            notes: string
+          }
+        }
+      }
+  )
+
+export interface JudgeSampleReference {
+  annotationAuthorId: string
+  annotationRevision: string
+  snapshotId: string
+}
+
+export interface JudgeSubmission {
+  indices: number[]
+  mode: 'sample' | 'judge' | 'judge-and-label'
+  options?: VlmJudgeRunOptions
+  approvalId?: string
+  samples?: Record<number, JudgeSampleReference>
+  snapshotIds?: Record<number, string>
 }
 
 export interface SavedInputSnapshot {

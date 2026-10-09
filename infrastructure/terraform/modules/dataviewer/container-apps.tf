@@ -64,6 +64,18 @@ resource "azurerm_container_app" "backend" {
         value = "azure"
       }
       env {
+        name  = "VLM_JUDGE_ENABLED"
+        value = "false"
+      }
+      env {
+        name  = "VLM_JUDGE_BACKEND"
+        value = "echo"
+      }
+      env {
+        name  = "VLM_JUDGE_CACHE_DIR"
+        value = "/scratch/judge"
+      }
+      env {
         name  = "AZURE_STORAGE_ACCOUNT_NAME"
         value = var.storage_account.name
       }

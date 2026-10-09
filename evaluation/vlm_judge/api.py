@@ -119,6 +119,15 @@ class JobRequest(BaseModel):
     samples: dict[int, SampleReference] = Field(default_factory=dict, max_length=10000)
 
 
+class ResetPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    dataset_id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._ -]{0,254}$")
+
+
+class ResetConfirmRequest(ResetPreviewRequest):
+    preview_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
 class ApplicationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     episode_indices: list[Annotated[int, Field(strict=True, ge=0)]] | None = Field(
@@ -155,6 +164,53 @@ def build_job_router(
             raise HTTPException(
                 status_code=409, detail="Judge request conflicts with saved state or configuration"
             ) from None
+
+    @router.post("/resets/preview", status_code=201, dependencies=mutation_dependencies or [])
+    async def preview_reset(
+        payload: ResetPreviewRequest,
+        actor: str = Depends(actor_dependency),
+        jobs: JudgeJobs = jobs_dependency,
+    ) -> dict[str, Any]:
+        await invoke(jobs.resolver.episode_indices(payload.dataset_id, principal_scope_id=actor))
+        result = await invoke(jobs.preview_reset(payload.dataset_id, actor))
+        return {key: value for key, value in result.items() if key != "actor"}
+
+    @router.post("/resets", status_code=202, dependencies=mutation_dependencies or [])
+    async def confirm_reset(
+        payload: ResetConfirmRequest,
+        request: Request,
+        response: Response,
+        actor: str = Depends(actor_dependency),
+        jobs: JudgeJobs = jobs_dependency,
+    ) -> dict[str, Any]:
+        await invoke(jobs.resolver.episode_indices(payload.dataset_id, principal_scope_id=actor))
+        result = await invoke(jobs.confirm_reset(payload.dataset_id, actor, payload.preview_id))
+        response.headers["Location"] = str(
+            request.url_for("judge_dataset_reset_status").include_query_params(dataset_id=payload.dataset_id)
+        )
+        response.headers["Retry-After"] = "1"
+        return {key: value for key, value in result.items() if key != "actor"}
+
+    @router.get("/resets", name="judge_dataset_reset_status")
+    async def reset_status(
+        dataset_id: str = Query(min_length=1, max_length=255),
+        actor: str = Depends(actor_dependency),
+        jobs: JudgeJobs = jobs_dependency,
+    ) -> dict[str, Any]:
+        dataset_id = dataset_id.replace("\r", "").replace("\n", "")
+        await invoke(jobs.resolver.episode_indices(dataset_id, principal_scope_id=actor))
+        result = await invoke(jobs.reset_status(dataset_id, actor))
+        return {key: value for key, value in result.items() if key != "actor"}
+
+    @router.post("/resets/retry", status_code=202, dependencies=mutation_dependencies or [])
+    async def retry_reset(
+        payload: ResetPreviewRequest,
+        actor: str = Depends(actor_dependency),
+        jobs: JudgeJobs = jobs_dependency,
+    ) -> dict[str, Any]:
+        await invoke(jobs.resolver.episode_indices(payload.dataset_id, principal_scope_id=actor))
+        result = await invoke(jobs.retry_reset(payload.dataset_id, actor))
+        return {key: value for key, value in result.items() if key != "actor"}
 
     @router.post("/jobs", status_code=202, dependencies=mutation_dependencies or [])
     async def submit_job(
@@ -389,6 +445,7 @@ def build_router(
             capacity=capacity,
             capacity_scope=capacity_scope,
             apply_result=apply_result if curation_store is not None else None,
+            curation_storage=curation_store,
         )
         if job_store is not None and resolver is not None
         else None

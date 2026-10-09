@@ -336,6 +336,46 @@ export async function apiRequestVersioned<T>(
 /**
  * Fetch all available datasets.
  */
+export interface DatasetSummary {
+  id: string
+  name: string
+  group: string | null
+  totalEpisodes: number
+  format: string | null
+}
+
+export interface DatasetCatalogPage {
+  items: DatasetSummary[]
+  total: number
+  catalogTotal: number
+  groups: string[]
+  snapshotId: string
+  offset: number
+  limit: number
+  stale: boolean
+  refreshFailed: boolean
+}
+
+export interface DatasetCatalogOptions {
+  query?: string
+  group?: string
+  sort?: 'name' | 'episodes' | 'episodes-desc'
+  offset?: number
+  limit?: number
+  snapshotId?: string
+  refresh?: boolean
+}
+
+export async function fetchDatasetCatalog(
+  options: DatasetCatalogOptions,
+): Promise<DatasetCatalogPage> {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(options)) {
+    if (value !== undefined) params.set(key === 'snapshotId' ? 'snapshot_id' : key, String(value))
+  }
+  return apiRequest(`/datasets/catalog?${params}`)
+}
+
 export async function fetchDatasets(): Promise<DatasetInfo[]> {
   return apiRequest('/datasets', {}, (data) =>
     (data as Array<Record<string, unknown>>).map(preserveDatasetFeatureKeys),
@@ -591,8 +631,123 @@ export async function runVlmJudge(
   throw new Error('Judge job is still running.')
 }
 
+export async function submitJudgeJob(
+  datasetId: string,
+  submission: import('@/types/vlm-judge').JudgeSubmission,
+  requestId: string,
+): Promise<JudgeJob> {
+  const options = submission.options ?? {}
+  return apiRequest('/judge/jobs', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': requestId },
+    body: JSON.stringify({
+      dataset_id: datasetId,
+      episode_indices: submission.indices,
+      mode: submission.mode,
+      approval_id: submission.approvalId,
+      snapshot_ids: submission.snapshotIds,
+      samples:
+        submission.samples &&
+        Object.fromEntries(
+          Object.entries(submission.samples).map(([index, reference]) => [
+            index,
+            {
+              annotation_author_id: reference.annotationAuthorId,
+              annotation_revision: reference.annotationRevision,
+              snapshot_id: reference.snapshotId,
+            },
+          ]),
+        ),
+      options: {
+        process_method: options.processMethod,
+        views: options.views,
+        annotation_author_id: options.annotationAuthorId,
+        force: options.force,
+      },
+    }),
+  })
+}
+
 export async function fetchJudgeJob(jobId: string): Promise<JudgeJob> {
   return apiRequest<JudgeJob>(`/judge/jobs/${encodeURIComponent(jobId)}`, { cache: 'no-store' })
+}
+
+export function fetchJudgeEvidence(datasetId: string, episodeIndex: number) {
+  const params = new URLSearchParams({
+    dataset_id: datasetId,
+    episode_index: String(episodeIndex),
+    limit: '25',
+  })
+  return apiRequest<{ items: import('@/types/vlm-judge').JudgeEvidence[]; total: number }>(
+    `/judge/results?${params}`,
+    { cache: 'no-store' },
+  )
+}
+
+export function fetchJudgeInventory(datasetId: string, offset: number, snapshotId?: string) {
+  const params = new URLSearchParams({ dataset_id: datasetId, offset: String(offset), limit: '25' })
+  if (snapshotId) params.set('snapshot_id', snapshotId)
+  return apiRequest<{ items: number[]; total: number; snapshotId: string }>(
+    `/judge/episodes?${params}`,
+    { cache: 'no-store' },
+  )
+}
+
+export function fetchJudgeJobs(datasetId: string, offset = 0) {
+  const params = new URLSearchParams({ dataset_id: datasetId, offset: String(offset), limit: '25' })
+  return apiRequest<{ items: JudgeJob[]; total: number }>(`/judge/jobs?${params}`, {
+    cache: 'no-store',
+  })
+}
+
+export function fetchJudgeApprovals(datasetId: string) {
+  const params = new URLSearchParams({ dataset_id: datasetId, limit: '100' })
+  return apiRequest<{ items: import('@/types/vlm-judge').JudgeApproval[]; total: number }>(
+    `/judge/approvals?${params}`,
+    { cache: 'no-store' },
+  )
+}
+
+export async function fetchJudgeReset(datasetId: string) {
+  try {
+    return await apiRequest<import('@/types/vlm-judge').JudgeReset>(
+      `/judge/resets?${new URLSearchParams({ dataset_id: datasetId })}`,
+      { cache: 'no-store' },
+    )
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 404) return null
+    throw error
+  }
+}
+
+export function mutateJudgeDataset(
+  datasetId: string,
+  action: import('@/types/vlm-judge').JudgeDatasetAction,
+) {
+  const path =
+    'jobId' in action
+      ? `/jobs/${encodeURIComponent(action.jobId)}/${action.kind}`
+      : action.kind === 'preview-reset'
+        ? '/resets/preview'
+        : action.kind === 'retry-reset'
+          ? '/resets/retry'
+          : '/resets'
+  const body =
+    action.kind === 'approve'
+      ? { acknowledge_exceptions: action.acknowledgeExceptions }
+      : action.kind === 'apply'
+        ? { episode_indices: action.indices }
+        : action.kind === 'confirm-reset'
+          ? { dataset_id: datasetId, preview_id: action.previewId }
+          : 'jobId' in action
+            ? {}
+            : { dataset_id: datasetId }
+  return apiRequest<
+    | JudgeJob
+    | import('@/types/vlm-judge').JudgeApproval
+    | import('@/types/vlm-judge').JudgeResetPreview
+    | import('@/types/vlm-judge').JudgeReset
+  >(`/judge${path}`, { method: 'POST', body: JSON.stringify(body) })
 }
 
 export async function fetchVlmJudgeSnapshot(

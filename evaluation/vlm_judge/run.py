@@ -43,7 +43,7 @@ from pathlib import Path
 from .agent import AgentConfig
 from .curation_storage import LocalCurationStorage, apply_judge_result
 from .dataset import EpisodeRecord, iter_episodes
-from .job_cli import add_job_arguments, execute_job_command
+from .job_cli import add_job_arguments, execute_job_command, read_sample_references
 from .job_storage import LocalJobStore
 from .jobs import JudgeJobs
 from .saved_input import LocalDatasetResolver, LocalSavedInputReader, SavedInputSnapshot, resolve_saved_input
@@ -185,14 +185,17 @@ async def _durable_main(args: argparse.Namespace) -> int:
             )
         )
         indices = [record.episode_index for record in records]
+        samples = read_sample_references(args.sample_references)
         snapshots = []
         for index in indices:
+            reference = samples.get(index, {}) if args.mode == "sample" else {}
             _, snapshot = await resolver.resolve(
                 dataset_id,
                 index,
                 principal_scope_id=args.principal_scope_id,
                 views=tuple(args.views or ()),
-                annotation_author_id=args.annotation_author_id,
+                annotation_author_id=reference.get("annotation_author_id", args.annotation_author_id),
+                expected_snapshot_id=reference.get("snapshot_id"),
             )
             snapshots.append(snapshot.model_dump(mode="json"))
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -228,6 +231,7 @@ async def _durable_main(args: argparse.Namespace) -> int:
         capacity=args.capacity,
         capacity_scope=args.capacity_scope,
         apply_result=apply_result,
+        curation_storage=storage,
     )
     code, result = await execute_job_command(
         jobs,

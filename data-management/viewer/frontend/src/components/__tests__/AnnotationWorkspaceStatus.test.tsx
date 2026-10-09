@@ -105,10 +105,16 @@ describe('AnnotationWorkspace status and header actions', () => {
       testState.savedEpisodeLabels = { 0: labels }
     })
     const { rerender } = render(<AnnotationWorkspace />)
+    const saveButton = screen.getByRole('button', { name: /^save episode$/i })
+    saveButton.focus()
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /^save episode$/i }))
-      fireEvent.click(screen.getByRole('button', { name: /^save episode$/i }))
+      fireEvent.click(saveButton)
+      fireEvent.click(saveButton)
     })
+    expect(saveButton).not.toBeDisabled()
+    expect(saveButton).toHaveAttribute('aria-disabled', 'true')
+    expect(saveButton).toHaveAttribute('aria-busy', 'true')
+    expect(saveButton).toHaveFocus()
     expect(mockSaveEpisodeLabels).toHaveBeenCalledOnce()
     testState.episodeLabels = { 0: ['PARTIAL'] }
     rerender(<AnnotationWorkspace />)

@@ -1,7 +1,12 @@
-import { act } from '@testing-library/react'
+import { act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { applyOutcomeLabel, outcomeToLabel, useVlmJudgeBatch } from '@/hooks/use-vlm-judge-batch'
+import {
+  applyOutcomeLabel,
+  outcomeToLabel,
+  useJudgeDataset,
+  useVlmJudgeBatch,
+} from '@/hooks/use-vlm-judge-batch'
 import { _resetCsrfToken } from '@/lib/api-client'
 import { clearPersistedEditDraftsForTests, persistLabelDraft } from '@/lib/edit-draft-storage'
 import {
@@ -23,6 +28,8 @@ function routeFetch(outcomes: Record<number, boolean | null>) {
     if (target.includes('/csrf-token')) {
       return Promise.resolve(jsonResponse({ csrf_token: TEST_CSRF_TOKEN }))
     }
+    if (target.endsWith('/judge/jobs'))
+      return Promise.resolve(jsonResponse({ id: 'durable', status: 'queued', total: 2 }, 202))
     const snapshotMatch = target.match(/episodes\/(\d+)\/judge\/snapshot$/)
     if (snapshotMatch)
       return Promise.resolve(
@@ -132,7 +139,76 @@ describe('applyOutcomeLabel', () => {
 })
 
 describe('useVlmJudgeBatch', () => {
-  it('stops writeback without acknowledging labels when the server omits its revision', async () => {
+  it('reconnects to durable jobs and excludes retained evidence after access denial', async () => {
+    useDatasetStore.setState({
+      currentDataset: {
+        id: 'ds-1',
+        name: 'Synthetic',
+        totalEpisodes: 2,
+        fps: 30,
+        features: {},
+        tasks: [],
+      },
+    })
+    let denied = false
+    mockFetch.mockImplementation(async (url: string) => {
+      if (String(url).includes('/judge/jobs?'))
+        return denied
+          ? jsonResponse({ detail: 'Denied' }, 403)
+          : jsonResponse({
+              items: [{ id: 'durable', status: 'running', judged: 1, applied: 0 }],
+              total: 1,
+            })
+      if (String(url).includes('/resets?')) return jsonResponse({ detail: 'Missing' }, 404)
+      return jsonResponse({ items: [], total: 0 })
+    })
+    const { result } = renderHookWithProviders(() => useJudgeDataset('ds-1', 0, true), {
+      queryClient,
+    })
+    await waitFor(() => expect(result.current.jobs.data?.items[0].id).toBe('durable'))
+    denied = true
+    await act(async () => {
+      await result.current.jobs.refetch()
+    })
+    await waitFor(() => expect(result.current.jobs.data).toBeUndefined())
+    await act(async () => {
+      await expect(result.current.act({ kind: 'cancel', jobId: 'durable' })).rejects.toThrow(
+        /context/,
+      )
+    })
+    expect(mockFetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
+  })
+  it('submits sparse targets once with saved references and never writes browser labels', async () => {
+    routeFetch({ 3: true, 1005: false })
+    const route = mockFetch.getMockImplementation()!
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/judge/jobs'))
+        return jsonResponse({ id: 'durable', status: 'queued', total: 2 }, 202)
+      return route(url, init)
+    })
+    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1'), { queryClient })
+    await act(async () => {
+      await result.current.submit({
+        indices: [3, 1005],
+        mode: 'judge-and-label',
+        approvalId: 'approval',
+        options: { processMethod: 'chronological' },
+      })
+    })
+    const calls = mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/judge/jobs'))
+    expect(calls).toHaveLength(1)
+    const payload = JSON.parse(String(calls[0][1]?.body))
+    expect(payload.episode_indices).toEqual([3, 1005])
+    expect(payload.approval_id).toBe('approval')
+    expect(payload.options.process_method).toBe('chronological')
+    expect(Object.keys(payload.snapshot_ids)).toEqual(['3', '1005'])
+    expect(
+      mockFetch.mock.calls.some(
+        ([url]) => String(url).endsWith('/labels') || String(url).endsWith('/judge'),
+      ),
+    ).toBe(false)
+  })
+  it('leaves label acknowledgment and conditional application to the durable backend', async () => {
     routeFetch({ 0: true, 1: false })
     const route = mockFetch.getMockImplementation()!
     mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -140,13 +216,16 @@ describe('useVlmJudgeBatch', () => {
       if (String(url).endsWith('/labels')) response.headers.delete('ETag')
       return response
     })
-    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1', 2), { queryClient })
+    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1'), { queryClient })
     await act(async () => {
-      await result.current.applyLabelsAll()
+      await result.current.submit({
+        indices: [0, 1],
+        mode: 'judge-and-label',
+        approvalId: 'approval',
+      })
     })
-    expect(result.current.error).toMatch(/acknowledg|revision/i)
     expect(useLabelStore.getState().savedEpisodeLabels[0]).toBeUndefined()
-    expect(mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/labels'))).toHaveLength(1)
+    expect(mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/labels'))).toHaveLength(0)
   })
 
   it('does not apply a late result after the active dataset changes', async () => {
@@ -154,7 +233,7 @@ describe('useVlmJudgeBatch', () => {
     const route = mockFetch.getMockImplementation()!
     mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
       const response = await route(url, init)
-      if (String(url).endsWith('/judge')) {
+      if (String(url).endsWith('/snapshot')) {
         useDatasetStore.setState({
           currentDataset: {
             id: 'another',
@@ -168,12 +247,14 @@ describe('useVlmJudgeBatch', () => {
       }
       return response
     })
-    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1', 1), { queryClient })
+    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1'), { queryClient })
     await act(async () => {
-      await result.current.applyLabelsAll()
+      await expect(
+        result.current.submit({ indices: [0], mode: 'judge', approvalId: 'approval' }),
+      ).rejects.toThrow(/context|scope/i)
     })
     expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith('/labels'))).toBe(false)
-    expect(result.current.error).toMatch(/context|scope/i)
+    expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith('/judge/jobs'))).toBe(false)
   })
 
   it('dispatches no targets until an unmounted selected draft is resolved', async () => {
@@ -184,76 +265,75 @@ describe('useVlmJudgeBatch', () => {
       savedEpisodeLabels: { 1: ['SUCCESS'] },
       baseEtag: 'one',
     })
-    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1', 2), { queryClient })
+    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1'), { queryClient })
     await act(async () => {
-      await result.current.runAll()
+      await expect(
+        result.current.submit({ indices: [0, 1], mode: 'judge', approvalId: 'approval' }),
+      ).rejects.toThrow(/Episode 1/)
     })
     expect(mockFetch).not.toHaveBeenCalled()
-    expect(result.current.error).toMatch(/Episode 1/)
     await persistLabelDraft('ds-1', 'principal-one', null)
     await act(async () => {
-      await result.current.runAll()
+      await result.current.submit({ indices: [0, 1], mode: 'judge', approvalId: 'approval' })
     })
-    expect(mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/judge'))).toHaveLength(2)
+    expect(
+      mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/judge/jobs')),
+    ).toHaveLength(1)
   })
 
-  it('runs the judge on every episode with the selected method', async () => {
+  it('submits the exact selected method and saved target references', async () => {
     routeFetch({ 0: true, 1: false })
 
-    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1', 2), { queryClient })
+    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1'), { queryClient })
     await act(async () => {
-      await result.current.runAll({ processMethod: 'chronological' })
+      await result.current.submit({
+        indices: [0, 1],
+        mode: 'judge',
+        approvalId: 'approval',
+        options: { processMethod: 'chronological' },
+      })
     })
 
-    const judgeCalls = mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/judge'))
-    expect(judgeCalls.map(([url]) => url)).toEqual([
-      '/api/datasets/ds-1/episodes/0/judge',
-      '/api/datasets/ds-1/episodes/1/judge',
-    ])
-    expect(JSON.parse(judgeCalls[0][1].body).process_method).toBe('chronological')
-    expect(JSON.parse(judgeCalls[0][1].body).snapshot_id).toBe('a'.repeat(64))
+    const judgeCalls = mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/judge/jobs'))
+    expect(judgeCalls).toHaveLength(1)
+    expect(JSON.parse(judgeCalls[0][1].body).options.process_method).toBe('chronological')
+    expect(JSON.parse(judgeCalls[0][1].body).snapshot_ids['0']).toBe('a'.repeat(64))
     // No label writes during a plain run.
     expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith('/labels'))).toBe(false)
-    expect(result.current.isRunning).toBe(false)
-    expect(result.current.progress).toBeNull()
   })
 
-  it('applies mapped outcome labels to every episode and preserves custom labels', async () => {
+  it('submits labeling intent without mutating local label drafts', async () => {
     routeFetch({ 0: true, 1: false })
     useLabelStore.getState().setEpisodeLabels(0, ['REVIEW'])
 
-    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1', 2), { queryClient })
+    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1'), { queryClient })
     await act(async () => {
-      await result.current.applyLabelsAll({ processMethod: 'gvl' })
+      await result.current.submit({
+        indices: [0, 1],
+        mode: 'judge-and-label',
+        approvalId: 'approval',
+        options: { processMethod: 'gvl' },
+      })
     })
 
     const labelPuts = mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/labels'))
-    expect(labelPuts).toHaveLength(2)
-    expect(JSON.parse(labelPuts[0][1].body)).toEqual({
-      labels: ['REVIEW', 'SUCCESS'],
-      intent: 'legacy-unknown',
-    })
-    expect(JSON.parse(labelPuts[1][1].body)).toEqual({
-      labels: ['FAILURE'],
-      intent: 'legacy-unknown',
-    })
+    expect(labelPuts).toHaveLength(0)
 
     const store = useLabelStore.getState()
-    expect(store.episodeLabels[0]).toEqual(['REVIEW', 'SUCCESS'])
-    expect(store.episodeLabels[1]).toEqual(['FAILURE'])
-    expect(store.savedEpisodeLabels[1]).toEqual(['FAILURE'])
-    expect(store.baseEtag).toBe('"labels-1"')
+    expect(store.episodeLabels[0]).toEqual(['REVIEW'])
+    expect(store.savedEpisodeLabels[1]).toBeUndefined()
   })
 
-  it('does nothing when the dataset has no episodes', async () => {
+  it('rejects an empty target selection without network calls', async () => {
     routeFetch({})
 
-    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1', 0))
+    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1'))
     await act(async () => {
-      await result.current.runAll()
+      await expect(result.current.submit({ indices: [], mode: 'judge' })).rejects.toThrow(
+        /Select actual episode IDs/,
+      )
     })
 
     expect(mockFetch).not.toHaveBeenCalled()
-    expect(result.current.progress).toBeNull()
   })
 })

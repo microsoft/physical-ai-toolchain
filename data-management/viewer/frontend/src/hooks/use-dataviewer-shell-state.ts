@@ -26,12 +26,15 @@ function allowNavigation(): boolean {
 }
 
 export function useDataviewerShellState({ datasets, episodes }: UseDataviewerShellStateOptions) {
-  const [datasetIdState, setDatasetIdState] = useState('')
+  const [datasetIdState, setDatasetIdState] = useState(
+    () => new URLSearchParams(window.location.search).get('dataset') ?? '',
+  )
   const [selectedEpisode, setSelectedEpisodeState] = useState<number>(0)
   const [diagnosticsVisible, setDiagnosticsVisible] = useState(() => isDiagnosticsEnabled())
   const [isWarmingCache, setIsWarmingCache] = useState(false)
   const setDatasets = useDatasetStore((state) => state.setDatasets)
   const selectDataset = useDatasetStore((state) => state.selectDataset)
+  const clearSelection = useDatasetStore((state) => state.clearSelection)
   const warmedRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -45,41 +48,24 @@ export function useDataviewerShellState({ datasets, episodes }: UseDataviewerShe
   }, [])
 
   useEffect(() => {
-    if (!datasets || datasets.length === 0) {
-      if (datasetIdState) {
-        setDatasetIdState('')
-        setSelectedEpisodeState(0)
-      }
-      return
-    }
-
-    const hasSelectedDataset = datasets.some((dataset) => dataset.id === datasetIdState)
-
-    if (!datasetIdState || !hasSelectedDataset) {
-      const autoId = datasets[0].id
-      setDatasetIdState(autoId)
+    if (datasets && datasetIdState && !datasets.some((dataset) => dataset.id === datasetIdState)) {
+      setDatasetIdState('')
       setSelectedEpisodeState(0)
-
-      if (autoId !== warmedRef.current) {
-        warmedRef.current = autoId
-        setIsWarmingCache(true)
-        void warmCache(autoId, 5).finally(() => setIsWarmingCache(false))
-      }
+      clearSelection()
     }
-  }, [datasets, datasetIdState])
+  }, [datasets, datasetIdState, clearSelection])
 
   useEffect(() => {
-    if (!datasets || datasets.length === 0) {
-      setDatasets([])
-      return
-    }
+    if (!datasets) return
 
     setDatasets(datasets)
 
     if (datasetIdState) {
       selectDataset(datasetIdState)
+    } else {
+      clearSelection()
     }
-  }, [datasetIdState, datasets, selectDataset, setDatasets])
+  }, [datasetIdState, datasets, selectDataset, setDatasets, clearSelection])
 
   const selectedDataset = useMemo(
     () => datasets?.find((dataset) => dataset.id === datasetIdState) ?? null,
@@ -90,7 +76,7 @@ export function useDataviewerShellState({ datasets, episodes }: UseDataviewerShe
   const canGoNextEpisode = totalEpisodes > 0 && selectedEpisode < totalEpisodes - 1
 
   const setDatasetId = useCallback((nextDatasetId: string) => {
-    if (!allowNavigation()) return
+    if (!allowNavigation()) return false
     setDatasetIdState(nextDatasetId)
     setSelectedEpisodeState(0)
 
@@ -99,6 +85,7 @@ export function useDataviewerShellState({ datasets, episodes }: UseDataviewerShe
       setIsWarmingCache(true)
       void warmCache(nextDatasetId, 5).finally(() => setIsWarmingCache(false))
     }
+    return true
   }, [])
 
   const setSelectedEpisode = useCallback((episodeIndex: number) => {

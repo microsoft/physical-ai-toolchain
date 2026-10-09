@@ -68,6 +68,26 @@ class TestPrefixHelpers:
 class TestGetClient:
     """Client construction and caching."""
 
+    @pytest.mark.parametrize("failure", ["client", "walk", "probe"])
+    async def test_strict_catalog_scan_propagates_failure_without_private_logs(
+        self, failure: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        provider = create_blob_dataset_provider()
+        client = MagicMock()
+        container = client.get_container_client.return_value
+        provider._get_client = AsyncMock(return_value=client)
+        error = OSError("private storage details")
+        if failure == "client":
+            provider._get_client.side_effect = error
+        elif failure == "walk":
+            container.walk_blobs.side_effect = error
+        else:
+            container.walk_blobs.return_value = _AsyncIter([_make_blob("dataset/")])
+            container.get_blob_client.return_value.get_blob_properties = AsyncMock(side_effect=error)
+        with pytest.raises(OSError):
+            await provider.scan_all_dataset_ids(strict=True)
+        assert "private storage" not in caplog.text
+
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     @patch("src.api.storage.blob_dataset.BlobServiceClient")
     async def test_dataset_exists_uses_sas_when_provided(self, mock_blob_service: MagicMock) -> None:

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -16,9 +16,33 @@ const { mockIsDiagnosticsEnabled, mockEnableDiagnostics, mockDisableDiagnostics 
 )
 
 let mockDatasets: DatasetInfo[] = []
+let mockCatalogError: Error | null = null
+const mockCatalogDiagnostic = vi.fn()
 
 vi.mock('@/hooks/use-datasets', () => ({
   useDatasets: () => ({ data: mockDatasets }),
+  useDataset: (id?: string) => ({ data: mockDatasets.find((dataset) => dataset.id === id) }),
+  useDatasetCatalog: (options: { query?: string; offset?: number; limit?: number }) => ({
+    data: {
+      items: mockDatasets
+        .filter((dataset) =>
+          `${dataset.id} ${dataset.name}`.toLowerCase().includes(options.query ?? ''),
+        )
+        .slice(options.offset ?? 0, (options.offset ?? 0) + (options.limit ?? 25)),
+      total: mockDatasets.length,
+      catalogTotal: mockDatasets.length,
+      groups: [],
+      snapshotId: 'catalog-revision',
+      offset: 0,
+      limit: 25,
+      stale: false,
+      refreshFailed: false,
+    },
+    isLoading: false,
+    isFetching: false,
+    error: mockCatalogError,
+    refreshCatalog: vi.fn(),
+  }),
   useCapabilities: () => ({ data: undefined }),
   useEpisodes: () => ({
     data: [
@@ -31,6 +55,8 @@ vi.mock('@/hooks/use-datasets', () => ({
   }),
   useEpisode: (_datasetId: string, episodeIndex: number) => ({
     data: {
+      sourceId: 'synthetic-source',
+      sourceRevision: 'synthetic-revision',
       meta: { index: episodeIndex, length: 12 },
       videoUrls: undefined,
       cameras: [],
@@ -45,11 +71,34 @@ vi.mock('@/hooks/use-joint-config', () => ({
   useJointConfig: () => undefined,
 }))
 
+vi.mock('@/hooks/use-vlm-judge-batch', () => ({
+  useJudgeDataset: () => ({
+    inventory: {},
+    jobs: {},
+    approvals: {},
+    reset: {},
+    review: {},
+    act: vi.fn(),
+    refresh: vi.fn(),
+  }),
+  useVlmJudgeBatch: () => ({ submit: vi.fn(), isPending: false }),
+  useJudgeSamples: () => ({ data: [] }),
+}))
+
+vi.mock('@/hooks/use-episode-readiness', () => ({
+  useEpisodeReadiness: () => ({ ready: true }),
+}))
+
+vi.mock('@/hooks/use-principal-context', () => ({
+  usePrincipalContext: () => ({ data: { scopeId: 'principal-one' } }),
+}))
+
 vi.mock('@/hooks/use-labels', () => ({
   useDatasetLabels: () => undefined,
 }))
 
 vi.mock('@/lib/playback-diagnostics', () => ({
+  recordDiagnosticEvent: (...args: unknown[]) => mockCatalogDiagnostic(...args),
   disableDiagnostics: mockDisableDiagnostics,
   enableDiagnostics: mockEnableDiagnostics,
   isDiagnosticsEnabled: mockIsDiagnosticsEnabled,
@@ -94,7 +143,80 @@ vi.mock('@/components/annotation-workspace/AnnotationWorkspace', () => ({
 }))
 
 describe('AppContent', () => {
+  it('replaces both episode panes while retaining drafts and frame state without autoplay', async () => {
+    const user = userEvent.setup()
+    render(<AppContent />)
+    const editor = await screen.findByText('Annotation Workspace')
+    act(() => {
+      useEpisodeStore.setState({ currentFrame: 7, isPlaying: true })
+      useLabelStore.getState().setEpisodeLabels(0, ['human draft'])
+    })
+    await user.click(screen.getByRole('button', { name: 'Dataset workspace' }))
+    expect(editor).not.toBeVisible()
+    expect(screen.getByText('Label Filter')).not.toBeVisible()
+    expect(screen.getByRole('button', { name: 'Dataset workspace' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    expect(useEpisodeStore.getState().isPlaying).toBe(false)
+    await user.click(screen.getByRole('button', { name: 'Return to episode' }))
+    expect(editor).toBeVisible()
+    expect(useEpisodeStore.getState().currentFrame).toBe(7)
+    expect(useEpisodeStore.getState().isPlaying).toBe(false)
+    expect(useLabelStore.getState().episodeLabels[0]).toEqual(['human draft'])
+    expect(screen.getByRole('button', { name: 'Dataset workspace' })).toHaveFocus()
+  })
+  it('retains catalog summaries on refresh failure without logging private error content', async () => {
+    window.history.replaceState(null, '', '/')
+    mockCatalogError = new Error('private storage query')
+    render(<AppContent />)
+    expect(screen.getByRole('alert')).toHaveTextContent('Catalog unavailable')
+    expect(screen.getByRole('option', { name: /houston_lerobot_fixed/ })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(mockCatalogDiagnostic).toHaveBeenCalledWith('navigation', 'catalog-fetch-error', {
+        retained: true,
+      }),
+    )
+    expect(JSON.stringify(mockCatalogDiagnostic.mock.calls)).not.toContain('private')
+  })
+  it('pages a large catalog and restores the search and row focus after selection', async () => {
+    window.history.replaceState(null, '', '/')
+    mockDatasets = Array.from({ length: 1000 }, (_, index) => ({
+      id: `group--${String(index).padStart(4, '0')}`,
+      name: 'Repeated name',
+      totalEpisodes: index,
+      fps: 30,
+      features: {},
+      tasks: [],
+    }))
+    const user = userEvent.setup()
+    render(<AppContent />)
+    expect(screen.getAllByRole('option')).toHaveLength(29)
+    await user.click(screen.getByRole('button', { name: 'Next catalog page' }))
+    expect(screen.getByRole('option', { name: /group--0025/ })).toBeInTheDocument()
+    await user.type(screen.getByRole('combobox', { name: 'Filter datasets' }), '0999')
+    await user.keyboard('{ArrowDown}{Enter}')
+    expect(await screen.findByText('Annotation Workspace')).toBeVisible()
+    act(() => useEpisodeStore.setState({ isPlaying: true }))
+    await user.click(screen.getByRole('button', { name: 'Dataset' }))
+    expect(useEpisodeStore.getState().isPlaying).toBe(false)
+    expect(screen.getByRole('combobox', { name: 'Filter datasets' })).toHaveValue('0999')
+    expect(screen.getByRole('option', { name: /group--0999/ })).toHaveFocus()
+    await user.keyboard('{Escape}')
+    expect(useEpisodeStore.getState().isPlaying).toBe(false)
+    expect(screen.getByRole('button', { name: 'Dataset' })).toHaveFocus()
+  })
+  it('starts in the catalog without selecting or mounting an episode workspace', async () => {
+    window.history.replaceState(null, '', '/')
+    render(<AppContent />)
+    expect(await screen.findByRole('heading', { name: 'Datasets' })).toBeInTheDocument()
+    expect(screen.queryByText('Annotation Workspace')).not.toBeInTheDocument()
+    expect(useDatasetStore.getState().currentDataset).toBeNull()
+  })
   beforeEach(() => {
+    mockCatalogError = null
+    mockCatalogDiagnostic.mockClear()
+    window.history.replaceState(null, '', '/?dataset=houston_lerobot_fixed')
     mockDatasets = [
       {
         id: 'houston_lerobot_fixed',
@@ -118,7 +240,10 @@ describe('AppContent', () => {
     useLabelStore.getState().reset()
   })
 
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    window.history.replaceState(null, '', '/')
+  })
 
   beforeEach(() => {
     mockIsDiagnosticsEnabled.mockReturnValue(false)
@@ -126,7 +251,7 @@ describe('AppContent', () => {
     mockDisableDiagnostics.mockClear()
   })
 
-  it('switches away from a removed selected dataset when the dataset list refreshes', async () => {
+  it('does not silently replace a directly selected dataset when catalog contents change', async () => {
     const { rerender } = render(<AppContent />)
 
     await waitFor(() => {
@@ -149,11 +274,14 @@ describe('AppContent', () => {
     rerender(<AppContent />)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Dataset' })).toHaveTextContent('customer_lerobot')
+      expect(screen.getByRole('button', { name: 'Dataset' })).toHaveTextContent(
+        'houston_lerobot_fixed',
+      )
     })
   })
 
   it('renders a filterable dataset dropdown even when only one dataset is available', async () => {
+    window.history.replaceState(null, '', '/?dataset=customer_lerobot')
     mockDatasets = [
       {
         id: 'customer_lerobot',
@@ -176,7 +304,7 @@ describe('AppContent', () => {
     await user.click(trigger)
 
     expect(screen.getByPlaceholderText('Filter datasets')).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'customer_lerobot' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /customer_lerobot/ })).toBeInTheDocument()
   })
 
   it('supports keyboard selection from the dataset dropdown results', async () => {

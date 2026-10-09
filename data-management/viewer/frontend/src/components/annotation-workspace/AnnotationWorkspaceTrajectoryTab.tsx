@@ -111,13 +111,12 @@ export function AnnotationWorkspaceTrajectoryTab({
             <div className="space-y-6">
               <CollapsibleSection title="Episode Labels">{labelPanel}</CollapsibleSection>
               <CollapsibleSection title="Episode Analysis" className="border-t pt-6">
+                <h2 className="mb-3 text-sm font-semibold">Episode Analysis</h2>
+                {judgePanel}
                 {analysisCard}
               </CollapsibleSection>
               <CollapsibleSection title="Language Instructions" className="border-t pt-6">
                 {languageInstructionPanel}
-              </CollapsibleSection>
-              <CollapsibleSection title="VLM Judge" className="border-t pt-6">
-                {judgePanel}
               </CollapsibleSection>
               <CollapsibleSection title="Object Detection" className="border-t pt-6">
                 {objectDetectionPanel}

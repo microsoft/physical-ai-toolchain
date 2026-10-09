@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import multiprocessing
 from pathlib import Path
 
@@ -13,6 +14,9 @@ from evaluation.vlm_judge.saved_input import SavedInputSnapshot
 
 
 class Resolver:
+    async def episode_indices(self, dataset_id: str, *, principal_scope_id: str) -> list[int]:
+        return [3, 1005]
+
     async def validation_sample(
         self,
         dataset_id: str,
@@ -60,11 +64,279 @@ async def infer(record: EpisodeRecord, snapshot: SavedInputSnapshot, config: dic
     ).to_dict()
 
 
+def test_withdrawal_removes_accepted_machine_values_but_preserves_human_and_motion() -> None:
+    from evaluation.vlm_judge.curation import DatasetLabelsFile, EpisodeAnalysisRecord, MachineOrigin
+    from evaluation.vlm_judge.curation_storage import plan_withdrawal
+
+    labels = DatasetLabelsFile(dataset_id="dataset")
+    origin = MachineOrigin(
+        run_id="run",
+        result_id="result",
+        run_order=1,
+        source_revision="source",
+        input_revision="input",
+        config_revision="config",
+    )
+    labels.apply_analysis(
+        3, EpisodeAnalysisRecord(object="cup", grasp_success=True), author_id="actor", machine_origin=origin
+    )
+    machine_object = next(
+        item for item in labels.provenance["3"].contributions if item.field == "analysis/object" and item.machine
+    )
+    labels.provenance["3"].accept(machine_object.id, "human")
+    labels.apply_analysis(3, EpisodeAnalysisRecord(grasp_success=False, smoothness=0.7), author_id="human")
+    labels.apply_analysis(4, EpisodeAnalysisRecord(object="cup"), author_id="human")
+    labels.apply_analysis(4, EpisodeAnalysisRecord(object="cup"), author_id="human", machine_origin=origin)
+    labels.analysis["5"] = EpisodeAnalysisRecord(object="unknown legacy", smoothness=0.9)
+
+    projected, summary = plan_withdrawal(labels, {"run"})
+
+    assert labels.analysis["3"].object == "cup"
+    assert projected.analysis["3"].object is None
+    assert projected.analysis["3"].grasp_success is False
+    assert projected.analysis["3"].smoothness == 0.7
+    assert projected.analysis["4"].object == "cup"
+    assert projected.analysis["5"].object == "unknown legacy"
+    assert summary["accepted_unchanged"] == 1
+    assert summary["preserved_human"] >= 2
+    assert summary["legacy_unknown"] >= 1
+    assert machine_object.id in projected.provenance["3"].withdrawn
+    repeated, second_summary = plan_withdrawal(projected, {"run"})
+    assert repeated == projected
+    assert second_summary["removable_fields"] == 0
+
+
+def test_withdrawal_clears_derived_findings_without_reviving_overlapping_runs() -> None:
+    from evaluation.vlm_judge.curation import DatasetLabelsFile, EpisodeAnalysisRecord, MachineOrigin
+    from evaluation.vlm_judge.curation_storage import plan_withdrawal
+
+    labels = DatasetLabelsFile(dataset_id="dataset")
+    origin = MachineOrigin(
+        run_id="older",
+        result_id="first",
+        run_order=1,
+        source_revision="source",
+        input_revision="input",
+        config_revision="config",
+    )
+    labels.apply_analysis(3, EpisodeAnalysisRecord(object="older value"), author_id="actor", machine_origin=origin)
+    labels.apply_analysis(
+        3,
+        EpisodeAnalysisRecord(object="new value"),
+        author_id="actor",
+        machine_origin=origin.model_copy(update={"run_id": "newer", "run_order": 2}),
+    )
+    ledger = labels.provenance["3"]
+    parent = next(item for item in ledger.contributions if item.machine and item.machine.run_id == "newer")
+    ledger.contributions.append(
+        parent.model_copy(
+            update={
+                "id": "derived",
+                "field": "analysis/notes",
+                "origin": "template",
+                "machine": None,
+                "derived_from": [parent.id],
+                "value": "derived note",
+            }
+        )
+    )
+    labels.analysis["3"].notes = "derived note"
+    projected, summary = plan_withdrawal(labels, {"older", "newer"})
+    assert projected.analysis["3"].object is None
+    assert projected.analysis["3"].notes is None
+    assert "derived" in projected.provenance["3"].withdrawn
+    assert summary["conflicts"] == 0
+    assert plan_withdrawal(projected, {"older", "newer"})[0] == projected
+
+
 def manager(root: Path, **kwargs: object) -> object:
     from evaluation.vlm_judge.job_storage import LocalJobStore
     from evaluation.vlm_judge.jobs import JudgeJobs
 
     return JudgeJobs(LocalJobStore(root), Resolver(), infer, capacity_scope="test-device", **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_reset_preview_is_revision_bound_and_fences_all_dataset_workers(tmp_path: Path) -> None:
+    from evaluation.vlm_judge.curation import DatasetLabelsFile
+    from evaluation.vlm_judge.curation_storage import LocalCurationStorage, apply_judge_result
+
+    storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
+    jobs = manager(tmp_path / "jobs", curation_storage=storage)
+    completed = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="completed")
+    await jobs.run_once()
+    completed = await jobs.get(completed["id"], "actor")
+    await apply_judge_result(storage, completed, completed["targets"][0])
+    running = await jobs.submit("dataset", "another-actor", [1005], {}, idempotency_key="running")
+    claim = await jobs.claim()
+    preview = await jobs.preview_reset("dataset", "actor")
+    assert set(preview["run_ids"]) == {completed["id"], running["id"]}
+    assert preview["summary"]["removable_fields"] >= 1
+    accepted = await jobs.confirm_reset("dataset", "actor", preview["id"])
+    assert accepted["status"] == "running"
+    with pytest.raises(ValueError, match="withdrawal"):
+        await jobs.submit("dataset", "actor", [3], {}, idempotency_key="blocked")
+    assert not await jobs.publish(claim, result={"late": True})
+
+    restarted = manager(tmp_path / "jobs", curation_storage=storage)
+    assert await restarted.reset_once()
+    assert (await restarted.reset_status("dataset", "actor"))["status"] == "succeeded"
+    assert not await restarted.reset_once()
+    saved = (await storage.load_versioned("dataset")).value or DatasetLabelsFile(dataset_id="dataset")
+    assert "FAILURE" not in saved.episodes["3"]
+    with pytest.raises(ValueError, match="Withdrawn"):
+        await jobs.retry(completed["id"], "actor")
+    assert (await jobs.results("dataset", "actor", 3))[0]["applicability"] == "withdrawn"
+    assert (await jobs.confirm_reset("dataset", "actor", preview["id"]))["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_reset_rejects_new_jobs_or_human_saves_after_preview(tmp_path: Path) -> None:
+    from evaluation.vlm_judge.curation import DatasetLabelsFile
+    from evaluation.vlm_judge.curation_storage import LocalCurationStorage
+
+    storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
+    jobs = manager(tmp_path / "jobs", curation_storage=storage)
+    await jobs.submit("dataset", "actor", [3], {}, idempotency_key="first")
+    preview = await jobs.preview_reset("dataset", "actor")
+    await jobs.submit("dataset", "actor", [1005], {}, idempotency_key="new")
+    with pytest.raises(ValueError, match="preview"):
+        await jobs.confirm_reset("dataset", "actor", preview["id"])
+    preview = await jobs.preview_reset("dataset", "actor")
+    labels = DatasetLabelsFile(dataset_id="dataset")
+    labels.apply_labels(3, ["SUCCESS"], author_id="human")
+    await storage.save("dataset", labels, if_none_match=True)
+    with pytest.raises(ValueError, match="preview"):
+        await jobs.confirm_reset("dataset", "actor", preview["id"])
+    assert (await jobs.preview_reset("dataset", "actor"))["summary"]["preserved_human"] == 1
+
+
+@pytest.mark.asyncio
+async def test_reset_recovers_resource_publication_before_lost_job_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from evaluation.vlm_judge.curation_storage import LocalCurationStorage, apply_judge_result
+
+    storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
+    jobs = manager(tmp_path / "jobs", curation_storage=storage)
+    job = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="first")
+    await jobs.run_once()
+    job = await jobs.get(job["id"], "actor")
+    await apply_judge_result(storage, job, job["targets"][0])
+    preview = await jobs.preview_reset("dataset", "actor")
+    await jobs.confirm_reset("dataset", "actor", preview["id"])
+
+    def interrupted_write(state: object) -> None:
+        raise OSError("private interrupted checkpoint")
+
+    monkeypatch.setattr(jobs.store, "_write", interrupted_write)
+    with pytest.raises(OSError):
+        await jobs.reset_once()
+    saved = await storage.load_versioned("dataset")
+    assert "FAILURE" not in saved.value.episodes["3"]
+    restarted = manager(tmp_path / "jobs", curation_storage=storage)
+    assert await restarted.reset_once()
+    assert (await restarted.reset_status("dataset", "actor"))["status"] == "succeeded"
+    assert (await storage.load_versioned("dataset")).etag == saved.etag
+
+
+@pytest.mark.asyncio
+async def test_reset_preserves_independent_human_sample_approval(tmp_path: Path) -> None:
+    from evaluation.vlm_judge.curation_storage import LocalCurationStorage
+
+    storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
+    jobs = manager(tmp_path / "jobs", curation_storage=storage)
+    sample = await jobs.submit(
+        "dataset",
+        "actor",
+        [3],
+        {},
+        idempotency_key="sample",
+        mode="sample",
+        samples={
+            3: {"annotation_author_id": "human", "annotation_revision": "annotation", "snapshot_id": "snapshot-3"},
+        },
+    )
+    await jobs.run_once()
+    approval = await jobs.approve(sample["id"], "actor")
+    preview = await jobs.preview_reset("dataset", "actor")
+    await jobs.confirm_reset("dataset", "actor", preview["id"])
+    await jobs.reset_once()
+    target = await jobs.submit(
+        "dataset", "actor", [1005], {}, idempotency_key="target", approval_id=approval["id"], require_approval=True
+    )
+    assert target["status"] == "queued"
+
+
+def test_reset_http_requires_mutation_authority_and_returns_durable_status(tmp_path: Path) -> None:
+    from evaluation.vlm_judge.api import build_job_router
+    from evaluation.vlm_judge.curation_storage import LocalCurationStorage
+    from fastapi import Depends, FastAPI, HTTPException
+    from fastapi.testclient import TestClient
+
+    storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
+    jobs = manager(tmp_path / "jobs", curation_storage=storage)
+    allowed = False
+
+    def authorize() -> None:
+        if not allowed:
+            raise HTTPException(403)
+
+    app = FastAPI()
+    app.include_router(
+        build_job_router(
+            lambda: jobs,
+            actor_dependency=lambda: "actor",
+            prepare_config=dict,
+            mutation_dependencies=[Depends(authorize)],
+        )
+    )
+    with TestClient(app) as client:
+        assert client.post("/resets/preview", json={"dataset_id": "dataset"}).status_code == 403
+        allowed = True
+        preview = client.post("/resets/preview", json={"dataset_id": "dataset"})
+        assert preview.status_code == 201, preview.text
+        assert "actor" not in preview.json()
+        accepted = client.post("/resets", json={"dataset_id": "dataset", "preview_id": preview.json()["id"]})
+        assert accepted.status_code == 202, accepted.text
+        assert accepted.headers["Retry-After"] == "1"
+        assert client.get(accepted.headers["Location"]).json()["status"] == "running"
+        asyncio.run(jobs.reset_once())
+        assert client.get(accepted.headers["Location"]).json()["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_reset_cli_preview_confirm_and_status_share_durable_owner(tmp_path: Path) -> None:
+    import argparse
+
+    from evaluation.vlm_judge.curation_storage import LocalCurationStorage
+    from evaluation.vlm_judge.job_cli import add_job_arguments, execute_job_command
+
+    jobs = manager(tmp_path / "jobs", curation_storage=LocalCurationStorage({"dataset": tmp_path / "dataset"}))
+    parser = argparse.ArgumentParser()
+    add_job_arguments(parser)
+    _, preview = await execute_job_command(
+        jobs, parser.parse_args(["--operation", "reset-preview"]), dataset_id="dataset", actor="actor", config={}
+    )
+    code, reset = await execute_job_command(
+        jobs,
+        parser.parse_args(
+            [
+                "--operation",
+                "reset-confirm",
+                "--preview-id",
+                preview["id"],
+            ]
+        ),
+        dataset_id="dataset",
+        actor="actor",
+        config={},
+    )
+    assert code == 0 and reset["status"] == "succeeded"
+    _, status = await execute_job_command(
+        jobs, parser.parse_args(["--operation", "reset-status"]), dataset_id="dataset", actor="actor", config={}
+    )
+    assert status["id"] == reset["id"]
 
 
 @pytest.mark.asyncio
@@ -464,7 +736,8 @@ async def test_service_executor_runs_blocking_inference_off_event_loop(monkeypat
 
 
 class MemoryBlob:
-    def __init__(self) -> None:
+    def __init__(self, *, require_lease: bool = True) -> None:
+        self.require_lease = require_lease
         self.content = None
         self.revision = 0
         self.leased = False
@@ -502,7 +775,7 @@ class MemoryBlob:
 
         return SimpleNamespace(properties=SimpleNamespace(etag=str(self.revision)), readall=readall)
 
-    async def upload_blob(self, content: bytes, **kwargs: object) -> None:
+    async def upload_blob(self, content: bytes, **kwargs: object) -> dict[str, str]:
         from azure.core import MatchConditions
         from azure.core.exceptions import ResourceExistsError, ResourceModifiedError
 
@@ -511,12 +784,92 @@ class MemoryBlob:
         if kwargs.get("overwrite") is False and self.content is not None:
             raise ResourceExistsError("State exists")
         if kwargs.get("overwrite"):
-            assert kwargs.get("lease") is self
+            if self.require_lease:
+                assert kwargs.get("lease") is self
             assert kwargs.get("match_condition") == MatchConditions.IfNotModified
             if kwargs.get("etag") != str(self.revision) or self.reject_publication:
                 raise ResourceModifiedError("State changed")
         self.content = content
         self.revision += 1
+        return {"etag": str(self.revision)}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["local", "blob"])
+@pytest.mark.parametrize("failure", ["storage", "human-edit"])
+async def test_reset_recovery_preserves_humans_and_reports_safe_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    backend: str,
+    failure: str,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from evaluation.vlm_judge.curation import EpisodeAnalysisRecord
+    from evaluation.vlm_judge.curation_storage import LocalCurationStorage, apply_judge_result
+    from evaluation.vlm_judge.job_storage import BlobJobStore, LocalJobStore
+    from evaluation.vlm_judge.jobs import JudgeJobs
+
+    from src.api.services.label_storage import BlobLabelStorage
+
+    caplog.set_level(logging.INFO, logger="evaluation.vlm_judge.jobs")
+    if backend == "blob":
+        client = MagicMock()
+        client.get_container_client.return_value.get_blob_client.return_value = MemoryBlob(require_lease=False)
+        storage = BlobLabelStorage(
+            SimpleNamespace(container_name="synthetic", _get_client=AsyncMock(return_value=client))
+        )
+        store = BlobJobStore(MemoryBlob())
+    else:
+        storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
+        store = LocalJobStore(tmp_path / "jobs")
+    jobs = JudgeJobs(store, Resolver(), infer, capacity_scope="test-device", curation_storage=storage)
+    job = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="first")
+    await jobs.run_once()
+    job = await jobs.get(job["id"], "actor")
+    await apply_judge_result(storage, job, job["targets"][0])
+    preview = await jobs.preview_reset("dataset", "actor")
+    await jobs.confirm_reset("dataset", "actor", preview["id"])
+    if failure == "storage":
+        original_save = storage.save
+        monkeypatch.setattr(storage, "save", AsyncMock(side_effect=OSError("private provider content")))
+    else:
+        resource = await storage.load_versioned("dataset")
+        resource.value.apply_analysis(3, EpisodeAnalysisRecord(notes="human revision"), author_id="human")
+        await storage.save("dataset", resource.value, if_match=resource.etag)
+    assert await jobs.reset_once()
+    reset = await jobs.reset_status("dataset", "actor")
+    assert reset["status"] == ("partial" if failure == "storage" else "conflicted")
+    assert "private provider" not in caplog.text
+    expected_category = "OSError" if failure == "storage" else "RevisionConflictError"
+    assert any(
+        record.levelno == logging.WARNING and expected_category in record.getMessage() for record in caplog.records
+    )
+    with pytest.raises(ValueError, match="withdrawal"):
+        await jobs.submit("dataset", "actor", [1005], {}, idempotency_key="blocked")
+    if failure == "storage":
+        monkeypatch.setattr(storage, "save", original_save)
+        await jobs.retry_reset("dataset", "actor")
+        assert any(
+            record.levelno == logging.INFO and "Withdrawal retry accepted" in record.getMessage()
+            for record in caplog.records
+        )
+    else:
+        with pytest.raises(ValueError, match="preview"):
+            await jobs.retry_reset("dataset", "actor")
+        refreshed = await jobs.preview_reset("dataset", "actor")
+        await jobs.confirm_reset("dataset", "actor", refreshed["id"])
+    restarted = JudgeJobs(store, Resolver(), infer, capacity_scope="test-device", curation_storage=storage)
+    assert await restarted.reset_once()
+    assert (await restarted.reset_status("dataset", "actor"))["status"] == "succeeded"
+    assert "human revision" not in caplog.text
+    assert "private provider" not in caplog.text
+    saved = (await storage.load_versioned("dataset")).value
+    assert "FAILURE" not in saved.episodes["3"]
+    if failure == "human-edit":
+        assert saved.analysis["3"].notes == "human revision"
 
 
 @pytest.mark.asyncio

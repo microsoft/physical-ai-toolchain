@@ -14,6 +14,7 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
@@ -21,7 +22,9 @@ from typing import TYPE_CHECKING, Any
 
 from ...models.datasources import (
     AcceptedDatasetContract,
+    DatasetCatalogPage,
     DatasetInfo,
+    DatasetSummary,
     EpisodeData,
     EpisodeMeta,
     FeatureSchema,
@@ -79,6 +82,12 @@ class DatasetService:
             base_path = os.environ.get("DATA_DIR", "./data")
         self.base_path = base_path
         self._datasets: dict[str, DatasetInfo] = {}
+        self._dataset_formats: dict[str, str] = {}
+        self._catalog_snapshots: dict[str, tuple[float, list[DatasetSummary]]] = {}
+        self._catalog_current: str | None = None
+        self._catalog_refresh_sequence = 0
+        self._catalog_refresh_failed = False
+        self._catalog_lock = asyncio.Lock()
         if storage_adapter is not None:
             self._storage: StorageAdapter = storage_adapter
         else:
@@ -256,6 +265,7 @@ class DatasetService:
         )
         self._datasets[dataset_id] = dataset_info
         self._blob_dataset_ids.add(dataset_id)
+        self._dataset_formats[dataset_id] = "hdf5"
         return dataset_info
 
     async def _discover_blob_dataset(self, dataset_id: str) -> DatasetInfo | None:
@@ -435,6 +445,7 @@ class DatasetService:
 
         dataset_info = handler.discover(dataset_id, dataset_path)
         if dataset_info is not None:
+            self._dataset_formats[dataset_id] = "lerobot" if handler is self._lerobot_handler else "hdf5"
             if "--" in dataset_id:
                 dataset_info.group = "--".join(dataset_id.split("--")[:-1])
             self._datasets[dataset_id] = dataset_info
@@ -444,6 +455,7 @@ class DatasetService:
     def _evict_dataset(self, dataset_id: str) -> None:
         """Remove cached dataset metadata, handler state, and temp dirs for a dataset."""
         self._datasets.pop(dataset_id, None)
+        self._dataset_formats.pop(dataset_id, None)
         self._local_dataset_ids.discard(dataset_id)
         self._blob_dataset_ids.discard(dataset_id)
         synced_dir = self._blob_synced.pop(dataset_id, None)
@@ -502,28 +514,48 @@ class DatasetService:
             if not handled:
                 self._scan_directory(item, current_parts, discovered)
 
-    async def list_datasets(self) -> list[DatasetInfo]:
+    async def list_datasets(self, *, strict: bool = False, refresh_cached: bool = False) -> list[DatasetInfo]:
         """List all available datasets."""
         # Single-pass blob container scan for both LeRobot and HDF5 datasets
         if self._blob_provider is not None:
             try:
-                scan = await self._blob_provider.scan_all_dataset_ids()
+                scan = (
+                    await self._blob_provider.scan_all_dataset_ids(strict=True)
+                    if strict
+                    else await self._blob_provider.scan_all_dataset_ids()
+                )
             except Exception as e:
+                if strict:
+                    raise
                 logger.warning("Failed to scan blob datasets: %s", e)
                 scan = {}
+            if strict:
+                discovered_blob_ids = set(scan.get("lerobot", [])) | set(scan.get("hdf5", []))
+                for dataset_id in self._blob_dataset_ids - discovered_blob_ids:
+                    self._evict_dataset(dataset_id)
             for dataset_id in scan.get("lerobot", []):
-                if dataset_id in self._datasets:
+                self._dataset_formats[dataset_id] = "lerobot"
+                if dataset_id in self._datasets and not refresh_cached:
                     continue
                 try:
-                    await self._discover_blob_dataset(dataset_id)
+                    discovered = await self._discover_blob_dataset(dataset_id)
+                    if strict and discovered is None:
+                        raise ValueError("Catalog dataset metadata unavailable")
                 except Exception as e:
+                    if strict:
+                        raise
                     logger.warning("Failed to discover blob dataset %s: %s", dataset_id, e)
             for dataset_id in scan.get("hdf5", []):
-                if dataset_id in self._datasets:
+                self._dataset_formats[dataset_id] = "hdf5"
+                if dataset_id in self._datasets and not refresh_cached:
                     continue
                 try:
-                    await self._discover_blob_hdf5_dataset(dataset_id)
+                    discovered = await self._discover_blob_hdf5_dataset(dataset_id)
+                    if strict and discovered is None:
+                        raise ValueError("Catalog dataset metadata unavailable")
                 except Exception as e:
+                    if strict:
+                        raise
                     logger.warning("Failed to discover blob HDF5 dataset %s: %s", dataset_id, e)
 
         base = Path(self.base_path)
@@ -534,15 +566,106 @@ class DatasetService:
         try:
             self._scan_directory(base, [], discovered_ids)
         except OSError:
+            if strict:
+                raise
             return list(self._datasets.values())
 
         self._prune_missing_local_datasets(discovered_ids)
 
         for dataset_id in discovered_ids:
-            if dataset_id not in self._datasets:
-                self._discover_dataset(dataset_id)
+            if dataset_id not in self._datasets or refresh_cached:
+                discovered = self._discover_dataset(dataset_id)
+                if strict and discovered is None:
+                    raise ValueError("Catalog dataset metadata unavailable")
 
         return list(self._datasets.values())
+
+    async def query_catalog(
+        self,
+        *,
+        query: str = "",
+        group: str | None = None,
+        sort: str = "name",
+        offset: int = 0,
+        limit: int = 25,
+        snapshot_id: str | None = None,
+        refresh: bool = False,
+    ) -> DatasetCatalogPage:
+        if offset < 0 or not 1 <= limit <= 100 or sort not in {"name", "episodes", "episodes-desc"}:
+            raise ValueError("Invalid catalog page")
+        if snapshot_id is not None and snapshot_id not in self._catalog_snapshots:
+            raise ValueError("Catalog snapshot expired; refresh the catalog")
+        if refresh or self._catalog_current is None:
+            previous = self._catalog_refresh_sequence
+            async with self._catalog_lock:
+                if previous == self._catalog_refresh_sequence:
+                    started = time.monotonic()
+                    try:
+                        datasets = await self.list_datasets(strict=True, refresh_cached=refresh)
+                        summaries = [
+                            DatasetSummary(
+                                id=item.id,
+                                name=item.name,
+                                group=item.group,
+                                total_episodes=item.total_episodes,
+                                format=self._dataset_formats.get(item.id),
+                            )
+                            for item in sorted(datasets, key=lambda item: item.id)
+                        ]
+                        revision = hashlib.sha256(
+                            json.dumps(
+                                [item.model_dump() for item in summaries],
+                                sort_keys=True,
+                            ).encode()
+                        ).hexdigest()
+                        self._catalog_snapshots.pop(revision, None)
+                        self._catalog_snapshots[revision] = (time.monotonic(), summaries)
+                        self._catalog_current = revision
+                        self._catalog_refresh_failed = False
+                        while len(self._catalog_snapshots) > 4:
+                            self._catalog_snapshots.pop(next(iter(self._catalog_snapshots)))
+                        logger.info(
+                            "Catalog refreshed datasets=%d duration_ms=%d",
+                            len(summaries),
+                            int((time.monotonic() - started) * 1000),
+                        )
+                    except Exception as error:
+                        self._catalog_refresh_failed = True
+                        logger.warning(
+                            "Catalog refresh failed category=%s retained=%s",
+                            type(error).__name__,
+                            self._catalog_current is not None,
+                        )
+                        if self._catalog_current is None:
+                            raise
+                    finally:
+                        self._catalog_refresh_sequence += 1
+        selected = snapshot_id if snapshot_id is not None and not refresh else self._catalog_current
+        if selected is None:
+            raise RuntimeError("Catalog discovery unavailable")
+        created, summaries = self._catalog_snapshots[selected]
+        search = query.casefold().strip()
+        items = [
+            item
+            for item in summaries
+            if (group is None or item.group == group)
+            and (not search or search in " ".join((item.id, item.name, item.group or "")).casefold())
+        ]
+        if sort == "name":
+            items.sort(key=lambda item: (item.name.casefold(), item.id))
+        else:
+            items.sort(key=lambda item: (item.total_episodes * (-1 if sort == "episodes-desc" else 1), item.id))
+        return DatasetCatalogPage(
+            items=items[offset : offset + limit],
+            total=len(items),
+            catalog_total=len(summaries),
+            groups=sorted({item.group for item in summaries if item.group is not None}),
+            snapshot_id=selected,
+            offset=offset,
+            limit=limit,
+            stale=self._catalog_refresh_failed or time.monotonic() - created > 60 or selected != self._catalog_current,
+            refresh_failed=self._catalog_refresh_failed,
+        )
 
     async def get_dataset(self, dataset_id: str) -> DatasetInfo | None:
         """Get metadata for a specific dataset."""

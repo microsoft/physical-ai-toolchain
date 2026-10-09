@@ -179,7 +179,7 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
     expect(labelsPanel).toContainElement(screen.getByText('Trajectory Adjustment'))
   })
 
-  it('places the VLM judge controls after the language instruction panel', () => {
+  it('places the single judge flow inside Episode Analysis before language instructions', () => {
     render(<AnnotationWorkspace />)
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: /trajectory viewer/i }), {
@@ -188,7 +188,11 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
     })
 
     const panelText = screen.getByTestId('trajectory-labels-panel').textContent ?? ''
-    expect(panelText.indexOf('Language Instructions')).toBeLessThan(panelText.indexOf('VLM Judge'))
+    expect(panelText.indexOf('Episode Analysis')).toBeLessThan(panelText.indexOf('VLM Judge'))
+    expect(panelText.indexOf('VLM Judge')).toBeLessThan(panelText.indexOf('Language Instructions'))
+    expect(
+      screen.queryByRole('button', { name: /^(Expand|Collapse) VLM Judge$/ }),
+    ).not.toBeInTheDocument()
   })
 
   it('constrains the compact trajectory playback media frame so it does not dominate the viewer', () => {

@@ -8,6 +8,7 @@ import {
   useDatasetLabels,
   useImportAnalysisLabels,
   useRemoveLabelOption,
+  useSavedEpisodeAnalysis,
   useSaveEpisodeLabels,
 } from '@/hooks/use-labels'
 import { useDatasetStore, useEpisodeStore, useLabelStore } from '@/stores'
@@ -73,6 +74,124 @@ afterEach(() => {
 })
 
 describe('use-labels hooks', () => {
+  it('excludes old-source machine findings without hiding human or independent motion evidence', async () => {
+    selectDataset()
+    useEpisodeStore.setState({
+      currentEpisode: {
+        sourceId: 'source',
+        sourceRevision: 'new',
+        meta: { index: 0, length: 3, taskIndex: 0, hasAnnotations: false },
+        cameras: [],
+        videoUrls: {},
+        trajectoryData: [],
+      },
+    })
+    const machine = {
+      run_id: 'run',
+      result_id: 'result',
+      run_order: 1,
+      source_revision: 'old',
+      input_revision: 'input',
+      config_revision: 'config',
+    }
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        dataset_id: 'ds-1',
+        available_labels: [],
+        episodes: {},
+        analysis: { '0': { object: 'cup', notes: 'Human correction', motion_score: 4 } },
+        provenance: {
+          '0': {
+            schema_version: '1.0.0',
+            withdrawn: [],
+            acceptances: {},
+            contributions: [
+              {
+                id: 'object',
+                field: 'analysis/object',
+                origin: 'machine',
+                value: 'cup',
+                sequence: 1,
+                machine,
+              },
+              {
+                id: 'old-notes',
+                field: 'analysis/notes',
+                origin: 'machine',
+                value: 'Old notes',
+                sequence: 2,
+                machine,
+              },
+              {
+                id: 'human',
+                field: 'analysis/notes',
+                origin: 'human',
+                value: 'Human correction',
+                sequence: 3,
+                machine: null,
+              },
+            ],
+          },
+        },
+      }),
+    )
+    const { result } = renderHookWithProviders(() => useSavedEpisodeAnalysis(0))
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.record?.object).toBeUndefined()
+    expect(result.current.record?.notes).toBe('Human correction')
+    expect(result.current.record?.motionScore).toBe(4)
+    expect(result.current.replaced).toBe(true)
+  })
+  it('refreshes saved analysis independently without overwriting dirty labels', async () => {
+    selectDataset()
+    useEpisodeStore.setState({
+      currentEpisode: {
+        sourceId: 'source',
+        sourceRevision: 'one',
+        meta: { index: 0, length: 3, taskIndex: 0, hasAnnotations: false },
+        cameras: [],
+        videoUrls: {},
+        trajectoryData: [],
+      },
+    })
+    mockFetch.mockImplementation(() =>
+      jsonResponse(
+        {
+          dataset_id: 'ds-1',
+          available_labels: [],
+          episodes: {},
+          analysis: { '0': { object: 'cup' } },
+        },
+        { headers: { ETag: 'first' } },
+      ),
+    )
+    const { result } = renderHookWithProviders(() => ({
+      read: useDatasetLabels(),
+      analysis: useSavedEpisodeAnalysis(0),
+    }))
+    await waitFor(() => expect(result.current.analysis.record?.object).toBe('cup'))
+    await waitFor(() => expect(useLabelStore.getState().draftHydrated).toBe(true))
+    act(() => useLabelStore.getState().setEpisodeLabels(0, ['HUMAN DRAFT']))
+    mockFetch.mockImplementation(() =>
+      jsonResponse(
+        {
+          dataset_id: 'ds-1',
+          available_labels: [],
+          episodes: {},
+          analysis: { '0': { object: null, motion_score: 4 } },
+        },
+        { headers: { ETag: 'second' } },
+      ),
+    )
+    await act(async () => {
+      await result.current.analysis.refetch()
+    })
+    await waitFor(() => expect(result.current.analysis.record?.motionScore).toBe(4))
+    expect(result.current.analysis.record?.object).toBeNull()
+    expect(useLabelStore.getState().episodeLabels[0]).toEqual(['HUMAN DRAFT'])
+    expect(useLabelStore.getState().baseEtag).toBe('first')
+    expect(useLabelStore.getState().conflict).not.toBeNull()
+  })
   describe('useDatasetLabels', () => {
     it('retains recovered labels as a conflict after source replacement', async () => {
       selectDataset()
