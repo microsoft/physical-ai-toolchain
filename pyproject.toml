@@ -80,7 +80,7 @@ addopts = [
     "--cov-fail-under=0",
 ]
 markers = [
-    "e2e: marks tests that submit real GPU training jobs (deselect: -m 'not e2e')",
+    "e2e: marks live tests that submit jobs to a deployed environment, some on GPUs (deselect: -m 'not e2e')",
 ]
 filterwarnings = [
     "ignore::marshmallow.warnings.RemovedInMarshmallow4Warning",
