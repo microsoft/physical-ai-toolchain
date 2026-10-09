@@ -114,6 +114,13 @@ function DatasetWorkspaceContent({
   const resetBlocked =
     ['running', 'partial'].includes(resetStatus ?? '') ||
     (resetStatus === 'conflicted' && !resetPublished)
+  const resetBlockReason = !resetBlocked
+    ? null
+    : resetStatus === 'running'
+      ? 'A label removal is running. Batch judging resumes when it finishes.'
+      : resetStatus === 'partial'
+        ? 'A label removal stopped before finishing. Retry it under Remove AI-applied labels.'
+        : 'A label removal was not applied because labels changed after its preview. Create a new preview under Remove AI-applied labels.'
   const approved = workspace.approvals.data?.items.find(
     (approval) => approval.id === approvalId && approval.current,
   )
@@ -173,6 +180,33 @@ function DatasetWorkspaceContent({
     !busy &&
     !resetBlocked
   const review = workspace.review.data
+  const blockReason = (missing: string | null) =>
+    !enabled
+      ? null
+      : (resetBlockReason ??
+        (busy ? 'Waiting for the current operation to finish.' : null) ??
+        (!readiness.ready ? readiness.reason : null) ??
+        missing)
+  const sampleBlockReason = blockReason(
+    sampleIndices.length === 0
+      ? 'Select at least one validation sample.'
+      : samples.error
+        ? 'Saved sample references could not be loaded.'
+        : samples.isFetching
+          ? 'Loading saved human annotations.'
+          : !sampleIndices.every((index) => !!references[index])
+            ? 'Choose a human reference author for every validation sample.'
+            : null,
+  )
+  const targetBlockReason = blockReason(
+    targets.length === 0
+      ? 'Select at least one target episode.'
+      : !approved || !approvalJob
+        ? 'Evaluate validation samples, review them and approve the configuration first, or select a current approval.'
+        : workspace.inventory.error || workspace.approvals.error
+          ? 'Refresh the dataset state before submitting.'
+          : null,
+  )
   const exceptions = review?.targets?.some((target) => target.comparison !== 'agreement')
   const evaluateSamples = () => {
     if (!samplesReady) return
@@ -254,7 +288,14 @@ function DatasetWorkspaceContent({
               <p role="alert">Dataset operation failed. Refresh saved state before retrying.</p>
             )}
             <section aria-label="Target selection" className="space-y-3">
-              <h3 className="font-semibold">Target episodes</h3>
+              <h3 className="font-semibold">Episodes</h3>
+              <p className="text-muted-foreground text-sm">
+                Batch judging runs in order: choose validation samples and their human reference
+                authors, evaluate the samples, review and approve the configuration, then judge
+                targets. <strong>Target</strong> selects an episode for the batch.{' '}
+                <strong>Validation sample</strong> selects an episode with saved human annotations
+                used to check the judge before the batch runs.
+              </p>
               {workspace.inventory.isPending && <p role="status">Loading episode inventory...</p>}
               {workspace.inventory.error && (
                 <p role="alert">Episode inventory could not be loaded.</p>
@@ -269,12 +310,12 @@ function DatasetWorkspaceContent({
                         checked={targets.includes(index)}
                         onChange={() => toggleTarget(index)}
                       />
-                      Episode {index}
+                      Target episode {index}
                     </label>
                     <label className="flex items-center gap-1 text-sm">
                       <input
                         type="checkbox"
-                        aria-label={`Sample episode ${index}`}
+                        aria-label={`Validation sample episode ${index}`}
                         checked={sampleIndices.includes(index)}
                         disabled={!sampleIndices.includes(index) && sampleIndices.length >= 25}
                         onChange={() => {
@@ -286,7 +327,7 @@ function DatasetWorkspaceContent({
                           )
                         }}
                       />
-                      Sample
+                      Validation sample
                     </label>
                   </div>
                 ))}
@@ -318,7 +359,11 @@ function DatasetWorkspaceContent({
               </div>
             </section>
             <section aria-label="Validation samples" className="space-y-3">
-              <h3 className="font-semibold">Saved human samples</h3>
+              <h3 className="font-semibold">Validation samples</h3>
+              <p className="text-muted-foreground text-sm">
+                For each sample, choose whose saved human annotation is the reference the judge is
+                compared against. This does not set who authors AI output.
+              </p>
               {samples.error && (
                 <p role="alert">
                   Saved sample references could not be loaded. Refresh before evaluating.
@@ -329,9 +374,9 @@ function DatasetWorkspaceContent({
                 .map((sample) => (
                   <div key={sample.index} className="space-y-1 border-b py-2 text-sm">
                     <label className="flex flex-wrap items-center gap-2">
-                      Episode {sample.index}
+                      Episode {sample.index} human reference author
                       <select
-                        aria-label={`Saved author for episode ${sample.index}`}
+                        aria-label={`Episode ${sample.index} human reference author`}
                         value={authors[sample.index] ?? ''}
                         onChange={(event) =>
                           setAuthors((current) => ({
@@ -341,7 +386,7 @@ function DatasetWorkspaceContent({
                         }
                         className="rounded border p-2"
                       >
-                        <option value="">Select saved author</option>
+                        <option value="">Select human reference</option>
                         {sample.authors.map((author) => (
                           <option key={author} value={author}>
                             {author}
@@ -358,10 +403,19 @@ function DatasetWorkspaceContent({
                     )}
                   </div>
                 ))}
-              <Button disabled={!enabled || !samplesReady} onClick={evaluateSamples}>
+              <Button
+                disabled={!enabled || !samplesReady}
+                aria-describedby={sampleBlockReason ? 'sample-block-reason' : undefined}
+                onClick={evaluateSamples}
+              >
                 <Play aria-hidden="true" className="mr-1 size-4" />
                 Evaluate samples
               </Button>
+              {sampleBlockReason && (
+                <p id="sample-block-reason" className="text-muted-foreground text-sm">
+                  {sampleBlockReason}
+                </p>
+              )}
               {review && (
                 <div className="space-y-2">
                   <h4 className="font-medium">Job review: {review.status}</h4>
@@ -478,21 +532,26 @@ function DatasetWorkspaceContent({
               {workspace.approvals.error && (
                 <p role="alert">Approval status is unavailable. Refresh before submitting.</p>
               )}
-              <Button disabled={!launchable} onClick={() => submit('judge')}>
+              <Button
+                disabled={!launchable}
+                aria-describedby={targetBlockReason ? 'target-block-reason' : undefined}
+                onClick={() => submit('judge')}
+              >
                 <Play aria-hidden="true" className="mr-1 size-4" />
                 Judge targets
               </Button>
               <Button
                 variant="outline"
                 disabled={!launchable}
+                aria-describedby={targetBlockReason ? 'target-block-reason' : undefined}
                 onClick={() => submit('judge-and-label')}
               >
                 <Play aria-hidden="true" className="mr-1 size-4" />
                 Judge and label targets
               </Button>
-              {!readiness.ready && (
-                <p role="status" className="basis-full text-sm">
-                  {readiness.reason}
+              {targetBlockReason && (
+                <p id="target-block-reason" className="basis-full text-sm">
+                  {targetBlockReason}
                 </p>
               )}
             </section>

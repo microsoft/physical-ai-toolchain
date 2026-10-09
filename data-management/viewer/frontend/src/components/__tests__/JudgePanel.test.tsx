@@ -215,10 +215,16 @@ describe('JudgePanel', () => {
       ],
     })
     render(<DatasetWorkspace datasetId="demo" open enabled onToggle={vi.fn()} />)
-    await user.click(screen.getByRole('checkbox', { name: 'Sample episode 3' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Validation sample episode 3' }))
     expect(screen.getByRole('button', { name: 'Evaluate samples' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Evaluate samples' })).toHaveAccessibleDescription(
+      'Choose a human reference author for every validation sample.',
+    )
+    expect(screen.getByRole('button', { name: 'Judge targets' })).toHaveAccessibleDescription(
+      'Select at least one target episode.',
+    )
     await user.selectOptions(
-      screen.getByRole('combobox', { name: 'Saved author for episode 3' }),
+      screen.getByRole('combobox', { name: 'Episode 3 human reference author' }),
       'reviewer',
     )
     expect(screen.getByText('saved-revision')).toBeInTheDocument()
@@ -226,6 +232,37 @@ describe('JudgePanel', () => {
     expect(submit).toHaveBeenCalledWith(
       expect.objectContaining({ mode: 'sample', indices: [3], samples: { 3: reference } }),
     )
+  })
+
+  it.each([
+    ['conflicted', [{ key: 'labels', status: 'pending' }], /not applied because labels changed/],
+    ['partial', [{ key: 'labels', status: 'pending' }], /Retry it under Remove AI-applied labels/],
+    ['conflicted', [{ key: 'labels', status: 'succeeded' }], null],
+  ])('explains whether a %s label removal blocks batch controls', (status, resources, reason) => {
+    mockBatch.mockReturnValue({ submit: vi.fn(), isPending: false })
+    mockDatasetJobs.mockReturnValue({
+      inventory: { data: { items: [3], total: 1 } },
+      jobs: {},
+      approvals: {},
+      reset: {
+        data: {
+          id: 'reset',
+          status,
+          resources,
+          summary: { fields: [], conflicts: 1, removableFields: 0 },
+        },
+      },
+      review: {},
+      act: mockDatasetAction,
+      refresh: vi.fn(),
+    })
+    render(<DatasetWorkspace datasetId="demo" open enabled onToggle={vi.fn()} />)
+    const description = screen
+      .getByRole('button', { name: 'Evaluate samples' })
+      .getAttribute('aria-describedby')
+    const text = description ? document.getElementById(description)?.textContent : ''
+    if (reason) expect(text).toMatch(reason)
+    else expect(text).toBe('Select at least one validation sample.')
   })
 
   it('requires acknowledgment and confirms only the displayed reset preview', async () => {
