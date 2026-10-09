@@ -22,10 +22,11 @@ const mockReadiness = vi.fn()
 const mockDatasetJobs = vi.fn()
 const mockDatasetAction = vi.fn()
 const mockSampleEvidence = vi.fn()
+const mockPrincipal = vi.fn()
 let principalScope = 'principal-one'
 
 vi.mock('@/hooks/use-principal-context', () => ({
-  usePrincipalContext: () => ({ data: { scopeId: principalScope } }),
+  usePrincipalContext: () => mockPrincipal(),
 }))
 
 vi.mock('@/hooks/use-episode-readiness', () => ({
@@ -94,6 +95,55 @@ function judgeResult(partial: Partial<VlmJudgeResult> = {}): VlmJudgeResult {
 }
 
 describe('JudgePanel', () => {
+  it.each(['disabled', 'checking-access', 'access-error', 'denied'])(
+    'hides batch controls while %s and keeps the return action available',
+    async (state) => {
+      const user = userEvent.setup()
+      const onToggle = vi.fn()
+      if (state === 'checking-access') mockPrincipal.mockReturnValue({ isPending: true })
+      if (state === 'access-error') mockPrincipal.mockReturnValue({ error: new Error('private') })
+      mockDatasetJobs.mockReturnValue({
+        inventory: { isPending: true },
+        jobs: {},
+        approvals: {},
+        reset: {},
+        review: {},
+        denied: state === 'denied',
+      })
+      mockReadiness.mockReturnValue({ ready: false, reason: 'Checking saved episode readiness.' })
+      mockBatch.mockReturnValue({ submit: vi.fn() })
+      render(
+        <DatasetWorkspace
+          datasetId="demo"
+          open
+          enabled={state !== 'disabled'}
+          onToggle={onToggle}
+        />,
+      )
+      const message = {
+        disabled: 'VLM judge is disabled.',
+        'checking-access': 'Checking dataset access...',
+        'access-error': 'Dataset access could not be verified.',
+        denied: 'Dataset operation access is denied.',
+      }[state]
+      expect(screen.getByText(message!)).toBeVisible()
+      expect(screen.queryByRole('button', { name: 'Refresh dataset jobs' })).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('button', {
+          name: /evaluate samples|judge.*targets|preview.*withdrawal|preview label removal/i,
+        }),
+      ).not.toBeInTheDocument()
+      expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+      expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+      expect(screen.queryByText('Loading episode inventory...')).not.toBeInTheDocument()
+      expect(screen.queryByText('Checking saved episode readiness.')).not.toBeInTheDocument()
+      expect(screen.queryByText('0 active jobs')).not.toBeInTheDocument()
+      expect(screen.queryByText('private')).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Return to episode' }))
+      expect(onToggle).toHaveBeenCalledOnce()
+    },
+  )
+
   it.each(['principal', 'source'])('clears selected targets when the %s changes', async (scope) => {
     useEpisodeStore.getState().reset()
     const user = userEvent.setup()
@@ -198,11 +248,11 @@ describe('JudgePanel', () => {
     })
     mockBatch.mockReturnValue({ submit: vi.fn(), isPending: false })
     render(<DatasetWorkspace datasetId="demo" open enabled onToggle={vi.fn()} />)
-    await user.click(screen.getByRole('button', { name: 'Preview VLM withdrawal' }))
+    await user.click(screen.getByRole('button', { name: 'Preview label removal' }))
     expect(screen.getByText('labels.SUCCESS')).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Confirm VLM withdrawal' })).toBeDisabled()
-    await user.click(screen.getByRole('checkbox', { name: 'I reviewed this withdrawal preview' }))
-    await user.click(screen.getByRole('button', { name: 'Confirm VLM withdrawal' }))
+    expect(screen.getByRole('button', { name: 'Confirm label removal' })).toBeDisabled()
+    await user.click(screen.getByRole('checkbox', { name: 'I reviewed this removal preview' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm label removal' }))
     expect(mockDatasetAction).toHaveBeenLastCalledWith({
       kind: 'confirm-reset',
       previewId: 'preview-id',
@@ -250,6 +300,7 @@ describe('JudgePanel', () => {
   })
   beforeEach(() => {
     principalScope = 'principal-one'
+    mockPrincipal.mockImplementation(() => ({ data: { scopeId: principalScope } }))
     mockSampleEvidence.mockReturnValue({ data: [] })
     mockUseStatus.mockReset()
     mockUseCapabilities.mockReset()
