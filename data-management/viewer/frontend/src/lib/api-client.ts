@@ -63,7 +63,10 @@ export async function mutationHeaders(): Promise<Record<string, string>> {
   return { 'X-CSRF-Token': await getCsrfToken(), ...(await getAuthHeaders()) }
 }
 
-/** Fetch wrapper that attaches CSRF + auth headers; caller headers win on key collision. */
+/**
+ * Fetch wrapper that attaches CSRF + auth headers; caller headers win on key collision.
+ * String bodies default to JSON because fetch would otherwise send them as text/plain.
+ */
 export async function mutationFetch(
   input: RequestInfo | URL,
   init: RequestInit = {},
@@ -72,6 +75,7 @@ export async function mutationFetch(
   const needsCsrf = method !== 'GET' && method !== 'HEAD'
   const baseHeaders = needsCsrf ? await mutationHeaders() : await requestHeaders()
   const headers = new Headers(baseHeaders)
+  if (typeof init.body === 'string') headers.set('Content-Type', 'application/json')
   new Headers(init.headers).forEach((value, name) => headers.set(name, value))
   return fetch(input, {
     ...init,

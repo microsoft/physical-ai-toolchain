@@ -22,10 +22,12 @@ import {
   fetchEpisode,
   fetchEpisodes,
   fetchVlmJudgeStatus,
+  mutateJudgeDataset,
   mutationFetch,
   mutationHeaders,
   runVlmJudge,
   saveAnnotation,
+  submitJudgeJob,
   triggerAutoAnalysis,
   warmCache,
 } from '../api-client'
@@ -752,6 +754,60 @@ describe('mutationFetch', () => {
     const headers = new Headers((init as RequestInit).headers)
     expect(headers.get('X-CSRF-Token')).toBe('caller-override')
     expect([...headers.keys()].filter((name) => name === 'x-csrf-token')).toHaveLength(1)
+  })
+
+  it('declares JSON for string bodies while keeping CSRF and caller overrides', async () => {
+    mockMutationFetch(jsonResponse({ ok: true }))
+    await mutationFetch('/api/thing', { method: 'POST', body: '{"a":1}' })
+    const headers = new Headers((mockFetch.mock.calls[1][1] as RequestInit).headers)
+    expect(headers.get('Content-Type')).toBe('application/json')
+    expect(headers.get('X-CSRF-Token')).toBe('test-csrf-token')
+
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
+    await mutationFetch('/api/thing', {
+      method: 'POST',
+      body: 'plain',
+      headers: { 'content-type': 'text/plain' },
+    })
+    expect(
+      new Headers((mockFetch.mock.calls[2][1] as RequestInit).headers).get('Content-Type'),
+    ).toBe('text/plain')
+  })
+
+  it('leaves FormData and bodiless requests without a JSON content type', async () => {
+    mockMutationFetch(jsonResponse({ ok: true }))
+    await mutationFetch('/api/upload', { method: 'POST', body: new FormData() })
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
+    await mutationFetch('/api/thing', { method: 'POST' })
+    for (const call of mockFetch.mock.calls.slice(1)) {
+      expect(new Headers((call[1] as RequestInit).headers).has('Content-Type')).toBe(false)
+    }
+  })
+})
+
+describe('judge JSON mutations', () => {
+  it.each([
+    [{ kind: 'apply', jobId: 'job-1', indices: [0] }, { episode_indices: [0] }],
+    [
+      { kind: 'approve', jobId: 'job-1', acknowledgeExceptions: true },
+      { acknowledge_exceptions: true },
+    ],
+    [{ kind: 'cancel', jobId: 'job-1' }, {}],
+    [{ kind: 'preview-reset' }, { dataset_id: 'ds-1' }],
+  ] as const)('sends %o as an application/json object', async (action, body) => {
+    mockMutationFetch(jsonResponse({ id: 'job-1' }, 202))
+    await mutateJudgeDataset('ds-1', action as never)
+    const init = mockFetch.mock.calls[1][1] as RequestInit
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/json')
+    expect(JSON.parse(init.body as string)).toEqual(body)
+  })
+
+  it('declares JSON when submitting dataset jobs', async () => {
+    mockMutationFetch(jsonResponse({ id: 'job-1' }, 202))
+    await submitJudgeJob('ds-1', { indices: [0], mode: 'judge' } as never, 'request-1')
+    const headers = new Headers((mockFetch.mock.calls[1][1] as RequestInit).headers)
+    expect(headers.get('Content-Type')).toBe('application/json')
+    expect(headers.get('Idempotency-Key')).toBe('request-1')
   })
 })
 

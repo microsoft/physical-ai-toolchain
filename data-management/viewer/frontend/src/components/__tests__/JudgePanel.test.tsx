@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DatasetWorkspace } from '@/components/app-shell/DatasetWorkspace'
 import { JudgePanel } from '@/components/vlm-judge'
+import { ApiClientError } from '@/lib/api-client'
 import { useEpisodeStore } from '@/stores/episode-store'
 import type { VlmJudgeResult, VlmJudgeStatus } from '@/types'
 
@@ -24,6 +25,7 @@ const mockDatasetAction = vi.fn()
 const mockSampleEvidence = vi.fn()
 const mockPrincipal = vi.fn()
 let principalScope = 'principal-one'
+let applicationError: Error | null = null
 
 vi.mock('@/hooks/use-principal-context', () => ({
   usePrincipalContext: () => mockPrincipal(),
@@ -37,7 +39,11 @@ vi.mock('@/hooks/use-vlm-judge', () => ({
   useVlmJudgeStatus: (...args: unknown[]) => mockUseStatus(...args),
   useRunVlmJudge: () => mockUseRun(),
   useJudgeEvidence: () => mockEvidence(),
-  useApplyJudgeResult: () => ({ mutate: mockApplyResult, isPending: false }),
+  useApplyJudgeResult: () => ({
+    mutate: mockApplyResult,
+    isPending: false,
+    error: applicationError,
+  }),
 }))
 
 vi.mock('@/hooks/use-datasets', () => ({
@@ -307,6 +313,7 @@ describe('JudgePanel', () => {
     mockMutate.mockReset()
     mockUseRun.mockReset()
     mockApplyResult.mockReset()
+    applicationError = null
     mockEvidence.mockImplementation(() => ({
       data: {
         items: mockUseStatus()?.data?.result
@@ -573,6 +580,20 @@ describe('JudgePanel', () => {
       runId: 'canonical-run',
     })
     expect(mockSaveLabels).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [new ApiClientError('invalid', 'HTTP_422', 422), /rejected .* as invalid.*will not resolve/i],
+    [new ApiClientError('conflict', 'HTTP_409', 409), /conflicts with newer saved inputs/i],
+  ])('distinguishes application failure %#', (error, message) => {
+    applicationError = error
+    mockUseStatus.mockReturnValue({
+      data: status({ result: judgeResult() }),
+      isLoading: false,
+      error: null,
+    })
+    render(<JudgePanel datasetId="demo" episodeIndex={0} />)
+    expect(screen.getByRole('alert')).toHaveTextContent(message)
   })
 
   it('retains marked withdrawn history without resurrecting a cached status result', () => {

@@ -26,6 +26,7 @@ import {
   useVlmJudgeStatus,
 } from '@/hooks/use-vlm-judge'
 import { outcomeToLabel } from '@/hooks/use-vlm-judge-batch'
+import { ApiClientError } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 import type { VlmJudgeResult } from '@/types'
 
@@ -109,6 +110,25 @@ function displayErrorMessage(error: Error | string): string {
     return 'Add a Language Instruction for this episode, or save one in the dataset metadata, before running the judge.'
   }
   return message
+}
+
+function applicationErrorMessage(error: Error): string {
+  if (error instanceof ApiClientError) {
+    if (error.status === 409 || error.status === 412) {
+      return 'Label application conflicts with newer saved inputs or withdrawn evidence. Refresh saved evidence, then judge the current inputs again if needed.'
+    }
+    if (error.status === 400 || error.status === 422) {
+      return 'The server rejected the label application request as invalid. Refreshing will not resolve this; record Diagnostics and report the issue.'
+    }
+    if (error.status === 401 || error.status === 403) {
+      return 'You are not authorized to apply this label. Sign in again or request access.'
+    }
+    if (error.status === 404) {
+      return 'The judge run was not found. Refresh saved evidence before retrying.'
+    }
+    return 'Label application failed on the server. Retry later; saved evidence is unchanged.'
+  }
+  return `Label application failed: ${error.message}`
 }
 
 export const JudgePanel = memo(function JudgePanel({
@@ -224,9 +244,7 @@ export const JudgePanel = memo(function JudgePanel({
           </Button>
         </div>
       )}
-      {application.error && (
-        <p role="alert">Label application failed. Refresh saved evidence before retrying.</p>
-      )}
+      {application.error && <p role="alert">{applicationErrorMessage(application.error)}</p>}
       {assessment && (
         <p className="text-xs break-all">
           Run {assessment.runId}; model {result?.judgeModel}; input {assessment.input.snapshotId};{' '}

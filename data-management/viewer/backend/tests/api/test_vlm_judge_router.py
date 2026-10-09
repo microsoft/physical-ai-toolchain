@@ -164,11 +164,22 @@ def test_viewer_durable_job_publishes_canonical_evidence_without_labels(
     assert evidence.json()["items"][0]["result"]["instruction"] == INSTRUCTION
     assert evidence.json()["items"][0]["applicability"] == "current"
     assert not (tmp_path / DATASET_ID / "meta" / "episode_labels.json").exists()
-    application = client.post(f"/api/judge/jobs/{response.json()['id']}/apply", json={"episode_indices": [0]})
+    apply_path = f"/api/judge/jobs/{response.json()['id']}/apply"
+    browser_body = json.dumps({"episode_indices": [0]})
+    undeclared = client.post(apply_path, content=browser_body, headers={"Content-Type": "text/plain;charset=UTF-8"})
+    assert undeclared.status_code == 422
+    assert "model_attributes_type" in undeclared.text
+    assert not (tmp_path / DATASET_ID / "meta" / "episode_labels.json").exists()
+    application = client.post(apply_path, content=browser_body, headers={"Content-Type": "application/json"})
     assert application.status_code == 202, application.text
     assert asyncio.run(client.app.state.judge_jobs.run_once())
     applied = client.get(response.headers["Location"]).json()
     assert applied["applied"] == 1
+    assert applied["judged"] == 1
+    reloaded = client.get("/api/judge/results", params={"dataset_id": DATASET_ID, "episode_index": 0}).json()
+    assert [item["run_id"] for item in reloaded["items"]] == [response.json()["id"]]
+    assert reloaded["items"][0]["result_id"] == evidence.json()["items"][0]["result_id"]
+    assert client.get(f"/api/datasets/{DATASET_ID}/labels").json()["episodes"]["0"] == ["SUCCESS"]
     saved = json.loads((tmp_path / DATASET_ID / "meta" / "episode_labels.json").read_text())
     assert saved["episodes"]["0"] == ["SUCCESS"]
     assert saved["analysis"] == {}
