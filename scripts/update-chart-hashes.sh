@@ -14,7 +14,9 @@ show_help() {
 Usage: $(basename "$0") [OPTIONS]
 
 Pull the latest version of each pinned Helm chart, compute its SHA256 hash,
-and update infrastructure/setup/defaults.conf in-place.
+and update infrastructure/setup/defaults.conf in-place. KAI Scheduler keeps
+its pinned version, which follows the release tested with the pinned OSMO
+version: the script refreshes that chart's hash and reports newer releases.
 
 OPTIONS:
     -h, --help               Show this help message
@@ -82,11 +84,23 @@ strip_v_prefix() {
   echo "${version#v}"
 }
 
-# Query the latest semver release tag from a ghcr.io OCI repository.
-# Paginates through the tags list API and returns the highest v* tag.
+# Succeed when a version is in a space-separated version list, ignoring any
+# leading "v" on either side.
+version_in_list() {
+  local version entry
+  version=$(ensure_v_prefix "$1")
+  for entry in $2; do
+    [[ "$(ensure_v_prefix "$entry")" == "$version" ]] && return 0
+  done
+  return 1
+}
+
+# Query the highest stable release tag (vX.Y.Z) from a ghcr.io OCI repository.
+# Paginates through the tags list API, ignores pre-release and build tags, and
+# skips any version in the optional space-separated exclusion list.
 oci_latest_version() {
-  local repo="$1"
-  local token token_url last_tag tags all_tags=""
+  local repo="$1" excluded_list="${2:-}"
+  local token token_url last_tag tags all_tags="" tag
 
   # These are GHCR registry API metadata calls (a short-lived pull token and the
   # tags list), not artifact downloads — there is nothing to checksum here. Chart
@@ -111,7 +125,11 @@ oci_latest_version() {
     [[ "$count" -ge 100 ]] || break
   done
 
-  echo "$all_tags" | grep '^v[0-9]' | sort -V | tail -1
+  while IFS= read -r tag; do
+    [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+    version_in_list "$tag" "$excluded_list" && continue
+    echo "$tag"
+  done <<< "$all_tags" | sort -V | tail -1
 }
 
 pull_chart_sha() {
@@ -161,27 +179,39 @@ else
 fi
 
 # --- KAI Scheduler ---
+# KAI_SCHEDULER_VERSION follows the KAI release NVIDIA tests with the pinned OSMO
+# version, and a version change also needs new operator and CRD-upgrader image
+# digests, so this section never writes the version: it reports newer releases
+# and keeps the pinned chart's hash current.
 section "KAI Scheduler"
-kai_latest=$(oci_latest_version "nvidia/kai-scheduler/kai-scheduler")
+[[ "$HELM_REPO_KAI" =~ ^oci://ghcr\.io/([a-zA-Z0-9._/-]+)$ ]] || \
+  fatal "HELM_REPO_KAI must be an oci://ghcr.io/ chart repository: $HELM_REPO_KAI"
+kai_registry_repo="${BASH_REMATCH[1]}/kai-scheduler"
+kai_retracted="${KAI_SCHEDULER_RETRACTED_VERSIONS:-}"
+kai_latest=$(oci_latest_version "$kai_registry_repo" "$kai_retracted")
 [[ -n "$kai_latest" ]] || fatal "Failed to query latest KAI Scheduler version"
-kai_sha=$(pull_chart_sha "oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler" "$kai_latest" "$tmpdir/kai-scheduler")
+kai_sha=$(pull_chart_sha "${HELM_REPO_KAI}/kai-scheduler" "$KAI_SCHEDULER_VERSION" "$tmpdir/kai-scheduler")
 
-print_kv "Current Version" "$KAI_SCHEDULER_VERSION"
-print_kv "Latest Version"  "$kai_latest"
-print_kv "New SHA256"       "$kai_sha"
+print_kv "Pinned Version"  "$KAI_SCHEDULER_VERSION"
+print_kv "Latest Release"  "$kai_latest"
+print_kv "Pinned SHA256"   "$kai_sha"
 
-if [[ "$kai_latest" != "$KAI_SCHEDULER_VERSION" || "$kai_sha" != "$KAI_SCHEDULER_CHART_SHA256" ]]; then
+if version_in_list "$KAI_SCHEDULER_VERSION" "$kai_retracted"; then
+  warn "KAI_SCHEDULER_VERSION $KAI_SCHEDULER_VERSION is retracted upstream; pin a supported release"
+elif [[ "$(printf '%s\n%s\n' "$KAI_SCHEDULER_VERSION" "$kai_latest" | sort -V | tail -1)" != "$KAI_SCHEDULER_VERSION" ]]; then
+  warn "KAI Scheduler $kai_latest is available; KAI_SCHEDULER_VERSION stays at $KAI_SCHEDULER_VERSION until the pinned OSMO release moves to a newer KAI"
+fi
+
+if [[ "$kai_sha" != "$KAI_SCHEDULER_CHART_SHA256" ]]; then
   if [[ "$dry_run" == "true" ]]; then
-    info "[dry-run] Would update KAI_SCHEDULER_VERSION to $kai_latest"
     info "[dry-run] Would update KAI_SCHEDULER_CHART_SHA256 to $kai_sha"
   else
-    update_default "KAI_SCHEDULER_VERSION" "$kai_latest"
     update_default "KAI_SCHEDULER_CHART_SHA256" "$kai_sha"
-    info "Updated KAI Scheduler to $kai_latest ($kai_sha)"
+    info "Updated KAI Scheduler chart hash for $KAI_SCHEDULER_VERSION ($kai_sha)"
   fi
   updated=$((updated + 1))
 else
-  info "KAI Scheduler is up to date"
+  info "KAI Scheduler chart hash matches $KAI_SCHEDULER_VERSION"
 fi
 
 # --- OSMO Charts ---

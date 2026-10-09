@@ -9,6 +9,10 @@ input. The synthetic LeRobot dataset is registered as an AzureML data asset and 
 both pipeline variants; ``continue_on_step_failure`` is false, so a COMPLETED parent job
 means every step succeeded.
 
+Azure ML occasionally times out while creating a pipeline and leaves a job that never starts.
+The test detects that job (still ``NotStarted`` with no child jobs after a few minutes), cancels
+and archives it, and resubmits once.
+
 ```shell
 uv run pytest -vv -s -m e2e tests/e2e/test_e2e_aml_il_pipeline.py
 ```
@@ -21,15 +25,16 @@ from pathlib import Path
 import pytest
 
 from tests.e2e._aml import (
+    AzureMLCompute,
     AzureMLJob,
     AzureMLWorkspace,
     archive_all_model_versions,
     cancel_aml_job,
     cleanup_aml_job_and_model_versions,
     resolve_registered_model,
+    start_aml_pipeline,
     submit_aml_lerobot_pipeline,
     wait_until_aml_completed,
-    wait_until_aml_started,
 )
 from tests.e2e._common import e2e_name, log_e2e
 from tests.e2e._lerobot_dataset import register_synthetic_lerobot_data_asset
@@ -45,7 +50,6 @@ def pipeline_dataset_asset(
 
 
 @pytest.mark.e2e
-@pytest.mark.usefixtures("aml_compute_target")
 @pytest.mark.parametrize(
     ("policy_type", "should_register"),
     [
@@ -56,6 +60,7 @@ def pipeline_dataset_asset(
 def test_aml_il_pipeline_e2e(
     request: pytest.FixtureRequest,
     aml_workspace: AzureMLWorkspace,
+    aml_compute_target: AzureMLCompute,
     repo_root: Path,
     pipeline_dataset_asset: str,
     policy_type: str,
@@ -65,41 +70,43 @@ def test_aml_il_pipeline_e2e(
     variant = f"{policy_type} {registration}"
     log_e2e(f"Starting AzureML IL (LeRobot) pipeline e2e test {variant}")
     register_model_name = e2e_name("il-pipeline-e2e-aml-model") if should_register else None
-    registered_jobs: list[AzureMLJob] = []
+    submitted_jobs: list[AzureMLJob] = []
     if register_model_name is not None:
+        fallback_model_name = register_model_name
+
+        def archive_models_when_nothing_was_submitted() -> None:
+            if not submitted_jobs:
+                archive_all_model_versions(repo_root, aml_workspace, fallback_model_name)
+
+        request.addfinalizer(archive_models_when_nothing_was_submitted)
+
+    def register_cleanup(job: AzureMLJob) -> None:
+        submitted_jobs.append(job)
+        if register_model_name is None:
+            request.addfinalizer(lambda: cancel_aml_job(job, repo_root))
+            return
         model_name = register_model_name
+        request.addfinalizer(lambda: cleanup_aml_job_and_model_versions(job, repo_root, aml_workspace, model_name))
 
-        def cleanup_registered_pipeline() -> None:
-            if registered_jobs:
-                cleanup_aml_job_and_model_versions(
-                    registered_jobs[0],
-                    repo_root,
-                    aml_workspace,
-                    model_name,
-                )
-            else:
-                archive_all_model_versions(repo_root, aml_workspace, model_name)
+    def submit() -> AzureMLJob:
+        return submit_aml_lerobot_pipeline(
+            repo_root,
+            aml_workspace,
+            dataset_asset=pipeline_dataset_asset,
+            dataset_repo_id="e2e/synthetic-pusht",
+            policy_type=policy_type,
+            training_steps=10,
+            save_freq=5,
+            batch_size=8,
+            eval_episodes=1,
+            register_model_name=register_model_name,
+            compute=aml_compute_target.name,
+        )
 
-        request.addfinalizer(cleanup_registered_pipeline)
-    job = submit_aml_lerobot_pipeline(
-        repo_root,
-        aml_workspace,
-        dataset_asset=pipeline_dataset_asset,
-        dataset_repo_id="e2e/synthetic-pusht",
-        policy_type=policy_type,
-        training_steps=10,
-        save_freq=5,
-        batch_size=8,
-        eval_episodes=1,
-        register_model_name=register_model_name,
+    log_e2e("Submitting the AzureML pipeline and waiting for it to start")
+    job = start_aml_pipeline(
+        submit, repo_root, on_submitted=register_cleanup, timeout_minutes=15, poll_interval_seconds=30
     )
-    if register_model_name is not None:
-        registered_jobs.append(job)
-    else:
-        request.addfinalizer(lambda: cancel_aml_job(job, repo_root))
-
-    log_e2e(f"Waiting for AzureML pipeline job {job.name} to start")
-    wait_until_aml_started(job, repo_root, timeout_minutes=15, poll_interval_seconds=30)
     log_e2e(f"Waiting for AzureML pipeline job {job.name} to complete")
     wait_until_aml_completed(job, repo_root, timeout_minutes=45, poll_interval_seconds=30)
     if register_model_name is not None:

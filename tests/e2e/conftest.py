@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import time
 from dataclasses import dataclass
@@ -11,11 +12,28 @@ from typing import Any
 
 import pytest
 
-from tests.e2e._aml import AzureMLWorkspace
+from tests.e2e._aml import AzureMLCompute, AzureMLWorkspace, aml_compute_from_payload
 from tests.e2e._common import run_command
+from tests.e2e._environment import (
+    ENVIRONMENT_VAR,
+    LOCAL_ENV_FILE,
+    EnvironmentBundle,
+    EnvironmentBundleError,
+    LocalEnvError,
+    activate_named_environment,
+    derive_compute_target,
+    read_local_env,
+)
 
-AML_COMPUTE_NAME_MAX_LENGTH = 16
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_HF_TOKEN_BEFORE = pytest.StashKey[str | None]()
+
 TFVARS_FALLBACK_OUTPUT_KEYS = ("resource_group", "azureml_workspace", "aks_cluster", "storage_account")
+AKS_RESOURCE_ID = re.compile(
+    r"^/subscriptions/(?P<subscription>[^/]+)/resourceGroups/(?P<resource_group>[^/]+)"
+    r"/providers/Microsoft\.ContainerService/managedClusters/(?P<name>[^/]+)$",
+    re.IGNORECASE,
+)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -29,13 +47,41 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_runtest_setup(item: pytest.Item) -> None:
     if item.get_closest_marker("requires_hf_token") is None:
         return
+    # Match scripts/lib/common.sh, which sources the untracked .env.local over the environment.
+    try:
+        local = read_local_env(_REPO_ROOT, ["HF_TOKEN"])
+    except LocalEnvError as error:
+        pytest.fail(f"{item.nodeid} requires HF_TOKEN: {error}", pytrace=False)
+    if "HF_TOKEN" in local:
+        if not local["HF_TOKEN"].strip():
+            pytest.fail(
+                f"{item.nodeid} requires HF_TOKEN: {LOCAL_ENV_FILE} sets it empty, which overrides the environment; "
+                "set it there or remove the line",
+                pytrace=False,
+            )
+        item.stash[_HF_TOKEN_BEFORE] = os.environ.get("HF_TOKEN")
+        os.environ["HF_TOKEN"] = local["HF_TOKEN"]
+        return
     if os.environ.get("HF_TOKEN", "").strip():
         return
 
     pytest.fail(
-        f"{item.nodeid} requires HF_TOKEN for gated Hugging Face model access",
+        f"{item.nodeid} requires HF_TOKEN for gated Hugging Face model access; "
+        f"set it in {LOCAL_ENV_FILE} at the repository root or export it",
         pytrace=False,
     )
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_runtest_teardown(item: pytest.Item) -> None:
+    """Restore the HF_TOKEN that the setup hook replaced, so the file value stays scoped to its test."""
+    if _HF_TOKEN_BEFORE not in item.stash:
+        return
+    before = item.stash[_HF_TOKEN_BEFORE]
+    if before is None:
+        os.environ.pop("HF_TOKEN", None)
+    else:
+        os.environ["HF_TOKEN"] = before
 
 
 @dataclass(frozen=True)
@@ -181,10 +227,36 @@ def _compute_target_name(outputs: TerraformOutputs) -> str:
     if not aks_cluster_name:
         return ""
 
-    compute_name = aks_cluster_name.replace("aks-", "k8s-", 1)
-    if len(compute_name) > AML_COMPUTE_NAME_MAX_LENGTH:
-        compute_name = compute_name[:AML_COMPUTE_NAME_MAX_LENGTH].rstrip("-")
-    return compute_name
+    return derive_compute_target(aks_cluster_name)
+
+
+@cache
+def _activate_named_environment(repo_root: Path) -> EnvironmentBundle | None:
+    return activate_named_environment(repo_root)
+
+
+def _named_environment_active(repo_root: Path) -> bool:
+    """Apply the ``E2E_ENVIRONMENT`` bundle defaults and report whether one is selected.
+
+    A selected but unusable bundle fails the test instead of falling back to local
+    Terraform state, so a misconfigured environment never targets other resources.
+    """
+    try:
+        bundle = _activate_named_environment(repo_root)
+    except EnvironmentBundleError as error:
+        pytest.fail(str(error), pytrace=False)
+    return bundle is not None
+
+
+def _required_named_value(*variables: str) -> str:
+    """Return the first non-blank variable, failing when the named environment lacks it."""
+    value = next((value for value in (os.environ.get(name, "").strip() for name in variables) if value), "")
+    if not value:
+        pytest.fail(
+            f"{variables[-1]} is not set, and the {ENVIRONMENT_VAR} bundle does not provide it",
+            pytrace=False,
+        )
+    return value
 
 
 @pytest.fixture(scope="session")
@@ -214,15 +286,16 @@ def _subscription_id_from_az_cli() -> str:
     return subscription_id
 
 
-@pytest.fixture(scope="session")
-def aml_workspace(repo_root: Path) -> AzureMLWorkspace:
-    """
-    Resolves the AML workspace to use for tests, skipping if it cannot be determined or accessed.
-    The workspace is determined by env vars, Terraform outputs, or terraform.tfvars, and is validated for accessibility
-    via the Azure CLI.
-    """
-    tf_outputs = _terraform_outputs(repo_root)
+def _resolve_workspace_identity(repo_root: Path) -> tuple[str, str, str]:
+    """Return the subscription, resource group, and workspace the e2e tests target."""
+    if _named_environment_active(repo_root):
+        return (
+            _required_named_value("AZURE_SUBSCRIPTION_ID"),
+            _required_named_value("AZURE_RESOURCE_GROUP"),
+            _required_named_value("AZUREML_WORKSPACE_NAME"),
+        )
 
+    tf_outputs = _terraform_outputs(repo_root)
     subscription_id = os.environ.get("AZURE_SUBSCRIPTION_ID") or _subscription_id_from_az_cli()
     resource_group = os.environ.get("AZURE_RESOURCE_GROUP") or tf_outputs.try_key_value("resource_group")
     workspace_name = os.environ.get("AZUREML_WORKSPACE_NAME") or tf_outputs.try_key_value("azureml_workspace")
@@ -231,6 +304,36 @@ def aml_workspace(repo_root: Path) -> AzureMLWorkspace:
         pytest.skip("Azure resource group is not configured in env vars, Terraform outputs, or terraform.tfvars")
     if not workspace_name:
         pytest.skip("AzureML workspace is not configured in env vars, Terraform outputs, or terraform.tfvars")
+    return subscription_id, resource_group, workspace_name
+
+
+def _resolve_storage_account(repo_root: Path) -> str | None:
+    """Return the storage account for staging e2e data, or ``None`` when undeterminable."""
+    named = _named_environment_active(repo_root)
+    account = os.environ.get("E2E_VLA_STORAGE_ACCOUNT") or os.environ.get("AZURE_STORAGE_ACCOUNT_NAME")
+    if account:
+        return account
+    if named:
+        return _required_named_value("E2E_VLA_STORAGE_ACCOUNT", "AZURE_STORAGE_ACCOUNT_NAME")
+    return _terraform_outputs(repo_root).try_key_value("storage_account")
+
+
+def _resolve_compute_name(repo_root: Path) -> str:
+    """Return the Azure ML compute target name, or an empty string when undeterminable."""
+    if _named_environment_active(repo_root):
+        return _required_named_value("AZUREML_COMPUTE")
+    return _compute_target_name(_terraform_outputs(repo_root))
+
+
+@pytest.fixture(scope="session")
+def aml_workspace(repo_root: Path) -> AzureMLWorkspace:
+    """
+    Resolves the AML workspace to use for tests, skipping if it cannot be determined or accessed.
+    With ``E2E_ENVIRONMENT`` set, the workspace comes only from env vars and the named environment
+    bundle; otherwise it comes from env vars, Terraform outputs, or terraform.tfvars. The workspace
+    is validated for accessibility via the Azure CLI.
+    """
+    subscription_id, resource_group, workspace_name = _resolve_workspace_identity(repo_root)
 
     result = run_command(
         [
@@ -263,25 +366,25 @@ def aml_workspace(repo_root: Path) -> AzureMLWorkspace:
 def storage_account(repo_root: Path) -> str:
     """Resolves the storage account used to stage e2e datasets, skipping if undeterminable.
 
-    Resolution order: ``E2E_VLA_STORAGE_ACCOUNT`` env var, ``AZURE_STORAGE_ACCOUNT_NAME`` env var,
-    then the ``storage_account`` Terraform output (or its terraform.tfvars fallback).
+    Resolution order: ``E2E_VLA_STORAGE_ACCOUNT`` env var, ``AZURE_STORAGE_ACCOUNT_NAME`` env var
+    (which a selected ``E2E_ENVIRONMENT`` bundle may supply), then the ``storage_account`` Terraform
+    output (or its terraform.tfvars fallback) when no named environment is selected.
     """
-    account = os.environ.get("E2E_VLA_STORAGE_ACCOUNT") or os.environ.get("AZURE_STORAGE_ACCOUNT_NAME")
-    if not account:
-        account = _terraform_outputs(repo_root).try_key_value("storage_account")
+    account = _resolve_storage_account(repo_root)
     if not account:
         pytest.skip("Storage account is not configured in env vars, Terraform outputs, or terraform.tfvars")
     return account
 
 
 @pytest.fixture(scope="session")
-def aml_compute_target(repo_root: Path, aml_workspace: AzureMLWorkspace) -> None:
+def aml_compute_target(repo_root: Path, aml_workspace: AzureMLWorkspace) -> AzureMLCompute:
     """
-    Ensures AML compute target is available, skipping tests if not.
-    The compute target name is determined by the AZUREML_COMPUTE env var or Terraform outputs.
+    Ensures AML compute target is available, skipping tests if not, and returns it with the
+    instance types a Kubernetes compute defines.
+    The compute target name is determined by the AZUREML_COMPUTE env var (which a selected
+    ``E2E_ENVIRONMENT`` bundle derives from its AKS cluster) or Terraform outputs.
     """
-    tf_outputs = _terraform_outputs(repo_root)
-    compute_name = _compute_target_name(tf_outputs)
+    compute_name = _resolve_compute_name(repo_root)
     if not compute_name:
         pytest.skip("AzureML compute target is not configured in env vars, Terraform outputs, or terraform.tfvars")
 
@@ -314,6 +417,48 @@ def aml_compute_target(repo_root: Path, aml_workspace: AzureMLWorkspace) -> None
     provisioning_state = payload.get("provisioning_state")
     if isinstance(provisioning_state, str) and provisioning_state.lower() != "succeeded":
         pytest.skip(f"AzureML compute target is not ready: {compute_name} ({provisioning_state})")
+
+    power_state = _attached_aks_power_state(payload, repo_root)
+    if power_state and power_state.lower() != "running":
+        pytest.skip(
+            f"AzureML compute target {compute_name} runs on an AKS cluster that is {power_state}; start it, then rerun"
+        )
+    return aml_compute_from_payload(compute_name, payload)
+
+
+def _attached_aks_power_state(compute: dict[str, Any], repo_root: Path) -> str | None:
+    """Return the power state of the AKS cluster behind a Kubernetes compute target, or None when unknown.
+
+    A stopped cluster leaves the attached compute ``Succeeded``, so jobs would queue until they time out.
+    Arc-connected clusters and managed compute have no AKS power state and return None.
+    """
+    resource_id = compute.get("resource_id")
+    if compute.get("type") != "kubernetes" or not isinstance(resource_id, str):
+        return None
+    match = AKS_RESOURCE_ID.match(resource_id.strip())
+    if match is None:
+        return None
+
+    result = run_command(
+        [
+            "az",
+            "aks",
+            "show",
+            "--subscription",
+            match["subscription"],
+            "--resource-group",
+            match["resource_group"],
+            "--name",
+            match["name"],
+            "--query",
+            "powerState.code",
+            "-o",
+            "tsv",
+        ],
+        cwd=repo_root,
+    )
+    state = result.stdout.strip()
+    return state if result.returncode == 0 and state else None
 
 
 @pytest.fixture(scope="session")
@@ -388,7 +533,7 @@ def _cluster_has_scalable_gpu_node_pool(repo_root: Path) -> bool:
     if shutil.which("az") is None:
         return False
 
-    tf_outputs = _terraform_outputs(repo_root)
+    tf_outputs = TerraformOutputs({}) if _named_environment_active(repo_root) else _terraform_outputs(repo_root)
     resource_group = os.environ.get("AZURE_RESOURCE_GROUP") or tf_outputs.try_key_value("resource_group")
     cluster_name = os.environ.get("AKS_CLUSTER_NAME") or tf_outputs.try_key_value("aks_cluster")
     if not resource_group or not cluster_name:
