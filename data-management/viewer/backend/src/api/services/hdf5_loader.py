@@ -5,7 +5,6 @@ Provides support for loading trajectory data, images, and metadata
 from HDF5 files following the LeRobot dataset format.
 """
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,20 +20,6 @@ try:
     HDF5_AVAILABLE = True
 except ImportError:
     HDF5_AVAILABLE = False
-
-
-def _attr_value(value: object) -> object:
-    """Return an HDF5 attribute as a Python value, decoding the JSON lists and objects exports write."""
-    if isinstance(value, bytes):
-        value = value.decode()
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, str) and value.startswith(("[", "{")):
-        try:
-            return json.loads(value)
-        except json.JSONDecodeError:
-            return value
-    return value
 
 
 @dataclass
@@ -346,14 +331,24 @@ class HDF5Loader:
 
         # Load root attributes
         for key in f.attrs:
-            metadata[key] = _attr_value(f.attrs[key])
+            value = f.attrs[key]
+            if isinstance(value, bytes):
+                value = value.decode()
+            elif isinstance(value, np.ndarray):
+                value = value.tolist()
+            metadata[key] = value
 
         # Load metadata group if present
         if "metadata" in f:
             meta_group = f["metadata"]
             if isinstance(meta_group, h5py.Group):
                 for key in meta_group.attrs:
-                    metadata[key] = _attr_value(meta_group.attrs[key])
+                    value = meta_group.attrs[key]
+                    if isinstance(value, bytes):
+                        value = value.decode()
+                    elif isinstance(value, np.ndarray):
+                        value = value.tolist()
+                    metadata[key] = value
 
         return metadata
 
