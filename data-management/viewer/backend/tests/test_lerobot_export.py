@@ -757,7 +757,7 @@ def test_an_export_that_loses_the_race_for_an_existing_directory_leaves_it_alone
     source: Path, monkeypatch: pytest.MonkeyPatch, held_locks: contextlib.ExitStack, meanwhile: str
 ) -> None:
     output = source.parents[1] / "edited"
-    locks: list[int] = []
+    locks: list[os.stat_result] = []
     output.mkdir()
     video_sizes = LeRobotExporter._video_sizes
     paused = False
@@ -789,7 +789,7 @@ def test_an_export_that_loses_the_race_for_an_existing_directory_leaves_it_alone
         assert "another export is writing to this directory" in result.error
         assert sorted(path.name for path in output.iterdir()) == sorted([CLAIM_DIRECTORY, LOCK_FILE])
         assert (output / CLAIM_DIRECTORY / "dataset/staged.bin").read_bytes() == b"staged"
-        assert os.path.samestat(os.stat(output / LOCK_FILE), os.fstat(locks[0]))
+        assert os.path.samestat(os.stat(output / LOCK_FILE), locks[0])
 
 
 def _published(output: Path) -> dict[str, str]:
@@ -993,7 +993,7 @@ def test_an_export_that_cannot_take_the_lock_removes_nothing(
     source: Path, monkeypatch: pytest.MonkeyPatch, held_locks: contextlib.ExitStack, existing: bool, peer: bool
 ) -> None:
     output = source.parents[1] / "edited"
-    locks: list[int] = []
+    locks: list[os.stat_result] = []
     if existing:
         output.mkdir()
     try_lock = lerobot_exporter._try_lock
@@ -1015,7 +1015,7 @@ def test_an_export_that_cannot_take_the_lock_removes_nothing(
     assert failed.success is False
     assert "can't be locked" in failed.error
     if peer:
-        assert os.path.samestat(os.stat(output / LOCK_FILE), os.fstat(locks[0]))
+        assert os.path.samestat(os.stat(output / LOCK_FILE), locks[0])
         assert os.path.samestat(output.stat(), seen["output"])
         assert (output / CLAIM_DIRECTORY / "dataset/staged.bin").read_bytes() == b"staged"
         excluded = LeRobotExporter(source, output, dataset_id="c").export_episodes([0])
@@ -1036,7 +1036,7 @@ def test_an_export_whose_lock_file_is_replaced_locks_the_current_one(
     source: Path, monkeypatch: pytest.MonkeyPatch, held_locks: contextlib.ExitStack, held: bool
 ) -> None:
     output = source.parents[1] / "edited"
-    locks: list[int] = []
+    locks: list[os.stat_result] = []
     output.mkdir()
     try_lock = lerobot_exporter._try_lock
 
@@ -1056,7 +1056,7 @@ def test_an_export_whose_lock_file_is_replaced_locks_the_current_one(
         assert result.success is False
         assert "another export is writing to this directory" in result.error
         assert [path.name for path in output.iterdir()] == [LOCK_FILE]
-        assert os.path.samestat(os.stat(output / LOCK_FILE), os.fstat(locks[0]))
+        assert os.path.samestat(os.stat(output / LOCK_FILE), locks[0])
     else:
         assert result.success, result.error
         assert sorted(path.name for path in output.iterdir()) == DATASET_ENTRIES

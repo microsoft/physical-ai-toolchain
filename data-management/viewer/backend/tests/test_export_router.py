@@ -596,7 +596,7 @@ class TestLeRobotExports:
         write_source(dataset_dir)
         override_service.dataset_is_lerobot.return_value = True
         output = base / "edited"
-        locks: list[int] = []
+        locks: list[os.stat_result] = []
         if state in ("free-lock-file", "held-lock-file"):
             output.mkdir()
             (output / LOCK_FILE).touch()
@@ -628,7 +628,7 @@ class TestLeRobotExports:
         else:
             assert _contents(output) == before
             assert os.path.samestat(output.stat(), identity)
-            assert os.path.samestat(os.stat(output / LOCK_FILE), os.fstat(locks[0]))
+            assert os.path.samestat(os.stat(output / LOCK_FILE), locks[0])
             assert "another export is writing to this directory" in caplog.text
             if state == "held-lock-file":
                 held_locks.close()

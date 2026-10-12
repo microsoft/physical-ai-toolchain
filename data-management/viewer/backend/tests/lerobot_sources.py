@@ -194,11 +194,11 @@ def stop_export(source: Path, output: Path, stop: str) -> None:
 
 
 @contextlib.contextmanager
-def hold_lock(directory: Path) -> Iterator[int]:
-    """Hold ``directory``'s export lock as another running export would, yielding the lock's descriptor."""
+def hold_lock(directory: Path) -> Iterator[os.stat_result]:
+    """Hold ``directory``'s export lock as another running export would, yielding the lock file's identity."""
     fd = os.open(directory / LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         assert _try_lock(fd), "another export already holds the lock"
-        yield fd
+        yield os.fstat(fd)
     finally:
         os.close(fd)
