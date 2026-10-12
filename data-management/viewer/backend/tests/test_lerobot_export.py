@@ -683,6 +683,26 @@ def test_failed_exports_leave_nothing_behind(
         assert list(output.iterdir()) == []
 
 
+def test_an_unexpected_failure_is_logged_with_its_traceback(
+    source: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    output = source.parents[1] / "edited"
+
+    def fail_unexpectedly(self: LeRobotExporter, *args: Any) -> None:
+        raise RuntimeError("simulated encoder crash")
+
+    monkeypatch.setattr(LeRobotExporter, "_write", fail_unexpectedly)
+    caplog.set_level(logging.ERROR, logger=lerobot_exporter.__name__)
+
+    result = LeRobotExporter(source, output, dataset_id="capture--lerobot").export_episodes([0])
+
+    assert result.success is False
+    [record] = [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert record.getMessage() == "LeRobot export failed unexpectedly"
+    assert record.exc_info is not None
+    assert isinstance(record.exc_info[1], RuntimeError)
+
+
 def test_a_non_empty_output_directory_is_refused(source: Path) -> None:
     output = source.parents[1] / "edited"
     output.mkdir()

@@ -798,6 +798,7 @@ class LeRobotExporter:
         except (ExportError, LeRobotLoaderError, ImageTransformError) as error:
             return ExportResult(success=False, output_files=[], error=str(error))
         except Exception as error:
+            logger.exception("LeRobot export failed unexpectedly")
             return ExportResult(success=False, output_files=[], error=f"Unexpected error: {error}")
         finally:
             # Only the lock holder removes anything, and the claim stays while entries this export moved do.
