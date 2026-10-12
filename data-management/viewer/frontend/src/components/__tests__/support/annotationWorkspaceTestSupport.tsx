@@ -1,6 +1,8 @@
 import { cleanup } from '@testing-library/react'
 import { vi } from 'vitest'
 
+import type { RecordedSubtask } from '@/types/api'
+
 const hoisted = vi.hoisted(() => {
   const diagnosticsState = {
     enabled: false,
@@ -24,6 +26,7 @@ const hoisted = vi.hoisted(() => {
     autoPlay: false,
     autoLoop: false,
     subtasks: [{ id: 'subtask-1', frameRange: [2, 6] as [number, number] }],
+    recordedSubtasks: [] as RecordedSubtask[] | undefined,
   }
 
   const clearDiagnosticEvents = vi.fn((channel?: string) => {
@@ -350,6 +353,7 @@ vi.mock('@/stores', () => ({
         videoUrls: { main: '/video.mp4' },
         cameras: ['main'],
         trajectoryData: undefined,
+        subtasks: hoisted.state.recordedSubtasks,
       },
     }),
   usePlaybackControls: () => ({
@@ -401,6 +405,8 @@ export function setupAnnotationWorkspaceTestCase() {
   testState.autoPlay = false
   testState.autoLoop = false
   testState.subtasks = [{ id: 'subtask-1', frameRange: [2, 6] }]
+  testState.recordedSubtasks = []
+  mockInitializeEdit.mockClear()
 
   mockSaveEpisodeLabels.mockReset()
   mockSetCurrentFrame.mockReset()

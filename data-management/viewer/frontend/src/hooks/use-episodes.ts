@@ -136,9 +136,9 @@ export function useCurrentEpisode() {
 
   useEffect(() => {
     if (query.data) {
-      setCurrentEpisode(query.data)
+      setCurrentEpisode(query.data, currentDataset?.id ?? null)
     }
-  }, [query.data, setCurrentEpisode])
+  }, [currentDataset?.id, query.data, setCurrentEpisode])
 
   useEffect(() => {
     if (query.error) {

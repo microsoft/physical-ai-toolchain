@@ -14,8 +14,6 @@ const request: ExportRequestWithEdits = {
   episodeIndices: [0],
   outputPath: '/tmp/export',
   applyEdits: false,
-  includeSubtasks: false,
-  format: 'hdf5',
 }
 
 const wireResult = {

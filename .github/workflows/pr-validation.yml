@@ -142,14 +142,14 @@ jobs:
     permissions:
       contents: read
 
-  # ms.date Freshness Check
+  # Changed Markdown ms.date freshness is advisory in PRs; weekly scans hard-fail.
   msdate-freshness:
     name: ms.date Freshness Check
     uses: ./.github/workflows/msdate-freshness-check.yml
     with:
       staleness-threshold-days: 90
-      changed-files-only: false
-      soft-fail: false
+      changed-files-only: true
+      soft-fail: true
     permissions:
       contents: read
 

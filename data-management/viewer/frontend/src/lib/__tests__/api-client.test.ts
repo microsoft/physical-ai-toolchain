@@ -101,6 +101,25 @@ describe('ApiClientError', () => {
         details: undefined,
       })
     })
+
+    it('explains an episode that fails to load without exposing server text', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(
+          {
+            code: 'EPISODE_LOAD_FAILED',
+            message: "Episode 3 of dataset 'ds-1' could not be loaded",
+          },
+          500,
+        ),
+      )
+
+      await expect(apiRequest('/datasets/ds-1/episodes/3')).rejects.toMatchObject({
+        name: 'ApiClientError',
+        code: 'EPISODE_LOAD_FAILED',
+        status: 500,
+        message: "The episode's files couldn't be read; the backend log has the cause",
+      })
+    })
   })
 })
 

@@ -15,39 +15,28 @@ describe('applyTrajectoryAdjustment', () => {
     expect(applyTrajectoryAdjustment(0.42, 7, undefined)).toBe(0.42)
   })
 
-  it('adds rightArmDelta to right-arm position joints (indices 0-2)', () => {
-    const adjustment: TrajectoryAdjustment = { frameIndex: 0, rightArmDelta: [0.1, 0.2, 0.3] }
+  it('adds each channel delta to its own channel index', () => {
+    const adjustment: TrajectoryAdjustment = { frameIndex: 0, channelDeltas: { 0: 0.1, 6: 0.3 } }
     expect(applyTrajectoryAdjustment(1, 0, adjustment)).toBeCloseTo(1.1)
-    expect(applyTrajectoryAdjustment(1, 1, adjustment)).toBeCloseTo(1.2)
-    expect(applyTrajectoryAdjustment(1, 2, adjustment)).toBeCloseTo(1.3)
+    expect(applyTrajectoryAdjustment(1, 6, adjustment)).toBeCloseTo(1.3)
   })
 
-  it('adds leftArmDelta to left-arm position joints (indices 8-10) with offset', () => {
-    const adjustment: TrajectoryAdjustment = { frameIndex: 0, leftArmDelta: [0.5, 0.6, 0.7] }
-    expect(applyTrajectoryAdjustment(2, 8, adjustment)).toBeCloseTo(2.5)
-    expect(applyTrajectoryAdjustment(2, 9, adjustment)).toBeCloseTo(2.6)
-    expect(applyTrajectoryAdjustment(2, 10, adjustment)).toBeCloseTo(2.7)
-  })
-
-  it('replaces the value at index 7 with rightGripperOverride', () => {
-    const adjustment: TrajectoryAdjustment = { frameIndex: 0, rightGripperOverride: 0.99 }
-    expect(applyTrajectoryAdjustment(0.1, 7, adjustment)).toBe(0.99)
-  })
-
-  it('replaces the value at index 15 with leftGripperOverride', () => {
-    const adjustment: TrajectoryAdjustment = { frameIndex: 0, leftGripperOverride: -0.42 }
-    expect(applyTrajectoryAdjustment(0.1, 15, adjustment)).toBe(-0.42)
-  })
-
-  it('does not modify joint indices outside the targeted ranges', () => {
+  it('replaces a channel with its set value, which wins over a delta on that channel', () => {
     const adjustment: TrajectoryAdjustment = {
       frameIndex: 0,
-      rightArmDelta: [0.1, 0.2, 0.3],
-      leftArmDelta: [0.4, 0.5, 0.6],
+      channelDeltas: { 2: 0.5 },
+      channelValues: { 2: 0.99 },
+    }
+    expect(applyTrajectoryAdjustment(0.1, 2, adjustment)).toBe(0.99)
+  })
+
+  it('does not modify channels without an adjustment', () => {
+    const adjustment: TrajectoryAdjustment = {
+      frameIndex: 0,
+      channelDeltas: { 0: 0.1 },
+      channelValues: { 15: 0.4 },
     }
     expect(applyTrajectoryAdjustment(0.5, 3, adjustment)).toBe(0.5)
-    expect(applyTrajectoryAdjustment(0.5, 6, adjustment)).toBe(0.5)
-    expect(applyTrajectoryAdjustment(0.5, 11, adjustment)).toBe(0.5)
     expect(applyTrajectoryAdjustment(0.5, 14, adjustment)).toBe(0.5)
   })
 })
@@ -107,7 +96,7 @@ describe('buildTrajectoryChartData', () => {
   it('builds positions data with adjustments applied per frame', () => {
     const trajectoryData = makeTrajectory()
     const trajectoryAdjustments = new Map<number, TrajectoryAdjustment>([
-      [1, { frameIndex: 1, rightArmDelta: [0.5, 0, 0] }],
+      [1, { frameIndex: 1, channelDeltas: { 0: 0.5 } }],
     ])
 
     const result = buildTrajectoryChartData({
@@ -125,10 +114,41 @@ describe('buildTrajectoryChartData', () => {
     expect(result[2].joint_0).toBe(2)
   })
 
+  it('applies adjustments to named state variables by index and leaves action variables unchanged', () => {
+    const trajectoryData = makeTrajectory().map((point) => ({
+      ...point,
+      variables: { 'observation.state[0]': point.jointPositions[0], 'action[0]': 7 },
+    }))
+    const trajectoryAdjustments = new Map<number, TrajectoryAdjustment>([
+      [1, { frameIndex: 1, channelDeltas: { 0: 0.5 } }],
+    ])
+
+    const result = buildTrajectoryChartData({
+      trajectoryData,
+      trajectoryAdjustments,
+      trajectoryVariables: [
+        {
+          key: 'observation.state[0]',
+          label: 'arm_1',
+          source: 'observation.state',
+          index: 0,
+          kind: 'state',
+        },
+        { key: 'action[0]', label: 'arm_1', source: 'action', index: 0, kind: 'action' },
+      ],
+      showVelocity: false,
+      showNormalized: false,
+    })
+
+    expect(result[1].series_0).toBeCloseTo(1.5)
+    expect(result[1].series_1).toBe(7)
+    expect(result[2].series_0).toBe(2)
+  })
+
   it('uses raw velocity values without normalization or adjustments when showVelocity is true', () => {
     const trajectoryData = makeTrajectory()
     const trajectoryAdjustments = new Map<number, TrajectoryAdjustment>([
-      [1, { frameIndex: 1, rightArmDelta: [0.5, 0, 0] }],
+      [1, { frameIndex: 1, channelDeltas: { 0: 0.5 } }],
     ])
 
     const result = buildTrajectoryChartData({

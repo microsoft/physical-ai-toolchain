@@ -212,7 +212,16 @@ export function mutationPreconditionHeaders(
   throw new Error('A mutation precondition is required')
 }
 
-function publicErrorMessage(status: number): string {
+const CODE_ERROR_MESSAGES = new Map<string, string>([
+  ['EPISODE_LOAD_FAILED', "The episode's files couldn't be read; the backend log has the cause"],
+])
+
+function publicErrorMessage(status: number, code: string): string {
+  const known = CODE_ERROR_MESSAGES.get(code)
+  if (known) {
+    return known
+  }
+
   if (status >= 500) {
     return 'The server could not complete the request'
   }
@@ -269,7 +278,12 @@ export async function handleResponse<T>(
       // Non-JSON errors still surface through the status-derived public error.
     }
 
-    throw new ApiClientError(publicErrorMessage(response.status), code, response.status, details)
+    throw new ApiClientError(
+      publicErrorMessage(response.status, code),
+      code,
+      response.status,
+      details,
+    )
   }
 
   if (response.status === 204) {

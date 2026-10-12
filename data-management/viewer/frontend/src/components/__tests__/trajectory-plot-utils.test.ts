@@ -24,7 +24,7 @@ describe('trajectory-plot-utils', () => {
           jointVelocities: [0.1, 0.4],
         },
       ],
-      trajectoryAdjustments: new Map([[1, { frameIndex: 1, rightArmDelta: [1, 2, 0] }]]),
+      trajectoryAdjustments: new Map([[1, { frameIndex: 1, channelDeltas: { 0: 1, 1: 2 } }]]),
       showVelocity: false,
       showNormalized: true,
     })
@@ -97,7 +97,7 @@ describe('trajectory-plot-utils', () => {
 
   it('normalizes values and resolves drag selection ranges predictably', () => {
     expect(normalizeSeries(6, 2, 10)).toBe(0.5)
-    expect(applyTrajectoryAdjustment(3, 0, { frameIndex: 0, rightArmDelta: [2, 0, 0] })).toBe(5)
+    expect(applyTrajectoryAdjustment(3, 0, { frameIndex: 0, channelDeltas: { 0: 2 } })).toBe(5)
     expect(resolveTrajectorySelectionRange(8, 3)).toEqual([3, 8])
   })
 })

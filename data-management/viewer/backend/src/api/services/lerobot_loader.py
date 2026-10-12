@@ -24,6 +24,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from numpy.typing import NDArray
 
+from .episode_edits import SubtaskSegment
+from .lerobot_language import LANGUAGE_PERSISTENT, recorded_subtasks
+
 logger = logging.getLogger(__name__)
 
 _TASK_DESCRIPTION_COLUMNS = ("task", "__index_level_0__", "task_description")
@@ -73,6 +76,9 @@ class LeRobotEpisodeData:
 
     metadata: dict[str, Any]
     """Additional metadata from info.json."""
+
+    subtasks: list[SubtaskSegment] = field(default_factory=list)
+    """Subtasks recorded as ``subtask`` rows in ``language_persistent``."""
 
 
 class LeRobotLoaderError(Exception):
@@ -500,22 +506,7 @@ class LeRobotLoader:
             return self._load_episode_jsonl(episode_index, info, full_path, chunk_idx, file_idx)
 
         try:
-            table = pq.read_table(full_path)
-
-            # Filter to requested episode
-            if "episode_index" in table.column_names:
-                mask = pa.array([int(value) == episode_index for value in table.column("episode_index").to_pylist()])
-                table = table.filter(mask)
-
-            if table.num_rows == 0:
-                raise LeRobotLoaderError(f"Episode {episode_index} not found in {full_path}")
-
-            # Sort by frame_index
-            if "frame_index" in table.column_names:
-                sort_indices = pa.array(
-                    sorted(range(table.num_rows), key=lambda idx: int(table.column("frame_index")[idx].as_py()))
-                )
-                table = table.take(sort_indices)
+            table = self._read_episode_table(full_path, episode_index)
 
             length = table.num_rows
             col_names = table.column_names
@@ -553,6 +544,13 @@ class LeRobotLoader:
 
             # Get task index
             task_index = int(table.column("task_index")[0].as_py()) if "task_index" in col_names else 0
+
+            # Every frame repeats the episode's persistent language rows
+            subtasks = (
+                recorded_subtasks(table.column(LANGUAGE_PERSISTENT)[0].as_py(), timestamps.tolist())
+                if LANGUAGE_PERSISTENT in col_names
+                else []
+            )
 
             # Find video paths. Honor per-episode video chunk/file indices
             # recorded in meta/episodes parquet so the path resolves to the
@@ -594,8 +592,66 @@ class LeRobotLoader:
                     "fps": info.fps,
                     "codebase_version": info.codebase_version,
                 },
+                subtasks=subtasks,
             )
 
+        except LeRobotLoaderError:
+            raise
+        except Exception as e:
+            raise LeRobotLoaderError(f"Failed to load episode {episode_index}: {e}", cause=e)
+
+    @staticmethod
+    def _read_episode_table(path: Path, episode_index: int) -> pa.Table:
+        """Read one episode's rows from a data parquet file, ordered by frame index."""
+        table = pq.read_table(path)
+        if "episode_index" in table.column_names:
+            mask = pa.array([int(value) == episode_index for value in table.column("episode_index").to_pylist()])
+            table = table.filter(mask)
+        if table.num_rows == 0:
+            raise LeRobotLoaderError(f"Episode {episode_index} not found in {path}")
+        if "frame_index" in table.column_names:
+            sort_indices = pa.array(
+                sorted(range(table.num_rows), key=lambda idx: int(table.column("frame_index")[idx].as_py()))
+            )
+            table = table.take(sort_indices)
+        return table
+
+    def episode_record(self, episode_index: int) -> dict[str, Any] | None:
+        """Return one episode's row from ``meta/episodes`` without its per-episode stats columns."""
+        meta_episodes_dir = self.base_path / "meta" / "episodes"
+        if not meta_episodes_dir.is_dir():
+            return None
+        for parquet_file in sorted(meta_episodes_dir.glob("chunk-*/*.parquet")):
+            names = [name for name in pq.read_schema(parquet_file).names if not name.startswith("stats/")]
+            if "episode_index" not in names:
+                continue
+            table = pq.read_table(parquet_file, columns=names)
+            indices = table.column("episode_index").to_pylist()
+            if episode_index in indices:
+                row = indices.index(episode_index)
+                return {name: table.column(name)[row].as_py() for name in names}
+        return None
+
+    def load_episode_table(self, episode_index: int) -> pa.Table:
+        """Return every data column of one episode, ordered by frame index.
+
+        The data file comes from the episode's ``meta/episodes`` record when present, which is
+        authoritative in v3 datasets, and otherwise from the same lookup ``load_episode`` uses.
+
+        Raises:
+            LeRobotLoaderError: If the episode cannot be found or its data is not parquet.
+        """
+        info = self._load_info()
+        record = self.episode_record(episode_index)
+        if record is not None and {"data/chunk_index", "data/file_index"} <= record.keys():
+            chunk_idx, file_idx = int(record["data/chunk_index"]), int(record["data/file_index"])
+        else:
+            chunk_idx, file_idx = self._find_episode_location(episode_index)
+        path = self.base_path / self._format_path(info.data_path, chunk_idx, file_idx, episode_index=episode_index)
+        if path.suffix != ".parquet":
+            raise LeRobotLoaderError(f"Episode {episode_index} is not stored in a parquet data file")
+        try:
+            return self._read_episode_table(path, episode_index)
         except LeRobotLoaderError:
             raise
         except Exception as e:

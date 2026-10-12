@@ -171,6 +171,16 @@ class TestNestedDatasetDiscovery:
         assert datasets[0].group == "project--recordings"
 
     @pytest.mark.asyncio
+    async def test_hidden_folders_are_not_scanned(self, tmp_path):
+        _write_dataset(tmp_path, "group--session")
+        _write_dataset(tmp_path / "group" / ".dataviewer-export.partial", "dataset")
+        service = DatasetService(base_path=str(tmp_path), episode_cache_capacity=0)
+
+        datasets = await service.list_datasets()
+
+        assert [dataset.id for dataset in datasets] == ["group--session"]
+
+    @pytest.mark.asyncio
     async def test_ignores_dataset_beyond_maximum_depth(self, tmp_path):
         _write_dataset(tmp_path, "a--b--c--d--e--f")
         service = DatasetService(base_path=str(tmp_path), episode_cache_capacity=0)

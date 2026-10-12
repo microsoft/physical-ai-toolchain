@@ -27,13 +27,15 @@ export function DataviewerEpisodeViewer({
 }: DataviewerEpisodeViewerProps) {
   const { data: episode, isLoading, error } = useEpisode(datasetId, episodeIndex)
   const setCurrentEpisode = useEpisodeStore((state) => state.setCurrentEpisode)
+  // The workspace reads the store, which keeps the previous dataset's episode until this effect runs.
+  const storedDatasetId = useEpisodeStore((state) => state.currentDatasetId)
   const [navigationStatus, setNavigationStatus] = useState<string | null>(null)
 
   useEffect(() => {
     if (episode) {
-      setCurrentEpisode(episode)
+      setCurrentEpisode(episode, datasetId)
     }
-  }, [episode, setCurrentEpisode])
+  }, [datasetId, episode, setCurrentEpisode])
 
   useEffect(() => {
     if (!navigationStatus) return
@@ -42,7 +44,7 @@ export function DataviewerEpisodeViewer({
   }, [navigationStatus])
 
   let content: ReactNode
-  if (isLoading) {
+  if (isLoading || (episode && !error && storedDatasetId !== datasetId)) {
     content = (
       <div className="flex h-full items-center justify-center">
         <div role="status" aria-live="polite" className="text-muted-foreground">

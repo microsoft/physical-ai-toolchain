@@ -15,10 +15,11 @@ attribute access is proxied to the service submodule.
 import sys
 import types
 
-from .service import DatasetService, get_dataset_service
+from .service import DatasetService, EpisodeLoadError, get_dataset_service
 
 __all__ = [
     "DatasetService",
+    "EpisodeLoadError",
     "get_dataset_service",
 ]
 

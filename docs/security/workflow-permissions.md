@@ -28,9 +28,9 @@ An empty workflow-level `permissions: {}` block grants no token scopes. Jobs tha
 
 ## 🔍 Enforced Rules
 
-| Script                                          | Rule                                                                                                                                                                       |
-|-------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `scripts/security/Test-WorkflowPermissions.ps1` | Reject workflows without top-level permissions and jobs that implicitly inherit a populated workflow-level grant.                                                         |
+| Script                                          | Rule                                                                                                                                                                         |
+|-------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `scripts/security/Test-WorkflowPermissions.ps1` | Reject workflows without top-level permissions and jobs that implicitly inherit a populated workflow-level grant.                                                            |
 | `scripts/security/Test-DangerousWorkflow.ps1`   | Reject direct interpolation of attacker-controlled event values or non-boolean inputs into `run` and `actions/github-script`, plus untrusted `pull_request_target` checkout. |
 
 Both linters run under `npm run test:ps` and standalone in `workflow-permissions-scan.yml`.
@@ -60,14 +60,14 @@ Merge-group execution changes OIDC claims such as `event_name`, `ref`, and
 `id-token: write` grant to its consuming step and provider. Retain dated
 provider evidence for these restrictions:
 
-| Claim or boundary   | Required evidence                                      |
-|---------------------|--------------------------------------------------------|
+| Claim or boundary   | Required evidence                                       |
+|---------------------|---------------------------------------------------------|
 | Repository          | Only `microsoft/physical-ai-toolchain` is accepted      |
 | Event               | The intended `merge_group` identity is accepted         |
 | Ref or subject      | Queue refs are bounded without accepting unrelated refs |
 | Audience            | The expected provider audience is required              |
 | Reusable workflow   | `job_workflow_ref` identifies the intended workflow     |
-| Negative validation | An out-of-scope identity is rejected                     |
+| Negative validation | An out-of-scope identity is rejected                    |
 
 Use a provider configuration export, screenshot, or administrator attestation.
 If the provider cannot express the required boundary, change the workflow so

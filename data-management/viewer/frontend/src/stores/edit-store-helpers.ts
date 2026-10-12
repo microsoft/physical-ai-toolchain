@@ -26,6 +26,8 @@ export interface EditStateSnapshot {
   insertedFrames: Map<number, FrameInsertion>
   subtasks: SubtaskSegment[]
   trajectoryAdjustments: Map<number, TrajectoryAdjustment>
+  /** Subtasks recorded with the episode; subtasks matching them are not an edit */
+  recordedSubtasks?: SubtaskSegment[]
 }
 
 export interface EditStateWithDerived extends EditStateSnapshot {
@@ -81,12 +83,20 @@ export function buildEditOperations(state: EditStateSnapshot): EpisodeEditOperat
             (a, b) => a.afterFrameIndex - b.afterFrameIndex,
           )
         : undefined,
-    subtasks: state.subtasks.length > 0 ? state.subtasks : undefined,
+    subtasks: subtaskEdits(state.subtasks, state.recordedSubtasks ?? []),
     trajectoryAdjustments:
       state.trajectoryAdjustments.size > 0
         ? Array.from(state.trajectoryAdjustments.values())
         : undefined,
   }
+}
+
+/**
+ * Return the subtasks an export should write: none when they match the recorded ones, which the
+ * export keeps, and an explicit empty list when every recorded subtask was removed.
+ */
+function subtaskEdits(subtasks: SubtaskSegment[], recorded: SubtaskSegment[]) {
+  return JSON.stringify(subtasks) === JSON.stringify(recorded) ? undefined : subtasks
 }
 
 export function hasEditContent(operations: EpisodeEditOperations) {

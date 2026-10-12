@@ -17,7 +17,12 @@ import { useEpisodeStore, useTrajectoryAdjustmentState } from '@/stores'
 import { useJointConfigStore } from '@/stores/joint-config-store'
 import type { TrajectoryVariable } from '@/types'
 
-import { getJointLabel, type JointGroup } from './joint-constants'
+import {
+  getJointLabel,
+  type JointGroup,
+  removeVariableLabelPrefix,
+  resolveStateChannelLabel,
+} from './joint-constants'
 import { buildTrajectoryChartData } from './trajectory-plot-utils'
 import { useTrajectoryPlotSelection } from './useTrajectoryPlotSelection'
 
@@ -45,10 +50,6 @@ function humanizeSource(source: string) {
     .replace(/^observation\./, '')
     .replace(/[._-]+/g, ' ')
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
-}
-
-function removeVariableLabelPrefix(label: string) {
-  return label.replace(/^(State|Action):\s+/i, '')
 }
 
 function buildVariableGroups(variables: readonly TrajectoryVariable[]): JointGroup[] {
@@ -143,22 +144,11 @@ export function useTrajectoryPlotState({
   )
 
   const resolveLabel = useCallback(
-    (idx: number) => {
-      if (shouldUseNamedVariables) {
-        return removeVariableLabelPrefix(namedTrajectoryVariables[idx]?.label ?? getJointLabel(idx))
-      }
-      if (showVelocity && stateVariables[idx]) {
-        return removeVariableLabelPrefix(stateVariables[idx].label)
-      }
-      return jointConfig.labels[String(idx)] ?? getJointLabel(idx)
-    },
-    [
-      jointConfig.labels,
-      namedTrajectoryVariables,
-      shouldUseNamedVariables,
-      showVelocity,
-      stateVariables,
-    ],
+    (idx: number) =>
+      shouldUseNamedVariables
+        ? removeVariableLabelPrefix(namedTrajectoryVariables[idx]?.label ?? getJointLabel(idx))
+        : resolveStateChannelLabel(idx, stateVariables, jointConfig.labels),
+    [jointConfig.labels, namedTrajectoryVariables, shouldUseNamedVariables, stateVariables],
   )
 
   const resolveDataKey = useCallback(

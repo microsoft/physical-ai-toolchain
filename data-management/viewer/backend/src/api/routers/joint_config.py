@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import Field
 
 from ..csrf import require_csrf_token
+from ..services.dataset_service import DatasetService, get_dataset_service
 from ..validation import SAFE_DATASET_ID_PATTERN, SanitizedModel, path_string_param, validate_path_containment
 
 logger = logging.getLogger(__name__)
@@ -80,9 +81,10 @@ def _get_base_path() -> str:
 
 
 def _dataset_config_path(dataset_id: str) -> Path:
+    """Resolve the config inside the dataset's own folder; ``parent--child`` IDs map to nested folders."""
     base = Path(_get_base_path())
-    path = base / dataset_id / "meta" / "joint_config.json"
-    return validate_path_containment(path, base)
+    parts = dataset_id.split("--") if "--" in dataset_id else [dataset_id]
+    return validate_path_containment(base.joinpath(*parts, "meta", "joint_config.json"), base)
 
 
 def _global_defaults_path() -> Path:
@@ -114,7 +116,21 @@ async def _save_global_defaults(config: JointConfig) -> None:
         await f.write(content)
 
 
-async def _load_dataset_config(dataset_id: str) -> JointConfig:
+async def _state_name_config(dataset_id: str, dataset_service: DatasetService) -> JointConfig | None:
+    """Label each state channel with the dataset's own feature name, when the dataset declares them."""
+    dataset = await dataset_service.get_dataset(dataset_id)
+    state = dataset.features.get("observation.state") if dataset is not None else None
+    if state is None or not state.names:
+        return None
+    return JointConfig(
+        dataset_id=dataset_id,
+        labels={str(index): name for index, name in enumerate(state.names)},
+        groups=[JointGroupConfig(id="state", label="State", indices=list(range(len(state.names))))],
+    )
+
+
+async def _load_dataset_config(dataset_id: str, dataset_service: DatasetService) -> JointConfig:
+    """Return the saved config, else defaults derived from the dataset, without writing anything."""
     path = _dataset_config_path(dataset_id)
     safe_base = os.path.realpath(_get_base_path())
     resolved = os.path.realpath(str(path))
@@ -125,14 +141,15 @@ async def _load_dataset_config(dataset_id: str) -> JointConfig:
         )
     path = Path(resolved)
     if not await aiofiles.os.path.exists(path):
+        derived = await _state_name_config(dataset_id, dataset_service)
+        if derived is not None:
+            return derived
         defaults = await _load_global_defaults()
-        config = JointConfig(
+        return JointConfig(
             dataset_id=dataset_id,
             labels=defaults.labels,
             groups=defaults.groups,
         )
-        await _save_dataset_config(dataset_id, config)
-        return config
     async with aiofiles.open(path, encoding="utf-8") as f:
         data = json.loads(await f.read())
         return JointConfig.model_validate(data)
@@ -157,9 +174,10 @@ async def _save_dataset_config(dataset_id: str, config: JointConfig) -> None:
 @router.get("/{dataset_id}/joint-config")
 async def get_joint_config(
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    dataset_service: DatasetService = Depends(get_dataset_service),
 ) -> JointConfig:
-    """Get joint configuration for a dataset. Auto-creates from defaults if missing."""
-    return await _load_dataset_config(dataset_id)
+    """Get joint configuration for a dataset, deriving labels from its state names when none is saved."""
+    return await _load_dataset_config(dataset_id, dataset_service)
 
 
 @router.put(

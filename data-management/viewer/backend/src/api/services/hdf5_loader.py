@@ -11,6 +11,8 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
+from .episode_edits import SUBTASK_FILE_SUFFIX, SubtaskSegment, read_subtask_file
+
 # h5py is an optional dependency
 try:
     import h5py
@@ -142,6 +144,11 @@ class HDF5Loader:
                 return file_path
 
         raise HDF5LoaderError(f"No HDF5 file found for episode {episode_index} in {self.base_path}")
+
+    def recorded_subtasks(self, episode_index: int, length: int) -> list[SubtaskSegment]:
+        """Return the subtasks in ``<episode file stem>.subtasks.json`` beside the episode, as HDF5 exports write it."""
+        episode_file = self._find_episode_file(episode_index)
+        return read_subtask_file(episode_file.with_name(episode_file.stem + SUBTASK_FILE_SUFFIX), length)
 
     def list_episodes(self) -> list[int]:
         """
