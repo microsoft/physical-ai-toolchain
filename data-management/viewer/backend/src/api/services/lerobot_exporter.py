@@ -82,6 +82,10 @@ _STAGING = "dataset"
 _RECORD = "publication.json"
 _LOCK_ATTEMPTS = 3
 _SUPPORTED_VERSION = "v3.0"
+_NO_FOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_NO_FOLLOW_DIRECTORY = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _NO_FOLLOW
+# Recovery and rollback remove what an export moved only through descriptors opened without following links.
+_DESCRIPTOR_RELATIVE = shutil.rmtree.avoids_symlink_attacks and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
 _TIMELINE = ("timestamp", "frame_index", "episode_index", "index")
 _STATS_DTYPES = {"float16", "float32", "float64", "int8", "int16", "int32", "int64", "uint8", "uint16", "bool"}
 _ENCODERS = {
@@ -446,11 +450,30 @@ def _write_record(claim: Path, publication: _Publication) -> None:
     os.replace(temporary, claim / _RECORD)
 
 
-def _read_record(claim: Path) -> _Publication | None:
-    """Return a claim's publication record, or ``None`` when it's missing or can't be read."""
+def _well_formed(publication: _Publication) -> bool:
+    """Return whether every recorded path is a plain relative path under a recorded directory, recorded once, and the
+    moves are exactly the recorded top-level names."""
+    paths = [entry.path for entry in publication.entries]
+    directories = {entry.path for entry in publication.entries if entry.directory}
+    for path in paths:
+        parts = path.split("/")
+        if "\\" in path or any(part in ("", ".", "..") for part in parts):
+            return False
+        if len(parts) > 1 and "/".join(parts[:-1]) not in directories:
+            return False
+    top_level = [path for path in paths if "/" not in path]
+    return len(set(paths)) == len(paths) and sorted(publication.moves) == sorted(top_level)
+
+
+def _read_record(claim: int) -> _Publication | None:
+    """Return the publication record in the claim open at ``claim``, or ``None`` when it's missing, can't be read or
+    doesn't describe a staged dataset."""
     try:
-        raw = json.loads((claim / _RECORD).read_text())
-        return _Publication(
+        with open(
+            _RECORD, encoding="utf-8", opener=lambda name, flags: os.open(name, flags | _NO_FOLLOW, dir_fd=claim)
+        ) as file:
+            raw = json.load(file)
+        publication = _Publication(
             [str(name) for name in raw["moves"]],
             [
                 _Recorded(
@@ -466,6 +489,10 @@ def _read_record(claim: Path) -> _Publication | None:
         )
     except (OSError, ValueError, KeyError, TypeError):
         return None
+    if not _well_formed(publication):
+        logger.warning("Ignoring an export record that doesn't describe a staged dataset")
+        return None
+    return publication
 
 
 def _matches(status: os.stat_result, entry: _Recorded) -> bool:
@@ -492,23 +519,71 @@ def _owned(directory: Path, entry: _Recorded, recorded: dict[str, _Recorded]) ->
     return True
 
 
+def _open_recorded(root: int, ancestors: list[str], recorded: dict[str, _Recorded]) -> int | None:
+    """Open the recorded directory ``ancestors`` below ``root`` one level at a time without following links.
+
+    Returns ``None`` when a directory on the way is missing, unreadable or isn't the recorded one.
+    """
+    fd = os.dup(root)
+    try:
+        for depth, name in enumerate(ancestors, start=1):
+            child = os.open(name, _NO_FOLLOW_DIRECTORY, dir_fd=fd)
+            os.close(fd)
+            fd = child
+            if not _matches(os.fstat(fd), recorded["/".join(ancestors[:depth])]):
+                os.close(fd)
+                return None
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
+
+
 def _remove_recorded(directory: Path, publication: _Publication) -> None:
     """Remove recorded files still in ``directory`` with their recorded identities, then the directories that empties.
 
-    A file someone added or replaced keeps its directory, and with it the directories above, in place. Any other
-    error propagates, so the caller keeps the claim and its record for another attempt.
+    Every removal goes through a descriptor for its recorded parent, opened without following links and checked
+    against the record, so a link swapped in for a directory can't redirect it. A file someone added or replaced
+    keeps its directory, and with it the directories above, in place. Any other error propagates, so the caller
+    keeps the claim and its record for another attempt. Platforms without descriptor-relative operations leave
+    everything in place.
     """
+    if not _DESCRIPTOR_RELATIVE:
+        logger.warning("This platform can't safely remove what an export moved, so it stays in place")
+        return
     recorded = {entry.path: entry for entry in publication.entries}
-    for entry in publication.entries:
-        if not entry.directory and _owned(directory, entry, recorded):
-            (directory / entry.path).unlink()
-    for entry in sorted(publication.entries, key=lambda entry: entry.path.count("/"), reverse=True):
-        if entry.directory and _owned(directory, entry, recorded):
+    files = [entry for entry in publication.entries if not entry.directory]
+    directories = sorted(
+        (entry for entry in publication.entries if entry.directory),
+        key=lambda entry: entry.path.count("/"),
+        reverse=True,
+    )
+    root = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for entry in [*files, *directories]:
+            *ancestors, name = entry.path.split("/")
+            parent = _open_recorded(root, ancestors, recorded)
+            if parent is None:
+                continue
             try:
-                (directory / entry.path).rmdir()
-            except OSError as error:
-                if error.errno not in (errno.ENOTEMPTY, errno.EEXIST, errno.ENOENT):
-                    raise
+                try:
+                    status = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                except OSError:
+                    continue
+                if not _matches(status, entry):
+                    continue
+                if not entry.directory:
+                    os.unlink(name, dir_fd=parent)
+                    continue
+                try:
+                    os.rmdir(name, dir_fd=parent)
+                except OSError as error:
+                    if error.errno not in (errno.ENOTEMPTY, errno.EEXIST, errno.ENOENT):
+                        raise
+            finally:
+                os.close(parent)
+    finally:
+        os.close(root)
 
 
 def _left_in_place(directory: Path, publication: _Publication) -> bool:
@@ -547,17 +622,31 @@ def _log_cleanup_error(function: Callable[..., object], path: str, error: BaseEx
 def _recover(directory: Path) -> None:
     """Remove what an export that stopped partway left in a directory this export has locked.
 
-    Without a readable record, only the claim goes. When the record's last move is in place, the publication
-    completed and its dataset stays. Otherwise the stopped export's moved files go wherever their recorded
-    identities still match, along with the directories that empties; everything else stays.
+    Without a readable, well-formed record, only the claim goes. When the record's last move is in place, the
+    publication completed and its dataset stays. Otherwise the stopped export's moved files go wherever their
+    recorded identities still match, along with the directories that empties; everything else stays. The claim is
+    opened, read and removed through descriptors, so a link swapped in for it is neither read nor followed.
+    Platforms without descriptor-relative operations leave the claim, and the export then refuses the directory.
     """
-    claim = directory / CLAIM_DIRECTORY
-    if not claim.is_dir() or claim.is_symlink():
+    if not _DESCRIPTOR_RELATIVE:
         return
-    publication = _read_record(claim)
-    if publication is not None and not _published(directory, publication):
-        _remove_recorded(directory, publication)
-    shutil.rmtree(claim)
+    root = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        try:
+            claim = os.open(CLAIM_DIRECTORY, _NO_FOLLOW_DIRECTORY, dir_fd=root)
+        except OSError as error:
+            if error.errno in (errno.ENOENT, errno.ENOTDIR, errno.ELOOP):
+                return
+            raise
+        try:
+            publication = _read_record(claim)
+        finally:
+            os.close(claim)
+        if publication is not None and not _published(directory, publication):
+            _remove_recorded(directory, publication)
+        shutil.rmtree(CLAIM_DIRECTORY, dir_fd=root)
+    finally:
+        os.close(root)
 
 
 def _move_into(staging: Path, directory: Path, publication: _Publication) -> None:

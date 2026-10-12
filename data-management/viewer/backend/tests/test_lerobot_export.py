@@ -8,7 +8,7 @@ import json
 import logging
 import os
 import stat
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import av
@@ -743,6 +743,131 @@ def test_the_next_export_cleans_up_after_a_hard_stop(source: Path, stop: str, fo
         assert _data(output).num_rows == LENGTHS[1]
 
 
+def _identity(path: Path, name: str) -> dict[str, Any]:
+    status = path.lstat()
+    return {
+        "path": name,
+        "directory": stat.S_ISDIR(status.st_mode),
+        "dev": status.st_dev,
+        "ino": status.st_ino,
+        "size": status.st_size,
+        "mtime_ns": status.st_mtime_ns,
+    }
+
+
+def _reaching(output: Path, target: Path, name: str) -> list[dict[str, Any]]:
+    """Record ``target`` as ``name`` with every ancestor a path-joining ancestry check would look up."""
+    parts = PurePosixPath(name).parts
+    keys = ["/".join(parts[:depth]) for depth in range(1, len(parts) + 1)]
+    entries = [_identity(output / key, key) for key in keys]
+    return entries if name in keys else [*entries, _identity(target, name)]
+
+
+def _plant_record(claim: Path, moves: list[str], entries: list[dict[str, Any]]) -> None:
+    claim.mkdir(parents=True, exist_ok=True)
+    (claim / "publication.json").write_text(json.dumps({"moves": moves, "entries": entries}))
+
+
+@pytest.mark.parametrize("reach", ["parent", "absolute"])
+def test_recovery_never_removes_what_a_record_places_outside_the_output(source: Path, reach: str) -> None:
+    output = source.parents[1] / "edited"
+    output.mkdir()
+    victim = source.parents[1] / "victim.txt"
+    victim.write_text("keep me")
+    name = "../victim.txt" if reach == "parent" else victim.as_posix()
+    _plant_record(output / CLAIM_DIRECTORY, ["meta"], _reaching(output, victim, name))
+
+    result = LeRobotExporter(source, output, dataset_id="retry").export_episodes([1])
+
+    assert victim.read_text() == "keep me"
+    assert result.success, result.error
+
+
+@pytest.mark.parametrize("malformed", ["nested-move", "unrecorded-parent", "duplicate-path", "backslash", "dot"])
+def test_recovery_ignores_a_malformed_record(source: Path, caplog: pytest.LogCaptureFixture, malformed: str) -> None:
+    output = source.parents[1] / "edited"
+    stop_export(source, output, "after the first move")
+    record_path = output / CLAIM_DIRECTORY / "publication.json"
+    record = json.loads(record_path.read_text())
+    entries = record["entries"]
+    if malformed == "nested-move":
+        record["moves"].insert(0, "data/chunk-000")
+    elif malformed == "unrecorded-parent":
+        record["entries"] = [entry for entry in entries if entry["path"] != "data/chunk-000"]
+    elif malformed == "duplicate-path":
+        entries.append(dict(entries[0]))
+    elif malformed == "backslash":
+        entries.append({**entries[0], "path": "data\\chunk-000"})
+    else:
+        entries.append({**entries[0], "path": "data/./chunk-000"})
+    record_path.write_text(json.dumps(record))
+    before = _digests(output / "data")
+    caplog.set_level(logging.WARNING, logger=lerobot_exporter.__name__)
+
+    result = LeRobotExporter(source, output, dataset_id="retry").export_episodes([1])
+
+    assert result.success is False
+    assert "new or empty" in result.error
+    assert _digests(output / "data") == before
+    assert "doesn't describe a staged dataset" in caplog.text
+
+
+def test_recovery_removes_nothing_through_a_link_swapped_in_after_its_check(
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = source.parents[1] / "edited"
+    stop_export(source, output, "after the first move")
+    outside = tmp_path / "outside"
+    victim = outside / "chunk-000/file-000.parquet"
+    victim.parent.mkdir(parents=True)
+    victim.write_bytes(b"keep me")
+    matches = lerobot_exporter._matches
+    swapped = False
+
+    # The moved data folder becomes a link to another folder right after its file passes the identity check.
+    def swap_after_the_check(status: os.stat_result, entry: Any) -> bool:
+        nonlocal swapped
+        matched = matches(status, entry)
+        if matched and entry.path == "data/chunk-000/file-000.parquet" and not swapped:
+            swapped = True
+            (output / "data").rename(output / "data.moved")
+            (output / "data").symlink_to(outside, target_is_directory=True)
+        return matched
+
+    monkeypatch.setattr(lerobot_exporter, "_matches", swap_after_the_check)
+
+    LeRobotExporter(source, output, dataset_id="retry").export_episodes([1])
+
+    assert swapped
+    assert victim.read_bytes() == b"keep me"
+
+
+def test_recovery_reads_and_removes_only_the_claim_it_opened(
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = source.parents[1] / "edited"
+    stop_export(source, output, "after the first move")
+    victim = source.parents[1] / "victim.txt"
+    victim.write_text("keep me")
+    decoy = tmp_path / "decoy"
+    _plant_record(decoy, ["meta"], _reaching(output, victim, "../victim.txt"))
+    read_record = lerobot_exporter._read_record
+
+    # Another process replaces the claim with a link to its own record once recovery has found the claim.
+    def swap_the_claim(claim: Any) -> Any:
+        (output / CLAIM_DIRECTORY).rename(output / ".dataviewer-export.original")
+        (output / CLAIM_DIRECTORY).symlink_to(decoy, target_is_directory=True)
+        return read_record(claim)
+
+    monkeypatch.setattr(lerobot_exporter, "_read_record", swap_the_claim)
+
+    result = LeRobotExporter(source, output, dataset_id="retry").export_episodes([1])
+
+    assert result.success is False
+    assert victim.read_text() == "keep me"
+    assert sorted(path.name for path in decoy.iterdir()) == ["publication.json"]
+
+
 def test_publication_moves_meta_last(source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     output = source.parents[1] / "edited"
     rename = Path.rename
@@ -840,9 +965,32 @@ def test_an_incomplete_rollback_or_recovery_keeps_the_claim_for_the_next_export(
 ) -> None:
     output = source.parents[1] / "edited"
     moved = output / "data"
+    real_os = lerobot_exporter.os
+    moves: list[str] = []
+
+    class RefusingOs:
+        """The exporter's ``os``, refusing to remove, or after the second move to open, the moved ``data``."""
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(real_os, name)
+
+        def unlink(self, path: Any, *args: Any, **kwargs: Any) -> None:
+            if failure == "rollback" and Path(path).suffix == ".parquet":
+                raise PermissionError(errno.EACCES, "simulated permission error", str(path))
+            real_os.unlink(path, *args, **kwargs)
+
+        def rmdir(self, path: Any, *args: Any, **kwargs: Any) -> None:
+            if failure == "recovery" and str(path) == "data":
+                raise PermissionError(errno.EACCES, "simulated permission error", str(path))
+            real_os.rmdir(path, *args, **kwargs)
+
+        def open(self, path: Any, *args: Any, **kwargs: Any) -> int:
+            if failure == "unreadable" and len(moves) == 2 and str(path) == "data":
+                raise PermissionError(errno.EACCES, "simulated permission error", str(path))
+            return real_os.open(path, *args, **kwargs)
+
     if failure in ("rollback", "unreadable"):
-        rename, unlink, lstat = Path.rename, Path.unlink, Path.lstat
-        moves: list[str] = []
+        rename, lstat = Path.rename, Path.lstat
 
         # The second move fails after `data` has moved; an unreadable `data` can't be checked from then on.
         def fail_second_move(self: Path, target: Path) -> Path:
@@ -852,31 +1000,17 @@ def test_an_incomplete_rollback_or_recovery_keeps_the_claim_for_the_next_export(
                     raise OSError("simulated rename failure")
             return rename(self, target)
 
-        def refuse_to_unlink_moved_files(self: Path, missing_ok: bool = False) -> None:
-            if self.is_relative_to(moved):
-                raise PermissionError(errno.EACCES, "simulated permission error", str(self))
-            unlink(self, missing_ok=missing_ok)
-
         def refuse_to_read_the_moved_folder(self: Path) -> os.stat_result:
             if len(moves) == 2 and self == moved:
                 raise PermissionError(errno.EACCES, "simulated permission error", str(self))
             return lstat(self)
 
         monkeypatch.setattr(Path, "rename", fail_second_move)
-        if failure == "rollback":
-            monkeypatch.setattr(Path, "unlink", refuse_to_unlink_moved_files)
-        else:
+        if failure == "unreadable":
             monkeypatch.setattr(Path, "lstat", refuse_to_read_the_moved_folder)
     else:
         stop_export(source, output, "after the first move")
-        rmdir = Path.rmdir
-
-        def refuse_to_remove_the_moved_folder(self: Path) -> None:
-            if self == moved:
-                raise PermissionError(errno.EACCES, "simulated permission error", str(self))
-            rmdir(self)
-
-        monkeypatch.setattr(Path, "rmdir", refuse_to_remove_the_moved_folder)
+    monkeypatch.setattr(lerobot_exporter, "os", RefusingOs())
 
     failed = LeRobotExporter(source, output, dataset_id="first").export_episodes([0])
 
@@ -889,6 +1023,39 @@ def test_an_incomplete_rollback_or_recovery_keeps_the_claim_for_the_next_export(
 
     assert retried.success, retried.error
     assert sorted(path.name for path in output.iterdir()) == DATASET_ENTRIES
+
+
+@pytest.mark.parametrize("stopped", ["hard-stop", "failed-move"])
+def test_without_descriptor_relative_removal_moved_files_stay_for_a_person_to_remove(
+    source: Path, monkeypatch: pytest.MonkeyPatch, stopped: str
+) -> None:
+    output = source.parents[1] / "edited"
+    monkeypatch.setattr(lerobot_exporter, "_DESCRIPTOR_RELATIVE", False)
+    if stopped == "hard-stop":
+        stop_export(source, output, "after the first move")
+    else:
+        rename = Path.rename
+        moves: list[str] = []
+
+        def fail_second_move(self: Path, target: Path) -> Path:
+            if Path(target).parent == output:
+                moves.append(self.name)
+                if len(moves) == 2:
+                    raise OSError("simulated rename failure")
+            return rename(self, target)
+
+        monkeypatch.setattr(Path, "rename", fail_second_move)
+        assert LeRobotExporter(source, output, dataset_id="first").export_episodes([0]).success is False
+        monkeypatch.setattr(Path, "rename", rename)
+    left = {name: digest for name, digest in _digests(output).items() if name != LOCK_FILE}
+
+    result = LeRobotExporter(source, output, dataset_id="retry").export_episodes([1])
+
+    assert result.success is False
+    assert "new or empty" in result.error
+    assert {name: digest for name, digest in _digests(output).items() if name != LOCK_FILE} == left
+    assert (output / CLAIM_DIRECTORY / "publication.json").is_file()
+    assert (output / "data").is_dir()
 
 
 def test_an_error_while_checking_the_lock_releases_it(source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
