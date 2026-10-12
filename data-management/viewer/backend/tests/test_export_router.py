@@ -7,6 +7,7 @@ HDF5 exporter mocked out.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -586,7 +587,7 @@ class TestLeRobotExports:
         client: TestClient,
         override_service,
         dataset_layout,
-        held_locks: list[int],
+        held_locks: contextlib.ExitStack,
         caplog: pytest.LogCaptureFixture,
         endpoint: str,
         state: str,
@@ -595,6 +596,7 @@ class TestLeRobotExports:
         write_source(dataset_dir)
         override_service.dataset_is_lerobot.return_value = True
         output = base / "edited"
+        locks: list[int] = []
         if state in ("free-lock-file", "held-lock-file"):
             output.mkdir()
             (output / LOCK_FILE).touch()
@@ -603,7 +605,7 @@ class TestLeRobotExports:
         if state == "foreign-root-file":
             (output / "notes.txt").write_text("mine")
         if state in ("live-holder", "held-lock-file"):
-            held_locks.append(hold_lock(output))
+            locks.append(held_locks.enter_context(hold_lock(output)))
         before, identity = _contents(output), output.stat()
 
         result = _export_through(client, endpoint, output)
@@ -626,10 +628,10 @@ class TestLeRobotExports:
         else:
             assert _contents(output) == before
             assert os.path.samestat(output.stat(), identity)
-            assert os.path.samestat(os.stat(output / LOCK_FILE), os.fstat(held_locks[0]))
+            assert os.path.samestat(os.stat(output / LOCK_FILE), os.fstat(locks[0]))
             assert "another export is writing to this directory" in caplog.text
             if state == "held-lock-file":
-                os.close(held_locks.pop())
+                held_locks.close()
                 assert _export_through(client, endpoint, output)["success"] is True
 
 

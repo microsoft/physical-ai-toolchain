@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -191,8 +193,12 @@ def stop_export(source: Path, output: Path, stop: str) -> None:
     assert completed.returncode == STOPPED, completed.stdout + completed.stderr
 
 
-def hold_lock(directory: Path) -> int:
-    """Lock ``directory`` as another running export would, and return the descriptor to close."""
+@contextlib.contextmanager
+def hold_lock(directory: Path) -> Iterator[int]:
+    """Hold ``directory``'s export lock as another running export would, yielding the lock's descriptor."""
     fd = os.open(directory / LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
-    assert _try_lock(fd), "another export already holds the lock"
-    return fd
+    try:
+        assert _try_lock(fd), "another export already holds the lock"
+        yield fd
+    finally:
+        os.close(fd)

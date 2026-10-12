@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -50,12 +51,10 @@ TEST_DATASET_ID = os.environ.get("TEST_DATASET_ID", "lerobot")
 
 
 @pytest.fixture
-def held_locks() -> Iterator[list[int]]:
-    """Descriptors of export locks a test holds as another export would, closed when the test ends."""
-    held: list[int] = []
-    yield held
-    for fd in held:
-        os.close(fd)
+def held_locks() -> Iterator[contextlib.ExitStack]:
+    """Export locks a test holds as another export would, released when the test ends."""
+    with contextlib.ExitStack() as stack:
+        yield stack
 
 
 @pytest.fixture

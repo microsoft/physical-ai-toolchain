@@ -87,7 +87,6 @@ _NO_FOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _NO_FOLLOW_DIRECTORY = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _NO_FOLLOW
 # Recovery and rollback remove what an export moved only through descriptors opened without following links.
 _DESCRIPTOR_RELATIVE = shutil.rmtree.avoids_symlink_attacks and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
-_TIMELINE = ("timestamp", "frame_index", "episode_index", "index")
 _STATS_DTYPES = {"float16", "float32", "float64", "int8", "int16", "int32", "int64", "uint8", "uint16", "bool"}
 _ENCODERS = {
     "av1": "libsvtav1",

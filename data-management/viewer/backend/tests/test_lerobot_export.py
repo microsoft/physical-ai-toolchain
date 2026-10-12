@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import hashlib
 import json
@@ -753,9 +754,10 @@ def test_a_failure_while_moving_into_the_output_leaves_nothing_behind(
 
 @pytest.mark.parametrize("meanwhile", ["another export finished", "another export holds the lock"])
 def test_an_export_that_loses_the_race_for_an_existing_directory_leaves_it_alone(
-    source: Path, monkeypatch: pytest.MonkeyPatch, held_locks: list[int], meanwhile: str
+    source: Path, monkeypatch: pytest.MonkeyPatch, held_locks: contextlib.ExitStack, meanwhile: str
 ) -> None:
     output = source.parents[1] / "edited"
+    locks: list[int] = []
     output.mkdir()
     video_sizes = LeRobotExporter._video_sizes
     paused = False
@@ -769,7 +771,7 @@ def test_an_export_that_loses_the_race_for_an_existing_directory_leaves_it_alone
                 other = LeRobotExporter(source, output, dataset_id="winner").export_episodes([1])
                 assert other.success, other.error
             else:
-                held_locks.append(hold_lock(output))
+                locks.append(held_locks.enter_context(hold_lock(output)))
                 _stage_a_claim(output)
         return video_sizes(self, *args)
 
@@ -787,7 +789,7 @@ def test_an_export_that_loses_the_race_for_an_existing_directory_leaves_it_alone
         assert "another export is writing to this directory" in result.error
         assert sorted(path.name for path in output.iterdir()) == sorted([CLAIM_DIRECTORY, LOCK_FILE])
         assert (output / CLAIM_DIRECTORY / "dataset/staged.bin").read_bytes() == b"staged"
-        assert os.path.samestat(os.stat(output / LOCK_FILE), os.fstat(held_locks[0]))
+        assert os.path.samestat(os.stat(output / LOCK_FILE), os.fstat(locks[0]))
 
 
 def _published(output: Path) -> dict[str, str]:
@@ -988,9 +990,10 @@ def test_publication_moves_meta_last(source: Path, monkeypatch: pytest.MonkeyPat
 @pytest.mark.parametrize("peer", [False, True], ids=["alone", "peer-holds-the-lock"])
 @pytest.mark.parametrize("existing", [False, True], ids=["new-output", "existing-output"])
 def test_an_export_that_cannot_take_the_lock_removes_nothing(
-    source: Path, monkeypatch: pytest.MonkeyPatch, held_locks: list[int], existing: bool, peer: bool
+    source: Path, monkeypatch: pytest.MonkeyPatch, held_locks: contextlib.ExitStack, existing: bool, peer: bool
 ) -> None:
     output = source.parents[1] / "edited"
+    locks: list[int] = []
     if existing:
         output.mkdir()
     try_lock = lerobot_exporter._try_lock
@@ -1000,7 +1003,7 @@ def test_an_export_that_cannot_take_the_lock_removes_nothing(
     def fail_to_lock(fd: int) -> bool:
         monkeypatch.setattr(lerobot_exporter, "_try_lock", try_lock)
         if peer:
-            held_locks.append(hold_lock(output))
+            locks.append(held_locks.enter_context(hold_lock(output)))
             _stage_a_claim(output)
             seen["output"] = output.stat()
         raise OSError(errno.ENOLCK, "No locks available")
@@ -1012,13 +1015,13 @@ def test_an_export_that_cannot_take_the_lock_removes_nothing(
     assert failed.success is False
     assert "can't be locked" in failed.error
     if peer:
-        assert os.path.samestat(os.stat(output / LOCK_FILE), os.fstat(held_locks[0]))
+        assert os.path.samestat(os.stat(output / LOCK_FILE), os.fstat(locks[0]))
         assert os.path.samestat(output.stat(), seen["output"])
         assert (output / CLAIM_DIRECTORY / "dataset/staged.bin").read_bytes() == b"staged"
         excluded = LeRobotExporter(source, output, dataset_id="c").export_episodes([0])
         assert excluded.success is False
         assert "another export is writing to this directory" in excluded.error
-        os.close(held_locks.pop())
+        held_locks.close()
     else:
         assert [path.name for path in output.iterdir()] == [LOCK_FILE]
 
@@ -1030,9 +1033,10 @@ def test_an_export_that_cannot_take_the_lock_removes_nothing(
 
 @pytest.mark.parametrize("held", [False, True], ids=["replacement-free", "replacement-held"])
 def test_an_export_whose_lock_file_is_replaced_locks_the_current_one(
-    source: Path, monkeypatch: pytest.MonkeyPatch, held_locks: list[int], held: bool
+    source: Path, monkeypatch: pytest.MonkeyPatch, held_locks: contextlib.ExitStack, held: bool
 ) -> None:
     output = source.parents[1] / "edited"
+    locks: list[int] = []
     output.mkdir()
     try_lock = lerobot_exporter._try_lock
 
@@ -1041,7 +1045,7 @@ def test_an_export_whose_lock_file_is_replaced_locks_the_current_one(
         monkeypatch.setattr(lerobot_exporter, "_try_lock", try_lock)
         (output / LOCK_FILE).unlink()
         if held:
-            held_locks.append(hold_lock(output))
+            locks.append(held_locks.enter_context(hold_lock(output)))
         return try_lock(fd)
 
     monkeypatch.setattr(lerobot_exporter, "_try_lock", replace_then_lock)
@@ -1052,7 +1056,7 @@ def test_an_export_whose_lock_file_is_replaced_locks_the_current_one(
         assert result.success is False
         assert "another export is writing to this directory" in result.error
         assert [path.name for path in output.iterdir()] == [LOCK_FILE]
-        assert os.path.samestat(os.stat(output / LOCK_FILE), os.fstat(held_locks[0]))
+        assert os.path.samestat(os.stat(output / LOCK_FILE), os.fstat(locks[0]))
     else:
         assert result.success, result.error
         assert sorted(path.name for path in output.iterdir()) == DATASET_ENTRIES
@@ -1193,7 +1197,7 @@ def test_a_cleanup_error_keeps_the_exports_own_result(
     source: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
-    held_locks: list[int],
+    held_locks: contextlib.ExitStack,
     refused: str,
     outcome: str,
 ) -> None:
@@ -1226,4 +1230,4 @@ def test_a_cleanup_error_keeps_the_exports_own_result(
         if record.exc_info and isinstance(record.exc_info[1], PermissionError)
     ]
     assert [os.path.basename(error.filename) for error in refusals] == [refused]
-    held_locks.append(hold_lock(output))
+    held_locks.enter_context(hold_lock(output))
