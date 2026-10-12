@@ -474,14 +474,16 @@ For individual episode review or correction:
 4. Click "Save & Next Episode" to persist and continue, or "Save Episode" on the final episode.
 
 The Edit Tools trajectory editor adjusts state channels per frame, labelled with the dataset's own channel names, and the trajectory plot previews each adjustment.
+Adjustments belong to the recorded frame under the playhead; after frames are removed or inserted, the editor names that recorded frame, and an inserted frame can't be adjusted directly.
 HDF5 exports keep the recorded joint positions as `data/qpos` and add the adjustments beside them as `data/qpos_adjusted`, with `data/qpos_adjusted_mask` marking the edited rows and the adjustment list in the episode's `.meta.json`.
 Velocities, actions and the other exported arrays stay as recorded.
 
-LeRobot v3.0 sources, including sim captures, export to a new LeRobot v3.0 dataset at the output path. That path must be new or empty and outside the source; an existing empty directory, such as a mount point, is kept.
+LeRobot v3.0 sources whose camera features are non-depth videos, including sim captures, export to a new LeRobot v3.0 dataset at the output path; datasets with image features or depth video are refused. That path must be new or empty and outside the source; an existing empty directory, such as a mount point, is kept.
 The export locks the directory with a hidden `.dataviewer-export.lock` file and stages in a hidden `.dataviewer-export.partial` directory, so a second export to the same directory fails while the first runs.
 If the backend stops mid-export, or an export fails and can't remove what it moved, the next export to that directory cleans up first. It removes the earlier export's staging and the moved files that still match the identities that export recorded, and keeps a dataset whose move finished. Anything else stays, and exports there fail until it's removed.
+The cleanup never follows links and ignores a record whose paths don't describe a staged dataset. On Windows it leaves the earlier export's files, so remove them, including `.dataviewer-export.partial`, before exporting there again.
 LeRobot exports need a filesystem with file locking; on one without, the export fails and can leave an empty `.dataviewer-export.lock`.
-The export keeps `observation.state` and every other recorded feature, and adds adjustments as `adjusted.observation.state` with `adjusted.observation.state_mask`. The `adjusted.` prefix keeps both out of LeRobot policy inputs.
+The export keeps `observation.state` and every other supported recorded feature, and adds adjustments as `adjusted.observation.state` with `adjusted.observation.state_mask`. The `adjusted.` prefix keeps both out of LeRobot policy inputs.
 Removing or inserting frames renumbers `frame_index` and `timestamp`. `dataviewer-export.json` maps every output frame to its source frame and records the edits and remapped subtasks.
 Subtasks shrink to the frames that survive the edits, and a LeRobot export also writes each one as a LeRobot `subtask` row in `language_persistent`, starting at its first output frame.
 LeRobot keeps a subtask active until the next one starts, so frames between two subtasks read as the earlier one; `dataviewer-export.json` keeps the exact ranges.
