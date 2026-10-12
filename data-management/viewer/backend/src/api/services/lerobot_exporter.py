@@ -1,7 +1,8 @@
 """
 LeRobot exporter: writes edited episodes of a LeRobot v3.0 dataset as a new v3.0 dataset.
 
-The source dataset is never modified. Recorded features are copied unchanged, and trajectory
+The source dataset is never modified, and its camera features must be non-depth videos; image features
+and depth video are refused. Every other recorded feature is copied unchanged, and trajectory
 adjustments become the derived ``adjusted.observation.state`` and ``adjusted.observation.state_mask``
 features. Removing or inserting frames renumbers the timeline so every timestamp stays
 ``frame_index / fps``, and LeRobot language annotation rows move with it; ``dataviewer-export.json``
