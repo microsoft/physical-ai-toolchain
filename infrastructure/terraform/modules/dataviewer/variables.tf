@@ -94,9 +94,9 @@ variable "should_deploy_dataviewer_auth" {
 
 variable "dataviewer_redirect_uris" {
   type        = list(string)
-  description = "SPA redirect URIs for MSAL.js authentication (local development)"
+  description = "SPA redirect bridge URIs for MSAL.js. Include /redirect.html for every frontend origin"
   default = [
-    "http://localhost:5173/",
-    "http://localhost:5174/",
+    "http://localhost:5173/redirect.html",
+    "http://localhost:5174/redirect.html",
   ]
 }

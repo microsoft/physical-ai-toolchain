@@ -253,6 +253,8 @@ kai_helm_args=(
   --set-string "operator.image.tag=${KAI_SCHEDULER_VERSION}@sha256:${kai_operator_sha}"
   --set-string "crdupgrader.image.tag=${KAI_SCHEDULER_VERSION}@sha256:${kai_crd_upgrader_sha}"
   --set-string "postCleanup.image.tag=${KAI_SCHEDULER_VERSION}@sha256:${kai_crd_upgrader_sha}"
+  --set-string "kaiConfigDeployer.image.tag=${KAI_SCHEDULER_VERSION}@sha256:${kai_crd_upgrader_sha}"
+  --set-string "topologyMigration.image.tag=${KAI_SCHEDULER_VERSION}@sha256:${kai_crd_upgrader_sha}"
 )
 kube_helm "$kubeconfig" "$context" upgrade --install kai-scheduler "$kai_chart" \
   --namespace "$NS_KAI_SCHEDULER" --create-namespace \

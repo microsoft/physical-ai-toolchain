@@ -17,13 +17,14 @@ Active — primary training approach.
 
 ## Runtime Environment
 
-| Setting   | Value                                                                                                 |
-|-----------|-------------------------------------------------------------------------------------------------------|
-| Container | `DEFAULT_ISAAC_LAB_IMAGE` from `scripts/lib/common.sh` (`nvcr.io/nvidia/isaac-lab:3.0.0-beta2-post1`) |
-| Python    | `/isaac-sim/kit/python/bin/python3` via `isaaclab.sh -p` wrapper                                      |
-| numpy     | `2.5.1` (aligned with the Isaac Lab 3.0 Post 1 runtime)                                               |
-| EULA      | `ACCEPT_EULA=Y`, `PRIVACY_CONSENT=Y` required                                                         |
-| Vulkan    | `NVIDIA_DRIVER_CAPABILITIES=all`                                                                      |
+| Setting           | Value                                                                                                 |
+|-------------------|-------------------------------------------------------------------------------------------------------|
+| Container         | `DEFAULT_ISAAC_LAB_IMAGE` from `scripts/lib/common.sh` (`nvcr.io/nvidia/isaac-lab:3.0.0-beta2-post1`) |
+| Python            | `/isaac-sim/kit/python/bin/python3` via `isaaclab.sh -p` wrapper                                      |
+| NumPy             | `2.5.3` (validated with the Isaac Lab 3.0 Post 1 runtime used by OSMO 6.3.1)                          |
+| OSMO payload root | `/tmp/isaac_payload`                                                                                  |
+| EULA              | `ACCEPT_EULA=Y`, `PRIVACY_CONSENT=Y` required                                                         |
+| Vulkan            | `NVIDIA_DRIVER_CAPABILITIES=all`                                                                      |
 
 ## Submission Paths
 

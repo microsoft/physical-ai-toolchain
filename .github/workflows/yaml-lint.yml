@@ -13,6 +13,15 @@ on:
         required: false
         type: boolean
         default: true
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.yaml-lint.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.yaml-lint.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.yaml-lint.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.yaml-lint.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.yaml-lint.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.yaml-lint.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.yaml-lint.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.yaml-lint.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -25,6 +34,16 @@ jobs:
   yaml-lint:
     name: actionlint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -43,7 +62,7 @@ jobs:
           $version = '1.7.10'
           $expectedHash = 'f4c76b71db5755a713e6055cbb0857ed07e103e028bda117817660ebadb4386f'
           $url = "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz"
-          $tmpFile = '/tmp/actionlint.tar.gz'
+          $tmpFile = Join-Path $env:GITHUB_WORKSPACE 'actionlint.tar.gz'
           Invoke-WebRequest -Uri $url -OutFile $tmpFile
           $actualHash = (Get-FileHash -Path $tmpFile -Algorithm SHA256).Hash.ToLower()
           if ($actualHash -ne $expectedHash) {
@@ -54,6 +73,7 @@ jobs:
           actionlint --version
 
       - name: Run YAML Lint
+        id: lint
         continue-on-error: ${{ inputs.soft-fail }}
         run: |
           $lintArgs = @{}
@@ -69,3 +89,14 @@ jobs:
           name: yaml-lint-results
           path: logs/
           retention-days: 30
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: yaml-lint
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["lint"]'
+          reports: '[{"path":"logs/yaml-lint-results.json","kind":"json"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

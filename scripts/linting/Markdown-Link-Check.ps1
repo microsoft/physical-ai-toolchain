@@ -193,7 +193,9 @@ function Invoke-MarkdownLinkCheckCore {
             $relative = [System.IO.Path]::GetRelativePath($repoRoot.Path, $absolute)
             Write-Output "Checking $relative"
 
-            $xmlFile = [System.IO.Path]::GetTempFileName() + '.xml'
+            $reportDir = Join-Path $repoRoot.Path 'logs/markdown-link-reports'
+            New-Item -Path $reportDir -ItemType Directory -Force | Out-Null
+            $xmlFile = Join-Path $reportDir "$([Guid]::NewGuid().ToString('N')).xml"
             $exitCode = 1
             try {
                 $commandArgs = $baseArguments + @($relative, '--reporters', 'default,junit', '--junit-output', $xmlFile)
@@ -226,6 +228,9 @@ function Invoke-MarkdownLinkCheckCore {
                                     Write-Host "  [FAIL] $url -> Status: $statusCode" -ForegroundColor Red
                                 }
                             }
+                            else {
+                                throw 'Markdown link checker did not write its required report.'
+                            }
 
                             if ($status -eq 'dead') {
                                 $brokenLinks += @{
@@ -245,9 +250,7 @@ function Invoke-MarkdownLinkCheckCore {
             }
             catch {
                 Write-Warning "Failed to parse XML output for $relative : $_"
-                if ($exitCode -ne 0) {
-                    $failedFiles += $relative
-                }
+                $failedFiles += $relative
             }
             finally {
                 if (Test-Path $xmlFile) {

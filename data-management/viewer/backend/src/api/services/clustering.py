@@ -5,6 +5,8 @@ Uses trajectory features and hierarchical clustering to group
 similar episodes together.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -97,6 +99,12 @@ class EpisodeClusterer:
                 silhouette_score=1.0,
             )
 
+        # Use a shared scale when squared statistics or path lengths could overflow.
+        magnitude = max(np.max(np.abs(trajectory), initial=0.0) for trajectory in trajectories)
+        safe_magnitude = np.sqrt(np.finfo(np.float64).max) / (4 * max(sum(t.size for t in trajectories), 1))
+        if magnitude > safe_magnitude:
+            trajectories = [trajectory / magnitude for trajectory in trajectories]
+
         # Extract features from each trajectory
         features = np.array([self._extract_features(t) for t in trajectories])
 
@@ -122,7 +130,8 @@ class EpisodeClusterer:
             labels = clustering.fit_predict(features_normalized)
 
             # Compute silhouette score
-            sil_score = silhouette_score(features_normalized, labels) if len(set(labels)) > 1 else 1.0
+            unique_labels = len(set(labels))
+            sil_score = silhouette_score(features_normalized, labels) if 1 < unique_labels < len(labels) else 1.0
 
             # Compute similarity scores (distance to cluster centroid)
             assignments = []

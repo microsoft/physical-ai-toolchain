@@ -6,7 +6,7 @@ if [[ -z "${CHECKPOINT_URI:-}" ]]; then
   exit 1
 fi
 
-PAYLOAD_ROOT="${PAYLOAD_ROOT:-/workspace/isaac_payload}"
+PAYLOAD_ROOT="${PAYLOAD_ROOT:-/tmp/isaac_payload}"
 INFERENCE_ROOT="${INFERENCE_ROOT:-${PAYLOAD_ROOT}/evaluation/sil}"
 
 mkdir -p "${PAYLOAD_ROOT}"

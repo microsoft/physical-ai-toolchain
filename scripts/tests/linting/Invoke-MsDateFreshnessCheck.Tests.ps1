@@ -256,7 +256,7 @@ Content
             $result | Should -BeNullOrEmpty
         }
 
-        It 'Returns null when ms.date has invalid format' {
+        It 'Fails when ms.date has invalid format' {
             $content = @'
 ---
 ms.date: 2025/01/01
@@ -265,11 +265,10 @@ ms.date: 2025/01/01
 Content
 '@
             Set-Content -Path $script:TestFile -Value $content
-            $result = Get-MsDateFromFrontmatter -FilePath $script:TestFile
-            $result | Should -BeNullOrEmpty
+            { Get-MsDateFromFrontmatter -FilePath $script:TestFile } | Should -Throw
         }
 
-        It 'Returns null when ms.date is not a valid date' {
+        It 'Fails when ms.date is not a valid date' {
             $content = @'
 ---
 ms.date: invalid-date
@@ -278,8 +277,7 @@ ms.date: invalid-date
 Content
 '@
             Set-Content -Path $script:TestFile -Value $content
-            $result = Get-MsDateFromFrontmatter -FilePath $script:TestFile
-            $result | Should -BeNullOrEmpty
+            { Get-MsDateFromFrontmatter -FilePath $script:TestFile } | Should -Throw
         }
     }
 
@@ -307,7 +305,7 @@ title: Incomplete
     }
 
     Context 'YAML parsing errors' {
-        It 'Handles malformed YAML gracefully' {
+        It 'Fails when YAML cannot be parsed' {
             $content = @'
 ---
 title: "Unclosed quote
@@ -317,20 +315,18 @@ ms.date: 2025-01-01
 Content
 '@
             Set-Content -Path $script:TestFile -Value $content
-            $result = Get-MsDateFromFrontmatter -FilePath $script:TestFile
-            $result | Should -BeNullOrEmpty
+            { Get-MsDateFromFrontmatter -FilePath $script:TestFile } | Should -Throw
         }
     }
 
     Context 'File access errors' {
-        It 'Returns null when file cannot be read' {
-            $result = Get-MsDateFromFrontmatter -FilePath (Join-Path $TestDrive 'nonexistent.md') 3>$null
-            $result | Should -BeNullOrEmpty
+        It 'Fails when file cannot be read' {
+            { Get-MsDateFromFrontmatter -FilePath (Join-Path $TestDrive 'nonexistent.md') } | Should -Throw
         }
 
-        It 'Emits warning when file cannot be read' {
-            $warnings = @(Get-MsDateFromFrontmatter -FilePath (Join-Path $TestDrive 'nonexistent.md') 3>&1)
-            $warnings | Where-Object { $_ -like '*Error reading file*' } | Should -Not -BeNullOrEmpty
+        It 'Does not classify a read failure as absent ms.date' {
+            { Get-MsDateFromFrontmatter -FilePath (Join-Path $TestDrive 'nonexistent.md') } |
+                Should -Throw '*does not exist*'
         }
     }
 }

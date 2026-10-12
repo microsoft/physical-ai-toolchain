@@ -108,3 +108,7 @@ For the cloud path, an Azure subscription with Contributor + User Access Adminis
 | [Contributing Guide](../contributing/README.md)               | Development workflow and code standards |
 | [Deployment Guide](../infrastructure/README.md)               | Detailed deployment reference           |
 | [Cost Considerations](../contributing/cost-considerations.md) | Pricing breakdown and optimization      |
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

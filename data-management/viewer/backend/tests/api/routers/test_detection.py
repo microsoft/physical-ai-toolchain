@@ -16,14 +16,6 @@ from src.api.models.detection import EpisodeDetectionSummary
 
 
 @pytest.fixture
-def client() -> TestClient:
-    from src.api.main import app
-
-    with TestClient(app) as c:
-        yield c
-
-
-@pytest.fixture
 def override_services():
     from src.api.main import app
     from src.api.services.dataset_service import get_dataset_service

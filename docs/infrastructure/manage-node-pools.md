@@ -3,7 +3,7 @@ sidebar_position: 11
 title: Manage Node Pools
 description: Add, remove, and resize AKS node pools on an existing cluster
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-01
+ms.date: 2026-10-08
 ms.topic: how-to
 keywords:
   - node-pools
@@ -58,22 +58,23 @@ Script `03` deploys the selected `osmo-platforms.yaml` as a Helm values overlay.
 
 These fields on a `node_pools` entry are `ForceNew`, so editing one destroys and recreates the pool under the same name:
 
-| Field                          | In-place? | Notes                                                                |
-|--------------------------------|-----------|----------------------------------------------------------------------|
-| `vm_size`                      | No        | VMSS SKU is immutable; AKS rejects in-place SKU changes              |
-| `subnet_address_prefixes`      | No        | The subnet itself is also a `ForceNew` resource                      |
-| `subnet_pool_key`              | No        | Moves the pool to another subnet; add a new pool instead             |
-| `zones`                        | No        | Availability zone is set at pool creation                            |
-| `priority`                     | No        | `Regular` vs `Spot` is set at pool creation                          |
-| `eviction_policy`              | No        | Tied to `priority`; only valid for `Spot`                            |
-| `gpu_driver`                   | No        | Affects pool creation flags                                          |
-| `node_count`                   | Yes       | When autoscaler is disabled                                          |
-| `min_count`, `max_count`       | Yes       | When autoscaler is enabled                                           |
-| `should_enable_auto_scaling`   | Yes       | Toggling on/off updates the existing pool                            |
-| `node_labels`                  | Yes       | Applied to existing nodes                                            |
-| `node_taints`                  | Yes       | Applied to existing nodes (workloads may be evicted)                 |
-| `max_surge`, `max_unavailable` | Yes       | Non-Spot pools only; set at most one                                 |
-| `undrainable_node_behavior`    | Yes       | Non-Spot pools only; removing it after it was set recreates the pool |
+| Field                          | In-place? | Notes                                                                 |
+|--------------------------------|-----------|-----------------------------------------------------------------------|
+| `vm_size`                      | No        | VMSS SKU is immutable; AKS rejects in-place SKU changes               |
+| `subnet_address_prefixes`      | No        | The subnet itself is also a `ForceNew` resource                       |
+| `subnet_pool_key`              | No        | Moves the pool to another subnet; add a new pool instead              |
+| `zones`                        | No        | Availability zone is set at pool creation                             |
+| `priority`                     | No        | `Regular` vs `Spot` is set at pool creation                           |
+| `eviction_policy`              | No        | Tied to `priority`; only valid for `Spot`                             |
+| `gpu_driver`                   | No        | Affects pool creation flags                                           |
+| `node_count`                   | Yes       | When autoscaler is disabled                                           |
+| `min_count`, `max_count`       | Yes       | When autoscaler is enabled                                            |
+| `should_enable_auto_scaling`   | Yes       | Toggling on/off updates the existing pool                             |
+| `node_labels`                  | Yes       | Applied to existing nodes                                             |
+| `node_taints`                  | Yes       | Applied to existing nodes (workloads may be evicted)                  |
+| `max_surge`, `max_unavailable` | Yes       | Non-Spot pools only; set at most one                                  |
+| `undrainable_node_behavior`    | Yes       | Non-Spot pools only; removing it after it was set recreates the pool  |
+| `os_sku`                       | Yes       | Between `Ubuntu*` and `AzureLinux*` SKUs; AKS rebuilds existing nodes |
 
 Anything in the "No" rows means choosing between two flows:
 
@@ -310,6 +311,8 @@ Faster but disruptive. Use only when no workloads are running on the pool, or wh
 | Spot constraints            | Azure rejects `upgrade_settings` for Spot pools; the Terraform module omits them and rejects `max_surge`, `max_unavailable`, and `undrainable_node_behavior` on Spot entries. `eviction_policy` applies only when `priority = "Spot"`.                                                                                                                                                                                                                                         |
 | Autoscaling                 | `min_count = 0` is allowed; the pool scales up on demand from pending pods. KAI/Volcano coscheduling requires whole-pool capacity for gang-scheduled jobs.                                                                                                                                                                                                                                                                                                                     |
 | Scale-from-zero for AzureML | AKS reserves the `accelerator` label and sets it on GPU nodes itself, so `node_labels` can't declare it. For a pool at zero, the cluster autoscaler predicts the pool's `agentpool` label but not `accelerator` for A10, H100, or RTX PRO 6000 sizes. InstanceTypes for pools that scale from zero must select `agentpool: <pool key>`, as the environment bundle generates them. See [Scale-from-zero GPU Pools](../training/azureml-training.md#-scale-from-zero-gpu-pools). |
+| Scale-from-zero guard       | Taint GPU pools with `nvidia.com/gpu:NoSchedule`, autoscale the system pool, and set `aks_auto_scaler_profile` (`least-waste`, `new_pod_scale_up_delay = "120s"`) so CPU pods pending at cluster start don't add GPU nodes. See [Taint GPU pools and guard cluster starts](../training/azureml-training.md#taint-gpu-pools-and-guard-cluster-starts).                                                                                                                          |
+| GPU node OS and upgrades    | On Kubernetes 1.35, set `os_sku = "Ubuntu2204"` on GPU pools, and add `nvidia.com/gpu-driver-upgrade.skip = "true"` to `node_labels` on pools with `gpu_driver = "Install"`. See [GPU Driver Management](../reference/gpu-configuration.md#gpu-driver-management).                                                                                                                                                                                                             |
 | OSMO reconciliation         | Regenerate the environment bundle after scheduling-property changes, then rerun `03-deploy-osmo.sh` with its `--platform-values` file to reconcile pool, platform, and backend configuration.                                                                                                                                                                                                                                                                                  |
 
 ## 🔗 Related

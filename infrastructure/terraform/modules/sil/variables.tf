@@ -69,8 +69,12 @@ variable "aks_config" {
     should_enable_microsoft_defender            = optional(bool, false)
     sku_tier                                    = optional(string, "Standard")
     support_plan                                = optional(string, "KubernetesOfficial")
+    auto_scaler_profile = optional(object({
+      expander               = optional(string)
+      new_pod_scale_up_delay = optional(string)
+    }))
   })
-  description = "AKS cluster configuration for the system node pool, SKU tier, and support plan. AKSLongTermSupport requires the Premium tier"
+  description = "AKS cluster configuration for the system node pool, SKU tier, support plan, and cluster autoscaler profile. AKSLongTermSupport requires the Premium tier. A null auto_scaler_profile leaves the cluster's autoscaler profile unchanged"
   default = {
     system_node_pool_vm_size                    = "Standard_D8ds_v5"
     system_node_pool_node_count                 = 2
@@ -95,6 +99,16 @@ variable "aks_config" {
     condition     = var.aks_config.support_plan != "AKSLongTermSupport" || var.aks_config.sku_tier == "Premium"
     error_message = "aks_config.support_plan AKSLongTermSupport requires aks_config.sku_tier Premium."
   }
+
+  validation {
+    condition     = try(var.aks_config.auto_scaler_profile.expander, null) == null ? true : contains(["least-waste", "most-pods", "priority", "random"], var.aks_config.auto_scaler_profile.expander)
+    error_message = "aks_config.auto_scaler_profile.expander must be least-waste, most-pods, priority, or random."
+  }
+
+  validation {
+    condition     = try(var.aks_config.auto_scaler_profile.new_pod_scale_up_delay, null) == null ? true : can(regex("^[0-9]+s$", var.aks_config.auto_scaler_profile.new_pod_scale_up_delay))
+    error_message = "aks_config.auto_scaler_profile.new_pod_scale_up_delay must be whole seconds such as 0s, 120s, or 600s; AKS rejects other units."
+  }
 }
 
 variable "node_pools" {
@@ -115,8 +129,9 @@ variable "node_pools" {
     undrainable_node_behavior  = optional(string, null)
     max_surge                  = optional(string, null)
     max_unavailable            = optional(string, null)
+    os_sku                     = optional(string, null)
   }))
-  description = "Additional AKS node pools configuration. Map key is used as the node pool name. Each entry either owns a subnet through subnet_address_prefixes or shares another entry's subnet through subnet_pool_key. Non-Spot entries can set undrainable_node_behavior (Cordon or Schedule) and one of max_surge or max_unavailable; max_surge defaults to 10% when neither is set. Note: Pod subnets are not used with Azure CNI Overlay mode"
+  description = "Additional AKS node pools configuration. Map key is used as the node pool name. Each entry either owns a subnet through subnet_address_prefixes or shares another entry's subnet through subnet_pool_key. Non-Spot entries can set undrainable_node_behavior (Cordon or Schedule) and one of max_surge or max_unavailable; max_surge defaults to 10% when neither is set. os_sku pins the node OS (Ubuntu, Ubuntu2204, Ubuntu2404, AzureLinux, or AzureLinux3); null keeps the AKS default for the Kubernetes version. Note: Pod subnets are not used with Azure CNI Overlay mode"
   default = {
     gpu = {
       vm_size                    = "Standard_NV36ads_A10_v5"
@@ -179,6 +194,14 @@ variable "node_pools" {
       !contains(keys(pool.node_labels), "accelerator")
     ])
     error_message = "node_labels can't set accelerator: AKS reserves that label and sets accelerator=nvidia on GPU nodes itself. Select GPU pools by agentpool instead."
+  }
+
+  validation {
+    condition = alltrue([
+      for key, pool in var.node_pools :
+      pool.os_sku == null ? true : contains(["Ubuntu", "Ubuntu2204", "Ubuntu2404", "AzureLinux", "AzureLinux3"], pool.os_sku)
+    ])
+    error_message = "os_sku must be Ubuntu, Ubuntu2204, Ubuntu2404, AzureLinux, or AzureLinux3."
   }
 }
 

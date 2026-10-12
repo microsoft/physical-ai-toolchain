@@ -7,6 +7,7 @@ activex
 acunetix
 addfinalizer
 addinivalue
+addopts
 adobe
 adrm
 adrs
@@ -140,6 +141,7 @@ buildpack
 bulletsprint
 byol
 byos
+cacheprovider
 caching
 caffe
 cannery
@@ -1305,6 +1307,7 @@ stonith
 stopwords
 storsimple
 strategizing
+strerror
 striim
 strpos
 stylecop
@@ -1422,6 +1425,7 @@ trivy
 trufflehog
 trustexitcode
 tryfirst
+trylast
 turbonomic
 twilio
 typeparam

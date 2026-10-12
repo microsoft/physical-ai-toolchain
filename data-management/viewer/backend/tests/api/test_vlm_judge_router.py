@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import av
@@ -63,13 +65,13 @@ def _build_dataset(root: Path, *, instruction: str | None, n_frames: int = 12) -
     (root / "meta" / "episodes.jsonl").write_text(json.dumps(episode) + "\n")
 
 
-def _reload_app(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> TestClient:
+def _reload_app(environment_patch: pytest.MonkeyPatch, data_dir: Path) -> TestClient:
     """Reload the API with the VLM judge enabled and the echo backend."""
-    monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "true")
-    monkeypatch.setenv("DATA_DIR", str(data_dir))
-    monkeypatch.setenv("VLM_JUDGE_ENABLED", "true")
-    monkeypatch.setenv("VLM_JUDGE_BACKEND", "echo")
-    monkeypatch.setenv("VLM_JUDGE_N_FRAMES", "6")
+    environment_patch.setenv("DATAVIEWER_AUTH_DISABLED", "true")
+    environment_patch.setenv("DATA_DIR", str(data_dir))
+    environment_patch.setenv("VLM_JUDGE_ENABLED", "true")
+    environment_patch.setenv("VLM_JUDGE_BACKEND", "echo")
+    environment_patch.setenv("VLM_JUDGE_N_FRAMES", "6")
 
     import src.api.config as config_mod
     import src.api.services.annotation_service as ann_service_mod
@@ -88,11 +90,47 @@ def _reload_app(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> TestClient:
     return TestClient(main_mod.app)
 
 
+@pytest.fixture(autouse=True)
+def restore_default_app() -> Iterator[pytest.MonkeyPatch]:
+    """Restore the default router set after each VLM-enabled app reload."""
+    environment_patch = pytest.MonkeyPatch()
+    yield environment_patch
+    environment_patch.undo()
+
+    import src.api.config as config_mod
+    import src.api.services.annotation_service as ann_service_mod
+    import src.api.services.dataset_service.service as ds_service_mod
+    from src.api.services.vlm_judge_service import reset_vlm_judge_service
+
+    config_mod._app_config = None
+    ann_service_mod._annotation_service = None
+    ds_service_mod._dataset_service = None
+    reset_vlm_judge_service()
+
+    import src.api.main as main_mod
+
+    importlib.reload(main_mod)
+
+
+def test_restore_default_app_uses_restored_data_dir(tmp_path: Path) -> None:
+    default_data_dir = os.environ["DATA_DIR"]
+    cleanup = restore_default_app.__wrapped__()
+    environment_patch = next(cleanup)
+    _reload_app(environment_patch, tmp_path)
+
+    with pytest.raises(StopIteration):
+        next(cleanup)
+
+    import src.api.main as main_mod
+
+    assert main_mod._config.data_path == default_data_dir
+
+
 @pytest.fixture
-def vlm_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def vlm_client(tmp_path: Path, restore_default_app: pytest.MonkeyPatch) -> TestClient:
     """Build a TestClient backed by a synthetic dataset under ``tmp_path``."""
     _build_dataset(tmp_path / DATASET_ID, instruction=INSTRUCTION)
-    return _reload_app(monkeypatch, tmp_path)
+    return _reload_app(restore_default_app, tmp_path)
 
 
 def test_get_returns_uncached_status_initially(vlm_client: TestClient) -> None:
@@ -106,9 +144,13 @@ def test_get_returns_uncached_status_initially(vlm_client: TestClient) -> None:
     assert body["prompt_version"].startswith("outcome-mcq-v1")
 
 
-def test_get_reports_disabled_when_service_is_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_reports_disabled_when_service_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    restore_default_app: pytest.MonkeyPatch,
+) -> None:
     _build_dataset(tmp_path / DATASET_ID, instruction=INSTRUCTION)
-    client = _reload_app(monkeypatch, tmp_path)
+    client = _reload_app(restore_default_app, tmp_path)
 
     import src.api.routers.vlm_judge as router_mod
 
@@ -169,11 +211,11 @@ def test_post_instruction_override_is_used(vlm_client: TestClient) -> None:
 
 def test_post_falls_back_to_dataset_instruction_when_request_omits_instruction(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    restore_default_app: pytest.MonkeyPatch,
 ) -> None:
     dataset_root = tmp_path / DATASET_ID
     _build_dataset(dataset_root, instruction="Dataset fallback instruction")
-    client = _reload_app(monkeypatch, tmp_path)
+    client = _reload_app(restore_default_app, tmp_path)
     path = f"/api/datasets/{DATASET_ID}/episodes/0/judge"
 
     rsp = client.post(path, json={"force": True})
@@ -237,10 +279,10 @@ def test_post_returns_404_for_missing_episode(vlm_client: TestClient) -> None:
 
 def test_post_returns_422_when_no_instruction_available(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    restore_default_app: pytest.MonkeyPatch,
 ) -> None:
     # Build a dataset that intentionally omits the task instruction.
     _build_dataset(tmp_path / "no-instruction", instruction=None)
-    client = _reload_app(monkeypatch, tmp_path)
+    client = _reload_app(restore_default_app, tmp_path)
     rsp = client.post("/api/datasets/no-instruction/episodes/0/judge", json={})
     assert rsp.status_code == 422

@@ -27,7 +27,7 @@ WORKFLOW OPTIONS:
     -n, --num-envs COUNT          Number of environments (default: 2048)
     -m, --max-iterations N        Maximum iterations (empty to unset)
     -i, --image IMAGE             Container image (default: ${DEFAULT_ISAAC_LAB_IMAGE})
-    -p, --payload-root DIR        Runtime extraction root (default: /workspace/isaac_payload)
+    -p, --payload-root DIR        Runtime extraction root (default: /tmp/isaac_payload)
     -b, --backend BACKEND         Training backend: skrl (default), rsl_rl
 
 RESOURCE OPTIONS:
@@ -88,7 +88,7 @@ task="${TASK:-Isaac-Velocity-Rough-Anymal-C-v0}"
 num_envs="${NUM_ENVS:-2048}"
 max_iterations="${MAX_ITERATIONS:-}"
 image="${IMAGE:-$DEFAULT_ISAAC_LAB_IMAGE}"
-payload_root="${PAYLOAD_ROOT:-/workspace/isaac_payload}"
+payload_root="${PAYLOAD_ROOT:-/tmp/isaac_payload}"
 backend="${TRAINING_BACKEND:-skrl}"
 
 gpu="${OSMO_GPU:-1}"

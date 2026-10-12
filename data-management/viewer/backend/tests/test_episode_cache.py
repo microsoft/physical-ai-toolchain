@@ -1,5 +1,7 @@
 """Unit tests for the LRU episode cache."""
 
+from __future__ import annotations
+
 import pytest
 
 from src.api.models.datasources import EpisodeData, EpisodeMeta, TrajectoryPoint
@@ -208,12 +210,13 @@ class TestEpisodeCacheMemoryBudget:
     """Memory-budget eviction alongside count-based eviction."""
 
     def test_evicts_by_memory_budget(self):
-        # Use a very small budget so 2 entries exceed it
         ep = _make_episode(0, length=100)
-        entry_size = EpisodeCache._estimate_episode_bytes(ep)
+        sizing_cache = EpisodeCache(capacity=1, max_memory_bytes=0)
+        sizing_cache.put("sizing", 0, ep)
+        entry_size = sizing_cache.stats().total_bytes
 
         cache = EpisodeCache(capacity=100, max_memory_bytes=int(entry_size * 1.5))
-        cache.put("ds", 0, _make_episode(0, length=100))
+        cache.put("ds", 0, ep)
         cache.put("ds", 1, _make_episode(1, length=100))
 
         assert cache.get("ds", 0) is None, "should be evicted by memory budget"
@@ -229,9 +232,6 @@ class TestEpisodeCacheMemoryBudget:
         assert stats.max_memory_bytes == 100 * 1024 * 1024
 
     def test_total_bytes_decreases_on_eviction(self):
-        ep = _make_episode(0, length=100)
-        entry_size = EpisodeCache._estimate_episode_bytes(ep)
-
         cache = EpisodeCache(capacity=2)
         cache.put("ds", 0, _make_episode(0, length=100))
         cache.put("ds", 1, _make_episode(1, length=100))
@@ -240,7 +240,7 @@ class TestEpisodeCacheMemoryBudget:
         cache.put("ds", 2, _make_episode(2, length=100))
         bytes_at_eviction = cache.stats().total_bytes
 
-        assert bytes_at_eviction < bytes_at_two + entry_size
+        assert bytes_at_eviction == bytes_at_two
 
     def test_total_bytes_zero_after_clear(self):
         cache = EpisodeCache(capacity=10)
@@ -259,14 +259,13 @@ class TestEpisodeCacheMemoryBudget:
 
         assert cache.stats().total_bytes < bytes_before
 
-    def test_estimate_episode_bytes_scales_with_length(self):
-        small = _make_episode(0, length=10)
-        large = _make_episode(1, length=1000)
+    def test_reported_memory_scales_with_episode_length(self):
+        small_cache = EpisodeCache(capacity=1, max_memory_bytes=0)
+        large_cache = EpisodeCache(capacity=1, max_memory_bytes=0)
+        small_cache.put("ds", 0, _make_episode(0, length=10))
+        large_cache.put("ds", 1, _make_episode(1, length=1000))
 
-        small_bytes = EpisodeCache._estimate_episode_bytes(small)
-        large_bytes = EpisodeCache._estimate_episode_bytes(large)
-
-        assert large_bytes > small_bytes * 50
+        assert large_cache.stats().total_bytes > small_cache.stats().total_bytes * 50
 
     def test_unlimited_memory_uses_count_only(self):
         cache = EpisodeCache(capacity=2, max_memory_bytes=0)

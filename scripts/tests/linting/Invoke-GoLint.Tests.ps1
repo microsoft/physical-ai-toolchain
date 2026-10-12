@@ -101,22 +101,19 @@ Describe 'Invoke-GoLintCore' -Tag 'Unit' {
             Remove-Item -Path (Join-Path $script:TestModuleDir 'go.mod') -Force
         }
 
-        It 'Returns 0 when go.mod does not exist' {
+        It 'Fails when required go.mod does not exist' {
             $result = Invoke-GoLintCore -OutputPath $script:TestOutputPath -GoModuleDir $script:TestModuleDir
-            $result | Should -Be 0
+            $result | Should -Be 1
         }
 
-        It 'Writes empty results JSON when go.mod missing' {
+        It 'Does not publish a passing report when go.mod is missing' {
             Invoke-GoLintCore -OutputPath $script:TestOutputPath -GoModuleDir $script:TestModuleDir
-            $script:TestOutputPath | Should -Exist
-            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
-            $json.lint_passed | Should -BeTrue
-            $json.violation_count | Should -Be 0
+            $script:TestOutputPath | Should -Not -Exist
         }
 
-        It 'Writes step summary when go.mod missing' {
+        It 'Annotates the required missing module' {
             Invoke-GoLintCore -OutputPath $script:TestOutputPath -GoModuleDir $script:TestModuleDir
-            Should -Invoke Write-CIStepSummary -Times 1
+            Should -Invoke Write-CIAnnotation -Times 1 -ParameterFilter { $Level -eq 'Error' }
         }
     }
 

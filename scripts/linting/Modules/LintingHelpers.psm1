@@ -11,10 +11,10 @@ Import-Module (Join-Path $PSScriptRoot "../../lib/Modules/CIHelpers.psm1") -Forc
 function Get-ChangedFilesFromGit {
     <#
     .SYNOPSIS
-    Gets changed files from git with intelligent fallback strategies.
+    Gets existing changed files relative to a verified Git merge base.
 
     .DESCRIPTION
-    Attempts to detect changed files using merge-base, with fallbacks for different scenarios.
+    Fails when the comparison cannot be established instead of reporting no changes.
 
     .PARAMETER BaseBranch
     The base branch to compare against (default: origin/main).
@@ -37,24 +37,21 @@ function Get-ChangedFilesFromGit {
     $changedFiles = @()
 
     try {
-        # Try merge-base first (best for PRs)
+        $PSNativeCommandUseErrorActionPreference = $false
         $mergeBase = git merge-base HEAD $BaseBranch 2>$null
 
         if ($LASTEXITCODE -eq 0 -and $mergeBase) {
             Write-Verbose "Using merge-base: $mergeBase"
             $changedFiles = git diff --name-only --diff-filter=ACMR $mergeBase HEAD 2>$null
         }
-        elseif ((git rev-parse HEAD~1 2>$null) -and $LASTEXITCODE -eq 0) {
-            Write-Verbose "Merge base failed, using HEAD~1"
-            $changedFiles = git diff --name-only --diff-filter=ACMR HEAD~1 HEAD 2>$null
-        }
         else {
-            Write-Verbose "HEAD~1 failed, using staged/unstaged files"
-            $changedFiles = git diff --name-only --diff-filter=ACMR HEAD 2>$null
+            throw "Unable to determine Git merge base against '$BaseBranch'."
         }
 
-        if ($LASTEXITCODE -ne 0 -or -not $changedFiles) {
-            Write-Warning "Unable to determine changed files from git"
+        if ($LASTEXITCODE -ne 0) {
+            throw "Unable to compare Git changes against '$BaseBranch'."
+        }
+        if (-not $changedFiles) {
             return @()
         }
 
@@ -75,12 +72,11 @@ function Get-ChangedFilesFromGit {
             $matchesExtension -and (Test-Path $currentFile -PathType Leaf)
         }
 
-        Write-Verbose "Found $($filteredFiles.Count) changed files matching extensions: $($FileExtensions -join ', ')"
+        Write-Verbose "Found $(@($filteredFiles).Count) changed files matching extensions: $($FileExtensions -join ', ')"
         return @($filteredFiles)
     }
     catch {
-        Write-Warning "Error getting changed files: $($_.Exception.Message)"
-        return @()
+        throw
     }
 }
 

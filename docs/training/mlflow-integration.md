@@ -3,7 +3,7 @@ sidebar_position: 6
 title: MLflow Integration for SKRL Training
 description: Metric logging integration for SKRL agent training during Isaac Lab runs using monkey-patching
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-09-30
 ms.topic: reference
 keywords:
   - mlflow
@@ -154,6 +154,7 @@ from skrl.utils.runner.torch import Runner
 from training.rl.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
 
 mlflow.set_tracking_uri("azureml://...")
+mlflow.set_registry_uri("azureml://...")
 mlflow.set_experiment("isaaclab-training")
 
 with mlflow.start_run():
@@ -225,7 +226,7 @@ The training script handles MLflow setup and monkey-patching automatically. To c
 
 Training runs complete but no metrics appear in MLflow.
 
-1. **MLflow not configured** - Verify `mlflow.set_tracking_uri()` is called with the correct Azure ML workspace URI and authentication is valid.
+1. **MLflow not configured** - Verify `mlflow.set_tracking_uri()` and `mlflow.set_registry_uri()` use the Azure ML workspace URI and authentication is valid. The Isaac Lab image may otherwise retain a local SQLite registry URI.
 2. **Monkey-patching not applied** - Ensure `create_mlflow_logging_wrapper` is called after Runner instantiation and `runner.agent.update` is replaced before `runner.run()`.
 3. **Short training runs** - Training updates occur after rollouts complete. Very short runs may finish before metrics are captured.
 4. **Empty tracking data** - Agent `tracking_data` may not populate until after the first rollout. If using `metric_filter`, verify the filter set contains matching metric names.

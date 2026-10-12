@@ -195,3 +195,7 @@ completeness only.
 | A0    | Classical CV augmentation (crops, jitter, blur, photometric/geometric) | Local, CPU, no model         |
 | A1    | Local small-VLM generation (e.g. vLLM locally, or Azure AI Foundry)    | Local GPU or hosted endpoint |
 | A2    | Full Cosmos / SDG world-foundation-model pipeline                      | Cloud, GPU cluster           |
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

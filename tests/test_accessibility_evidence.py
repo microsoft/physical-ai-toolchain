@@ -8,6 +8,7 @@ import hashlib
 import importlib
 import json
 import os
+import re
 import shutil
 import subprocess
 from copy import deepcopy
@@ -782,17 +783,21 @@ class TestAccessibilityWorkflowSource:
         events = workflow.get("on", workflow.get(True))
         evidence_job = workflow["jobs"]["evidence"]
         steps = {step["name"]: step for step in evidence_job["steps"]}
+        publication_steps = {step["name"]: step for step in workflow["jobs"]["publish-evidence"]["steps"]}
 
         # Assert
         assert set(events) == {"workflow_call", "workflow_dispatch", "schedule"}
         assert workflow["permissions"] == {"contents": "read"}
         assert "google-chrome --version" in steps["Verify system Chrome"]["run"]
-        assert steps["Upload accessibility evidence"]["if"] == "always()"
-        assert steps["Upload accessibility evidence"]["with"]["retention-days"] == 30
-        product_condition = steps["Run deterministic product evidence"]["if"]
+        assert publication_steps["Upload accessibility evidence"]["if"] == "always()"
+        assert publication_steps["Upload accessibility evidence"]["with"]["retention-days"] == 30
+        product_condition = workflow["jobs"]["product-evidence"]["if"]
         assert "github.event_name == 'schedule'" in product_condition
         assert "github.event_name == 'workflow_dispatch'" in product_condition
-        assert steps["Validate generated evidence bundle"]["if"] == "${{ inputs.validate-generated-bundle == true }}"
+        assert (
+            publication_steps["Validate generated evidence bundle"]["if"]
+            == "${{ inputs.validate-generated-bundle == true }}"
+        )
         contract_run = steps["Validate project evidence contracts"]["run"]
         assert "scripts/accessibility/evidence_gate.py --config-preview" in contract_run
         self_test_run = steps["Run HVE accessibility self-tests"]["run"]
@@ -2157,7 +2162,8 @@ class TestDocusaurusScreenReaderConsumer:
         # Assert
         assert 'cd "$skill_root"' in steps["Run pinned HVE accessibility self-tests"]["run"]
         self_test_run = steps["Run pinned HVE accessibility self-tests"]["run"]
-        assert "node --test tests/runtime_a11y/runner/*.test.mjs" in self_test_run
+        assert "node --test --test-reporter=junit" in self_test_run
+        assert "tests/runtime_a11y/runner/*.test.mjs" in self_test_run
         binding_run = steps["Validate Docusaurus screen-reader binding"]["run"]
         assert "materializeMethodCells" in binding_run
         assert "screen-reader-method-cells.json" in binding_run
@@ -2407,6 +2413,7 @@ class TestGitHubSurfaceContracts:
         workflow = _load_yaml(_MAIN_WORKFLOW_PATH)
         accessibility_job = workflow["jobs"]["accessibility-evidence"]
         docusaurus_job = workflow["jobs"]["docusaurus-tests"]
+        summary = workflow["jobs"]["main-validation-summary"]
         release_needs = workflow["jobs"]["release-please"]["needs"]
 
         # Assert
@@ -2415,15 +2422,18 @@ class TestGitHubSurfaceContracts:
         assert docusaurus_job["uses"] == "./.github/workflows/docusaurus-tests.yml"
         assert docusaurus_job["with"]["evidence-cadence"] == "release"
         assert docusaurus_job["with"]["required-completeness"] == "automated"
-        assert release_needs.count("accessibility-evidence") == 1
-        assert release_needs.count("docusaurus-tests") == 1
+        assert release_needs == "main-validation-summary"
+        assert summary["needs"].count("accessibility-evidence") == 1
+        assert summary["needs"].count("docusaurus-tests") == 1
+        assert workflow["jobs"]["release-please"].get("if", "success()") == "success()"
 
     def test_given_accessibility_workflows_when_reviewed_then_playwright_has_one_owner(self) -> None:
         # Act
         viewer_workflow = _load_yaml(_VIEWER_WORKFLOW_PATH)
         accessibility_workflow = _load_yaml(_ACCESSIBILITY_WORKFLOW_PATH)
         viewer_steps = {step["name"]: step for step in viewer_workflow["jobs"]["frontend-checks"]["steps"]}
-        evidence_steps = {step["name"]: step for step in accessibility_workflow["jobs"]["evidence"]["steps"]}
+        evidence_steps = {step["name"]: step for step in accessibility_workflow["jobs"]["product-evidence"]["steps"]}
+        publication_steps = {step["name"]: step for step in accessibility_workflow["jobs"]["publish-evidence"]["steps"]}
 
         # Assert
         assert all("npm run test:a11y" not in str(step.get("run", "")) for step in viewer_steps.values())
@@ -2437,7 +2447,7 @@ class TestGitHubSurfaceContracts:
         assert "expected_titles != actual_titles" in product_run
         assert "VIEWER_A11Y_EXPECTED_TESTS" not in product_run
         assert "playwright-results.xml" in product_run
-        upload = evidence_steps["Upload accessibility evidence"]
+        upload = publication_steps["Upload accessibility evidence"]
         assert "artifacts/accessibility/" in upload["with"]["path"]
         assert upload["if"] == "always()"
         assert upload["with"]["retention-days"] == 30
@@ -2446,11 +2456,11 @@ class TestGitHubSurfaceContracts:
         workflow = _load_yaml(_ACCESSIBILITY_WORKFLOW_PATH)
         product_step = next(
             step
-            for step in workflow["jobs"]["evidence"]["steps"]
+            for step in workflow["jobs"]["product-evidence"]["steps"]
             if step.get("name") == "Run deterministic product evidence"
         )
 
-        condition = product_step["if"]
+        condition = workflow["jobs"]["product-evidence"]["if"]
         assert "github.event_name == 'schedule'" in condition
         assert "github.event_name == 'workflow_dispatch'" in condition
         assert "viewer-evidence-manifest.json" in product_step["run"]
@@ -2845,8 +2855,12 @@ def test_given_accessibility_runtime_contracts_when_inspected_then_native_toolch
     breadcrumb_js = _REPOSITORY_ROOT / "docs/docusaurus/src/theme/DocBreadcrumbs/index.js"
 
     assert annotation_model.splitlines()[7] == "from __future__ import annotations"
-    assert viewer_manifest["devDependencies"]["@playwright/test"] == "1.63.0"
-    assert viewer_lock["packages"]["data-management/viewer/frontend"]["devDependencies"]["@playwright/test"] == "1.63.0"
+    playwright_spec = viewer_manifest["devDependencies"]["@playwright/test"]
+    assert re.fullmatch(r"\d+\.\d+\.\d+", playwright_spec), "pin @playwright/test to an exact version"
+    assert (
+        viewer_lock["packages"]["data-management/viewer/frontend"]["devDependencies"]["@playwright/test"]
+        == playwright_spec
+    )
     assert breadcrumb_tsx.is_file()
     assert not breadcrumb_js.exists()
     assert "interface BreadcrumbLinkProps" in breadcrumb_tsx.read_text(encoding="utf-8")

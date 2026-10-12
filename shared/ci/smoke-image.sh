@@ -34,6 +34,9 @@ DOMAIN:
     evaluation    Software-in-the-loop evaluation (evaluation)
     vlm-judge     VLM-as-judge optional runtime (evaluation/vlm_judge) -- --mode cpu only
     osmo-replay   OSMO-to-AzureML replay mirror (workflows/osmo)
+    gpu-smoke     Azure ML GPU smoke job (training/smoke) -- --mode cpu only
+    azureml-register  Azure ML register-model component (workflows/azureml/scripts) -- --mode cpu only
+    osmo-proxy    Azure ML-to-OSMO proxy job (workflows/azureml/osmo-proxy) -- --mode cpu only
 
 OPTIONS:
     -m, --mode MODE    image (default) runs the domain's production container;
@@ -67,8 +70,8 @@ done
 
 if [[ "$mode" == "cpu" ]]; then
     case "$domain" in
-        rl | il | vla | evaluation | vlm-judge | osmo-replay) image="$CPU_IMAGE" ;;
-        *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, vlm-judge, or osmo-replay)" ;;
+        rl | il | vla | evaluation | vlm-judge | osmo-replay | gpu-smoke | azureml-register | osmo-proxy) image="$CPU_IMAGE" ;;
+        *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, vlm-judge, osmo-replay, gpu-smoke, azureml-register, or osmo-proxy)" ;;
     esac
 else
     case "$domain" in
@@ -89,8 +92,8 @@ else
             [[ -n "$image" ]] || fatal "Could not resolve OSMO replay image from $OSMO_REPLAY_WORKFLOW"
             ;;
         vla) image="$DEFAULT_LEROBOT_TRAIN_IMAGE" ;;
-        vlm-judge) fatal "vlm-judge has no runtime-image smoke; use --mode cpu" ;;
-        *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, vlm-judge, or osmo-replay)" ;;
+        vlm-judge | gpu-smoke | azureml-register | osmo-proxy) fatal "${domain} has no runtime-image smoke; use --mode cpu" ;;
+        *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, vlm-judge, osmo-replay, gpu-smoke, azureml-register, or osmo-proxy)" ;;
     esac
 fi
 

@@ -1,7 +1,5 @@
-# SECURITY FAST LANE — do not throttle or batch security updates.
-# `cooldown` applies to version updates only; security updates are unaffected by design.
-# Do NOT add `applies-to: security-updates` to any group, especially for runtime/GPU
-# packages — it would batch security fixes into the cooldown'd PR and delay them.
+# Security updates remain ungrouped so fixes can be reviewed independently.
+# Version-update cooldowns do not apply to security updates.
 version: 2
 updates:
 - package-ecosystem: npm
@@ -13,9 +11,42 @@ updates:
     default-days: 7
     semver-major-days: 14
   groups:
-    root-npm-dependencies:
+    npm-vitest:
+      applies-to: version-updates
+      dependency-type: development
+      patterns:
+      - vitest
+      - "@vitest/*"
+      update-types:
+      - major
+      - minor
+      - patch
+    npm-authentication:
+      applies-to: version-updates
+      dependency-type: production
+      patterns:
+      - "@azure/msal-*"
+      update-types:
+      - minor
+      - patch
+    npm-development:
+      applies-to: version-updates
+      dependency-type: development
       patterns:
       - "*"
+      exclude-patterns:
+      - vitest
+      - "@vitest/*"
+      update-types:
+      - minor
+      - patch
+    npm-runtime:
+      applies-to: version-updates
+      dependency-type: production
+      patterns:
+      - "*"
+      exclude-patterns:
+      - "@azure/msal-*"
       update-types:
       - minor
       - patch
@@ -27,6 +58,50 @@ updates:
   - dependency-name: eslint
     versions:
     - ">=10"
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - npm
+  commit-message:
+    prefix: chore
+    include: scope
+# Separate from the root entry so the root ESLint 10 ignore does not apply here.
+- package-ecosystem: npm
+  directory: /docs/docusaurus
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    docs-docusaurus:
+      applies-to: version-updates
+      patterns:
+      - "@docusaurus/*"
+      update-types:
+      - minor
+      - patch
+    docs-development:
+      applies-to: version-updates
+      dependency-type: development
+      patterns:
+      - "*"
+      exclude-patterns:
+      - "@docusaurus/*"
+      update-types:
+      - minor
+      - patch
+    docs-runtime:
+      applies-to: version-updates
+      dependency-type: production
+      patterns:
+      - "*"
+      exclude-patterns:
+      - "@docusaurus/*"
+      update-types:
+      - minor
+      - patch
   open-pull-requests-limit: 5
   labels:
   - dependencies
@@ -395,7 +470,11 @@ updates:
     prefix: chore
     include: scope
 - package-ecosystem: terraform
-  directory: /infrastructure/terraform
+  directories:
+  - /infrastructure/terraform
+  - /infrastructure/terraform/dns
+  - /infrastructure/terraform/vpn
+  - /infrastructure/terraform/automation
   schedule:
     interval: weekly
     day: monday
@@ -403,69 +482,7 @@ updates:
     default-days: 7
   groups:
     terraform-dependencies:
-      patterns:
-      - "*"
-      update-types:
-      - minor
-      - patch
-  open-pull-requests-limit: 5
-  labels:
-  - dependencies
-  - terraform
-  commit-message:
-    prefix: chore
-    include: scope
-- package-ecosystem: terraform
-  directory: /infrastructure/terraform/dns
-  schedule:
-    interval: weekly
-    day: monday
-  cooldown:
-    default-days: 7
-  groups:
-    terraform-dns-dependencies:
-      patterns:
-      - "*"
-      update-types:
-      - minor
-      - patch
-  open-pull-requests-limit: 5
-  labels:
-  - dependencies
-  - terraform
-  commit-message:
-    prefix: chore
-    include: scope
-- package-ecosystem: terraform
-  directory: /infrastructure/terraform/vpn
-  schedule:
-    interval: weekly
-    day: monday
-  cooldown:
-    default-days: 7
-  groups:
-    terraform-vpn-dependencies:
-      patterns:
-      - "*"
-      update-types:
-      - minor
-      - patch
-  open-pull-requests-limit: 5
-  labels:
-  - dependencies
-  - terraform
-  commit-message:
-    prefix: chore
-    include: scope
-- package-ecosystem: terraform
-  directory: /infrastructure/terraform/automation
-  schedule:
-    interval: weekly
-    day: monday
-  cooldown:
-    default-days: 7
-  groups:
-    terraform-automation-dependencies:
+      applies-to: version-updates
       patterns:
       - "*"
       update-types:
@@ -529,28 +546,6 @@ updates:
   - dependencies
   - python
   - dataviewer
-  commit-message:
-    prefix: chore
-    include: scope
-- package-ecosystem: npm
-  directory: /docs/docusaurus
-  schedule:
-    interval: weekly
-    day: monday
-  cooldown:
-    default-days: 7
-    semver-major-days: 14
-  groups:
-    docusaurus-dependencies:
-      patterns:
-      - "*"
-      update-types:
-      - minor
-      - patch
-  open-pull-requests-limit: 5
-  labels:
-  - dependencies
-  - npm
   commit-message:
     prefix: chore
     include: scope

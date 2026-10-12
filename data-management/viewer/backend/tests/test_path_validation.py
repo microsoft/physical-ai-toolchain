@@ -1,10 +1,7 @@
 """Security tests for path traversal remediation (issue #387)."""
 
-import os
-
 import pytest
 from fastapi import HTTPException
-from fastapi.testclient import TestClient
 
 from src.api.models.detection import DetectionRequest
 from src.api.routers.export import ExportRequest
@@ -197,49 +194,35 @@ class TestRangeHeaderParam:
 class TestEndpointTraversalRejection:
     """Integration tests: endpoints reject traversal inputs with HTTP 400."""
 
-    @pytest.fixture
-    def client(self, tmp_path):
-        """Lightweight test client that does not require a real dataset directory."""
-        os.environ["DATA_DIR"] = str(tmp_path)
-
-        import src.api.services.dataset_service as ds_mod
-
-        ds_mod._dataset_service = None
-
-        from src.api.main import app
-
-        with TestClient(app) as c:
-            yield c
-
-        ds_mod._dataset_service = None
-
-    # HTTP clients and ASGI routers normalize "../" in URL paths before routing,
-    # so traversal segments may produce 404 (no matching route) rather than 400
-    # (validation rejection). Both outcomes block the traversal attempt.
-
     def test_export_traversal_dataset_id(self, client):
         resp = client.post("/api/datasets/../etc/passwd/export")
-        assert resp.status_code in (400, 404)
+        assert resp.status_code == 404
+        assert resp.json() == {"detail": "Not Found"}
 
     def test_export_stream_traversal_dataset_id(self, client):
         resp = client.post("/api/datasets/../etc/passwd/export/stream")
-        assert resp.status_code in (400, 404)
+        assert resp.status_code == 404
+        assert resp.json() == {"detail": "Not Found"}
 
     def test_datasets_traversal_dataset_id(self, client):
         resp = client.get("/api/datasets/../etc/passwd")
-        assert resp.status_code in (400, 404)
+        assert resp.status_code == 404
+        assert resp.json() == {"detail": "Not Found"}
 
     def test_labels_traversal_dataset_id(self, client):
         resp = client.get("/api/datasets/../etc/passwd/episodes/0/labels")
-        assert resp.status_code in (400, 404)
+        assert resp.status_code == 404
+        assert resp.json() == {"detail": "Not Found"}
 
     def test_detection_traversal_dataset_id(self, client):
         resp = client.get("/api/datasets/../etc/passwd/episodes/0/detections")
-        assert resp.status_code in (400, 404)
+        assert resp.status_code == 404
+        assert resp.json() == {"detail": "Not Found"}
 
     def test_datasets_traversal_camera_name(self, client):
         resp = client.get(
-            "/api/datasets/valid_dataset/episodes/0/frames",
+            "/api/datasets/valid_dataset/episodes/0/frames/0",
             params={"camera": "../../../etc/passwd"},
         )
-        assert resp.status_code in (400, 404)
+        assert resp.status_code == 400
+        assert resp.json() == {"detail": "Invalid camera name: '../../../etc/passwd'"}

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import io
 import types
@@ -34,7 +33,7 @@ def _model_digest(path: Path) -> str:
 class TestDetectionEpisodeProcessing:
     """Tests for frame index handling in episode detection."""
 
-    def test_detect_episode_preserves_integer_frame_indices(self, monkeypatch):
+    async def test_detect_episode_preserves_integer_frame_indices(self, monkeypatch):
         service = DetectionService()
         observed_indices: list[int] = []
 
@@ -59,14 +58,12 @@ class TestDetectionEpisodeProcessing:
         monkeypatch.setattr(DetectionService, "detect_frame", fake_detect_frame)
         monkeypatch.setattr(service, "_resolve_model_path", lambda _model_name: Path("yolo11n.pt"))
 
-        summary = asyncio.run(
-            service.detect_episode(
-                dataset_id="dataset",
-                episode_idx=0,
-                request=DetectionRequest(frames=[1, 3]),
-                get_frame_image=get_frame_image,
-                total_frames=10,
-            )
+        summary = await service.detect_episode(
+            dataset_id="dataset",
+            episode_idx=0,
+            request=DetectionRequest(frames=[1, 3]),
+            get_frame_image=get_frame_image,
+            total_frames=10,
         )
 
         assert observed_indices == [1, 1, 3, 3]
@@ -268,24 +265,22 @@ class TestModelPathRestrictions:
         with pytest.raises(DetectionModelError, match="outside configured models directory"):
             service._resolve_model_path("yolo11n")
 
-    def test_invalid_model_is_rejected_before_processing_empty_episode(self, tmp_path: Path):
+    async def test_invalid_model_is_rejected_before_processing_empty_episode(self, tmp_path: Path):
         service = DetectionService(models_dir=tmp_path)
 
         async def get_frame_image(_frame_idx: int) -> None:
             return None
 
         with pytest.raises(InvalidDetectionModelError, match="approved model identifier"):
-            asyncio.run(
-                service.detect_episode(
-                    dataset_id="d",
-                    episode_idx=0,
-                    request=DetectionRequest(model="../unsafe"),
-                    get_frame_image=get_frame_image,
-                    total_frames=0,
-                )
+            await service.detect_episode(
+                dataset_id="d",
+                episode_idx=0,
+                request=DetectionRequest(model="../unsafe"),
+                get_frame_image=get_frame_image,
+                total_frames=0,
             )
 
-    def test_invalid_model_with_labels_is_not_replaced_before_validation(self, tmp_path: Path):
+    async def test_invalid_model_with_labels_is_not_replaced_before_validation(self, tmp_path: Path):
         (tmp_path / "yolov8s-world.pt").touch()
         service = DetectionService(models_dir=tmp_path)
 
@@ -293,14 +288,12 @@ class TestModelPathRestrictions:
             return None
 
         with pytest.raises(InvalidDetectionModelError, match="approved model identifier"):
-            asyncio.run(
-                service.detect_episode(
-                    dataset_id="d",
-                    episode_idx=0,
-                    request=DetectionRequest(model="../unsafe", labels=["part"]),
-                    get_frame_image=get_frame_image,
-                    total_frames=0,
-                )
+            await service.detect_episode(
+                dataset_id="d",
+                episode_idx=0,
+                request=DetectionRequest(model="../unsafe", labels=["part"]),
+                get_frame_image=get_frame_image,
+                total_frames=0,
             )
 
     def test_rejects_model_without_configured_digest(self, tmp_path: Path):
@@ -321,56 +314,58 @@ class TestModelPathRestrictions:
 
 class TestCacheHelpers:
     @staticmethod
-    def _detect_empty_episode(service: DetectionService, dataset_id: str, episode_idx: int) -> EpisodeDetectionSummary:
+    async def _detect_empty_episode(
+        service: DetectionService,
+        dataset_id: str,
+        episode_idx: int,
+    ) -> EpisodeDetectionSummary:
         async def get_frame_image(_frame_idx: int) -> None:
             return None
 
-        return asyncio.run(
-            service.detect_episode(
-                dataset_id=dataset_id,
-                episode_idx=episode_idx,
-                request=DetectionRequest(),
-                get_frame_image=get_frame_image,
-                total_frames=0,
-            )
+        return await service.detect_episode(
+            dataset_id=dataset_id,
+            episode_idx=episode_idx,
+            request=DetectionRequest(),
+            get_frame_image=get_frame_image,
+            total_frames=0,
         )
 
-    def test_get_cached_returns_none_and_value(self, monkeypatch):
+    async def test_get_cached_returns_none_and_value(self, monkeypatch):
         service = DetectionService()
         monkeypatch.setattr(service, "_resolve_model_path", lambda _model_name: Path("yolo11n.pt"))
 
         assert service.get_cached("d", 0) is None
-        summary = self._detect_empty_episode(service, "d", 0)
+        summary = await self._detect_empty_episode(service, "d", 0)
 
         assert service.get_cached("d", 0) is summary
 
-    def test_clear_cache_hit_and_miss(self, monkeypatch):
+    async def test_clear_cache_hit_and_miss(self, monkeypatch):
         service = DetectionService()
         monkeypatch.setattr(service, "_resolve_model_path", lambda _model_name: Path("yolo11n.pt"))
 
         assert service.clear_cache("d", 0) is False
-        self._detect_empty_episode(service, "d", 0)
+        await self._detect_empty_episode(service, "d", 0)
         assert service.clear_cache("d", 0) is True
         assert service.get_cached("d", 0) is None
 
-    def test_cache_evicts_least_recently_used_entry_at_capacity(self, monkeypatch):
+    async def test_cache_evicts_least_recently_used_entry_at_capacity(self, monkeypatch):
         service = DetectionService(cache_max_size=2)
         monkeypatch.setattr(service, "_resolve_model_path", lambda _model_name: Path("yolo11n.pt"))
 
-        first = self._detect_empty_episode(service, "d", 0)
-        self._detect_empty_episode(service, "d", 1)
+        first = await self._detect_empty_episode(service, "d", 0)
+        await self._detect_empty_episode(service, "d", 1)
         assert service.get_cached("d", 0) is first
-        third = self._detect_empty_episode(service, "d", 2)
+        third = await self._detect_empty_episode(service, "d", 2)
 
         assert service.get_cached("d", 0) is first
         assert service.get_cached("d", 1) is None
         assert service.get_cached("d", 2) is third
 
-    def test_cache_entry_expires_after_ttl(self, monkeypatch):
+    async def test_cache_entry_expires_after_ttl(self, monkeypatch):
         now = 100.0
         service = DetectionService(cache_ttl_seconds=10, cache_timer=lambda: now)
         monkeypatch.setattr(service, "_resolve_model_path", lambda _model_name: Path("yolo11n.pt"))
-        self._detect_empty_episode(service, "d", 0)
+        await self._detect_empty_episode(service, "d", 0)
 
         now = 111.0
 
@@ -390,22 +385,22 @@ class TestEffectiveConfidence:
 
 
 class TestDetectFrame:
-    def test_no_results(self):
+    async def test_no_results(self):
         s = DetectionService()
         s._model = _FakeYOLOModel([])
         s._model_name = "yolo11n"
-        out = asyncio.run(s.detect_frame(_png_bytes(), frame_idx=2))
+        out = await s.detect_frame(_png_bytes(), frame_idx=2)
         assert out.frame == 2
         assert out.detections == []
 
-    def test_no_boxes(self):
+    async def test_no_boxes(self):
         s = DetectionService()
         s._model = _FakeYOLOModel([_FakeResult(boxes=None)])
         s._model_name = "yolo11n"
-        out = asyncio.run(s.detect_frame(_png_bytes(), frame_idx=0))
+        out = await s.detect_frame(_png_bytes(), frame_idx=0)
         assert out.detections == []
 
-    def test_with_boxes_and_unknown_class(self):
+    async def test_with_boxes_and_unknown_class(self):
         s = DetectionService()
         boxes = _FakeBoxes(
             classes=[0, 999],
@@ -414,14 +409,14 @@ class TestDetectFrame:
         )
         s._model = _FakeYOLOModel([_FakeResult(boxes=boxes)])
         s._model_name = "yolo11n"
-        out = asyncio.run(s.detect_frame(_png_bytes(), frame_idx=0))
+        out = await s.detect_frame(_png_bytes(), frame_idx=0)
         names = [d.class_name for d in out.detections]
         assert names == ["person", "class_999"]
         assert out.detections[0].confidence == pytest.approx(0.9)
 
 
 class TestDetectEpisodeFull:
-    def test_full_path_with_skips_exception_and_detections(self, monkeypatch):
+    async def test_full_path_with_skips_exception_and_detections(self, monkeypatch):
         s = DetectionService()
         boxes = _FakeBoxes(classes=[0], confs=[0.8], xyxy=[[0.0, 0.0, 1.0, 1.0]])
         s._model = _FakeYOLOModel([_FakeResult(boxes=boxes)])
@@ -435,14 +430,12 @@ class TestDetectEpisodeFull:
                 raise RuntimeError("explode")
             return _png_bytes()
 
-        summary = asyncio.run(
-            s.detect_episode(
-                dataset_id="d",
-                episode_idx=0,
-                request=DetectionRequest(),
-                get_frame_image=get_frame_image,
-                total_frames=8,
-            )
+        summary = await s.detect_episode(
+            dataset_id="d",
+            episode_idx=0,
+            request=DetectionRequest(),
+            get_frame_image=get_frame_image,
+            total_frames=8,
         )
         assert summary.total_frames == 8
         assert summary.processed_frames == 3
@@ -451,7 +444,7 @@ class TestDetectEpisodeFull:
         assert summary.class_summary["person"].count == 3
         assert s.get_cached("d", 0) is summary
 
-    def test_uses_configured_confidence_when_request_omits_override(self, monkeypatch):
+    async def test_uses_configured_confidence_when_request_omits_override(self, monkeypatch):
         service = DetectionService(default_confidence=0.42)
         observed_confidence: list[float] = []
 
@@ -471,19 +464,17 @@ class TestDetectEpisodeFull:
         async def get_frame_image(_frame_idx: int) -> bytes:
             return _png_bytes()
 
-        asyncio.run(
-            service.detect_episode(
-                dataset_id="d",
-                episode_idx=0,
-                request=DetectionRequest(),
-                get_frame_image=get_frame_image,
-                total_frames=1,
-            )
+        await service.detect_episode(
+            dataset_id="d",
+            episode_idx=0,
+            request=DetectionRequest(),
+            get_frame_image=get_frame_image,
+            total_frames=1,
         )
 
         assert observed_confidence == [0.42]
 
-    def test_request_confidence_overrides_configured_default(self, monkeypatch):
+    async def test_request_confidence_overrides_configured_default(self, monkeypatch):
         service = DetectionService(default_confidence=0.42)
         observed_confidence: list[float] = []
 
@@ -503,14 +494,12 @@ class TestDetectEpisodeFull:
         async def get_frame_image(_frame_idx: int) -> bytes:
             return _png_bytes()
 
-        asyncio.run(
-            service.detect_episode(
-                dataset_id="d",
-                episode_idx=0,
-                request=DetectionRequest(confidence=0.7),
-                get_frame_image=get_frame_image,
-                total_frames=1,
-            )
+        await service.detect_episode(
+            dataset_id="d",
+            episode_idx=0,
+            request=DetectionRequest(confidence=0.7),
+            get_frame_image=get_frame_image,
+            total_frames=1,
         )
 
         assert observed_confidence == [0.7]

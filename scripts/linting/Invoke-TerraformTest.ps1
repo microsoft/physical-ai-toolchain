@@ -40,6 +40,7 @@ function Invoke-TerraformTestCore {
         [switch]$ChangedFilesOnly
     )
 
+    $PSNativeCommandUseErrorActionPreference = $false
     $repoRoot = & git rev-parse --show-toplevel 2>$null
     if (-not $repoRoot) {
         $repoRoot = (Get-Item $PSScriptRoot).Parent.Parent.Parent.FullName
@@ -108,7 +109,7 @@ function Invoke-TerraformTestCore {
 
     # Handle zero test directories
     if ($testModuleDirs.Count -eq 0) {
-        Write-Host '0 modules with tests found — nothing to test'
+        Write-CIAnnotation -Level Error -Message 'Selected Terraform suite contains no test modules'
 
         $results = @{
             timestamp         = (Get-Date -Format 'o')
@@ -120,8 +121,9 @@ function Invoke-TerraformTestCore {
                 modules_skipped = 0
                 total_passed    = 0
                 total_failed    = 0
-                total_errors    = 0
-                overall_passed  = $true
+                total_errors    = 1
+                total_skipped   = 0
+                overall_passed  = $false
             }
         }
 
@@ -131,11 +133,11 @@ function Invoke-TerraformTestCore {
         $summaryContent = @(
             '### Terraform Test Results'
             ''
-            '0 modules tested — no `tests/` directories found.'
+            'Selected Terraform suite executed no modules.'
         ) -join "`n"
         Write-CIStepSummary -Content $summaryContent
         Write-Host $summaryContent
-        return 0
+        return 1
     }
 
     # Run tests per module
@@ -143,6 +145,7 @@ function Invoke-TerraformTestCore {
     $totalPassed = 0
     $totalFailed = 0
     $totalErrors = 0
+    $totalSkipped = 0
 
     foreach ($moduleDir in $testModuleDirs) {
         $displayPath = $moduleDir -replace [regex]::Escape($repoRoot + [IO.Path]::DirectorySeparatorChar), '' `
@@ -160,18 +163,21 @@ function Invoke-TerraformTestCore {
                     passed    = 0
                     failed    = 0
                     errors    = 1
-                    skipped   = $false
-                    test_runs = @()
+                    skipped   = 0
+                    exit_code = $LASTEXITCODE
+                    test_runs = @(@{ name = '[terraform init]'; status = 'error'; file = '' })
                 }
                 Write-CIAnnotation -Level Error -Message "terraform init failed in $displayPath"
                 continue
             }
 
             $testOutput = & terraform test -json -no-color 2>&1
+            $testExitCode = $LASTEXITCODE
 
             $modulePassed = 0
             $moduleFailed = 0
             $moduleErrors = 0
+            $moduleSkipped = 0
             $moduleTestRuns = @()
 
             foreach ($line in $testOutput) {
@@ -188,7 +194,8 @@ function Invoke-TerraformTestCore {
                 if ($jsonObj.type -eq 'test_run' -and $jsonObj.test_run.progress -eq 'complete') {
                     $status = $jsonObj.test_run.status
                     $testName = "$($jsonObj.test_run.run)"
-                    $moduleTestRuns += @{ name = $testName; status = $status }
+                    $testFile = if ($jsonObj.test_run.PSObject.Properties['path']) { "$($jsonObj.test_run.path)" } else { '' }
+                    $moduleTestRuns += @{ name = $testName; status = $status; file = $testFile }
 
                     if ($status -eq 'pass') {
                         $modulePassed++
@@ -201,19 +208,34 @@ function Invoke-TerraformTestCore {
                         $moduleErrors++
                         Write-CIAnnotation -Level Error -Message "Test error in ${displayPath}: $testName"
                     }
+                    elseif ($status -eq 'skip') {
+                        $moduleSkipped++
+                    }
                 }
+            }
+
+            if ($testExitCode -ne 0 -and $moduleFailed -eq 0 -and $moduleErrors -eq 0) {
+                $moduleErrors++
+                $moduleTestRuns += @{ name = '[terraform test execution]'; status = 'error'; file = '' }
+                Write-CIAnnotation -Level Error -Message "terraform test exited with code $testExitCode in $displayPath"
+            }
+            if ($modulePassed + $moduleFailed + $moduleErrors -eq 0) {
+                $moduleErrors++
+                Write-CIAnnotation -Level Error -Message "Selected Terraform module executed no testcases: $displayPath"
             }
 
             $totalPassed += $modulePassed
             $totalFailed += $moduleFailed
             $totalErrors += $moduleErrors
+            $totalSkipped += $moduleSkipped
 
             $moduleResults += @{
                 path      = $displayPath
                 passed    = $modulePassed
                 failed    = $moduleFailed
                 errors    = $moduleErrors
-                skipped   = $false
+                skipped   = $moduleSkipped
+                exit_code = $testExitCode
                 test_runs = @($moduleTestRuns)
             }
         }
@@ -235,7 +257,8 @@ function Invoke-TerraformTestCore {
                     passed    = $_.passed
                     failed    = $_.failed
                     errors    = $_.errors
-                    skipped   = if ($_.skipped) { $true } else { $false }
+                    skipped   = $_.skipped
+                    exit_code = $_.exit_code
                     test_runs = @($_.test_runs)
                 }
             })
@@ -246,6 +269,7 @@ function Invoke-TerraformTestCore {
             total_passed    = $totalPassed
             total_failed    = $totalFailed
             total_errors    = $totalErrors
+            total_skipped   = $totalSkipped
             overall_passed  = $overallPassed
         }
     }

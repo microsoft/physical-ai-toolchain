@@ -1,4 +1,7 @@
-# Fleet Intelligence
+---
+title: Fleet Intelligence
+description: Roadmap for fleet-wide robot telemetry, operational dashboards, drift detection, and human-supervised retraining triggers.
+---
 
 The **fleet-intelligence cognition layer (T5 — Operate)**: fleet-wide telemetry collection, operational
 dashboards, drift detection, and retraining triggers across a fleet of deployed robots. "Fleet" means a
@@ -47,3 +50,7 @@ fleet of robots, not Kubernetes clusters. This is the cognition layer that sits 
 | [Dashboard Specification](https://github.com/microsoft/physical-ai-toolchain/blob/main/fleet-intelligence/specifications/dashboards.specification.md)            | Fleet dashboard and alerting design   |
 | [Drift Detection Specification](https://github.com/microsoft/physical-ai-toolchain/blob/main/fleet-intelligence/specifications/drift-detection.specification.md) | Detection algorithms and thresholds   |
 | [Retraining Specification](https://github.com/microsoft/physical-ai-toolchain/blob/main/fleet-intelligence/specifications/retraining.specification.md)           | Automated retraining trigger pipeline |
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

@@ -1,4 +1,7 @@
-# Your First RL Training Job
+---
+title: Your First RL Training Job
+description: Submit an Isaac Lab reinforcement learning job to OSMO, verify MLflow metrics, and locate the trained Anymal-C checkpoint.
+---
 
 Submit an Isaac Lab RL training job to OSMO and verify that training metrics appear in MLflow. By the end of this recipe, you will have a trained checkpoint for the Anymal-C velocity locomotion task.
 

@@ -2,15 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from src.api.middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddleware
-
-
-def _run(coro):
-    return asyncio.run(coro)
 
 
 async def _ok_app(scope, receive, send):
@@ -40,22 +34,28 @@ class _Sender:
 
 
 class TestSecurityHeadersSkipPaths:
+    pytestmark = pytest.mark.asyncio
+
     @pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
-    def test_skip_paths_bypass_header_injection(self, path):
+    async def test_skip_paths_bypass_header_injection(self, path):
         sender = _Sender()
         middleware = SecurityHeadersMiddleware(_ok_app)
 
         async def receive():
             return {"type": "http.request", "body": b"", "more_body": False}
 
-        _run(middleware(_http_scope(path=path), receive, sender))
+        await middleware(_http_scope(path=path), receive, sender)
 
-        start = next(m for m in sender.messages if m["type"] == "http.response.start")
-        assert start["headers"] == []
+        assert sender.messages == [
+            {"type": "http.response.start", "status": 200, "headers": []},
+            {"type": "http.response.body", "body": b"ok"},
+        ]
 
 
 class TestContentSizeLimitBranches:
-    def test_invalid_content_length_header_falls_through(self):
+    pytestmark = pytest.mark.asyncio
+
+    async def test_invalid_content_length_header_falls_through(self):
         sender = _Sender()
         middleware = ContentSizeLimitMiddleware(_ok_app, max_content_length=1024)
 
@@ -63,12 +63,14 @@ class TestContentSizeLimitBranches:
             return {"type": "http.request", "body": b"", "more_body": False}
 
         scope = _http_scope(headers=[(b"content-length", b"not-a-number")])
-        _run(middleware(scope, receive, sender))
+        await middleware(scope, receive, sender)
 
-        start = next(m for m in sender.messages if m["type"] == "http.response.start")
-        assert start["status"] == 200
+        assert sender.messages == [
+            {"type": "http.response.start", "status": 200, "headers": []},
+            {"type": "http.response.body", "body": b"ok"},
+        ]
 
-    def test_streaming_body_over_limit_returns_413(self):
+    async def test_streaming_body_over_limit_returns_413(self):
         sender = _Sender()
         middleware = ContentSizeLimitMiddleware(_streaming_app, max_content_length=8)
 
@@ -81,9 +83,9 @@ class TestContentSizeLimitBranches:
         async def receive():
             return next(iterator)
 
-        _run(middleware(_http_scope(), receive, sender))
+        await middleware(_http_scope(), receive, sender)
 
         start = next(m for m in sender.messages if m["type"] == "http.response.start")
         assert start["status"] == 413
         body = b"".join(m.get("body", b"") for m in sender.messages if m["type"] == "http.response.body")
-        assert b"too large" in body.lower()
+        assert body == b'{"detail":"Request body too large"}'

@@ -8,6 +8,15 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.toml-format.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.toml-format.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.toml-format.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.toml-format.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.toml-format.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.toml-format.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.toml-format.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.toml-format.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -20,6 +29,16 @@ jobs:
   toml-format:
     name: TOML Format
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -32,5 +51,16 @@ jobs:
         uses: ./.github/actions/setup-node-deps
 
       - name: Check TOML formatting
+        id: toml-format
         run: npm run lint:toml
         continue-on-error: ${{ inputs.soft-fail }}
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: toml-format
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["toml-format"]'
+          fail-on-error: ${{ !inputs.soft-fail }}

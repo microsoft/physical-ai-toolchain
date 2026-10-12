@@ -84,17 +84,54 @@ The training script writes the registration manifest under `outputs/checkpoints/
 
 The Azure ML pi0 E2E test initializes pi0 from the gated
 [`google/paligemma-3b-pt-224`](https://huggingface.co/google/paligemma-3b-pt-224)
-backbone. Accept the model access conditions on Hugging Face, then export a read token
-authorized for the model before running the test:
+backbone, so it needs a Hugging Face token that can read that model:
+
+1. Sign in to Hugging Face, open the model page, and accept its access conditions.
+2. Create a fine-grained access token in your [token settings](https://huggingface.co/settings/tokens)
+   with read access to `google/paligemma-3b-pt-224`.
+3. Add the token to the untracked repository-root `.env.local`, creating it from
+   `.env.local.example` if needed. Edit the file instead of echoing the token in a shell
+   command, which would save it in your shell history:
+
+   ```bash
+   HF_TOKEN=hf_...
+   ```
+
+Git ignores `.env.local`, and Azure ML code snapshots exclude it. The test, the Dependabot
+verification runner, and the submission scripts use the value in `.env.local` whenever the
+file sets `HF_TOKEN`, and an exported value only when it doesn't; a submission script's
+`--hf-token` option overrides both. An empty `HF_TOKEN=` line overrides an exported token, so
+leave the line commented out if you export the token instead. Keep the line a plain value as
+shown: the checks reject shell syntax such as `$OTHER` rather than guess what it expands to.
+
+Every submission script loads `.env.local`, and the LeRobot evaluation script passes the
+token in effect to every evaluation job, not only pi0. Those jobs and the pi0 training job
+carry it as an environment variable that anyone who can read the jobs can see, so keep the
+token limited to reading that one model.
+
+To confirm access before submitting a job, request a small file from the model. The command
+reads the token from `.env.local` without putting it on a command line, and prints `200` when
+the token works; `401` or `403` means the token or the access conditions need attention:
 
 ```bash
-export HF_TOKEN="$(cat /secure/path/to/hf-token)"
+(set -a; . ./.env.local; set +a
+ printf 'Authorization: Bearer %s\n' "$HF_TOKEN" |
+   curl -s -L -o /dev/null -w '%{http_code}\n' -H @- \
+     https://huggingface.co/google/paligemma-3b-pt-224/resolve/main/config.json)
+```
+
+Then run the test:
+
+```bash
 uv run pytest -o addopts='' -vv -s -m e2e tests/e2e/test_e2e_aml_vla_pi0_training.py
 ```
 
-Pytest fails during client-side setup before resolving Azure fixtures or submitting a
-job when `HF_TOKEN` is unset or empty. Other E2E tests require this variable only when
-they carry the `requires_hf_token` marker.
+Pytest fails during client-side setup, before resolving Azure fixtures or submitting a
+job, when `HF_TOKEN` is set in neither place or `.env.local` sets it empty. Other E2E tests
+require this variable only when they carry the `requires_hf_token` marker.
+
+Dependabot verification runs this test as the `aml-vla-pi0` check in the `vla` category. See
+[Verifying Dependabot Updates](../../docs/contributing/dependabot-verification.md).
 
 ## 🚀 GR00T-N1.5 Fine-Tuning
 

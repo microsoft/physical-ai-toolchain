@@ -13,6 +13,15 @@ on:
         required: false
         type: boolean
         default: true
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.psscriptanalyzer.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.psscriptanalyzer.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.psscriptanalyzer.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.psscriptanalyzer.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.psscriptanalyzer.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.psscriptanalyzer.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.psscriptanalyzer.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.psscriptanalyzer.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -25,6 +34,16 @@ jobs:
   psscriptanalyzer:
     name: PSScriptAnalyzer
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -39,9 +58,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path logs | Out-Null
 
       - name: Run PSScriptAnalyzer
+        id: analyze
         continue-on-error: ${{ inputs.soft-fail }}
         run: |
-          $scriptArgs = @{}
+          $scriptArgs = @{ OutputPath = 'logs/psscriptanalyzer-results.json' }
           if ('${{ inputs.changed-files-only }}' -eq 'true') {
             $scriptArgs['ChangedFilesOnly'] = $true
           }
@@ -63,3 +83,14 @@ jobs:
             Write-CIAnnotation -Level Error -Message 'PSScriptAnalyzer found violations — see annotations above for details'
             exit 1
           }
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: ps-script-analyzer
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["analyze"]'
+          reports: '[{"path":"logs/psscriptanalyzer-results.json","kind":"json"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

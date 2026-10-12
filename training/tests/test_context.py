@@ -84,6 +84,7 @@ def test_bootstrap_azure_ml_success_returns_context(monkeypatch: pytest.MonkeyPa
     set_defaults_mock = Mock()
     build_credential_mock = Mock(return_value=credential)
     set_tracking_uri_mock = Mock()
+    set_registry_uri_mock = Mock()
     set_experiment_mock = Mock()
     build_storage_context_mock = Mock(return_value=storage)
 
@@ -96,6 +97,7 @@ def test_bootstrap_azure_ml_success_returns_context(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(context_module, "_build_credential", build_credential_mock)
     monkeypatch.setattr(context_module, "MLClient", ml_client_constructor)
     monkeypatch.setattr(context_module.mlflow, "set_tracking_uri", set_tracking_uri_mock)
+    monkeypatch.setattr(context_module.mlflow, "set_registry_uri", set_registry_uri_mock, raising=False)
     monkeypatch.setattr(context_module.mlflow, "set_experiment", set_experiment_mock)
     monkeypatch.setattr(
         context_module,
@@ -118,6 +120,7 @@ def test_bootstrap_azure_ml_success_returns_context(monkeypatch: pytest.MonkeyPa
         }
     )
     set_tracking_uri_mock.assert_called_once_with(mlflow_tracking_uri)
+    set_registry_uri_mock.assert_called_once_with(mlflow_tracking_uri)
     set_experiment_mock.assert_called_once_with("exp-name")
     build_storage_context_mock.assert_called_once_with(credential)
 
@@ -554,8 +557,10 @@ def test_bootstrap_azure_ml_skips_set_experiment_when_name_empty(
     monkeypatch.setattr(context_module, "MLClient", Mock(return_value=ml_client_mock))
 
     set_tracking_uri_mock = Mock()
+    set_registry_uri_mock = Mock()
     set_experiment_mock = Mock()
     monkeypatch.setattr(context_module.mlflow, "set_tracking_uri", set_tracking_uri_mock)
+    monkeypatch.setattr(context_module.mlflow, "set_registry_uri", set_registry_uri_mock, raising=False)
     monkeypatch.setattr(context_module.mlflow, "set_experiment", set_experiment_mock)
     monkeypatch.setattr(context_module, "_build_storage_context", Mock(return_value=None))
 
@@ -563,4 +568,5 @@ def test_bootstrap_azure_ml_skips_set_experiment_when_name_empty(
 
     assert result.tracking_uri == "https://mlflow.example"
     set_tracking_uri_mock.assert_called_once_with("https://mlflow.example")
+    set_registry_uri_mock.assert_called_once_with("https://mlflow.example")
     set_experiment_mock.assert_not_called()

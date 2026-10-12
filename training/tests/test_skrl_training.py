@@ -926,7 +926,7 @@ class TestMlflowRunContext:
         monkeypatch.setenv("MLFLOW_CORRELATION_ID", "corr-99")
         mlflow = MagicMock()
         env_cfg = SimpleNamespace(scene=None, num_envs=1)
-        context = SimpleNamespace(workspace_name="ws-1")
+        context = SimpleNamespace(workspace_name="ws-1", tracking_uri="azureml://tracking")
         args = _make_mlflow_args(checkpoint_uri="runs:/abc")
 
         with _MOD.mlflow_run_context(
@@ -943,6 +943,8 @@ class TestMlflowRunContext:
             pass
 
         tags_call = mlflow.set_tags.call_args.args[0]
+        mlflow.set_tracking_uri.assert_called_once_with("azureml://tracking")
+        mlflow.set_registry_uri.assert_called_once_with("azureml://tracking")
         assert tags_call["azureml_workspace"] == "ws-1"
         assert tags_call["checkpoint_resume"] == "/some/ckpt"
         assert tags_call["checkpoint_source_uri"] == "runs:/abc"

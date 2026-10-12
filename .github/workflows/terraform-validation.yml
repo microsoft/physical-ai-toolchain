@@ -13,6 +13,15 @@ on:
         required: false
         type: boolean
         default: false
+    outputs:
+      work-status: {description: Execution status, value: '${{ jobs.terraform-validation.outputs.work-status }}'}
+      expected-count: {description: Expected operations, value: '${{ jobs.terraform-validation.outputs.expected-count }}'}
+      executed-count: {description: Executed operations, value: '${{ jobs.terraform-validation.outputs.executed-count }}'}
+      artifact-id: {description: Evidence artifact ID, value: '${{ jobs.terraform-validation.outputs.artifact-id }}'}
+      artifact-url: {description: Evidence artifact URL, value: '${{ jobs.terraform-validation.outputs.artifact-url }}'}
+      test-count: {description: Executed tests, value: '${{ jobs.terraform-validation.outputs.test-count }}'}
+      skipped-count: {description: Skipped operations, value: '${{ jobs.terraform-validation.outputs.skipped-count }}'}
+      first-failure: {description: First failed operation, value: '${{ jobs.terraform-validation.outputs.first-failure }}'}
 
 permissions:
   contents: read
@@ -25,6 +34,16 @@ jobs:
   terraform-validation:
     name: Terraform Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      work-status: ${{ steps.outcome.outputs.work-status }}
+      expected-count: ${{ steps.outcome.outputs.expected-count }}
+      executed-count: ${{ steps.outcome.outputs.executed-count }}
+      artifact-id: ${{ steps.outcome.outputs.artifact-id }}
+      artifact-url: ${{ steps.outcome.outputs.artifact-url }}
+      test-count: ${{ steps.outcome.outputs.test-count }}
+      skipped-count: ${{ steps.outcome.outputs.skipped-count }}
+      first-failure: ${{ steps.outcome.outputs.first-failure }}
     permissions:
       contents: read
     steps:
@@ -44,7 +63,7 @@ jobs:
           terraform_wrapper: false
 
       - name: Run Terraform Validation
-        id: validation
+        id: validate
         continue-on-error: ${{ inputs.soft-fail }}
         run: |
           $params = @{}
@@ -55,10 +74,21 @@ jobs:
 
       - name: Upload Terraform results
         if: always()
-        continue-on-error: ${{ job.status == 'failure' || steps.validation.outcome == 'failure' }}
+        continue-on-error: ${{ job.status == 'failure' || steps.validate.outcome == 'failure' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: terraform-validation-results
           path: logs/terraform-validation-results.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish execution evidence
+        id: outcome
+        if: always()
+        uses: ./.github/actions/ci-outcome
+        with:
+          workflow: terraform-validation
+          steps-json: ${{ toJSON(steps) }}
+          required-steps: '["validate"]'
+          reports: '[{"path":"logs/terraform-validation-results.json","kind":"json"}]'
+          fail-on-error: ${{ !inputs.soft-fail }}

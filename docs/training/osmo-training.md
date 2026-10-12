@@ -3,7 +3,7 @@ sidebar_position: 7
 title: OSMO Training Workflows
 description: Submit Isaac Lab training jobs to NVIDIA OSMO on Azure Kubernetes Service
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-30
+ms.date: 2026-10-08
 ms.topic: how-to
 keywords:
   - osmo
@@ -96,12 +96,23 @@ Dataset folder injection via OSMO bucket system. Training folder mounts at `/dat
 
 ## 🛌 Scale-from-zero GPU Pools
 
-OSMO schedules GPU workflows onto AKS Spot pools that default to `min_count = 0`, so idle GPU capacity is released and only billed while a job runs. A workflow requesting GPU resources triggers the pool to scale up from zero, runs to completion, and the pool scales back down once idle. (For the AzureML equivalent, see [AzureML Scale-from-zero GPU Pools](azureml-training.md#-scale-from-zero-gpu-pools).)
+OSMO GPU workflows can target AKS pools that sit at zero nodes. A task becomes a pending pod, KAI Scheduler marks it unschedulable, and the cluster autoscaler adds a node to the pool whose template the pod matches. On H100 and A10 pools, a workflow started running 8 to 12 minutes after submission, and the pool scaled back down about 10 minutes after the work finished. (For the AzureML equivalent, see [AzureML Scale-from-zero GPU Pools](azureml-training.md#-scale-from-zero-gpu-pools).)
 
-Two pieces of platform configuration in [`infrastructure/setup/values/osmo-platforms.yaml`](../../infrastructure/setup/values/osmo-platforms.yaml) make this work:
+Three parts of the OSMO configuration decide whether a workflow can wake an empty pool:
 
-- **`gpu_platform`** — the platform a workflow selects via `resources.default.platform` (see [`training/il/workflows/osmo/lerobot-train.yaml`](../../training/il/workflows/osmo/lerobot-train.yaml)). It binds the `gpu_tpl` pod template, which pins the GPU SKU `nodeSelector`, the Spot `scalesetpriority` toleration, and the `nvidia.com/gpu` resource request. Those constraints are what let the cluster autoscaler match a pending pod to the zero-scaled Spot pool and bring a node online.
-- **`gpu_gpu_required`** — a resource validation that asserts `USER_GPU >= 1`. It rejects a GPU-platform workflow submitted with zero GPUs at submit time, before a node is provisioned, so a misconfigured job fails fast instead of pinning a freshly-scaled GPU node doing no GPU work.
+| Setting              | Requirement for pools that scale from zero                                                                                                                                                          |
+|----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Resource validations | Static rules only, such as `static_cpu`, `static_memory`, `static_storage`, and `static_gpu_non_negative` in [`osmo-control-plane.yaml`](../../infrastructure/setup/values/osmo-control-plane.yaml) |
+| Pod templates        | Select `agentpool: <pool key>` and `node.kubernetes.io/instance-type`, tolerate the pool's taints, and request `nvidia.com/gpu: "{{USER_GPU}}"`                                                     |
+| GPU count            | `gpu` set on every GPU task                                                                                                                                                                         |
+
+Rules that compare with `{{K8_CPU}}`, `{{K8_MEMORY}}`, or `{{K8_STORAGE}}` read the capacity of running nodes, so OSMO rejects a workflow for an empty pool with `There are no resources in platform ...` and nothing scales up. When two pools share a VM size, such as a Spot and an on-demand H100 pool, an instance-type selector alone matches both, and the autoscaler chooses between them.
+
+OSMO exposes GPUs only to tasks whose spec sets `gpu` above zero: for a task that omits `gpu` or sets `gpu: 0`, it sets `NVIDIA_VISIBLE_DEVICES` to an empty value, so a GPU that the pod template requests stays unusable. Without a `USER_GPU` platform default, such a task requests zero GPUs, but the platform's pod template still selects the GPU pool, so the task wakes a GPU node it can't use. Point CPU-only tasks at a CPU platform.
+
+[`osmo-platforms.yaml`](../../infrastructure/setup/values/osmo-platforms.yaml) shows the platform pattern. `gpu_platform` binds the `gpu_tpl` pod template, which pins the GPU size, tolerates the GPU and Spot taints, and requests `{{USER_GPU}}` GPUs, with a platform default of one. A task that omits `gpu` therefore passes `gpu_gpu_required` (`USER_GPU >= 1`) and holds a GPU it can't see, so set `gpu` explicitly in GPU workflows.
+
+Static validations don't compare a request with node size, so a task that needs more GPUs, CPU, or memory than one node offers waits in the queue until its `queue_timeout` instead of failing at submit.
 
 KAI Scheduler gang-schedules multi-GPU workflows: all of a job's pods wait until the requested GPU count is simultaneously available, so a partially-scaled pool never starts a job that cannot complete. To add or resize a GPU pool, edit `osmo-platforms.yaml` and rerun `infrastructure/setup/03-deploy-osmo.sh` (see [Manage Node Pools](../infrastructure/manage-node-pools.md)).
 

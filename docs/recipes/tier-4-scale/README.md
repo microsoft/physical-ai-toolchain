@@ -1,4 +1,7 @@
-# T4 — Scale: Multi-Site Fleet Delivery (Advanced)
+---
+title: "T4 — Scale: Multi-Site Fleet Delivery (Advanced)"
+description: Infrastructure requirements and guidance for multi-site robot policy delivery with Azure Arc, FluxCD, and deployment gating.
+---
 
 > [!NOTE]
 > **Advanced tier.** This is the legitimate top of the *necessary* ladder. Reach it only when robots
@@ -45,3 +48,7 @@ docs. This recipe deliberately does not duplicate them:
 - [Tier model (canonical reference)](../../design/tier-model.md)
 - [Architecture: T4 — Scale](../../contributing/architecture.md#t4--scale)
 - [T3 — Production](../tier-3-production/README.md) · [T5 — Operate](../tier-5-operate/README.md)
+
+---
+
+🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.

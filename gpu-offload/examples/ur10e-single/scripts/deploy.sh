@@ -32,6 +32,7 @@ test -d "$cache_path" || {
   exit 1
 }
 
+# pinning-ignore: registry health probe; no downloaded artifact
 curl --silent --fail "http://$registry_host/v2/" > /dev/null || {
   echo "No registry on http://$registry_host/v2/; run registry/registry-up.sh first" >&2
   exit 1
