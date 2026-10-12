@@ -31,6 +31,7 @@ from src.api.services.lerobot_exporter import (
     LeRobotExportError,
 )
 from src.api.services.lerobot_language import LanguageInstruction
+from src.api.services.lerobot_loader import LeRobotLoader
 
 from .lerobot_sources import (
     CAMERA,
@@ -447,6 +448,54 @@ def test_language_instructions_become_task_phrasings_and_a_plan(source: Path) ->
         "annotator_id": "local",
         "saved_at": "2026-10-01T12:00:00+00:00",
     }
+
+
+# The column types lerobot.datasets.language declares in LeRobot 0.6.1.
+_TOOL_CALLS = pa.list_(pa.json_())
+LANGUAGE_PERSISTENT_TYPE = pa.list_(
+    pa.struct(
+        [
+            pa.field("role", pa.string(), nullable=False),
+            pa.field("content", pa.string()),
+            pa.field("style", pa.string()),
+            pa.field("timestamp", pa.float32(), nullable=False),
+            pa.field("camera", pa.string()),
+            pa.field("tool_calls", _TOOL_CALLS),
+        ]
+    )
+)
+LANGUAGE_EVENTS_TYPE = pa.list_(
+    pa.struct(
+        [
+            pa.field("role", pa.string(), nullable=False),
+            pa.field("content", pa.string()),
+            pa.field("style", pa.string()),
+            pa.field("camera", pa.string()),
+            pa.field("tool_calls", _TOOL_CALLS),
+        ]
+    )
+)
+
+
+@pytest.mark.parametrize("events", [False, True], ids=["no-events", "recorded-events"])
+def test_language_columns_have_the_types_lerobot_declares(source: Path, events: bool) -> None:
+    if events:
+        _add_language(source, {}, {(0, 1): [SPEECH]})
+    output = source.parents[1] / "edited"
+
+    result = LeRobotExporter(source, output).export_episodes([0], language={0: LanguageInstruction("Pick up the gear")})
+
+    assert result.success, result.error
+    schema = pq.read_schema(output / "data/chunk-000/file-000.parquet")
+    assert schema.field("language_persistent").type == LANGUAGE_PERSISTENT_TYPE
+    assert schema.field("language_events").type == LANGUAGE_EVENTS_TYPE
+    reopened = LeRobotLoader(output)
+    assert reopened.get_dataset_info().total_frames == LENGTHS[0]
+    assert reopened.load_episode(0).length == LENGTHS[0]
+    frames = _language(output, 0)
+    assert [(row["style"], row["content"]) for row in frames[0][0]] == [("task_aug", "Pick up the gear")]
+    recorded_events = [[json.loads(call) for call in row["tool_calls"]] for _, rows in frames for row in rows]
+    assert recorded_events == ([SPEECH["tool_calls"]] if events else [])
 
 
 def test_writes_use_standard_paths_even_when_source_templates_point_elsewhere(source: Path) -> None:

@@ -8,10 +8,13 @@ row of the same style takes over. ``language_events`` holds rows that fire on th
 
 from __future__ import annotations
 
+import json
 from bisect import bisect_left
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Any
+
+import pyarrow as pa
 
 from .episode_edits import PlannedFrame, SubtaskSegment, output_indices, remap_subtasks
 
@@ -27,6 +30,42 @@ _TIMESTAMP_TOLERANCE_S = 1e-4
 """Matches LeRobot's frame-timestamp tolerance, so float32 rounding can't push a row onto the next frame."""
 
 LanguageRow = dict[str, Any]
+
+_ROW_FIELDS = [
+    pa.field("role", pa.string(), nullable=False),
+    pa.field("content", pa.string()),
+    pa.field("style", pa.string()),
+]
+_TARGET_FIELDS = [pa.field("camera", pa.string()), pa.field("tool_calls", pa.list_(pa.json_()))]
+# The column types ``lerobot.datasets.language`` declares in LeRobot 0.6.
+_LANGUAGE_TYPES = {
+    LANGUAGE_PERSISTENT: pa.list_(
+        pa.struct([*_ROW_FIELDS, pa.field("timestamp", pa.float32(), nullable=False), *_TARGET_FIELDS])
+    ),
+    LANGUAGE_EVENTS: pa.list_(pa.struct([*_ROW_FIELDS, *_TARGET_FIELDS])),
+}
+
+
+def language_column(name: str, frames: list[list[LanguageRow]]) -> pa.Array:
+    """
+    Build a language column with the type LeRobot declares for it, even when every frame is empty.
+
+    ``pa.array`` can't build the JSON ``tool_calls`` element from Python values, so the rows are inferred and then
+    cast, with tool calls recorded as objects stored as JSON text.
+    """
+    rows = [
+        [
+            row
+            if row.get("tool_calls") is None
+            else {
+                **row,
+                "tool_calls": [call if isinstance(call, str) else json.dumps(call) for call in row["tool_calls"]],
+            }
+            for row in frame
+        ]
+        for frame in frames
+    ]
+    return pa.array(rows).cast(_LANGUAGE_TYPES[name])
 
 
 @dataclass(frozen=True)

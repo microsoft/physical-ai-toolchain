@@ -60,6 +60,7 @@ from .lerobot_language import (
     LanguageInstruction,
     episode_persistent_rows,
     instruction_rows,
+    language_column,
     plan_events,
     subtask_rows,
 )
@@ -987,8 +988,7 @@ class LeRobotExporter:
             persistent.extend([planned] * episode.length)
             events.extend(plan_events(frame_events, episode.plan))
         columns = {LANGUAGE_PERSISTENT: persistent, LANGUAGE_EVENTS: events}
-        # Types are inferred from the rows, as lerobot's writer does; its JSON element type can't be built from Python.
-        return {name: pa.array(columns[name]) for name in LANGUAGE_COLUMNS if name in written}
+        return {name: language_column(name, columns[name]) for name in LANGUAGE_COLUMNS if name in written}
 
     def _write_videos(
         self,
