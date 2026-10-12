@@ -72,8 +72,8 @@ Proceed to Phase 2 for interactive browsing (requires browser automation tools),
 ### Phase 2: Interactive Browsing
 
 Use the integrated browser tools (`read_page`, `click_element`, `type_in_page`, `run_playwright_code`, `screenshot_page`) on the page the user sees, or the Playwright MCP tools (`mcp_playwright_browser_*`) headlessly on the same URL. If neither is available, use `open_browser_page` and guide the user through manual interaction.
-The Edit Tools trajectory editor's adjustments preview on the plot. HDF5 exports keep the recorded `data/qpos` and add the adjustments beside it as `data/qpos_adjusted`, with `data/qpos_adjusted_mask` marking the edited rows.
-LeRobot v3.0 sources export to a new LeRobot dataset in a new or empty folder. `observation.state` stays as recorded, the adjustments go to `adjusted.observation.state` and its mask, and `dataviewer-export.json` maps output frames to source frames.
+The Edit Tools trajectory editor adjusts the recorded frame under the playhead, and its adjustments preview on the plot. HDF5 exports keep the recorded `data/qpos` and add the adjustments beside it as `data/qpos_adjusted`, with `data/qpos_adjusted_mask` marking the edited rows.
+LeRobot v3.0 sources whose camera features are non-depth videos export to a new LeRobot dataset in a new or empty folder; image features and depth video are refused. `observation.state` stays as recorded, the adjustments go to `adjusted.observation.state` and its mask, and `dataviewer-export.json` maps output frames to source frames.
 Subtasks become LeRobot `subtask` rows in `language_persistent`, each starting at its first surviving frame, and recorded language annotations move with the edited frames.
 Reopened exports show their subtasks in the editor, and re-exports keep unchanged ones as recorded. The export dialog can also write each episode's latest saved language instruction as `task_aug` and `plan` rows.
 
