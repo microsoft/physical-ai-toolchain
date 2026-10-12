@@ -81,6 +81,151 @@ done
 require_tools az terraform jq
 [[ "$local_build" == "true" && "$skip_build" == "false" ]] && require_tools docker
 
+proxy_secret_name="dataviewer-proxy-key"
+easy_auth_secret_name="microsoft-provider-authentication-secret"
+
+wait_for_ready_revision() {
+  local app="$1"
+  local expected_revision ready_revision
+
+  expected_revision=$(az containerapp show \
+    --name "$app" \
+    --resource-group "$rg" \
+    --query properties.latestRevisionName -o tsv)
+
+  for _ in {1..60}; do
+    ready_revision=$(az containerapp show \
+      --name "$app" \
+      --resource-group "$rg" \
+      --query properties.latestReadyRevisionName -o tsv)
+    if [[ -n "$expected_revision" && "$ready_revision" == "$expected_revision" ]]; then
+      return 0
+    fi
+    sleep 5
+  done
+
+  error "Timed out waiting for revision $expected_revision on $app"
+  return 1
+}
+
+operator_auth_gate() {
+  local confirmation
+
+  info "Authentication gate: proxy-bound Easy Auth rollout"
+  info "Open $frontend_url in a private browser window and sign in."
+  info "Confirm /api/auth/context returns HTTP 200 with auth_mode=easy_auth."
+  info "Confirm image and frame loads plus video playback, HEAD, and Range requests work without a browser Authorization header."
+  if ! IFS= read -r -t 900 -p "Type 'yes' within 15 minutes to confirm this gate, or anything else to roll back: " confirmation; then
+    error "Authentication gate timed out or input ended before confirmation"
+    return 1
+  fi
+  [[ "$confirmation" == "yes" ]]
+}
+
+restore_app_rollout() {
+  local app="$1"
+  local image="$2"
+  local proxy_secret_ref="$3"
+  shift 3
+  local -a update_args env_args=("$@")
+
+  update_args=(
+    --name "$app"
+    --resource-group "$rg"
+    --image "$image"
+  )
+  if [[ -n "$proxy_secret_ref" ]]; then
+    env_args+=("DATAVIEWER_PROXY_KEY=secretref:${proxy_secret_ref}")
+  else
+    update_args+=(--remove-env-vars DATAVIEWER_PROXY_KEY)
+  fi
+  if [[ "${#env_args[@]}" -gt 0 ]]; then
+    update_args+=(--set-env-vars "${env_args[@]}")
+  fi
+  update_args+=(--output none)
+
+  az containerapp update "${update_args[@]}"
+  wait_for_ready_revision "$app"
+}
+
+restore_frontend_auth() {
+  if [[ "$frontend_auth_changed" != "true" ]]; then
+    return 0
+  fi
+
+  az containerapp auth update \
+    --name "$frontend_app" \
+    --resource-group "$rg" \
+    --enabled false \
+    --output none
+}
+
+rollback_backend() {
+  local -a update_args backend_env remove_env
+
+  backend_env=("DATAVIEWER_AUTH_DISABLED=${old_auth_disabled}")
+  remove_env=()
+
+  if [[ -n "$old_provider" ]]; then
+    backend_env+=("DATAVIEWER_AUTH_PROVIDER=${old_provider}")
+  else
+    remove_env+=(DATAVIEWER_AUTH_PROVIDER)
+  fi
+  if [[ -n "$old_tenant_id" ]]; then
+    backend_env+=("DATAVIEWER_AZURE_TENANT_ID=${old_tenant_id}")
+  else
+    remove_env+=(DATAVIEWER_AZURE_TENANT_ID)
+  fi
+  if [[ -n "$old_client_id" ]]; then
+    backend_env+=("DATAVIEWER_AZURE_CLIENT_ID=${old_client_id}")
+  else
+    remove_env+=(DATAVIEWER_AZURE_CLIENT_ID)
+  fi
+  if [[ -n "$old_backend_proxy_secret_ref" ]]; then
+    backend_env+=("DATAVIEWER_PROXY_KEY=secretref:${old_backend_proxy_secret_ref}")
+  else
+    remove_env+=(DATAVIEWER_PROXY_KEY)
+  fi
+
+  update_args=(
+    --name "$backend_app"
+    --resource-group "$rg"
+    --image "$old_backend_image"
+    --set-env-vars "${backend_env[@]}"
+  )
+  if [[ "${#remove_env[@]}" -gt 0 ]]; then
+    update_args+=(--remove-env-vars "${remove_env[@]}")
+  fi
+  update_args+=(--output none)
+
+  az containerapp update "${update_args[@]}"
+  wait_for_ready_revision "$backend_app"
+}
+
+rollback_complete_rollout() {
+  local restore_failed=false
+
+  if [[ "$skip_frontend" == "false" ]]; then
+    restore_app_rollout \
+      "$frontend_app" \
+      "$old_frontend_image" \
+      "$old_frontend_proxy_secret_ref" || restore_failed=true
+    restore_frontend_auth || restore_failed=true
+  fi
+  if [[ "$skip_backend" == "false" ]]; then
+    rollback_backend || restore_failed=true
+  fi
+
+  [[ "$restore_failed" == "false" ]]
+}
+
+rollback_failed() {
+  error "Automatic rollback failed. Restore the previous images and environment secret references for:"
+  error "Frontend: $frontend_app"
+  error "Backend: $backend_app"
+  exit 1
+}
+
 SRC_DIR="$SCRIPT_DIR/../viewer"
 backend_dockerfile="$SRC_DIR/backend/Dockerfile"
 frontend_dockerfile="$REPO_ROOT/data-management/viewer/frontend/Dockerfile"
@@ -218,6 +363,115 @@ if [[ "$skip_build" == "false" && "$local_build" == "false" && ${#buildkit_image
 fi
 
 #------------------------------------------------------------------------------
+# Capture Rollback State and Validate Authentication Rollout
+#------------------------------------------------------------------------------
+
+old_backend_image=""
+old_frontend_image=""
+old_provider=""
+old_auth_disabled="false"
+old_tenant_id=""
+old_client_id=""
+old_backend_proxy_secret_ref=""
+old_frontend_proxy_secret_ref=""
+frontend_auth_changed=false
+
+if [[ "$skip_update" == "false" ]]; then
+  old_backend_image=$(az containerapp show \
+    --name "$backend_app" \
+    --resource-group "$rg" \
+    --query properties.template.containers[0].image -o tsv)
+  old_frontend_image=$(az containerapp show \
+    --name "$frontend_app" \
+    --resource-group "$rg" \
+    --query properties.template.containers[0].image -o tsv)
+  old_provider=$(az containerapp show \
+    --name "$backend_app" \
+    --resource-group "$rg" \
+    --query "properties.template.containers[0].env[?name=='DATAVIEWER_AUTH_PROVIDER'] | [0].value" -o tsv)
+  old_auth_disabled=$(az containerapp show \
+    --name "$backend_app" \
+    --resource-group "$rg" \
+    --query "properties.template.containers[0].env[?name=='DATAVIEWER_AUTH_DISABLED'] | [0].value" -o tsv)
+  old_auth_disabled="${old_auth_disabled:-false}"
+  old_tenant_id=$(az containerapp show \
+    --name "$backend_app" \
+    --resource-group "$rg" \
+    --query "properties.template.containers[0].env[?name=='DATAVIEWER_AZURE_TENANT_ID'] | [0].value" -o tsv)
+  old_client_id=$(az containerapp show \
+    --name "$backend_app" \
+    --resource-group "$rg" \
+    --query "properties.template.containers[0].env[?name=='DATAVIEWER_AZURE_CLIENT_ID'] | [0].value" -o tsv)
+  old_backend_proxy_secret_ref=$(az containerapp show \
+    --name "$backend_app" \
+    --resource-group "$rg" \
+    --query "properties.template.containers[0].env[?name=='DATAVIEWER_PROXY_KEY'] | [0].secretRef" -o tsv)
+  old_frontend_proxy_secret_ref=$(az containerapp show \
+    --name "$frontend_app" \
+    --resource-group "$rg" \
+    --query "properties.template.containers[0].env[?name=='DATAVIEWER_PROXY_KEY'] | [0].secretRef" -o tsv)
+
+  if [[ "$auth_enabled" == "true" ]]; then
+    if [[ ! -t 0 || ! -t 1 ]]; then
+      fatal "Authenticated rollout requires an interactive terminal for the final browser validation gate."
+    fi
+
+    backend_secret=$(az containerapp secret list \
+      --name "$backend_app" \
+      --resource-group "$rg" \
+      --query "[?name=='${proxy_secret_name}'] | [0].name" -o tsv)
+    frontend_secret=$(az containerapp secret list \
+      --name "$frontend_app" \
+      --resource-group "$rg" \
+      --query "[?name=='${proxy_secret_name}'] | [0].name" -o tsv)
+    frontend_easy_auth_secret=$(az containerapp secret list \
+      --name "$frontend_app" \
+      --resource-group "$rg" \
+      --query "[?name=='${easy_auth_secret_name}'] | [0].name" -o tsv)
+    if [[ "$backend_secret" != "$proxy_secret_name" || "$frontend_secret" != "$proxy_secret_name" ]]; then
+      fatal "Terraform-managed secret '${proxy_secret_name}' must exist on both Container Apps before deployment."
+    fi
+    if [[ "$frontend_easy_auth_secret" != "$easy_auth_secret_name" ]]; then
+      fatal "Terraform-managed secret '${easy_auth_secret_name}' must exist on the frontend Container App before deployment."
+    fi
+
+    frontend_origin="${frontend_url%/}"
+    if [[ -z "$frontend_origin" ]]; then
+      frontend_fqdn=$(az containerapp show \
+        --name "$frontend_app" \
+        --resource-group "$rg" \
+        --query properties.configuration.ingress.fqdn -o tsv)
+      frontend_origin="https://${frontend_fqdn}"
+    fi
+    frontend_url="$frontend_origin"
+
+    web_redirect="${frontend_origin}/.auth/login/aad/callback"
+    web_redirect_found=false
+    while IFS= read -r redirect_uri; do
+      if [[ "${redirect_uri%/}" == "$web_redirect" ]]; then
+        web_redirect_found=true
+        break
+      fi
+    done < <(az ad app show --id "$entra_client_id" --query web.redirectUris -o tsv)
+    if [[ "$web_redirect_found" != "true" ]]; then
+      fatal "The Easy Auth Web redirect URI ${web_redirect} is missing. Apply Terraform before deployment."
+    fi
+
+    easy_auth_enabled=$(az containerapp auth show \
+      --name "$frontend_app" \
+      --resource-group "$rg" \
+      --query platform.enabled -o tsv)
+
+    if [[ "$skip_backend" == "true" && ( "$old_provider" != "easy_auth" || "$old_backend_proxy_secret_ref" != "$proxy_secret_name" ) ]]; then
+      fatal "--skip-backend requires an existing easy_auth backend that references secret '${proxy_secret_name}'."
+    fi
+    if [[ "$skip_frontend" == "true" && ( "$easy_auth_enabled" != "true" || "$old_frontend_proxy_secret_ref" != "$proxy_secret_name" ) ]]; then
+      fatal "--skip-frontend requires enabled Easy Auth and an existing frontend reference to secret '${proxy_secret_name}'."
+    fi
+  fi
+fi
+
+#------------------------------------------------------------------------------
 # Configure ACR Registry
 #------------------------------------------------------------------------------
 
@@ -263,6 +517,7 @@ if [[ "$skip_build" == "false" ]]; then
       docker buildx build \
         --platform "$DATAVIEWER_BUILD_PLATFORM" \
         --build-arg "BACKEND_EXTRAS=${backend_extras}" \
+        --build-arg "UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX:-https://pypi.org/simple}" \
         --file "$backend_dockerfile" \
         --tag "$backend_image" \
         --push \
@@ -272,6 +527,7 @@ if [[ "$skip_build" == "false" ]]; then
         --registry "$acr_name" \
         --image "${DATAVIEWER_BACKEND_IMAGE}:${image_tag}" \
         --build-arg "BACKEND_EXTRAS=${backend_extras}" \
+        --build-arg "UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX:-https://pypi.org/simple}" \
         --file "$backend_dockerfile" \
         "$SRC_DIR/backend/"
     fi
@@ -281,17 +537,9 @@ if [[ "$skip_build" == "false" ]]; then
     section "Building Frontend Image"
     info "Building $frontend_image..."
 
-    build_args=()
-    if [[ "$auth_enabled" == "true" ]]; then
-      build_args+=(--build-arg "VITE_AZURE_CLIENT_ID=${entra_client_id}")
-      build_args+=(--build-arg "VITE_AZURE_TENANT_ID=${entra_tenant_id}")
-      info "Entra ID auth enabled — injecting MSAL build args"
-    fi
-
     if [[ "$local_build" == "true" ]]; then
       docker buildx build \
         --platform "$DATAVIEWER_BUILD_PLATFORM" \
-        ${build_args[@]+"${build_args[@]}"} \
         --file "$frontend_dockerfile" \
         --tag "$frontend_image" \
         --push \
@@ -300,7 +548,6 @@ if [[ "$skip_build" == "false" ]]; then
       az acr build \
         --registry "$acr_name" \
         --image "${DATAVIEWER_FRONTEND_IMAGE}:${image_tag}" \
-        ${build_args[@]+"${build_args[@]}"} \
         --file "data-management/viewer/frontend/Dockerfile" \
         "$REPO_ROOT"
     fi
@@ -308,121 +555,111 @@ if [[ "$skip_build" == "false" ]]; then
 fi
 
 #------------------------------------------------------------------------------
-# Update Container Apps
+# Configure Authentication and Update Container Apps
 #------------------------------------------------------------------------------
 
-if [[ "$skip_update" == "false" ]]; then
-
+if [[ "$skip_update" == "false" && "$auth_enabled" == "true" ]]; then
   if [[ "$skip_backend" == "false" ]]; then
     section "Updating Backend Container App"
-    info "Deploying $backend_image to $backend_app with $backend_storage_env..."
-    az containerapp update \
+    info "Deploying $backend_image with proxy-bound Easy Auth..."
+    if ! az containerapp update \
       --name "$backend_app" \
       --resource-group "$rg" \
       --image "$backend_image" \
-      --set-env-vars "$backend_storage_env" \
-      --remove-env-vars "$legacy_backend_storage_env"
-  fi
-
-  if [[ "$skip_frontend" == "false" ]]; then
-    section "Updating Frontend Container App"
-    info "Deploying $frontend_image to $frontend_app..."
-    az containerapp update \
-      --name "$frontend_app" \
-      --resource-group "$rg" \
-      --image "$frontend_image"
-  fi
-fi
-
-#------------------------------------------------------------------------------
-# Configure Authentication
-#------------------------------------------------------------------------------
-
-# Auth changes apply only to the apps this run selects. With --skip-frontend,
-# the Entra app credentials and Easy Auth settings stay as they are.
-if [[ "$auth_enabled" == "true" && "$skip_update" == "false" ]]; then
-
-  if [[ "$skip_backend" == "false" ]]; then
-    section "Configuring Backend Authentication"
-    info "Setting auth env vars on $backend_app..."
-    az containerapp update \
-      --name "$backend_app" \
-      --resource-group "$rg" \
       --set-env-vars \
+        "$backend_storage_env" \
         "DATAVIEWER_AUTH_PROVIDER=easy_auth" \
         "DATAVIEWER_AUTH_DISABLED=false" \
-        "DATAVIEWER_AZURE_TENANT_ID=${entra_tenant_id}" \
-        "DATAVIEWER_AZURE_CLIENT_ID=${entra_client_id}" \
-      --output none
+        "DATAVIEWER_PROXY_KEY=secretref:${proxy_secret_name}" \
+      --remove-env-vars \
+        "$legacy_backend_storage_env" \
+        DATAVIEWER_AZURE_TENANT_ID \
+        DATAVIEWER_AZURE_CLIENT_ID \
+      --output none ||
+      ! wait_for_ready_revision "$backend_app"; then
+      rollback_backend || rollback_failed
+      restore_frontend_auth || rollback_failed
+      fatal "Backend deployment failed and was rolled back."
+    fi
   fi
 
   if [[ "$skip_frontend" == "false" ]]; then
     section "Configuring Easy Auth on Frontend"
+    if [[ "$easy_auth_enabled" != "true" ]]; then
+      frontend_auth_changed=true
+    fi
 
-    # Create client secret for server-directed OAuth flow
-    info "Creating client secret for Easy Auth..."
-    client_secret=$(az ad app credential reset \
-      --id "$entra_client_id" \
-      --display-name "easy-auth" \
-      --years 2 \
-      --query password -o tsv)
-
-    # Enable ID token issuance (required for Easy Auth)
-    info "Enabling ID token issuance..."
-    az ad app update --id "$entra_client_id" \
-      --enable-id-token-issuance true \
-      --output none
-
-    # Add web redirect URI for Easy Auth callback
-    frontend_fqdn=$(az containerapp show \
-      --name "$frontend_app" \
-      --resource-group "$rg" \
-      --query 'properties.configuration.ingress.fqdn' -o tsv)
-
-    info "Adding Easy Auth callback redirect URI..."
-    az ad app update --id "$entra_client_id" \
-      --web-redirect-uris "https://${frontend_fqdn}/.auth/login/aad/callback" \
-      --output none
-
-    # Configure Easy Auth identity provider
-    info "Configuring Easy Auth Microsoft provider..."
-    az containerapp auth microsoft update \
+    if ! az containerapp auth microsoft update \
       --name "$frontend_app" \
       --resource-group "$rg" \
       --client-id "$entra_client_id" \
-      --client-secret "$client_secret" \
+      --client-secret-name "$easy_auth_secret_name" \
       --issuer "https://login.microsoftonline.com/${entra_tenant_id}/v2.0" \
       --yes \
-      --output none
+      --output none ||
+      ! az containerapp auth update \
+        --name "$frontend_app" \
+        --resource-group "$rg" \
+        --enabled true \
+        --unauthenticated-client-action RedirectToLoginPage \
+        --redirect-provider azureactivedirectory \
+        --output none; then
+      restore_frontend_auth || rollback_failed
+      if [[ "$skip_backend" == "false" ]]; then
+        rollback_backend || rollback_failed
+      fi
+      fatal "Frontend Easy Auth configuration failed and the prior rollout state was restored."
+    fi
 
-    # Require authentication for all requests
-    info "Setting unauthenticated client action to RedirectToLoginPage..."
-    az containerapp auth update \
+    section "Updating Frontend Container App"
+    info "Deploying $frontend_image with the proxy credential reference..."
+    if ! az containerapp update \
       --name "$frontend_app" \
       --resource-group "$rg" \
-      --unauthenticated-client-action RedirectToLoginPage \
-      --redirect-provider azureactivedirectory \
-      --output none
+      --image "$frontend_image" \
+      --set-env-vars "DATAVIEWER_PROXY_KEY=secretref:${proxy_secret_name}" \
+      --output none ||
+      ! wait_for_ready_revision "$frontend_app"; then
+      rollback_complete_rollout || rollback_failed
+      fatal "Frontend deployment failed and the paired rollout was rolled back."
+    fi
   fi
 
-elif [[ "$auth_enabled" == "false" && "$skip_update" == "false" ]]; then
+  if ! operator_auth_gate; then
+    rollback_complete_rollout || rollback_failed
+    fatal "Authentication validation failed and the paired rollout was rolled back."
+  fi
 
-  section "Disabling Authentication"
-
+elif [[ "$skip_update" == "false" ]]; then
   if [[ "$skip_backend" == "false" ]]; then
-    info "Setting auth-disabled env vars on $backend_app..."
+    section "Updating Backend Container App"
     az containerapp update \
       --name "$backend_app" \
       --resource-group "$rg" \
-      --set-env-vars "DATAVIEWER_AUTH_DISABLED=true" \
+      --image "$backend_image" \
+      --set-env-vars \
+        "$backend_storage_env" \
+        "DATAVIEWER_AUTH_DISABLED=true" \
       --remove-env-vars \
+        "$legacy_backend_storage_env" \
         DATAVIEWER_AUTH_PROVIDER \
         DATAVIEWER_AZURE_TENANT_ID \
         DATAVIEWER_AZURE_CLIENT_ID \
+        DATAVIEWER_PROXY_KEY \
       --output none
+    wait_for_ready_revision "$backend_app"
   fi
 
   if [[ "$skip_frontend" == "false" ]]; then
+    section "Updating Frontend Container App"
+    az containerapp update \
+      --name "$frontend_app" \
+      --resource-group "$rg" \
+      --image "$frontend_image" \
+      --remove-env-vars DATAVIEWER_PROXY_KEY \
+      --output none
+    wait_for_ready_revision "$frontend_app"
+
     info "Allowing anonymous access on $frontend_app..."
     az containerapp auth update \
       --name "$frontend_app" \
@@ -430,7 +667,6 @@ elif [[ "$auth_enabled" == "false" && "$skip_update" == "false" ]]; then
       --enabled false \
       --output none
   fi
-
 fi
 
 #------------------------------------------------------------------------------

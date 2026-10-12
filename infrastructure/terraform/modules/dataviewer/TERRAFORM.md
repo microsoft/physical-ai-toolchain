@@ -2,7 +2,7 @@
 title: Dataviewer Module
 description: "Deploys the dataviewer application on Azure Container Apps with networking, identity, and app-level resources."
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-05
+ms.date: 2026-10-06
 ms.topic: reference
 ---
 
@@ -40,6 +40,7 @@ Supports internal (VNet/VPN) and external (public) deployment modes.
 | Name | Type |
 | ---- | ---- |
 | [azuread_application.dataviewer](https://registry.terraform.io/providers/hashicorp/azuread/latest/docs/resources/application) | resource |
+| [azuread_application_password.dataviewer_easy_auth](https://registry.terraform.io/providers/hashicorp/azuread/latest/docs/resources/application_password) | resource |
 | [azuread_service_principal.dataviewer](https://registry.terraform.io/providers/hashicorp/azuread/latest/docs/resources/service_principal) | resource |
 | [azurerm_container_app.backend](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/container_app) | resource |
 | [azurerm_container_app.frontend](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/container_app) | resource |
@@ -54,6 +55,7 @@ Supports internal (VNet/VPN) and external (public) deployment modes.
 | [azurerm_subnet_nat_gateway_association.container_apps](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/subnet_nat_gateway_association) | resource |
 | [azurerm_subnet_network_security_group_association.container_apps](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/subnet_network_security_group_association) | resource |
 | [azurerm_user_assigned_identity.dataviewer](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/user_assigned_identity) | resource |
+| [random_password.dataviewer_proxy_key](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [random_uuid.dataviewer_role_admin](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/uuid) | resource |
 | [random_uuid.dataviewer_role_annotator](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/uuid) | resource |
 | [random_uuid.dataviewer_role_viewer](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/uuid) | resource |

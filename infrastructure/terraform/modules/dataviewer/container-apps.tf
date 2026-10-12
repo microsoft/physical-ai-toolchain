@@ -22,6 +22,14 @@ resource "azurerm_container_app" "backend" {
     identity_ids = [azurerm_user_assigned_identity.dataviewer.id]
   }
 
+  dynamic "secret" {
+    for_each = var.should_deploy_dataviewer_auth ? [random_password.dataviewer_proxy_key[0].result] : []
+    content {
+      name  = "dataviewer-proxy-key"
+      value = secret.value
+    }
+  }
+
   dynamic "registry" {
     for_each = local.use_acr_images ? [1] : []
     content {
@@ -83,6 +91,20 @@ resource "azurerm_container_app" "backend" {
         name  = "DATAVIEWER_AUTH_DISABLED"
         value = var.should_enable_internal && !var.should_deploy_dataviewer_auth ? "true" : "false"
       }
+      dynamic "env" {
+        for_each = var.should_deploy_dataviewer_auth ? [1] : []
+        content {
+          name  = "DATAVIEWER_AUTH_PROVIDER"
+          value = "easy_auth"
+        }
+      }
+      dynamic "env" {
+        for_each = var.should_deploy_dataviewer_auth ? [1] : []
+        content {
+          name        = "DATAVIEWER_PROXY_KEY"
+          secret_name = "dataviewer-proxy-key"
+        }
+      }
       env {
         name  = "CORS_ORIGINS"
         value = "https://*.${azurerm_container_app_environment.main.default_domain}"
@@ -125,6 +147,22 @@ resource "azurerm_container_app" "frontend" {
     identity_ids = [azurerm_user_assigned_identity.dataviewer.id]
   }
 
+  dynamic "secret" {
+    for_each = var.should_deploy_dataviewer_auth ? [random_password.dataviewer_proxy_key[0].result] : []
+    content {
+      name  = "dataviewer-proxy-key"
+      value = secret.value
+    }
+  }
+
+  dynamic "secret" {
+    for_each = var.should_deploy_dataviewer_auth ? [azuread_application_password.dataviewer_easy_auth[0].value] : []
+    content {
+      name  = "microsoft-provider-authentication-secret"
+      value = secret.value
+    }
+  }
+
   dynamic "registry" {
     for_each = local.use_acr_images ? [1] : []
     content {
@@ -160,6 +198,13 @@ resource "azurerm_container_app" "frontend" {
       env {
         name  = "NGINX_BACKEND_SCHEME"
         value = "https"
+      }
+      dynamic "env" {
+        for_each = var.should_deploy_dataviewer_auth ? [1] : []
+        content {
+          name        = "DATAVIEWER_PROXY_KEY"
+          secret_name = "dataviewer-proxy-key"
+        }
       }
     }
   }
