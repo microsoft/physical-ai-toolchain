@@ -2,20 +2,27 @@
  * Trajectory editor for adjusting the state vector at each frame.
  *
  * Each state channel takes an additive delta or a set value. Adjustments are stored
- * non-destructively in the edit store and preview on the trajectory plot. Exports keep the recorded
- * positions and add the adjustments beside them with a mask of the edited rows: qpos_adjusted in
- * HDF5 exports and adjusted.observation.state in LeRobot exports.
+ * non-destructively in the edit store, keyed by recorded frame, and preview on the trajectory plot.
+ * Exports keep the recorded positions and add the adjustments beside them with a mask of the edited
+ * rows: qpos_adjusted in HDF5 exports and adjusted.observation.state in LeRobot exports.
  */
 
 import { Check, RotateCcw, Trash2 } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 
 import { resolveStateChannelLabel } from '@/components/episode-viewer/joint-constants'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
-import { useEpisodeStore, usePlaybackControls, useTrajectoryAdjustmentState } from '@/stores'
+import {
+  useEditStore,
+  useEpisodeStore,
+  usePlaybackControls,
+  useTrajectoryAdjustmentState,
+} from '@/stores'
+import { getOriginalIndex } from '@/stores/edit-store-frame-utils'
 import { useJointConfigStore } from '@/stores/joint-config-store'
 
 interface TrajectoryEditorProps {
@@ -36,6 +43,7 @@ interface ChannelEditorProps {
   setValue: number | undefined
   onDeltaChange: (delta: number) => void
   onSetValueChange: (value: number | undefined) => void
+  onReset: () => void
 }
 
 /**
@@ -48,7 +56,9 @@ function ChannelEditor({
   setValue,
   onDeltaChange,
   onSetValueChange,
+  onReset,
 }: ChannelEditorProps) {
+  const sliderRef = useRef<HTMLInputElement>(null)
   const isSet = setValue !== undefined
   const hasChange = delta !== 0 || isSet
   // Local text state allows partial typing such as "-" or "0." before a value parses.
@@ -107,8 +117,9 @@ function ChannelEditor({
               className="h-6 w-6 p-0"
               aria-label={`Reset ${label}`}
               onClick={() => {
-                onDeltaChange(0)
-                onSetValueChange(undefined)
+                // The reset button goes away with the change, so focus moves to the enabled slider.
+                flushSync(onReset)
+                sliderRef.current?.focus()
               }}
             >
               <RotateCcw className="h-3 w-3" />
@@ -117,6 +128,7 @@ function ChannelEditor({
         </div>
       </div>
       <input
+        ref={sliderRef}
         type="range"
         aria-label={`${label} delta`}
         value={delta}
@@ -178,26 +190,45 @@ function ChannelEditor({
  */
 export function TrajectoryEditor({ className }: TrajectoryEditorProps) {
   const { currentFrame } = usePlaybackControls()
+  const insertedFrames = useEditStore((state) => state.insertedFrames)
+  const removedFrames = useEditStore((state) => state.removedFrames)
   // Remount per episode+frame so the editor inputs always start from that frame's
   // stored adjustment instead of retaining the previously edited frame's values.
   const episodeKey = useEpisodeStore(
     (state) => state.currentEpisode?.meta?.id ?? state.currentEpisode?.meta?.index,
   )
+  // Adjustments apply to recorded frames, so the playback position maps back through the frame edits.
+  const recordedFrame = getOriginalIndex(currentFrame, insertedFrames, removedFrames)
+
+  if (recordedFrame === null) {
+    return (
+      <p className={cn('text-muted-foreground p-4 text-sm', className)}>
+        This frame is inserted. It takes its values from the recorded frames on either side, so
+        adjust those instead.
+      </p>
+    )
+  }
 
   return (
     <TrajectoryEditorFrame
-      key={`${episodeKey}:${currentFrame}`}
+      key={`${episodeKey}:${recordedFrame}`}
       className={className}
-      currentFrame={currentFrame}
+      recordedFrame={recordedFrame}
+      playbackFrame={currentFrame}
     />
   )
 }
 
 interface TrajectoryEditorFrameProps extends TrajectoryEditorProps {
-  currentFrame: number
+  recordedFrame: number
+  playbackFrame: number
 }
 
-function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFrameProps) {
+function TrajectoryEditorFrame({
+  className,
+  recordedFrame,
+  playbackFrame,
+}: TrajectoryEditorFrameProps) {
   const currentEpisode = useEpisodeStore((state) => state.currentEpisode)
   const jointConfigLabels = useJointConfigStore((state) => state.config.labels)
   const {
@@ -206,12 +237,23 @@ function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFram
     removeTrajectoryAdjustment,
     clearTrajectoryAdjustments,
   } = useTrajectoryAdjustmentState()
+  const groupRef = useRef<HTMLDivElement>(null)
+  const [status, setStatus] = useState('')
+
+  // Report an action's result, and keep keyboard focus in the editor when the action disables or
+  // removes the focused button.
+  const announce = useCallback((message: string, refocus: boolean) => {
+    setStatus(message)
+    if (refocus) {
+      groupRef.current?.focus()
+    }
+  }, [])
 
   const currentPoint = useMemo(() => {
     const trajectoryData = currentEpisode?.trajectoryData || []
     if (trajectoryData.length === 0) return null
-    return trajectoryData[Math.min(currentFrame, trajectoryData.length - 1)]
-  }, [currentEpisode?.trajectoryData, currentFrame])
+    return trajectoryData[Math.min(recordedFrame, trajectoryData.length - 1)]
+  }, [currentEpisode?.trajectoryData, recordedFrame])
 
   const stateVariables = useMemo(
     () =>
@@ -231,7 +273,7 @@ function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFram
     [currentPoint, jointConfigLabels, stateVariables],
   )
 
-  const currentAdjustment = trajectoryAdjustments.get(currentFrame)
+  const currentAdjustment = trajectoryAdjustments.get(recordedFrame)
   const [deltas, setDeltas] = useState<ChannelRecord>(() => ({
     ...currentAdjustment?.channelDeltas,
   }))
@@ -257,19 +299,28 @@ function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFram
     setDeltas((current) => withoutChannel(current, index))
   }, [])
 
+  const resetChannel = useCallback((index: number, label: string) => {
+    setDeltas((current) => withoutChannel(current, index))
+    setValues((current) => withoutChannel(current, index))
+    setStatus(`Reset ${label}`)
+  }, [])
+
   const handleApply = useCallback(() => {
     if (!hasFrameChanges) {
-      removeTrajectoryAdjustment(currentFrame)
+      removeTrajectoryAdjustment(recordedFrame)
+      announce(`Removed the adjustment from frame ${recordedFrame}`, true)
       return
     }
 
-    setTrajectoryAdjustment(currentFrame, {
+    setTrajectoryAdjustment(recordedFrame, {
       channelDeltas: changedDeltas.length > 0 ? Object.fromEntries(changedDeltas) : undefined,
       channelValues: Object.keys(values).length > 0 ? { ...values } : undefined,
     })
+    announce(`Adjusted frame ${recordedFrame}`, false)
   }, [
+    announce,
     changedDeltas,
-    currentFrame,
+    recordedFrame,
     hasFrameChanges,
     removeTrajectoryAdjustment,
     setTrajectoryAdjustment,
@@ -279,15 +330,17 @@ function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFram
   const handleResetFrame = useCallback(() => {
     setDeltas({})
     setValues({})
-    removeTrajectoryAdjustment(currentFrame)
-  }, [currentFrame, removeTrajectoryAdjustment])
+    removeTrajectoryAdjustment(recordedFrame)
+    announce(`Reset frame ${recordedFrame}`, true)
+  }, [announce, recordedFrame, removeTrajectoryAdjustment])
 
   // Clearing every stored adjustment must also drop this frame's pending edits.
   const handleClearAll = useCallback(() => {
     setDeltas({})
     setValues({})
     clearTrajectoryAdjustments()
-  }, [clearTrajectoryAdjustments])
+    announce('Cleared all trajectory adjustments', true)
+  }, [announce, clearTrajectoryAdjustments])
 
   if (!currentPoint) {
     return (
@@ -298,11 +351,20 @@ function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFram
   }
 
   return (
-    <div className={cn('space-y-4', className)}>
+    <div
+      ref={groupRef}
+      role="group"
+      aria-label={`Frame ${recordedFrame} trajectory adjustments`}
+      tabIndex={-1}
+      className={cn(
+        'focus-visible:ring-ring space-y-4 rounded-md focus-visible:ring-1 focus-visible:outline-hidden',
+        className,
+      )}
+    >
       {/* Frame indicator */}
       <div className="flex items-center justify-between">
         <div className="text-sm">
-          <span className="font-medium">Frame {currentFrame}</span>
+          <span className="font-medium">Frame {recordedFrame}</span>
           {currentAdjustment && (
             <span className="ml-2 text-xs text-orange-500">(has adjustments)</span>
           )}
@@ -311,6 +373,12 @@ function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFram
           {trajectoryAdjustments.size} frame(s) modified
         </div>
       </div>
+
+      {playbackFrame !== recordedFrame && (
+        <p className="text-muted-foreground text-xs">
+          Playback position {playbackFrame} shows recorded frame {recordedFrame}.
+        </p>
+      )}
 
       <p role="note" className="text-muted-foreground text-xs">
         Exports keep the recorded joint positions and add these adjustments beside them, as
@@ -328,6 +396,7 @@ function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFram
             setValue={values[channel.index]}
             onDeltaChange={(delta) => setChannelDelta(channel.index, delta)}
             onSetValueChange={(next) => setChannelValue(channel.index, next)}
+            onReset={() => resetChannel(channel.index, channel.label)}
           />
         ))}
       </div>
@@ -341,7 +410,7 @@ function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFram
           className="flex-1"
         >
           <Check className="mr-1 h-4 w-4" />
-          Apply to Frame {currentFrame}
+          Apply to Frame {recordedFrame}
         </Button>
         <Button
           variant="outline"
@@ -353,6 +422,10 @@ function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFram
           Reset Frame
         </Button>
       </div>
+
+      <p role="status" aria-live="polite" className="sr-only">
+        {status}
+      </p>
 
       {/* Clear all adjustments */}
       {hasAnyAdjustments && (

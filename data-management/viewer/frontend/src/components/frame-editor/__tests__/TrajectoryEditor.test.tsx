@@ -3,13 +3,19 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { useEpisodeStore, usePlaybackControls, useTrajectoryAdjustmentState } from '@/stores'
+import {
+  useEditStore,
+  useEpisodeStore,
+  usePlaybackControls,
+  useTrajectoryAdjustmentState,
+} from '@/stores'
 import type { TrajectoryPoint, TrajectoryVariable } from '@/types/api'
-import type { TrajectoryAdjustment } from '@/types/episode-edit'
+import type { FrameInsertion, TrajectoryAdjustment } from '@/types/episode-edit'
 
 import { TrajectoryEditor } from '../TrajectoryEditor'
 
 vi.mock('@/stores', () => ({
+  useEditStore: vi.fn(),
   useEpisodeStore: vi.fn(),
   usePlaybackControls: vi.fn(),
   useTrajectoryAdjustmentState: vi.fn(),
@@ -22,9 +28,15 @@ vi.mock('@/components/ui/tooltip', () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
 
+const mockedEditStore = vi.mocked(useEditStore)
 const mockedEpisodeStore = vi.mocked(useEpisodeStore)
 const mockedPlaybackControls = vi.mocked(usePlaybackControls)
 const mockedTrajectoryState = vi.mocked(useTrajectoryAdjustmentState)
+
+interface FrameEditState {
+  removedFrames: Set<number>
+  insertedFrames: Map<number, FrameInsertion>
+}
 
 interface EpisodeState {
   currentEpisode:
@@ -65,6 +77,7 @@ function setup(
     playback?: Partial<PlaybackState>
     episode?: Partial<EpisodeState>
     trajectory?: Partial<TrajectoryAdjustmentStateValue>
+    edits?: Partial<FrameEditState>
   } = {},
 ) {
   const playbackState: PlaybackState = {
@@ -85,7 +98,14 @@ function setup(
     clearTrajectoryAdjustments: vi.fn(),
     ...opts.trajectory,
   }
+  const editState: FrameEditState = {
+    removedFrames: new Set(),
+    insertedFrames: new Map(),
+    ...opts.edits,
+  }
   mockedPlaybackControls.mockReturnValue(playbackState)
+  mockedEditStore.mockImplementation(((selector: (state: FrameEditState) => unknown) =>
+    selector(editState)) as never)
   mockedEpisodeStore.mockImplementation(((selector: (state: EpisodeState) => unknown) =>
     selector(episodeState)) as never)
   mockedTrajectoryState.mockReturnValue(trajectoryState)
@@ -98,6 +118,8 @@ const deltaInput = (label: string) =>
   screen.getByRole<HTMLInputElement>('spinbutton', { name: `${label} delta` })
 const valueInput = (label: string) =>
   screen.getByRole<HTMLInputElement>('spinbutton', { name: `${label} set value` })
+const insertAfter = (frame: number): Map<number, FrameInsertion> =>
+  new Map([[frame, { afterFrameIndex: frame, interpolationFactor: 0.5 }]])
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -357,5 +379,128 @@ describe('TrajectoryEditor', () => {
     expect(screen.queryByText(/Δ: \+0.3000/)).not.toBeInTheDocument()
     expect(screen.getByText(/Δ: -0.2000/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Reset arm_3' })).not.toBeInTheDocument()
+  })
+
+  describe('playback position and recorded frame', () => {
+    it('adjusts the recorded frame under the playhead after an earlier removal', () => {
+      const { trajectoryState } = setup({
+        playback: { currentFrame: 1 },
+        edits: { removedFrames: new Set([0]) },
+      })
+      render(<TrajectoryEditor />)
+
+      expect(screen.getByText('Frame 2')).toBeInTheDocument()
+      expect(screen.getByText('Playback position 1 shows recorded frame 2.')).toBeInTheDocument()
+      fireEvent.change(deltaSlider('arm_1'), { target: { value: '0.2' } })
+      expect(screen.getByText(/Original: 2.1000/)).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /Apply to Frame 2/ }))
+
+      expect(trajectoryState.setTrajectoryAdjustment).toHaveBeenCalledWith(2, {
+        channelDeltas: { 0: 0.2 },
+        channelValues: undefined,
+      })
+    })
+
+    it('shows and removes the stored adjustment of the recorded frame after an earlier insertion', async () => {
+      const user = userEvent.setup()
+      const adjustments = new Map<number, TrajectoryAdjustment>([
+        [1, { frameIndex: 1, channelDeltas: { 0: 0.25 } }],
+        [2, { frameIndex: 2, channelDeltas: { 0: 0.5 } }],
+      ])
+      const { trajectoryState } = setup({
+        playback: { currentFrame: 2 },
+        edits: { insertedFrames: insertAfter(0) },
+        trajectory: { trajectoryAdjustments: adjustments },
+      })
+      render(<TrajectoryEditor />)
+
+      expect(deltaInput('arm_1').value).toBe('0.2500')
+      await user.click(screen.getByRole('button', { name: /Reset Frame/ }))
+
+      expect(trajectoryState.removeTrajectoryAdjustment).toHaveBeenCalledWith(1)
+    })
+
+    it('offers no adjustment on an inserted frame', () => {
+      setup({ playback: { currentFrame: 1 }, edits: { insertedFrames: insertAfter(0) } })
+      render(<TrajectoryEditor />)
+
+      expect(screen.queryAllByRole('slider')).toHaveLength(0)
+      expect(screen.queryByRole('button', { name: /Apply to Frame/ })).not.toBeInTheDocument()
+      expect(
+        screen.getByText(
+          'This frame is inserted. It takes its values from the recorded frames on either side, so adjust those instead.',
+        ),
+      ).toBeInTheDocument()
+    })
+  })
+
+  describe('keyboard focus and announcements', () => {
+    it('keeps focus in the editor and announces the result when Clear All removes itself', async () => {
+      const user = userEvent.setup()
+      const adjustments = new Map<number, TrajectoryAdjustment>([
+        [0, { frameIndex: 0, channelDeltas: { 0: 0.1 } }],
+      ])
+      setup({ trajectory: { trajectoryAdjustments: adjustments } })
+      render(<TrajectoryEditor />)
+
+      const clearAll = screen.getByRole('button', { name: /Clear All Trajectory Adjustments/ })
+      clearAll.focus()
+      await user.keyboard('{Enter}')
+
+      expect(screen.getByRole('group', { name: 'Frame 0 trajectory adjustments' })).toHaveFocus()
+      expect(screen.getByRole('status')).toHaveTextContent('Cleared all trajectory adjustments')
+      expect(screen.getByRole('status')).not.toHaveTextContent('frame(s) modified')
+    })
+
+    it('moves focus to the channel slider when its reset button disappears', async () => {
+      const user = userEvent.setup()
+      setup()
+      render(<TrajectoryEditor />)
+
+      fireEvent.change(deltaSlider('arm_2'), { target: { value: '0.3' } })
+      screen.getByRole('button', { name: 'Reset arm_2' }).focus()
+      await user.keyboard('{Enter}')
+
+      expect(screen.queryByRole('button', { name: 'Reset arm_2' })).not.toBeInTheDocument()
+      expect(deltaSlider('arm_2')).toHaveFocus()
+      expect(screen.getByRole('status')).toHaveTextContent('Reset arm_2')
+    })
+
+    it.each([
+      ['Apply', /Apply to Frame 0/, 'Adjusted frame 0', false],
+      ['Reset Frame', /Reset Frame/, 'Reset frame 0', true],
+    ])('announces %s and keeps focus in the editor', async (_name, button, message, refocused) => {
+      const user = userEvent.setup()
+      const adjustments = new Map<number, TrajectoryAdjustment>([
+        [0, { frameIndex: 0, channelDeltas: { 0: 0.1 } }],
+      ])
+      setup({ trajectory: { trajectoryAdjustments: adjustments } })
+      render(<TrajectoryEditor />)
+
+      const target = screen.getByRole('button', { name: button })
+      target.focus()
+      await user.keyboard('{Enter}')
+
+      expect(screen.getByRole('status')).toHaveTextContent(message)
+      expect(
+        refocused ? screen.getByRole('group', { name: 'Frame 0 trajectory adjustments' }) : target,
+      ).toHaveFocus()
+    })
+
+    it('announces removing the adjustment and refocuses when Apply has nothing left', async () => {
+      const user = userEvent.setup()
+      const adjustments = new Map<number, TrajectoryAdjustment>([
+        [0, { frameIndex: 0, channelDeltas: { 0: 0.1 } }],
+      ])
+      setup({ trajectory: { trajectoryAdjustments: adjustments } })
+      render(<TrajectoryEditor />)
+
+      fireEvent.change(deltaSlider('arm_1'), { target: { value: '0' } })
+      screen.getByRole('button', { name: /Apply to Frame 0/ }).focus()
+      await user.keyboard('{Enter}')
+
+      expect(screen.getByRole('status')).toHaveTextContent('Removed the adjustment from frame 0')
+      expect(screen.getByRole('group', { name: 'Frame 0 trajectory adjustments' })).toHaveFocus()
+    })
   })
 })
