@@ -374,7 +374,10 @@ export function validateWorkflows(graph, contract = loadContract()) {
           check(product.valid && product.value === true, `${key}: required accessibility lane must run product evidence`);
         }
         const innerFilter = graph[`.github/workflows/${lane.target}`]?.on?.workflow_call?.inputs?.['changed-files-only'];
-        check(!innerFilter || job.with?.['changed-files-only'] === false, `${key}: secondary changed-file filter is forbidden; explicitly disable it`);
+        const advisoryFreshness = owner === 'pr' && lane.id === 'msdate-freshness' && lane.classification === 'advisory';
+        check(!innerFilter || job.with?.['changed-files-only'] === advisoryFreshness,
+          advisoryFreshness ? `${key}: advisory freshness must check changed files only` :
+            `${key}: secondary changed-file filter is forbidden; explicitly disable it`);
         const expected = owner === 'pr' && lane.selector !== 'always' ? `needs.changes.outputs.${lane.selector} == 'true'` : '';
         check(expression(job.if) === expected, `${key}: selector condition mismatch`);
         if (expected) check(array(job.needs).includes('changes'), `${key}: selector dependency missing`);
