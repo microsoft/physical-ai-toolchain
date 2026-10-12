@@ -253,6 +253,36 @@ def test_trajectory_adjustments_add_derived_state_beside_the_recorded_state(sour
     assert [adjustment["frame_index"] for adjustment in edits["trajectory_adjustments"]] == [2, 7]
 
 
+def test_a_subset_export_describes_its_own_layout(source: Path) -> None:
+    info = json.loads((source / "meta/info.json").read_text())
+    # Counters left from a LeRobot v2.1 conversion describe the source's files, not the export's.
+    info.update(total_chunks=3, total_videos=6, data_files_size_in_mb=50, video_files_size_in_mb=200)
+    (source / "meta/info.json").write_text(json.dumps(info))
+
+    output = _export(source, [1])
+
+    exported = _info(output)
+    assert not {"total_chunks", "total_videos"} & set(exported)
+    assert (exported["total_episodes"], exported["total_frames"], exported["splits"]) == (
+        1,
+        LENGTHS[1],
+        {"train": "0:1"},
+    )
+    assert (exported["chunks_size"], exported["data_files_size_in_mb"], exported["video_files_size_in_mb"]) == (
+        info["chunks_size"],
+        50,
+        200,
+    )
+    for row in _episodes(output):
+        data = exported["data_path"].format(chunk_index=row["data/chunk_index"], file_index=row["data/file_index"])
+        video = exported["video_path"].format(
+            video_key=CAMERA,
+            chunk_index=row[f"videos/{CAMERA}/chunk_index"],
+            file_index=row[f"videos/{CAMERA}/file_index"],
+        )
+        assert (output / data).is_file() and (output / video).is_file()
+
+
 def test_episode_and_dataset_stats_match_the_exported_data(source: Path) -> None:
     output = _export(source, [0, 1], _edits(0, removed_frames={3}))
 

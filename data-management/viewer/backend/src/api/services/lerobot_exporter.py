@@ -919,6 +919,9 @@ class LeRobotExporter:
         (root / "meta/stats.json").write_text(json.dumps(stats, indent=4))
 
         raw = copy.deepcopy(info.raw_info)
+        # LeRobot v3.0 defines no chunk or video counts; ones left from a v2.1 conversion describe the source's files.
+        for stale in ("total_chunks", "total_videos"):
+            raw.pop(stale, None)
         raw.update(
             features=features,
             total_episodes=len(episodes),
