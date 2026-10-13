@@ -22,14 +22,14 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy==2.5.2",
     "azure-core==1.41.0",
-    "azure-storage-blob==12.30.3",
-    "azure-identity==1.25.3",
-    "azure-ai-ml==1.35.0",
+    "azure-storage-blob==12.31.0",
+    "azure-identity==1.26.0",
+    "azure-ai-ml==1.35.1",
     "azureml-mlflow==1.62.0.post6",
     # azure-ai-ml allows newer prerelease storage clients when prerelease
     # resolution is enabled for telemetry; keep storage clients on stable rails.
-    "azure-storage-file-datalake==12.25.0",
-    "azure-storage-file-share==12.26.0",
+    "azure-storage-file-datalake==12.26.0",
+    "azure-storage-file-share==12.27.0",
     # marshmallow held at 3.x because azure-ai-ml==1.34.1 imports symbols that
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Track azure-ai-ml release notes; bump together when 4.x support lands.
@@ -41,7 +41,7 @@ dependencies = [
     # and hf-xet alpha/dev releases; pin stable versions unless a direct
     # dependency requires them.
     "pydantic==2.13.5",
-    "sentry-sdk==2.70.0",
+    "sentry-sdk==2.71.0",
     "hf-xet==1.6.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
@@ -52,8 +52,8 @@ dependencies = [
     # lerobot[dataset,pi] supplies the dataset/video runtime plus dependencies
     # required by the pi0 / pi0_fast / pi05 policy implementations.
     "lerobot[dataset,pi]==0.6.1",
-    "torch==2.14.0",
-    "torchvision==0.29.0",
+    "torch==2.14.1",
+    "torchvision==0.29.1",
     # Keep aligned with the root constraint used by CPU smoke resolution.
     "pygments==2.21.0",
     # Held below 5.6 because lerobot[pi]==0.6.1 requires transformers<5.6.
@@ -69,20 +69,20 @@ dependencies = [
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
     "accelerate==1.15.0",
-    "torchcodec==0.16.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
+    "torchcodec==0.17.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via
     # mlflow-skinny and wandb).
-    "gitpython==3.1.62",
+    "gitpython==3.2.0",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.8.0",
     # Pin cryptography above the 48.0.1 security floor for
     # GHSA-537c-gmf6-5ccf. azureml-mlflow caps below 49.0.0, so this pin is
     # also overridden below.
-    "cryptography==50.0.1",
+    "cryptography==50.0.2",
     # Pin wrapt explicitly to 2.4.0. opentelemetry-instrumentation accepts
     # wrapt>=1.0,<3.0, so the 2.x line is in range; the explicit pin prevents
     # the prerelease resolver from selecting a stray 2.x release candidate.
-    "wrapt==2.4.1",
+    "wrapt==2.5.0",
 ]
 
 [build-system]
@@ -113,9 +113,9 @@ override-dependencies = [
     "diffusers==0.40.0",
     # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps below 12.30.1;
     # mirror the direct 12.30.1 pin.
-    "azure-storage-blob==12.30.3",
+    "azure-storage-blob==12.31.0",
     # cryptography: azureml-mlflow caps below 49.0.0; mirror the direct pin.
-    "cryptography==50.0.1",
+    "cryptography==50.0.2",
     # mlflow-skinny: azureml-mlflow caps at <=3.13.0; mirror the direct pin.
     "mlflow-skinny==3.16.1",
     # packaging: azureml-mlflow caps below 26.x; mirror the direct pin.
@@ -124,13 +124,13 @@ override-dependencies = [
     "numpy==2.5.2",
     # torchcodec: lerobot==0.6.1 caps below 0.12.0; 0.16.0 provides a CPython
     # 3.12 manylinux_2_28 x86_64 wheel for the target platform.
-    "torchcodec==0.16.0",
+    "torchcodec==0.17.0",
     # datasets: lerobot==0.6.1 caps below 5.0.0; 5.0.1 fixes CVE-2026-66007.
     "datasets==5.0.1",
     # torch: lerobot==0.6.1 caps below 2.12.0; use the validated patched release.
-    "torch==2.14.0",
+    "torch==2.14.1",
     # torchvision: lerobot==0.6.1 caps below 0.27.0; Torch 2.14 requires 0.29.0.
-    "torchvision==0.29.0",
+    "torchvision==0.29.1",
 ]
 package = false
 
