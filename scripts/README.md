@@ -2,7 +2,7 @@
 title: Scripts
 description: CI/CD scripts, shared libraries, linting, security, and Pester tests for the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-07
+ms.date: 2026-10-11
 ms.topic: reference
 keywords:
   - scripts
@@ -119,6 +119,19 @@ attempt. Run `npm run lint:ci` and `npm run test:ci` for graph validation, negat
 report-adapter tests, and the existing 80% line/branch/function coverage gate.
 Local validation does not verify hosted PR checks, branch protection, or post-merge execution;
 verify those separately without treating a local green result as hosted evidence.
+
+`npm run test:ci` runs every `*.test.mjs` file in `scripts/tests/ci/`:
+
+| Test file                                                           | Scope                                                                                                                  |
+|---------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| [evaluate-checks.test.mjs](tests/ci/evaluate-checks.test.mjs)       | Evaluator rules for selection evidence, execution evidence, outcomes, and owners, using in-memory fixtures without Git |
+| [ci-contract.test.mjs](tests/ci/ci-contract.test.mjs)               | Real Git selection, repository workflow and contract policy, receipts, summaries, and CLI behavior                     |
+| [execution-evidence.test.mjs](tests/ci/execution-evidence.test.mjs) | Execution receipts and native report adapters                                                                          |
+
+Assert policy and observable results, not step display names, duplicated tool versions, or
+runtime error wording. Keep exact checks for permission boundaries, artifact identity, failure
+handling, and other required CI contracts. Evaluator unit tests match diagnostics by the job or
+evidence they identify rather than by full message text.
 
 ## 🔍 Linting Scripts
 

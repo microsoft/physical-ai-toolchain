@@ -24,6 +24,7 @@ const validatorPath = join(root, 'scripts/ci/validate-workflows.mjs');
 const resolverPath = join(root, 'scripts/ci/resolve-workflow-change-range.mjs');
 const contract = loadContract();
 const graph = readWorkflowGraph(root);
+const baselineWorkflowErrors = validateWorkflows(graph, contract);
 const allSelectors = [
   'training', 'rl', 'il', 'vla', 'evaluation', 'osmo_replay', 'dm_tools', 'data_pipeline',
   'inference', 'gpu_offload', 'gpu_offload_e2e', 'shared_ci', 'dv_backend', 'dv_frontend',
@@ -143,68 +144,69 @@ test('coverage boundary: Codecov retains root test modules, fuzz and product cov
 
 test('coverage boundary: fuzz workflow retains test selection and all measured source directories', () => {
   const steps = graph['.github/workflows/fuzz-regression-tests.yml'].jobs['fuzz-regression'].steps;
-  const run = steps.find(step => step.name === 'Run fuzz regression tests').run;
+  const run = steps.find(step => step.run?.includes('tests/fuzz_harness.py'))?.run;
+  assert.ok(run, 'Missing fuzz regression command');
   assert.match(run, /pytest -o addopts="" tests\/fuzz_harness\.py\s/);
   assert.deepEqual([...run.matchAll(/--cov=([^\s]+)/g)].map(match => match[1]),
     ['tests', 'data-management/viewer/backend/src', 'training']);
-  const upload = steps.find(step => step.name === 'Upload coverage to Codecov');
+  const upload = steps.find(step => step.uses?.startsWith('codecov/codecov-action@'));
+  assert.ok(upload, 'Missing fuzz coverage upload');
   assert.equal(upload.with.flags, 'pytest-fuzz');
   assert.equal(upload.with.files, 'logs/coverage-fuzz.xml');
 });
 
-test('accessibility coverage: exact report upload isolates OIDC and fails closed', () => {
-  const workflow = graph['.github/workflows/accessibility-evidence.yml'];
-  const verify = candidate => {
-    const producer = candidate.jobs.evidence;
-    assert.deepEqual(producer.permissions, { contents: 'read' });
-    const artifacts = producer.steps.filter(step => step.name === 'Upload Python coverage artifact');
-    assert.equal(artifacts.length, 1, 'Expected one dedicated Python coverage artifact');
-    const artifact = artifacts[0];
-    assert.match(artifact.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/);
-    assert.equal(artifact.if, 'always()');
-    assert.equal(artifact['continue-on-error'], undefined);
-    assert.deepEqual(artifact.with, {
-      name: 'pytest-accessibility-coverage-xml', path: 'logs/coverage-accessibility.xml',
-      'if-no-files-found': 'error', 'retention-days': 30,
-    });
-    const uploader = candidate.jobs['accessibility-python-codecov'];
-    assert.ok(uploader, 'Missing dedicated Python coverage uploader');
-    assert.equal(uploader.needs, 'evidence');
-    assert.equal(uploader.if, 'always()');
-    assert.equal(uploader['continue-on-error'], undefined);
-    assert.deepEqual(uploader.permissions, { contents: 'read', 'id-token': 'write' });
-    assert.equal(uploader.steps.length, 3);
-    const [checkout, download, upload] = uploader.steps;
-    assert.match(checkout.uses, /^actions\/checkout@[a-f0-9]{40}$/);
-    assert.deepEqual(checkout.with, { 'persist-credentials': false });
-    assert.match(download.uses, /^actions\/download-artifact@[a-f0-9]{40}$/);
-    assert.deepEqual(download.with, { name: 'pytest-accessibility-coverage-xml', path: 'coverage' });
-    assert.match(upload.uses, /^codecov\/codecov-action@[a-f0-9]{40}$/);
-    assert.deepEqual(upload.with, {
-      files: 'coverage/coverage-accessibility.xml', disable_search: true, use_oidc: true,
-      use_pypi: true, fail_ci_if_error: true,
-      url: 'https://codecov.io', flags: 'pytest-accessibility',
-      name: 'pytest-accessibility-coverage',
-    });
-    for (const step of uploader.steps) {
-      assert.equal(step.if, undefined);
-      assert.equal(step['continue-on-error'], undefined);
-      assert.equal(step.run, undefined);
-    }
-  };
-  verify(workflow);
-  for (const mutate of [
-    candidate => { candidate.jobs.evidence.steps.find(step => step.name === 'Upload Python coverage artifact').with['if-no-files-found'] = 'warn'; },
-    candidate => { delete candidate.jobs['accessibility-python-codecov'].permissions['id-token']; },
-    candidate => { candidate.jobs['accessibility-python-codecov'].steps[1].with.name = 'other-report'; },
-    candidate => { candidate.jobs['accessibility-python-codecov'].steps[2].with.files = 'other.xml'; },
-    candidate => { candidate.jobs['accessibility-python-codecov'].steps[2].with.flags = 'pytest-fuzz'; },
-    candidate => { candidate.jobs['accessibility-python-codecov'].steps[2].with.fail_ci_if_error = false; },
-  ]) {
-    const candidate = structuredClone(workflow);
-    mutate(candidate);
-    assert.throws(() => verify(candidate), assert.AssertionError);
+test('accessibility coverage: producer retains the exact report without OIDC', () => {
+  const producer = graph['.github/workflows/accessibility-evidence.yml'].jobs.evidence;
+  assert.deepEqual(producer.permissions, { contents: 'read' });
+  const artifacts = producer.steps.filter(step => step.uses?.startsWith('actions/upload-artifact@')
+    && step.with?.name === 'pytest-accessibility-coverage-xml');
+  assert.equal(artifacts.length, 1, 'Expected one dedicated Python coverage artifact');
+  const [artifact] = artifacts;
+  assert.match(artifact.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/);
+  assert.equal(artifact.if, 'always()');
+  assert.equal(artifact['continue-on-error'], undefined);
+  assert.deepEqual(artifact.with, {
+    name: 'pytest-accessibility-coverage-xml', path: 'logs/coverage-accessibility.xml',
+    'if-no-files-found': 'error', 'retention-days': 30,
+  });
+});
+
+test('accessibility coverage: dedicated uploader isolates OIDC and cannot suppress failures', () => {
+  const uploader = graph['.github/workflows/accessibility-evidence.yml'].jobs['accessibility-python-codecov'];
+  assert.ok(uploader, 'Missing dedicated Python coverage uploader');
+  assert.equal(uploader.needs, 'evidence');
+  assert.equal(uploader.if, 'always()');
+  assert.equal(uploader['continue-on-error'], undefined);
+  assert.deepEqual(uploader.permissions, { contents: 'read', 'id-token': 'write' });
+  assert.deepEqual(uploader.steps.map(step => step.uses?.split('@')[0]), [
+    'actions/checkout', 'actions/download-artifact', 'codecov/codecov-action',
+  ]);
+  for (const step of uploader.steps) {
+    assert.match(step.uses, /^[^@]+@[a-f0-9]{40}$/);
+    assert.deepEqual({ if: step.if, continueOnError: step['continue-on-error'], run: step.run },
+      { if: undefined, continueOnError: undefined, run: undefined }, step.uses);
   }
+});
+
+test('accessibility coverage: uploader downloads only the dedicated report', () => {
+  const steps = graph['.github/workflows/accessibility-evidence.yml'].jobs['accessibility-python-codecov'].steps;
+  const checkout = steps.find(step => step.uses?.startsWith('actions/checkout@'));
+  const download = steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
+  assert.ok(checkout && download, 'Missing coverage checkout or download');
+  assert.deepEqual(checkout.with, { 'persist-credentials': false });
+  assert.deepEqual(download.with, { name: 'pytest-accessibility-coverage-xml', path: 'coverage' });
+});
+
+test('accessibility coverage: Codecov uses OIDC and fails closed on the exact report', () => {
+  const steps = graph['.github/workflows/accessibility-evidence.yml'].jobs['accessibility-python-codecov'].steps;
+  const upload = steps.find(step => step.uses?.startsWith('codecov/codecov-action@'));
+  assert.ok(upload, 'Missing Python Codecov upload');
+  assert.deepEqual(upload.with, {
+    files: 'coverage/coverage-accessibility.xml', disable_search: true, use_oidc: true,
+    use_pypi: true, fail_ci_if_error: true,
+    url: 'https://codecov.io', flags: 'pytest-accessibility',
+    name: 'pytest-accessibility-coverage',
+  });
 });
 
 test('accessibility coverage: flag retains test and product measurements without new gates', () => {
@@ -232,11 +234,10 @@ test('gitleaks: tested-revision helper and native regressions own scan and summa
   const checkout = steps.find(step => step.uses?.startsWith('actions/checkout@'));
   assert.equal(checkout.with['fetch-depth'], 0);
   assert.equal(checkout.with['persist-credentials'], false);
-  const download = steps.findIndex(step => step.name === 'Download and verify gitleaks');
-  const nativeTests = steps.findIndex(step => step.name === 'Test Gitleaks scan contracts');
+  const download = steps.findIndex(step => step.run?.includes('GITLEAKS_VERSION='));
+  const nativeTests = steps.findIndex(step => step.run === 'node --test scripts/tests/security/gitleaks-scan.test.mjs');
   const scanIndex = steps.findIndex(step => step.id === 'gitleaks');
-  assert.ok(nativeTests > download && nativeTests < scanIndex);
-  assert.equal(steps[nativeTests].run, 'node --test scripts/tests/security/gitleaks-scan.test.mjs');
+  assert.ok(download >= 0 && nativeTests > download && nativeTests < scanIndex);
   assert.equal(steps[nativeTests].env.GITLEAKS_BIN, '${{ github.workspace }}/gitleaks');
   assert.equal(steps[nativeTests].if, undefined);
   assert.equal(steps[nativeTests]['continue-on-error'], undefined);
@@ -244,9 +245,9 @@ test('gitleaks: tested-revision helper and native regressions own scan and summa
   assert.equal(steps[scanIndex].env.GITLEAKS_BIN, '${{ github.workspace }}/gitleaks');
   assert.equal(steps[scanIndex].env.SOFT_FAIL, '${{ inputs.soft-fail == true }}');
   assert.equal(steps[scanIndex]['continue-on-error'], undefined);
-  const summary = steps.find(step => step.name === 'Add job summary');
+  const summary = steps.find(step => step.run === 'node scripts/security/gitleaks-scan.mjs summary');
+  assert.ok(summary, 'Missing Gitleaks summary command');
   assert.equal(summary.if, 'always()');
-  assert.equal(summary.run, 'node scripts/security/gitleaks-scan.mjs summary');
   assert.deepEqual(summary.env, {
     SCAN_STATUS: '${{ steps.gitleaks.outputs.scan-status }}',
     SCAN_REVISION: '${{ steps.gitleaks.outputs.scan-revision }}',
@@ -255,13 +256,16 @@ test('gitleaks: tested-revision helper and native regressions own scan and summa
   });
   const setup = steps.findIndex(step => step.uses?.startsWith('actions/setup-node@'));
   assert.ok(setup >= 0 && setup < nativeTests);
-  assert.equal(steps[setup].with['node-version'], '24.14.1');
-  const report = steps.find(step => step.name === 'Upload scan results');
+  assert.match(steps[setup].with['node-version'], /^24\.\d+\.\d+$/);
+  const report = steps.find(step => step.uses?.startsWith('actions/upload-artifact@')
+    && step.with?.name === 'gitleaks-results');
+  assert.ok(report, 'Missing Gitleaks report artifact');
   assert.equal(report.if, 'always()');
   assert.equal(report.with.name, 'gitleaks-results');
   assert.equal(report.with.path, 'logs/gitleaks-results.sarif');
   assert.equal(report.with['retention-days'], 90);
-  assert.ok(steps[download].run.includes('GITLEAKS_VERSION="8.30.0"'));
+  assert.match(steps[download].run, /^\s*GITLEAKS_VERSION="\d+\.\d+\.\d+"$/m);
+  assert.match(steps[download].run, /^\s*GITLEAKS_SHA256="[a-f0-9]{64}"$/m);
   assert.ok(steps[download].run.includes('sha256sum -c -'));
 });
 
@@ -609,7 +613,7 @@ for (const [name, stream] of [
 }
 
 test('workflow graph: actual parsed repository and declared invariants pass', () => {
-  assert.deepEqual(validateWorkflows(graph, contract), []);
+  assert.deepEqual(baselineWorkflowErrors, []);
   assert.deepEqual(graph[smokePath].jobs['import-smoke'].strategy.matrix.domain, cpuDomains);
   for (const [owner, path, aggregate] of [['pr', prPath, summaryId], ['main', mainPath, 'main-validation-summary']]) {
     assert.deepEqual([...graph[path].jobs[aggregate].needs].sort(), visibleLanes(contract, owner).map(lane => lane.owners[owner]).sort());
@@ -1235,15 +1239,15 @@ const graphMutations = [
 
 for (const [name, mutate, diagnostic] of graphMutations) {
   test(`workflow mutation: rejects ${name}`, () => {
+    assert.equal(baselineWorkflowErrors.some(error => error.includes(diagnostic)), false,
+      `Diagnostic must be caused by the mutation: ${diagnostic}`);
     const candidate = { graph: structuredClone(graph), contract: structuredClone(contract) };
-    assert.deepEqual(validateWorkflows(candidate.graph, candidate.contract), [], 'Original graph must be valid');
     const pr = candidate.graph[prPath].jobs;
     mutate({
       ...candidate, pr, main: candidate.graph[mainPath].jobs, docs: candidate.graph[docsPath], promotion: candidate.graph[promotionPath],
       summary: pr[summaryId], cpu: candidate.graph[smokePath].jobs['import-smoke'],
     });
     const errors = validateWorkflows(candidate.graph, candidate.contract);
-    assert.ok(errors.length > 0, `Validator accepted invalid mutation: ${name}`);
     assert.ok(errors.some(error => error.includes(diagnostic)), `Expected ${diagnostic}; received ${JSON.stringify(errors)}`);
   });
 }
@@ -1556,88 +1560,23 @@ function freshEvidence(t, needs, owner = 'main') {
   } };
 }
 
-test('outcomes: every selected and unconditional lane succeeds', t => {
+test('selector/evaluator integration: every selected and unconditional lane succeeds', t => {
   const needs = outcomeFixture(t, { all: true });
   assert.ok(Object.values(needs).every(job => job.result === 'success'));
   assert.deepEqual(evaluateChecks(needs, contract), []);
 });
 
-test('outcomes: GitHub may omit the empty first-failure output after successful publication', t => {
-  const needs = outcomeFixture(t);
-  delete needs.smoke.outputs['first-failure'];
-  assert.deepEqual(evaluateChecks(needs, contract), []);
-  delete needs.smoke.outputs['work-status'];
-  assert.ok(evaluateChecks(needs, contract).some(error => error.startsWith('smoke:')));
-});
-
-test('outcomes: verified unselected lanes may legitimately skip', t => {
+test('selector/evaluator integration: verified unselected lanes may legitimately skip', t => {
   const needs = outcomeFixture(t);
   assert.equal(needs.changes.outputs.training, 'false');
   assert.equal(needs['pytest-training'].result, 'skipped');
   assert.equal(needs['docusaurus-tests'].result, 'success');
-  assert.deepEqual(evaluateChecks(needs, contract), []);
-});
-
-test('outcomes: selected accessibility evidence must succeed', t => {
-  const needs = outcomeFixture(t, { all: true });
-  needs['accessibility-evidence'].result = 'skipped';
-  assert.ok(evaluateChecks(needs, contract).includes('accessibility-evidence: expected success but received skipped'));
-});
-
-test('outcomes: unselected accessibility evidence may skip', t => {
-  const needs = outcomeFixture(t);
   assert.equal(needs.changes.outputs.accessibility, 'false');
   assert.equal(needs['accessibility-evidence'].result, 'skipped');
   assert.deepEqual(evaluateChecks(needs, contract), []);
 });
 
-const outcomeMutations = [
-  ['missing execution evidence despite green result', needs => { delete needs['docusaurus-tests'].outputs; }, 'docusaurus-tests: expected work-status success but received missing'],
-  ['selected lane reports planned skip', needs => { needs['docusaurus-tests'].outputs['work-status'] = 'planned-skip'; }, 'docusaurus-tests: expected work-status success but received planned-skip'],
-  ['cancelled evidence masked by green job', needs => { needs['docusaurus-tests'].outputs['work-status'] = 'cancelled'; }, 'docusaurus-tests: expected work-status success but received cancelled'],
-  ['missing expected count', needs => { delete needs.smoke.outputs['expected-count']; }, 'smoke: invalid or missing expected-count'],
-  ['missing executed count', needs => { delete needs.smoke.outputs['executed-count']; }, 'smoke: invalid or missing executed-count'],
-  ['partial operations', needs => { needs.smoke.outputs['executed-count'] = '1'; }, 'smoke: incomplete execution counts'],
-  ['no expected work', needs => { needs.smoke.outputs['expected-count'] = '0'; needs.smoke.outputs['executed-count'] = '0'; }, 'smoke: incomplete execution counts'],
-  ['unsafe integer count', needs => { needs.smoke.outputs['test-count'] = '9007199254740992'; }, 'smoke: invalid or missing test-count'],
-  ['negative skipped count', needs => { needs.smoke.outputs['skipped-count'] = '-1'; }, 'smoke: invalid or missing skipped-count'],
-  ['zero executed tests', needs => { needs['docusaurus-tests'].outputs['test-count'] = '0'; }, 'docusaurus-tests: no executed testcases'],
-  ['missing artifact identity', needs => { delete needs.smoke.outputs['artifact-id']; }, 'smoke: missing or invalid artifact identity'],
-  ['artifact URL mismatch', needs => { needs.smoke.outputs['artifact-id'] = '11'; }, 'smoke: missing or invalid artifact identity'],
-  ['unsafe artifact link', needs => { needs.smoke.outputs['artifact-url'] = 'javascript:alert(1)'; }, 'smoke: missing or invalid artifact identity'],
-  ['failed operation masked by green result', needs => { needs.smoke.outputs['first-failure'] = 'smoke'; }, 'smoke: first-failure contradicts successful evidence'],
-  ['missing selection reasons', needs => { delete needs.changes.outputs.selection_reasons; }, 'Invalid selection reason: training'],
-  ['malformed selection reasons', needs => { needs.changes.outputs.selection_reasons = '{'; }, 'Invalid selection reason: training'],
-  ['non-object selection reasons', needs => { needs.changes.outputs.selection_reasons = '[]'; }, 'Invalid selection reason: training'],
-  ['selected lane skips', needs => { needs['docusaurus-tests'].result = 'skipped'; }, 'docusaurus-tests: expected success but received skipped'],
-  ['unconditional lane skips', needs => { needs.smoke.result = 'skipped'; }, 'smoke: expected success but received skipped'],
-  ['selected lane cancelled', needs => { needs['docusaurus-tests'].result = 'cancelled'; }, 'docusaurus-tests: expected success but received cancelled'],
-  ['unselected lane failed', needs => { needs['pytest-training'].result = 'failure'; }, 'pytest-training: expected success/skipped but received failure'],
-  ['missing result', needs => { delete needs['docusaurus-tests'].result; }, 'docusaurus-tests: expected success but received missing'],
-  ['missing required job', needs => { delete needs.smoke; }, 'smoke: expected success but received missing'],
-  ['missing selector outputs', needs => { delete needs.changes.outputs; }, 'Missing verified selection evidence'],
-  ['invalid comparison SHA', needs => { needs.changes.outputs.base_sha = 'HEAD'; }, 'Missing comparison SHAs'],
-  ['unverified full comparison metadata on PR', needs => { needs.changes.outputs.selection_status = 'full'; }, 'Missing verified selection evidence'],
-  ['malformed boolean output', needs => { needs.changes.outputs.training = true; }, 'Invalid selection output: training'],
-  ['invalid comparison file count', needs => { needs.changes.outputs.file_count = '-1'; }, 'Invalid comparison file count'],
-  ['verified-empty status contradicts changed-file count', needs => { needs.changes.outputs.selection_status = 'verified-empty'; }, 'Invalid comparison file count'],
-  ['verified-empty metadata contradicts selected lanes', needs => {
-    needs.changes.outputs.selection_status = 'verified-empty';
-    needs.changes.outputs.file_count = '0';
-  }, 'Nonempty selection for verified-empty comparison: docusaurus'],
-];
-
-for (const [name, mutate, diagnostic] of outcomeMutations) {
-  test(`outcome mutation: rejects ${name}`, t => {
-    const needs = outcomeFixture(t);
-    assert.deepEqual(evaluateChecks(needs, contract), [], 'Original outcomes must be valid');
-    mutate(needs);
-    const errors = evaluateChecks(needs, contract);
-    assert.ok(errors.includes(diagnostic), `Expected ${diagnostic}; received ${JSON.stringify(errors)}`);
-  });
-}
-
-test('outcomes: a real verified-empty comparison still requires unconditional success', t => {
+test('selector/evaluator integration: a real verified-empty comparison still requires unconditional success', t => {
   const needs = outcomeFixture(t, { empty: true });
   assert.equal(needs.changes.outputs.selection_status, 'verified-empty');
   assert.equal(needs.smoke.result, 'success');
@@ -1645,44 +1584,14 @@ test('outcomes: a real verified-empty comparison still requires unconditional su
   assert.deepEqual(evaluateChecks(needs, contract), []);
 });
 
-test('outcomes: advisory OSV and Terraform security cannot block the required aggregate', t => {
+test('real contract: advisory OSV and Terraform security cannot block the required aggregate', t => {
   const needs = outcomeFixture(t);
   needs['osv-scanner'] = { result: 'failure' };
   needs['terraform-security'] = { result: 'cancelled' };
   assert.deepEqual(evaluateChecks(needs, contract), []);
 });
 
-test('ms.date freshness: PR scans are advisory while weekly scans remain strict', () => {
-  assert.equal(graph[prPath].jobs['msdate-freshness'].with['soft-fail'], true);
-  assert.equal(graph[prPath].jobs['msdate-freshness'].with['changed-files-only'], true);
-  assert.ok(graph[prPath].jobs[summaryId].needs.includes('msdate-freshness'));
-  assert.equal(graph[weeklyPath].jobs['msdate-freshness'].with['soft-fail'], false);
-  assert.equal(graph[weeklyPath].jobs['msdate-freshness'].with['changed-files-only'], false);
-  assert.equal(graph[weeklyPath].jobs['create-stale-docs-issues'].if,
-    "failure() && needs.msdate-freshness.result == 'failure'");
-  assert.equal(graph['.github/workflows/msdate-freshness-check.yml'].on.workflow_call.inputs['soft-fail'].default, false);
-  const candidate = structuredClone(graph);
-  candidate[prPath].jobs['msdate-freshness'].with['changed-files-only'] = false;
-  assert.ok(validateWorkflows(candidate, contract).some(message =>
-    message.includes('msdate-freshness: advisory freshness must check changed files only')));
-});
-
-test('ms.date freshness: tolerated findings remain visible without blocking PR validation', t => {
-  const needs = outcomeFixture(t);
-  const { context } = freshEvidence(t, needs, 'pr');
-  needs['msdate-freshness'] = {
-    result: 'success',
-    outputs: executionOutputs({ 'work-status': 'failure', 'first-failure': 'freshness' }),
-  };
-  assert.deepEqual(evaluateChecks(needs, contract), []);
-  const summary = buildSummary(needs, contract, 'pr', context);
-  assert.equal(summary.report.status, 'success');
-  const row = summary.report.rows.find(item => item.job === 'msdate-freshness');
-  assert.equal(row.classification, 'advisory');
-  assert.equal(row.status, 'failure');
-});
-
-test('outcomes: all whole-step tolerated lanes remain advisory but container execution is required', t => {
+test('real contract: all whole-step tolerated lanes remain advisory but container execution is required', t => {
   const needs = outcomeFixture(t, { all: true });
   for (const id of ['msdate-freshness', 'markdown-link-check', 'terraform-tests', 'terraform-docs-check']) needs[id] = { result: 'failure' };
   assert.deepEqual(evaluateChecks(needs, contract), []);
@@ -1690,19 +1599,7 @@ test('outcomes: all whole-step tolerated lanes remain advisory but container exe
   assert.ok(evaluateChecks(needs, contract).some(error => error.startsWith('container-scan:')));
 });
 
-test('outcomes: unselected successful job requires an explicit zero-work planned-skip receipt', t => {
-  const needs = outcomeFixture(t);
-  needs['pytest-training'] = { result: 'success', outputs: executionOutputs({
-    'work-status': 'planned-skip', 'expected-count': '0', 'executed-count': '0', 'test-count': '0',
-  }) };
-  assert.deepEqual(evaluateChecks(needs, contract), []);
-  needs['pytest-training'].outputs['test-count'] = '2';
-  assert.ok(evaluateChecks(needs, contract).includes('pytest-training: planned skip has executed testcases'));
-  needs['pytest-training'].outputs['expected-count'] = '2';
-  assert.ok(evaluateChecks(needs, contract).includes('pytest-training: incomplete execution counts'));
-});
-
-test('outcomes: main requires every lane without PR selection metadata', () => {
+test('real contract: main requires every lane without PR selection metadata', () => {
   const needs = Object.fromEntries(requiredLanes(contract, 'main').map(lane => [
     lane.owners.main, { result: 'success', outputs: executionOutputs() },
   ]));
@@ -2320,30 +2217,47 @@ test('release policy: an explicit success condition is allowed', () => {
   assert.deepEqual(validateWorkflows(candidate, contract), []);
 });
 
-test('evaluator CLI: valid needs succeed and malformed or missing input fails closed', t => {
+function runEvaluator(t, input, environment = {}) {
+  const directory = temporaryDirectory(t);
+  const stepSummary = join(directory, 'step-summary.md');
+  const env = {
+    ...nodeEnvironment, ...environment,
+    CI_SUMMARY_PATH: join(directory, 'summary.json'), GITHUB_STEP_SUMMARY: stepSummary,
+  };
+  if (input === undefined) delete env.NEEDS_JSON;
+  else env.NEEDS_JSON = input;
+  const result = spawnSync(process.execPath, [evaluatorPath], { cwd: root, env, encoding: 'utf8', timeout: 30_000 });
+  assert.ifError(result.error);
+  return { ...result, stepSummary };
+}
+
+test('evaluator CLI: valid needs with fresh execution evidence succeed', t => {
   const needs = outcomeFixture(t);
   const evidence = freshEvidence(t, needs, 'pr');
-  for (const [input, status, diagnostic] of [
-    [JSON.stringify(needs), 0, 'All mandatory checks match'],
-    ['{', 1, 'Expected property name'],
-    [undefined, 1, 'Missing needs object'],
-  ]) {
-    const env = { ...nodeEnvironment, ...evidence.env, CI_SUMMARY_PATH: join(temporaryDirectory(t), 'summary.json') };
-    if (input === undefined) delete env.NEEDS_JSON;
-    else env.NEEDS_JSON = input;
-    const result = spawnSync(process.execPath, [evaluatorPath], { cwd: root, env, encoding: 'utf8' });
-    assert.ifError(result.error);
-    assert.equal(result.status, status, result.stderr);
-    assert.ok(`${result.stdout}${result.stderr}`.includes(diagnostic));
-  }
+  const result = runEvaluator(t, JSON.stringify(needs), evidence.env);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /All mandatory checks match/);
+  assert.equal(result.stderr, '');
+  assert.match(readFileSync(result.stepSummary, 'utf8'), /PR validation: success/);
 });
 
+for (const [name, input] of [['malformed JSON', '{'], ['missing input', undefined]]) {
+  test(`evaluator CLI: ${name} fails closed with a diagnostic`, t => {
+    const result = runEvaluator(t, input);
+    assert.equal(result.status, 1, result.stderr);
+    assert.doesNotMatch(result.stdout, /All mandatory checks match/);
+    assert.notEqual(result.stderr.trim(), '', 'Expected a failure diagnostic');
+    if (input === undefined) assert.match(result.stderr, /Missing needs object/);
+  });
+}
+
 test('validator CLI: repository succeeds and a missing workflow directory fails closed', t => {
-  const success = spawnSync(process.execPath, [validatorPath], { cwd: root, env: nodeEnvironment, encoding: 'utf8' });
+  const options = { env: nodeEnvironment, encoding: 'utf8', timeout: 30_000 };
+  const success = spawnSync(process.execPath, [validatorPath], { ...options, cwd: root });
   assert.ifError(success.error);
   assert.equal(success.status, 0, success.stderr);
   assert.ok(success.stdout.includes('CI workflow graph and dependency contract are valid.'));
-  const failure = spawnSync(process.execPath, [validatorPath], { cwd: temporaryDirectory(t), env: nodeEnvironment, encoding: 'utf8' });
+  const failure = spawnSync(process.execPath, [validatorPath], { ...options, cwd: temporaryDirectory(t) });
   assert.ifError(failure.error);
   assert.equal(failure.status, 1);
   assert.ok(failure.stderr.includes('.github'));
