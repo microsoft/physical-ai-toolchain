@@ -2,7 +2,7 @@
 title: Dataviewer Module
 description: "Deploys the dataviewer application on Azure Container Apps with networking, identity, and app-level resources."
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-05
+ms.date: 2026-10-13
 ms.topic: reference
 ---
 
@@ -24,7 +24,7 @@ Supports internal (VNet/VPN) and external (public) deployment modes.
 |-----------|-------------------|
 | terraform | >= 1.9.8, < 2.0   |
 | azuread   | >= 3.0.2          |
-| azurerm   | >= 5.1.0, < 5.7.1 |
+| azurerm   | >= 5.1.0, < 5.8.1 |
 | random    | >= 3.6.0          |
 
 ## Providers
@@ -32,7 +32,7 @@ Supports internal (VNet/VPN) and external (public) deployment modes.
 | Name    | Version           |
 |---------|-------------------|
 | azuread | >= 3.0.2          |
-| azurerm | >= 5.1.0, < 5.7.1 |
+| azurerm | >= 5.1.0, < 5.8.1 |
 | random  | >= 3.6.0          |
 
 ## Resources
