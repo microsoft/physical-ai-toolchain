@@ -50,6 +50,8 @@ jobs:
                   Repo               = 'astral-sh/uv'
                   ShellVariable      = 'UV_VERSION'
                   PowerShellVariable = 'UvVersion'
+                  PythonPackage      = 'uv'
+                  ContainerImage     = 'ghcr.io/astral-sh/uv'
                   GitHubAction       = 'astral-sh/setup-uv'
                   GitHubActionInput  = 'version'
               }
@@ -94,7 +96,13 @@ jobs:
                   $pinParameters.GitHubActionInput = $tool.GitHubActionInput
               }
               $assignments = @(
-                  Get-PinnedToolVersionAssignments @pinParameters
+                  Get-PinnedToolVersionAssignments `
+                      -ShellVariable $tool.ShellVariable `
+                      -PowerShellVariable $tool.PowerShellVariable `
+                      -Files $candidateFiles `
+                      -PythonPackage $tool.PythonPackage `
+                      -ContainerImage $tool.ContainerImage
+                      -RepoRoot $PWD
               )
               if ($assignments.Count -eq 0) {
                   throw "No version assignments found for $($tool.Name) ($($tool.ShellVariable))"

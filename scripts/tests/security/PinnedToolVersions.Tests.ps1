@@ -16,8 +16,13 @@ Describe 'Get-PinnedToolVersionAssignments' -Tag 'Unit' {
             ShellVariable      = 'UV_VERSION'
             PowerShellVariable = 'UvVersion'
             RepoRoot           = $script:RepoRoot
+            PythonPackage      = 'uv'
+            ContainerImage     = 'ghcr.io/astral-sh/uv'
         }
     }
+
+    $script:semanticVersionPattern =
+    '(?<Version>[0-9]+(?:\.[0-9]+)+(?:[-+][0-9A-Za-z.-]+)?)'
 
     It 'Returns every unique file and version pair' {
         @'
@@ -47,6 +52,219 @@ $UvVersion = '0.12.8'
         $pins.Count | Should -Be 1
         $pins[0].Version | Should -Be '0.12.8'
     }
+
+    It 'Extracts version and digest from pinned Docker uv image' {
+    @'
+FROM ghcr.io/astral-sh/uv:0.12.8@sha256:d1cbaeadc234fe19c0d93daabcf5e98738cd93c6d1dd4918ef6aa30735feb23a
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    $content = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    $pins = Get-DockerVersionAssignments `
+        -Content $content `
+        -SemanticVersionPattern $semanticVersionPattern `
+        -ContainerImage 'ghcr.io/astral-sh/uv' `
+        -File 'Dockerfile'
+
+    $pins.Count | Should -Be 1
+    $pins[0].Version | Should -Be '0.12.8'
+    $pins[0].Digest | Should -Be 'sha256:d1cbaeadc234fe19c0d93daabcf5e98738cd93c6d1dd4918ef6aa30735feb23a'
+}
+
+It 'Ignores unrelated Docker images' {
+    @'
+FROM python:3.12
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    $content = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    $pins = Get-DockerVersionAssignments `
+        -Content $content `
+        -SemanticVersionPattern $semanticVersionPattern `
+        -ContainerImage 'ghcr.io/astral-sh/uv' `
+        -File 'Dockerfile'
+
+    $pins.Count | Should -Be 0
+}
+
+It 'Fails when Docker uv image is missing a digest' {
+    @'
+FROM ghcr.io/astral-sh/uv:0.12.8
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    $content = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    {
+        Get-DockerVersionAssignments `
+            -Content $content `
+            -SemanticVersionPattern $semanticVersionPattern `
+            -ContainerImage 'ghcr.io/astral-sh/uv' `
+            -File 'Dockerfile'
+    } | Should -Throw '*not pinned*'
+}
+
+It 'Fails when Docker uv image uses a dynamic tag' {
+    @'
+FROM ghcr.io/astral-sh/uv:${UV_VERSION}
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    $content = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    {
+        Get-DockerVersionAssignments `
+            -Content $content `
+            -SemanticVersionPattern $semanticVersionPattern `
+            -ContainerImage 'ghcr.io/astral-sh/uv' `
+            -File 'Dockerfile'
+    } | Should -Throw '*not pinned*'
+}
+
+It 'Fails when Docker uv image uses latest tag' {
+    @'
+FROM ghcr.io/astral-sh/uv:latest@sha256:d1cbaeadc234fe19c0d93daabcf5e98738cd93c6d1dd4918ef6aa30735feb23a
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    $content = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    {
+        Get-DockerVersionAssignments `
+            -Content $content `
+            -SemanticVersionPattern $semanticVersionPattern `
+            -ContainerImage 'ghcr.io/astral-sh/uv' `
+            -File 'Dockerfile'
+    } | Should -Throw '*not pinned*'
+}
+
+It 'Fails when Docker uv image has an invalid digest' {
+    @'
+FROM ghcr.io/astral-sh/uv:0.12.8@sha256:not-a-valid-digest
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    $content = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    {
+        Get-DockerVersionAssignments `
+            -Content $content `
+            -SemanticVersionPattern $semanticVersionPattern `
+            -ContainerImage 'ghcr.io/astral-sh/uv' `
+            -File 'Dockerfile'
+    } | Should -Throw '*not pinned*'
+}
+
+It 'Extracts multiple Docker uv image pins' {
+    @'
+FROM ghcr.io/astral-sh/uv:0.12.8@sha256:d1cbaeadc234fe19c0d93daabcf5e98738cd93c6d1dd4918ef6aa30735feb23a
+FROM ghcr.io/astral-sh/uv:0.10.9@sha256:10902f58a1606787602f303954cea099626a4adb02acbac4c69920fe9d278f82
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    $content = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    $pins = Get-DockerVersionAssignments `
+        -Content $content `
+        -SemanticVersionPattern $semanticVersionPattern `
+        -ContainerImage 'ghcr.io/astral-sh/uv' `
+        -File 'Dockerfile'
+
+    $pins.Count | Should -Be 2
+    $pins[0].Version | Should -Be '0.12.8'
+    $pins[1].Version | Should -Be '0.10.9'
+}
+
+It 'Discovers Docker uv pins through the main scanner' {
+    @'
+FROM ghcr.io/astral-sh/uv:0.12.8@sha256:d1cbaeadc234fe19c0d93daabcf5e98738cd93c6d1dd4918ef6aa30735feb23a
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'Dockerfile')
+
+    $pins = Get-PinnedToolVersionAssignments `
+        -ShellVariable 'UV_VERSION' `
+        -PowerShellVariable 'UvVersion' `
+        -PythonPackage 'uv' `
+        -ContainerImage 'ghcr.io/astral-sh/uv' `
+        -Files @('Dockerfile') `
+        -RepoRoot $script:RepoRoot
+
+    $pins.Count | Should -Be 1
+    $pins[0].File | Should -Be 'Dockerfile'
+    $pins[0].Version | Should -Be '0.12.8'
+}
+
+    It 'Extracts version assignments from pip install command in .sh file' {
+    @'
+pip install --quiet uv==0.12.8
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'python.sh')
+
+    $pins = Get-PinnedToolVersionAssignments @script:Parameters -Files @('python.sh')
+
+    $pins.Count | Should -Be 1
+    $pins[0].Version | Should -Be '0.12.8'
+    $pins[0].File | Should -Be 'python.sh'
+}
+
+    It 'Extracts version assignments from pip install command when multiple packages exist in .sh file' {
+        @'
+pip install requests uv==0.12.8 flask
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'python.sh')
+        $pins = Get-PinnedToolVersionAssignments @script:Parameters -Files @('python.sh')
+
+        $pins.Count | Should -Be 1
+        $pins[0].Version | Should -Be '0.12.8'
+        $pins[0].File | Should -Be 'python.sh'
+    }
+
+    It 'Ignores unrelated packages in .sh file' {
+        @'
+pip install requests flask
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'python.sh')
+        $pins = Get-PinnedToolVersionAssignments @script:Parameters -Files @('python.sh')
+
+        $pins.Count | Should -Be 0
+    }
+
+    It 'Throws when pip install uv is unpinned in .sh file' {
+    @'
+pip install uv
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'python.sh')
+
+    {
+        Get-PinnedToolVersionAssignments @script:Parameters -Files @('python.sh')
+    } | Should -Throw "*uv*"
+}
+
+    It 'Throws when pip install uv is dynamically assigned in .sh file' {
+    @'
+pip install uv==$UV_VERSION
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'python.sh')
+
+    {
+        Get-PinnedToolVersionAssignments @script:Parameters -Files @('python.sh')
+    } | Should -Throw "*uv*"
+}
+
+    It 'Extracts version assignments from pip install command in a .yml file' {
+    @'
+command: >-
+  pip install --quiet uv==0.12.8
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'python.yml')
+
+    $pins = Get-PinnedToolVersionAssignments @script:Parameters -Files @('python.yml')
+
+    $pins.Count | Should -Be 1
+    $pins[0].Version | Should -Be '0.12.8'
+    $pins[0].File | Should -Be 'python.yml'
+}
+
+    It 'Extracts version assignments from pip install command in a .yaml file' {
+    @'
+command: >-
+  pip install --quiet uv==0.12.8
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'python.yaml')
+
+    $pins = Get-PinnedToolVersionAssignments @script:Parameters -Files @('python.yaml')
+
+    $pins.Count | Should -Be 1
+    $pins[0].Version | Should -Be '0.12.8'
+    $pins[0].File | Should -Be 'python.yaml'
+}
 
     It 'Extracts assignments after JSON command separators' {
         @'
@@ -207,6 +425,20 @@ UV_VERSION=$(cat version.txt)
         $pins.Count | Should -Be 1
         $pins[0].Version | Should -Be '0.12.8'
     }
+
+    It 'Ignores empty JSON string values' {
+    @'
+{
+    "empty": "",
+    "command": "MODE=ci UV_VERSION=\"0.12.8\" run-tool"
+}
+'@ | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'empty-string.json')
+
+    $pins = Get-PinnedToolVersionAssignments @script:Parameters -Files @('empty-string.json')
+
+    $pins.Count | Should -Be 1
+    $pins[0].Version | Should -Be '0.12.8'
+}
 
     It 'Ignores PowerShell assignments without a configured variable' {
         '$UvVersion = ''0.12.8''' | Set-Content -LiteralPath (Join-Path $script:RepoRoot 'pin.ps1')
@@ -642,7 +874,7 @@ Describe 'Get-PinCandidateFiles' -Tag 'Unit' {
     It 'Returns every supported tracked source extension' {
         $repoRoot = Join-Path $TestDrive 'extensions'
         New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null
-        foreach ($file in @('pin.sh', 'pin.ps1', 'pin.json', 'pin.jsonc', 'pin.yml', 'pin.yaml', 'ignored.txt')) {
+        foreach ($file in @('Dockerfile', 'pin.sh', 'pin.ps1', 'pin.json', 'pin.jsonc', 'pin.yaml', 'pin.yml')) {
             'content' | Set-Content -LiteralPath (Join-Path $repoRoot $file)
         }
         git -C $repoRoot init --quiet
@@ -650,8 +882,16 @@ Describe 'Get-PinCandidateFiles' -Tag 'Unit' {
 
         $files = Get-PinCandidateFiles -RepoRoot $repoRoot
 
-        @($files | Sort-Object) |
-            Should -Be @('pin.json', 'pin.jsonc', 'pin.ps1', 'pin.sh', 'pin.yaml', 'pin.yml')
+        @($files | Sort-Object) | Should -Be @(
+            'Dockerfile'
+            'pin.json'
+            'pin.jsonc'
+            'pin.ps1'
+            'pin.sh'
+            'pin.yaml'
+            'pin.yml'
+        )
+
     }
 
     It 'Throws when no candidate files are tracked' {
@@ -686,7 +926,8 @@ Describe 'Repository pin discovery' -Tag 'Integration' {
             -GitHubAction 'astral-sh/setup-uv' `
             -GitHubActionInput 'version' `
             -Files $files `
-            -RepoRoot $repoRoot
+            -RepoRoot $repoRoot `
+            -PythonPackage 'uv'
 
         @($pins.File) | Should -Contain 'setup-dev.ps1'
         @($pins.File) | Should -Contain 'shared/ci/smoke-import.sh'
@@ -696,7 +937,40 @@ Describe 'Repository pin discovery' -Tag 'Integration' {
         @($pins.File | Where-Object { $_ -like '.github/workflows/*' }).Count | Should -Be 15
         @($pins.Version | Sort-Object -Unique).Count | Should -Be 1
     }
+
+    It 'Discovers every uv assignment in the repository with one consistent version' {
+        $repoRoot = git rev-parse --show-toplevel
+        $files = Get-PinCandidateFiles -RepoRoot $repoRoot
+
+        $pins = Get-PinnedToolVersionAssignments `
+            -ShellVariable 'UV_VERSION' `
+            -PowerShellVariable 'UvVersion' `
+            -Files $files `
+            -RepoRoot $repoRoot `
+            -PythonPackage 'uv' `
+            -ContainerImage 'ghcr.io/astral-sh/uv'
+        $expectedFiles = @(
+            "data-management/viewer/backend/Dockerfile"
+            "evaluation/sil/scripts/osmo-lerobot-eval-entry.sh"
+            "infrastructure/setup/optional/isaac-sim-vm/scripts/install-dev-deps.sh"
+            "setup-dev.ps1"
+            "setup-dev.sh"
+            "shared/ci/smoke-import.sh"
+            "training/il/scripts/lerobot-train-osmo-entry.sh"
+            "training/il/scripts/lerobot/azureml-train-entry.sh"
+            "training/il/scripts/lerobot/lerobot-azureml.sh"
+            "training/rl/scripts/setup_isaac_runtime.sh"
+            "workflows/azureml/components/register.yaml"
+            "workflows/azureml/osmo-proxy-job.yaml"
+        )
+        $actualFiles = @($pins.File)
+        $actualFiles = $actualFiles | Sort-Object
+        $expectedFiles = $expectedFiles | Sort-Object
+
+        $actualFiles | Should -Be $expectedFiles
+    }
 }
+
 
 Describe 'ConvertFrom-GitHubReleasePage' -Tag 'Unit' {
     It 'Retains the stable predecessor from a later API page' {

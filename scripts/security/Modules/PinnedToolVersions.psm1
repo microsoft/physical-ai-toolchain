@@ -58,10 +58,7 @@ function Get-PinCandidateFiles {
         )
     )
 
-    $gitOutput = @(
-        git -c core.quotePath=false -C $RepoRoot ls-files -- `
-            '*.sh' '*.ps1' '*.json' '*.jsonc' '*.yml' '*.yaml' 2>&1
-    )
+    $gitOutput = @(git -c core.quotePath=false -C $RepoRoot ls-files -- '*.sh' '*.ps1' '*.json' '*.jsonc' '*.yml' '*.yaml' 'Dockerfile*' '**/Dockerfile*' 2>&1)
     $gitExitCode = $LASTEXITCODE
     if ($gitExitCode -ne 0) {
         throw "Could not enumerate tracked source files (git exit code $gitExitCode): $($gitOutput -join "`n")"
@@ -535,6 +532,150 @@ function New-PinShellAssignmentPatterns {
     }
 }
 
+function Get-PythonVersionAssignments {
+    <#
+    .SYNOPSIS
+        Extracts literal Python package version pins from executable command segments.
+    .OUTPUTS
+        PSCustomObject records with File and Version properties.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Content,
+
+        [Parameter(Mandatory)]
+        [string]$SemanticVersionPattern,
+
+        [Parameter(Mandatory)]
+        [string]$PythonPackage,
+
+        [Parameter(Mandatory)]
+        [string]$File
+    )
+
+    $PythonCommandPatterns = '\b' + [regex]::Escape($PythonPackage) + '==' + $SemanticVersionPattern + '\b'
+
+    $extension = [System.IO.Path]::GetExtension($File)
+    $shellContent = $Content
+
+    if ($extension -in @('.yml', '.yaml')) {
+        $commandMatch = [regex]::Match(
+            $Content,
+            "(?ms)^\s*command:\s*>-\s*(?<Command>.*?)(?=^\S|\z)"
+        )
+
+        if ($commandMatch.Success) {
+            $shellContent = $commandMatch.Groups['Command'].Value
+
+            $bashMatch = [regex]::Match(
+                $shellContent,
+                "(?ms)^\s*bash\s+-c\s+'(?<Command>.*?)'\s*$"
+            )
+
+            if ($bashMatch.Success) {
+                $shellContent = $bashMatch.Groups['Command'].Value
+            }
+        }
+    }
+
+    $segments = @(Get-ShellCommandSegments -Content $shellContent)
+
+    $assignments = foreach ($segment in $segments) {
+        # Check if it is a pip install command.
+        if ($segment -notmatch '^\s*pip\s+install\b') {
+            continue
+        }
+
+        # Check if the configured Python package is present.
+        if ($segment -notmatch ('\b' + [regex]::Escape($PythonPackage) + '\b')) {
+            continue
+        }
+
+        try {
+            # Check for an exact package==version pin.
+            $match = [regex]::Match(
+                $segment,
+                $PythonCommandPatterns,
+                [System.Text.RegularExpressions.RegexOptions]::None,
+                $script:PinRegexTimeout
+            )
+        }
+        catch [System.Text.RegularExpressions.RegexMatchTimeoutException] {
+            throw "Timed out parsing '$PythonPackage' package pin in '$File'"
+        }
+
+        if ($match.Success) {
+            [pscustomobject][ordered]@{
+                File    = $File
+                Version = $match.Groups['Version'].Value
+            }
+            continue
+        }
+
+        throw "Found '$PythonPackage' in '$File' but the package is not pinned to a supported literal version"
+    }
+
+    @($assignments)
+}
+
+function Get-DockerVersionAssignments {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Content,
+
+        [Parameter(Mandatory)]
+        [string]$SemanticVersionPattern,
+
+        [Parameter(Mandatory)]
+        [string]$ContainerImage,
+
+        [Parameter(Mandatory)]
+        [string]$File
+    )
+
+    # parser logic comes here
+    $escapedContainerImage = [regex]::Escape($ContainerImage)
+    $DockerCommandPattern = "FROM\s+(?<Repository>$escapedContainerImage):$SemanticVersionPattern@(?<Digest>sha256:[0-9a-fA-F]{64})"
+
+    $assignments = foreach ($line in ($Content -split "\r?\n")) {
+        # Check if it is a FROM instruction.
+        if ($line -notmatch '^\s*FROM\s+') {
+            continue
+        }
+
+        # Check if the configured container image is present.
+        if ($line -notmatch [regex]::Escape($ContainerImage)) {
+            continue
+        }
+
+        try {
+            # Check for an exact package:version@digest pin.
+            $match = [regex]::Match(
+                $line,
+                $DockerCommandPattern
+            )
+        }
+        catch [System.Text.RegularExpressions.RegexMatchTimeoutException] {
+            throw "Timed out parsing '$DockerCommandPattern' package pin in '$File'"
+        }
+
+        if ($match.Success) {
+            [pscustomobject][ordered]@{
+                File    = $File
+                Version = $match.Groups['Version'].Value
+                Repository = $match.Groups['Repository'].Value
+                Digest = $match.Groups['Digest'].Value
+            }
+            continue
+        }
+
+        throw "Found '$ContainerImage' in '$File' but the image is not pinned to a supported version and digest"
+    }
+    @($assignments)
+}
+
 function Get-PinShellVersionAssignments {
     <#
     .SYNOPSIS
@@ -658,7 +799,7 @@ function Get-PinJsonVersionAssignments {
     catch {
         throw "Could not parse '$File' as JSON: $($_.Exception.Message)"
     }
-    foreach ($value in Get-PinJsonStringValues -Value $json) {
+    foreach ($value in (Get-PinJsonStringValues -Value $json | Where-Object { $_ -ne '' })) {
         Get-PinShellVersionAssignments `
             -Content $value `
             -ShellVariable $ShellVariable `
@@ -741,6 +882,8 @@ function Get-PinnedToolVersionAssignments {
         Repository root used to resolve and contain candidate paths.
     .PARAMETER PowerShellVariable
         Optional PowerShell variable name used in assignment statements.
+    .PARAMETER PythonPackage
+        Optional Python package name used in pip install commands.
     .PARAMETER GitHubAction
         Optional GitHub Action whose workflow input contains the tool version.
     .PARAMETER GitHubActionInput
@@ -764,6 +907,10 @@ function Get-PinnedToolVersionAssignments {
         [string]$PowerShellVariable,
 
         [Parameter()]
+        [string]$PythonPackage,
+
+        [Parameter()]
+        [string]$ContainerImage
         [string]$GitHubAction,
 
         [Parameter()]
@@ -794,6 +941,23 @@ function Get-PinnedToolVersionAssignments {
         }
 
         $extension = [System.IO.Path]::GetExtension($canonicalPath)
+
+        if ($PythonPackage -and $extension -in @('.sh', '.yml', '.yaml', '.json', '.jsonc')) {
+            Get-PythonVersionAssignments `
+                -Content $content `
+                -File $file `
+                -SemanticVersionPattern $semanticVersion `
+                -PythonPackage $PythonPackage
+        }
+
+        if ($ContainerImage -and [System.IO.Path]::GetFileName($file) -like 'Dockerfile*') {
+            Get-DockerVersionAssignments `
+                -Content $content `
+                -File $file `
+                -SemanticVersionPattern $semanticVersion `
+                -ContainerImage $ContainerImage
+        }
+
         if ($extension -in @('.yml', '.yaml')) {
             if ($GitHubAction) {
                 Get-GitHubActionInputVersionAssignments `
@@ -827,16 +991,15 @@ function Get-PinnedToolVersionAssignments {
             }
             continue
         }
-        if ($content -notmatch ('\b' + $shellVariablePattern + '\b')) {
-            continue
-        }
 
         if ($extension -eq '.sh') {
-            Get-PinShellVersionAssignments `
-                -Content $content `
-                -ShellVariable $ShellVariable `
-                -ShellPatterns $shellPatterns `
-                -File $file
+            if ($content -match ('\b' + $shellVariablePattern + '\b')) {
+                Get-PinShellVersionAssignments `
+                    -Content $content `
+                    -ShellVariable $ShellVariable `
+                    -ShellPatterns $shellPatterns `
+                    -File $file
+            }
             continue
         }
 
@@ -1001,5 +1164,7 @@ Export-ModuleMember -Function @(
     'Get-PinnedToolVersionAssignments',
     'Get-EligibleToolRelease',
     'Get-PowerShellAssignments',
-    'Get-PinnedToolFreshness'
+    'Get-PythonVersionAssignments',
+    'Get-PinnedToolFreshness',
+    'Get-DockerVersionAssignments'
 )
