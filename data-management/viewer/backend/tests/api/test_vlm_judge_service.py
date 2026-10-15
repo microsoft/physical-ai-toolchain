@@ -161,8 +161,8 @@ async def test_given_saved_label_sample_when_validated_then_requires_unchanged_b
     monkeypatch: pytest.MonkeyPatch,
     changed: bool,
 ) -> None:
-    from evaluation.vlm_judge.curation import DatasetLabelsFile
-    from evaluation.vlm_judge.saved_input import label_baseline
+    from physical_ai_curation.models import DatasetLabelsFile
+    from physical_ai_curation.saved_input import label_baseline
 
     labels = DatasetLabelsFile(dataset_id="dataset", episodes={"0": ["success"]})
     replacement = DatasetLabelsFile(dataset_id="dataset", episodes={"0": ["failure"]}) if changed else labels
@@ -640,7 +640,7 @@ def test_given_partial_cli_execution_when_finished_then_nonzero_exit(
 
 @pytest.mark.asyncio
 async def test_given_saved_local_instruction_when_resolved_then_author_and_revision_bound(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.saved_input import LocalSavedInputReader, resolve_saved_input
+    from physical_ai_curation.saved_input import LocalSavedInputReader, resolve_saved_input
 
     (tmp_path / "meta").mkdir()
     (tmp_path / "meta" / "info.json").write_text("{}")
@@ -683,7 +683,7 @@ async def test_given_saved_local_instruction_when_resolved_then_author_and_revis
 async def test_given_saved_media_edit_when_cli_resolves_then_unsupported_transform_rejected(tmp_path: Path) -> None:
     import hashlib
 
-    from evaluation.vlm_judge.saved_input import LocalSavedInputReader, resolve_saved_input
+    from physical_ai_curation.saved_input import LocalSavedInputReader, resolve_saved_input
 
     (tmp_path / "meta").mkdir()
     (tmp_path / "meta" / "info.json").write_text("{}")

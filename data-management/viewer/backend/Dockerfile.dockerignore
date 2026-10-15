@@ -13,6 +13,11 @@
 !evaluation/vlm_judge/*.py
 !evaluation/vlm_judge/pyproject.toml
 !evaluation/vlm_judge/uv.lock
+!shared/
+!shared/curation/
+!shared/curation/pyproject.toml
+!shared/curation/physical_ai_curation/
+!shared/curation/physical_ai_curation/*.py
 **/__pycache__
 **/*.pyc
 **/.env

@@ -34,6 +34,7 @@ def test_judge_profiles_install_from_their_own_lock_without_checkout_imports() -
     assert "WORKDIR /app/data-management/viewer/backend" in dockerfile
     assert "UV_PROJECT_ENVIRONMENT=/app/.venv" in dockerfile
     assert "COPY evaluation/vlm_judge/ /app/evaluation/vlm_judge/" in dockerfile
+    assert "COPY shared/curation/ /app/shared/curation/" in dockerfile
     assert 'ARG JUDGE_EXTRAS=""' in dockerfile
     assert "uv sync --project /app/evaluation/vlm_judge --frozen --no-dev --no-editable" in dockerfile
     assert "COPY data-management/viewer/backend/src/ ./src/" in dockerfile
@@ -49,6 +50,8 @@ def test_build_upload_is_allowlisted_and_compose_keeps_jobs_durable() -> None:
     patterns = ignore.read_text().splitlines()
     assert patterns[0] == "**"
     assert "!evaluation/vlm_judge/*.py" in patterns
+    assert "!shared/curation/pyproject.toml" in patterns
+    assert "!shared/curation/physical_ai_curation/*.py" in patterns
     assert not any(line.startswith("!") and ".env" in line for line in patterns)
     compose = (backend.parent / "docker-compose.yml").read_text()
     assert 'VLM_JUDGE_JOB_DIR: "/state/judge"' in compose
@@ -59,6 +62,8 @@ def test_build_upload_is_allowlisted_and_compose_keeps_jobs_durable() -> None:
     assert '"$SRC_DIR/backend/"' not in deploy
     assert '--build-arg "JUDGE_EXTRAS=${judge_extras}"' in deploy
     assert 'cp "$backend_dockerfile" "$backend_context/data-management/viewer/backend/Dockerfile"' in deploy
+    assert 'cp "$REPO_ROOT/shared/curation/pyproject.toml" "$backend_context/shared/curation/"' in deploy
+    assert 'cp "$REPO_ROOT/shared/curation/physical_ai_curation/"*.py' in deploy
 
 
 def test_browser_gate_cannot_reuse_live_services_or_resolve_dependencies() -> None:
@@ -95,7 +100,7 @@ assert callable(build_router)
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=root,
-        env={**os.environ, "PYTHONPATH": str(root)},
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [str(root), os.environ.get("PYTHONPATH")]))},
         capture_output=True,
         text=True,
         check=False,

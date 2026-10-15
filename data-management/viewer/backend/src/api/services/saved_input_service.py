@@ -3,20 +3,22 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from evaluation.vlm_judge.dataset import EpisodeRecord
-from evaluation.vlm_judge.saved_input import (
+from physical_ai_curation.saved_input import (
     SavedInputError,
     SavedInputSnapshot,
     SavedResource,
     label_baseline,
     resolve_validation_sample,
 )
-from evaluation.vlm_judge.saved_input import resolve_saved_input as resolve_snapshot
+from physical_ai_curation.saved_input import resolve_saved_input as resolve_snapshot
 
 from .annotation_service import AnnotationService
 from .dataset_service import DatasetService
+
+if TYPE_CHECKING:
+    from evaluation.vlm_judge.dataset import EpisodeRecord
 
 
 class ViewerSavedInputReader:

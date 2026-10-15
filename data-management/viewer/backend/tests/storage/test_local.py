@@ -379,7 +379,7 @@ class TestLocalStorageAdapter:
         def fail_replace(source: Path, target: Path) -> None:
             raise OSError("replace failed")
 
-        monkeypatch.setattr("evaluation.vlm_judge.curation_storage.os.replace", fail_replace)
+        monkeypatch.setattr("physical_ai_curation.storage.os.replace", fail_replace)
         with pytest.raises(StorageError, match="Failed to save annotation file"):
             await self.adapter.save_annotation(self.dataset_id, 4, annotation)
 
@@ -436,7 +436,7 @@ class TestLocalStorageAdapter:
             source.unlink()
             raise OSError("replace failed")
 
-        monkeypatch.setattr("evaluation.vlm_judge.curation_storage.os.replace", fail_replace)
+        monkeypatch.setattr("physical_ai_curation.storage.os.replace", fail_replace)
         with pytest.raises(StorageError, match="replace failed"):
             await self.adapter.save_annotation(self.dataset_id, 9, annotation)
 

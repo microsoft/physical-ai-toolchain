@@ -34,16 +34,15 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from evaluation.vlm_judge.backend import GenerationConfig, Qwen3VLBackend
-from evaluation.vlm_judge.curation_storage import LocalCurationStorage, apply_judge_result
+from evaluation.vlm_judge.curation_storage import apply_judge_result
 from evaluation.vlm_judge.dataset import iter_episodes, load_dataset_spec
 from evaluation.vlm_judge.frames import FrameWindow, extract_frames, tile_horizontally
 from evaluation.vlm_judge.job_cli import add_job_arguments, execute_job_command
 from evaluation.vlm_judge.job_storage import LocalJobStore
 from evaluation.vlm_judge.jobs import JudgeJobs
-from evaluation.vlm_judge.saved_input import (
-    LocalDatasetResolver,
-    SavedInputSnapshot,
-)
+from evaluation.vlm_judge.saved_input import LocalDatasetResolver
+from physical_ai_curation.saved_input import SavedInputSnapshot
+from physical_ai_curation.storage import LocalCurationStorage
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

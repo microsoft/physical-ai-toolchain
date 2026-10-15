@@ -1,13 +1,12 @@
 """HTTP API for the VLM-as-judge service.
 
-Exposes a small FastAPI ``APIRouter`` that the dataviewer backend can mount
-under ``/api/vlm-judge`` and the policy-evaluation pipeline can consume from
-a sidecar process. The router is intentionally framework-thin — all real
-work happens in :class:`evaluation.vlm_judge.service.JudgeService`.
+Exposes a local-only FastAPI router. The viewer uses a separate authenticated
+dataset router backed by the same JudgeService. Standalone judging requires
+explicit local opt-in and a confined media root; forwarding is unsupported.
 
 Run as a standalone server:
 
-    uvicorn evaluation.vlm_judge.api:app --host 0.0.0.0 --port 8080
+    uvicorn evaluation.vlm_judge.api:app --host 127.0.0.1 --port 8080 --no-proxy-headers
 
 Mount inside an existing FastAPI app:
 
@@ -24,10 +23,12 @@ import asyncio
 import json
 import logging
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import asynccontextmanager, suppress
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -39,11 +40,13 @@ except ModuleNotFoundError as error:
     if error.name != "starlette":
         raise
 
-from evaluation.vlm_judge.curation_storage import CurationStorage, LocalCurationStorage, apply_judge_result
+from physical_ai_curation.saved_input import SavedInputError
+from physical_ai_curation.storage import CurationStorage, LocalCurationStorage
 
+from .curation_storage import apply_judge_result
 from .job_storage import JobStore, LocalJobStore
 from .jobs import DatasetResolver, JudgeJobs, fingerprint
-from .saved_input import LocalDatasetResolver, SavedInputError
+from .saved_input import LocalDatasetResolver
 from .service import (
     BackendConfig,
     FrameConfig,
@@ -155,11 +158,12 @@ def build_job_router(
     actor_dependency: Callable[..., str],
     prepare_config: Callable[[dict[str, Any]], dict[str, Any]],
     mutation_dependencies: list[Any] | None = None,
+    route_class: type[Any] | None = None,
 ) -> Any:
     """Expose the shared lifecycle with caller-supplied authentication and storage."""
     from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
-    router = APIRouter(tags=["judge-jobs"])
+    router = APIRouter(tags=["judge-jobs"], **({"route_class": route_class} if route_class is not None else {}))
     jobs_dependency = Depends(get_jobs)
 
     async def invoke(operation: Awaitable[Any]) -> Any:
@@ -432,6 +436,61 @@ class JudgeResponse(BaseModel):
     failure_mode: str | None = None
 
 
+def _local_authority(authority: str, scheme: str) -> tuple[str, str, int]:
+    """Parse a literal loopback authority without DNS or forwarded headers."""
+    if (
+        scheme not in {"http", "https"}
+        or not authority
+        or any(character.isspace() or character in "/\\?#@%," for character in authority)
+    ):
+        raise ValueError("Invalid authority")
+    parsed = urlsplit(f"//{authority}")
+    host = parsed.hostname
+    if not host or authority.endswith(":"):
+        raise ValueError("Invalid authority")
+    if host != "localhost":
+        address = ip_address(host)
+        if not address.is_loopback:
+            raise ValueError("Non-loopback authority")
+        host = str(address)
+    port = parsed.port
+    if port == 0:
+        raise ValueError("Invalid port")
+    return scheme, host, port if port is not None else (443 if scheme == "https" else 80)
+
+
+def _admit_local_request(request: Request, *, require_json: bool = True) -> bool:
+    """Admit unproxied local requests, requiring JSON for body-bearing routes."""
+    try:
+        if request.client is None or not ip_address(request.client.host).is_loopback:
+            return False
+        if any(name == "forwarded" or name.startswith("x-forwarded-") for name in request.headers):
+            return False
+        hosts = request.headers.getlist("host")
+        if len(hosts) != 1:
+            return False
+        authority = _local_authority(hosts[0], request.scope.get("scheme", "http"))
+        origins = request.headers.getlist("origin")
+        if len(origins) > 1:
+            return False
+        if origins:
+            origin = urlsplit(origins[0])
+            if origin.path or origin.query or origin.fragment:
+                return False
+            if _local_authority(origin.netloc, origin.scheme) != authority:
+                return False
+        if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
+            return False
+        if request.method in {"GET", "HEAD"}:
+            return True
+        content_types = request.headers.getlist("content-type")
+        if not require_json and not content_types:
+            return True
+        return len(content_types) == 1 and content_types[0].split(";", 1)[0].strip().lower() == "application/json"
+    except ValueError:
+        return False
+
+
 def build_router(
     service: JudgeService,
     *,
@@ -442,9 +501,46 @@ def build_router(
     curation_store: CurationStorage | None = None,
     capacity: int = 1,
     capacity_scope: str = "configured-inference-device",
-):
+    allow_unauthenticated: bool | None = None,
+) -> Any:
     """Return a FastAPI router bound to ``service``."""
     from fastapi import APIRouter, Depends, Header, HTTPException
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse
+    from fastapi.routing import APIRoute
+
+    enabled = (
+        allow_unauthenticated
+        if allow_unauthenticated is not None
+        else os.environ.get("VLM_JUDGE_ALLOW_UNAUTHENTICATED", "").lower() == "true"
+    )
+    configured = (
+        resolver is not None
+        and job_store is not None
+        and bool(principal_dependency or local_actor)
+        and (
+            not isinstance(resolver, LocalDatasetResolver)
+            or (bool(resolver.datasets) and all(root != Path(root.anchor) for root in resolver.datasets.values()))
+        )
+    )
+
+    class LocalJudgeRoute(APIRoute):
+        def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+            handler = super().get_route_handler()
+            if self.name == "health":
+                return handler
+
+            async def admitted_handler(request: Request) -> Response:
+                if not enabled or not configured:
+                    raise HTTPException(status_code=503, detail="Judge unavailable")
+                if not _admit_local_request(request, require_json=self.body_field is not None):
+                    raise HTTPException(status_code=403, detail="Request forbidden")
+                try:
+                    return await handler(request)
+                except RequestValidationError:
+                    return JSONResponse(status_code=422, content={"detail": "Invalid request"})
+
+            return admitted_handler
 
     executor = ServiceExecutor(service)
     if curation_store is None and isinstance(resolver, LocalDatasetResolver):
@@ -472,7 +568,7 @@ def build_router(
     @asynccontextmanager
     async def lifespan(app: Any) -> AsyncIterator[None]:
         workers = []
-        if jobs is not None:
+        if enabled and configured and jobs is not None:
             app.state.judge_jobs = jobs
             workers = [asyncio.create_task(jobs.run_forever()) for _ in range(capacity)]
         try:
@@ -484,7 +580,7 @@ def build_router(
                 with suppress(asyncio.CancelledError):
                     await worker
 
-    router = APIRouter(tags=["vlm-judge"], lifespan=lifespan)
+    router = APIRouter(tags=["vlm-judge"], route_class=LocalJudgeRoute, lifespan=lifespan)
 
     def require_local_actor() -> str:
         if not local_actor:
@@ -502,6 +598,7 @@ def build_router(
             require_jobs,
             actor_dependency=principal_dependency or require_local_actor,
             prepare_config=executor.configuration,
+            route_class=LocalJudgeRoute,
         )
     )
 
@@ -562,6 +659,10 @@ def build_app():
     - ``VLM_JUDGE_API_KEY``  (optional API key for ``openai-compat``)
     - ``VLM_JUDGE_N_FRAMES`` (default ``12``)
     - ``VLM_JUDGE_CACHE_DIR`` (default ``outputs/vlm-judge/cache``)
+    - ``VLM_JUDGE_ALLOW_UNAUTHENTICATED`` (must be ``true`` for local judging)
+    - ``VLM_JUDGE_DATASETS`` (JSON mapping of dataset IDs to confined local roots)
+    - ``VLM_JUDGE_LOCAL_ACTOR`` (explicit local principal)
+    - ``VLM_JUDGE_JOB_DIR`` (durable local job storage)
     """
     from fastapi import FastAPI
 

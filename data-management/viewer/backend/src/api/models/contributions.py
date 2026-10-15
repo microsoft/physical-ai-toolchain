@@ -2,20 +2,10 @@
 
 from __future__ import annotations
 
-from evaluation.vlm_judge.curation import (
-    Contribution as Contribution,
-)
-from evaluation.vlm_judge.curation import (
-    ContributionLedger as ContributionLedger,
-)
-from evaluation.vlm_judge.curation import (
-    ContributionOrigin as ContributionOrigin,
-)
-from evaluation.vlm_judge.curation import (
-    EffectiveContribution as EffectiveContribution,
-)
-from evaluation.vlm_judge.curation import (
-    MachineOrigin as MachineOrigin,
-)
+from physical_ai_curation.models import Contribution as Contribution
+from physical_ai_curation.models import ContributionLedger as ContributionLedger
+from physical_ai_curation.models import ContributionOrigin as ContributionOrigin
+from physical_ai_curation.models import EffectiveContribution as EffectiveContribution
+from physical_ai_curation.models import MachineOrigin as MachineOrigin
 
 __all__ = ["Contribution", "ContributionLedger", "ContributionOrigin", "EffectiveContribution", "MachineOrigin"]

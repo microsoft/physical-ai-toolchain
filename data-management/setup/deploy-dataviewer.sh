@@ -261,7 +261,8 @@ if [[ "$skip_build" == "false" ]]; then
     section "Building Backend Image"
     backend_context="$(mktemp -d)"
     trap 'rm -rf -- "$backend_context"' EXIT
-    mkdir -p "$backend_context/data-management/viewer/backend" "$backend_context/evaluation/vlm_judge"
+    mkdir -p "$backend_context/data-management/viewer/backend" "$backend_context/evaluation/vlm_judge" \
+      "$backend_context/shared/curation/physical_ai_curation"
     tar -C "$SRC_DIR/backend" --exclude='__pycache__' --exclude='*.pyc' --exclude='.env*' \
       -cf - pyproject.toml uv.lock logging.json src \
       | tar -C "$backend_context/data-management/viewer/backend" -xf -
@@ -269,6 +270,9 @@ if [[ "$skip_build" == "false" ]]; then
     cp "$REPO_ROOT/evaluation/vlm_judge/"*.py \
       "$REPO_ROOT/evaluation/vlm_judge/pyproject.toml" "$REPO_ROOT/evaluation/vlm_judge/uv.lock" \
       "$backend_context/evaluation/vlm_judge/"
+    cp "$REPO_ROOT/shared/curation/pyproject.toml" "$backend_context/shared/curation/"
+    cp "$REPO_ROOT/shared/curation/physical_ai_curation/"*.py \
+      "$backend_context/shared/curation/physical_ai_curation/"
     info "Building $backend_image ($build_mode)..."
     if [[ "$local_build" == "true" ]]; then
       docker buildx build \

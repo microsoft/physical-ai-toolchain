@@ -2,7 +2,7 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-10-12
+ms.date: 2026-10-15
 ms.topic: overview
 ---
 
@@ -265,7 +265,8 @@ the model and frame settings. See [GPU and Azure deployment guidance](../../eval
 1. Enable the selected backend and start the viewer. For local Qwen:
 
    ```bash
-   VLM_JUDGE_ENABLED=true VLM_JUDGE_BACKEND=qwen3-vl ./start.sh
+   VLM_JUDGE_ENABLED=true VLM_JUDGE_BACKEND=qwen3-vl \
+     VLM_JUDGE_MODEL_REVISION='<reviewed-full-40-hex-commit-sha>' ./start.sh
    ```
 
 2. Select an episode and save its changes. Resolve any unsaved-input or conflict warnings.
@@ -348,20 +349,29 @@ The launcher selects the evaluator dependencies for the configured backend. For
 container build profiles and Azure setup, see the
 [deployment guide](../../evaluation/vlm_judge/README.md).
 
-| Variable                   | Default                       | Description                                                                            |
-|----------------------------|-------------------------------|----------------------------------------------------------------------------------------|
-| `VLM_JUDGE_ENABLED`        | `false`                       | Enable the viewer judge and durable `/api/judge` lifecycle routes                      |
-| `VLM_JUDGE_BACKEND`        | `echo`                        | `qwen3-vl` (local HF), `openai-compat` (vLLM, NIM, Azure OpenAI), or `echo`            |
-| `VLM_JUDGE_MODEL_ID`       | `Qwen/Qwen3-VL-4B-Instruct`   | HF model id or remote model name                                                       |
-| `VLM_JUDGE_MODEL_REVISION` | Unset                         | Immutable model revision matching the deployed weights                                 |
-| `VLM_JUDGE_BASE_URL`       | —                             | OpenAI-compatible server URL (`openai-compat` only)                                    |
-| `VLM_JUDGE_API_KEY`        | —                             | Bearer token for the remote backend                                                    |
-| `VLM_JUDGE_N_FRAMES`       | `12`                          | Frames sampled per episode                                                             |
-| `VLM_JUDGE_PROCESS_METHOD` | `gvl`                         | Process-reward method: `gvl` (shuffle-and-rank) or `chronological`                     |
-| `VLM_JUDGE_CACHE_DIR`      | Unset                         | Disposable inference cache, not durable job authority                                  |
-| `VLM_JUDGE_JOB_DIR`        | Derived local default         | Durable local job root; Compose uses `/state/judge`, Azure mode uses shared Blob state |
-| `VLM_JUDGE_CAPACITY`       | `1`                           | Shared maximum concurrent judgment work for a capacity scope                           |
-| `VLM_JUDGE_CAPACITY_SCOPE` | `configured-inference-device` | Shared identity for workers using the same inference capacity                          |
+| Variable                   | Default                       | Description                                                                             |
+|----------------------------|-------------------------------|-----------------------------------------------------------------------------------------|
+| `VLM_JUDGE_ENABLED`        | `false`                       | Enable the viewer judge and durable `/api/judge` lifecycle routes                       |
+| `VLM_JUDGE_BACKEND`        | `echo`                        | `qwen3-vl` (local HF), `openai-compat` (vLLM, NIM, Azure OpenAI), or `echo`             |
+| `VLM_JUDGE_MODEL_ID`       | `Qwen/Qwen3-VL-4B-Instruct`   | HF model id or remote model name                                                        |
+| `VLM_JUDGE_MODEL_REVISION` | Unset                         | Required full Hub commit SHA for native Qwen; omit for explicit local model directories |
+| `VLM_JUDGE_BASE_URL`       | —                             | OpenAI-compatible server URL (`openai-compat` only)                                     |
+| `VLM_JUDGE_API_KEY`        | —                             | Bearer token for the remote backend                                                     |
+| `VLM_JUDGE_N_FRAMES`       | `12`                          | Frames sampled per episode                                                              |
+| `VLM_JUDGE_PROCESS_METHOD` | `gvl`                         | Process-reward method: `gvl` (shuffle-and-rank) or `chronological`                      |
+| `VLM_JUDGE_CACHE_DIR`      | Unset                         | Disposable inference cache, not durable job authority                                   |
+| `VLM_JUDGE_JOB_DIR`        | Derived local default         | Durable local job root; Compose uses `/state/judge`, Azure mode uses shared Blob state  |
+| `VLM_JUDGE_CAPACITY`       | `1`                           | Shared maximum concurrent judgment work for a capacity scope                            |
+| `VLM_JUDGE_CAPACITY_SCOPE` | `configured-inference-device` | Shared identity for workers using the same inference capacity                           |
+
+Native Hub loading requires a full SHA and never enables repository Python code.
+For offline artifacts, set `VLM_JUDGE_MODEL_ID` to an absolute directory or a path
+starting `./` or `../`, and omit `VLM_JUDGE_MODEL_REVISION`. Clear the judgment cache
+after replacing local model contents. Echo and hosted `openai-compat` models need no
+Hub pin. Existing viewer authentication and CSRF remain unchanged; standalone
+`VLM_JUDGE_ALLOW_UNAUTHENTICATED`, `VLM_JUDGE_DATASETS` and `VLM_JUDGE_LOCAL_ACTOR`
+do not govern this router.
+Viewer media must remain inside its dataset directory, including metadata-derived paths.
 
 > [!NOTE]
 > **Process-reward method (`VLM_JUDGE_PROCESS_METHOD`).** The per-frame progress
@@ -398,7 +408,8 @@ the bundled OpenAI-compatible shim — and point the dataviewer at it with
 uv run --project ../../evaluation/vlm_judge --frozen --no-sync --extra api --extra qwen3-vl \
   python -m evaluation.vlm_judge.openai_shim \
   --port 8001 \
-  --model-id Qwen/Qwen3-VL-4B-Instruct
+  --model-id Qwen/Qwen3-VL-4B-Instruct \
+  --model-revision '<reviewed-full-40-hex-commit-sha>'
 ```
 
 Run this from the viewer directory after an approved frozen restore of the evaluator's
@@ -412,6 +423,7 @@ The shim reads these variables ([`evaluation/vlm_judge/openai_shim.py`](../../ev
 | `VLM_SHIM_HOST`                   | `127.0.0.1`                 | Bind address; the shim has no auth, so keep it on loopback            |
 | `VLM_SHIM_PORT`                   | `8001`                      | Listen port                                                           |
 | `VLM_SHIM_MODEL_ID`               | `Qwen/Qwen3-VL-4B-Instruct` | Hugging Face model id to load                                         |
+| `VLM_SHIM_MODEL_REVISION`         | Unset                       | Full Hub commit SHA; omit for an explicit local model directory       |
 | `VLM_SHIM_DEVICE_MAP`             | `auto`                      | Transformers device map                                               |
 | `VLM_SHIM_DTYPE`                  | `bfloat16`                  | Model dtype                                                           |
 | `VLM_SHIM_ALLOW_REMOTE_IMAGES`    | `false`                     | Fetch `http(s)` image URLs server-side; off restricts to `data:` URIs |
@@ -419,17 +431,11 @@ The shim reads these variables ([`evaluation/vlm_judge/openai_shim.py`](../../ev
 
 > [!WARNING]
 > The shim exposes an unauthenticated `/v1/chat/completions` endpoint and runs
-> model inference on untrusted input. Treat it as a trusted-network-only service:
->
-> - Bind to loopback (`VLM_SHIM_HOST=127.0.0.1`, the default). Expose it only on a
->   private, trusted network — never a public interface — and front it with your own
->   auth/proxy if it must be reachable remotely.
-> - Leave `VLM_SHIM_ALLOW_REMOTE_IMAGES=false`. The dataviewer sends frames as
->   `data:` URIs, so it never needs remote fetching. Enabling remote fetch lets the
->   shim issue server-side requests (a server-side request forgery surface) with no
->   host allowlist, so only enable it on a network you fully control.
-> - When remote images are enabled, keep `VLM_SHIM_REMOTE_IMAGE_TIMEOUT_S` low to
->   bound request hangs.
+> model inference on supplied input. Its protocol does not gain the standalone
+> judge router's admission controls. Keep it on loopback on a trusted single-user
+> host with `VLM_SHIM_ALLOW_REMOTE_IMAGES=false`; the viewer sends `data:` URIs.
+> Do not expose it through LAN listeners, proxies, tunnels or port forwarding.
+> Authentication and ingress hardening remain separate work.
 
 ## 🔒 Authentication with Entra ID
 

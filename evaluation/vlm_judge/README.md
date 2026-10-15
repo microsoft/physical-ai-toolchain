@@ -1,7 +1,7 @@
 ---
 title: VLM-as-Judge
-description: Run reproducible vision-language episode evaluations with saved inputs and approval-gated dataset jobs
-ms.date: 2026-10-12
+description: Run vision-language evaluations with saved inputs, approval-gated jobs and confined HTTP media access
+ms.date: 2026-10-15
 ---
 
 Open-weight-first harness that scores LeRobot manipulation episodes and
@@ -81,27 +81,49 @@ the CLI and the HTTP API import the service — no parallel paths.
 
 For Qwen3-VL-4B in bfloat16, start validation with a full 24 GB GPU and concurrency
 one. This is not a guaranteed minimum: model, frame and generation settings affect VRAM.
+Run these commands from the repository root in an existing evaluation environment;
+`--no-sync` does not install missing dependencies.
 
 ```sh
 # 1. Smoke test (no model load, no GPU)
-evaluation/vlm_judge/scripts/evaluate-leisaac-pick-orange.sh \
-    --backend echo --dry-run --limit 2
+uv run --project evaluation --no-sync bash \
+  evaluation/vlm_judge/scripts/evaluate-leisaac-pick-orange.sh \
+  --backend echo --dry-run --limit 2
 
-# 2. Real evaluation on three episodes with Qwen3-VL-4B
-evaluation/vlm_judge/scripts/evaluate-leisaac-pick-orange.sh --limit 3
+# 2. Evaluate three episodes with a pinned Qwen3-VL-4B on a GPU host
+export VLM_JUDGE_MODEL_REVISION='<reviewed-full-40-hex-commit-sha>'
+uv run --project evaluation --no-sync bash \
+  evaluation/vlm_judge/scripts/evaluate-leisaac-pick-orange.sh \
+  --backend qwen3-vl --limit 3 \
+  -- --model-revision "$VLM_JUDGE_MODEL_REVISION"
 
-# 3. Score policy rollouts under leisaac-tests/pickup-orange/
-evaluation/vlm_judge/scripts/evaluate-policy-rollouts.sh
+# 3. Score policy rollouts using reviewed offline model artifacts
+uv run --project evaluation --no-sync bash \
+  evaluation/vlm_judge/scripts/evaluate-policy-rollouts.sh \
+  --backend qwen3-vl --model-id /path/to/reviewed-qwen-model
 
-# 4. Serve the HTTP API (defaults to echo backend; see env vars in --help)
-evaluation/vlm_judge/scripts/serve-api.sh --backend qwen3-vl --port 8088
+# 4. Serve the HTTP API on loopback with the same pin (echo needs no GPU)
+export VLM_JUDGE_ALLOW_UNAUTHENTICATED=true
+export VLM_JUDGE_DATASETS='{"example-dataset":"/path/to/dataset"}'
+export VLM_JUDGE_LOCAL_ACTOR=local-operator
+export VLM_JUDGE_JOB_DIR=outputs/vlm-judge/jobs
+uv run --project evaluation --no-sync bash evaluation/vlm_judge/scripts/serve-api.sh \
+  --backend qwen3-vl --port 8088
 
 # 5. Full dataset against a vLLM server hosting a larger model
 VLM_JUDGE_BACKEND=openai-compat \
 VLM_JUDGE_MODEL_ID=Qwen/Qwen3-VL-30B-A3B-Instruct \
-evaluation/vlm_judge/scripts/evaluate-cnc-lerobot.sh \
-    --base-url http://localhost:8000/v1
+uv run --project evaluation --no-sync bash \
+  evaluation/vlm_judge/scripts/evaluate-cnc-lerobot.sh \
+  --base-url http://localhost:8000/v1
 ```
+
+The wrappers retain their dataset and output defaults; use `--dataset`,
+`--rollout-root` and `--output` for your own data. The dataset wrapper forwards
+extra CLI options after `--`. For Azure OpenAI, use your deployment name as the
+model ID and its OpenAI-compatible base URL. The dataset CLI reads
+`OPENAI_API_KEY`; the server and viewer use `VLM_JUDGE_API_KEY`. Keep credentials
+out of command arguments and shell history.
 
 ## ☁️ Azure Deployment
 
@@ -209,7 +231,9 @@ unit tests do not establish GPU compatibility or model quality.
 
 ```text
 GET  /health              -> {status, model_id, backend_kind, cache_enabled}
-POST /judge               -> JudgeResponse
+POST /judge               -> 202 job summary, Location and Retry-After headers
+GET  /jobs/{job_id}        -> Durable job status and paginated targets
+GET  /results             -> Episode evidence (dataset_id and episode_index query)
 ```
 
 `POST /judge` body:
@@ -223,11 +247,32 @@ POST /judge               -> JudgeResponse
 }
 ```
 
-Mount inside an existing FastAPI app (e.g., the dataviewer backend):
+The operator maps dataset IDs to local roots with `VLM_JUDGE_DATASETS`. Requests
+select saved episodes and views, not filesystem paths or inline instructions.
+Every selected view must be a regular MP4 contained within its dataset root before cache access.
+Traversal, escaping symlinks, missing files, directories and special files are rejected.
+Suffix validation does not verify content safety; decoding remains in-process.
+
+From another terminal on the same host:
+
+```bash
+curl --fail-with-body --include http://127.0.0.1:8088/judge \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: example-dataset-episode-7-run-1' \
+  -d '{"dataset_id":"example-dataset","episode_index":7,"views":["observation.images.front"]}'
+```
+
+Poll the returned `Location` until the job completes, then read its results. Reuse
+the same idempotency key when retrying submission of the same request, and use a new
+key for a new run. A successful submission is not a completed judgment or label write.
+
+Mount the standalone local-only router in another FastAPI app:
 
 ```python
 from pathlib import Path
+from fastapi import FastAPI
 from evaluation.vlm_judge.api import build_router
+from evaluation.vlm_judge.job_storage import LocalJobStore
 from evaluation.vlm_judge.saved_input import LocalDatasetResolver
 from evaluation.vlm_judge.service import (
     BackendConfig,
@@ -238,14 +283,21 @@ from evaluation.vlm_judge.service import (
 
 service = JudgeService(
     ServiceConfig(
-        backend=BackendConfig(kind="qwen3-vl", model_id="Qwen/Qwen3-VL-4B-Instruct"),
+        backend=BackendConfig(kind="echo"),
         frames=FrameConfig(n_frames=12),
         cache_dir=Path("outputs/vlm-judge/cache"),
     )
 )
 resolver = LocalDatasetResolver({"example-dataset": Path("/data/example-dataset")})
+app = FastAPI()
 app.include_router(
-    build_router(service, resolver=resolver, local_actor="local-operator"),
+  build_router(
+    service,
+    resolver=resolver,
+    local_actor="local-operator",
+    job_store=LocalJobStore(Path("outputs/vlm-judge/jobs")),
+    allow_unauthenticated=True,
+  ),
     prefix="/api/vlm-judge",
 )
 ```
@@ -262,17 +314,50 @@ The example explicitly enables an unauthenticated local actor. Bind local-only
 services to loopback. Authenticated applications supply `principal_dependency`;
 authentication failures never fall back to that local actor. Standalone startup
 reads an operator-controlled `VLM_JUDGE_DATASETS` JSON map and requires
-`VLM_JUDGE_ALLOW_UNAUTHENTICATED=true` plus `VLM_JUDGE_LOCAL_ACTOR` for local mode.
+`VLM_JUDGE_ALLOW_UNAUTHENTICATED=true`, `VLM_JUDGE_LOCAL_ACTOR` and a persistent
+`VLM_JUDGE_JOB_DIR` for local mode.
 Requests cannot supply server paths or unsaved instructions.
 
-The HTTP service is intentionally framework-thin — all stateful work
-happens in `JudgeService` so the dataviewer backend, an Azure Container
-App, or a Kubernetes sidecar all share one Python implementation.
+`JudgeService` performs inference; `JudgeJobs` manages durable execution and explicit
+result application. Router lifespan starts workers; the host application must run
+its lifespan to process queued jobs.
+
+This router retains its admission checks when mounted. The viewer uses its own
+authenticated dataset router; its authentication and CSRF checks are unchanged.
+
+### Local operating contract
+
+Previously unrestricted HTTP requests now require the saved-dataset configuration
+and explicit local opt-in described above. Dataset roots must be existing directories
+narrower than the filesystem root. `VLM_JUDGE_MEDIA_ROOT` no longer configures this API.
+Health and documentation boot without loading a model or configuring local judging.
+Requests require a literal loopback peer and loopback/localhost Host; body-bearing
+requests require JSON content type. Browser Origin must match;
+cross-site and forwarded-header requests are denied before body parsing.
+Run direct ASGI deployments with `--host 127.0.0.1 --no-proxy-headers` as well.
+
+| Status | Meaning                                                   |
+|--------|-----------------------------------------------------------|
+| 202    | Work accepted; poll the returned status URL               |
+| 503    | Local judging configuration is disabled or unavailable    |
+| 403    | Request admission denied before body parsing              |
+| 422    | Invalid request, missing instruction or unsupported edits |
+| 404    | Dataset, episode or actor-scoped job is unavailable       |
+| 409    | Saved inputs, configuration or idempotency conflict       |
+
+Inference and decoder failures after acceptance are recorded in job state, not returned
+as a synchronous judgment response. Admission and request-validation errors do not
+reflect submitted paths or raw exceptions. Server logs retain diagnostics.
+No Entra registration is required for trusted-local mode. It is not authentication:
+shared hosts, LAN listeners, container port publishing, proxies, dev tunnels and port
+forwarding are unsupported. A local forwarding process can appear to be a local caller.
+Dataset writers must be trusted; file replacement races are not prevented.
 
 ## 📤 Output
 
-Both the CLI and HTTP API produce records of this shape (one per
-episode):
+Completed inference results contain the following fields (one result per episode).
+HTTP submission returns a job summary first; retrieve completed target results
+through the job lifecycle routes.
 
 ```json
 {
@@ -310,6 +395,33 @@ variants (`Qwen3-VL-8B-Instruct`, `Qwen3-VL-30B-A3B-Instruct`) by passing
 Open License), point the OpenAI-compatible backend at a Cosmos NIM or
 self-hosted vLLM.
 
+### Native model migration and offline use
+
+Previously unpinned Hub loads now require a full 40-hex commit SHA, supplied through
+CLI `--model-revision` or server/viewer `VLM_JUDGE_MODEL_REVISION`. Branches, tags,
+blank revisions and `trust_remote_code=True` fail before model imports or downloads.
+Processor and all model fallback classes use native Transformers implementations.
+
+To obtain the full SHA for a Hub model:
+
+1. Open the model's commit history, for example
+  [Qwen3-VL-4B-Instruct commits](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct/commits/main).
+2. Select the revision you intend to use and copy its full 40-character commit
+  hash, not the abbreviated hash or a branch name such as `main`.
+3. Set `VLM_JUDGE_MODEL_REVISION` to that value for the server/viewer, or pass it
+  through `--model-revision` for the CLI. Use the matching model repository ID.
+
+The SHA pins an exact repository version; it does not establish that the artifacts
+are trusted or compatible with your runtime. Review the selected revision and
+validate it in your target environment before relying on it.
+
+An absolute directory or a path starting `./` or `../` selects local-only loading.
+Omit the revision for local directories; missing directories never fall back to the
+Hub. A bare `owner/model` remains a Hub ID; a matching local path is rejected as
+ambiguous. Use explicit `./owner/model` for local artifacts or change working directory.
+`HF_HUB_OFFLINE=1` also permits loading an already-cached full Hub SHA. Echo and
+OpenAI-compatible clients, including Azure hosted deployments, need no Hub revision.
+
 ## 💾 Cache
 
 `JudgeCache` keys results on a stable SHA256 of:
@@ -317,6 +429,7 @@ self-hosted vLLM.
 - video paths + size + mtime (per view, sorted)
 - instruction text
 - `judge_model` (backend `name`)
+- backend kind and normalized model revision, in a versioned payload
 - `prompt_version`
 - serialised `AgentConfig`
 
@@ -325,10 +438,20 @@ checkpoint-upload idempotency convention. Default location is
 `outputs/vlm-judge/cache/`. Set `--cache-dir ""` to disable, or
 `--force` to bypass on a single run.
 
+Old cache payloads are invalidated. Changing backend kind or Hub SHA creates a new
+key; displayed model IDs do not encode the pin. Local directory identity is only a
+canonical locator. Before replacing local artifacts, stop every service that has
+loaded them (the standalone judge, viewer backend, or local OpenAI shim). After
+replacement is complete, restart those services and clear the associated result
+caches or force fresh judgments.
+Clearing the result cache or using `--force` does not reload model weights already
+held in memory. No cryptographic content identity is claimed.
+
 ## 🧪 Tests
 
 ```sh
-cd evaluation && pytest tests/vlm_judge/ -q --no-header -o addopts=""
+uv run --project evaluation --no-sync pytest -c evaluation/pyproject.toml \
+  --no-cov evaluation/tests/vlm_judge -q
 ```
 
 The tests use a `ScriptedBackend` (canned responses keyed by prompt

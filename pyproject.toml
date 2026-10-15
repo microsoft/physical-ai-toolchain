@@ -14,6 +14,7 @@ packages = ["training/rl"]
 
 [dependency-groups]
 dev = [
+    "physical-ai-curation==0.1.0",
     "hypothesis==6.168.3",
     "numpy==2.5.3",
     "ruff==0.16.9",
@@ -45,6 +46,9 @@ override-dependencies = [
     "cryptography==50.0.1",
 ]
 package = false
+
+[tool.uv.sources]
+physical-ai-curation = { path = "shared/curation", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = [

@@ -12,6 +12,7 @@ import pytest
 from PIL import Image
 from vlm_judge.frames import (
     FrameWindow,
+    MediaInputError,
     _stream_duration_s,
     encode_jpeg_b64,
     extract_frames,
@@ -21,21 +22,30 @@ from vlm_judge.frames import (
 
 @pytest.mark.parametrize("count", [0, -1])
 def test_given_nonpositive_count_when_extracting_then_rejects_sampling(rollout_video: Path, count: int) -> None:
-    with pytest.raises(ValueError, match="n_frames must be positive"):
+    with pytest.raises(MediaInputError, match=r"^Invalid media input$") as error:
         extract_frames(FrameWindow(rollout_video, None, None), n_frames=count)
+
+    assert isinstance(error.value.__cause__, ValueError)
+    assert "n_frames must be positive" in str(error.value.__cause__)
 
 
 def test_given_missing_video_when_extracting_then_reports_missing_media(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="Video not found"):
+    with pytest.raises(MediaInputError, match=r"^Invalid media input$") as error:
         extract_frames(FrameWindow(tmp_path / "missing.mp4", None, None), n_frames=1)
+
+    assert isinstance(error.value.__cause__, FileNotFoundError)
+    assert "Video not found" in str(error.value.__cause__)
 
 
 @pytest.mark.parametrize("window", [(0.5, 0.5), (0.75, 0.25), (0, 0)])
 def test_given_reversed_or_empty_window_when_extracting_then_rejects_window(
     rollout_video: Path, window: tuple[float, float]
 ) -> None:
-    with pytest.raises(ValueError, match="Invalid window"):
+    with pytest.raises(MediaInputError, match=r"^Invalid media input$") as error:
         extract_frames(FrameWindow(rollout_video, *window), n_frames=3)
+
+    assert isinstance(error.value.__cause__, ValueError)
+    assert "Invalid window" in str(error.value.__cause__)
 
 
 @pytest.mark.parametrize("size", [None, (0, 32), (24, 16), (32, 32)])

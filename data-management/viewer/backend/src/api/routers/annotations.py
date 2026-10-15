@@ -10,8 +10,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from evaluation.vlm_judge.saved_input import label_baseline
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Response
+from physical_ai_curation.saved_input import label_baseline
 
 from ..auth import PrincipalContext, require_principal_context
 from ..csrf import require_csrf_token

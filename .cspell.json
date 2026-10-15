@@ -83,6 +83,7 @@
 		"misattributed",
 		"modpath",
 		"MJPG",
+		"mkfifo",
 		"mlruns",
 		"monkeypatch",
 		"moveit",

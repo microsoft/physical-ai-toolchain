@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs, { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { syncBuiltinESMExports } from 'node:module';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, matchesGlob } from 'node:path';
 import test from 'node:test';
@@ -150,6 +150,35 @@ test('coverage boundary: fuzz workflow retains test selection and all measured s
   const upload = steps.find(step => step.name === 'Upload coverage to Codecov');
   assert.equal(upload.with.flags, 'pytest-fuzz');
   assert.equal(upload.with.files, 'logs/coverage-fuzz.xml');
+});
+
+test('frontend coverage: each upload uses one flag and only the explicit report', () => {
+  const steps = graph['.github/workflows/dataviewer-frontend-tests.yml'].jobs['frontend-checks'].steps;
+  const uploads = steps.filter(step => step.uses?.startsWith('codecov/codecov-action@'));
+  assert.deepEqual(uploads.map(step => step.with.flags), [
+    'vitest', 'vitest-components', 'vitest-features', 'vitest-lib', 'vitest-state', 'vitest-app',
+  ]);
+  assert.equal(new Set(uploads.map(step => step.with.name)).size, uploads.length);
+  for (const upload of uploads) {
+    assert.equal(upload.with.files, 'data-management/viewer/frontend/coverage/cobertura-coverage.xml');
+    assert.equal(upload.with.disable_search, true);
+    assert.equal(upload.with.use_oidc, true);
+    assert.equal(upload.if, '${{ inputs.code-coverage && always() }}');
+  }
+});
+
+test('Docusaurus coverage: LCOV sources and upload network use the repository root', () => {
+  const require = createRequire(import.meta.url);
+  const config = require(join(root, 'docs/docusaurus/jest.config.js'));
+  const reporter = config.coverageReporters.find(item => Array.isArray(item) && item[0] === 'lcov');
+  assert.ok(reporter, 'LCOV must explicitly configure its source-path root');
+  assert.equal(reporter[1].projectRoot, root.replace(/\/$/, ''));
+  const steps = graph['.github/workflows/docusaurus-tests.yml'].jobs['docusaurus-codecov'].steps;
+  const upload = steps.find(step => step.id === 'codecov');
+  assert.equal(upload.with.files, 'coverage/lcov.info');
+  assert.equal(upload.with.root_dir, undefined);
+  assert.equal(upload.with.disable_search, true);
+  assert.equal(upload.with.flags, 'docusaurus');
 });
 
 test('accessibility coverage: exact report upload isolates OIDC and fails closed', () => {

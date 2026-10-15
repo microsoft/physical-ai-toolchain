@@ -2554,6 +2554,17 @@ wheels = [
 ]
 
 [[package]]
+name = "physical-ai-curation"
+version = "0.1.0"
+source = { editable = "../shared/curation" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = "==2.13.5" }]
+
+[[package]]
 name = "physical-ai-evaluation"
 version = "0.1.0"
 source = { virtual = "." }
@@ -2592,6 +2603,7 @@ dev = [
     { name = "hypothesis" },
     { name = "matplotlib" },
     { name = "numpy" },
+    { name = "physical-ai-curation" },
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pygments" },
@@ -2641,6 +2653,7 @@ dev = [
     { name = "hypothesis", specifier = "==6.168.1" },
     { name = "matplotlib", specifier = "==3.11.2" },
     { name = "numpy", specifier = "==2.2.6" },
+    { name = "physical-ai-curation", editable = "../shared/curation" },
     { name = "pyarrow", specifier = "==25.0.1" },
     { name = "pydantic", specifier = "==2.13.5" },
     { name = "pygments", specifier = "==2.21.0" },

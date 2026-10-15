@@ -66,6 +66,7 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.uv.sources]
+physical-ai-curation = { path = "../shared/curation", editable = true }
 torch = [
     { index = "pytorch-cu130", marker = "platform_machine == 'x86_64' or platform_machine == 'AMD64'" },
     { index = "pytorch-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" },
@@ -80,8 +81,12 @@ prerelease = "allow"
 
 [dependency-groups]
 dev = [
+    "physical-ai-curation==0.1.0",
     # Held below 16 because lerobot[dataset]==0.6.1 requires av<16.
     "av==15.1.0",
+    "fastapi==0.141.1",
+    "pydantic==2.13.5",
+    "httpx==0.28.1",
     "pytest==9.1.1",
     "pytest-mock==3.15.1",
     "pytest-cov==7.1.0",

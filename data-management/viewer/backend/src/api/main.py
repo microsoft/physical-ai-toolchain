@@ -51,6 +51,7 @@ load_dotenv(env_path)
 from .config import load_config  # noqa: E402
 
 _config = load_config()
+_job_router = vlm_judge.build_optional_job_router() if _config.vlm_judge_enabled else None
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     from .services.dataset_service import get_dataset_service
 
     workers = []
-    if _config.vlm_judge_enabled:
+    if _job_router is not None:
         from .services.annotation_service import get_annotation_service
         from .services.vlm_judge_service import create_judge_jobs
 
@@ -225,7 +226,8 @@ app.include_router(labels.router, prefix="/api/datasets", tags=["labels"], depen
 app.include_router(joint_config.router, prefix="/api/datasets", tags=["joint-config"], dependencies=api_auth)
 app.include_router(joint_config.defaults_router, prefix="/api", tags=["joint-config"], dependencies=api_auth)
 if _config.vlm_judge_enabled:
-    app.include_router(vlm_judge.job_router, prefix="/api/judge", dependencies=api_auth)
+    if _job_router is not None:
+        app.include_router(_job_router, prefix="/api/judge", dependencies=api_auth)
     app.include_router(
         vlm_judge.router,
         prefix="/api/datasets",

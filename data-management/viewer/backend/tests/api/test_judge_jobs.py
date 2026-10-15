@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from evaluation.vlm_judge.dataset import EpisodeRecord
 from evaluation.vlm_judge.judge import JudgeResult
-from evaluation.vlm_judge.saved_input import SavedInputSnapshot
+from physical_ai_curation.saved_input import SavedInputSnapshot
 
 
 class Resolver:
@@ -65,8 +65,8 @@ async def infer(record: EpisodeRecord, snapshot: SavedInputSnapshot, config: dic
 
 
 def test_withdrawal_removes_accepted_machine_values_but_preserves_human_and_motion() -> None:
-    from evaluation.vlm_judge.curation import DatasetLabelsFile, EpisodeAnalysisRecord, MachineOrigin
-    from evaluation.vlm_judge.curation_storage import plan_withdrawal
+    from physical_ai_curation.models import DatasetLabelsFile, EpisodeAnalysisRecord, MachineOrigin
+    from physical_ai_curation.storage import plan_withdrawal
 
     labels = DatasetLabelsFile(dataset_id="dataset")
     origin = MachineOrigin(
@@ -107,8 +107,8 @@ def test_withdrawal_removes_accepted_machine_values_but_preserves_human_and_moti
 
 
 def test_withdrawal_clears_derived_findings_without_reviving_overlapping_runs() -> None:
-    from evaluation.vlm_judge.curation import DatasetLabelsFile, EpisodeAnalysisRecord, MachineOrigin
-    from evaluation.vlm_judge.curation_storage import plan_withdrawal
+    from physical_ai_curation.models import DatasetLabelsFile, EpisodeAnalysisRecord, MachineOrigin
+    from physical_ai_curation.storage import plan_withdrawal
 
     labels = DatasetLabelsFile(dataset_id="dataset")
     origin = MachineOrigin(
@@ -153,8 +153,9 @@ def test_withdrawal_clears_derived_findings_without_reviving_overlapping_runs() 
 async def test_given_withdrawn_outcome_label_when_previewed_again_then_absent_flags_are_not_listed(
     tmp_path: Path,
 ) -> None:
-    from evaluation.vlm_judge.curation import DatasetLabelsFile
-    from evaluation.vlm_judge.curation_storage import LocalCurationStorage, apply_judge_result, plan_withdrawal
+    from physical_ai_curation.models import DatasetLabelsFile
+    from physical_ai_curation.storage import LocalCurationStorage, plan_withdrawal
+    from evaluation.vlm_judge.curation_storage import apply_judge_result
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     await storage.save("dataset", DatasetLabelsFile(dataset_id="dataset"), if_none_match=True)
@@ -182,8 +183,8 @@ async def test_given_withdrawn_outcome_label_when_previewed_again_then_absent_fl
 
 
 def test_given_present_unprovenanced_label_when_previewed_then_it_remains_legacy_unknown() -> None:
-    from evaluation.vlm_judge.curation import DatasetLabelsFile
-    from evaluation.vlm_judge.curation_storage import plan_withdrawal
+    from physical_ai_curation.models import DatasetLabelsFile
+    from physical_ai_curation.storage import plan_withdrawal
 
     labels = DatasetLabelsFile(dataset_id="dataset", episodes={"2": ["SUCCESS"]})
     projected, summary = plan_withdrawal(labels, {"run"})
@@ -218,7 +219,7 @@ async def _apply_success(storage: object, run_id: str, run_order: int, episode: 
 async def test_given_output_from_unlisted_run_when_withdrawing_then_conflict_is_explained_and_recoverable(
     tmp_path: Path,
 ) -> None:
-    from evaluation.vlm_judge.curation_storage import LocalCurationStorage
+    from physical_ai_curation.storage import LocalCurationStorage
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
@@ -263,8 +264,8 @@ async def test_given_output_from_unlisted_run_when_withdrawing_then_conflict_is_
 async def test_given_unprovenanced_label_before_ai_application_when_withdrawn_then_it_is_restored_not_conflicted(
     tmp_path: Path,
 ) -> None:
-    from evaluation.vlm_judge.curation import DatasetLabelsFile
-    from evaluation.vlm_judge.curation_storage import LocalCurationStorage, plan_withdrawal
+    from physical_ai_curation.models import DatasetLabelsFile
+    from physical_ai_curation.storage import LocalCurationStorage, plan_withdrawal
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     legacy = DatasetLabelsFile(dataset_id="dataset", episodes={"3": ["SUCCESS"]})
@@ -288,8 +289,9 @@ def manager(root: Path, **kwargs: object) -> object:
 
 @pytest.mark.asyncio
 async def test_reset_preview_is_revision_bound_and_fences_all_dataset_workers(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.curation import DatasetLabelsFile
-    from evaluation.vlm_judge.curation_storage import LocalCurationStorage, apply_judge_result
+    from physical_ai_curation.models import DatasetLabelsFile
+    from physical_ai_curation.storage import LocalCurationStorage
+    from evaluation.vlm_judge.curation_storage import apply_judge_result
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
@@ -322,8 +324,8 @@ async def test_reset_preview_is_revision_bound_and_fences_all_dataset_workers(tm
 
 @pytest.mark.asyncio
 async def test_reset_rejects_new_jobs_or_human_saves_after_preview(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.curation import DatasetLabelsFile
-    from evaluation.vlm_judge.curation_storage import LocalCurationStorage
+    from physical_ai_curation.models import DatasetLabelsFile
+    from physical_ai_curation.storage import LocalCurationStorage
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
@@ -345,7 +347,8 @@ async def test_reset_rejects_new_jobs_or_human_saves_after_preview(tmp_path: Pat
 async def test_reset_recovers_resource_publication_before_lost_job_checkpoint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from evaluation.vlm_judge.curation_storage import LocalCurationStorage, apply_judge_result
+    from physical_ai_curation.storage import LocalCurationStorage
+    from evaluation.vlm_judge.curation_storage import apply_judge_result
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
@@ -372,7 +375,7 @@ async def test_reset_recovers_resource_publication_before_lost_job_checkpoint(
 
 @pytest.mark.asyncio
 async def test_reset_preserves_independent_human_sample_approval(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.curation_storage import LocalCurationStorage
+    from physical_ai_curation.storage import LocalCurationStorage
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
@@ -400,7 +403,7 @@ async def test_reset_preserves_independent_human_sample_approval(tmp_path: Path)
 
 def test_reset_http_requires_mutation_authority_and_returns_durable_status(tmp_path: Path) -> None:
     from evaluation.vlm_judge.api import build_job_router
-    from evaluation.vlm_judge.curation_storage import LocalCurationStorage
+    from physical_ai_curation.storage import LocalCurationStorage
     from fastapi import Depends, FastAPI, HTTPException
     from fastapi.testclient import TestClient
 
@@ -439,7 +442,7 @@ def test_reset_http_requires_mutation_authority_and_returns_durable_status(tmp_p
 async def test_reset_cli_preview_confirm_and_status_share_durable_owner(tmp_path: Path) -> None:
     import argparse
 
-    from evaluation.vlm_judge.curation_storage import LocalCurationStorage
+    from physical_ai_curation.storage import LocalCurationStorage
     from evaluation.vlm_judge.job_cli import add_job_arguments, execute_job_command
 
     jobs = manager(tmp_path / "jobs", curation_storage=LocalCurationStorage({"dataset": tmp_path / "dataset"}))
@@ -795,7 +798,7 @@ def test_http_job_reads_are_bounded_and_principal_scoped(tmp_path: Path) -> None
 
 @pytest.mark.asyncio
 async def test_expected_saved_snapshot_is_checked_before_acceptance(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.saved_input import SavedInputError
+    from physical_ai_curation.saved_input import SavedInputError
 
     class ChangedResolver(Resolver):
         async def resolve(
@@ -937,8 +940,9 @@ async def test_reset_recovery_preserves_humans_and_reports_safe_failures(
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock
 
-    from evaluation.vlm_judge.curation import EpisodeAnalysisRecord
-    from evaluation.vlm_judge.curation_storage import LocalCurationStorage, apply_judge_result
+    from physical_ai_curation.models import EpisodeAnalysisRecord
+    from physical_ai_curation.storage import LocalCurationStorage
+    from evaluation.vlm_judge.curation_storage import apply_judge_result
     from evaluation.vlm_judge.job_storage import BlobJobStore, LocalJobStore
     from evaluation.vlm_judge.jobs import JudgeJobs
 
@@ -1052,7 +1056,7 @@ async def test_blob_transaction_waits_for_existing_lease_and_rejects_lost_revisi
 
 
 def test_shared_curation_preserves_human_ownership_and_machine_retry_identity() -> None:
-    from evaluation.vlm_judge.curation import DatasetLabelsFile, MachineOrigin
+    from physical_ai_curation.models import DatasetLabelsFile, MachineOrigin
 
     resource = DatasetLabelsFile(dataset_id="dataset", episodes={"3": ["REVIEW"]})
     resource.apply_labels(3, ["REVIEW", "SUCCESS"], author_id="human", origin="human")
@@ -1077,8 +1081,9 @@ def test_shared_curation_preserves_human_ownership_and_machine_retry_identity() 
 
 @pytest.mark.asyncio
 async def test_application_is_durable_and_retries_without_duplicate_contributions(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.curation import DatasetLabelsFile
-    from evaluation.vlm_judge.curation_storage import LocalCurationStorage, apply_judge_result
+    from physical_ai_curation.models import DatasetLabelsFile
+    from physical_ai_curation.storage import LocalCurationStorage
+    from evaluation.vlm_judge.curation_storage import apply_judge_result
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     labels = DatasetLabelsFile(dataset_id="dataset")
@@ -1137,7 +1142,7 @@ async def test_cancelled_application_cannot_mutate_labels(tmp_path: Path) -> Non
 async def test_given_sample_disagreement_when_approving_then_acknowledgment_and_current_evidence_required(
     tmp_path: Path,
 ) -> None:
-    from evaluation.vlm_judge.saved_input import SavedInputError
+    from physical_ai_curation.saved_input import SavedInputError
 
     class SampleResolver(Resolver):
         changed = False
@@ -1279,8 +1284,8 @@ async def test_given_saved_sample_when_resolving_then_saved_outcome_and_revision
 ) -> None:
     import json
 
-    from evaluation.vlm_judge.curation import ContributionLedger
-    from evaluation.vlm_judge.saved_input import LocalSavedInputReader, SavedInputError, resolve_validation_sample
+    from physical_ai_curation.models import ContributionLedger
+    from physical_ai_curation.saved_input import LocalSavedInputReader, SavedInputError, resolve_validation_sample
 
     ledger = ContributionLedger()
     ledger.record_changes(
@@ -1340,13 +1345,8 @@ async def test_given_saved_labels_when_grounding_then_one_outcome_and_current_re
     labels: list[str],
     accepted: bool,
 ) -> None:
-    from evaluation.vlm_judge.curation import DatasetLabelsFile
-    from evaluation.vlm_judge.saved_input import (
-        LocalSavedInputReader,
-        SavedInputError,
-        label_baseline,
-        resolve_validation_sample,
-    )
+    from physical_ai_curation.models import DatasetLabelsFile
+    from physical_ai_curation.saved_input import LocalSavedInputReader, SavedInputError, label_baseline, resolve_validation_sample
 
     saved = DatasetLabelsFile(dataset_id="dataset", episodes={"3": labels})
     baseline = label_baseline(saved, 3)
@@ -1375,14 +1375,9 @@ async def test_given_saved_labels_when_grounding_then_one_outcome_and_current_re
 async def test_given_label_baseline_when_approved_then_only_grounding_label_changes_invalidate_it(
     tmp_path: Path,
 ) -> None:
-    from evaluation.vlm_judge.curation import DatasetLabelsFile, MachineOrigin
-    from evaluation.vlm_judge.curation_storage import LocalCurationStorage
-    from evaluation.vlm_judge.saved_input import (
-        LocalSavedInputReader,
-        SavedInputError,
-        label_baseline,
-        resolve_validation_sample,
-    )
+    from physical_ai_curation.models import DatasetLabelsFile, MachineOrigin
+    from physical_ai_curation.storage import LocalCurationStorage
+    from physical_ai_curation.saved_input import LocalSavedInputReader, SavedInputError, label_baseline, resolve_validation_sample
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     labels = DatasetLabelsFile(dataset_id="dataset")
@@ -1454,8 +1449,9 @@ async def test_given_label_baseline_when_approved_then_only_grounding_label_chan
 async def test_given_task_findings_when_executed_then_schema_and_human_ownership_remain_distinct(
     tmp_path: Path,
 ) -> None:
-    from evaluation.vlm_judge.curation import DatasetLabelsFile, EpisodeAnalysisRecord
-    from evaluation.vlm_judge.curation_storage import LocalCurationStorage, apply_judge_result
+    from physical_ai_curation.models import DatasetLabelsFile, EpisodeAnalysisRecord
+    from physical_ai_curation.storage import LocalCurationStorage
+    from evaluation.vlm_judge.curation_storage import apply_judge_result
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     labels = DatasetLabelsFile(dataset_id="dataset")

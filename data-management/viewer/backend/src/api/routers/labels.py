@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from evaluation.vlm_judge.curation import DEFAULT_LABELS, DatasetLabelsFile, EpisodeAnalysisRecord
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from physical_ai_curation.models import DEFAULT_LABELS, DatasetLabelsFile, EpisodeAnalysisRecord
 from pydantic import Field
 
 from ..auth import PrincipalContext, require_principal_context

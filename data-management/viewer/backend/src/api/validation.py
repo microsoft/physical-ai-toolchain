@@ -7,10 +7,10 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-from evaluation.vlm_judge.curation import SanitizedModel as SanitizedModel
-from evaluation.vlm_judge.curation import sanitize_user_string as sanitize_user_string
 from fastapi import Header, HTTPException, Query
 from fastapi import Path as PathParam
+from physical_ai_curation.models import SanitizedModel as SanitizedModel
+from physical_ai_curation.models import sanitize_user_string as sanitize_user_string
 
 __all__ = [
     "SAFE_CAMERA_NAME_PATTERN",

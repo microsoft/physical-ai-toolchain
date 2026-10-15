@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 import aiofiles
-from evaluation.vlm_judge.curation import DatasetLabelsFile
 from fastapi import HTTPException
+from physical_ai_curation.models import DatasetLabelsFile
 from pydantic import ValidationError
 
 from ..storage import RevisionConflictError, VersionedValue

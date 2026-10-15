@@ -26,6 +26,8 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from physical_ai_curation.saved_input import SavedInputSnapshot
+
 from .agent import AgentConfig, JudgeAgent
 from .backend import EchoBackend, JudgeBackend, OpenAICompatibleBackend, Qwen3VLBackend
 from .cache import JudgeCache
@@ -33,7 +35,6 @@ from .dataset import EpisodeRecord
 from .frames import FrameWindow, extract_frames, tile_horizontally
 from .judge import JudgeResult
 from .prompts import PROMPT_VERSION
-from .saved_input import SavedInputSnapshot
 
 _LOGGER = logging.getLogger("evaluation.vlm_judge")
 
@@ -47,7 +48,7 @@ class BackendConfig:
 
     model_id: str = "Qwen/Qwen3-VL-4B-Instruct"
     revision: str | None = None
-    """Immutable HF commit SHA pinning the qwen3-vl download; None uses the default branch."""
+    """Required full HF commit SHA for qwen3-vl Hub models; omit for explicit local directories."""
     base_url: str | None = None
     api_key: str | None = None
     device_map: str = "auto"
@@ -86,10 +87,15 @@ class JudgeService:
     def execution_config(self) -> dict[str, object]:
         """Credential-free identity of the declared inference and frame settings."""
         backend = self._config.backend
+        model_locator = backend.model_id
+        if backend.kind == "qwen3-vl" and (
+            Path(model_locator).is_absolute() or model_locator.startswith(("./", "../"))
+        ):
+            model_locator = str(Path(model_locator).resolve())
         return {
             "backend": backend.kind,
-            "model_id": backend.model_id,
-            "revision": backend.revision,
+            "model_id": model_locator,
+            "revision": backend.revision.lower() if backend.revision else None,
             "deployment": hashlib.sha256((backend.base_url or "").encode("utf-8")).hexdigest(),
             "device_map": backend.device_map,
             "dtype": backend.dtype,

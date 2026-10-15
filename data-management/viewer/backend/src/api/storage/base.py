@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from evaluation.vlm_judge.curation_storage import RevisionConflictError as RevisionConflictError
-from evaluation.vlm_judge.curation_storage import VersionedValue as VersionedValue
+from physical_ai_curation.storage import RevisionConflictError as RevisionConflictError
+from physical_ai_curation.storage import VersionedValue as VersionedValue
 
 from ..models.annotations import EpisodeAnnotationFile
 

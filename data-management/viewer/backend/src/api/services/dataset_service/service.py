@@ -831,6 +831,8 @@ class DatasetService:
     async def get_episode_media_record(self, dataset_id: str, episode_idx: int) -> EpisodeRecord | None:
         """Resolve versioned camera references without downloading any video."""
         from evaluation.vlm_judge.dataset import iter_episodes
+        from evaluation.vlm_judge.frames import validate_media_root, validate_video_path
+        from physical_ai_curation.saved_input import SavedInputError
 
         if await self.get_dataset(dataset_id) is None:
             return None
@@ -850,17 +852,31 @@ class DatasetService:
                     lambda: next(iter_episodes(root, indices=[episode_idx], limit=1), None)
                 )
         else:
-            root = self._get_dataset_path(dataset_id)
-            record = await asyncio.to_thread(lambda: next(iter_episodes(root, indices=[episode_idx], limit=1), None))
+            configured_root = self._get_dataset_path(dataset_id)
+            try:
+                root = validate_media_root(configured_root)
+                record = await asyncio.to_thread(
+                    lambda: next(
+                        iter_episodes(
+                            root,
+                            indices=[episode_idx],
+                            limit=1,
+                            video_validator=lambda path: validate_video_path(path, root, root_alias=configured_root),
+                        ),
+                        None,
+                    )
+                )
+            except (OSError, RuntimeError, ValueError):
+                raise SavedInputError("Invalid media input", 400) from None
         if record is None:
             return None
         paths = {}
         identities = {}
         for camera, path in record.video_paths.items():
-            path = path.resolve()
-            if not path.is_relative_to(root.resolve()):
-                raise ValueError("Invalid media path")
             if remote:
+                path = path.resolve()
+                if not path.is_relative_to(root.resolve()):
+                    raise ValueError("Invalid media path")
                 provider = self._blob_provider
                 if provider is None:
                     raise ValueError("Media storage unavailable")

@@ -14,12 +14,13 @@ from copy import deepcopy
 from typing import Any, Protocol
 from uuid import uuid4
 
-from .curation import DatasetLabelsFile, validate_task_result
-from .curation_storage import CurationStorage, plan_withdrawal
+from physical_ai_curation.models import DatasetLabelsFile, validate_task_result
+from physical_ai_curation.saved_input import SavedInputSnapshot
+from physical_ai_curation.storage import CurationStorage, plan_withdrawal
+
 from .dataset import EpisodeRecord
 from .job_storage import JobStore
 from .judge import JudgeResult
-from .saved_input import SavedInputSnapshot
 
 _LOGGER = logging.getLogger("evaluation.vlm_judge.jobs")
 _TERMINAL = {"succeeded", "partial", "failed", "cancelled"}
@@ -492,7 +493,7 @@ class JudgeJobs:
         offset: int = 0,
         limit: int = 25,
     ) -> dict[str, Any]:
-        from .saved_input import SavedInputError
+        from physical_ai_curation.saved_input import SavedInputError
 
         if offset < 0 or not 1 <= limit <= 100:
             raise ValueError("Invalid approval page")

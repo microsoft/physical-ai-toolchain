@@ -26,7 +26,7 @@ from .saved_input_service import ViewerDatasetResolver
 if TYPE_CHECKING:
     from evaluation.vlm_judge.dataset import EpisodeRecord
     from evaluation.vlm_judge.jobs import JudgeJobs
-    from evaluation.vlm_judge.saved_input import SavedInputSnapshot
+    from physical_ai_curation.saved_input import SavedInputSnapshot
 
 logger = logging.getLogger(__name__)
 

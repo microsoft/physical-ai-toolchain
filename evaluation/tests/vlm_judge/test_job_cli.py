@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from vlm_judge.curation_storage import LocalCurationStorage
+from physical_ai_curation.storage import LocalCurationStorage
 from vlm_judge.job_cli import add_job_arguments, execute_job_command, job_exit_code, read_sample_references
 from vlm_judge.job_storage import LocalJobStore
 from vlm_judge.jobs import JudgeJobs

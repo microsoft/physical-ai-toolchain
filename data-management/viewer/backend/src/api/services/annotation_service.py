@@ -12,7 +12,7 @@ import logging
 from collections import OrderedDict, defaultdict
 from datetime import UTC, datetime
 
-from evaluation.vlm_judge.saved_input import grounding_author
+from physical_ai_curation.saved_input import grounding_author
 from pydantic import JsonValue
 
 from ..models.annotations import (

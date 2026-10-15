@@ -57,7 +57,7 @@ class JudgeCache:
             "time_window": {"from_s": from_s, "to_s": to_s},
             "video_windows": dict(video_windows or {}),
             "instruction": instruction,
-            "judge_model": judge_model,
+            "judge_model": self._execution_config.get("model_id", judge_model),
             "prompt_version": prompt_version,
             "agent_config": _serialise_config(agent_config),
         }

@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from evaluation.vlm_judge.api import build_job_router, job_summary
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -57,12 +56,21 @@ def _job_actor(principal: PrincipalContext = Depends(require_principal_context))
     return principal.scope_id
 
 
-job_router = build_job_router(
-    get_judge_jobs,
-    actor_dependency=_job_actor,
-    prepare_config=prepare_job_configuration,
-    mutation_dependencies=[Depends(require_csrf_token)],
-)
+def build_optional_job_router() -> APIRouter | None:
+    """Mount evaluator jobs only when the optional evaluator package is installed."""
+    try:
+        from evaluation.vlm_judge.api import build_job_router
+    except ModuleNotFoundError as error:
+        if error.name not in {"evaluation", "evaluation.vlm_judge"}:
+            raise
+        logger.warning("VLM judge jobs unavailable: install the backend vlm-judge extra")
+        return None
+    return build_job_router(
+        get_judge_jobs,
+        actor_dependency=_job_actor,
+        prepare_config=prepare_job_configuration,
+        mutation_dependencies=[Depends(require_csrf_token)],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +289,8 @@ async def run_episode_judgment(
         raise HTTPException(status_code=409, detail="Judge request conflicts with saved state") from None
     response.headers["Location"] = str(request.url_for("judge_job_status", job_id=job["id"]))
     response.headers["Retry-After"] = "1"
+    from evaluation.vlm_judge.api import job_summary
+
     return job_summary(job)
 
 
@@ -357,6 +367,7 @@ def _resolve_episode(
 ):
     """Return the matching ``EpisodeRecord`` or ``None`` if not found."""
     from evaluation.vlm_judge.dataset import iter_episodes
+    from evaluation.vlm_judge.frames import validate_video_path
 
     base_path = getattr(service, "base_path", None)
     if not base_path:
@@ -374,10 +385,12 @@ def _resolve_episode(
             views=views or None,
             indices=[episode_idx],
             limit=1,
+            video_validator=lambda path: validate_video_path(path, dataset_root),
         ):
             return record
-    except (FileNotFoundError, ValueError) as err:
-        raise HTTPException(status_code=400, detail=str(err)) from err
+    except (OSError, ValueError) as err:
+        logger.exception("Invalid judge dataset media")
+        raise HTTPException(status_code=400, detail="Invalid media input") from err
     return None
 
 

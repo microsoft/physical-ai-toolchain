@@ -758,9 +758,9 @@ def test_given_saved_labels_and_dataset_task_when_grounding_then_no_annotation_i
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from evaluation.vlm_judge.curation import DatasetLabelsFile
+    from physical_ai_curation.models import DatasetLabelsFile
     from evaluation.vlm_judge.dataset import EpisodeRecord
-    from evaluation.vlm_judge.saved_input import label_baseline
+    from physical_ai_curation.saved_input import label_baseline
 
     from src.api.models.annotations import GroundingOverview
     from src.api.routers import labels as label_router
