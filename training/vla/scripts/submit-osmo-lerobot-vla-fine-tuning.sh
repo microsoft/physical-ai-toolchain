@@ -299,12 +299,19 @@ groot_scripts_dir="$REPO_ROOT/training/vla/scripts/groot"
 download_blob_py="$groot_scripts_dir/download_blob.py"
 aml_mirror_py="$REPO_ROOT/training/utils/aml_mirror.py"
 train_entry_sh="$groot_scripts_dir/osmo-train-entry.sh"
-for entry_script in "$download_blob_py" "$aml_mirror_py" "$train_entry_sh"; do
+verify_prebuilt_runtime_py="$groot_scripts_dir/verify_prebuilt_runtime.py"
+patch_n17_trainer_py="$groot_scripts_dir/patch_n17_trainer.py"
+preflight_check_py="$groot_scripts_dir/preflight_check.py"
+for entry_script in "$download_blob_py" "$aml_mirror_py" "$train_entry_sh" \
+  "$verify_prebuilt_runtime_py" "$patch_n17_trainer_py" "$preflight_check_py"; do
   [[ -f "$entry_script" ]] || fatal "Entry script not found: $entry_script"
 done
 download_blob_b64="$(base64 < "$download_blob_py" | tr -d '\n')"
 aml_mirror_b64="$(base64 < "$aml_mirror_py" | tr -d '\n')"
 train_script_b64="$(base64 < "$train_entry_sh" | tr -d '\n')"
+verify_prebuilt_runtime_b64="$(base64 < "$verify_prebuilt_runtime_py" | tr -d '\n')"
+patch_n17_trainer_b64="$(base64 < "$patch_n17_trainer_py" | tr -d '\n')"
+preflight_check_b64="$(base64 < "$preflight_check_py" | tr -d '\n')"
 
 if [[ -z "$azureml_model_name" || "$azureml_model_name" == "groot-model" ]]; then
   azureml_model_name=$(echo "${base_model##*/}" | tr '[:upper:]' '[:lower:]')
@@ -365,6 +372,9 @@ submit_args=(
   "download_blob_b64=$download_blob_b64"
   "aml_mirror_b64=$aml_mirror_b64"
   "train_script_b64=$train_script_b64"
+  "verify_prebuilt_runtime_b64=$verify_prebuilt_runtime_b64"
+  "patch_n17_trainer_b64=$patch_n17_trainer_b64"
+  "preflight_check_b64=$preflight_check_b64"
 )
 
 [[ -n "$run_id_override" ]]  && submit_args+=("run_id_override=$run_id_override")

@@ -5,7 +5,8 @@
 # ephemeral storage and optionally mirrored to Azure ML.
 #
 # Usage — submit via the wrapper script, which base64-injects the entry scripts
-# (training/vla/scripts/groot/{download_blob.py,osmo-train-entry.sh};
+# (training/vla/scripts/groot/{download_blob.py,osmo-train-entry.sh} and its
+# Python helpers verify_prebuilt_runtime.py, patch_n17_trainer.py, preflight_check.py;
 # AML mirror reuses training/utils/aml_mirror.py)
 # as default-values before submitting:
 #   training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh \
@@ -34,7 +35,11 @@ workflow:
           base64 -d /tmp/download_blob.py.b64 > /tmp/download_blob.py
           base64 -d /tmp/aml_mirror.py.b64 > /tmp/aml_mirror.py
           base64 -d /tmp/train.sh.b64 > /tmp/train.sh
-          for f in /tmp/download_blob.py /tmp/aml_mirror.py /tmp/train.sh; do
+          base64 -d /tmp/verify_prebuilt_runtime.py.b64 > /tmp/verify_prebuilt_runtime.py
+          base64 -d /tmp/patch_n17_trainer.py.b64 > /tmp/patch_n17_trainer.py
+          base64 -d /tmp/preflight_check.py.b64 > /tmp/preflight_check.py
+          for f in /tmp/download_blob.py /tmp/aml_mirror.py /tmp/train.sh \
+            /tmp/verify_prebuilt_runtime.py /tmp/patch_n17_trainer.py /tmp/preflight_check.py; do
             [ -s "$f" ] || { echo "ERROR: $f is empty — submit via training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh" >&2; exit 1; }
           done
           exec bash /tmp/train.sh
@@ -72,6 +77,12 @@ workflow:
           contents: "{{aml_mirror_b64}}"
         - path: /tmp/train.sh.b64
           contents: "{{train_script_b64}}"
+        - path: /tmp/verify_prebuilt_runtime.py.b64
+          contents: "{{verify_prebuilt_runtime_b64}}"
+        - path: /tmp/patch_n17_trainer.py.b64
+          contents: "{{patch_n17_trainer_b64}}"
+        - path: /tmp/preflight_check.py.b64
+          contents: "{{preflight_check_b64}}"
 
 default-values:
   workflow_name: groot-train
@@ -88,6 +99,9 @@ default-values:
   download_blob_b64: ""
   aml_mirror_b64: ""
   train_script_b64: ""
+  verify_prebuilt_runtime_b64: ""
+  patch_n17_trainer_b64: ""
+  preflight_check_b64: ""
   base_model: ""
   base_model_revision: ""
   batch_size: 4
