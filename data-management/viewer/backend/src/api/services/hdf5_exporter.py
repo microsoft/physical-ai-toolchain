@@ -11,6 +11,8 @@ Exports episodes to new HDF5 files with:
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +42,7 @@ from .image_transform import (
     ImageTransformError,
     apply_camera_transforms,
 )
+from .lerobot_exporter import LOCK_FILE, _lock, _release_lock
 
 # h5py is an optional dependency
 try:
@@ -52,6 +55,32 @@ except ImportError:
 
 class HDF5ExportError(ExportError):
     """Exception raised for HDF5 export failures."""
+
+
+def _publish(staging: Path, destination: Path) -> None:
+    """Move ``staging`` to ``destination``, failing instead of replacing a file that already exists.
+
+    Creating the destination exclusively reserves its name, so the rename only ever replaces this export's
+    own reservation. That keeps publication atomic without needing hard links from the filesystem.
+    """
+    try:
+        os.close(os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+    except FileExistsError:
+        raise HDF5ExportError(f"{destination.name} already exists in the output directory") from None
+    try:
+        os.replace(staging, destination)
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
+
+
+def _write_new(path: Path, text: str) -> None:
+    """Write ``text`` to a file that must not exist yet."""
+    try:
+        with path.open("x", encoding="utf-8") as file:
+            file.write(text)
+    except FileExistsError:
+        raise HDF5ExportError(f"{path.name} already exists in the output directory") from None
 
 
 class HDF5Exporter:
@@ -114,6 +143,8 @@ class HDF5Exporter:
         """
         Export a single episode with edit operations applied.
 
+        Holds the destination's export lock while writing, so it fails while another export is writing there.
+
         Args:
             episode_index: Episode index to export.
             edits: Edit operations to apply (None = no edits).
@@ -122,13 +153,34 @@ class HDF5Exporter:
         Returns:
             ExportResult with success status and output files.
         """
+        try:
+            lock = self._lock_destination()
+        except ExportError as e:
+            return ExportResult(success=False, output_files=[], error=str(e))
+        try:
+            return self._export_episode(episode_index, edits, progress_callback)
+        finally:
+            _release_lock(lock, self.dst_path / LOCK_FILE)
+
+    def _lock_destination(self) -> int:
+        """Create the destination if needed and take its export lock, returning the descriptor that holds it."""
+        try:
+            self.dst_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise HDF5ExportError(f"the output directory can't be created: {e}") from e
+        return _lock(self.dst_path)
+
+    def _export_episode(
+        self,
+        episode_index: int,
+        edits: EpisodeEditOperations | None,
+        progress_callback: ProgressCallback | None,
+    ) -> ExportResult:
+        """Export one episode while the caller holds the destination's export lock."""
         start_time = datetime.now()
         output_files: list[str] = []
 
         try:
-            # Create output directory
-            self.dst_path.mkdir(parents=True, exist_ok=True)
-
             # Load source episode with images
             if progress_callback:
                 progress_callback(
@@ -174,33 +226,40 @@ class HDF5Exporter:
             # Output file path
             output_path = self.dst_path / f"episode_{episode_index:06d}.hdf5"
 
-            # Export to HDF5
-            with h5py.File(output_path, "w") as dst:
-                # Copy and filter trajectory data
-                self._export_trajectory_data(
-                    dst,
-                    episode,
-                    valid_indices,
-                    edits.inserted_frames if edits else None,
-                    edits.trajectory_adjustments if edits else None,
-                )
-
-                # Apply transforms and export images
-                if episode.images:
-                    self._export_images(
+            # Write to a staging file only this export owns, then publish it without replacing an existing episode.
+            fd, staging = tempfile.mkstemp(dir=self.dst_path, prefix=f".{output_path.name}.", suffix=".partial")
+            os.close(fd)
+            staging_path = Path(staging)
+            try:
+                with h5py.File(staging_path, "w") as dst:
+                    # Copy and filter trajectory data
+                    self._export_trajectory_data(
                         dst,
-                        episode.images,
+                        episode,
                         valid_indices,
-                        edits.global_transform if edits else None,
-                        edits.camera_transforms if edits else None,
-                        progress_callback,
-                        episode_index,
-                        output_frames,
                         edits.inserted_frames if edits else None,
+                        edits.trajectory_adjustments if edits else None,
                     )
 
-                # Copy metadata
-                self._export_metadata(dst, episode, edits)
+                    # Apply transforms and export images
+                    if episode.images:
+                        self._export_images(
+                            dst,
+                            episode.images,
+                            valid_indices,
+                            edits.global_transform if edits else None,
+                            edits.camera_transforms if edits else None,
+                            progress_callback,
+                            episode_index,
+                            output_frames,
+                            edits.inserted_frames if edits else None,
+                        )
+
+                    # Copy metadata
+                    self._export_metadata(dst, episode, edits)
+                _publish(staging_path, output_path)
+            finally:
+                staging_path.unlink(missing_ok=True)
 
             output_files.append(str(output_path))
 
@@ -217,10 +276,8 @@ class HDF5Exporter:
             remapped = remap_subtasks(subtasks, output_indices(plan))
             subtasks_path = self.dst_path / f"episode_{episode_index:06d}{SUBTASK_FILE_SUFFIX}"
             if remapped:
-                subtasks_path.write_text(json.dumps(remapped, indent=2))
+                _write_new(subtasks_path, json.dumps(remapped, indent=2))
                 output_files.append(str(subtasks_path))
-            else:
-                subtasks_path.unlink(missing_ok=True)
 
             if progress_callback:
                 progress_callback(
@@ -276,7 +333,28 @@ class HDF5Exporter:
 
         Returns:
             ExportResult with combined stats.
+
+        The destination's export lock is held for the whole batch, and the destination must hold nothing but
+        that lock once it's taken, so a concurrent export is refused before it writes anything.
         """
+        try:
+            lock = self._lock_destination()
+        except ExportError as e:
+            return ExportResult(success=False, output_files=[], error=str(e))
+        try:
+            if any(entry.name != LOCK_FILE for entry in self.dst_path.iterdir()):
+                return ExportResult(success=False, output_files=[], error="the output directory must be new or empty")
+            return self._export_batch(episode_indices, edits_map, progress_callback)
+        finally:
+            _release_lock(lock, self.dst_path / LOCK_FILE)
+
+    def _export_batch(
+        self,
+        episode_indices: list[int],
+        edits_map: dict[int, EpisodeEditOperations] | None,
+        progress_callback: ProgressCallback | None,
+    ) -> ExportResult:
+        """Export each episode while the caller holds the destination's export lock."""
         start_time = datetime.now()
         edits_map = edits_map or {}
         all_output_files: list[str] = []
@@ -307,7 +385,7 @@ class HDF5Exporter:
                 return episode_progress
 
             progress_fn = make_episode_progress(i, episode_index)
-            result = self.export_episode(episode_index, edits, progress_fn)
+            result = self._export_episode(episode_index, edits, progress_fn)
 
             all_output_files.extend(result.output_files)
             total_frames += result.stats.get("total_frames", 0)
@@ -658,4 +736,4 @@ class HDF5Exporter:
 
             meta["edits"] = edit_info
 
-        path.write_text(json.dumps(meta, indent=2))
+        _write_new(path, json.dumps(meta, indent=2))
