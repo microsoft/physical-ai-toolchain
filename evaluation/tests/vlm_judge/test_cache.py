@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,54 @@ def _touch(path: Path, size_bytes: int = 64) -> Path:
 
 
 class TestJudgeCache:
+    def test_legacy_payload_cannot_match_new_identity(self, tmp_path: Path) -> None:
+        video = _touch(tmp_path / "ep.mp4")
+        legacy = {
+            "videos": [
+                {
+                    "view": "front",
+                    "path": str(video),
+                    "size": video.stat().st_size,
+                    "mtime_ns": video.stat().st_mtime_ns,
+                }
+            ],
+            "time_window": {"from_s": None, "to_s": None},
+            "instruction": "pick cube",
+            "judge_model": "echo",
+            "prompt_version": "v1",
+            "agent_config": None,
+        }
+        legacy_key = hashlib.sha256(json.dumps(legacy, sort_keys=True).encode()).hexdigest()
+        current = JudgeCache(None).key(
+            video_paths={"front": video}, instruction="pick cube", judge_model="echo", prompt_version="v1"
+        )
+        assert current != legacy_key
+
+    def test_explicit_local_locator_is_canonical(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "model").mkdir()
+        cache = JudgeCache(None)
+        arguments = {"video_paths": {}, "instruction": "x", "prompt_version": "v1", "backend_kind": "qwen3-vl"}
+        assert cache.key(**arguments, judge_model="./model") == cache.key(
+            **arguments, judge_model=str(tmp_path / "model")
+        )
+
+    def test_backend_and_normalized_revision_separate_cache_entries(self, tmp_path: Path) -> None:
+        cache = JudgeCache(tmp_path / "cache")
+        arguments = {
+            "video_paths": {"front": _touch(tmp_path / "ep.mp4")},
+            "instruction": "pick cube",
+            "judge_model": "owner/model",
+            "prompt_version": "v1",
+        }
+        echo = cache.key(**arguments, backend_kind="echo", model_revision="a" * 40)
+        native = cache.key(**arguments, backend_kind="qwen3-vl", model_revision="a" * 40)
+        changed = cache.key(**arguments, backend_kind="qwen3-vl", model_revision="b" * 40)
+        normalized = cache.key(**arguments, backend_kind="qwen3-vl", model_revision="A" * 40)
+
+        assert len({echo, native, changed}) == 3
+        assert native == normalized
+
     def test_disabled_when_root_is_none(self) -> None:
         cache = JudgeCache(None)
         assert cache.enabled is False

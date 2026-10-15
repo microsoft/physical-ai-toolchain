@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import math
+import stat
 from base64 import b64encode
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -17,6 +18,43 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from PIL.Image import Image
+
+
+class MediaInputError(ValueError):
+    """Invalid local video path or undecodable episode media."""
+
+
+def validate_media_root(root: Path | str | None) -> Path:
+    """Require an explicit existing directory narrower than the filesystem root."""
+    if root is None or not str(root).strip():
+        raise ValueError("A media root is required")
+    resolved = Path(root).resolve()
+    if resolved.parent == resolved or not resolved.is_dir():
+        raise ValueError("Media root must be an existing non-root directory")
+    return resolved
+
+
+def validate_video_path(path: Path | str, root: Path) -> Path:
+    """Return a canonical regular MP4 inside root without opening the media.
+
+    The caller owns root configuration. This is not protection against a
+    trusted local writer replacing a file after validation.
+    """
+    try:
+        submitted = Path(path)
+        if ".." in submitted.parts or "\x00" in str(path) or "://" in str(path):
+            raise MediaInputError("Invalid media input")
+        candidate = submitted if submitted.is_absolute() else root / submitted
+        if not candidate.is_relative_to(root):
+            raise MediaInputError("Invalid media input")
+        resolved = candidate.resolve()
+        if not resolved.is_relative_to(root) or resolved.suffix.lower() != ".mp4":
+            raise MediaInputError("Invalid media input")
+        if not stat.S_ISREG(resolved.stat().st_mode):
+            raise MediaInputError("Invalid media input")
+        return resolved
+    except (OSError, RuntimeError, ValueError) as err:
+        raise MediaInputError("Invalid media input") from err
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +74,20 @@ def extract_frames(
 ) -> list[Image]:
     """Return ``n_frames`` PIL images sampled evenly across the window."""
     import av
+
+    try:
+        return _extract_frames(window, n_frames=n_frames, target_size=target_size)
+    except (av.FFmpegError, OSError, ValueError, RuntimeError, IndexError, OverflowError) as err:
+        raise MediaInputError("Invalid media input") from err
+
+
+def _extract_frames(
+    window: FrameWindow,
+    *,
+    n_frames: int,
+    target_size: tuple[int, int] | None,
+) -> list[Image]:
+    import av
     from PIL import Image as PILImage
 
     if n_frames <= 0:
@@ -50,7 +102,7 @@ def extract_frames(
         duration_s = _stream_duration_s(container, stream)
         from_s = max(window.from_s or 0.0, 0.0)
         to_s = window.to_s if window.to_s is not None else duration_s
-        if to_s <= from_s:
+        if not math.isfinite(from_s) or not math.isfinite(to_s) or to_s <= from_s:
             raise ValueError(
                 f"Invalid window {from_s:.3f}->{to_s:.3f}s for {window.path}",
             )

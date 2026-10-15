@@ -21,6 +21,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from evaluation.vlm_judge.frames import MediaInputError
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
@@ -149,6 +150,8 @@ async def get_episode_judgment(
         instruction=record.instruction,
         judge_model=judge_service.model_id,
         prompt_version=_prompt_version(),
+        backend_kind=judge_service.config.backend.kind,
+        model_revision=judge_service.config.backend.revision,
         from_s=record.from_timestamp,
         to_s=record.to_timestamp,
         agent_config=judge_service.config.agent,
@@ -213,6 +216,8 @@ async def run_episode_judgment(
         instruction=instruction,
         judge_model=judge_service.model_id,
         prompt_version=_prompt_version(),
+        backend_kind=judge_service.config.backend.kind,
+        model_revision=judge_service.config.backend.revision,
         from_s=record.from_timestamp,
         to_s=record.to_timestamp,
         agent_config=replace(judge_service.config.agent, process_method=effective_method),
@@ -234,15 +239,14 @@ async def run_episode_judgment(
             cache_dir=_judge_cache_dir(service, dataset_id),
             process_method=payload.process_method,
         )
-    except FileNotFoundError as err:
-        raise HTTPException(status_code=404, detail=str(err)) from err
-    except ValueError as err:
-        raise HTTPException(status_code=400, detail=str(err)) from err
+    except MediaInputError as err:
+        logger.exception("Invalid judge media")
+        raise HTTPException(status_code=400, detail="Invalid media input") from err
     except Exception as err:  # backend / model errors surface as 502
         safe_dataset_id = dataset_id.replace("\r", "").replace("\n", "")
         safe_episode_idx = int(episode_idx)
         logger.exception("VLM judge failed for %s/%d", safe_dataset_id, safe_episode_idx)
-        raise HTTPException(status_code=502, detail=f"VLM backend error: {err}") from err
+        raise HTTPException(status_code=502, detail="VLM backend error") from err
 
     payload_out = result.to_dict()
     return JudgeResponse(cached=was_cached, process_method=effective_method, **payload_out)
@@ -262,6 +266,7 @@ def _resolve_episode(
 ):
     """Return the matching ``EpisodeRecord`` or ``None`` if not found."""
     from evaluation.vlm_judge.dataset import iter_episodes
+    from evaluation.vlm_judge.frames import validate_video_path
 
     base_path = getattr(service, "base_path", None)
     if not base_path:
@@ -279,10 +284,12 @@ def _resolve_episode(
             views=views or None,
             indices=[episode_idx],
             limit=1,
+            video_validator=lambda path: validate_video_path(path, dataset_root),
         ):
             return record
-    except (FileNotFoundError, ValueError) as err:
-        raise HTTPException(status_code=400, detail=str(err)) from err
+    except (OSError, ValueError) as err:
+        logger.exception("Invalid judge dataset media")
+        raise HTTPException(status_code=400, detail="Invalid media input") from err
     return None
 
 

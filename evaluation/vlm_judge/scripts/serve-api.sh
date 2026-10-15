@@ -16,7 +16,7 @@ Start the VLM-as-judge FastAPI server.
 
 OPTIONS:
     -h, --help              Show this help
-    --host HOST             Bind host (default: 0.0.0.0)
+    --host HOST             Loopback bind host (default: 127.0.0.1)
     --port PORT             Bind port (default: 8088)
     --backend NAME          qwen3-vl | openai-compat | echo (default: echo)
     --model-id ID           Backend model id
@@ -26,7 +26,12 @@ OPTIONS:
 
 ENV:
     VLM_JUDGE_BACKEND, VLM_JUDGE_MODEL_ID, VLM_JUDGE_BASE_URL,
-    VLM_JUDGE_API_KEY, VLM_JUDGE_N_FRAMES, VLM_JUDGE_CACHE_DIR.
+    VLM_JUDGE_API_KEY, VLM_JUDGE_N_FRAMES, VLM_JUDGE_CACHE_DIR,
+    VLM_JUDGE_MODEL_REVISION, VLM_JUDGE_MEDIA_ROOT,
+    VLM_JUDGE_ALLOW_UNAUTHENTICATED=true (trusted local host only).
+
+  Judging is disabled without explicit local opt-in and a narrow media root.
+  Proxies, tunnels, port forwarding and shared-host exposure are unsupported.
 
 EXAMPLES:
     $(basename "$0") --backend echo
@@ -36,7 +41,7 @@ EXAMPLES:
 EOF
 }
 
-host="0.0.0.0"
+host="127.0.0.1"
 port="8088"
 backend="${VLM_JUDGE_BACKEND:-echo}"
 model_id="${VLM_JUDGE_MODEL_ID:-Qwen/Qwen3-VL-4B-Instruct}"
@@ -60,6 +65,10 @@ done
 
 require_tools python3
 
+if ! python3 -c 'import ipaddress, sys; host = sys.argv[1]; sys.exit(0 if host == "localhost" or ipaddress.ip_address(host).is_loopback else 1)' "$host" 2>/dev/null; then
+  fatal "Standalone no-auth serving requires a loopback host"
+fi
+
 export VLM_JUDGE_BACKEND="$backend"
 export VLM_JUDGE_MODEL_ID="$model_id"
 [[ -n "$base_url" ]] && export VLM_JUDGE_BASE_URL="$base_url"
@@ -72,10 +81,11 @@ print_kv "Model"      "$model_id"
 print_kv "Base URL"   "${base_url:-(n/a)}"
 print_kv "Reload"     "$reload"
 
-[[ "$config_preview" == "true" ]] && exit 0
-
-cmd=(python3 -m uvicorn evaluation.vlm_judge.api:app --host "$host" --port "$port")
+cmd=(python3 -m uvicorn evaluation.vlm_judge.api:app --host "$host" --port "$port" --no-proxy-headers)
 [[ "$reload" == "true" ]] && cmd+=(--reload)
+print_kv "Command" "${cmd[*]}"
+
+[[ "$config_preview" == "true" ]] && exit 0
 
 cd "$REPO_ROOT"
 exec "${cmd[@]}"
