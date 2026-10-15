@@ -440,6 +440,68 @@ def test_http_media_rejected_before_probe_or_cache(
     assert response.json() == {"detail": "Invalid media input"}
 
 
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_selected_v3_episode_ignores_missing_unselected_media(
+    vlm_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: str
+) -> None:
+    root = tmp_path / DATASET_ID
+    _set_video_template(root, "v3.0", "videos/chunk-000/obs.front/episode_{episode_index:06d}.mp4")
+    missing = root / "videos/chunk-000/obs.front/episode_000000.mp4"
+    missing.rename(missing.with_name("episode_000001.mp4"))
+    info_path = root / "meta/info.json"
+    info = json.loads(info_path.read_text())
+    info["total_episodes"] = 2
+    info_path.write_text(json.dumps(info))
+    (root / "meta/episodes.jsonl").write_text(
+        "".join(json.dumps({"episode_index": index, "length": 12, "tasks": [INSTRUCTION]}) + "\n" for index in (0, 1))
+    )
+    original_stat = Path.stat
+
+    def guarded_stat(candidate: Path, *args: object, **kwargs: object) -> os.stat_result:
+        if candidate == missing:
+            pytest.fail("Unselected episode reached a media probe")
+        return original_stat(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", guarded_stat)
+    path = f"/api/datasets/{DATASET_ID}/episodes/1/judge"
+    response = vlm_client.request(method, path, **({"json": {}} if method == "POST" else {}))
+
+    assert response.status_code == 200
+    first = vlm_client.post(path, json={})
+    assert first.status_code == 200
+    assert first.json()["cached"] is (method == "POST")
+    assert vlm_client.post(path, json={}).json()["cached"] is True
+    assert vlm_client.get(path).json()["cached"] is True
+
+
+@pytest.mark.parametrize("indices", [None, [], [0], [1]])
+@pytest.mark.parametrize("validate_media", [False, True])
+def test_v3_jsonl_selection_preserves_trusted_and_validated_iteration(
+    tmp_path: Path, indices: list[int] | None, validate_media: bool
+) -> None:
+    from evaluation.vlm_judge.dataset import iter_episodes
+    from evaluation.vlm_judge.frames import validate_video_path
+
+    root = tmp_path / DATASET_ID
+    _build_dataset(root, instruction=INSTRUCTION)
+    _set_video_template(root, "v3.0", "videos/chunk-000/obs.front/episode_{episode_index:06d}.mp4")
+    _write_mp4(root / "videos/chunk-000/obs.front/episode_000001.mp4")
+    (root / "meta/episodes.jsonl").write_text(
+        "".join(json.dumps({"episode_index": index, "length": 12, "tasks": [INSTRUCTION]}) + "\n" for index in (0, 1))
+    )
+    validated = []
+
+    def validator(candidate: Path) -> Path:
+        validated.append(candidate)
+        return validate_video_path(candidate, root)
+
+    records = list(iter_episodes(root, indices=indices, video_validator=validator if validate_media else None))
+
+    assert [record.episode_index for record in records] == ([0, 1] if indices is None else indices)
+    expected_paths = {path for record in records for path in record.video_paths.values()}
+    assert set(validated) == (expected_paths if validate_media else set())
+
+
 def test_contained_v3_jsonl_episode_judges_and_reuses_cache(vlm_client: TestClient, tmp_path: Path) -> None:
     _set_video_template(tmp_path / DATASET_ID, "v3.0", "videos/chunk-000/obs.front/episode_{episode_index:06d}.mp4")
     path = f"/api/datasets/{DATASET_ID}/episodes/0/judge"

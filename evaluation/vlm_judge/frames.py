@@ -35,11 +35,13 @@ def validate_media_root(root: Path | str | None) -> Path:
     return resolved
 
 
-def validate_video_path(path: Path | str, root: Path) -> Path:
+def validate_video_path(path: Path | str, root: Path, *, root_alias: Path | str | None = None) -> Path:
     """Return a canonical regular MP4 inside root without opening the media.
 
-    The caller owns root configuration. This is not protection against a
-    trusted local writer replacing a file after validation.
+    The caller owns the canonical root and optional configured alias. The alias
+    only permits a lexical spelling; resolved paths must remain inside root.
+    This is not protection against a trusted local writer replacing a file
+    after validation.
     """
     try:
         submitted = Path(path)
@@ -47,7 +49,10 @@ def validate_video_path(path: Path | str, root: Path) -> Path:
             raise MediaInputError("Invalid media input")
         candidate = str(submitted if submitted.is_absolute() else root / submitted)
         root_prefix = str(root) + os.sep
-        if not candidate.startswith(root_prefix):
+        allowed_prefixes = (root_prefix,)
+        if root_alias is not None:
+            allowed_prefixes += (str(Path(root_alias).absolute()) + os.sep,)
+        if not candidate.startswith(allowed_prefixes):
             raise MediaInputError("Invalid media input")
         resolved = os.path.realpath(candidate)
         if not resolved.startswith(root_prefix):

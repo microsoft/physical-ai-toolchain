@@ -108,7 +108,7 @@ def iter_episodes(
         records = (
             _iter_v3(spec, selected_views)
             if parquet_meta
-            else _iter_v3_jsonl(spec, selected_views, video_validator=video_validator)
+            else _iter_v3_jsonl(spec, selected_views, indices=indices, video_validator=video_validator)
         )
     else:
         records = _iter_v21(spec, selected_views)
@@ -255,6 +255,7 @@ def _iter_v3_jsonl(
     spec: DatasetSpec,
     views: tuple[str, ...],
     *,
+    indices: list[int] | None = None,
     video_validator: Callable[[Path], Path] | None = None,
 ) -> Iterator[EpisodeRecord]:
     ep_meta_dir = spec.root / "meta" / "episodes"
@@ -277,6 +278,8 @@ def _iter_v3_jsonl(
                     continue
                 payload = _normalize_tasks_field(json.loads(line))
                 ep_idx = int(payload["episode_index"])
+                if indices is not None and ep_idx not in indices:
+                    continue
                 length = int(payload.get("length", 0))
                 instruction = _resolve_instruction_v21(payload, tasks_by_index)
                 video_paths: dict[str, Path] = {}

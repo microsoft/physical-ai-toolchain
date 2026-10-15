@@ -187,7 +187,10 @@ def build_router(
         try:
             if not request.video_paths:
                 raise MediaInputError("Invalid media input")
-            video_paths = {view: validate_video_path(path, root) for view, path in request.video_paths.items()}
+            video_paths = {
+                view: validate_video_path(path, root, root_alias=configured_root)
+                for view, path in request.video_paths.items()
+            }
             result = service.judge_episode(
                 episode_id=request.episode_id,
                 instruction=request.instruction,

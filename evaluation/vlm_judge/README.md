@@ -280,8 +280,12 @@ checkpoint-upload idempotency convention. Default location is
 
 Old cache payloads are invalidated. Changing backend kind or Hub SHA creates a new
 key; displayed model IDs do not encode the pin. Local directory identity is only a
-canonical locator: after replacing local artifacts, clear the associated cache or
-force fresh judgments. No cryptographic content identity is claimed.
+canonical locator. Before replacing local artifacts, stop every service that has
+loaded them (the standalone judge, viewer backend, or local OpenAI shim). After
+replacement is complete, restart those services and clear the associated result
+caches or force fresh judgments.
+Clearing the result cache or using `--force` does not reload model weights already
+held in memory. No cryptographic content identity is claimed.
 
 ## 🧪 Tests
 

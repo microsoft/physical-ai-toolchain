@@ -220,6 +220,74 @@ def test_contained_media_uses_canonical_path(client, tmp_path: Path, path_kind: 
     assert service.calls[0]["video_paths"] == {"front": expected}
 
 
+@pytest.mark.parametrize("path_kind", ["relative", "alias-absolute", "canonical-absolute"])
+def test_symlinked_media_root_accepts_equivalent_paths(tmp_path: Path, path_kind: str) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    root = tmp_path / "media"
+    root.mkdir()
+    video = root / "episode.mp4"
+    video.write_bytes(b"stub video")
+    alias = tmp_path / "configured-media"
+    alias.symlink_to(root, target_is_directory=True)
+    paths = {
+        "relative": "episode.mp4",
+        "alias-absolute": str(alias / "episode.mp4"),
+        "canonical-absolute": str(video),
+    }
+    service = StubService()
+    app = FastAPI()
+    app.include_router(api_module.build_router(service, media_root=alias, allow_unauthenticated=True))
+    connection = TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000))
+
+    response = connection.post(
+        "/judge",
+        json={"episode_id": "ep0", "instruction": "pick cube", "video_paths": {"front": paths[path_kind]}},
+    )
+
+    assert response.status_code == 200
+    assert service.calls[0]["video_paths"] == {"front": video}
+
+
+@pytest.mark.parametrize("path_kind", ["alias-prefix", "canonical-prefix", "escape", "traversal", "missing"])
+def test_symlinked_media_root_rejects_invalid_paths(tmp_path: Path, path_kind: str) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    root = tmp_path / "media"
+    root.mkdir()
+    alias = tmp_path / "configured-media"
+    alias.symlink_to(root, target_is_directory=True)
+    sibling = tmp_path / "media-other"
+    sibling.mkdir()
+    outside = sibling / "episode.mp4"
+    outside.write_bytes(b"not opened")
+    sibling_alias = tmp_path / "configured-media-other"
+    sibling_alias.symlink_to(sibling, target_is_directory=True)
+    (root / "escape.mp4").symlink_to(outside)
+    paths = {
+        "alias-prefix": str(sibling_alias / "episode.mp4"),
+        "canonical-prefix": str(outside),
+        "escape": str(alias / "escape.mp4"),
+        "traversal": str(alias / ".." / "media-other" / "episode.mp4"),
+        "missing": str(alias / "missing.mp4"),
+    }
+    service = StubService()
+    app = FastAPI()
+    app.include_router(api_module.build_router(service, media_root=alias, allow_unauthenticated=True))
+    connection = TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000))
+
+    response = connection.post(
+        "/judge",
+        json={"episode_id": "ep0", "instruction": "pick cube", "video_paths": {"front": paths[path_kind]}},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid media input"}
+    assert service.calls == []
+
+
 @pytest.mark.parametrize("path_kind", ["outside", "prefix", "symlink-prefix"])
 def test_outside_media_is_rejected_before_additional_filesystem_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path_kind: str
