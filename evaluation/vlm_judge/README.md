@@ -242,6 +242,19 @@ CLI `--model-revision` or server/viewer `VLM_JUDGE_MODEL_REVISION`. Branches, ta
 blank revisions and `trust_remote_code=True` fail before model imports or downloads.
 Processor and all model fallback classes use native Transformers implementations.
 
+To obtain the full SHA for a Hub model:
+
+1. Open the model's commit history, for example
+  [Qwen3-VL-4B-Instruct commits](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct/commits/main).
+2. Select the revision you intend to use and copy its full 40-character commit
+  hash, not the abbreviated hash or a branch name such as `main`.
+3. Set `VLM_JUDGE_MODEL_REVISION` to that value for the server/viewer, or pass it
+  through `--model-revision` for the CLI. Use the matching model repository ID.
+
+The SHA pins an exact repository version; it does not establish that the artifacts
+are trusted or compatible with your runtime. Review the selected revision and
+validate it in your target environment before relying on it.
+
 An absolute directory or a path starting `./` or `../` selects local-only loading.
 Omit the revision for local directories; missing directories never fall back to the
 Hub. A bare `owner/model` remains a Hub ID; a matching local path is rejected as
