@@ -82,6 +82,9 @@ prerelease = "allow"
 dev = [
     # Held below 16 because lerobot[dataset]==0.6.1 requires av<16.
     "av==15.1.0",
+    "fastapi==0.141.1",
+    "pydantic==2.13.5",
+    "httpx==0.28.1",
     "pytest==9.1.1",
     "pytest-mock==3.15.1",
     "pytest-cov==7.1.0",

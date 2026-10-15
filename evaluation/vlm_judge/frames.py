@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import math
+import os
 import stat
 from base64 import b64encode
 from collections.abc import Sequence
@@ -44,15 +45,17 @@ def validate_video_path(path: Path | str, root: Path) -> Path:
         submitted = Path(path)
         if ".." in submitted.parts or "\x00" in str(path) or "://" in str(path):
             raise MediaInputError("Invalid media input")
-        candidate = submitted if submitted.is_absolute() else root / submitted
-        if not candidate.is_relative_to(root):
+        candidate = str(submitted if submitted.is_absolute() else root / submitted)
+        root_prefix = str(root) + os.sep
+        if not candidate.startswith(root_prefix):
             raise MediaInputError("Invalid media input")
-        resolved = candidate.resolve()
-        if not resolved.is_relative_to(root) or resolved.suffix.lower() != ".mp4":
+        resolved = str(Path(candidate).resolve())
+        if not resolved.startswith(root_prefix):
             raise MediaInputError("Invalid media input")
-        if not stat.S_ISREG(resolved.stat().st_mode):
+        validated = Path(resolved)
+        if validated.suffix.lower() != ".mp4" or not stat.S_ISREG(validated.stat().st_mode):
             raise MediaInputError("Invalid media input")
-        return resolved
+        return validated
     except (OSError, RuntimeError, ValueError) as err:
         raise MediaInputError("Invalid media input") from err
 

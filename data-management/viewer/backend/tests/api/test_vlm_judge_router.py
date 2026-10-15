@@ -12,6 +12,10 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import shutil
+import subprocess
+import sys
+import sysconfig
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -23,6 +27,51 @@ from fastapi.testclient import TestClient
 
 DATASET_ID = "synthetic-eval"
 INSTRUCTION = "Pick up the cube"
+
+
+@pytest.mark.parametrize("enabled", ["false", "true"])
+def test_backend_starts_without_optional_evaluator(tmp_path: Path, enabled: str) -> None:
+    app_dir = tmp_path / "app"
+    shutil.copytree(Path(__file__).resolve().parents[2] / "src", app_dir / "src")
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    environment = {
+        **os.environ,
+        "STORAGE_BACKEND": "local",
+        "DATA_DIR": str(data_dir),
+        "DATAVIEWER_AUTH_DISABLED": "true",
+        "VLM_JUDGE_ENABLED": enabled,
+        "VLM_JUDGE_BACKEND": "echo",
+    }
+    script = """
+import importlib.util
+import sys
+
+sys.path.insert(0, sys.argv[1])
+sys.path.append(sys.argv[2])
+assert importlib.util.find_spec("evaluation") is None
+
+from fastapi.testclient import TestClient
+from src.api.main import app
+from src.api.config import get_app_config
+from src.api.services.vlm_judge_service import get_vlm_judge_service
+
+with TestClient(app) as client:
+    assert client.get("/health").status_code == 200
+    assert get_vlm_judge_service(get_app_config()) is None
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(app_dir), sysconfig.get_path("purelib")],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def _write_mp4(path: Path, *, n_frames: int = 12, width: int = 64, height: int = 48, fps: int = 30) -> None:

@@ -21,7 +21,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from evaluation.vlm_judge.frames import MediaInputError
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
@@ -190,6 +189,8 @@ async def run_episode_judgment(
             status_code=503,
             detail="VLM judge is disabled. Set VLM_JUDGE_ENABLED=true to enable.",
         )
+
+    from evaluation.vlm_judge.frames import MediaInputError
 
     record = _resolve_episode(service, dataset_id, episode_idx, views=tuple(payload.views or ()))
     if record is None:

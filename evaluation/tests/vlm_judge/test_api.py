@@ -13,7 +13,8 @@ import pytest
 
 pytest.importorskip("pydantic")
 
-from vlm_judge.api import build_router
+import vlm_judge.api as api_module
+from vlm_judge.frames import MediaInputError, validate_video_path
 from vlm_judge.judge import JudgeResult
 
 
@@ -85,7 +86,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("VLM_JUDGE_MEDIA_ROOT", str(root))
     monkeypatch.setenv("VLM_JUDGE_ALLOW_UNAUTHENTICATED", "true")
     app = fastapi.FastAPI()
-    app.include_router(build_router(service), prefix="/api/vlm-judge")
+    app.include_router(api_module.build_router(service), prefix="/api/vlm-judge")
     return TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000)), service
 
 
@@ -135,7 +136,20 @@ class TestApi:
 
 
 @pytest.mark.parametrize(
-    "case", ["outside", "absent-outside", "traversal", "symlink", "missing", "directory", "fifo", "suffix", "url"]
+    "case",
+    [
+        "outside",
+        "absent-outside",
+        "traversal",
+        "symlink",
+        "prefix",
+        "symlink-prefix",
+        "missing",
+        "directory",
+        "fifo",
+        "suffix",
+        "url",
+    ],
 )
 def test_invalid_media_is_rejected_before_service(client, tmp_path: Path, case: str) -> None:
     connection, service = client
@@ -143,6 +157,10 @@ def test_invalid_media_is_rejected_before_service(client, tmp_path: Path, case: 
     outside = tmp_path / "outside.mp4"
     outside.write_bytes(b"not opened")
     (root / "escape.mp4").symlink_to(outside)
+    sibling = tmp_path / "media-other"
+    sibling.mkdir()
+    (sibling / "episode.mp4").write_bytes(b"not opened")
+    (root / "prefix.mp4").symlink_to(sibling / "episode.mp4")
     (root / "directory.mp4").mkdir()
     (root / "notes.txt").write_text("not media")
     os.mkfifo(root / "pipe.mp4")
@@ -151,6 +169,8 @@ def test_invalid_media_is_rejected_before_service(client, tmp_path: Path, case: 
         "absent-outside": str(tmp_path / "absent.mp4"),
         "traversal": "../outside.mp4",
         "symlink": "escape.mp4",
+        "prefix": str(sibling / "episode.mp4"),
+        "symlink-prefix": "prefix.mp4",
         "missing": "missing.mp4",
         "directory": "directory.mp4",
         "fifo": "pipe.mp4",
@@ -172,22 +192,61 @@ def test_invalid_media_is_rejected_before_service(client, tmp_path: Path, case: 
     assert service.calls == []
 
 
-def test_contained_symlink_uses_canonical_path(client, tmp_path: Path) -> None:
+@pytest.mark.parametrize("path_kind", ["relative", "absolute", "nested", "symlink"])
+def test_contained_media_uses_canonical_path(client, tmp_path: Path, path_kind: str) -> None:
     connection, service = client
     root = tmp_path / "media"
     (root / "alias.mp4").symlink_to(root / "ep0.mp4")
+    (root / "nested").mkdir()
+    (root / "nested" / "episode.mp4").write_bytes(b"stub video")
+    paths = {
+        "relative": "ep0.mp4",
+        "absolute": str(root / "ep0.mp4"),
+        "nested": "nested/episode.mp4",
+        "symlink": "alias.mp4",
+    }
+    expected = root / "nested" / "episode.mp4" if path_kind == "nested" else root / "ep0.mp4"
 
     response = connection.post(
         "/api/vlm-judge/judge",
         json={
             "episode_id": "ep0",
             "instruction": "pick cube",
-            "video_paths": {"front": "alias.mp4"},
+            "video_paths": {"front": paths[path_kind]},
         },
     )
 
     assert response.status_code == 200
-    assert service.calls[0]["video_paths"] == {"front": root / "ep0.mp4"}
+    assert service.calls[0]["video_paths"] == {"front": expected}
+
+
+@pytest.mark.parametrize("path_kind", ["outside", "prefix", "symlink-prefix"])
+def test_outside_media_is_rejected_before_additional_filesystem_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path_kind: str
+) -> None:
+    root = tmp_path / "media"
+    root.mkdir()
+    sibling = tmp_path / "media-other"
+    sibling.mkdir()
+    outside = sibling / "episode.mp4"
+    outside.write_bytes(b"not opened")
+    (root / "escape.mp4").symlink_to(outside)
+    paths = {"outside": tmp_path / "absent.mp4", "prefix": outside, "symlink-prefix": root / "escape.mp4"}
+
+    def forbidden_probe(*args: object, **kwargs: object) -> None:
+        pytest.fail("Rejected media reached a filesystem probe")
+
+    with monkeypatch.context() as patch:
+        original_resolve = Path.resolve
+
+        def resolve_then_forbid_stat(candidate: Path) -> Path:
+            resolved = original_resolve(candidate)
+            patch.setattr(Path, "stat", forbidden_probe)
+            return resolved
+
+        patch.setattr(Path, "resolve", resolve_then_forbid_stat if path_kind == "symlink-prefix" else forbidden_probe)
+        with pytest.raises(MediaInputError, match=r"^Invalid media input$"):
+            validate_video_path(paths[path_kind], root)
 
 
 @pytest.mark.parametrize("root", [None, "/"])
@@ -200,7 +259,7 @@ def test_unconfigured_or_filesystem_root_disables_judging(monkeypatch: pytest.Mo
         monkeypatch.setenv("VLM_JUDGE_MEDIA_ROOT", root)
     service = StubService()
     app = FastAPI()
-    app.include_router(build_router(service))
+    app.include_router(api_module.build_router(service))
     connection = TestClient(app)
 
     response = connection.post(
@@ -247,7 +306,7 @@ def test_real_media_errors_and_cache_are_sanitized(
     )
     app = FastAPI()
     monkeypatch.setenv("VLM_JUDGE_ALLOW_UNAUTHENTICATED", "true")
-    app.include_router(build_router(service, media_root=root))
+    app.include_router(api_module.build_router(service, media_root=root))
     connection = TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000))
     payload = {"episode_id": "ep0", "instruction": "pick cube", "video_paths": {"front": "episode.mp4"}}
     if failure == "corrupt":
@@ -305,7 +364,6 @@ def test_admission_precedes_body_and_media_work(
     body: str,
     denial: str,
 ) -> None:
-    import vlm_judge.api as api_module
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -318,7 +376,7 @@ def test_admission_precedes_body_and_media_work(
     service = StubService()
     if mounted:
         app = FastAPI()
-        app.include_router(build_router(service), prefix="/mounted")
+        app.include_router(api_module.build_router(service), prefix="/mounted")
         path = "/mounted/judge"
     else:
         monkeypatch.setattr(api_module, "JudgeService", lambda config: service)
@@ -389,7 +447,7 @@ def test_loopback_peer_host_and_matching_origin_are_admitted(
     (tmp_path / "video.mp4").write_bytes(b"stub")
     service = StubService()
     app = FastAPI()
-    app.include_router(build_router(service, media_root=tmp_path))
+    app.include_router(api_module.build_router(service, media_root=tmp_path))
     connection = TestClient(app, base_url="http://localhost", client=(peer, 50000))
     response = connection.post(
         "/judge",
@@ -423,7 +481,6 @@ def test_launcher_preview_is_loopback_only(host: str | None) -> None:
 def test_global_app_is_default_deny(monkeypatch: pytest.MonkeyPatch) -> None:
     import importlib
 
-    import vlm_judge.api as api_module
     from fastapi.testclient import TestClient
 
     monkeypatch.delenv("VLM_JUDGE_ALLOW_UNAUTHENTICATED", raising=False)
@@ -440,13 +497,12 @@ class TestAccessibilityDocumentationApps:
         fastapi = pytest.importorskip("fastapi")
         pytest.importorskip("httpx")
         from fastapi.testclient import TestClient
-        from vlm_judge.api import build_app
 
         monkeypatch.setenv("VLM_JUDGE_BACKEND", "echo")
         monkeypatch.setenv("VLM_JUDGE_CACHE_DIR", "")
 
         # Act
-        with TestClient(build_app()) as documentation_client:
+        with TestClient(api_module.build_app()) as documentation_client:
             responses = [documentation_client.get(path) for path in ("/docs", "/redoc", "/openapi.json", "/health")]
 
         # Assert
