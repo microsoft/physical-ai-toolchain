@@ -162,8 +162,8 @@ service = JudgeService(
 )
 app = FastAPI()
 app.include_router(
-  build_router(service, media_root=Path("/path/to/dataset"), allow_unauthenticated=True),
-  prefix="/api/vlm-judge",
+    build_router(service, media_root=Path("/path/to/dataset"), allow_unauthenticated=True),
+    prefix="/api/vlm-judge",
 )
 ```
 
