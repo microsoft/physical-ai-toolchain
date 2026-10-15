@@ -83,12 +83,18 @@ async def test_cookie_never_grants_general_api_access(
     assert await provider.authenticate(request) is None
 
 
-@pytest.mark.parametrize("site", ["cross-site", "same-site"])
+@pytest.mark.parametrize("site", ["cross-site", "same-site", "none", "", "unexpected"])
 async def test_cross_origin_media_cookie_rejected(token_provider: tuple[auth.JwtProvider, str], site: str) -> None:
     provider, token = token_provider
     request = make_asgi_request(
         "GET", "/api/datasets/example/episodes/0/video/front", {"Cookie": f"{COOKIE}={token}", "Sec-Fetch-Site": site}
     )
+    assert await provider.authenticate(request) is None
+
+
+async def test_media_cookie_without_fetch_metadata_rejected(token_provider: tuple[auth.JwtProvider, str]) -> None:
+    provider, token = token_provider
+    request = make_asgi_request("GET", "/api/datasets/example/episodes/0/frames/0", {"Cookie": f"{COOKIE}={token}"})
     assert await provider.authenticate(request) is None
 
 
@@ -197,7 +203,7 @@ async def test_cookie_accepts_head_requests(token_provider: tuple[auth.JwtProvid
     request = make_asgi_request(
         "HEAD",
         "/api/datasets/example/episodes/0/video/front",
-        {"Cookie": f"{COOKIE}={token}"},
+        {"Cookie": f"{COOKIE}={token}", "Sec-Fetch-Site": "same-origin"},
     )
     assert await provider.authenticate(request) is not None
 

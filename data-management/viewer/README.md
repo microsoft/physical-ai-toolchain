@@ -450,7 +450,7 @@ When `VITE_AZURE_CLIENT_ID` is set, the app wraps in an `MsalProvider` and attac
 
 Native images and videos cannot attach authorization headers. [`MediaAuthGate`](frontend/src/components/auth/MediaAuthGate.tsx) obtains a media cookie before mounting the authenticated workspace using the JWT- and CSRF-protected `POST /api/auth/media-session` endpoint. The gate renews at half the returned lifetime and displays an error on failure.
 
-The backend sets a host-only `__Secure-dataviewer-media` cookie with `HttpOnly`, `Secure`, `SameSite=Strict`, and path `/api/datasets/`. Its browser lifetime is at most five minutes and never exceeds the JWT's remaining lifetime. Cookie authentication is restricted to exact read-only frame and video routes, including range requests.
+The backend sets a host-only `__Secure-dataviewer-media` cookie with `HttpOnly`, `Secure`, `SameSite=Strict`, and path `/api/datasets/`. Its browser lifetime is at most five minutes and never exceeds the JWT's remaining lifetime. Cookie authentication is restricted to exact read-only frame and video routes, including range requests, and requires `Sec-Fetch-Site: same-origin`. Clients that omit fetch metadata must use a bearer token.
 
 Signature, issuer, audience, and expiration checks still apply; an invalid authorization header never falls back to a cookie. Dataset metadata, annotations, and mutations require ordinary authentication headers. Tokens are never placed in media URLs. Serve the frontend and API on the same HTTPS origin; Easy Auth continues to use its platform session.
 
