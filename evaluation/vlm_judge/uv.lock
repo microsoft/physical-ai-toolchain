@@ -849,7 +849,7 @@ wheels = [
 [[package]]
 name = "physical-ai-curation"
 version = "0.1.0"
-source = { editable = "../../shared/curation" }
+source = { editable = "../../data-management/curation" }
 dependencies = [
     { name = "pydantic" },
 ]
@@ -896,7 +896,7 @@ requires-dist = [
     { name = "hf-xet", marker = "extra == 'qwen3-vl'", specifier = "==1.6.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = "==3.6.0" },
     { name = "pandas", specifier = "==3.0.5" },
-    { name = "physical-ai-curation", editable = "../../shared/curation" },
+    { name = "physical-ai-curation", editable = "../../data-management/curation" },
     { name = "pillow", specifier = "==12.3.0" },
     { name = "pyarrow", specifier = "==25.0.1" },
     { name = "pydantic", specifier = "==2.13.5" },

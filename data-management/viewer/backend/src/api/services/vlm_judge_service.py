@@ -104,7 +104,7 @@ def reset_vlm_judge_service() -> None:
 
 
 def prepare_job_configuration(options: dict[str, Any]) -> dict[str, Any]:
-    from evaluation.vlm_judge.service import ServiceExecutor
+    from physical_ai_curation.adapters.evaluator import ServiceExecutor
 
     service = get_vlm_judge_service(get_app_config())
     if service is None:
@@ -116,7 +116,7 @@ async def create_judge_jobs(config: AppConfig, datasets: DatasetService, annotat
     from evaluation.vlm_judge.curation_storage import apply_judge_result
     from evaluation.vlm_judge.job_storage import BlobJobStore, LocalJobStore
     from evaluation.vlm_judge.jobs import JudgeJobs
-    from evaluation.vlm_judge.service import ServiceExecutor
+    from physical_ai_curation.adapters.evaluator import ServiceExecutor
 
     service = get_vlm_judge_service(config)
     if service is None:

@@ -23,6 +23,7 @@ from pytest_mock import MockerFixture
 from vlm_judge.frames import MediaInputError, validate_video_path
 from vlm_judge.job_storage import LocalJobStore
 from vlm_judge.judge import JudgeResult
+from vlm_judge.prompts import PROMPT_VERSION
 from vlm_judge.saved_input import LocalDatasetResolver
 from vlm_judge.service import JudgeService
 
@@ -71,8 +72,8 @@ class StubService(JudgeService):
         return JudgeResult(
             episode_id=episode_id,
             instruction=instruction,
-            judge_model=self.model_id,
-            prompt_version="test-v1",
+            judge_model="echo",
+            prompt_version=PROMPT_VERSION,
             n_frames=8,
             outcome_success=True,
             outcome_confidence=0.9,

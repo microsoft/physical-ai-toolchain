@@ -64,6 +64,117 @@ async def infer(record: EpisodeRecord, snapshot: SavedInputSnapshot, config: dic
     ).to_dict()
 
 
+@pytest.mark.parametrize("kind", ["judge", "task-findings"])
+async def test_given_versioned_evidence_when_read_then_preserves_payload_and_identity(kind: str) -> None:
+    from physical_ai_curation.evidence import bind_evidence, read_evidence
+    from physical_ai_curation.judge_port import JudgeInvocation
+
+    record, snapshot = await Resolver().resolve("dataset", 3, principal_scope_id="actor")
+    payload = await infer(record, snapshot, {})
+    if kind == "task-findings":
+        payload = {
+            "episode_id": record.episode_id,
+            "instruction": snapshot.instruction,
+            "judge_model": "echo",
+            "prompt_version": "test",
+            "findings": {
+                "pick_from": "table",
+                "object": "cup",
+                "movement_quality": "smooth",
+                "notes": "",
+                "grasp_success": False,
+                "place_success": False,
+            },
+        }
+    invocation = JudgeInvocation(
+        invocation_id="request",
+        input_id=snapshot.snapshot_id,
+        episode_id=record.episode_id,
+        instruction=snapshot.instruction,
+        views=(),
+        options={},
+        declared_identity={"model_id": "echo", "prompt_version": "test"},
+    )
+    envelope = bind_evidence(invocation, payload, kind=kind)
+    restored = read_evidence(envelope.to_dict(), expected=invocation)
+    legacy = read_evidence(payload, kind=kind)
+
+    assert restored.payload == legacy.payload == payload
+    assert restored.schema_version == 1
+    assert legacy.schema_version is None
+    assert legacy.invocation_id is None and legacy.declared_identity is None
+    assert snapshot.model_dump(mode="json")["snapshot_id"] == "snapshot-3"
+
+
+@pytest.mark.parametrize(
+    "field", ["invocation_id", "input_id", "declared_identity", "observed_identity", "schema_version"]
+)
+async def test_given_mismatched_evidence_when_read_then_rejects_identity_or_version(field: str) -> None:
+    from physical_ai_curation.evidence import bind_evidence, read_evidence
+    from physical_ai_curation.judge_port import JudgeInvocation
+
+    record, snapshot = await Resolver().resolve("dataset", 3, principal_scope_id="actor")
+    invocation = JudgeInvocation(
+        invocation_id="request",
+        input_id=snapshot.snapshot_id,
+        episode_id=record.episode_id,
+        instruction=snapshot.instruction,
+        views=(),
+        options={},
+        declared_identity={"model_id": "echo", "prompt_version": "test"},
+    )
+    envelope = bind_evidence(invocation, await infer(record, snapshot, {})).to_dict()
+    envelope[field] = (
+        {"model_id": "other"} if field.endswith("identity") else 2 if field == "schema_version" else "other"
+    )
+
+    with pytest.raises(ValueError):
+        read_evidence(envelope, expected=invocation)
+
+
+@pytest.mark.parametrize("mismatch", [None, "judge_model", "prompt_version"])
+async def test_given_cached_evidence_when_executed_then_validates_identity_before_media(
+    tmp_path: Path, mismatch: str | None
+) -> None:
+    from evaluation.vlm_judge.prompts import PROMPT_VERSION
+    from evaluation.vlm_judge.service import BackendConfig, JudgeService, ServiceConfig
+    from physical_ai_curation.adapters.evaluator import ServiceExecutor
+
+    service = JudgeService(ServiceConfig(backend=BackendConfig(kind="echo"), cache_dir=tmp_path))
+    record, snapshot = await Resolver().resolve("dataset", 3, principal_scope_id="actor")
+
+    async def forbidden_media(record: EpisodeRecord, snapshot: SavedInputSnapshot) -> EpisodeRecord:
+        pytest.fail("Cached evidence must be checked before media preparation")
+
+    executor = ServiceExecutor(service, prepare_media=forbidden_media)
+    config = executor.configuration({})
+    cache = service.cache_for(None)
+    key = cache.key(
+        episode_id=record.episode_id,
+        snapshot_id=snapshot.snapshot_id,
+        video_paths=record.video_paths,
+        instruction=snapshot.instruction,
+        judge_model=service.model_id,
+        prompt_version=PROMPT_VERSION,
+        from_s=record.from_timestamp,
+        to_s=record.to_timestamp,
+        video_windows=record.video_windows,
+        media_identity=record.media_identity,
+        agent_config=service.config.agent,
+    )
+    payload = {**await infer(record, snapshot, {}), "prompt_version": PROMPT_VERSION}
+    if mismatch:
+        payload[mismatch] = "unexpected"
+    cache.put(key, payload)
+
+    if mismatch:
+        with pytest.raises(ValueError, match="identity mismatch"):
+            await executor(record, snapshot, config)
+    else:
+        assert await executor(record, snapshot, config) == {**payload, "_cache_hit": True}
+    assert cache.get(key) == payload
+
+
 def test_withdrawal_removes_accepted_machine_values_but_preserves_human_and_motion() -> None:
     from physical_ai_curation.models import DatasetLabelsFile, EpisodeAnalysisRecord, MachineOrigin
     from physical_ai_curation.storage import plan_withdrawal
@@ -153,9 +264,10 @@ def test_withdrawal_clears_derived_findings_without_reviving_overlapping_runs() 
 async def test_given_withdrawn_outcome_label_when_previewed_again_then_absent_flags_are_not_listed(
     tmp_path: Path,
 ) -> None:
-    from physical_ai_curation.models import DatasetLabelsFile
-    from physical_ai_curation.storage import LocalCurationStorage, plan_withdrawal
     from evaluation.vlm_judge.curation_storage import apply_judge_result
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.models import DatasetLabelsFile
+    from physical_ai_curation.storage import plan_withdrawal
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     await storage.save("dataset", DatasetLabelsFile(dataset_id="dataset"), if_none_match=True)
@@ -219,7 +331,7 @@ async def _apply_success(storage: object, run_id: str, run_order: int, episode: 
 async def test_given_output_from_unlisted_run_when_withdrawing_then_conflict_is_explained_and_recoverable(
     tmp_path: Path,
 ) -> None:
-    from physical_ai_curation.storage import LocalCurationStorage
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
@@ -264,8 +376,9 @@ async def test_given_output_from_unlisted_run_when_withdrawing_then_conflict_is_
 async def test_given_unprovenanced_label_before_ai_application_when_withdrawn_then_it_is_restored_not_conflicted(
     tmp_path: Path,
 ) -> None:
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
     from physical_ai_curation.models import DatasetLabelsFile
-    from physical_ai_curation.storage import LocalCurationStorage, plan_withdrawal
+    from physical_ai_curation.storage import plan_withdrawal
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     legacy = DatasetLabelsFile(dataset_id="dataset", episodes={"3": ["SUCCESS"]})
@@ -289,9 +402,9 @@ def manager(root: Path, **kwargs: object) -> object:
 
 @pytest.mark.asyncio
 async def test_reset_preview_is_revision_bound_and_fences_all_dataset_workers(tmp_path: Path) -> None:
-    from physical_ai_curation.models import DatasetLabelsFile
-    from physical_ai_curation.storage import LocalCurationStorage
     from evaluation.vlm_judge.curation_storage import apply_judge_result
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.models import DatasetLabelsFile
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
@@ -324,8 +437,8 @@ async def test_reset_preview_is_revision_bound_and_fences_all_dataset_workers(tm
 
 @pytest.mark.asyncio
 async def test_reset_rejects_new_jobs_or_human_saves_after_preview(tmp_path: Path) -> None:
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
     from physical_ai_curation.models import DatasetLabelsFile
-    from physical_ai_curation.storage import LocalCurationStorage
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
@@ -347,8 +460,8 @@ async def test_reset_rejects_new_jobs_or_human_saves_after_preview(tmp_path: Pat
 async def test_reset_recovers_resource_publication_before_lost_job_checkpoint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from physical_ai_curation.storage import LocalCurationStorage
     from evaluation.vlm_judge.curation_storage import apply_judge_result
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
@@ -375,7 +488,7 @@ async def test_reset_recovers_resource_publication_before_lost_job_checkpoint(
 
 @pytest.mark.asyncio
 async def test_reset_preserves_independent_human_sample_approval(tmp_path: Path) -> None:
-    from physical_ai_curation.storage import LocalCurationStorage
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
@@ -403,9 +516,9 @@ async def test_reset_preserves_independent_human_sample_approval(tmp_path: Path)
 
 def test_reset_http_requires_mutation_authority_and_returns_durable_status(tmp_path: Path) -> None:
     from evaluation.vlm_judge.api import build_job_router
-    from physical_ai_curation.storage import LocalCurationStorage
     from fastapi import Depends, FastAPI, HTTPException
     from fastapi.testclient import TestClient
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
@@ -442,8 +555,8 @@ def test_reset_http_requires_mutation_authority_and_returns_durable_status(tmp_p
 async def test_reset_cli_preview_confirm_and_status_share_durable_owner(tmp_path: Path) -> None:
     import argparse
 
-    from physical_ai_curation.storage import LocalCurationStorage
     from evaluation.vlm_judge.job_cli import add_job_arguments, execute_job_command
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
 
     jobs = manager(tmp_path / "jobs", curation_storage=LocalCurationStorage({"dataset": tmp_path / "dataset"}))
     parser = argparse.ArgumentParser()
@@ -830,7 +943,8 @@ async def test_idle_worker_does_not_create_or_rewrite_state(tmp_path: Path) -> N
 
 @pytest.mark.asyncio
 async def test_service_executor_rejects_changed_runtime_before_inference() -> None:
-    from evaluation.vlm_judge.service import BackendConfig, JudgeService, ServiceConfig, ServiceExecutor
+    from evaluation.vlm_judge.service import BackendConfig, JudgeService, ServiceConfig
+    from physical_ai_curation.adapters.evaluator import ServiceExecutor
 
     service = JudgeService(ServiceConfig(backend=BackendConfig(kind="echo", model_id="echo")))
     executor = ServiceExecutor(service)
@@ -842,17 +956,59 @@ async def test_service_executor_rejects_changed_runtime_before_inference() -> No
         await executor(record, snapshot, configuration)
 
 
+async def test_given_resolved_views_when_port_scores_then_preserves_order_windows_and_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from evaluation.vlm_judge.prompts import PROMPT_VERSION
+    from evaluation.vlm_judge.service import BackendConfig, JudgeService, ServiceConfig
+    from physical_ai_curation.adapters.evaluator import EvaluatorJudge
+    from physical_ai_curation.judge_port import JudgeInvocation
+
+    service = JudgeService(ServiceConfig(backend=BackendConfig(kind="echo", model_id="echo")))
+    adapter = EvaluatorJudge(service)
+    calls = []
+
+    def score(**kwargs: object) -> JudgeResult:
+        calls.append(kwargs)
+        return JudgeResult("episode", "Move the cup", "echo", PROMPT_VERSION, 2, False, 1.0, 1, [0, 25], 1.0)
+
+    monkeypatch.setattr(service, "judge_episode", score)
+    request = JudgeInvocation(
+        invocation_id="request",
+        input_id="snapshot",
+        episode_id="episode",
+        instruction="Move the cup",
+        views=(
+            {"name": "wrist", "path": "/synthetic/wrist.mp4", "window": (3, 4), "media_identity": "wrist-v1"},
+            {"name": "front", "path": "/synthetic/front.mp4", "window": (7, 8), "media_identity": "front-v1"},
+        ),
+        options={"process_method": "chronological"},
+        declared_identity=adapter.identity("chronological"),
+    )
+    result = await adapter.evaluate(request)
+
+    assert result.input_id == "snapshot" and result.invocation_id == "request"
+    assert result.payload["outcome_success"] is False
+    assert list(calls[0]["video_paths"]) == ["wrist", "front"]
+    assert calls[0]["video_windows"] == {"wrist": (3, 4), "front": (7, 8)}
+    assert calls[0]["media_identity"] == {"wrist": "wrist-v1", "front": "front-v1"}
+    assert "principal_scope_id" not in calls[0]
+
+
 @pytest.mark.asyncio
 async def test_service_executor_runs_blocking_inference_off_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
     import threading
 
-    from evaluation.vlm_judge.service import BackendConfig, JudgeService, ServiceConfig, ServiceExecutor
+    from evaluation.vlm_judge.prompts import PROMPT_VERSION
+    from evaluation.vlm_judge.service import BackendConfig, JudgeService, ServiceConfig
+    from physical_ai_curation.adapters.evaluator import ServiceExecutor
 
     service = JudgeService(ServiceConfig(backend=BackendConfig(kind="echo", model_id="echo")))
     executor = ServiceExecutor(service)
     entered, release = threading.Event(), threading.Event()
     record, snapshot = await Resolver().resolve("dataset", 3, principal_scope_id="actor")
     result = JudgeResult.from_dict(await infer(record, snapshot, {}))
+    result.prompt_version = PROMPT_VERSION
 
     def blocked(**kwargs: object) -> JudgeResult:
         entered.set()
@@ -940,11 +1096,11 @@ async def test_reset_recovery_preserves_humans_and_reports_safe_failures(
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock
 
-    from physical_ai_curation.models import EpisodeAnalysisRecord
-    from physical_ai_curation.storage import LocalCurationStorage
     from evaluation.vlm_judge.curation_storage import apply_judge_result
     from evaluation.vlm_judge.job_storage import BlobJobStore, LocalJobStore
     from evaluation.vlm_judge.jobs import JudgeJobs
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.models import EpisodeAnalysisRecord
 
     from src.api.services.label_storage import BlobLabelStorage
 
@@ -1081,9 +1237,9 @@ def test_shared_curation_preserves_human_ownership_and_machine_retry_identity() 
 
 @pytest.mark.asyncio
 async def test_application_is_durable_and_retries_without_duplicate_contributions(tmp_path: Path) -> None:
-    from physical_ai_curation.models import DatasetLabelsFile
-    from physical_ai_curation.storage import LocalCurationStorage
     from evaluation.vlm_judge.curation_storage import apply_judge_result
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.models import DatasetLabelsFile
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     labels = DatasetLabelsFile(dataset_id="dataset")
@@ -1284,8 +1440,9 @@ async def test_given_saved_sample_when_resolving_then_saved_outcome_and_revision
 ) -> None:
     import json
 
+    from physical_ai_curation.adapters.local_saved_input import LocalSavedInputReader
     from physical_ai_curation.models import ContributionLedger
-    from physical_ai_curation.saved_input import LocalSavedInputReader, SavedInputError, resolve_validation_sample
+    from physical_ai_curation.saved_input import SavedInputError, resolve_validation_sample
 
     ledger = ContributionLedger()
     ledger.record_changes(
@@ -1345,8 +1502,13 @@ async def test_given_saved_labels_when_grounding_then_one_outcome_and_current_re
     labels: list[str],
     accepted: bool,
 ) -> None:
+    from physical_ai_curation.adapters.local_saved_input import LocalSavedInputReader
     from physical_ai_curation.models import DatasetLabelsFile
-    from physical_ai_curation.saved_input import LocalSavedInputReader, SavedInputError, label_baseline, resolve_validation_sample
+    from physical_ai_curation.saved_input import (
+        SavedInputError,
+        label_baseline,
+        resolve_validation_sample,
+    )
 
     saved = DatasetLabelsFile(dataset_id="dataset", episodes={"3": labels})
     baseline = label_baseline(saved, 3)
@@ -1375,9 +1537,14 @@ async def test_given_saved_labels_when_grounding_then_one_outcome_and_current_re
 async def test_given_label_baseline_when_approved_then_only_grounding_label_changes_invalidate_it(
     tmp_path: Path,
 ) -> None:
+    from physical_ai_curation.adapters.local_saved_input import LocalSavedInputReader
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
     from physical_ai_curation.models import DatasetLabelsFile, MachineOrigin
-    from physical_ai_curation.storage import LocalCurationStorage
-    from physical_ai_curation.saved_input import LocalSavedInputReader, SavedInputError, label_baseline, resolve_validation_sample
+    from physical_ai_curation.saved_input import (
+        SavedInputError,
+        label_baseline,
+        resolve_validation_sample,
+    )
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     labels = DatasetLabelsFile(dataset_id="dataset")
@@ -1449,9 +1616,9 @@ async def test_given_label_baseline_when_approved_then_only_grounding_label_chan
 async def test_given_task_findings_when_executed_then_schema_and_human_ownership_remain_distinct(
     tmp_path: Path,
 ) -> None:
-    from physical_ai_curation.models import DatasetLabelsFile, EpisodeAnalysisRecord
-    from physical_ai_curation.storage import LocalCurationStorage
     from evaluation.vlm_judge.curation_storage import apply_judge_result
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.models import DatasetLabelsFile, EpisodeAnalysisRecord
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     labels = DatasetLabelsFile(dataset_id="dataset")

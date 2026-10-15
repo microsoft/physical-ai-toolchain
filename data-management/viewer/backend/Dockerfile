@@ -21,7 +21,7 @@ FROM base AS build
 COPY data-management/viewer/backend/pyproject.toml data-management/viewer/backend/uv.lock ./
 COPY data-management/viewer/backend/src/ ./src/
 COPY evaluation/vlm_judge/ /app/evaluation/vlm_judge/
-COPY shared/curation/ /app/shared/curation/
+COPY data-management/curation/ /app/data-management/curation/
 
 # Runtime feature extras, separated by commas or spaces.
 ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"

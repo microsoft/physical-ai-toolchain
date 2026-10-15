@@ -40,8 +40,10 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
-from physical_ai_curation.saved_input import LocalSavedInputReader, SavedInputSnapshot, resolve_saved_input
-from physical_ai_curation.storage import LocalCurationStorage
+from physical_ai_curation.adapters.evaluator import ServiceExecutor
+from physical_ai_curation.adapters.local_saved_input import LocalSavedInputReader
+from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+from physical_ai_curation.saved_input import SavedInputSnapshot, resolve_saved_input
 
 from .agent import AgentConfig
 from .curation_storage import apply_judge_result
@@ -55,7 +57,6 @@ from .service import (
     FrameConfig,
     JudgeService,
     ServiceConfig,
-    ServiceExecutor,
 )
 
 _LOGGER = logging.getLogger("evaluation.vlm_judge")

@@ -48,7 +48,7 @@ override-dependencies = [
 package = false
 
 [tool.uv.sources]
-physical-ai-curation = { path = "shared/curation", editable = true }
+physical-ai-curation = { path = "data-management/curation", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = [

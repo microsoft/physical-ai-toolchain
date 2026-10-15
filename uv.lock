@@ -2282,7 +2282,7 @@ wheels = [
 [[package]]
 name = "physical-ai-curation"
 version = "0.1.0"
-source = { editable = "shared/curation" }
+source = { editable = "data-management/curation" }
 dependencies = [
     { name = "pydantic" },
 ]
@@ -2335,7 +2335,7 @@ dev = [
     { name = "jsonschema", extras = ["format"], specifier = "==4.26.0" },
     { name = "matplotlib", specifier = "==3.11.2" },
     { name = "numpy", specifier = "==2.5.3" },
-    { name = "physical-ai-curation", editable = "shared/curation" },
+    { name = "physical-ai-curation", editable = "data-management/curation" },
     { name = "pyarrow", specifier = "==25.0.1" },
     { name = "pydantic", specifier = "==2.13.5" },
     { name = "pytest", specifier = "==9.1.1" },

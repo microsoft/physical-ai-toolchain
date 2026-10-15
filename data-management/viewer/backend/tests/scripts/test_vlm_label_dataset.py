@@ -158,8 +158,8 @@ def test_resolve_views_rejects_unknown(mod: ModuleType, tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_given_partial_analysis_when_conditionally_saved_then_preserves_omitted_fields(tmp_path: Path) -> None:
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
     from physical_ai_curation.models import DatasetLabelsFile, EpisodeAnalysisRecord
-    from physical_ai_curation.storage import LocalCurationStorage
 
     storage = LocalCurationStorage({"owner--dataset": tmp_path})
     labels = DatasetLabelsFile(dataset_id="owner--dataset")
@@ -179,8 +179,9 @@ async def test_given_partial_analysis_when_conditionally_saved_then_preserves_om
 async def test_given_concurrent_human_save_when_cli_storage_publishes_then_rejects_stale_analysis(
     tmp_path: Path,
 ) -> None:
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
     from physical_ai_curation.models import DatasetLabelsFile, EpisodeAnalysisRecord
-    from physical_ai_curation.storage import LocalCurationStorage, RevisionConflictError
+    from physical_ai_curation.storage import RevisionConflictError
 
     storage = LocalCurationStorage({"dataset": tmp_path})
     labels = DatasetLabelsFile(dataset_id="dataset")

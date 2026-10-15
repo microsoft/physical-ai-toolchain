@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import os
+import shutil
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 
@@ -34,7 +37,7 @@ def test_judge_profiles_install_from_their_own_lock_without_checkout_imports() -
     assert "WORKDIR /app/data-management/viewer/backend" in dockerfile
     assert "UV_PROJECT_ENVIRONMENT=/app/.venv" in dockerfile
     assert "COPY evaluation/vlm_judge/ /app/evaluation/vlm_judge/" in dockerfile
-    assert "COPY shared/curation/ /app/shared/curation/" in dockerfile
+    assert "COPY data-management/curation/ /app/data-management/curation/" in dockerfile
     assert 'ARG JUDGE_EXTRAS=""' in dockerfile
     assert "uv sync --project /app/evaluation/vlm_judge --frozen --no-dev --no-editable" in dockerfile
     assert "COPY data-management/viewer/backend/src/ ./src/" in dockerfile
@@ -50,8 +53,9 @@ def test_build_upload_is_allowlisted_and_compose_keeps_jobs_durable() -> None:
     patterns = ignore.read_text().splitlines()
     assert patterns[0] == "**"
     assert "!evaluation/vlm_judge/*.py" in patterns
-    assert "!shared/curation/pyproject.toml" in patterns
-    assert "!shared/curation/physical_ai_curation/*.py" in patterns
+    assert "!data-management/curation/pyproject.toml" in patterns
+    assert "!data-management/curation/physical_ai_curation/*.py" in patterns
+    assert "!data-management/curation/physical_ai_curation/adapters/*.py" in patterns
     assert not any(line.startswith("!") and ".env" in line for line in patterns)
     compose = (backend.parent / "docker-compose.yml").read_text()
     assert 'VLM_JUDGE_JOB_DIR: "/state/judge"' in compose
@@ -62,8 +66,11 @@ def test_build_upload_is_allowlisted_and_compose_keeps_jobs_durable() -> None:
     assert '"$SRC_DIR/backend/"' not in deploy
     assert '--build-arg "JUDGE_EXTRAS=${judge_extras}"' in deploy
     assert 'cp "$backend_dockerfile" "$backend_context/data-management/viewer/backend/Dockerfile"' in deploy
-    assert 'cp "$REPO_ROOT/shared/curation/pyproject.toml" "$backend_context/shared/curation/"' in deploy
-    assert 'cp "$REPO_ROOT/shared/curation/physical_ai_curation/"*.py' in deploy
+    assert (
+        'cp "$REPO_ROOT/data-management/curation/pyproject.toml" "$backend_context/data-management/curation/"' in deploy
+    )
+    assert 'cp "$REPO_ROOT/data-management/curation/physical_ai_curation/"*.py' in deploy
+    assert 'cp "$REPO_ROOT/data-management/curation/physical_ai_curation/adapters/"*.py' in deploy
 
 
 def test_browser_gate_cannot_reuse_live_services_or_resolve_dependencies() -> None:
@@ -106,3 +113,68 @@ assert callable(build_router)
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_given_no_curation_when_importing_evaluator_then_echo_scoring_is_independent(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[4]
+    shutil.copytree(
+        root / "evaluation" / "vlm_judge",
+        tmp_path / "vlm_judge",
+        ignore=shutil.ignore_patterns("__pycache__", ".venv", "build", "*.egg-info"),
+    )
+    script = """
+import importlib.abc
+import sys
+
+sys.path.extend(sys.argv[1:])
+
+class NoCuration(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'physical_ai_curation', 'src', 'api'}:
+            raise ModuleNotFoundError('Curation is not installed', name=fullname.split('.')[0])
+
+sys.meta_path.insert(0, NoCuration())
+from PIL import Image
+from vlm_judge import AgentConfig, EchoBackend, JudgeAgent, JudgeResult, JudgeService
+
+agent = JudgeAgent(EchoBackend(), config=AgentConfig(n_outcome_samples=1))
+result = agent.judge(
+    episode_id='synthetic/episode_0',
+    instruction='Move the object',
+    frames=[Image.new('RGB', (32, 32)) for _ in range(8)],
+)
+assert JudgeResult.from_dict(result.to_dict()).episode_id == 'synthetic/episode_0'
+assert callable(JudgeService.judge_episode)
+assert not any(name.startswith('physical_ai_curation') for name in sys.modules)
+"""
+    before = set(tmp_path.rglob("*"))
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", script, str(tmp_path), sysconfig.get_path("purelib")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert set(tmp_path.rglob("*")) == before
+
+
+def test_given_curation_core_when_inspected_then_runtime_and_storage_are_adapter_owned() -> None:
+    import physical_ai_curation
+
+    core = Path(physical_ai_curation.__file__).parent
+    forbidden = {"evaluation", "vlm_judge", "fastapi", "starlette", "azure", "src"}
+    for source in core.glob("*.py"):
+        tree = ast.parse(source.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                assert (node.module or "").split(".")[0] not in forbidden, source.name
+            elif isinstance(node, ast.Import):
+                assert not forbidden.intersection(alias.name.split(".")[0] for alias in node.names), source.name
+    storage = ast.parse((core / "storage.py").read_text())
+    definitions = {node.name for node in storage.body if isinstance(node, (ast.ClassDef, ast.FunctionDef))}
+    assert not {"LocalCurationStorage", "write_conditional", "delete_conditional"}.intersection(definitions)
+    saved_input = ast.parse((core / "saved_input.py").read_text())
+    definitions = {node.name for node in saved_input.body if isinstance(node, (ast.ClassDef, ast.FunctionDef))}
+    assert not {"LocalSavedInputReader", "local_source_revision"}.intersection(definitions)

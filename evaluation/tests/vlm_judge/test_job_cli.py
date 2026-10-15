@@ -9,12 +9,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from physical_ai_curation.storage import LocalCurationStorage
+from physical_ai_curation.adapters.evaluator import ServiceExecutor
+from physical_ai_curation.adapters.local_storage import LocalCurationStorage
 from vlm_judge.job_cli import add_job_arguments, execute_job_command, job_exit_code, read_sample_references
 from vlm_judge.job_storage import LocalJobStore
 from vlm_judge.jobs import JudgeJobs
 from vlm_judge.saved_input import LocalDatasetResolver
-from vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig, ServiceExecutor
+from vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig
 
 
 @pytest.fixture

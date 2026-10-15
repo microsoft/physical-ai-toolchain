@@ -51,7 +51,7 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.uv.sources]
-physical-ai-curation = { path = "../../shared/curation", editable = true }
+physical-ai-curation = { path = "../../data-management/curation", editable = true }
 torch = [
     { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
     { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },

@@ -101,7 +101,7 @@ constraint-dependencies = [
 ]
 
 [tool.uv.sources]
-physical-ai-curation = { path = "../../../shared/curation", editable = true }
+physical-ai-curation = { path = "../../curation", editable = true }
 physical-ai-vlm-judge = { path = "../../../evaluation/vlm_judge", editable = true }
 
 [tool.pytest.ini_options]

@@ -1,7 +1,7 @@
 [project]
 name = "physical-ai-curation"
 version = "0.1.0"
-description = "Shared curation models, saved inputs, and conditional storage"
+description = "Data-management curation models, saved inputs, and conditional storage"
 requires-python = ">=3.12"
 dependencies = ["pydantic==2.13.5"]
 

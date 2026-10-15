@@ -7,8 +7,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from physical_ai_curation.adapters.local_saved_input import LocalSavedInputReader
 from physical_ai_curation.saved_input import (
-    LocalSavedInputReader,
     SavedInputError,
     SavedInputSnapshot,
     resolve_saved_input,
@@ -60,7 +60,7 @@ class LocalDatasetResolver:
             annotation_author_id=reference.get("annotation_author_id"),
             expected_snapshot_id=reference.get("snapshot_id"),
         )
-        from physical_ai_curation.storage import LocalCurationStorage
+        from physical_ai_curation.adapters.local_storage import LocalCurationStorage
 
         labels = await LocalCurationStorage(self.datasets).load_versioned(dataset_id)
         return await resolve_validation_sample(

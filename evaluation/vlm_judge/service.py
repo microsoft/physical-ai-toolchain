@@ -15,23 +15,18 @@ backend is configured but not yet provisioned.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
-import json
 import logging
 import math
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from physical_ai_curation.saved_input import SavedInputSnapshot
-
 from .agent import AgentConfig, JudgeAgent
 from .backend import EchoBackend, JudgeBackend, OpenAICompatibleBackend, Qwen3VLBackend
 from .cache import JudgeCache
-from .dataset import EpisodeRecord
 from .frames import FrameWindow, extract_frames, tile_horizontally
 from .judge import JudgeResult
 from .prompts import PROMPT_VERSION
@@ -252,98 +247,6 @@ class JudgeService:
         if cfg.kind == "echo":
             return EchoBackend()
         raise ValueError(f"Unknown backend kind: {cfg.kind}")
-
-
-class ServiceExecutor:
-    """Bind persisted runtime identity and keep blocking inference off the event loop."""
-
-    def __init__(
-        self,
-        service: JudgeService,
-        *,
-        prepare_media: Callable[[EpisodeRecord, SavedInputSnapshot], Awaitable[EpisodeRecord]] | None = None,
-        cache_directory: Callable[[SavedInputSnapshot], Path] | None = None,
-    ) -> None:
-        self.service = service
-        self.prepare_media = prepare_media
-        self.cache_directory = cache_directory
-
-    def configuration(self, options: dict[str, Any]) -> dict[str, Any]:
-        method = options.get("process_method") or self.service.config.agent.process_method
-        if method not in {"gvl", "chronological"}:
-            raise ValueError("Invalid process method")
-        return json.loads(
-            json.dumps(
-                {
-                    "execution": self.service.execution_config,
-                    "agent": asdict(replace(self.service.config.agent, process_method=method)),
-                    "prompt_version": PROMPT_VERSION,
-                    "process_method": method,
-                    "views": sorted(set(options.get("views") or [])),
-                    "annotation_author_id": options.get("annotation_author_id"),
-                    "force": bool(options.get("force", False)),
-                    **(
-                        {"instruction_override": options["instruction_override"]}
-                        if options.get("instruction_override")
-                        else {}
-                    ),
-                }
-            )
-        )
-
-    async def __call__(
-        self,
-        record: EpisodeRecord,
-        snapshot: SavedInputSnapshot,
-        config: dict[str, Any],
-    ) -> dict[str, Any]:
-        if config != self.configuration(config):
-            raise ValueError("Saved judge runtime configuration is unavailable")
-        cache_dir = self.cache_directory(snapshot) if self.cache_directory else None
-        cache = self.service.cache_for(cache_dir)
-        cache_key = cache.key(
-            episode_id=record.episode_id,
-            snapshot_id=snapshot.snapshot_id,
-            video_paths=record.video_paths,
-            instruction=snapshot.instruction,
-            judge_model=self.service.model_id,
-            prompt_version=PROMPT_VERSION,
-            from_s=record.from_timestamp,
-            to_s=record.to_timestamp,
-            video_windows=record.video_windows,
-            media_identity=record.media_identity,
-            agent_config=replace(self.service.config.agent, process_method=config["process_method"]),
-        )
-        cached = await asyncio.to_thread(cache.get, cache_key) if not config["force"] else None
-        if cached is not None:
-            result = JudgeResult.from_dict(cached)
-            if result.episode_id != record.episode_id or result.instruction != snapshot.instruction:
-                raise ValueError("Saved judge evidence does not match requested input")
-            return {**result.to_dict(), "_cache_hit": True}
-        if self.prepare_media is not None:
-            record = await self.prepare_media(record, snapshot)
-        execution = asyncio.create_task(
-            asyncio.to_thread(
-                self.service.judge_episode,
-                episode_id=record.episode_id,
-                instruction=snapshot.instruction,
-                video_paths=record.video_paths,
-                from_s=record.from_timestamp,
-                to_s=record.to_timestamp,
-                video_windows=record.video_windows,
-                media_identity=record.media_identity,
-                snapshot_id=snapshot.snapshot_id,
-                process_method=config["process_method"],
-                force=config["force"],
-                cache_dir=cache_dir,
-            )
-        )
-        try:
-            result = await asyncio.shield(execution)
-        except asyncio.CancelledError:
-            await execution
-            raise
-        return result.to_dict()
 
 
 def _result_from_dict(payload: dict[str, Any]) -> JudgeResult:

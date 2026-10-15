@@ -41,8 +41,8 @@ from evaluation.vlm_judge.job_cli import add_job_arguments, execute_job_command
 from evaluation.vlm_judge.job_storage import LocalJobStore
 from evaluation.vlm_judge.jobs import JudgeJobs
 from evaluation.vlm_judge.saved_input import LocalDatasetResolver
+from physical_ai_curation.adapters.local_storage import LocalCurationStorage
 from physical_ai_curation.saved_input import SavedInputSnapshot
-from physical_ai_curation.storage import LocalCurationStorage
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

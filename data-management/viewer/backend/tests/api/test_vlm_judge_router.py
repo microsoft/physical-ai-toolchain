@@ -465,6 +465,8 @@ from src.api.config import get_app_config
 from src.api.services.vlm_judge_service import get_vlm_judge_service
 from src.api.services.label_storage import LocalLabelStorage
 from src.api.storage import RevisionConflictError
+from src.api.storage.local import LocalStorageAdapter
+from src.api.models.annotations import EpisodeAnnotationFile
 from physical_ai_curation.models import DatasetLabelsFile
 
 async def verify_curation():
@@ -480,6 +482,31 @@ async def verify_curation():
     else:
         raise AssertionError("Stale conditional write was accepted")
     assert (await storage.load_versioned("test")).etag == revision
+
+    annotations = LocalStorageAdapter(os.environ["DATA_DIR"])
+    annotation = EpisodeAnnotationFile.model_validate({
+        "dataset_id": "test", "episode_index": 0,
+        "annotations": [{
+            "annotator_id": "local-user", "timestamp": "2026-10-15T00:00:00Z",
+            "task_completeness": {"rating": "success", "confidence": 5, "completion_percentage": 100},
+            "trajectory_quality": {
+                "overall_score": 5,
+                "metrics": {"smoothness": 5, "efficiency": 5, "safety": 5, "precision": 5},
+            },
+            "data_quality": {"overall_quality": "good"}, "anomalies": {},
+            "notes": "Saved without evaluator",
+        }],
+    })
+    annotation_revision = await annotations.save_annotation("test", 0, annotation, if_none_match=True)
+    saved_annotation = await annotations.get_annotation_versioned("test", 0)
+    assert saved_annotation.value == annotation and saved_annotation.etag == annotation_revision
+    try:
+        await annotations.save_annotation("test", 0, annotation, if_match='"stale"')
+    except RevisionConflictError:
+        pass
+    else:
+        raise AssertionError("Stale annotation write was accepted")
+    assert (await annotations.get_annotation_versioned("test", 0)).etag == annotation_revision
 
 with TestClient(app) as client:
     assert client.get("/health").status_code == 200
@@ -872,7 +899,9 @@ def test_backend_and_pin_changes_invalidate_service_and_viewer_cache(
 
     def fake_backend(config: object) -> EchoBackend:
         calls.append(config)
-        return EchoBackend()
+        backend = EchoBackend()
+        backend.name = "echo" if config.kind == "echo" else config.model_id
+        return backend
 
     monkeypatch.setattr(JudgeService, "_build_backend", staticmethod(fake_backend))
     path = f"/api/datasets/{DATASET_ID}/episodes/0/judge"

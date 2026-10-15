@@ -640,7 +640,8 @@ def test_given_partial_cli_execution_when_finished_then_nonzero_exit(
 
 @pytest.mark.asyncio
 async def test_given_saved_local_instruction_when_resolved_then_author_and_revision_bound(tmp_path: Path) -> None:
-    from physical_ai_curation.saved_input import LocalSavedInputReader, resolve_saved_input
+    from physical_ai_curation.adapters.local_saved_input import LocalSavedInputReader
+    from physical_ai_curation.saved_input import resolve_saved_input
 
     (tmp_path / "meta").mkdir()
     (tmp_path / "meta" / "info.json").write_text("{}")
@@ -683,7 +684,8 @@ async def test_given_saved_local_instruction_when_resolved_then_author_and_revis
 async def test_given_saved_media_edit_when_cli_resolves_then_unsupported_transform_rejected(tmp_path: Path) -> None:
     import hashlib
 
-    from physical_ai_curation.saved_input import LocalSavedInputReader, resolve_saved_input
+    from physical_ai_curation.adapters.local_saved_input import LocalSavedInputReader
+    from physical_ai_curation.saved_input import resolve_saved_input
 
     (tmp_path / "meta").mkdir()
     (tmp_path / "meta" / "info.json").write_text("{}")
