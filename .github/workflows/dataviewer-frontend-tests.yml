@@ -107,11 +107,72 @@ jobs:
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: data-management/viewer/frontend/coverage/cobertura-coverage.xml
+          disable_search: true
           use_oidc: true
           fail_ci_if_error: false
           verbose: true
-          flags: vitest,vitest-components,vitest-features,vitest-lib,vitest-state,vitest-app
+          flags: vitest
           name: vitest-coverage
+
+      - name: Upload component coverage to Codecov
+        if: ${{ inputs.code-coverage && always() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: data-management/viewer/frontend/coverage/cobertura-coverage.xml
+          disable_search: true
+          use_oidc: true
+          fail_ci_if_error: false
+          verbose: true
+          flags: vitest-components
+          name: vitest-components-coverage
+
+      - name: Upload feature coverage to Codecov
+        if: ${{ inputs.code-coverage && always() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: data-management/viewer/frontend/coverage/cobertura-coverage.xml
+          disable_search: true
+          use_oidc: true
+          fail_ci_if_error: false
+          verbose: true
+          flags: vitest-features
+          name: vitest-features-coverage
+
+      - name: Upload library coverage to Codecov
+        if: ${{ inputs.code-coverage && always() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: data-management/viewer/frontend/coverage/cobertura-coverage.xml
+          disable_search: true
+          use_oidc: true
+          fail_ci_if_error: false
+          verbose: true
+          flags: vitest-lib
+          name: vitest-lib-coverage
+
+      - name: Upload state coverage to Codecov
+        if: ${{ inputs.code-coverage && always() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: data-management/viewer/frontend/coverage/cobertura-coverage.xml
+          disable_search: true
+          use_oidc: true
+          fail_ci_if_error: false
+          verbose: true
+          flags: vitest-state
+          name: vitest-state-coverage
+
+      - name: Upload app coverage to Codecov
+        if: ${{ inputs.code-coverage && always() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: data-management/viewer/frontend/coverage/cobertura-coverage.xml
+          disable_search: true
+          use_oidc: true
+          fail_ci_if_error: false
+          verbose: true
+          flags: vitest-app
+          name: vitest-app-coverage
 
       - name: Publish execution evidence
         id: outcome
