@@ -49,7 +49,7 @@ def validate_video_path(path: Path | str, root: Path) -> Path:
         root_prefix = str(root) + os.sep
         if not candidate.startswith(root_prefix):
             raise MediaInputError("Invalid media input")
-        resolved = str(Path(candidate).resolve())
+        resolved = os.path.realpath(candidate)
         if not resolved.startswith(root_prefix):
             raise MediaInputError("Invalid media input")
         validated = Path(resolved)

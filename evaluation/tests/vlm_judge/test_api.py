@@ -237,14 +237,16 @@ def test_outside_media_is_rejected_before_additional_filesystem_probe(
         pytest.fail("Rejected media reached a filesystem probe")
 
     with monkeypatch.context() as patch:
-        original_resolve = Path.resolve
+        original_realpath = os.path.realpath
 
-        def resolve_then_forbid_stat(candidate: Path) -> Path:
-            resolved = original_resolve(candidate)
+        def resolve_then_forbid_stat(candidate: str | Path, *, strict: bool = False) -> str:
+            resolved = original_realpath(candidate, strict=strict)
             patch.setattr(Path, "stat", forbidden_probe)
             return resolved
 
-        patch.setattr(Path, "resolve", resolve_then_forbid_stat if path_kind == "symlink-prefix" else forbidden_probe)
+        patch.setattr(
+            os.path, "realpath", resolve_then_forbid_stat if path_kind == "symlink-prefix" else forbidden_probe
+        )
         with pytest.raises(MediaInputError, match=r"^Invalid media input$"):
             validate_video_path(paths[path_kind], root)
 
