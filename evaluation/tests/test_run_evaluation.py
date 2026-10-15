@@ -146,6 +146,35 @@ def test_shared_episode_data_and_video_are_bounded(tmp_path: Path) -> None:
     assert [int(frame[0, 0, 0]) for frame in sliced] == [2, 3, 4]
 
 
+def test_find_files_honor_info_path_templates(tmp_path: Path) -> None:
+    meta = tmp_path / "meta"
+    meta.mkdir()
+    (meta / "info.json").write_text(
+        json.dumps(
+            {
+                "data_path": "frames/c{chunk_index}/f{file_index}.parquet",
+                "video_path": "media/{video_key}/c{chunk_index}/f{file_index}.mp4",
+            }
+        ),
+        encoding="utf-8",
+    )
+    data_file = tmp_path / "frames" / "c1" / "f2.parquet"
+    video_file = tmp_path / "media" / "observation.images.wrist" / "c3" / "f4.mp4"
+    data_file.parent.mkdir(parents=True)
+    video_file.parent.mkdir(parents=True)
+    data_file.touch()
+    video_file.touch()
+    episode_record = {
+        "data/chunk_index": 1,
+        "data/file_index": 2,
+        "videos/observation.images.wrist/chunk_index": 3,
+        "videos/observation.images.wrist/file_index": 4,
+    }
+
+    assert _MOD._find_data_file(str(tmp_path), 1, episode_record) == str(data_file)
+    assert _MOD._find_video_file(str(tmp_path), "observation.images.wrist", 1, episode_record) == str(video_file)
+
+
 def test_write_vla_schema_v1_emits_strict_contract(tmp_path: Path) -> None:
     _MOD._write_vla_schema_v1(
         output_dir=tmp_path,
