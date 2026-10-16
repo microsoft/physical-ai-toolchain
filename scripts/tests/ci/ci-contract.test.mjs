@@ -478,6 +478,16 @@ const selectionCases = [
   ['shared shell defaults conservatively select every consumer', 'scripts/lib/common.sh', allSelectors],
   ['shared image scripts also select their own tests', 'shared/ci/smoke-image.sh', [...imageConsumers, 'shared_ci']],
   ['VLM judge selects evaluation, the viewer backend, and accessibility', 'evaluation/vlm_judge/judge.py', ['evaluation', 'dv_backend', 'accessibility']],
+  ...['physical_ai_curation/jobs.py', 'tests/test_jobs.py', 'pyproject.toml', 'uv.lock'].map(path => [
+    `curation package ${path} selects backend, fuzz, and accessibility`,
+    `data-management/curation/${path}`,
+    ['dv_backend', 'fuzz', 'accessibility'],
+  ]),
+  ...['physical_ai_dataset_io/lerobot.py', 'tests/test_lerobot.py', 'pyproject.toml', 'uv.lock'].map(path => [
+    `dataset-I/O package ${path} selects evaluator, backend, fuzz, and accessibility`,
+    `data-management/dataset-io/${path}`,
+    ['evaluation', 'dv_backend', 'fuzz', 'accessibility'],
+  ]),
   ['data-pipeline config selects its Python and accessibility tests', 'data-pipeline/pyproject.toml', ['data_pipeline', 'accessibility']],
   ['Terraform provider locks retain unconditional validation and accessibility', 'infrastructure/terraform/.terraform.lock.hcl', ['accessibility']],
   ['accessibility contracts select evidence and docs', '.github/accessibility/surfaces.yaml', ['accessibility', 'docusaurus']],

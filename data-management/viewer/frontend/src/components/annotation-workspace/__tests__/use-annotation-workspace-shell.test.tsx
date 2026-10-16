@@ -17,6 +17,7 @@ import * as annotationHooks from '@/hooks/use-annotations'
 import { useEpisodeEdits } from '@/hooks/use-episode-edits'
 import * as principalHooks from '@/hooks/use-principal-context'
 import { ApiClientError } from '@/lib/api-client'
+import * as stores from '@/stores'
 import { renderHookWithProviders } from '@/test-utils/render'
 import { SUBTASK_COLORS } from '@/types/episode-edit'
 
@@ -94,10 +95,67 @@ describe('useAnnotationWorkspaceShell', () => {
     expect(mockTogglePlayback).toHaveBeenCalledOnce()
   })
 
+  it.each([
+    {
+      state: { annotationRecoveryError: 'Annotation recovery failed' },
+      message: 'Annotation recovery failed',
+    },
+    { state: { labelRecoveryError: 'Label recovery failed' }, message: 'Label recovery failed' },
+    { state: { editPersistenceError: 'Edit recovery failed' }, message: 'Edit recovery failed' },
+    { state: { labelDraftHydrated: false }, message: 'Loading label drafts.' },
+    { state: { labelsLoaded: false }, message: 'Loading labels.' },
+  ])('preserves pending edits and blocks save: $message', async ({ state, message }) => {
+    Object.assign(testState, state, { hasAnnotationChanges: true, hasEdits: true })
+    const { result } = renderHookWithProviders(() => useAnnotationWorkspaceShell({}))
+
+    await act(async () => {
+      await result.current.handleSaveEpisode()
+    })
+
+    expect(result.current.canSaveEpisode).toBe(false)
+    expect(result.current.saveStatusMessage).toBe(message)
+    expect(mockSaveAnnotation).not.toHaveBeenCalled()
+    expect(mockSaveEpisodeDraft).not.toHaveBeenCalled()
+    expect(testState.hasAnnotationChanges).toBe(true)
+    expect(testState.hasEdits).toBe(true)
+  })
+
   it('defaults the workspace shell to the trajectory tab', () => {
     const { result } = renderHookWithProviders(() => useAnnotationWorkspaceShell({}))
 
     expect(result.current.activeTab).toBe('trajectory')
+  })
+
+  it('disables save while no episode is loaded', async () => {
+    vi.spyOn(stores, 'useEpisodeStore').mockImplementation((selector) =>
+      selector({ currentEpisode: null } as ReturnType<typeof stores.useEpisodeStore.getState>),
+    )
+    const { result } = renderHookWithProviders(() => useAnnotationWorkspaceShell({}))
+
+    await act(async () => {
+      await result.current.handleSaveEpisode()
+    })
+
+    expect(result.current.canSaveEpisode).toBe(false)
+    expect(mockSaveAnnotation).not.toHaveBeenCalled()
+    expect(mockSaveEpisodeDraft).not.toHaveBeenCalled()
+  })
+
+  it('blocks saves until the saved-edit revision is ready', async () => {
+    testState.hasEdits = true
+    vi.mocked(useEpisodeEdits).mockReturnValue({
+      isReady: false,
+      persistenceError: null,
+    } as ReturnType<typeof useEpisodeEdits>)
+    const { result } = renderHookWithProviders(() => useAnnotationWorkspaceShell({}))
+
+    await act(async () => {
+      await result.current.handleSaveEpisode()
+    })
+
+    expect(result.current.saveStatusMessage).toBe('Loading saved edits.')
+    expect(mockSaveEpisodeDraft).not.toHaveBeenCalled()
+    expect(testState.hasEdits).toBe(true)
   })
 
   it('records workspace diagnostics when switching tabs', () => {

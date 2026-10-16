@@ -1,3 +1,7 @@
+import { randomUUID } from 'node:crypto'
+import { cpSync } from 'node:fs'
+import { join } from 'node:path'
+
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 
@@ -317,16 +321,26 @@ test('P06 real echo judge displays evidence without writes and withdraws explici
   test.setTimeout(60_000)
   await page.clock.setFixedTime(new Date())
   const backend = 'http://127.0.0.1:18000'
-  const dataset = `${backend}/api/datasets/integration-judge-fixture`
+  const datasetId = `integration-judge-${randomUUID()}`
+  const dataDirectory = testInfo.config.metadata.dataDirectory as string
+  cpSync(join(dataDirectory, 'integration-judge-fixture'), join(dataDirectory, datasetId), {
+    recursive: true,
+  })
+  expect((await request.get(`${backend}/api/datasets?refresh=true`)).ok()).toBe(true)
+  const dataset = `${backend}/api/datasets/${datasetId}`
   expect((await (await request.get(`${dataset}/capabilities`)).json()).vlm_judge_enabled).toBe(true)
   const labelsBefore = (await (await request.get(`${dataset}/labels`)).json()).episodes
-  await page.goto('http://127.0.0.1:4173/?dataset=integration-judge-fixture')
+  const resultsUrl = `${backend}/api/judge/results?dataset_id=${datasetId}&episode_index=0`
+  expect((await (await request.get(resultsUrl)).json()).items).toEqual([])
+  await page.goto(`http://127.0.0.1:4173/?dataset=${datasetId}`)
+  await expect(page.getByRole('heading', { name: 'Episode 0', exact: true })).toBeVisible()
   await page.getByRole('tab', { name: 'Episode Analyzer' }).click()
-  await page.getByRole('button', { name: 'Run judge', exact: true }).click()
+  const runJudge = page.getByRole('button', { name: 'Run judge', exact: true })
+  await expect(runJudge).toBeEnabled()
+  await runJudge.click()
   const assessment = page.getByRole('region', { name: 'Judge assessment' })
   await expect(assessment).toContainText('current', { timeout: 20_000 })
   expect((await (await request.get(`${dataset}/labels`)).json()).episodes).toEqual(labelsBefore)
-  const resultsUrl = `${backend}/api/judge/results?dataset_id=integration-judge-fixture&episode_index=0`
   const evidence = (await (await request.get(resultsUrl)).json()).items
   expect(evidence).toHaveLength(1)
   await page.reload()
@@ -422,7 +436,9 @@ test('P06 real echo judge displays evidence without writes and withdraws explici
   expect((await (await request.get(`${dataset}/labels`)).json()).episodes['0'] ?? []).toEqual([])
   expect((await (await request.get(resultsUrl)).json()).items).toHaveLength(1)
   await page.getByRole('button', { name: /Episode 1/ }).click()
-  await page.getByRole('button', { name: 'Run judge', exact: true }).press('Enter')
+  await expect(page.getByRole('heading', { name: 'Episode 1', exact: true })).toBeVisible()
+  await expect(runJudge).toBeEnabled()
+  await runJudge.press('Enter')
   await expect(assessment).toContainText('current')
   const secondResultsUrl = resultsUrl.replace('episode_index=0', 'episode_index=1')
   const originalRun = (await (await request.get(secondResultsUrl)).json()).items[0].run_id

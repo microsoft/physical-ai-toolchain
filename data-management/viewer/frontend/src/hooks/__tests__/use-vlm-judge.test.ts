@@ -6,12 +6,14 @@ import {
   useApplyJudgeResult,
   useJudgeEvidence,
   useRunVlmJudge,
+  useVlmJudgeStatus,
   vlmJudgeKeys,
 } from '@/hooks/use-vlm-judge'
 import {
   fetchJudgeEvidence,
   fetchJudgeJob,
   fetchVlmJudgeSnapshot,
+  fetchVlmJudgeStatus,
   mutateJudgeDataset,
   runVlmJudge,
 } from '@/lib/api-client'
@@ -92,6 +94,7 @@ beforeEach(async () => {
   useEpisodeStore.getState().reset()
   await clearPersistedEditDraftsForTests()
   mockRunVlmJudge.mockReset()
+  vi.mocked(fetchVlmJudgeStatus).mockReset()
   vi.mocked(fetchVlmJudgeSnapshot)
     .mockReset()
     .mockResolvedValue({
@@ -110,6 +113,64 @@ beforeEach(async () => {
 })
 
 afterEach(() => vi.restoreAllMocks())
+
+describe('useVlmJudgeStatus', () => {
+  it.each([
+    { datasetId: null, episodeIndex: 0, enabled: true },
+    { datasetId: 'ds-1', episodeIndex: null, enabled: true },
+    { datasetId: 'ds-1', episodeIndex: -1, enabled: true },
+    { datasetId: 'ds-1', episodeIndex: 0, enabled: false },
+  ])('does not fetch an unavailable selection %j', (options) => {
+    const queryClient = createTestQueryClient()
+    queryClient.setDefaultOptions({ queries: { gcTime: Infinity } })
+    queryClient.setQueryData(['auth', 'principal-context'], { scopeId: 'principal-one' })
+    const { result } = renderHookWithProviders(() => useVlmJudgeStatus(options), { queryClient })
+
+    expect(result.current.fetchStatus).toBe('idle')
+    expect(fetchVlmJudgeStatus).not.toHaveBeenCalled()
+  })
+
+  it('reads disabled capability without dispatching inference', async () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setDefaultOptions({ queries: { gcTime: Infinity } })
+    queryClient.setQueryData(['auth', 'principal-context'], { scopeId: 'principal-one' })
+    vi.mocked(fetchVlmJudgeStatus).mockResolvedValueOnce(status({ enabled: false }))
+    const { result } = renderHookWithProviders(
+      () => useVlmJudgeStatus({ datasetId: 'ds-1', episodeIndex: 0 }),
+      { queryClient },
+    )
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data?.enabled).toBe(false)
+    expect(fetchVlmJudgeStatus).toHaveBeenCalledWith('ds-1', 0)
+    expect(mockRunVlmJudge).not.toHaveBeenCalled()
+  })
+
+  it('retains a cached status after a refresh failure and recovers on retry', async () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setDefaultOptions({ queries: { gcTime: Infinity, retry: false } })
+    queryClient.setQueryData(['auth', 'principal-context'], { scopeId: 'principal-one' })
+    vi.mocked(fetchVlmJudgeStatus).mockResolvedValueOnce(status({ cached: true }))
+    const { result } = renderHookWithProviders(
+      () => useVlmJudgeStatus({ datasetId: 'ds-1', episodeIndex: 0 }),
+      { queryClient },
+    )
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    vi.mocked(fetchVlmJudgeStatus).mockRejectedValueOnce(new Error('Temporarily unavailable'))
+
+    await act(async () => {
+      await result.current.refetch()
+    })
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.data?.cached).toBe(true)
+    vi.mocked(fetchVlmJudgeStatus).mockResolvedValueOnce(status({ cached: false }))
+    await act(async () => {
+      await result.current.refetch()
+    })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data?.cached).toBe(false)
+  })
+})
 
 describe('selected episode readiness', () => {
   it.each([[], [-1], [0.5], [Number.NaN]].map((indices) => ({ indices })))(
@@ -679,6 +740,25 @@ describe('useApplyJudgeResult', () => {
 })
 
 describe('useRunVlmJudge', () => {
+  it('does not dispatch when the active episode changes while the snapshot loads', async () => {
+    const queryClient = createTestQueryClient()
+    queryClient.setDefaultOptions({ queries: { gcTime: Infinity } })
+    queryClient.setQueryData(['auth', 'principal-context'], { scopeId: 'principal-one' })
+    const snapshot = await fetchVlmJudgeSnapshot('ds-1', 0)
+    vi.mocked(fetchVlmJudgeSnapshot).mockImplementationOnce(async () => {
+      useEpisodeStore.setState({ currentIndex: 1 })
+      return snapshot
+    })
+    const { result } = renderHookWithProviders(() => useRunVlmJudge(), { queryClient })
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({ datasetId: 'ds-1', episodeIndex: 0 }),
+      ).rejects.toThrow('Judge context changed')
+    })
+    expect(mockRunVlmJudge).not.toHaveBeenCalled()
+  })
+
   it('rejects a result returned after the principal changes', async () => {
     const queryClient = createTestQueryClient()
     queryClient.setDefaultOptions({ queries: { gcTime: Infinity } })

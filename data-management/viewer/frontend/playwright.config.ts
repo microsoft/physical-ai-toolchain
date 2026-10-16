@@ -18,6 +18,7 @@ const isolatedEnvironment = {
 const seedDataset = `uv run --directory ../backend --no-sync --frozen python -c "import os; from pathlib import Path; from tests.api.test_vlm_judge_router import _build_dataset; [_build_dataset(Path(os.environ['DATA_DIR']) / dataset_id, instruction='Place the block', n_episodes=2) for dataset_id in ('integration-fixture', 'integration-judge-fixture', 'integration-grounding-fixture')]"`
 
 export default defineConfig({
+  metadata: { dataDirectory },
   testDir: './e2e',
   testIgnore: '**/auth-redirect.spec.ts',
   outputDir: '../../../artifacts/accessibility/current/playwright',

@@ -357,6 +357,8 @@ export function useAnnotationWorkspaceShell({
     canGoNextEpisode,
     canGoPreviousEpisode,
     canSaveEpisode:
+      !!currentDataset &&
+      !!currentEpisode &&
       !saveBlockedReason &&
       !saveEpisodeLabels.isPending &&
       !saveAnnotation.isPending &&

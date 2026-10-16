@@ -14,6 +14,16 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.parametrize(
+    "retired_path",
+    ["evaluation/vlm_judge/api.py", "data-management/viewer/backend/scripts/vlm_label_dataset.py"],
+)
+def test_given_canonical_curation_entrypoints_then_retired_duplicates_are_absent(retired_path: str) -> None:
+    repository = Path(__file__).resolve().parents[4]
+
+    assert not (repository / retired_path).exists()
+
+
 def test_dependency_installation_is_isolated_from_runtime_layers() -> None:
     dockerfile = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text()
     base, stages = dockerfile.split("FROM base AS build\n", maxsplit=1)

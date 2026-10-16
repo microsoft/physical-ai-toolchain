@@ -210,6 +210,7 @@
     "evaluation": {
       "patterns": [
         "^evaluation/",
+        "^data-management/dataset-io/",
         "^training/il/lerobot/"
       ],
       "groups": [
@@ -282,6 +283,7 @@
     "dv_backend": {
       "patterns": [
         "^data-management/viewer/backend/",
+        "^data-management/(curation|dataset-io)/",
         "^data-management/viewer/specifications/language-tag-corpus\\.json$",
         "^evaluation/vlm_judge/"
       ],
@@ -302,6 +304,7 @@
     },
     "accessibility": {
       "patterns": [
+        "^data-management/(curation|dataset-io)/",
         "^\\.github/(accessibility/|ISSUE_TEMPLATE/|CODEOWNERS$|agents/dataviewer-developer\\.agent\\.md$)",
         "^scripts/accessibility/",
         "^tests/test_accessibility_(evidence|promotion)\\.py$",
@@ -314,6 +317,7 @@
       "patterns": [
         "^tests/",
         "^data-management/viewer/backend/",
+        "^data-management/(curation|dataset-io)/",
         "^training/"
       ],
       "groups": [
