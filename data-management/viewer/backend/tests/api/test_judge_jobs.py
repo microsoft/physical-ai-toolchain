@@ -8,9 +8,12 @@ import multiprocessing
 from pathlib import Path
 
 import pytest
-from evaluation.vlm_judge.dataset import EpisodeRecord
 from evaluation.vlm_judge.judge import JudgeResult
+from physical_ai_curation.evidence import bind_job_evidence
 from physical_ai_curation.saved_input import SavedInputSnapshot
+from physical_ai_dataset_io.lerobot import EpisodeRecord
+
+ECHO_CONFIG = {"execution": {"backend": "echo", "model_id": "echo"}, "agent": {}, "prompt_version": "test"}
 
 
 class Resolver:
@@ -97,12 +100,11 @@ async def test_given_versioned_evidence_when_read_then_preserves_payload_and_ide
     )
     envelope = bind_evidence(invocation, payload, kind=kind)
     restored = read_evidence(envelope.to_dict(), expected=invocation)
-    legacy = read_evidence(payload, kind=kind)
 
-    assert restored.payload == legacy.payload == payload
+    assert restored.payload == payload
     assert restored.schema_version == 1
-    assert legacy.schema_version is None
-    assert legacy.invocation_id is None and legacy.declared_identity is None
+    with pytest.raises(ValueError, match="Missing evidence envelope"):
+        read_evidence(payload)
     assert snapshot.model_dump(mode="json")["snapshot_id"] == "snapshot-3"
 
 
@@ -173,6 +175,83 @@ async def test_given_cached_evidence_when_executed_then_validates_identity_befor
     else:
         assert await executor(record, snapshot, config) == {**payload, "_cache_hit": True}
     assert cache.get(key) == payload
+
+
+async def test_given_pre_move_inputs_when_relocated_then_snapshot_config_and_cache_hashes_match() -> None:
+    import hashlib
+    import json
+
+    from evaluation.vlm_judge.service import BackendConfig, JudgeService, ServiceConfig
+    from physical_ai_curation.adapters.evaluator import ServiceExecutor
+    from physical_ai_curation.saved_input import SavedResource, resolve_saved_input
+
+    class Reader:
+        async def annotation(self, dataset_id: str, episode_index: int) -> SavedResource:
+            return SavedResource(None, None)
+
+        async def edits(
+            self, dataset_id: str, episode_index: int, principal_scope_id: str, source: tuple[str, str]
+        ) -> SavedResource:
+            return SavedResource(None, None)
+
+        async def source_revision(self, dataset_id: str, episode_index: int) -> tuple[str, str]:
+            return ("source", "revision")
+
+    identities = {"wrist": "wrist-v1", "front": "front-v1"}
+    windows = {"wrist": (3.0, 4.0), "front": (7.0, 8.0)}
+    snapshot = await resolve_saved_input(
+        Reader(),
+        "dataset",
+        3,
+        principal_scope_id="actor",
+        source=("source", "revision"),
+        dataset_instruction="Move the cube",
+        media_identity=identities,
+        video_windows=windows,
+    )
+    service = JudgeService(ServiceConfig(backend=BackendConfig(kind="echo", model_id="echo")))
+    config = ServiceExecutor(service).configuration({"process_method": "chronological", "views": ["wrist", "front"]})
+    config_hash = hashlib.sha256(json.dumps(config, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    cache_key = service.cache_for(None).key(
+        episode_id="dataset/episode_000003",
+        snapshot_id=snapshot.snapshot_id,
+        video_paths={},
+        instruction=snapshot.instruction,
+        judge_model=service.model_id,
+        prompt_version=config["prompt_version"],
+        video_windows=windows,
+        media_identity=identities,
+        agent_config=config["agent"],
+    )
+
+    assert snapshot.snapshot_id == "5c4af4b5b47420620d247d41859b6c8383704433891940e56d46af9a6f6b98dc"
+    assert config_hash == "493eac88ef1936f0becf6fa042de863c3f1a70c1b327a8021703723a4cf7d6eb"
+    assert cache_key == "9dd6791484adc5a3df5ae5d332d9cf0d4a23806be680ebee72ac668efba2e438"
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"n_frames": True},
+        {"outcome_n_valid_votes": -1},
+        {"outcome_confidence": float("nan")},
+        {"voc": float("inf")},
+        {"outcome_success": 1},
+        {"progress_per_frame": [False, 25]},
+        {"outcome_confidence": "0.5"},
+        {"milestones": [{"name": "", "completed": True}]},
+    ],
+)
+async def test_given_invalid_payload_when_validated_then_both_contracts_reject(invalid: dict[str, object]) -> None:
+    from physical_ai_curation.evidence import validate_payload
+
+    record, snapshot = await Resolver().resolve("dataset", 3, principal_scope_id="actor")
+    payload = {**await infer(record, snapshot, {}), **invalid}
+
+    with pytest.raises(ValueError):
+        JudgeResult.from_dict(payload)
+    with pytest.raises(ValueError):
+        validate_payload(payload, "judge")
 
 
 def test_withdrawal_removes_accepted_machine_values_but_preserves_human_and_motion() -> None:
@@ -264,21 +343,30 @@ def test_withdrawal_clears_derived_findings_without_reviving_overlapping_runs() 
 async def test_given_withdrawn_outcome_label_when_previewed_again_then_absent_flags_are_not_listed(
     tmp_path: Path,
 ) -> None:
-    from evaluation.vlm_judge.curation_storage import apply_judge_result
     from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.application import apply_judge_result
     from physical_ai_curation.models import DatasetLabelsFile
     from physical_ai_curation.storage import plan_withdrawal
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     await storage.save("dataset", DatasetLabelsFile(dataset_id="dataset"), if_none_match=True)
     result = JudgeResult("dataset/episode_000002", "Pick", "echo", "test", 2, True, 1.0, 3, [0, 100], 1.0)
-    job = {"id": "run", "run_order": 1, "config_revision": "config", "actor": "actor", "dataset_id": "dataset"}
+    job = {
+        "id": "run",
+        "run_order": 1,
+        "config_revision": "config",
+        "actor": "actor",
+        "dataset_id": "dataset",
+        "config": ECHO_CONFIG,
+    }
     target = {
         "episode_index": 2,
         "result": result.to_dict(),
         "result_id": "result",
-        "input": {"source_revision": "source", "snapshot_id": "snapshot"},
+        "input_key": "input",
+        "input": {"source_revision": "source", "snapshot_id": "snapshot", "instruction": "Pick"},
     }
+    target["evidence"] = bind_job_evidence(job, target, target["result"]).to_dict()
     assert await apply_judge_result(storage, job, target)
     labels = (await storage.load_versioned("dataset")).value
     assert labels.episodes["2"] == ["SUCCESS"]
@@ -314,16 +402,25 @@ def test_given_present_unprovenanced_label_when_previewed_then_it_remains_legacy
 
 
 async def _apply_success(storage: object, run_id: str, run_order: int, episode: int = 3) -> None:
-    from evaluation.vlm_judge.curation_storage import apply_judge_result
+    from physical_ai_curation.application import apply_judge_result
 
     result = JudgeResult(f"dataset/episode_{episode:06d}", "Pick", "echo", "test", 2, True, 1.0, 3, [0, 100], 1.0)
-    job = {"id": run_id, "run_order": run_order, "config_revision": "config", "actor": "actor", "dataset_id": "dataset"}
+    job = {
+        "id": run_id,
+        "run_order": run_order,
+        "config_revision": "config",
+        "actor": "actor",
+        "dataset_id": "dataset",
+        "config": ECHO_CONFIG,
+    }
     target = {
         "episode_index": episode,
         "result": result.to_dict(),
         "result_id": f"result-{run_id}",
-        "input": {"source_revision": "source", "snapshot_id": "snapshot"},
+        "input_key": "input",
+        "input": {"source_revision": "source", "snapshot_id": "snapshot", "instruction": "Pick"},
     }
+    target["evidence"] = bind_job_evidence(job, target, target["result"]).to_dict()
     assert await apply_judge_result(storage, job, target)
 
 
@@ -335,7 +432,7 @@ async def test_given_output_from_unlisted_run_when_withdrawing_then_conflict_is_
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
-    listed = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="listed")
+    listed = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="listed")
     await _apply_success(storage, "lost-run", 99)
     await _apply_success(storage, listed["id"], 1, episode=1005)
 
@@ -361,7 +458,7 @@ async def test_given_output_from_unlisted_run_when_withdrawing_then_conflict_is_
     assert [item["episode_index"] for item in withdrawn] == [1005]
     saved = (await storage.load_versioned("dataset")).value
     assert saved.episodes["1005"] == [] and saved.episodes["3"] == ["SUCCESS"]
-    assert (await jobs.submit("dataset", "actor", [1005], {}, idempotency_key="after"))["status"] == "queued"
+    assert (await jobs.submit("dataset", "actor", [1005], ECHO_CONFIG, idempotency_key="after"))["status"] == "queued"
 
     recovery = await jobs.preview_reset("dataset", "actor", include_unlisted_runs=True)
     assert "lost-run" in recovery["run_ids"]
@@ -394,25 +491,25 @@ async def test_given_unprovenanced_label_before_ai_application_when_withdrawn_th
 
 
 def manager(root: Path, **kwargs: object) -> object:
-    from evaluation.vlm_judge.job_storage import LocalJobStore
-    from evaluation.vlm_judge.jobs import JudgeJobs
+    from physical_ai_curation.adapters.job_storage import LocalJobStore
+    from physical_ai_curation.jobs import JudgeJobs
 
     return JudgeJobs(LocalJobStore(root), Resolver(), infer, capacity_scope="test-device", **kwargs)
 
 
 @pytest.mark.asyncio
 async def test_reset_preview_is_revision_bound_and_fences_all_dataset_workers(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.curation_storage import apply_judge_result
     from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.application import apply_judge_result
     from physical_ai_curation.models import DatasetLabelsFile
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
-    completed = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="completed")
+    completed = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="completed")
     await jobs.run_once()
     completed = await jobs.get(completed["id"], "actor")
     await apply_judge_result(storage, completed, completed["targets"][0])
-    running = await jobs.submit("dataset", "another-actor", [1005], {}, idempotency_key="running")
+    running = await jobs.submit("dataset", "another-actor", [1005], ECHO_CONFIG, idempotency_key="running")
     claim = await jobs.claim()
     preview = await jobs.preview_reset("dataset", "actor")
     assert set(preview["run_ids"]) == {completed["id"], running["id"]}
@@ -420,7 +517,7 @@ async def test_reset_preview_is_revision_bound_and_fences_all_dataset_workers(tm
     accepted = await jobs.confirm_reset("dataset", "actor", preview["id"])
     assert accepted["status"] == "running"
     with pytest.raises(ValueError, match="withdrawal"):
-        await jobs.submit("dataset", "actor", [3], {}, idempotency_key="blocked")
+        await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="blocked")
     assert not await jobs.publish(claim, result={"late": True})
 
     restarted = manager(tmp_path / "jobs", curation_storage=storage)
@@ -442,9 +539,9 @@ async def test_reset_rejects_new_jobs_or_human_saves_after_preview(tmp_path: Pat
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
-    await jobs.submit("dataset", "actor", [3], {}, idempotency_key="first")
+    await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="first")
     preview = await jobs.preview_reset("dataset", "actor")
-    await jobs.submit("dataset", "actor", [1005], {}, idempotency_key="new")
+    await jobs.submit("dataset", "actor", [1005], ECHO_CONFIG, idempotency_key="new")
     with pytest.raises(ValueError, match="preview"):
         await jobs.confirm_reset("dataset", "actor", preview["id"])
     preview = await jobs.preview_reset("dataset", "actor")
@@ -460,12 +557,12 @@ async def test_reset_rejects_new_jobs_or_human_saves_after_preview(tmp_path: Pat
 async def test_reset_recovers_resource_publication_before_lost_job_checkpoint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from evaluation.vlm_judge.curation_storage import apply_judge_result
     from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.application import apply_judge_result
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
-    job = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="first")
+    job = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="first")
     await jobs.run_once()
     job = await jobs.get(job["id"], "actor")
     await apply_judge_result(storage, job, job["targets"][0])
@@ -496,7 +593,7 @@ async def test_reset_preserves_independent_human_sample_approval(tmp_path: Path)
         "dataset",
         "actor",
         [3],
-        {},
+        ECHO_CONFIG,
         idempotency_key="sample",
         mode="sample",
         samples={
@@ -509,16 +606,22 @@ async def test_reset_preserves_independent_human_sample_approval(tmp_path: Path)
     await jobs.confirm_reset("dataset", "actor", preview["id"])
     await jobs.reset_once()
     target = await jobs.submit(
-        "dataset", "actor", [1005], {}, idempotency_key="target", approval_id=approval["id"], require_approval=True
+        "dataset",
+        "actor",
+        [1005],
+        ECHO_CONFIG,
+        idempotency_key="target",
+        approval_id=approval["id"],
+        require_approval=True,
     )
     assert target["status"] == "queued"
 
 
 def test_reset_http_requires_mutation_authority_and_returns_durable_status(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.api import build_job_router
     from fastapi import Depends, FastAPI, HTTPException
     from fastapi.testclient import TestClient
     from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.api import build_job_router
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
     jobs = manager(tmp_path / "jobs", curation_storage=storage)
@@ -533,7 +636,7 @@ def test_reset_http_requires_mutation_authority_and_returns_durable_status(tmp_p
         build_job_router(
             lambda: jobs,
             actor_dependency=lambda: "actor",
-            prepare_config=dict,
+            prepare_config=lambda value: {**ECHO_CONFIG, **value},
             mutation_dependencies=[Depends(authorize)],
         )
     )
@@ -555,14 +658,18 @@ def test_reset_http_requires_mutation_authority_and_returns_durable_status(tmp_p
 async def test_reset_cli_preview_confirm_and_status_share_durable_owner(tmp_path: Path) -> None:
     import argparse
 
-    from evaluation.vlm_judge.job_cli import add_job_arguments, execute_job_command
     from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.job_cli import add_job_arguments, execute_job_command
 
     jobs = manager(tmp_path / "jobs", curation_storage=LocalCurationStorage({"dataset": tmp_path / "dataset"}))
     parser = argparse.ArgumentParser()
     add_job_arguments(parser)
     _, preview = await execute_job_command(
-        jobs, parser.parse_args(["--operation", "reset-preview"]), dataset_id="dataset", actor="actor", config={}
+        jobs,
+        parser.parse_args(["--operation", "reset-preview"]),
+        dataset_id="dataset",
+        actor="actor",
+        config=ECHO_CONFIG,
     )
     code, reset = await execute_job_command(
         jobs,
@@ -576,11 +683,15 @@ async def test_reset_cli_preview_confirm_and_status_share_durable_owner(tmp_path
         ),
         dataset_id="dataset",
         actor="actor",
-        config={},
+        config=ECHO_CONFIG,
     )
     assert code == 0 and reset["status"] == "succeeded"
     _, status = await execute_job_command(
-        jobs, parser.parse_args(["--operation", "reset-status"]), dataset_id="dataset", actor="actor", config={}
+        jobs,
+        parser.parse_args(["--operation", "reset-status"]),
+        dataset_id="dataset",
+        actor="actor",
+        config=ECHO_CONFIG,
     )
     assert status["id"] == reset["id"]
 
@@ -588,7 +699,11 @@ async def test_reset_cli_preview_confirm_and_status_share_durable_owner(tmp_path
 @pytest.mark.asyncio
 async def test_accepted_work_survives_new_manager_and_uses_real_ids(tmp_path: Path) -> None:
     first = manager(tmp_path)
-    job = await first.submit("dataset", "actor", [3, 1005], {"backend": "echo"}, idempotency_key="request")
+    job = await first.submit("dataset", "actor", [3, 1005], ECHO_CONFIG, idempotency_key="request")
+    management = manager(tmp_path)
+    management.infer = None
+    assert not await management.run_once()
+    assert (await management.get(job["id"], "actor"))["status"] == "queued"
     second = manager(tmp_path)
 
     assert (await second.get(job["id"], "actor"))["status"] == "queued"
@@ -606,18 +721,18 @@ async def test_accepted_work_survives_new_manager_and_uses_real_ids(tmp_path: Pa
 @pytest.mark.asyncio
 async def test_idempotency_replays_same_request_and_rejects_changed_payload(tmp_path: Path) -> None:
     jobs = manager(tmp_path)
-    first = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="request")
-    replay = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="request")
+    first = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="request")
+    replay = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="request")
 
     assert replay["id"] == first["id"]
     with pytest.raises(ValueError, match="Idempotency"):
-        await jobs.submit("dataset", "actor", [1005], {}, idempotency_key="request")
+        await jobs.submit("dataset", "actor", [1005], ECHO_CONFIG, idempotency_key="request")
 
 
 @pytest.mark.asyncio
 async def test_cancellation_during_inference_fences_late_result(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.job_storage import LocalJobStore
-    from evaluation.vlm_judge.jobs import JudgeJobs
+    from physical_ai_curation.adapters.job_storage import LocalJobStore
+    from physical_ai_curation.jobs import JudgeJobs
 
     entered, release = asyncio.Event(), asyncio.Event()
 
@@ -629,11 +744,11 @@ async def test_cancellation_during_inference_fences_late_result(tmp_path: Path) 
         return await infer(record, snapshot, config)
 
     jobs = JudgeJobs(LocalJobStore(tmp_path), Resolver(), delayed, capacity_scope="test-device")
-    job = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="request")
+    job = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="request")
     execution = asyncio.create_task(jobs.run_once())
     await asyncio.wait_for(entered.wait(), 5)
     await jobs.cancel(job["id"], "actor")
-    await jobs.submit("other", "actor", [1005], {}, idempotency_key="other")
+    await jobs.submit("other", "actor", [1005], ECHO_CONFIG, idempotency_key="other")
     assert await jobs.claim() is None
     release.set()
     assert await execution is True
@@ -650,7 +765,7 @@ async def test_expired_claim_cannot_publish_and_is_recovered(tmp_path: Path) -> 
     now = [100.0]
     first = manager(tmp_path, clock=lambda: now[0], lease_seconds=10)
     second = manager(tmp_path, clock=lambda: now[0], lease_seconds=10)
-    job = await first.submit("dataset", "actor", [3], {}, idempotency_key="request")
+    job = await first.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="request")
     old = await first.claim()
     now[0] += 11
     current = await second.claim()
@@ -665,8 +780,8 @@ async def test_expired_claim_cannot_publish_and_is_recovered(tmp_path: Path) -> 
 @pytest.mark.asyncio
 async def test_capacity_is_shared_across_instances_and_datasets(tmp_path: Path) -> None:
     first, second = manager(tmp_path), manager(tmp_path)
-    await first.submit("dataset", "actor", [3], {}, idempotency_key="first")
-    await second.submit("other", "actor", [1005], {}, idempotency_key="second")
+    await first.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="first")
+    await second.submit("other", "actor", [1005], ECHO_CONFIG, idempotency_key="second")
 
     claimed = await asyncio.gather(first.claim(), second.claim())
 
@@ -676,7 +791,7 @@ async def test_capacity_is_shared_across_instances_and_datasets(tmp_path: Path) 
 @pytest.mark.asyncio
 async def test_failed_target_retry_preserves_successful_evidence(tmp_path: Path) -> None:
     jobs = manager(tmp_path)
-    job = await jobs.submit("dataset", "actor", [3, 1005], {}, idempotency_key="request")
+    job = await jobs.submit("dataset", "actor", [3, 1005], ECHO_CONFIG, idempotency_key="request")
     await jobs.run_once()
     claim = await jobs.claim()
     await jobs.publish(claim, error="SyntheticFailure")
@@ -693,7 +808,7 @@ async def test_failed_target_retry_preserves_successful_evidence(tmp_path: Path)
 @pytest.mark.asyncio
 async def test_job_reads_do_not_expose_another_actor(tmp_path: Path) -> None:
     jobs = manager(tmp_path)
-    job = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="request")
+    job = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="request")
     with pytest.raises(PermissionError):
         await jobs.get(job["id"], "other-actor")
 
@@ -705,7 +820,7 @@ def _claim_process(root: str, output: object) -> None:
 @pytest.mark.asyncio
 async def test_competing_processes_share_one_durable_capacity_slot(tmp_path: Path) -> None:
     jobs = manager(tmp_path)
-    await jobs.submit("dataset", "actor", [3, 1005], {}, idempotency_key="request")
+    await jobs.submit("dataset", "actor", [3, 1005], ECHO_CONFIG, idempotency_key="request")
     context = multiprocessing.get_context("spawn")
     output = context.Queue()
     processes = [context.Process(target=_claim_process, args=(str(tmp_path), output)) for _ in range(2)]
@@ -722,8 +837,8 @@ async def test_competing_processes_share_one_durable_capacity_slot(tmp_path: Pat
 
 @pytest.mark.asyncio
 async def test_identical_inputs_reuse_evidence_without_another_inference(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.job_storage import LocalJobStore
-    from evaluation.vlm_judge.jobs import JudgeJobs
+    from physical_ai_curation.adapters.job_storage import LocalJobStore
+    from physical_ai_curation.jobs import JudgeJobs
 
     calls = []
 
@@ -734,9 +849,9 @@ async def test_identical_inputs_reuse_evidence_without_another_inference(tmp_pat
         return await infer(record, snapshot, config)
 
     jobs = JudgeJobs(LocalJobStore(tmp_path), Resolver(), counted, capacity_scope="test-device")
-    first = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="first")
+    first = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="first")
     await jobs.run_once()
-    second = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="second")
+    second = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="second")
     await jobs.run_once()
 
     assert calls == [3]
@@ -749,7 +864,7 @@ async def test_identical_inputs_reuse_evidence_without_another_inference(tmp_pat
 @pytest.mark.asyncio
 async def test_wrong_episode_result_is_an_execution_error(tmp_path: Path) -> None:
     jobs = manager(tmp_path)
-    job = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="request")
+    job = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="request")
     claim = await jobs.claim()
     record, snapshot = await Resolver().resolve("dataset", 3, principal_scope_id="actor")
     result = await infer(record, snapshot, {})
@@ -757,6 +872,72 @@ async def test_wrong_episode_result_is_an_execution_error(tmp_path: Path) -> Non
     await jobs.publish(claim, result=result)
 
     assert (await jobs.get(job["id"], "actor"))["status"] == "failed"
+
+
+async def test_given_declared_runtime_when_reopened_and_reused_then_evidence_is_bound_without_identity_changes(
+    tmp_path: Path,
+) -> None:
+    from physical_ai_curation.jobs import fingerprint
+
+    config = {"execution": {"backend": "echo", "model_id": "echo"}, "agent": {}, "prompt_version": "test"}
+    jobs = manager(tmp_path)
+    first = await jobs.submit("dataset", "actor", [3], config, idempotency_key="first")
+    await jobs.run_once()
+    stored = (await manager(tmp_path).get(first["id"], "actor"))["targets"][0]
+
+    assert stored["result_id"] == fingerprint([first["id"], stored["input_key"]])
+    assert stored["evidence"]["payload"] == stored["result"]
+    assert stored["evidence"]["schema_version"] == 1
+    assert stored["evidence"]["input_id"] == stored["input"]["snapshot_id"]
+    assert stored["evidence"]["declared_identity"]["model_id"] == "echo"
+    for missing_config in ({}, {"execution": {}}, {"execution": {"backend": "echo"}}):
+        with pytest.raises(ValueError, match="Missing declared evidence identity"):
+            bind_job_evidence({**first, "config": missing_config}, stored, stored["result"])
+
+    async def forbidden_inference(*args: object) -> dict[str, object]:
+        pytest.fail("Reusing evidence must not invoke inference")
+
+    jobs.infer = forbidden_inference
+    second = await jobs.submit("dataset", "actor", [3], config, idempotency_key="second")
+    await jobs.run_once()
+    reused = (await jobs.get(second["id"], "actor"))["targets"][0]
+    assert reused["cached"] is True
+    assert reused["result"] == stored["result"]
+    assert reused["input_key"] == stored["input_key"]
+    assert reused["evidence"]["invocation_id"] != stored["evidence"]["invocation_id"]
+    history = await manager(tmp_path).results("dataset", "actor", 3, snapshot_id="snapshot-3")
+    assert history[0]["evidence"] == reused["evidence"]
+    assert history[1]["result_id"] == stored["result_id"]
+    async with jobs.store.transaction() as state:
+        state["jobs"][first["id"]]["targets"][0].pop("evidence")
+    with pytest.raises(ValueError, match="Missing evidence envelope"):
+        await manager(tmp_path).results("dataset", "actor", 3, snapshot_id="snapshot-3")
+
+
+@pytest.mark.parametrize("field,value", [("schema_version", 2), ("input_id", "other"), ("kind", "task-findings")])
+async def test_given_invalid_stored_envelope_when_read_or_applied_then_rejected(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.application import apply_judge_result
+
+    jobs = manager(tmp_path / "jobs")
+    config = {"execution": {"backend": "echo", "model_id": "echo"}, "agent": {}, "prompt_version": "test"}
+    accepted = await jobs.submit("dataset", "actor", [3], config, idempotency_key="first")
+    await jobs.run_once()
+    async with jobs.store.transaction() as state:
+        state["jobs"][accepted["id"]]["targets"][0]["evidence"][field] = value
+    job = await jobs.get(accepted["id"], "actor")
+    storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
+
+    with pytest.raises(ValueError):
+        await jobs.results("dataset", "actor", 3)
+    with pytest.raises(ValueError):
+        await apply_judge_result(storage, job, job["targets"][0])
+    assert (await storage.load_versioned("dataset")).etag is None
+    assert not (tmp_path / "dataset" / "meta" / "episode_labels.json").exists()
 
 
 @pytest.mark.asyncio
@@ -771,11 +952,11 @@ async def test_force_recomputes_without_changing_execution_identity(tmp_path: Pa
 
     jobs = manager(tmp_path)
     jobs.infer = counted
-    original = await jobs.submit("dataset", "actor", [3], {"force": False}, idempotency_key="original")
+    original = await jobs.submit("dataset", "actor", [3], {**ECHO_CONFIG, "force": False}, idempotency_key="original")
     await jobs.run_once()
-    forced = await jobs.submit("dataset", "actor", [3], {"force": True}, idempotency_key="forced")
+    forced = await jobs.submit("dataset", "actor", [3], {**ECHO_CONFIG, "force": True}, idempotency_key="forced")
     await jobs.run_once()
-    reused = await jobs.submit("dataset", "actor", [3], {"force": False}, idempotency_key="reused")
+    reused = await jobs.submit("dataset", "actor", [3], {**ECHO_CONFIG, "force": False}, idempotency_key="reused")
     await jobs.run_once()
 
     assert calls == [3, 3]
@@ -791,8 +972,8 @@ async def test_history_is_read_only_and_generation_fences_publication_and_applic
     tmp_path: Path,
     storage_kind: str,
 ) -> None:
-    from evaluation.vlm_judge.job_storage import BlobJobStore, LocalJobStore
-    from evaluation.vlm_judge.jobs import JudgeJobs
+    from physical_ai_curation.adapters.job_storage import BlobJobStore, LocalJobStore
+    from physical_ai_curation.jobs import JudgeJobs
 
     calls = []
 
@@ -802,11 +983,11 @@ async def test_history_is_read_only_and_generation_fences_publication_and_applic
 
     store = LocalJobStore(tmp_path) if storage_kind == "local" else BlobJobStore(MemoryBlob())
     jobs = JudgeJobs(store, Resolver(), infer, capacity_scope="test-device", apply_result=apply_result)
-    first = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="first")
+    first = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="first")
     await jobs.run_once()
-    second = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="second")
+    second = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="second")
     await jobs.run_once()
-    pending = await jobs.submit("dataset", "actor", [1005], {}, idempotency_key="pending")
+    pending = await jobs.submit("dataset", "actor", [1005], ECHO_CONFIG, idempotency_key="pending")
     claim = await jobs.claim()
     await jobs.request_application(second["id"], "actor")
     before = await store.read()
@@ -833,13 +1014,17 @@ async def test_history_is_read_only_and_generation_fences_publication_and_applic
 
 
 def test_http_accepts_durable_work_without_request_held_inference(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.api import build_job_router
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+    from physical_ai_curation.api import build_job_router
 
     jobs = manager(tmp_path)
     app = FastAPI()
-    app.include_router(build_job_router(lambda: jobs, actor_dependency=lambda: "actor", prepare_config=dict))
+    app.include_router(
+        build_job_router(
+            lambda: jobs, actor_dependency=lambda: "actor", prepare_config=lambda value: {**ECHO_CONFIG, **value}
+        )
+    )
     payload = {
         "dataset_id": "dataset",
         "episode_indices": [3, 1005],
@@ -873,14 +1058,18 @@ def test_http_accepts_durable_work_without_request_held_inference(tmp_path: Path
 
 
 def test_http_job_reads_are_bounded_and_principal_scoped(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.api import build_job_router
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+    from physical_ai_curation.api import build_job_router
 
     jobs = manager(tmp_path)
     actor = ["actor"]
     app = FastAPI()
-    app.include_router(build_job_router(lambda: jobs, actor_dependency=lambda: actor[0], prepare_config=dict))
+    app.include_router(
+        build_job_router(
+            lambda: jobs, actor_dependency=lambda: actor[0], prepare_config=lambda value: {**ECHO_CONFIG, **value}
+        )
+    )
     with TestClient(app) as client:
         accepted = client.post(
             "/jobs",
@@ -924,12 +1113,12 @@ async def test_expected_saved_snapshot_is_checked_before_acceptance(tmp_path: Pa
     jobs = manager(tmp_path)
     jobs.resolver = ChangedResolver()
     accepted = await jobs.submit(
-        "dataset", "actor", [3], {}, idempotency_key="expected", expected_snapshots={3: "expected-snapshot"}
+        "dataset", "actor", [3], ECHO_CONFIG, idempotency_key="expected", expected_snapshots={3: "expected-snapshot"}
     )
     assert accepted["status"] == "queued"
     with pytest.raises(SavedInputError):
         await jobs.submit(
-            "dataset", "actor", [3], {}, idempotency_key="changed", expected_snapshots={3: "stale-snapshot"}
+            "dataset", "actor", [3], ECHO_CONFIG, idempotency_key="changed", expected_snapshots={3: "stale-snapshot"}
         )
     assert (await jobs.list("dataset", "actor"))["total"] == 1
 
@@ -1096,15 +1285,15 @@ async def test_reset_recovery_preserves_humans_and_reports_safe_failures(
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock
 
-    from evaluation.vlm_judge.curation_storage import apply_judge_result
-    from evaluation.vlm_judge.job_storage import BlobJobStore, LocalJobStore
-    from evaluation.vlm_judge.jobs import JudgeJobs
+    from physical_ai_curation.adapters.job_storage import BlobJobStore, LocalJobStore
     from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.application import apply_judge_result
+    from physical_ai_curation.jobs import JudgeJobs
     from physical_ai_curation.models import EpisodeAnalysisRecord
 
     from src.api.services.label_storage import BlobLabelStorage
 
-    caplog.set_level(logging.INFO, logger="evaluation.vlm_judge.jobs")
+    caplog.set_level(logging.INFO, logger="physical_ai_curation.jobs")
     if backend == "blob":
         client = MagicMock()
         client.get_container_client.return_value.get_blob_client.return_value = MemoryBlob(require_lease=False)
@@ -1116,7 +1305,7 @@ async def test_reset_recovery_preserves_humans_and_reports_safe_failures(
         storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
         store = LocalJobStore(tmp_path / "jobs")
     jobs = JudgeJobs(store, Resolver(), infer, capacity_scope="test-device", curation_storage=storage)
-    job = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="first")
+    job = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="first")
     await jobs.run_once()
     job = await jobs.get(job["id"], "actor")
     await apply_judge_result(storage, job, job["targets"][0])
@@ -1138,7 +1327,7 @@ async def test_reset_recovery_preserves_humans_and_reports_safe_failures(
         record.levelno == logging.WARNING and expected_category in record.getMessage() for record in caplog.records
     )
     with pytest.raises(ValueError, match="withdrawal"):
-        await jobs.submit("dataset", "actor", [1005], {}, idempotency_key="blocked")
+        await jobs.submit("dataset", "actor", [1005], ECHO_CONFIG, idempotency_key="blocked")
     if failure == "storage":
         monkeypatch.setattr(storage, "save", original_save)
         await jobs.retry_reset("dataset", "actor")
@@ -1164,13 +1353,13 @@ async def test_reset_recovery_preserves_humans_and_reports_safe_failures(
 
 @pytest.mark.asyncio
 async def test_blob_job_lifecycle_matches_local_evidence_and_recovery() -> None:
-    from evaluation.vlm_judge.job_storage import BlobJobStore
-    from evaluation.vlm_judge.jobs import JudgeJobs
+    from physical_ai_curation.adapters.job_storage import BlobJobStore
+    from physical_ai_curation.jobs import JudgeJobs
 
     blob = MemoryBlob()
     first = JudgeJobs(BlobJobStore(blob), Resolver(), infer, capacity_scope="shared")
     second = JudgeJobs(BlobJobStore(blob), Resolver(), infer, capacity_scope="shared")
-    job = await first.submit("dataset", "actor", [3, 1005], {}, idempotency_key="request")
+    job = await first.submit("dataset", "actor", [3, 1005], ECHO_CONFIG, idempotency_key="request")
     await second.run_once()
     assert (await first.get(job["id"], "actor"))["judged"] == 1
     await second.cancel(job["id"], "actor")
@@ -1186,7 +1375,7 @@ async def test_blob_job_lifecycle_matches_local_evidence_and_recovery() -> None:
 @pytest.mark.asyncio
 async def test_blob_transaction_waits_for_existing_lease_and_rejects_lost_revision() -> None:
     from azure.core.exceptions import ResourceModifiedError
-    from evaluation.vlm_judge.job_storage import BlobJobStore
+    from physical_ai_curation.adapters.job_storage import BlobJobStore
 
     blob = MemoryBlob()
     first, second = BlobJobStore(blob), BlobJobStore(blob)
@@ -1237,8 +1426,8 @@ def test_shared_curation_preserves_human_ownership_and_machine_retry_identity() 
 
 @pytest.mark.asyncio
 async def test_application_is_durable_and_retries_without_duplicate_contributions(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.curation_storage import apply_judge_result
     from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.application import apply_judge_result
     from physical_ai_curation.models import DatasetLabelsFile
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
@@ -1255,7 +1444,7 @@ async def test_application_is_durable_and_retries_without_duplicate_contribution
         return applied
 
     jobs = manager(tmp_path / "jobs", apply_result=interrupted)
-    job = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="judge")
+    job = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="judge")
     await jobs.run_once()
     queued = await jobs.request_application(job["id"], "actor")
     assert queued["applied"] == 0
@@ -1286,7 +1475,7 @@ async def test_cancelled_application_cannot_mutate_labels(tmp_path: Path) -> Non
         return True
 
     jobs = manager(tmp_path, apply_result=apply_result)
-    job = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="judge")
+    job = await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="judge")
     await jobs.run_once()
     await jobs.request_application(job["id"], "actor")
     await jobs.cancel(job["id"], "actor")
@@ -1322,7 +1511,9 @@ async def test_given_sample_disagreement_when_approving_then_acknowledgment_and_
     references = {
         3: {"annotation_author_id": "human", "annotation_revision": "annotation", "snapshot_id": "snapshot-3"}
     }
-    sample = await jobs.submit("dataset", "actor", [3], {}, idempotency_key="sample", mode="sample", samples=references)
+    sample = await jobs.submit(
+        "dataset", "actor", [3], ECHO_CONFIG, idempotency_key="sample", mode="sample", samples=references
+    )
     with pytest.raises(ValueError, match="complete"):
         await jobs.approve(sample["id"], "actor")
     await jobs.run_once()
@@ -1332,7 +1523,13 @@ async def test_given_sample_disagreement_when_approving_then_acknowledgment_and_
         await jobs.approve(sample["id"], "actor")
     approved = await jobs.approve(sample["id"], "actor", acknowledge_exceptions=True)
     accepted = await jobs.submit(
-        "dataset", "actor", [1005], {}, idempotency_key="targets", approval_id=approved["id"], require_approval=True
+        "dataset",
+        "actor",
+        [1005],
+        ECHO_CONFIG,
+        idempotency_key="targets",
+        approval_id=approved["id"],
+        require_approval=True,
     )
     assert accepted["targets"][0]["input"]["instruction"] == "Saved instruction 1005"
     with pytest.raises(ValueError, match="approval"):
@@ -1348,7 +1545,13 @@ async def test_given_sample_disagreement_when_approving_then_acknowledgment_and_
     jobs.resolver.changed = True
     with pytest.raises(SavedInputError, match="changed"):
         await jobs.submit(
-            "dataset", "actor", [1005], {}, idempotency_key="stale", approval_id=approved["id"], require_approval=True
+            "dataset",
+            "actor",
+            [1005],
+            ECHO_CONFIG,
+            idempotency_key="stale",
+            approval_id=approved["id"],
+            require_approval=True,
         )
     await jobs.run_once()
     assert (await jobs.get(accepted["id"], "actor"))["targets"][0]["status"] == "failed"
@@ -1358,20 +1561,24 @@ async def test_given_sample_disagreement_when_approving_then_acknowledgment_and_
 async def test_given_dataset_submission_when_approval_missing_then_no_job_is_accepted(tmp_path: Path) -> None:
     jobs = manager(tmp_path)
     with pytest.raises(ValueError, match="approval"):
-        await jobs.submit("dataset", "actor", [3], {}, idempotency_key="unapproved", require_approval=True)
+        await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="unapproved", require_approval=True)
     with pytest.raises(ValueError, match="sample"):
-        await jobs.submit("dataset", "actor", [3], {}, idempotency_key="empty-sample", mode="sample")
+        await jobs.submit("dataset", "actor", [3], ECHO_CONFIG, idempotency_key="empty-sample", mode="sample")
     assert (await jobs.list("dataset", "actor"))["total"] == 0
 
 
 def test_given_http_dataset_work_when_submitting_then_explicit_approval_is_required(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.api import build_job_router
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+    from physical_ai_curation.api import build_job_router
 
     jobs = manager(tmp_path)
     app = FastAPI()
-    app.include_router(build_job_router(lambda: jobs, actor_dependency=lambda: "actor", prepare_config=dict))
+    app.include_router(
+        build_job_router(
+            lambda: jobs, actor_dependency=lambda: "actor", prepare_config=lambda value: {**ECHO_CONFIG, **value}
+        )
+    )
     with TestClient(app) as client:
         target = {"dataset_id": "dataset", "episode_indices": [1005]}
         assert client.post("/jobs", json=target, headers={"Idempotency-Key": "unapproved"}).status_code == 409
@@ -1405,13 +1612,17 @@ def test_given_http_dataset_work_when_submitting_then_explicit_approval_is_requi
 
 
 def test_given_no_withdrawal_history_when_reading_reset_status_then_successful_empty_state(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.api import build_job_router
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+    from physical_ai_curation.api import build_job_router
 
     jobs = manager(tmp_path)
     app = FastAPI()
-    app.include_router(build_job_router(lambda: jobs, actor_dependency=lambda: "actor", prepare_config=dict))
+    app.include_router(
+        build_job_router(
+            lambda: jobs, actor_dependency=lambda: "actor", prepare_config=lambda value: {**ECHO_CONFIG, **value}
+        )
+    )
     with TestClient(app) as client:
         response = client.get("/resets", params={"dataset_id": "dataset"})
 
@@ -1581,7 +1792,7 @@ async def test_given_label_baseline_when_approved_then_only_grounding_label_chan
     jobs.resolver.validation_sample = sample
     reference = {"snapshot_id": "snapshot-3", "labels_revision": label_baseline(labels, 3)["revision"]}
     accepted = await jobs.submit(
-        "dataset", "actor", [3], {}, mode="sample", samples={3: reference}, idempotency_key="labels"
+        "dataset", "actor", [3], ECHO_CONFIG, mode="sample", samples={3: reference}, idempotency_key="labels"
     )
     await jobs.run_once()
     completed = await jobs.get(accepted["id"], "actor")
@@ -1593,7 +1804,13 @@ async def test_given_label_baseline_when_approved_then_only_grounding_label_chan
     labels.apply_labels(1005, ["SUCCESS"], author_id="actor")
     await storage.save("dataset", labels, if_match=resource.etag)
     await jobs.submit(
-        "dataset", "actor", [1005], {}, approval_id=approval["id"], require_approval=True, idempotency_key="targets"
+        "dataset",
+        "actor",
+        [1005],
+        ECHO_CONFIG,
+        approval_id=approval["id"],
+        require_approval=True,
+        idempotency_key="targets",
     )
     resource = await storage.load_versioned("dataset")
     labels = resource.value
@@ -1605,7 +1822,7 @@ async def test_given_label_baseline_when_approved_then_only_grounding_label_chan
             "dataset",
             "actor",
             [1005],
-            {},
+            ECHO_CONFIG,
             approval_id=approval["id"],
             require_approval=True,
             idempotency_key="stale-label",
@@ -1616,8 +1833,8 @@ async def test_given_label_baseline_when_approved_then_only_grounding_label_chan
 async def test_given_task_findings_when_executed_then_schema_and_human_ownership_remain_distinct(
     tmp_path: Path,
 ) -> None:
-    from evaluation.vlm_judge.curation_storage import apply_judge_result
     from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.application import apply_judge_result
     from physical_ai_curation.models import DatasetLabelsFile, EpisodeAnalysisRecord
 
     storage = LocalCurationStorage({"dataset": tmp_path / "dataset"})
@@ -1648,11 +1865,12 @@ async def test_given_task_findings_when_executed_then_schema_and_human_ownership
 
     jobs = manager(tmp_path / "jobs", result_kind="task-findings", apply_result=apply_result)
     jobs.infer = task_infer
+    config = {"model_id": "synthetic-task-model", "prompt_version": "task-v1"}
     sample = await jobs.submit(
         "dataset",
         "actor",
         [3],
-        {},
+        config,
         idempotency_key="sample",
         mode="sample",
         samples={
@@ -1666,7 +1884,7 @@ async def test_given_task_findings_when_executed_then_schema_and_human_ownership
         await jobs.approve(sample["id"], "actor")
     approval = await jobs.approve(sample["id"], "actor", acknowledge_exceptions=True)
     job = await jobs.submit(
-        "dataset", "actor", [3], {}, idempotency_key="task", mode="judge-and-label", approval_id=approval["id"]
+        "dataset", "actor", [3], config, idempotency_key="task", mode="judge-and-label", approval_id=approval["id"]
     )
     await jobs.run_once()
     await jobs.run_once()
@@ -1687,24 +1905,28 @@ async def test_given_cli_lifecycle_when_detached_and_resumed_then_work_and_exit_
 ) -> None:
     import argparse
 
-    from evaluation.vlm_judge.job_cli import add_job_arguments, execute_job_command
+    from physical_ai_curation.job_cli import add_job_arguments, execute_job_command
 
     parser = argparse.ArgumentParser()
     add_job_arguments(parser)
     jobs = manager(tmp_path)
     args = parser.parse_args(["--single", "--detach", "--request-id", "cli-request"])
-    code, accepted = await execute_job_command(jobs, args, dataset_id="dataset", actor="actor", config={}, indices=[3])
+    code, accepted = await execute_job_command(
+        jobs, args, dataset_id="dataset", actor="actor", config=ECHO_CONFIG, indices=[3]
+    )
     assert code == 0
     assert accepted["status"] == "queued"
     assert accepted["judged"] == 0
     await manager(tmp_path).run_once()
     status_args = parser.parse_args(["--operation", "status", "--job-id", accepted["id"]])
-    code, status = await execute_job_command(jobs, status_args, dataset_id="dataset", actor="actor", config={})
+    code, status = await execute_job_command(jobs, status_args, dataset_id="dataset", actor="actor", config=ECHO_CONFIG)
     assert code == 0
     assert status["status"] == "succeeded"
     assert status["targets"][0]["result"]["outcome_success"] is False
     with pytest.raises(ValueError, match="one"):
-        await execute_job_command(jobs, args, dataset_id="dataset", actor="actor", config={}, indices=[3, 1005])
+        await execute_job_command(
+            jobs, args, dataset_id="dataset", actor="actor", config=ECHO_CONFIG, indices=[3, 1005]
+        )
 
 
 @pytest.mark.asyncio
@@ -1714,12 +1936,12 @@ async def test_given_cli_terminal_errors_when_reading_status_then_exit_is_nonzer
 ) -> None:
     import argparse
 
-    from evaluation.vlm_judge.job_cli import add_job_arguments, execute_job_command
+    from physical_ai_curation.job_cli import add_job_arguments, execute_job_command
 
     parser = argparse.ArgumentParser()
     add_job_arguments(parser)
     jobs = manager(tmp_path)
-    job = await jobs.submit("dataset", "actor", [3, 1005], {}, idempotency_key="request")
+    job = await jobs.submit("dataset", "actor", [3, 1005], ECHO_CONFIG, idempotency_key="request")
     if terminal == "cancelled":
         await jobs.cancel(job["id"], "actor")
     else:
@@ -1731,6 +1953,6 @@ async def test_given_cli_terminal_errors_when_reading_status_then_exit_is_nonzer
             await jobs.publish(first, error="SyntheticError")
         await jobs.publish(await jobs.claim(), error="SyntheticError")
     args = parser.parse_args(["--operation", "status", "--job-id", job["id"]])
-    code, status = await execute_job_command(jobs, args, dataset_id="dataset", actor="actor", config={})
+    code, status = await execute_job_command(jobs, args, dataset_id="dataset", actor="actor", config=ECHO_CONFIG)
     assert code != 0
     assert status["status"] == terminal

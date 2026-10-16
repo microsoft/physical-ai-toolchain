@@ -94,7 +94,7 @@ print_kv "Dry run"        "$dry_run"
 
 [[ "$config_preview" == "true" ]] && exit 0
 
-cmd=(python3 -m evaluation.vlm_judge.run
+cmd=(python3 -m physical_ai_curation.run
      --dataset "$dataset"
      --output "$output"
      --backend "$backend"

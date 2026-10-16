@@ -1,25 +1,24 @@
-"""Apply verified evaluator results through shared curation storage."""
+"""Apply verified saved evidence through curation-owned storage."""
 
 from __future__ import annotations
 
 from typing import Any
 
+from physical_ai_curation.evidence import read_job_evidence
 from physical_ai_curation.models import ContributionLedger, DatasetLabelsFile, MachineOrigin
 from physical_ai_curation.storage import CurationStorage
 
 
 async def apply_judge_result(storage: CurationStorage, job: dict[str, Any], target: dict[str, Any]) -> bool:
     """Apply typed machine proposals from a verified durable result."""
-    from physical_ai_curation.models import EpisodeAnalysisRecord, validate_task_result
+    from physical_ai_curation.models import EpisodeAnalysisRecord
 
-    from .judge import JudgeResult
-
+    result = read_job_evidence(job, target).payload
     task_result = None
     if job.get("result_kind") == "task-findings":
-        task_result = validate_task_result(target["result"])
+        task_result = result
     else:
-        result = JudgeResult.from_dict(target["result"])
-        if result.outcome_success is None:
+        if result["outcome_success"] is None:
             return False
     resource = await storage.load_versioned(job["dataset_id"])
     labels = resource.value or DatasetLabelsFile(dataset_id=job["dataset_id"])
@@ -43,7 +42,7 @@ async def apply_judge_result(storage: CurationStorage, job: dict[str, Any], targ
         await storage.save(job["dataset_id"], labels, if_match=resource.etag, if_none_match=resource.etag is None)
         return True
     key = str(target["episode_index"])
-    outcome = "SUCCESS" if result.outcome_success else "FAILURE"
+    outcome = "SUCCESS" if result["outcome_success"] else "FAILURE"
     previous = labels.episodes.get(key, [])
     ledger = labels.provenance.setdefault(key, ContributionLedger())
     ledger.record_changes(

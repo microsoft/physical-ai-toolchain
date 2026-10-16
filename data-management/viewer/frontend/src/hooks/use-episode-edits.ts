@@ -215,6 +215,8 @@ export function useSaveEpisodeEdits() {
         ),
         saved,
       )
+      queryClient.invalidateQueries({ queryKey: ['judge-dataset', saved.operations.datasetId] })
+      queryClient.invalidateQueries({ queryKey: ['judge-evidence', saved.operations.datasetId] })
     },
   })
 }

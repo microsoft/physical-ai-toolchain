@@ -10,11 +10,11 @@ from typing import Any
 
 import pytest
 from physical_ai_curation.adapters.evaluator import ServiceExecutor
+from physical_ai_curation.adapters.job_storage import LocalJobStore
+from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
 from physical_ai_curation.adapters.local_storage import LocalCurationStorage
-from vlm_judge.job_cli import add_job_arguments, execute_job_command, job_exit_code, read_sample_references
-from vlm_judge.job_storage import LocalJobStore
-from vlm_judge.jobs import JudgeJobs
-from vlm_judge.saved_input import LocalDatasetResolver
+from physical_ai_curation.job_cli import add_job_arguments, execute_job_command, job_exit_code, read_sample_references
+from physical_ai_curation.jobs import JudgeJobs
 from vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig
 
 
@@ -69,8 +69,9 @@ def test_given_invalid_lifecycle_arguments_when_executing_then_rejects_before_wo
         _command(lifecycle, arguments, indices)
 
 
+@pytest.mark.parametrize("changed_resource", ["metadata", "video"])
 def test_given_real_episode_when_submitting_then_persists_completed_job_and_current_evidence(
-    lifecycle: tuple[JudgeJobs, dict[str, Any]], jsonl_dataset: Path
+    lifecycle: tuple[JudgeJobs, dict[str, Any]], jsonl_dataset: Path, changed_resource: str
 ) -> None:
     code, accepted = _command(lifecycle, ["--single", "--request-id", "single-episode"], [0])
 
@@ -87,10 +88,15 @@ def test_given_real_episode_when_submitting_then_persists_completed_job_and_curr
     assert evidence["total"] == 1
     assert evidence["items"][0]["applicability"] == "current"
 
-    path = jsonl_dataset / "meta/info.json"
-    info = json.loads(path.read_text())
-    info["robot_type"] = "changed-source"
-    path.write_text(json.dumps(info))
+    if changed_resource == "metadata":
+        path = jsonl_dataset / "meta/info.json"
+        info = json.loads(path.read_text())
+        info["robot_type"] = "changed-source"
+        path.write_text(json.dumps(info))
+    else:
+        record, _ = asyncio.run(lifecycle[0].resolver.resolve("dataset", 0, principal_scope_id="local-test"))
+        path = next(iter(record.video_paths.values()))
+        path.write_bytes(path.read_bytes() + b"changed-media")
     _, stale = _command(lifecycle, ["--operation", "results", "--episode-index", "0"])
     assert stale["items"][0]["applicability"] == "stale"
     _, paged = _command(lifecycle, ["--operation", "results", "--episode-index", "0", "--offset", "1"])

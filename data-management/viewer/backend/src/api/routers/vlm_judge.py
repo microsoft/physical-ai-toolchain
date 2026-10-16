@@ -1,7 +1,7 @@
 """VLM-as-judge endpoints for the dataviewer.
 
 Resolves a dataset + episode pair to view-aligned MP4 paths via the same
-``evaluation.vlm_judge.dataset.iter_episodes`` walker that drives the CLI,
+``physical_ai_dataset_io.lerobot.iter_episodes`` walker that drives the CLI,
 then delegates to a singleton :class:`evaluation.vlm_judge.JudgeService`.
 
 Endpoints (all under ``/api/datasets``, mounted with auth):
@@ -31,7 +31,7 @@ from ..services.saved_input_service import SavedInputError, SavedInputSnapshot, 
 from ..storage import StorageError
 
 if TYPE_CHECKING:
-    from evaluation.vlm_judge.dataset import EpisodeRecord
+    from physical_ai_dataset_io.lerobot import EpisodeRecord
 
 from ..config import AppConfig, get_app_config
 from ..csrf import require_csrf_token
@@ -56,15 +56,10 @@ def _job_actor(principal: PrincipalContext = Depends(require_principal_context))
     return principal.scope_id
 
 
-def build_optional_job_router() -> APIRouter | None:
-    """Mount evaluator jobs only when the optional evaluator package is installed."""
-    try:
-        from evaluation.vlm_judge.api import build_job_router
-    except ModuleNotFoundError as error:
-        if error.name not in {"evaluation", "evaluation.vlm_judge"}:
-            raise
-        logger.warning("VLM judge jobs unavailable: install the backend vlm-judge extra")
-        return None
+def build_optional_job_router() -> APIRouter:
+    """Build curation routes independently of the optional evaluator runtime."""
+    from physical_ai_curation.api import build_job_router
+
     return build_job_router(
         get_judge_jobs,
         actor_dependency=_job_actor,
@@ -289,7 +284,7 @@ async def run_episode_judgment(
         raise HTTPException(status_code=409, detail="Judge request conflicts with saved state") from None
     response.headers["Location"] = str(request.url_for("judge_job_status", job_id=job["id"]))
     response.headers["Retry-After"] = "1"
-    from evaluation.vlm_judge.api import job_summary
+    from physical_ai_curation.api import job_summary
 
     return job_summary(job)
 
@@ -366,8 +361,8 @@ def _resolve_episode(
     views: tuple[str, ...] = (),
 ):
     """Return the matching ``EpisodeRecord`` or ``None`` if not found."""
-    from evaluation.vlm_judge.dataset import iter_episodes
-    from evaluation.vlm_judge.frames import validate_video_path
+    from physical_ai_dataset_io.lerobot import iter_episodes
+    from physical_ai_dataset_io.media import validate_video_path
 
     base_path = getattr(service, "base_path", None)
     if not base_path:

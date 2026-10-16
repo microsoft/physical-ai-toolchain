@@ -84,7 +84,7 @@ print_kv "Model"      "$model_id"
 print_kv "Base URL"   "${base_url:-(n/a)}"
 print_kv "Reload"     "$reload"
 
-cmd=(python3 -m uvicorn evaluation.vlm_judge.api:app --host "$host" --port "$port" --no-proxy-headers)
+cmd=(python3 -m uvicorn physical_ai_curation.api:app --host "$host" --port "$port" --no-proxy-headers)
 [[ "$reload" == "true" ]] && cmd+=(--reload)
 print_kv "Command" "${cmd[*]}"
 

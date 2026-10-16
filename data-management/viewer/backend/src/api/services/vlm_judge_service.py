@@ -24,9 +24,9 @@ from .label_storage import BlobLabelStorage, LocalLabelStorage
 from .saved_input_service import ViewerDatasetResolver
 
 if TYPE_CHECKING:
-    from evaluation.vlm_judge.dataset import EpisodeRecord
-    from evaluation.vlm_judge.jobs import JudgeJobs
+    from physical_ai_curation.jobs import JudgeJobs
     from physical_ai_curation.saved_input import SavedInputSnapshot
+    from physical_ai_dataset_io.lerobot import EpisodeRecord
 
 logger = logging.getLogger(__name__)
 
@@ -104,23 +104,20 @@ def reset_vlm_judge_service() -> None:
 
 
 def prepare_job_configuration(options: dict[str, Any]) -> dict[str, Any]:
-    from physical_ai_curation.adapters.evaluator import ServiceExecutor
-
     service = get_vlm_judge_service(get_app_config())
     if service is None:
         raise HTTPException(status_code=503, detail="VLM judge is unavailable")
+    from physical_ai_curation.adapters.evaluator import ServiceExecutor
+
     return ServiceExecutor(service).configuration(options)
 
 
 async def create_judge_jobs(config: AppConfig, datasets: DatasetService, annotations: AnnotationService) -> JudgeJobs:
-    from evaluation.vlm_judge.curation_storage import apply_judge_result
-    from evaluation.vlm_judge.job_storage import BlobJobStore, LocalJobStore
-    from evaluation.vlm_judge.jobs import JudgeJobs
-    from physical_ai_curation.adapters.evaluator import ServiceExecutor
+    from physical_ai_curation.adapters.job_storage import BlobJobStore, LocalJobStore
+    from physical_ai_curation.application import apply_judge_result
+    from physical_ai_curation.jobs import JudgeJobs
 
     service = get_vlm_judge_service(config)
-    if service is None:
-        raise HTTPException(status_code=503, detail="VLM judge is unavailable")
 
     async def prepare_media(record: EpisodeRecord, snapshot: SavedInputSnapshot) -> EpisodeRecord:
         return replace(
@@ -153,10 +150,16 @@ async def create_judge_jobs(config: AppConfig, datasets: DatasetService, annotat
     async def apply_result(job: dict[str, Any], target: dict[str, Any]) -> bool:
         return await apply_judge_result(curation, job, target)
 
+    executor = None
+    if service is not None:
+        from physical_ai_curation.adapters.evaluator import ServiceExecutor
+
+        executor = ServiceExecutor(service, prepare_media=prepare_media, cache_directory=cache_directory)
+
     return JudgeJobs(
         store,
-        ViewerDatasetResolver(datasets, annotations),
-        ServiceExecutor(service, prepare_media=prepare_media, cache_directory=cache_directory),
+        ViewerDatasetResolver(datasets, annotations, label_storage_factory=lambda: curation),
+        executor,
         capacity_scope=config.vlm_judge_capacity_scope,
         capacity=config.vlm_judge_capacity,
         apply_result=apply_result,

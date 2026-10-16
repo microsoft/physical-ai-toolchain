@@ -287,6 +287,22 @@ describe('useVlmJudgeBatch', () => {
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
+  it('submits a label-only grounding reference when the absent annotation revision is null', async () => {
+    routeFetch({ 0: true })
+    const { result } = renderHookWithProviders(() => useVlmJudgeBatch('ds-1'), { queryClient })
+
+    await act(async () => {
+      await expect(
+        result.current.submit({
+          indices: [0],
+          mode: 'sample',
+          samples: { 0: { snapshotId: 'a'.repeat(64), labelsRevision: 'label-revision' } },
+        }),
+      ).resolves.toMatchObject({ id: 'durable', status: 'queued' })
+    })
+    expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith('/judge/jobs'))).toBe(true)
+  })
+
   it.each(['snapshot', 'annotation'])(
     'rejects a replaced grounding %s reference before submitting',
     async (changedField) => {

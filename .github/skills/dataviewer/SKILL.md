@@ -680,10 +680,10 @@ Paginate status/results as needed. `404` indicates missing/inaccessible resource
 
 ### Single-episode CLI smoke (no dataviewer needed)
 
-Use the existing frozen root evaluator environment. Set `DATASET` to an approved isolated fixture, `EPISODE_ID` to one actual inventory ID, and `JOB_DIR`/`OUTPUT` to isolated paths. Commands write durable state and exports; do not test on user datasets without permission.
+Use the already-restored viewer backend environment with its judge profile. `--no-sync` avoids installing dependencies. Set `DATASET` to an approved isolated fixture, `EPISODE_ID` to one actual inventory ID, and `JOB_DIR`/`OUTPUT` to isolated paths. Commands write durable state and exports; do not test on user datasets without permission.
 
 ```bash
-uv run --frozen python -m evaluation.vlm_judge.run \
+uv run --project data-management/viewer/backend --no-sync python -m physical_ai_curation.run \
   --dataset "$DATASET" --indices "$EPISODE_ID" \
   --single --mode judge --backend echo --n-frames 6 \
   --job-dir "$JOB_DIR" --request-id "$REQUEST_ID" --output "$OUTPUT"
@@ -700,7 +700,7 @@ Inspect terminal status and use `--operation results --episode-index "$EPISODE_I
 ```bash
 JUDGE_ARGS=(--dataset "$DATASET" --job-dir "$JOB_DIR" \
   --principal-scope-id "$PRINCIPAL_ID" --backend echo --n-frames 6)
-uv run --frozen python -m evaluation.vlm_judge.run "${JUDGE_ARGS[@]}" \
+uv run --project data-management/viewer/backend --no-sync python -m physical_ai_curation.run "${JUDGE_ARGS[@]}" \
   --mode sample --indices "$SAMPLE_IDS" --sample-references "$SAMPLE_REFERENCES" \
   --request-id "$SAMPLE_REQUEST_ID" --output "$SAMPLE_OUTPUT"
 ```
@@ -708,21 +708,21 @@ uv run --frozen python -m evaluation.vlm_judge.run "${JUDGE_ARGS[@]}" \
 Read the returned sample job ID, terminal status and evidence for each sample. Compare with saved human outcomes and review disagreements/inconclusive evidence. Only after explicit review, approve the sample job. Add `--acknowledge-exceptions` only when the reviewer explicitly accepts those exceptions.
 
 ```bash
-uv run --frozen python -m evaluation.vlm_judge.run "${JUDGE_ARGS[@]}" \
+uv run --project data-management/viewer/backend --no-sync python -m physical_ai_curation.run "${JUDGE_ARGS[@]}" \
   --operation approve --job-id "$SAMPLE_JOB_ID"
 ```
 
 Read the returned approval `id` and submit the selected batch. Judge mode produces evidence only; `--mode judge-and-label` additionally requires explicit label-write authority.
 
 ```bash
-uv run --frozen python -m evaluation.vlm_judge.run "${JUDGE_ARGS[@]}" \
+uv run --project data-management/viewer/backend --no-sync python -m physical_ai_curation.run "${JUDGE_ARGS[@]}" \
   --mode judge --indices "$TARGET_IDS" --approval-id "$APPROVAL_ID" \
   --request-id "$BATCH_REQUEST_ID" --output "$BATCH_OUTPUT"
 ```
 
 If approval is stale, stop, refresh saved inputs/configuration, rerun samples and review a new approval. Do not force or fan out single submissions. HTTP follows the same sequence: sample POST `/api/judge/jobs` with `episode_indices`, `samples` and `snapshot_ids`, review evidence, POST `/jobs/{id}/approve`, then submit judge/judge-and-label with `approval_id` and current snapshots. Dataset submissions require `Idempotency-Key`.
 
-Dataset/policy wrapper scripts under `evaluation/vlm_judge/scripts/` are conveniences, not approval bypasses. Inspect their accepted lifecycle arguments before use; fall back to the generic CLI when a wrapper cannot carry the required selection, references or approval.
+Dataset wrappers and the standalone HTTP launcher live under `data-management/curation/scripts/`. They are conveniences, not approval bypasses. Inspect their accepted lifecycle arguments before use; fall back to the generic CLI when a wrapper cannot carry the required selection, references or approval. Policy-rollout inference stays under `evaluation/vlm_judge/scripts/` and does not expose curation operations.
 
 ### Status, cancellation and restart recovery
 

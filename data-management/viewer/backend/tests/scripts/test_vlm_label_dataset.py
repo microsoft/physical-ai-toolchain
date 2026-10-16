@@ -12,8 +12,9 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from evaluation.vlm_judge import task_findings
 
-_SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "vlm_label_dataset.py"
+_SCRIPT_PATH = Path(__file__).resolve().parents[4] / "curation" / "physical_ai_curation" / "label_dataset.py"
 
 
 @pytest.fixture(scope="session")
@@ -25,31 +26,84 @@ def mod() -> ModuleType:
     return module
 
 
+@pytest.mark.parametrize("mismatch", [None, "episode_id", "instruction", "judge_model", "prompt_version"])
+@pytest.mark.asyncio
+async def test_given_task_evidence_when_executed_then_bound_to_saved_input(
+    mod: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mismatch: str | None
+) -> None:
+    from physical_ai_curation.saved_input import SavedInputSnapshot
+    from physical_ai_dataset_io.lerobot import EpisodeRecord
+
+    snapshot = SavedInputSnapshot(
+        snapshot_id="snapshot",
+        dataset_id="dataset",
+        episode_index=3,
+        principal_scope_id="actor",
+        source_id="source",
+        source_revision="revision",
+        annotation_author_id=None,
+        annotation_revision=None,
+        edit_revision=None,
+        instruction="Move the cube",
+        instruction_origin="dataset",
+    )
+    record = EpisodeRecord(
+        "dataset/episode_000003", 3, "Original", 30, 30, {"front": tmp_path / "front.mp4"}, None, None
+    )
+    config = {"model_id": "synthetic-model", "prompt_version": "task-findings-v1", "views": ["front"]}
+    from physical_ai_curation.adapters.evaluator import TaskExecutor
+
+    executor = TaskExecutor(config)
+    payload = {
+        "episode_id": record.episode_id,
+        "instruction": snapshot.instruction,
+        "judge_model": config["model_id"],
+        "prompt_version": config["prompt_version"],
+        "findings": {
+            "pick_from": "table",
+            "object": "cube",
+            "grasp_success": True,
+            "place_success": False,
+            "movement_quality": "smooth",
+            "notes": "",
+        },
+    }
+    if mismatch:
+        payload[mismatch] = "other"
+    monkeypatch.setattr(executor.service, "evaluate", lambda *args, **kwargs: payload)
+
+    if mismatch:
+        with pytest.raises(ValueError, match=r"identity|invocation"):
+            await executor(record, snapshot, config)
+    else:
+        assert await executor(record, snapshot, config) == payload
+
+
 def test_parse_label_extracts_plain_json(mod: ModuleType) -> None:
-    result = mod.parse_label('{"pick_from": "front", "grasp_success": true}')
+    result = task_findings.parse_label('{"pick_from": "front", "grasp_success": true}')
     assert result == {"pick_from": "front", "grasp_success": True}
 
 
 def test_parse_label_strips_code_fences(mod: ModuleType) -> None:
     text = '```json\n{"object": "red cube"}\n```'
-    assert mod.parse_label(text) == {"object": "red cube"}
+    assert task_findings.parse_label(text) == {"object": "red cube"}
 
 
 def test_parse_label_raises_without_json(mod: ModuleType) -> None:
     with pytest.raises(ValueError, match="No JSON object"):
-        mod.parse_label("the model refused to answer")
+        task_findings.parse_label("the model refused to answer")
 
 
 @pytest.mark.parametrize("payload", [{}, {"object": "cube"}, {"grasp_success": "true"}])
 def test_given_malformed_task_result_when_normalized_then_rejected(mod: ModuleType, payload: dict[str, object]) -> None:
     with pytest.raises(ValueError, match=r"label|result"):
-        mod._row_from_label(payload)
+        task_findings.normalize_label(payload)
 
 
 def test_given_camera_windows_when_filmstrip_built_then_each_window_preserved(
     mod: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from evaluation.vlm_judge.dataset import EpisodeRecord
+    from physical_ai_dataset_io.lerobot import EpisodeRecord
 
     record = EpisodeRecord(
         "synthetic/3",
@@ -68,10 +122,10 @@ def test_given_camera_windows_when_filmstrip_built_then_each_window_preserved(
         windows.append((window.from_s, window.to_s))
         return [object()]
 
-    monkeypatch.setattr(mod, "extract_frames", extract)
-    monkeypatch.setattr(mod, "tile_horizontally", lambda frames: frames[0])
+    monkeypatch.setattr(task_findings, "extract_frames", extract)
+    monkeypatch.setattr(task_findings, "tile_horizontally", lambda frames: frames[0])
 
-    mod.build_filmstrip(record, views=("front", "wrist"), n_frames=4, frame_size=64)
+    task_findings.build_filmstrip(record, views=("front", "wrist"), n_frames=4, frame_size=64)
 
     assert windows == [(10, 11), (20, 22)]
 
@@ -93,7 +147,7 @@ def test_as_bool_tristate(mod: ModuleType, value: object, expected: bool | None)
 
 
 def test_build_user_prompt_lists_multiple_views_and_instruction(mod: ModuleType) -> None:
-    prompt = mod.build_user_prompt(
+    prompt = task_findings.build_user_prompt(
         n_frames=12,
         views=["observation.images.front", "observation.images.wrist"],
         instruction="Pick up the cube",
@@ -105,13 +159,13 @@ def test_build_user_prompt_lists_multiple_views_and_instruction(mod: ModuleType)
 
 
 def test_build_user_prompt_handles_single_view_without_instruction(mod: ModuleType) -> None:
-    prompt = mod.build_user_prompt(n_frames=8, views=["cam"], instruction=None)
+    prompt = task_findings.build_user_prompt(n_frames=8, views=["cam"], instruction=None)
     assert "single camera view: cam" in prompt
     assert "pick-and-place" in prompt
 
 
 def test_build_user_prompt_injects_scene_context(mod: ModuleType) -> None:
-    prompt = mod.build_user_prompt(
+    prompt = task_findings.build_user_prompt(
         n_frames=8,
         views=["cam"],
         instruction=None,
@@ -254,8 +308,8 @@ def test_given_task_cli_when_detached_then_backend_is_lazy_and_saved_job_resumes
                 }
             )
 
-    monkeypatch.setattr(mod, "Qwen3VLBackend", FakeBackend)
-    monkeypatch.setattr(mod, "build_filmstrip", lambda *args, **kwargs: [object()])
+    monkeypatch.setattr(task_findings, "Qwen3VLBackend", FakeBackend)
+    monkeypatch.setattr(task_findings, "build_filmstrip", lambda *args, **kwargs: [object()])
     args = [
         "--dataset-root",
         str(root),
@@ -319,8 +373,8 @@ def test_given_task_failure_when_cli_resumes_then_same_job_retries_with_safe_dia
                 }
             )
 
-    monkeypatch.setattr(mod, "Qwen3VLBackend", FakeBackend)
-    monkeypatch.setattr(mod, "build_filmstrip", lambda *args, **kwargs: [object()])
+    monkeypatch.setattr(task_findings, "Qwen3VLBackend", FakeBackend)
+    monkeypatch.setattr(task_findings, "build_filmstrip", lambda *args, **kwargs: [object()])
     args = [
         "--dataset-root",
         str(root),

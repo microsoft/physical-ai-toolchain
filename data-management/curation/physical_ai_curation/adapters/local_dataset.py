@@ -1,4 +1,4 @@
-"""Resolve evaluator media from operator-configured dataset roots."""
+"""Resolve saved inputs and confined media from operator-configured roots."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from physical_ai_curation.saved_input import (
 )
 
 if TYPE_CHECKING:
-    from .dataset import EpisodeRecord
+    from physical_ai_dataset_io.lerobot import EpisodeRecord
 
 
 class LocalDatasetResolver:
@@ -28,7 +28,7 @@ class LocalDatasetResolver:
         self.instruction_override = instruction_override
 
     def _video_validator(self, dataset_id: str) -> Callable[[Path], Path]:
-        from .frames import validate_media_root, validate_video_path
+        from physical_ai_dataset_io.media import validate_media_root, validate_video_path
 
         try:
             root = validate_media_root(self.datasets[dataset_id])
@@ -68,7 +68,7 @@ class LocalDatasetResolver:
         )
 
     async def episode_indices(self, dataset_id: str, *, principal_scope_id: str) -> list[int]:
-        from .dataset import iter_episodes
+        from physical_ai_dataset_io.lerobot import iter_episodes
 
         root = self.datasets.get(dataset_id)
         if root is None:
@@ -94,7 +94,8 @@ class LocalDatasetResolver:
     ) -> tuple[EpisodeRecord, SavedInputSnapshot]:
         from dataclasses import replace
 
-        from .dataset import iter_episodes, load_dataset_spec
+        from physical_ai_dataset_io.lerobot import iter_episodes, load_dataset_spec
+        from physical_ai_dataset_io.media import local_media_identity
 
         root = self.datasets.get(dataset_id)
         if root is None:
@@ -104,18 +105,19 @@ class LocalDatasetResolver:
         specification = await asyncio.to_thread(load_dataset_spec, root)
         if set(views) - set(specification.video_keys):
             raise SavedInputError("Requested camera is unavailable", 422)
-        records = await asyncio.to_thread(
-            list,
-            iter_episodes(
-                root,
-                views=views or None,
-                indices=[episode_index],
-                video_validator=self._video_validator(dataset_id),
-            ),
-        )
-        if len(records) != 1:
-            raise SavedInputError("Episode is unavailable", 404)
-        record = records[0]
+
+        def read_record() -> EpisodeRecord:
+            records = list(
+                iter_episodes(root, indices=[episode_index], video_validator=self._video_validator(dataset_id))
+            )
+            if len(records) != 1:
+                raise SavedInputError("Episode is unavailable", 404)
+            return replace(
+                records[0],
+                media_identity={name: local_media_identity(path) for name, path in records[0].video_paths.items()},
+            )
+
+        record = await asyncio.to_thread(read_record)
         snapshot = await resolve_saved_input(
             reader,
             dataset_id,
@@ -129,6 +131,20 @@ class LocalDatasetResolver:
             expected_snapshot_id=expected_snapshot_id,
             declared_instruction_override=self.instruction_override,
         )
+        verified = await asyncio.to_thread(read_record)
+        if (verified.media_identity, verified.video_windows, verified.instruction) != (
+            record.media_identity,
+            record.video_windows,
+            record.instruction,
+        ):
+            raise SavedInputError("Media changed while resolving saved inputs")
+        if views:
+            record = replace(
+                record,
+                video_paths={view: record.video_paths[view] for view in views},
+                video_windows={view: window for view, window in record.video_windows.items() if view in views},
+                media_identity={view: record.media_identity[view] for view in views},
+            )
         return replace(
             record,
             episode_id=f"{dataset_id}/episode_{episode_index:06d}",

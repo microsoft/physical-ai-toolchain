@@ -1,14 +1,14 @@
 ---
 title: VLM-as-Judge
 description: Run vision-language evaluations with saved inputs, approval-gated jobs and confined HTTP media access
-ms.date: 2026-10-15
+ms.date: 2026-10-16
 ---
 
 Open-weight-first harness that scores LeRobot manipulation episodes and
 policy-rollout videos with a vision-language model. Dataset and rollout CLIs
 and the HTTP API share the same engine.
 
-Dataset clients resolve saved instructions and supported edit descriptors before
+Curation clients resolve saved instructions and supported edit descriptors before
 execution. Malformed model output is an execution error; an inconclusive judgment
 does not become a human `PARTIAL` label. Cache identity includes the saved snapshot,
 model revision or deployment digest, selected cameras, frame settings and process
@@ -21,10 +21,19 @@ endpoint. Confirm that endpoint and its data-handling policy before running it.
 
 The entry points are:
 
-- **Dataset / rollout CLI** — `evaluation.vlm_judge.run` and
-  `evaluation.vlm_judge.policy_eval`.
-- **HTTP API** — `evaluation.vlm_judge.api` (FastAPI router) for the
-  dataviewer and any other in-loop integrations.
+| Entry point                          | Responsibility                                                              |
+|--------------------------------------|-----------------------------------------------------------------------------|
+| `physical_ai_curation.run`           | Saved-input judging, durable jobs, approval, application and withdrawal     |
+| `physical_ai_curation.label_dataset` | Durable task-findings workflow and JSONL/CSV exports                        |
+| `physical_ai_curation.api`           | Curation HTTP routes used by the viewer and standalone app                  |
+| `evaluation.vlm_judge.run`           | Direct dataset-metadata inference without saved annotations or durable jobs |
+| `evaluation.vlm_judge.policy_eval`   | Direct policy-rollout inference                                             |
+
+Curation launchers live in [data-management/curation/scripts](../../data-management/curation/scripts).
+There are no old-command aliases. Direct inference does not accept lifecycle options.
+Management operations remain available without the optional evaluator; scoring requires it.
+See [data-management/curation/README.md](../../data-management/curation/README.md)
+for install profiles, command migration and the current evidence contract.
 
 ## 🧠 Agentic Harness
 
@@ -51,25 +60,21 @@ the CLI and the HTTP API import the service — no parallel paths.
 
 ## 📂 Layout
 
-| File / dir                                | Purpose                                                      |
-|-------------------------------------------|--------------------------------------------------------------|
-| `dataset.py`                              | LeRobot v2.1 + v3.0 episode discovery and instruction lookup |
-| `frames.py`                               | PyAV frame extraction with multi-view tiling                 |
-| `prompts.py`                              | Outcome MCQ + GVL + milestone + failure-mode templates       |
-| `backend.py`                              | Qwen3-VL HF backend, OpenAI-compatible HTTP backend, echo    |
-| `judge.py`                                | `score_episode` + `JudgeResult` + Spearman VOC               |
-| `agent.py`                                | `JudgeAgent` multi-step controller                           |
-| `cache.py`                                | SHA256-keyed JSON disk cache                                 |
-| `service.py`                              | `JudgeService` — single integration surface                  |
-| `api.py`                                  | FastAPI router + standalone uvicorn app                      |
-| `run.py`                                  | CLI: judge a LeRobot dataset folder                          |
-| `policy_eval.py`                          | CLI: judge a directory of policy-rollout MP4s                |
-| `scripts/evaluate-dataset.sh`             | Generic dataset wrapper                                      |
-| `scripts/evaluate-cnc-lerobot.sh`         | Wrapper for `datasets/cnc_lerobot`                           |
-| `scripts/evaluate-ur10e-episodes.sh`      | Wrapper for `datasets/ur10e_episodes`                        |
-| `scripts/evaluate-leisaac-pick-orange.sh` | Wrapper for `datasets/leisaac-pick-orange`                   |
-| `scripts/evaluate-policy-rollouts.sh`     | Wrapper for policy rollout dirs (`leisaac-tests/*`)          |
-| `scripts/serve-api.sh`                    | Launch the HTTP API                                          |
+| File / dir                            | Purpose                                                   |
+|---------------------------------------|-----------------------------------------------------------|
+| `physical_ai_dataset_io.lerobot`      | Shared LeRobot v2.1 + v3.0 discovery and metadata parsing |
+| `frames.py`                           | PyAV frame extraction with multi-view tiling              |
+| `prompts.py`                          | Outcome MCQ + GVL + milestone + failure-mode templates    |
+| `backend.py`                          | Qwen3-VL HF backend, OpenAI-compatible HTTP backend, echo |
+| `judge.py`                            | `score_episode` + `JudgeResult` + Spearman VOC            |
+| `agent.py`                            | `JudgeAgent` multi-step controller                        |
+| `cache.py`                            | SHA256-keyed JSON disk cache                              |
+| `service.py`                          | `JudgeService` — single integration surface               |
+| `physical_ai_curation.api`            | FastAPI router + standalone curation app                  |
+| `run.py`                              | CLI: direct dataset inference without curation            |
+| `policy_eval.py`                      | CLI: judge a directory of policy-rollout MP4s             |
+| `data-management/curation/scripts/`   | Dataset recipes and standalone curation HTTP launcher     |
+| `scripts/evaluate-policy-rollouts.sh` | Wrapper for policy rollout dirs (`leisaac-tests/*`)       |
 
 ## 🚀 Quick Start
 
@@ -81,21 +86,22 @@ the CLI and the HTTP API import the service — no parallel paths.
 
 For Qwen3-VL-4B in bfloat16, start validation with a full 24 GB GPU and concurrency
 one. This is not a guaranteed minimum: model, frame and generation settings affect VRAM.
-Run these commands from the repository root in an existing evaluation environment;
+Run curation commands from the repository root in an existing viewer backend
+environment with the required judge profile. Policy rollouts use the evaluator environment;
 `--no-sync` does not install missing dependencies.
 
 ```sh
 # 1. Smoke test (no model load, no GPU)
-uv run --project evaluation --no-sync bash \
-  evaluation/vlm_judge/scripts/evaluate-leisaac-pick-orange.sh \
+uv run --project data-management/viewer/backend --no-sync bash \
+  data-management/curation/scripts/evaluate-leisaac-pick-orange.sh \
   --backend echo --dry-run --limit 2
 
-# 2. Evaluate three episodes with a pinned Qwen3-VL-4B on a GPU host
+# 2. Evaluate one episode with a pinned Qwen3-VL-4B on a GPU host
 export VLM_JUDGE_MODEL_REVISION='<reviewed-full-40-hex-commit-sha>'
-uv run --project evaluation --no-sync bash \
-  evaluation/vlm_judge/scripts/evaluate-leisaac-pick-orange.sh \
-  --backend qwen3-vl --limit 3 \
-  -- --model-revision "$VLM_JUDGE_MODEL_REVISION"
+uv run --project data-management/viewer/backend --no-sync bash \
+  data-management/curation/scripts/evaluate-leisaac-pick-orange.sh \
+  --backend qwen3-vl --limit 1 \
+  -- --single --model-revision "$VLM_JUDGE_MODEL_REVISION"
 
 # 3. Score policy rollouts using reviewed offline model artifacts
 uv run --project evaluation --no-sync bash \
@@ -107,25 +113,41 @@ export VLM_JUDGE_ALLOW_UNAUTHENTICATED=true
 export VLM_JUDGE_DATASETS='{"example-dataset":"/path/to/dataset"}'
 export VLM_JUDGE_LOCAL_ACTOR=local-operator
 export VLM_JUDGE_JOB_DIR=outputs/vlm-judge/jobs
-uv run --project evaluation --no-sync bash evaluation/vlm_judge/scripts/serve-api.sh \
+uv run --project data-management/viewer/backend --no-sync bash data-management/curation/scripts/serve-api.sh \
   --backend qwen3-vl --port 8088
 
-# 5. Full dataset against a vLLM server hosting a larger model
+# 5. Approved dataset against a vLLM server hosting a larger model
 VLM_JUDGE_BACKEND=openai-compat \
 VLM_JUDGE_MODEL_ID=Qwen/Qwen3-VL-30B-A3B-Instruct \
-uv run --project evaluation --no-sync bash \
-  evaluation/vlm_judge/scripts/evaluate-cnc-lerobot.sh \
-  --base-url http://localhost:8000/v1
+uv run --project data-management/viewer/backend --no-sync bash \
+  data-management/curation/scripts/evaluate-dataset.sh \
+  --dataset /path/to/approved-dataset --base-url http://localhost:8000/v1 \
+  -- --approval-id "$APPROVAL_ID" --request-id "$REQUEST_ID"
 ```
+
+The dataset example requires an approval from reviewed samples using the same
+dataset, principal, job store and runtime configuration. Single-episode smoke
+commands do not replace that approval workflow.
 
 The wrappers retain their dataset and output defaults; use `--dataset`,
 `--rollout-root` and `--output` for your own data. The dataset wrapper forwards
 extra CLI options after `--`. For Azure OpenAI, use your deployment name as the
-model ID and its OpenAI-compatible base URL. The dataset CLI reads
+model ID and its OpenAI-compatible base URL. Configure authentication for the
+target environment. For non-Azure endpoints, the dataset CLI reads
 `OPENAI_API_KEY`; the server and viewer use `VLM_JUDGE_API_KEY`. Keep credentials
 out of command arguments and shell history.
 
 ## ☁️ Azure Deployment
+
+### Azure Inference Authentication
+
+Use an identity with inference permission on the target deployment. The current
+Azure inference authentication supports local development; production
+managed-identity integration is deferred. Do not treat a developer login as
+production configuration. Keep credentials out of source, `.env` files and logs.
+Blob storage authentication is configured separately.
+
+### Deployment Layout
 
 Keep the existing CPU Container Apps deployment. Add a separate private GPU inference
 service, starting with an existing suitable A10 VM.
@@ -201,7 +223,7 @@ profiles with the backend's `vlm-judge` extra, which pins a different Transforme
 | Availability           | Keep a worker replica running while jobs are pending; no job-triggered scale-from-zero exists |
 | GPU capacity           | Limit other inference clients separately; drain work before deallocating the GPU              |
 | Model identity         | Pin weights on the model server; the viewer's revision setting does not pin them remotely     |
-| Credentials            | The current inference client uses an API key, not managed-identity token acquisition          |
+| Credentials            | Validate authentication in the target runtime; inference managed-identity support is deferred |
 
 > [!WARNING]
 > The bundled [shim](openai_shim.py) has no authentication. Keep it on loopback
@@ -271,9 +293,9 @@ Mount the standalone local-only router in another FastAPI app:
 ```python
 from pathlib import Path
 from fastapi import FastAPI
-from evaluation.vlm_judge.api import build_router
-from evaluation.vlm_judge.job_storage import LocalJobStore
-from evaluation.vlm_judge.saved_input import LocalDatasetResolver
+from physical_ai_curation.api import build_router
+from physical_ai_curation.adapters.job_storage import LocalJobStore
+from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
 from evaluation.vlm_judge.service import (
     BackendConfig,
     FrameConfig,
@@ -291,13 +313,13 @@ service = JudgeService(
 resolver = LocalDatasetResolver({"example-dataset": Path("/data/example-dataset")})
 app = FastAPI()
 app.include_router(
-  build_router(
-    service,
-    resolver=resolver,
-    local_actor="local-operator",
-    job_store=LocalJobStore(Path("outputs/vlm-judge/jobs")),
-    allow_unauthenticated=True,
-  ),
+    build_router(
+        service,
+        resolver=resolver,
+        local_actor="local-operator",
+        job_store=LocalJobStore(Path("outputs/vlm-judge/jobs")),
+        allow_unauthenticated=True,
+    ),
     prefix="/api/vlm-judge",
 )
 ```

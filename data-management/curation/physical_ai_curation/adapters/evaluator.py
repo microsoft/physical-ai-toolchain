@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
-from evaluation.vlm_judge.dataset import EpisodeRecord
+from physical_ai_dataset_io.lerobot import EpisodeRecord
+
 from evaluation.vlm_judge.judge import JudgeResult
 from evaluation.vlm_judge.prompts import PROMPT_VERSION
 from evaluation.vlm_judge.service import JudgeService
@@ -65,6 +67,59 @@ class EvaluatorJudge:
             await execution
             raise
         return bind_evidence(invocation, result.to_dict())
+
+
+class TaskExecutor:
+    """Bind task-findings inference to caller-owned saved input and runtime identity."""
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        from evaluation.vlm_judge.task_findings import TaskFindingsService
+
+        self.config = deepcopy(config)
+        self.service = TaskFindingsService(deepcopy(config))
+
+    async def __call__(
+        self, record: EpisodeRecord, snapshot: SavedInputSnapshot, config: dict[str, Any]
+    ) -> dict[str, Any]:
+        declared = {key: value for key, value in config.items() if key != "force"}
+        if any(
+            declared != {key: value for key, value in runtime.items() if key != "force"}
+            for runtime in (self.config, self.service.config)
+        ):
+            raise ValueError("Saved task-finding runtime configuration is unavailable")
+        invocation = JudgeInvocation(
+            invocation_id=snapshot.snapshot_id,
+            input_id=snapshot.snapshot_id,
+            episode_id=record.episode_id,
+            instruction=snapshot.instruction,
+            views=tuple(
+                ResolvedView(
+                    name=name,
+                    path=record.video_paths[name],
+                    window=record.video_windows.get(name),
+                    media_identity=(record.media_identity or {}).get(name),
+                )
+                for name in declared["views"]
+            ),
+            options=ExecutionOptions(
+                from_s=record.from_timestamp, to_s=record.to_timestamp, force=bool(config.get("force", False))
+            ),
+            declared_identity={
+                "model_id": declared["model_id"],
+                "prompt_version": declared["prompt_version"],
+                "execution": declared,
+                "agent": {},
+            },
+        )
+        execution = asyncio.create_task(
+            asyncio.to_thread(self.service.evaluate, record, instruction=invocation.instruction)
+        )
+        try:
+            result = await asyncio.shield(execution)
+        except asyncio.CancelledError:
+            await execution
+            raise
+        return bind_evidence(invocation, result, kind="task-findings").payload
 
 
 class ServiceExecutor:

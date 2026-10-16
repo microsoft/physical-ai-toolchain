@@ -198,6 +198,30 @@ class TestDatasetDiscovery:
         with pytest.raises(ValueError, match="Source generation is unavailable"):
             await service.get_source_revision("dataset", 0)
 
+    @pytest.mark.parametrize("azure", [False, True])
+    @pytest.mark.parametrize("operation", ["list", "lookup", "path"])
+    async def test_given_local_dataset_when_selecting_storage_then_sources_are_exclusive(
+        self,
+        tmp_path: Path,
+        accessibility_dataset_path: Path,
+        azure: bool,
+        operation: str,
+    ) -> None:
+        shutil.copytree(accessibility_dataset_path / "a11y-synthetic", tmp_path / "local-only")
+        service = DatasetService(base_path=str(tmp_path), blob_provider=_make_provider() if azure else None)
+
+        if operation == "list":
+            datasets = await service.list_datasets(strict=True)
+            assert ("local-only" in {dataset.id for dataset in datasets}) is not azure
+        elif operation == "lookup":
+            dataset = await service.get_dataset("local-only")
+            assert (dataset is not None) is not azure
+        elif azure:
+            with pytest.raises(ValueError, match="Local dataset access"):
+                service._get_dataset_path("local-only")
+        else:
+            assert service._get_dataset_path("local-only") == tmp_path / "local-only"
+
     async def test_given_missing_remote_catalog_entry_when_strictly_refreshed_then_cached_metadata_evicted(
         self,
         tmp_path: Path,
@@ -464,7 +488,7 @@ class TestDatasetDiscovery:
         monkeypatch: pytest.MonkeyPatch,
         failure: str,
     ) -> None:
-        from evaluation.vlm_judge.dataset import EpisodeRecord
+        from physical_ai_dataset_io.lerobot import EpisodeRecord
 
         root = tmp_path / "metadata"
         root.mkdir()
@@ -492,7 +516,7 @@ class TestDatasetDiscovery:
         path = tmp_path / "outside.mp4" if failure == "outside-root" else root / "video.mp4"
         record = EpisodeRecord("dataset/0", 0, "Move cube", 30, 30, {"front": path}, None, None)
         monkeypatch.setattr(
-            "evaluation.vlm_judge.dataset.iter_episodes",
+            "physical_ai_dataset_io.lerobot.iter_episodes",
             lambda *args, **kwargs: iter([] if failure == "missing-record" else [record]),
         )
         if failure == "provider":
@@ -764,8 +788,7 @@ class TestListEpisodes:
             indices,
             {index: {"length": 10, "task_index": 1} for index in indices},
         )
-        provider = _make_provider()
-        service = DatasetService(base_path=str(tmp_path), storage_adapter=_make_storage(), blob_provider=provider)
+        service = DatasetService(base_path=str(tmp_path), storage_adapter=_make_storage())
         _install_handlers(service, handler)
         await service.list_datasets()
 
@@ -774,8 +797,7 @@ class TestListEpisodes:
         assert [(episode.index, episode.length, episode.task_index) for episode in episodes] == [
             (index, 10, 1) for index in indices
         ]
-        provider.sync_meta_only_to_local.assert_not_awaited()
-        provider.sync_hdf5_dataset_to_local.assert_not_awaited()
+        assert service._blob_provider is None
 
     async def test_lists_registered_episode_range_with_filters_and_pagination(self, tmp_path: Path) -> None:
         storage = _make_storage([0, 3])

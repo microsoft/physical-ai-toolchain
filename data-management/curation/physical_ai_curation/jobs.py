@@ -14,15 +14,12 @@ from copy import deepcopy
 from typing import Any, Protocol
 from uuid import uuid4
 
-from physical_ai_curation.models import DatasetLabelsFile, validate_task_result
+from physical_ai_curation.evidence import bind_job_evidence, read_job_evidence
+from physical_ai_curation.models import DatasetLabelsFile
 from physical_ai_curation.saved_input import SavedInputSnapshot
-from physical_ai_curation.storage import CurationStorage, plan_withdrawal
+from physical_ai_curation.storage import CurationStorage, JobStore, plan_withdrawal
 
-from .dataset import EpisodeRecord
-from .job_storage import JobStore
-from .judge import JudgeResult
-
-_LOGGER = logging.getLogger("evaluation.vlm_judge.jobs")
+_LOGGER = logging.getLogger("physical_ai_curation.jobs")
 _TERMINAL = {"succeeded", "partial", "failed", "cancelled"}
 
 
@@ -45,9 +42,7 @@ class DatasetResolver(Protocol):
         views: tuple[str, ...] = (),
     ) -> dict[str, Any]: ...
 
-    async def resolve(
-        self, dataset_id: str, episode_index: int, **kwargs: Any
-    ) -> tuple[EpisodeRecord, SavedInputSnapshot]: ...
+    async def resolve(self, dataset_id: str, episode_index: int, **kwargs: Any) -> tuple[Any, SavedInputSnapshot]: ...
 
 
 class JudgeJobs:
@@ -55,7 +50,7 @@ class JudgeJobs:
         self,
         store: JobStore,
         resolver: DatasetResolver,
-        infer: Callable[[EpisodeRecord, SavedInputSnapshot, dict[str, Any]], Awaitable[dict[str, Any]]],
+        infer: Callable[[Any, SavedInputSnapshot, dict[str, Any]], Awaitable[dict[str, Any]]] | None,
         *,
         capacity_scope: str,
         capacity: int = 1,
@@ -676,11 +671,8 @@ class JudgeJobs:
             job, target = current
             if error is None:
                 try:
-                    validated = (
-                        validate_task_result(result or {})
-                        if job.get("result_kind") == "task-findings"
-                        else JudgeResult.from_dict(result or {}).to_dict()
-                    )
+                    evidence = bind_job_evidence(job, target, result or {})
+                    validated = evidence.payload
                     if validated["instruction"] != target["input"]["instruction"]:
                         raise ValueError("Judge instruction changed")
                     if validated["episode_id"] != f"{job['dataset_id']}/episode_{target['episode_index']:06d}":
@@ -694,6 +686,7 @@ class JudgeJobs:
                         status="succeeded",
                         cached=cached,
                     )
+                    target["evidence"] = evidence.to_dict()
                     if job["mode"] == "sample":
                         outcome = validated.get("outcome_success")
                         predicted = "success" if outcome is True else "failure" if outcome is False else None
@@ -843,6 +836,8 @@ class JudgeJobs:
             return True
         if await self.apply_once():
             return True
+        if self.infer is None:
+            return False
         claim = await self.claim()
         if claim is None:
             return False
@@ -874,7 +869,7 @@ class JudgeJobs:
             )
             prior = next(
                 (
-                    item["result"]
+                    (previous, item)
                     for previous in sorted(state["jobs"].values(), key=lambda entry: entry["run_order"], reverse=True)
                     for item in previous["targets"]
                     if item["input_key"] == target["input_key"]
@@ -884,7 +879,11 @@ class JudgeJobs:
                 None,
             )
             cached = prior is not None and not job["config"].get("force", False)
-            result = deepcopy(prior) if cached else await self.infer(record, snapshot, job["config"])
+            result = (
+                deepcopy(read_job_evidence(*prior).payload)
+                if cached
+                else await self.infer(record, snapshot, job["config"])
+            )
             cached = cached or result.pop("_cache_hit", False) is True
             await self.resolver.resolve(
                 job["dataset_id"],
@@ -936,6 +935,7 @@ class JudgeJobs:
             for target in job["targets"]:
                 if target["episode_index"] != episode_index or target["result"] is None:
                     continue
+                record = read_job_evidence(job, target)
                 withdrawn = job["generation"] != state["generations"].get(dataset_id, 0)
                 applicability = (
                     "withdrawn"
@@ -953,7 +953,8 @@ class JudgeJobs:
                         "config_revision": job["config_revision"],
                         "config": deepcopy(job["config"]),
                         "input": deepcopy(target["input"]),
-                        "result": deepcopy(target["result"]),
+                        "result": deepcopy(record.payload),
+                        "evidence": record.to_dict(),
                         "applicability": applicability,
                         "applied": target["applied"],
                         "created_at": job["created_at"],

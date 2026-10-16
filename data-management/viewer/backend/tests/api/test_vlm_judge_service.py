@@ -25,9 +25,87 @@ from src.api.config import AppConfig, load_config
 from src.api.services.saved_input_service import SavedInputError, ViewerDatasetResolver
 
 
+@pytest.mark.parametrize(
+    "host", ["example.openai.azure.com", "example.services.ai.azure.com", "example.cognitiveservices.azure.com"]
+)
+@pytest.mark.parametrize("refresh_fails", [False, True])
+def test_given_foundry_when_token_expires_then_cli_refreshes_without_static_key_fallback(
+    monkeypatch: pytest.MonkeyPatch, host: str, refresh_fails: bool
+) -> None:
+    import httpx
+    import openai
+    from azure.core.credentials import AccessTokenInfo
+    from azure.core.exceptions import ClientAuthenticationError
+    from azure.identity import AzureCliCredential
+    from evaluation.vlm_judge.backend import OpenAICompatibleBackend
+
+    clock = [1000.0]
+    scopes_seen = []
+    headers = []
+
+    def token_info(_credential: AzureCliCredential, *scopes: str, **_kwargs: object) -> AccessTokenInfo:
+        scopes_seen.append(scopes)
+        if refresh_fails and len(scopes_seen) > 1:
+            raise ClientAuthenticationError("Synthetic credential expiry")
+        return AccessTokenInfo(f"synthetic-token-{len(scopes_seen)}", int(clock[0]) + 3600)
+
+    def send(request: httpx.Request) -> httpx.Response:
+        headers.append(request.headers["Authorization"])
+        return httpx.Response(200, json={"object": "list", "data": []}, request=request)
+
+    constructor = openai.OpenAI
+    transport = httpx.Client(transport=httpx.MockTransport(send))
+    monkeypatch.setattr(openai, "OpenAI", lambda **options: constructor(http_client=transport, **options))
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    monkeypatch.setattr(AzureCliCredential, "get_token_info", token_info)
+    monkeypatch.setenv("OPENAI_API_KEY", "unused-environment-key")
+    backend = OpenAICompatibleBackend(
+        model="example", base_url=f"https://{host}/openai/v1/", api_key="unused-explicit-key"
+    )
+    try:
+        backend._client.models.list()
+        backend._client.models.list()
+        assert headers == ["Bearer synthetic-token-1", "Bearer synthetic-token-1"]
+        assert len(scopes_seen) == 1
+        clock[0] += 3601
+        if refresh_fails:
+            with pytest.raises(ClientAuthenticationError, match="Synthetic credential expiry"):
+                backend._client.models.list()
+            assert len(headers) == 2
+        else:
+            backend._client.models.list()
+            assert headers[-1] == "Bearer synthetic-token-2"
+        assert scopes_seen == [("https://cognitiveservices.azure.com/.default",)] * 2
+    finally:
+        backend._client.close()
+
+
+@pytest.mark.parametrize("base_url", ["http://localhost:9000/v1", "https://example.openai.azure.com.invalid/v1"])
+def test_given_non_azure_endpoint_when_constructing_then_preserves_explicit_key(base_url: str) -> None:
+    from evaluation.vlm_judge.backend import OpenAICompatibleBackend
+
+    backend = OpenAICompatibleBackend(model="example", base_url=base_url, api_key="synthetic-key")
+    try:
+        assert backend._client.api_key == "synthetic-key"
+    finally:
+        backend._client.close()
+
+
+@pytest.mark.parametrize(
+    "base_url", ["http://example.openai.azure.com/v1", "https://synthetic:credential@example.openai.azure.com/v1"]
+)
+def test_given_unsafe_azure_endpoint_when_constructing_then_rejected(base_url: str) -> None:
+    from evaluation.vlm_judge.backend import OpenAICompatibleBackend
+
+    with pytest.raises(ValueError, match="HTTPS without URL credentials"):
+        OpenAICompatibleBackend(model="example", base_url=base_url)
+
+
 @pytest.fixture
 def saved_input_resolver(tmp_path: Path) -> ViewerDatasetResolver:
-    from evaluation.vlm_judge.dataset import EpisodeRecord
+    from physical_ai_dataset_io.lerobot import EpisodeRecord
+
+    from src.api.services.label_storage import LocalLabelStorage
 
     record = EpisodeRecord(
         "dataset/0",
@@ -51,7 +129,7 @@ def saved_input_resolver(tmp_path: Path) -> ViewerDatasetResolver:
         get_annotation_versioned=AsyncMock(return_value=SimpleNamespace(value=None, etag=None)),
         get_saved_edits=AsyncMock(return_value=SimpleNamespace(value=None, etag=None)),
     )
-    return ViewerDatasetResolver(datasets, annotations)
+    return ViewerDatasetResolver(datasets, annotations, label_storage_factory=lambda: LocalLabelStorage(tmp_path))
 
 
 async def test_given_duplicate_episode_indices_when_selected_then_sorted_and_deduplicated(
@@ -167,7 +245,12 @@ async def test_given_saved_label_sample_when_validated_then_requires_unchanged_b
     labels = DatasetLabelsFile(dataset_id="dataset", episodes={"0": ["success"]})
     replacement = DatasetLabelsFile(dataset_id="dataset", episodes={"0": ["failure"]}) if changed else labels
     storage = SimpleNamespace(load=AsyncMock(side_effect=[labels, replacement]))
-    monkeypatch.setattr("src.api.routers.labels._get_label_storage", lambda: storage)
+    saved_input_resolver = ViewerDatasetResolver(
+        saved_input_resolver.datasets, saved_input_resolver.annotations, label_storage_factory=lambda: storage
+    )
+    monkeypatch.setattr(
+        "src.api.routers.labels._get_label_storage", lambda: pytest.fail("Resolver must use injected storage")
+    )
     _, snapshot = await saved_input_resolver.resolve("dataset", 0, principal_scope_id="human")
     reference = {"snapshot_id": snapshot.snapshot_id, "labels_revision": label_baseline(labels, 0)["revision"]}
 
@@ -350,20 +433,38 @@ def test_returns_none_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     assert vjs.get_vlm_judge_service(_config(monkeypatch, enabled=False)) is None
 
 
+def _write_cli_metadata(root: Path, instruction: str, indices: tuple[int, ...]) -> None:
+    (root / "meta").mkdir()
+    (root / "meta" / "info.json").write_text(
+        json.dumps(
+            {
+                "codebase_version": "v2.1",
+                "fps": 30,
+                "total_episodes": len(indices),
+                "features": {"front": {"dtype": "video"}},
+                "data_path": "data/{episode_index}.parquet",
+                "video_path": "episode_{episode_index}.mp4",
+            }
+        )
+    )
+    (root / "meta" / "episodes.jsonl").write_text(
+        "".join(json.dumps({"episode_index": index, "length": 30, "tasks": [instruction]}) + "\n" for index in indices)
+    )
+    for index in indices:
+        (root / f"episode_{index}.mp4").write_bytes(b"synthetic media; no decoding in this test")
+
+
 @pytest.mark.parametrize("override", ["", "Declared experiment instruction"])
 def test_cli_persists_declared_instruction_before_service_creation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, override: str
 ) -> None:
-    from evaluation.vlm_judge import run as judge_run
-    from evaluation.vlm_judge.dataset import EpisodeRecord
+    from evaluation.vlm_judge import run as inference_run
     from evaluation.vlm_judge.service import JudgeService
+    from physical_ai_curation import run as judge_run
 
-    (tmp_path / "meta").mkdir()
-    (tmp_path / "meta" / "info.json").write_text("{}")
-    episode = EpisodeRecord("synthetic/episode_000000", 0, "Saved dataset instruction", 30, 30, {}, None, None)
-    monkeypatch.setattr(judge_run, "iter_episodes", lambda *args, **kwargs: iter([episode]))
+    _write_cli_metadata(tmp_path, "Saved dataset instruction", (0,))
     output = tmp_path / "results.jsonl"
-    original_build = judge_run._build_service
+    observed = []
 
     def build_with_declared_configuration(args: argparse.Namespace) -> JudgeService:
         declared = json.loads(output.with_suffix(".jsonl.config.json").read_text())
@@ -372,9 +473,11 @@ def test_cli_persists_declared_instruction_before_service_creation(
         assert declared["backend"] == "echo"
         assert "api_key" not in declared
         assert "base_url" not in declared
-        return original_build(args)
+        assert declared["saved_inputs"][0]["instruction"] == (override or "Saved dataset instruction")
+        observed.append(args.backend)
+        raise ValueError("Synthetic stop before inference")
 
-    monkeypatch.setattr(judge_run, "_build_service", build_with_declared_configuration)
+    monkeypatch.setattr(inference_run, "build_service", build_with_declared_configuration)
     assert (
         judge_run.main(
             [
@@ -384,16 +487,17 @@ def test_cli_persists_declared_instruction_before_service_creation(
                 str(output),
                 "--backend",
                 "echo",
-                "--dry-run",
+                "--single",
                 "--instruction",
                 override,
                 "--api-key",
                 "synthetic-not-a-credential",
             ]
         )
-        == 0
+        == 2
     )
-    assert json.loads(output.read_text())["instruction"] == (override or episode.instruction)
+    assert observed == ["echo"]
+    assert not output.exists()
 
 
 def test_builds_and_memoizes_singleton(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -615,15 +719,10 @@ def test_given_saved_instruction_when_prompt_rendered_then_preserved(renderer: s
 def test_given_partial_cli_execution_when_finished_then_nonzero_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from evaluation.vlm_judge import run as judge_run
-    from evaluation.vlm_judge.dataset import EpisodeRecord
+    from physical_ai_curation import run as judge_run
+    from physical_ai_dataset_io.lerobot import EpisodeRecord
 
-    (tmp_path / "meta").mkdir()
-    (tmp_path / "meta" / "info.json").write_text("{}")
-    episodes = [
-        EpisodeRecord(f"synthetic/{index}", index, "Saved instruction", 30, 30, {}, None, None) for index in (3, 1005)
-    ]
-    monkeypatch.setattr(judge_run, "iter_episodes", lambda *args, **kwargs: iter(episodes))
+    _write_cli_metadata(tmp_path, "Saved instruction", (3, 1005))
 
     def process(*, episode: EpisodeRecord, **kwargs: object) -> dict[str, object]:
         if episode.episode_index == 1005:
@@ -633,9 +732,12 @@ def test_given_partial_cli_execution_when_finished_then_nonzero_exit(
     monkeypatch.setattr(judge_run, "_process_episode", process)
 
     assert (
-        judge_run.main(["--dataset", str(tmp_path), "--output", str(tmp_path / "results.jsonl"), "--backend", "echo"])
-        != 0
+        judge_run.main(
+            ["--dataset", str(tmp_path), "--output", str(tmp_path / "results.jsonl"), "--backend", "echo", "--dry-run"]
+        )
+        == 1
     )
+    assert len((tmp_path / "results.jsonl").read_text().splitlines()) == 1
 
 
 @pytest.mark.asyncio
@@ -722,11 +824,9 @@ async def test_given_saved_media_edit_when_cli_resolves_then_unsupported_transfo
 def test_given_saved_annotation_when_cli_runs_then_uses_saved_instruction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from evaluation.vlm_judge import run as judge_run
-    from evaluation.vlm_judge.dataset import EpisodeRecord
+    from physical_ai_curation import run as judge_run
 
-    (tmp_path / "meta").mkdir()
-    (tmp_path / "meta" / "info.json").write_text("{}")
+    _write_cli_metadata(tmp_path, "Original instruction", (3,))
     path = tmp_path / "annotations" / "episodes" / "episode_000003.json"
     path.parent.mkdir(parents=True)
     path.write_text(
@@ -738,8 +838,6 @@ def test_given_saved_annotation_when_cli_runs_then_uses_saved_instruction(
             }
         )
     )
-    episode = EpisodeRecord("dataset/3", 3, "Original instruction", 30, 30, {}, None, None)
-    monkeypatch.setattr(judge_run, "iter_episodes", lambda *args, **kwargs: iter([episode]))
     output = tmp_path / "results.jsonl"
 
     assert judge_run.main(["--dataset", str(tmp_path), "--output", str(output), "--backend", "echo", "--dry-run"]) == 0
@@ -769,10 +867,10 @@ def test_given_malformed_outcome_when_scored_then_execution_error_without_raw_ou
 
 
 def test_given_unconfigured_standalone_api_when_judged_then_fails_closed() -> None:
-    from evaluation.vlm_judge.api import build_router
     from evaluation.vlm_judge.service import BackendConfig, JudgeService, ServiceConfig
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+    from physical_ai_curation.api import build_router
 
     app = FastAPI()
     app.include_router(build_router(JudgeService(ServiceConfig(backend=BackendConfig(kind="echo")))))

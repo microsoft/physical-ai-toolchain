@@ -382,6 +382,7 @@ export function useSaveAnnotation() {
         queryKey: annotationKeys.summary(variables.datasetId),
       })
       queryClient.invalidateQueries({ queryKey: ['judge-dataset', variables.datasetId] })
+      queryClient.invalidateQueries({ queryKey: ['judge-evidence', variables.datasetId] })
     },
 
     onError: (error, variables, context) => {
@@ -475,6 +476,8 @@ export function useDeleteAnnotation() {
       queryClient.invalidateQueries({
         queryKey: annotationKeys.summary(variables.datasetId),
       })
+      queryClient.invalidateQueries({ queryKey: ['judge-dataset', variables.datasetId] })
+      queryClient.invalidateQueries({ queryKey: ['judge-evidence', variables.datasetId] })
     },
   })
 }

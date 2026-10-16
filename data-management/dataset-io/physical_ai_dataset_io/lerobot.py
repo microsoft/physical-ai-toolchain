@@ -1,4 +1,4 @@
-"""LeRobot dataset adapter for VLM-as-judge evaluation.
+"""LeRobot metadata shared by curation and evaluation.
 
 Resolves a LeRobot dataset directory into an iterable of ``EpisodeRecord``
 entries, each carrying the per-view MP4 paths, the language instruction,

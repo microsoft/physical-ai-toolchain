@@ -13,6 +13,9 @@ supported-markers = [
     "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')",
 ]
 
+[options]
+prerelease-mode = "allow"
+
 [manifest]
 overrides = [
     { name = "diffusers", specifier = "==0.40.0" },
@@ -2554,15 +2557,16 @@ wheels = [
 ]
 
 [[package]]
-name = "physical-ai-curation"
+name = "physical-ai-dataset-io"
 version = "0.1.0"
-source = { editable = "../data-management/curation" }
-dependencies = [
-    { name = "pydantic" },
-]
+source = { editable = "../data-management/dataset-io" }
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = "==2.13.5" }]
+requires-dist = [
+    { name = "pandas", marker = "extra == 'parquet'", specifier = "==3.0.5" },
+    { name = "pyarrow", marker = "extra == 'parquet'", specifier = "==25.0.1" },
+]
+provides-extras = ["parquet"]
 
 [[package]]
 name = "physical-ai-evaluation"
@@ -2584,6 +2588,7 @@ dependencies = [
     { name = "onnxruntime-gpu" },
     { name = "onnxscript" },
     { name = "packaging" },
+    { name = "physical-ai-dataset-io" },
     { name = "psutil" },
     { name = "pynvml" },
     { name = "pyperclip" },
@@ -2603,7 +2608,6 @@ dev = [
     { name = "hypothesis" },
     { name = "matplotlib" },
     { name = "numpy" },
-    { name = "physical-ai-curation" },
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pygments" },
@@ -2630,6 +2634,7 @@ requires-dist = [
     { name = "onnxruntime-gpu", specifier = "==1.30.0" },
     { name = "onnxscript", specifier = "==0.7.2" },
     { name = "packaging", specifier = "==25.0" },
+    { name = "physical-ai-dataset-io", editable = "../data-management/dataset-io" },
     { name = "psutil", specifier = "==7.2.2" },
     { name = "pynvml", specifier = "==13.0.1" },
     { name = "pyperclip", specifier = "==1.11.0" },
@@ -2653,7 +2658,6 @@ dev = [
     { name = "hypothesis", specifier = "==6.168.1" },
     { name = "matplotlib", specifier = "==3.11.2" },
     { name = "numpy", specifier = "==2.2.6" },
-    { name = "physical-ai-curation", editable = "../data-management/curation" },
     { name = "pyarrow", specifier = "==25.0.1" },
     { name = "pydantic", specifier = "==2.13.5" },
     { name = "pygments", specifier = "==2.21.0" },

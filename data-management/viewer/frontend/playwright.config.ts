@@ -15,7 +15,7 @@ const isolatedEnvironment = {
   VLM_JUDGE_CACHE_DIR: join(dataDirectory, 'cache'),
   VLM_JUDGE_JOB_DIR: join(dataDirectory, 'jobs'),
 }
-const seedDataset = `uv run --directory ../backend --no-sync --frozen python -c "import os; from pathlib import Path; from tests.api.test_vlm_judge_router import _build_dataset; _build_dataset(Path(os.environ['DATA_DIR']) / 'integration-fixture', instruction='Place the block')"`
+const seedDataset = `uv run --directory ../backend --no-sync --frozen python -c "import os; from pathlib import Path; from tests.api.test_vlm_judge_router import _build_dataset; [_build_dataset(Path(os.environ['DATA_DIR']) / dataset_id, instruction='Place the block', n_episodes=2) for dataset_id in ('integration-fixture', 'integration-judge-fixture', 'integration-grounding-fixture')]"`
 
 export default defineConfig({
   testDir: './e2e',
@@ -61,11 +61,16 @@ export default defineConfig({
       url: 'http://127.0.0.1:18000/docs',
       reuseExistingServer: false,
       timeout: 180_000,
-      env: isolatedEnvironment,
+      env: {
+        ...isolatedEnvironment,
+        VLM_JUDGE_ENABLED: 'true',
+        VLM_JUDGE_MODEL_ID: 'echo',
+        VLM_JUDGE_N_FRAMES: '4',
+      },
     },
     {
       command:
-        'uv run --project ../backend --no-sync --frozen python -m uvicorn evaluation.vlm_judge.api:app --host 127.0.0.1 --port 18001',
+        'uv run --project ../backend --no-sync --frozen python -m uvicorn physical_ai_curation.api:build_app --factory --host 127.0.0.1 --port 18001',
       url: 'http://127.0.0.1:18001/docs',
       reuseExistingServer: false,
       timeout: 180_000,

@@ -167,6 +167,10 @@ The backend lists every dataset folder under `DATA_DIR`, up to five levels deep,
 
 ### Azure Blob Storage
 
+Dataset sources are exclusive: Azure mode reads only Blob datasets and ignores
+`DATA_DIR`. Missing Azure configuration or dependencies fail explicitly; they do
+not enable local discovery. Local mode reads only `DATA_DIR`.
+
 Use this mode when datasets live in Azure Blob Storage. Authentication uses
 [DefaultAzureCredential](https://learn.microsoft.com/azure/developer/python/sdk/authentication-overview),
 which supports managed identity, workload identity, and Azure CLI credentials
@@ -356,13 +360,18 @@ container build profiles and Azure setup, see the
 | `VLM_JUDGE_MODEL_ID`       | `Qwen/Qwen3-VL-4B-Instruct`   | HF model id or remote model name                                                        |
 | `VLM_JUDGE_MODEL_REVISION` | Unset                         | Required full Hub commit SHA for native Qwen; omit for explicit local model directories |
 | `VLM_JUDGE_BASE_URL`       | —                             | OpenAI-compatible server URL (`openai-compat` only)                                     |
-| `VLM_JUDGE_API_KEY`        | —                             | Bearer token for the remote backend                                                     |
+| `VLM_JUDGE_API_KEY`        | —                             | API key for non-Azure endpoints; ignored for Azure endpoints                            |
 | `VLM_JUDGE_N_FRAMES`       | `12`                          | Frames sampled per episode                                                              |
 | `VLM_JUDGE_PROCESS_METHOD` | `gvl`                         | Process-reward method: `gvl` (shuffle-and-rank) or `chronological`                      |
 | `VLM_JUDGE_CACHE_DIR`      | Unset                         | Disposable inference cache, not durable job authority                                   |
 | `VLM_JUDGE_JOB_DIR`        | Derived local default         | Durable local job root; Compose uses `/state/judge`, Azure mode uses shared Blob state  |
 | `VLM_JUDGE_CAPACITY`       | `1`                           | Shared maximum concurrent judgment work for a capacity scope                            |
 | `VLM_JUDGE_CAPACITY_SCOPE` | `configured-inference-device` | Shared identity for workers using the same inference capacity                           |
+
+Configure inference authentication for the target environment, independently of
+Blob storage authentication. The current Azure inference setup is for development;
+production managed-identity support is deferred. See the
+[authentication guidance](../../evaluation/vlm_judge/README.md#azure-inference-authentication).
 
 Native Hub loading requires a full SHA and never enables repository Python code.
 For offline artifacts, set `VLM_JUDGE_MODEL_ID` to an absolute directory or a path
@@ -569,7 +578,7 @@ From `data-management/viewer/`:
 npm run dev
 ```
 
-The npm command starts the backend and frontend together on Windows, macOS, and Linux. Stop both processes with `Ctrl+C`.
+The npm command starts the backend and frontend together on Windows, macOS, and Linux. Complete the dependency setup first: npm and VS Code tasks use the prepared backend environment without restoring or removing optional judge packages. Stop both processes with `Ctrl+C`.
 
 ### Health-checked Bash launcher
 
@@ -578,6 +587,8 @@ The npm command starts the backend and frontend together on Windows, macOS, and 
 ```
 
 The Bash launcher starts the backend first, waits for its health endpoint, then starts the frontend. Use it on macOS, Linux, WSL, or a compatible shell when ordered startup and health checking are required.
+
+When a dependency restore is needed, it restores the selected evaluator profile before the backend, then checks the combined environment. A dependency conflict stops startup. Existing services are not reconfigured by changing launcher source.
 
 Available options:
 
@@ -742,33 +753,34 @@ Each export is its own dataset. LeRobot merges datasets only when their features
 
 ### VLM dataset-labeling CLI
 
-`backend/scripts/vlm_label_dataset.py` runs Qwen3-VL across a LeRobot v2.1 or v3.0 dataset. It writes full rows to `labels.jsonl` and a flat summary to `labels.csv`.
+`physical_ai_curation.label_dataset` runs Qwen3-VL across a LeRobot v2.1 or v3.0 dataset. It persists jobs before execution and exports full rows to `labels.jsonl` and a flat summary to `labels.csv`.
 
 ```bash
 cd data-management/viewer/backend
-uv run --extra vlm-judge --with-editable ../../../evaluation/vlm_judge \
-  python scripts/vlm_label_dataset.py \
+uv run --frozen --extra vlm-judge \
+  python -m physical_ai_curation.label_dataset \
   --dataset-root /data/my-dataset \
   --dataset-id owner--my-dataset \
   --output-dir /data/my-dataset/vlm-labels \
-  --n-frames 16 \
-  --resume \
-  --write-analysis
+  --model-revision '<reviewed-full-40-hex-commit-sha>' \
+  --n-frames 16 --limit 1 --single
 ```
 
-| Option             | Behavior                                                                                                                             |
-|--------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| `--dataset-id`     | Writes the canonical dataviewer ID into generated metadata; set it for nested IDs such as `owner--dataset`                           |
-| `--resume`         | Loads existing `labels.jsonl`, skips successful episode indices, retries failed rows, appends attempts, and regenerates `labels.csv` |
-| `--write-analysis` | Merges successful rows into `<dataset-root>/meta/episode_labels.json` without replacing labels or unrelated analysis fields          |
-| `--views`          | Restricts the model input to selected video feature keys; all detected video views are used by default                               |
-| `--limit`          | Processes only the first requested number of episodes                                                                                |
-| `--scene-context`  | Adds dataset-specific scene context to the model prompt                                                                              |
+| Option                 | Behavior                                                                                                   |
+|------------------------|------------------------------------------------------------------------------------------------------------|
+| `--dataset-id`         | Writes the canonical dataviewer ID into generated metadata; set it for nested IDs such as `owner--dataset` |
+| `--resume --job-id ID` | Retries eligible targets in a saved job, preserving successful targets and revalidating saved inputs       |
+| `--write-analysis`     | Requests approved dataset application without replacing human-owned labels or analysis                     |
+| `--views`              | Restricts the model input to selected video feature keys; all detected video views are used by default     |
+| `--limit`              | Processes only the first requested number of episodes                                                      |
+| `--scene-context`      | Adds dataset-specific scene context to the model prompt                                                    |
 
 Without `--write-analysis`, the JSONL and CSV files remain standalone exports and do not appear in the Episode Analysis card. Error rows remain in JSONL and CSV for inspection but are not merged into the dataset analysis map.
 
-> [!WARNING]
-> Stop other writers for the same dataset before using `--write-analysis`. The command replaces the metadata file atomically, but concurrent read-modify-write operations can still overwrite each other.
+Dataset runs require reviewed samples and an approval for the same runtime configuration.
+Use `--operation apply --job-id ID` for explicit application of an eligible saved job.
+Application uses revision-conditional writes; resolve a reported conflict and retry instead of overwriting current metadata.
+Management operations do not require the evaluator package. Direct inference remains available through `evaluation.vlm_judge.run`, without saved-input selection or durable lifecycle options.
 
 ## 🚢 Container Deployment
 
@@ -876,13 +888,17 @@ Mount the reviewed model directory read-only at `/models`. Update the mount and 
 
 The backend image includes the frozen `azure`, `analysis`, `export`, `auth`, and `yolo` extras. Its build stage installs dependencies; the runtime stage copies the virtual environment with the application user's ownership. Installation caches remain in the build stage.
 
+Build from the repository root so the allowlisted context includes curation, dataset-I/O and evaluator sources.
+
 ```bash
 # Backend
-docker build --file data-management/viewer/backend/Dockerfile --tag dataviewer-backend data-management/viewer/backend
+docker build --file data-management/viewer/backend/Dockerfile --tag dataviewer-backend .
 
 # Frontend
 docker build --file data-management/viewer/frontend/Dockerfile --tag dataviewer-frontend .
 ```
+
+For model-free echo execution, set `--build-arg BACKEND_EXTRAS=azure,analysis,export,auth` to omit YOLO dependencies. Add `--build-arg JUDGE_EXTRAS=openai` for a remote inference client, or `JUDGE_EXTRAS=qwen3-vl` for a separately validated local GPU runtime. Build profiles select installed dependencies; runtime settings still control whether judging is enabled and which backend it uses.
 
 ## 🧪 Development
 

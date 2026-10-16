@@ -27,7 +27,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import asynccontextmanager, suppress
 from ipaddress import ip_address
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -41,20 +41,16 @@ except ModuleNotFoundError as error:
         raise
 
 from physical_ai_curation.adapters.evaluator import ServiceExecutor
+from physical_ai_curation.adapters.job_storage import LocalJobStore
+from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
 from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+from physical_ai_curation.application import apply_judge_result
+from physical_ai_curation.jobs import DatasetResolver, JudgeJobs, fingerprint
 from physical_ai_curation.saved_input import SavedInputError
-from physical_ai_curation.storage import CurationStorage
+from physical_ai_curation.storage import CurationStorage, JobStore
 
-from .curation_storage import apply_judge_result
-from .job_storage import JobStore, LocalJobStore
-from .jobs import DatasetResolver, JudgeJobs, fingerprint
-from .saved_input import LocalDatasetResolver
-from .service import (
-    BackendConfig,
-    FrameConfig,
-    JudgeService,
-    ServiceConfig,
-)
+if TYPE_CHECKING:
+    from evaluation.vlm_judge.service import JudgeService
 
 _LOGGER = logging.getLogger("evaluation.vlm_judge")
 
@@ -493,7 +489,7 @@ def _admit_local_request(request: Request, *, require_json: bool = True) -> bool
 
 
 def build_router(
-    service: JudgeService,
+    service: JudgeService | None,
     *,
     resolver: DatasetResolver | None = None,
     principal_dependency: Callable[..., str] | None = None,
@@ -544,6 +540,12 @@ def build_router(
             return admitted_handler
 
     executor = ServiceExecutor(service)
+
+    def prepare_config(options: dict[str, Any]) -> dict[str, Any]:
+        if service is None:
+            raise HTTPException(status_code=503, detail="Judge unavailable")
+        return executor.configuration(options)
+
     if curation_store is None and isinstance(resolver, LocalDatasetResolver):
         curation_store = LocalCurationStorage(resolver.datasets)
 
@@ -569,7 +571,7 @@ def build_router(
     @asynccontextmanager
     async def lifespan(app: Any) -> AsyncIterator[None]:
         workers = []
-        if enabled and configured and jobs is not None:
+        if enabled and configured and jobs is not None and service is not None:
             app.state.judge_jobs = jobs
             workers = [asyncio.create_task(jobs.run_forever()) for _ in range(capacity)]
         try:
@@ -598,13 +600,15 @@ def build_router(
         build_job_router(
             require_jobs,
             actor_dependency=principal_dependency or require_local_actor,
-            prepare_config=executor.configuration,
+            prepare_config=prepare_config,
             route_class=LocalJudgeRoute,
         )
     )
 
     @router.get("/health")
     def health() -> dict[str, Any]:
+        if service is None:
+            return {"status": "unavailable", "model_id": None, "backend_kind": None, "cache_enabled": False}
         return {
             "status": "ok",
             "model_id": service.model_id,
@@ -631,7 +635,7 @@ def build_router(
                 request.dataset_id.replace("\r", "").replace("\n", ""),
                 actor,
                 [int(request.episode_index)],
-                executor.configuration(options.model_dump()),
+                prepare_config(options.model_dump()),
                 idempotency_key=(idempotency_key or uuid4().hex).replace("\r", "").replace("\n", ""),
                 expected_snapshots={int(request.episode_index): request.snapshot_id} if request.snapshot_id else None,
             )
@@ -666,25 +670,46 @@ def build_app():
     - ``VLM_JUDGE_JOB_DIR`` (durable local job storage)
     """
     from fastapi import FastAPI
+    from fastapi.openapi.docs import get_swagger_ui_html
+    from fastapi.responses import HTMLResponse
 
-    from .swagger_ui import install_responsive_swagger_ui
-
-    backend = BackendConfig(
-        kind=os.environ.get("VLM_JUDGE_BACKEND", "echo"),
-        model_id=os.environ.get("VLM_JUDGE_MODEL_ID", "Qwen/Qwen3-VL-4B-Instruct"),
-        revision=os.environ.get("VLM_JUDGE_MODEL_REVISION") or None,
-        base_url=os.environ.get("VLM_JUDGE_BASE_URL") or None,
-        api_key=os.environ.get("VLM_JUDGE_API_KEY") or None,
-    )
-    frames = FrameConfig(
-        n_frames=int(os.environ.get("VLM_JUDGE_N_FRAMES", "12")),
-    )
-    cache_dir_env = os.environ.get("VLM_JUDGE_CACHE_DIR", "outputs/vlm-judge/cache")
-    cache_dir = Path(cache_dir_env) if cache_dir_env else None
-
-    service = JudgeService(ServiceConfig(backend=backend, frames=frames, cache_dir=cache_dir))
+    try:
+        from evaluation.vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig
+    except ImportError:
+        service = None
+    else:
+        backend = BackendConfig(
+            kind=os.environ.get("VLM_JUDGE_BACKEND", "echo"),
+            model_id=os.environ.get("VLM_JUDGE_MODEL_ID", "Qwen/Qwen3-VL-4B-Instruct"),
+            revision=os.environ.get("VLM_JUDGE_MODEL_REVISION") or None,
+            base_url=os.environ.get("VLM_JUDGE_BASE_URL") or None,
+            api_key=os.environ.get("VLM_JUDGE_API_KEY") or None,
+        )
+        frames = FrameConfig(n_frames=int(os.environ.get("VLM_JUDGE_N_FRAMES", "12")))
+        cache_dir_env = os.environ.get("VLM_JUDGE_CACHE_DIR", "outputs/vlm-judge/cache")
+        cache_dir = Path(cache_dir_env) if cache_dir_env else None
+        service = JudgeService(ServiceConfig(backend=backend, frames=frames, cache_dir=cache_dir))
     app = FastAPI(title="VLM-as-Judge", version="0.1.0", docs_url=None)
-    install_responsive_swagger_ui(app)
+
+    @app.get("/docs", include_in_schema=False)
+    async def swagger_ui() -> HTMLResponse:
+        response = get_swagger_ui_html(openapi_url=app.openapi_url, title=f"{app.title} - Swagger UI")
+        styles = """<style>
+@media (max-width: 600px) {
+  .swagger-ui .wrapper { padding-inline: 10px; }
+  .swagger-ui table { table-layout: fixed; width: 100%; }
+  .swagger-ui table .response-col_status { width: 48px; }
+  .swagger-ui table .response-col_links { display: none; }
+  .swagger-ui table .response-col_description { width: auto; }
+  .swagger-ui .model-example,
+  .swagger-ui .response-col_description__inner { min-width: 0; max-width: 100%; }
+  .swagger-ui .highlight-code,
+  .swagger-ui .microlight,
+  .swagger-ui pre { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+</style>"""
+        return HTMLResponse(response.body.decode("utf-8").replace("</head>", f"{styles}</head>"))
+
     configured = json.loads(os.environ.get("VLM_JUDGE_DATASETS", "{}"))
     resolver = LocalDatasetResolver({identifier: Path(root) for identifier, root in configured.items()})
     local_actor = (
@@ -701,7 +726,7 @@ def build_app():
             capacity_scope=os.environ.get("VLM_JUDGE_CAPACITY_SCOPE", "configured-inference-device"),
         )
     )
-    _LOGGER.info("VLM judge API ready (backend=%s, model=%s)", backend.kind, backend.model_id)
+    _LOGGER.info("Curation API ready (inference_available=%s)", service is not None)
     return app
 
 

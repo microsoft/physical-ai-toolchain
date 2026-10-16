@@ -27,6 +27,8 @@ argument-hint: "[datasetPath=...] [backendPort=8000] [frontendPort=5173] [runVlm
 6. Report the loaded datasets and episode counts.
 7. When `runVlmJudge=true`, follow Phase 5 of the Dataviewer Developer agent:
     * Probe `GET /api/datasets/{id}/capabilities` for each selected dataset and require `vlm_judge_enabled: true` before requesting judgments.
-    * For each `(dataset, episode)` pair in the cross-product of `vlmDatasets` and `vlmEpisodes`, run the judge via the CLI (`python -m evaluation.vlm_judge.run --dataset datasets/{id} --indices {idx} --backend ${vlmBackend} --output outputs/vlm-judge/{id}.jsonl`).
+        * For each explicitly requested smoke episode, resolve the dataset root, principal scope and durable job root from the active viewer.
+            Use `python -m physical_ai_curation.run --dataset <resolved-root> --dataset-id {id} --principal-scope-id <active-scope> --job-dir <active-job-root> --indices {idx} --single --backend ${vlmBackend} --output outputs/vlm-judge/{id}.jsonl`, carrying the same configured model/revision and runtime settings.
+            Follow the dataviewer skill's sample/approval workflow for dataset runs; do not fan out single requests to bypass approval.
     * Verify one representative episode in the UI by navigating Playwright to the Trajectory tab and waiting for the outcome badge.
     * Summarize: success rate, mean VOC, any 4xx/5xx responses, and the JSONL output paths.

@@ -294,12 +294,13 @@ start_backend() {
 
     if [[ ! -d "${BACKEND_DIR}/.venv" ]] || [[ "${should_install_vlm_judge}" == "true" ]]; then
         log_info "Restoring frozen backend dependencies..."
-        (cd "${BACKEND_DIR}" && uv sync --inexact "${backend_sync_args[@]}")
         if [[ -n "${judge_extra}" ]]; then
             UV_PROJECT_ENVIRONMENT="${BACKEND_DIR}/.venv" uv sync \
                 --project "${REPO_ROOT}/evaluation/vlm_judge" \
-                --frozen --inexact --no-dev --extra "${judge_extra}"
+                --frozen --inexact --no-dev --python 3.12 --extra "${judge_extra}"
         fi
+        (cd "${BACKEND_DIR}" && uv sync --inexact "${backend_sync_args[@]}")
+        uv pip check --python "${BACKEND_DIR}/.venv/bin/python"
     fi
 
     (

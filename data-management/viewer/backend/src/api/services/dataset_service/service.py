@@ -39,7 +39,7 @@ from .hdf5_handler import HDF5FormatHandler
 from .lerobot_handler import LEROBOT_AVAILABLE, LeRobotFormatHandler
 
 if TYPE_CHECKING:
-    from evaluation.vlm_judge.dataset import EpisodeRecord
+    from physical_ai_dataset_io.lerobot import EpisodeRecord
 
     from ...storage.blob_dataset import BlobDatasetProvider
 
@@ -569,6 +569,8 @@ class DatasetService:
                         raise
                     logger.warning("Failed to discover blob HDF5 dataset %s: %s", dataset_id, e)
 
+            return list(self._datasets.values())
+
         base = Path(self.base_path)
         if not base.exists():
             return list(self._datasets.values())
@@ -696,9 +698,7 @@ class DatasetService:
             blob_result = await self._discover_blob_dataset(dataset_id)
             if blob_result is not None:
                 return blob_result
-            hdf5_result = await self._discover_blob_hdf5_dataset(dataset_id)
-            if hdf5_result is not None:
-                return hdf5_result
+            return await self._discover_blob_hdf5_dataset(dataset_id)
 
         return self._discover_dataset(dataset_id)
 
@@ -830,9 +830,9 @@ class DatasetService:
 
     async def get_episode_media_record(self, dataset_id: str, episode_idx: int) -> EpisodeRecord | None:
         """Resolve versioned camera references without downloading any video."""
-        from evaluation.vlm_judge.dataset import iter_episodes
-        from evaluation.vlm_judge.frames import validate_media_root, validate_video_path
         from physical_ai_curation.saved_input import SavedInputError
+        from physical_ai_dataset_io.lerobot import iter_episodes
+        from physical_ai_dataset_io.media import local_media_identity, validate_media_root, validate_video_path
 
         if await self.get_dataset(dataset_id) is None:
             return None
@@ -886,19 +886,10 @@ class DatasetService:
                     raise ValueError("Versioned media unavailable")
                 identity = ["azure", provider.account_name, provider.container_name, blob_path, properties["etag"]]
                 paths[camera] = Path(blob_path)
+                identities[camera] = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
             else:
-                stat = path.stat()
-                identity = [
-                    "local",
-                    str(path),
-                    stat.st_dev,
-                    stat.st_ino,
-                    stat.st_size,
-                    stat.st_mtime_ns,
-                    stat.st_ctime_ns,
-                ]
                 paths[camera] = path
-            identities[camera] = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+                identities[camera] = local_media_identity(path)
         return replace(record, video_paths=paths, media_identity=identities)
 
     async def materialize_episode_media(self, dataset_id: str, paths: dict[str, Path]) -> dict[str, Path]:
@@ -1292,6 +1283,8 @@ class DatasetService:
             ValueError: If any component contains path traversal or
                         the directory does not exist.
         """
+        if self._blob_provider is not None:
+            raise ValueError("Local dataset access is disabled in Azure mode")
         parts = dataset_id.split("--") if "--" in dataset_id else [dataset_id]
         if len(parts) > 5:
             raise ValueError(f"Dataset nesting too deep (max 5 levels): {dataset_id}")

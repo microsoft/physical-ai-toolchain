@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -18,7 +19,9 @@ from .annotation_service import AnnotationService
 from .dataset_service import DatasetService
 
 if TYPE_CHECKING:
-    from evaluation.vlm_judge.dataset import EpisodeRecord
+    from physical_ai_dataset_io.lerobot import EpisodeRecord
+
+    from .label_storage import LabelStorage
 
 
 class ViewerSavedInputReader:
@@ -45,9 +48,16 @@ class ViewerSavedInputReader:
 class ViewerDatasetResolver:
     """Resolve saved viewer inputs without materializing media or importing routers."""
 
-    def __init__(self, datasets: DatasetService, annotations: AnnotationService) -> None:
+    def __init__(
+        self,
+        datasets: DatasetService,
+        annotations: AnnotationService,
+        *,
+        label_storage_factory: Callable[[], LabelStorage],
+    ) -> None:
         self.datasets = datasets
         self.annotations = annotations
+        self.label_storage_factory = label_storage_factory
 
     async def validation_sample(
         self,
@@ -66,9 +76,7 @@ class ViewerDatasetResolver:
             annotation_author_id=reference.get("annotation_author_id"),
             expected_snapshot_id=reference.get("snapshot_id"),
         )
-        from ..routers.labels import _get_label_storage
-
-        storage = _get_label_storage()
+        storage = self.label_storage_factory()
         labels = await storage.load(dataset_id) if "labels_revision" in reference else None
         sample = await resolve_validation_sample(
             ViewerSavedInputReader(self.datasets, self.annotations), snapshot, reference, labels=labels

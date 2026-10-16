@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from .jobs import JudgeJobs
+from physical_ai_curation.jobs import JudgeJobs
 
 _LOGGER = logging.getLogger("evaluation.vlm_judge.cli")
 _TERMINAL = {"succeeded", "partial", "failed", "cancelled"}

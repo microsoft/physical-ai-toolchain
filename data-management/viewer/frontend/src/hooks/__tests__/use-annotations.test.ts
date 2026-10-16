@@ -370,11 +370,15 @@ describe('saved episode edits', () => {
 
   it('hydrates server edits without renaming camera keys and saves against the loaded revision', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(state, { headers: { ETag: 'revision-a' } }))
-    const { result } = renderHookWithProviders(() => ({
+    const { result, queryClient } = renderHookWithProviders(() => ({
       read: useEpisodeEdits('ds-1', 0, 'me'),
       save: useSaveEpisodeEdits(),
     }))
     await waitFor(() => expect(result.current.read.isReady).toBe(true))
+    const evidenceKey = ['judge-evidence', 'ds-1', 'me', 'source', 'revision', 0]
+    const otherEvidenceKey = ['judge-evidence', 'other-dataset', 'me', 'source', 'revision', 0]
+    queryClient.setQueryData(evidenceKey, { items: [], total: 0 })
+    queryClient.setQueryData(otherEvidenceKey, { items: [], total: 0 })
     expect(useEditStore.getState().cameraTransforms.wrist_camera.resize?.width).toBe(32)
     act(() => useEditStore.getState().toggleFrameRemoval(5))
     const submitted = {
@@ -410,6 +414,8 @@ describe('saved episode edits', () => {
     )
     expect(useEditStore.getState().serverBaseline?.etag).toBe('revision-b')
     expect(useEditStore.getState().isDirty).toBe(false)
+    expect(queryClient.getQueryState(evidenceKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(otherEvidenceKey)?.isInvalidated).toBe(false)
   })
 
   it('does not acknowledge a write without a server revision', async () => {
@@ -909,6 +915,9 @@ describe('useDeleteAnnotation', () => {
       data: { annotations: [makeAnnotation('me')] },
       etag: '"revision-one"',
     })
+    const evidenceKey = ['judge-evidence', 'ds-1', 'me', 'source', 'revision', 0]
+    queryClient.setQueryDefaults(evidenceKey, { gcTime: Infinity })
+    queryClient.setQueryData(evidenceKey, { items: [], total: 0 })
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
     act(() => {
@@ -924,6 +933,7 @@ describe('useDeleteAnnotation', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['annotations', 'summary', 'ds-1'],
     })
+    expect(queryClient.getQueryState(evidenceKey)?.isInvalidated).toBe(true)
 
     const deleteCall = mockFetch.mock.calls[1]
     expect(deleteCall[1].method).toBe('DELETE')

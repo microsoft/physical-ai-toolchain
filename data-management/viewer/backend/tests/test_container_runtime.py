@@ -8,7 +8,10 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import tomllib
 from pathlib import Path
+
+import pytest
 
 
 def test_dependency_installation_is_isolated_from_runtime_layers() -> None:
@@ -38,6 +41,7 @@ def test_judge_profiles_install_from_their_own_lock_without_checkout_imports() -
     assert "UV_PROJECT_ENVIRONMENT=/app/.venv" in dockerfile
     assert "COPY evaluation/vlm_judge/ /app/evaluation/vlm_judge/" in dockerfile
     assert "COPY data-management/curation/ /app/data-management/curation/" in dockerfile
+    assert "COPY data-management/dataset-io/ /app/data-management/dataset-io/" in dockerfile
     assert 'ARG JUDGE_EXTRAS=""' in dockerfile
     assert "uv sync --project /app/evaluation/vlm_judge --frozen --no-dev --no-editable" in dockerfile
     assert "COPY data-management/viewer/backend/src/ ./src/" in dockerfile
@@ -56,6 +60,8 @@ def test_build_upload_is_allowlisted_and_compose_keeps_jobs_durable() -> None:
     assert "!data-management/curation/pyproject.toml" in patterns
     assert "!data-management/curation/physical_ai_curation/*.py" in patterns
     assert "!data-management/curation/physical_ai_curation/adapters/*.py" in patterns
+    assert "!data-management/dataset-io/pyproject.toml" in patterns
+    assert "!data-management/dataset-io/physical_ai_dataset_io/*.py" in patterns
     assert not any(line.startswith("!") and ".env" in line for line in patterns)
     compose = (backend.parent / "docker-compose.yml").read_text()
     assert 'VLM_JUDGE_JOB_DIR: "/state/judge"' in compose
@@ -71,6 +77,8 @@ def test_build_upload_is_allowlisted_and_compose_keeps_jobs_durable() -> None:
     )
     assert 'cp "$REPO_ROOT/data-management/curation/physical_ai_curation/"*.py' in deploy
     assert 'cp "$REPO_ROOT/data-management/curation/physical_ai_curation/adapters/"*.py' in deploy
+    assert 'cp "$REPO_ROOT/data-management/dataset-io/pyproject.toml"' in deploy
+    assert 'cp "$REPO_ROOT/data-management/dataset-io/physical_ai_dataset_io/"*.py' in deploy
 
 
 def test_browser_gate_cannot_reuse_live_services_or_resolve_dependencies() -> None:
@@ -84,6 +92,8 @@ def test_browser_gate_cannot_reuse_live_services_or_resolve_dependencies() -> No
     assert "--port 18000" in config
     assert "--port 18001" in config
     assert "--port 18002" in config
+    assert "physical_ai_curation.api:build_app --factory" in config
+    assert "evaluation.vlm_judge.api" not in config
     scenarios = (frontend / "e2e" / "accessibility.spec.ts").read_text()
     assert "http://127.0.0.1:8000/" not in scenarios
 
@@ -100,7 +110,7 @@ class NoHttpExtra(importlib.abc.MetaPathFinder):
             raise ModuleNotFoundError('HTTP extra absent', name=fullname.split('.')[0])
 
 sys.meta_path.insert(0, NoHttpExtra())
-from evaluation.vlm_judge.api import JudgeRequest, build_router
+from physical_ai_curation.api import JudgeRequest, build_router
 assert JudgeRequest(dataset_id='synthetic', episode_index=0).episode_index == 0
 assert callable(build_router)
 """
@@ -116,6 +126,14 @@ assert callable(build_router)
 
 
 def test_given_no_curation_when_importing_evaluator_then_echo_scoring_is_independent(tmp_path: Path) -> None:
+    repository = Path(__file__).resolve().parents[4]
+    for relative in ("evaluation/pyproject.toml", "evaluation/vlm_judge/pyproject.toml"):
+        manifest = tomllib.loads((repository / relative).read_text())
+        dependencies = manifest["project"].get("dependencies", []) + manifest.get("dependency-groups", {}).get(
+            "dev", []
+        )
+        assert not any(dependency.startswith("physical-ai-curation") for dependency in dependencies), relative
+        assert "physical-ai-curation" not in manifest["tool"]["uv"].get("sources", {}), relative
     root = Path(__file__).resolve().parents[4]
     shutil.copytree(
         root / "evaluation" / "vlm_judge",
@@ -145,8 +163,12 @@ result = agent.judge(
 )
 assert JudgeResult.from_dict(result.to_dict()).episode_id == 'synthetic/episode_0'
 assert callable(JudgeService.judge_episode)
+from vlm_judge.task_findings import build_user_prompt, parse_label
+assert parse_label('{"object": "cube"}') == {'object': 'cube'}
+assert 'wrist' in build_user_prompt(n_frames=2, views=['wrist'], instruction='Move cube')
 assert not any(name.startswith('physical_ai_curation') for name in sys.modules)
 """
+    shutil.copytree(root / "data-management/dataset-io/physical_ai_dataset_io", tmp_path / "physical_ai_dataset_io")
     before = set(tmp_path.rglob("*"))
     result = subprocess.run(
         [sys.executable, "-I", "-S", "-B", "-c", script, str(tmp_path), sysconfig.get_path("purelib")],
@@ -160,12 +182,169 @@ assert not any(name.startswith('physical_ai_curation') for name in sys.modules)
     assert set(tmp_path.rglob("*")) == before
 
 
+@pytest.mark.parametrize("layout", ["v2.1", "v3-jsonl", "v3-parquet"])
+def test_given_no_evaluator_when_applying_saved_evidence_then_replay_and_withdrawal_work(
+    tmp_path: Path, layout: str
+) -> None:
+    import physical_ai_curation
+
+    shutil.copytree(Path(physical_ai_curation.__file__).parent, tmp_path / "physical_ai_curation")
+    shutil.copyfile(
+        Path(physical_ai_curation.__file__).parents[1] / "tests/test_job_cli.py", tmp_path / "test_job_cli.py"
+    )
+    shutil.copytree(
+        Path(__file__).resolve().parents[4] / "data-management/dataset-io/physical_ai_dataset_io",
+        tmp_path / "physical_ai_dataset_io",
+    )
+    script = """
+import asyncio
+import importlib.abc
+import json
+import sys
+from pathlib import Path
+
+sys.path[:0] = [sys.argv[1], sys.argv[2]]
+class NoEvaluator(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'evaluation', 'vlm_judge', 'src', 'torch', 'transformers', 'av', 'PIL'}:
+            raise ModuleNotFoundError('Evaluator absent', name=fullname)
+sys.meta_path.insert(0, NoEvaluator())
+from physical_ai_curation.application import apply_judge_result
+from physical_ai_curation.evidence import bind_job_evidence
+from physical_ai_curation.jobs import JudgeJobs, fingerprint
+from physical_ai_curation.adapters.job_storage import LocalJobStore
+from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
+from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+from physical_ai_curation.storage import plan_withdrawal
+
+async def check():
+    root = Path(sys.argv[1]) / 'dataset'
+    layout = sys.argv[3]
+    (root / 'meta').mkdir(parents=True)
+    info = {
+        'codebase_version': 'v2.1' if layout == 'v2.1' else 'v3.0', 'fps': 30, 'total_episodes': 1,
+        'data_path': 'data/{episode_index}.parquet', 'video_path': 'videos/{video_key}/{episode_index}.mp4',
+        'features': {'front': {'dtype': 'video', 'videos_path': 'videos/front/{episode_index}.mp4'}}
+    }
+    episode = {'episode_index': 3, 'length': 30, 'tasks': ['Move the cube']}
+    if layout == 'v3-parquet':
+        import pyarrow as arrow
+        import pyarrow.parquet as parquet
+        info['video_path'] = 'videos/{video_key}/{file_index}.mp4'
+        episode.update({'videos/front/chunk_index': 0, 'videos/front/file_index': 3,
+                        'videos/front/from_timestamp': 1.0, 'videos/front/to_timestamp': 2.0})
+        (root / 'meta/episodes/chunk-000').mkdir(parents=True)
+        parquet.write_table(arrow.Table.from_pylist([episode]), root / 'meta/episodes/chunk-000/file-000.parquet')
+    else:
+        (root / 'meta/episodes.jsonl').write_text(json.dumps(episode) + '\\n')
+    (root / 'meta/info.json').write_text(json.dumps(info))
+    (root / 'videos/front').mkdir(parents=True)
+    (root / 'videos/front/3.mp4').write_bytes(b'synthetic-media')
+    resolver = LocalDatasetResolver({'dataset': root})
+    record, snapshot = await resolver.resolve('dataset', 3, principal_scope_id='actor')
+    assert record.instruction == snapshot.instruction == 'Move the cube'
+    if layout == 'v3-parquet':
+        assert record.video_windows == {'front': (1.0, 2.0)}
+    storage = LocalCurationStorage({'dataset': root})
+    applications = []
+
+    async def forbidden_inference(*args):
+        raise AssertionError('Stored-evidence management must not infer')
+
+    async def apply(job, target):
+        applied = await apply_judge_result(storage, job, target)
+        applications.append(target['result_id'])
+        if len(applications) == 1:
+            raise OSError('Synthetic checkpoint failure after label publication')
+        return applied
+
+    def reopen():
+        return JudgeJobs(LocalJobStore(Path(sys.argv[1]) / 'jobs'), LocalDatasetResolver({'dataset': root}),
+                         forbidden_inference, capacity_scope='test', apply_result=apply, curation_storage=storage)
+
+    manager = reopen()
+    assert (await manager.store.read())['jobs'] == {}
+    try:
+        await manager.get('missing', 'actor')
+    except KeyError:
+        pass
+    else:
+        raise AssertionError('Missing durable job must be explicit')
+    async def seed_result(request):
+        config = {'execution': {'backend': 'echo', 'model_id': 'echo'}, 'prompt_version': 'test'}
+        job = await manager.submit('dataset', 'actor', [3], config, idempotency_key=request)
+        async with manager.store.transaction() as state:
+            saved = state['jobs'][job['id']]
+            saved['status'] = 'succeeded'
+            target = saved['targets'][0]
+            target.update(status='succeeded', result_id=fingerprint([job['id'], target['input_key']]),
+                          result={'episode_id': record.episode_id, 'instruction': snapshot.instruction,
+                                  'judge_model': 'echo', 'prompt_version': 'test', 'n_frames': 2,
+                                  'outcome_success': True, 'outcome_confidence': 1.0, 'outcome_n_valid_votes': 1,
+                                  'progress_per_frame': [0, 100], 'voc': 1.0})
+            target['evidence'] = bind_job_evidence(saved, target, target['result']).to_dict()
+        return job
+
+    job = await seed_result('bound')
+    manager = reopen()
+    results = await manager.results('dataset', 'actor', 3, snapshot_id=snapshot.snapshot_id)
+    assert results[0]['applicability'] == 'current' and results[0]['evidence']['schema_version'] == 1
+    assert (await manager.results('dataset', 'other', 3)) == []
+    assert not applications
+    await manager.request_application(job['id'], 'actor')
+    assert await manager.apply_once()
+    assert (await manager.get(job['id'], 'actor'))['targets'][0]['application_status'] == 'failed'
+    first = (await storage.load_versioned('dataset')).value
+    assert first.episodes['3'] == ['SUCCESS']
+    manager = reopen()
+    await manager.request_application(job['id'], 'actor')
+    assert await manager.apply_once()
+    assert (await manager.get(job['id'], 'actor'))['targets'][0]['application_status'] == 'succeeded'
+    replay = (await storage.load_versioned('dataset')).value
+    assert replay.provenance == first.provenance
+    assert len(applications) == 2 and len(set(applications)) == 1
+    stale = await seed_result('stale')
+    (root / 'meta/info.json').write_text(json.dumps({**info, 'fps': 60}))
+    await manager.request_application(stale['id'], 'actor')
+    assert await manager.apply_once()
+    assert (await manager.get(stale['id'], 'actor'))['targets'][0]['application_error'] == 'SavedInputError'
+    assert len(applications) == 2
+    projected, summary = plan_withdrawal(replay, {job['id']})
+    assert 'SUCCESS' not in projected.episodes.get('3', [])
+    assert summary['removable_fields'] > 0
+    preview = await manager.preview_reset('dataset', 'actor')
+    await manager.confirm_reset('dataset', 'actor', preview['id'])
+    assert await manager.reset_once()
+    assert 'SUCCESS' not in (await storage.load_versioned('dataset')).value.episodes.get('3', [])
+    assert (await manager.results('dataset', 'actor', 3))[0]['applicability'] == 'withdrawn'
+    assert not any(name.startswith(('evaluation', 'vlm_judge')) for name in sys.modules)
+asyncio.run(check())
+if sys.argv[3] == 'v2.1':
+    import os
+    os.environ['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] = '1'
+    os.environ.pop('PYTEST_ADDOPTS', None)
+    import pytest
+    assert pytest.main([str(Path(sys.argv[1]) / 'test_job_cli.py'), '-q', '-p', 'no:cacheprovider']) == 0
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", script, str(tmp_path), sysconfig.get_path("purelib"), layout],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_given_curation_core_when_inspected_then_runtime_and_storage_are_adapter_owned() -> None:
     import physical_ai_curation
 
     core = Path(physical_ai_curation.__file__).parent
     forbidden = {"evaluation", "vlm_judge", "fastapi", "starlette", "azure", "src"}
     for source in core.glob("*.py"):
+        if source.name in {"api.py", "run.py", "label_dataset.py"}:
+            continue
         tree = ast.parse(source.read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
@@ -178,3 +357,11 @@ def test_given_curation_core_when_inspected_then_runtime_and_storage_are_adapter
     saved_input = ast.parse((core / "saved_input.py").read_text())
     definitions = {node.name for node in saved_input.body if isinstance(node, (ast.ClassDef, ast.FunctionDef))}
     assert not {"LocalSavedInputReader", "local_source_revision"}.intersection(definitions)
+    dataset_io = Path(__file__).resolve().parents[4] / "data-management/dataset-io/physical_ai_dataset_io"
+    forbidden |= {"physical_ai_curation", "torch", "transformers", "av", "PIL"}
+    for source in dataset_io.glob("*.py"):
+        for node in ast.walk(ast.parse(source.read_text())):
+            if isinstance(node, ast.ImportFrom):
+                assert (node.module or "").split(".")[0] not in forbidden, source.name
+            elif isinstance(node, ast.Import):
+                assert not forbidden.intersection(alias.name.split(".")[0] for alias in node.names), source.name

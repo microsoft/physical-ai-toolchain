@@ -10,7 +10,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 
 def empty_state() -> dict[str, Any]:
@@ -30,12 +30,6 @@ def decode_state(content: bytes) -> dict[str, Any]:
     if not isinstance(state, dict) or state.get("schema_version") != 1 or not isinstance(state.get("jobs"), dict):
         raise ValueError("Invalid durable judge state")
     return state
-
-
-class JobStore(Protocol):
-    def transaction(self) -> Any: ...
-
-    async def read(self) -> dict[str, Any]: ...
 
 
 class LocalJobStore:

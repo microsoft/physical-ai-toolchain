@@ -1546,6 +1546,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "numpy" },
     { name = "physical-ai-curation" },
+    { name = "physical-ai-dataset-io" },
     { name = "pillow" },
     { name = "pyarrow" },
     { name = "pydantic" },
@@ -1616,6 +1617,7 @@ requires-dist = [
     { name = "numpy", specifier = "==2.5.3" },
     { name = "pandas", marker = "extra == 'analysis'", specifier = "==3.0.5" },
     { name = "physical-ai-curation", editable = "../../curation" },
+    { name = "physical-ai-dataset-io", editable = "../../dataset-io" },
     { name = "physical-ai-vlm-judge", marker = "extra == 'vlm-judge'", editable = "../../../evaluation/vlm_judge" },
     { name = "pillow", specifier = "==12.3.0" },
     { name = "pyarrow", specifier = "==25.0.1" },
@@ -2313,11 +2315,31 @@ name = "physical-ai-curation"
 version = "0.1.0"
 source = { editable = "../../curation" }
 dependencies = [
+    { name = "physical-ai-dataset-io" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = "==2.13.5" }]
+requires-dist = [
+    { name = "fastapi", marker = "extra == 'api'", specifier = "==0.142.2" },
+    { name = "physical-ai-dataset-io", editable = "../../dataset-io" },
+    { name = "physical-ai-dataset-io", extras = ["parquet"], marker = "extra == 'parquet'", editable = "../../dataset-io" },
+    { name = "pydantic", specifier = "==2.13.5" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'api'", specifier = "==0.54.0" },
+]
+provides-extras = ["api", "parquet"]
+
+[[package]]
+name = "physical-ai-dataset-io"
+version = "0.1.0"
+source = { editable = "../../dataset-io" }
+
+[package.metadata]
+requires-dist = [
+    { name = "pandas", marker = "extra == 'parquet'", specifier = "==3.0.5" },
+    { name = "pyarrow", marker = "extra == 'parquet'", specifier = "==25.0.1" },
+]
+provides-extras = ["parquet"]
 
 [[package]]
 name = "physical-ai-vlm-judge"
@@ -2326,7 +2348,7 @@ source = { editable = "../../../evaluation/vlm_judge" }
 dependencies = [
     { name = "av" },
     { name = "pandas" },
-    { name = "physical-ai-curation" },
+    { name = "physical-ai-dataset-io" },
     { name = "pillow" },
     { name = "pyarrow" },
     { name = "pydantic" },
@@ -2336,11 +2358,12 @@ dependencies = [
 requires-dist = [
     { name = "accelerate", marker = "extra == 'qwen3-vl'", specifier = "==1.15.0" },
     { name = "av", specifier = "==18.1.0" },
+    { name = "azure-identity", marker = "extra == 'openai'", specifier = "==1.26.0" },
     { name = "fastapi", marker = "extra == 'api'", specifier = "==0.141.1" },
     { name = "hf-xet", marker = "extra == 'qwen3-vl'", specifier = "==1.6.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = "==3.6.0" },
     { name = "pandas", specifier = "==3.0.5" },
-    { name = "physical-ai-curation", editable = "../../curation" },
+    { name = "physical-ai-dataset-io", editable = "../../dataset-io" },
     { name = "pillow", specifier = "==12.3.0" },
     { name = "pyarrow", specifier = "==25.0.1" },
     { name = "pydantic", specifier = "==2.13.5" },

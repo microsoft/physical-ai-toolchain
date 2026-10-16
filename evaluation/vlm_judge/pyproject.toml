@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "VLM-as-judge harness for robot manipulation episodes"
 requires-python = ">=3.12"
 dependencies = [
-    "physical-ai-curation==0.1.0",
+    "physical-ai-dataset-io==0.1.0",
     "av==18.1.0",
     "pandas==3.0.5",
     "Pillow==12.3.0",
@@ -18,6 +18,7 @@ api = [
     "uvicorn[standard]==0.52.4",
 ]
 openai = [
+    "azure-identity==1.26.0",
     "openai==3.6.0",
 ]
 qwen3-vl = [
@@ -51,7 +52,7 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.uv.sources]
-physical-ai-curation = { path = "../../data-management/curation", editable = true }
+physical-ai-dataset-io = { path = "../../data-management/dataset-io", editable = true }
 torch = [
     { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
     { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },

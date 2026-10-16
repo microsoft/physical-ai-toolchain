@@ -9,6 +9,7 @@ any pre-downloaded dataset.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import os
@@ -16,16 +17,29 @@ import shutil
 import subprocess
 import sys
 import sysconfig
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import av
+import fastapi
 import numpy as np
+import physical_ai_curation.api as api_module
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from evaluation.tests.vlm_judge.conftest import jsonl_dataset as jsonl_dataset
+from evaluation.tests.vlm_judge.conftest import rollout_video as rollout_video
+from evaluation.vlm_judge.judge import JudgeResult
+from evaluation.vlm_judge.prompts import PROMPT_VERSION
+from evaluation.vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig
 from fastapi.testclient import TestClient
+from physical_ai_curation import run as curation_run
+from physical_ai_curation.adapters.job_storage import LocalJobStore
+from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
+from physical_ai_dataset_io.lerobot import iter_episodes
+from physical_ai_dataset_io.media import MediaInputError, validate_video_path
 
 DATASET_ID = "synthetic-eval"
 INSTRUCTION = "Pick up the cube"
@@ -34,7 +48,7 @@ INSTRUCTION = "Pick up the cube"
 def test_given_judge_cli_when_detached_then_same_job_resumes_with_saved_evidence(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from evaluation.vlm_judge import run as judge_run
+    from physical_ai_curation import run as judge_run
 
     dataset = tmp_path / DATASET_ID
     _build_dataset(dataset, instruction=INSTRUCTION)
@@ -73,8 +87,8 @@ def test_given_explicit_sample_author_when_cli_submits_then_ambiguous_global_aut
 ) -> None:
     import asyncio
 
-    from evaluation.vlm_judge import run as judge_run
-    from evaluation.vlm_judge.saved_input import LocalDatasetResolver
+    from physical_ai_curation import run as judge_run
+    from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
     from physical_ai_curation.models import ContributionLedger
 
     dataset = tmp_path / DATASET_ID
@@ -146,19 +160,63 @@ def test_given_explicit_sample_author_when_cli_submits_then_ambiguous_global_aut
     assert declaration["saved_inputs"][0]["annotation_author_id"] == "selected"
 
 
+@pytest.mark.parametrize("selected_view", [False, True])
 def test_viewer_durable_job_publishes_canonical_evidence_without_labels(
     tmp_path: Path,
     restore_default_app: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    selected_view: bool,
 ) -> None:
     import asyncio
 
+    from physical_ai_curation import run as judge_run
+    from physical_ai_curation.models import DatasetLabelsFile
+    from physical_ai_dataset_io.lerobot import load_dataset_spec
+
     _build_dataset(tmp_path / DATASET_ID, instruction=INSTRUCTION)
+    restore_default_app.setenv("VLM_JUDGE_BASE_URL", "")
     client = _reload_app(restore_default_app, tmp_path)
+    views = [load_dataset_spec(tmp_path / DATASET_ID).video_keys[0]] if selected_view else []
     response = client.post(
-        f"/api/datasets/{DATASET_ID}/episodes/0/judge", json={}, headers={"Idempotency-Key": "durable-request"}
+        f"/api/datasets/{DATASET_ID}/episodes/0/judge",
+        json={"views": views},
+        headers={"Idempotency-Key": "durable-request"},
     )
     assert response.status_code == 202, response.text
     assert response.json()["status"] == "queued"
+    viewer_job = asyncio.run(client.app.state.judge_jobs.store.read())["jobs"][response.json()["id"]]
+    arguments = [
+        "--dataset",
+        str(tmp_path / DATASET_ID),
+        "--dataset-id",
+        DATASET_ID,
+        "--principal-scope-id",
+        viewer_job["actor"],
+        "--job-dir",
+        str(tmp_path / "cli-jobs"),
+        "--output",
+        str(tmp_path / "cli-results.jsonl"),
+        "--backend",
+        "echo",
+        "--n-frames",
+        "6",
+        "--cache-dir",
+        "",
+    ]
+    if views:
+        arguments.extend(["--views", *views])
+    assert judge_run.main([*arguments, "--dry-run"]) == 0
+    declaration = json.loads((tmp_path / "cli-results.jsonl.config.json").read_text())
+    assert declaration["saved_inputs"][0] == viewer_job["targets"][0]["input"]
+    assert judge_run.main([*arguments, "--single", "--detach", "--request-id", "cli-parity"]) == 0
+    cli_accepted = json.loads(capsys.readouterr().out)
+    assert judge_run.main([*arguments, "--operation", "status", "--job-id", cli_accepted["id"]]) == 0
+    cli_status = json.loads(capsys.readouterr().out)
+    assert cli_status["targets"][0]["input"] == viewer_job["targets"][0]["input"]
+    assert cli_status["config"] == viewer_job["config"]
+    assert cli_status["config_revision"] == viewer_job["config_revision"]
+    assert cli_status["status"] == "queued" and cli_status["judged"] == 0
+    assert not (tmp_path / DATASET_ID / "meta" / "episode_labels.json").exists()
     assert asyncio.run(client.app.state.judge_jobs.run_once())
     completed = client.get(response.headers["Location"])
     assert completed.json()["status"] == "succeeded", completed.text
@@ -168,6 +226,10 @@ def test_viewer_durable_job_publishes_canonical_evidence_without_labels(
     assert evidence.status_code == 200, evidence.text
     assert evidence.json()["items"][0]["result"]["instruction"] == INSTRUCTION
     assert evidence.json()["items"][0]["applicability"] == "current"
+    assert judge_run.main([*arguments, "--single", "--request-id", "cli-parity"]) == 0
+    cli_completed = json.loads(capsys.readouterr().out)
+    assert cli_completed["status"] == "succeeded"
+    assert cli_completed["targets"][0]["result"] == evidence.json()["items"][0]["result"]
     assert not (tmp_path / DATASET_ID / "meta" / "episode_labels.json").exists()
     apply_path = f"/api/judge/jobs/{response.json()['id']}/apply"
     browser_body = json.dumps({"episode_indices": [0]})
@@ -175,6 +237,11 @@ def test_viewer_durable_job_publishes_canonical_evidence_without_labels(
     assert undeclared.status_code == 422
     assert "model_attributes_type" in undeclared.text
     assert not (tmp_path / DATASET_ID / "meta" / "episode_labels.json").exists()
+    labels_path = tmp_path / DATASET_ID / "meta" / "episode_labels.json"
+    human_labels = DatasetLabelsFile.model_validate(
+        {"dataset_id": DATASET_ID, "episodes": {"0": ["HUMAN"]}, "analysis": {"0": {"object": "human object"}}}
+    )
+    labels_path.write_text(human_labels.model_dump_json())
     application = client.post(apply_path, content=browser_body, headers={"Content-Type": "application/json"})
     assert application.status_code == 202, application.text
     assert asyncio.run(client.app.state.judge_jobs.run_once())
@@ -184,15 +251,20 @@ def test_viewer_durable_job_publishes_canonical_evidence_without_labels(
     reloaded = client.get("/api/judge/results", params={"dataset_id": DATASET_ID, "episode_index": 0}).json()
     assert [item["run_id"] for item in reloaded["items"]] == [response.json()["id"]]
     assert reloaded["items"][0]["result_id"] == evidence.json()["items"][0]["result_id"]
-    assert client.get(f"/api/datasets/{DATASET_ID}/labels").json()["episodes"]["0"] == ["SUCCESS"]
+    assert set(client.get(f"/api/datasets/{DATASET_ID}/labels").json()["episodes"]["0"]) == {"HUMAN", "SUCCESS"}
     saved = json.loads((tmp_path / DATASET_ID / "meta" / "episode_labels.json").read_text())
-    assert saved["episodes"]["0"] == ["SUCCESS"]
-    assert saved["analysis"] == {}
+    assert set(saved["episodes"]["0"]) == {"HUMAN", "SUCCESS"}
+    assert saved["analysis"]["0"]["object"] == "human object"
     assert all(
         item["machine"]["run_id"] == response.json()["id"]
         for item in saved["provenance"]["0"]["contributions"]
         if item["origin"] == "machine"
     )
+    assert judge_run.main([*arguments, "--operation", "apply", "--job-id", cli_accepted["id"]]) == 0
+    assert json.loads(capsys.readouterr().out)["applied"] == 1
+    reapplied = json.loads(labels_path.read_text())
+    assert set(reapplied["episodes"]["0"]) == {"HUMAN", "SUCCESS"}
+    assert reapplied["analysis"]["0"]["object"] == "human object"
 
 
 def test_viewer_recovers_accepted_job_on_startup_without_browser(
@@ -225,11 +297,11 @@ def test_viewer_recovers_accepted_job_on_startup_without_browser(
 def test_configured_standalone_api_resolves_saved_inputs_without_caller_paths(tmp_path: Path) -> None:
     import asyncio
 
-    from evaluation.vlm_judge.api import build_router
-    from evaluation.vlm_judge.job_storage import LocalJobStore
-    from evaluation.vlm_judge.saved_input import LocalDatasetResolver
     from evaluation.vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig
     from fastapi import FastAPI
+    from physical_ai_curation.adapters.job_storage import LocalJobStore
+    from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
+    from physical_ai_curation.api import build_router
 
     _build_dataset(tmp_path, instruction=INSTRUCTION)
     service = JudgeService(ServiceConfig(backend=BackendConfig(kind="echo"), frames=FrameConfig(n_frames=4)))
@@ -335,7 +407,7 @@ def test_remote_judge_cache_uses_source_versions_not_scratch_paths(tmp_path: Pat
 
 
 def test_v3_metadata_preserves_different_camera_windows(tmp_path: Path) -> None:
-    from evaluation.vlm_judge.dataset import iter_episodes
+    from physical_ai_dataset_io.lerobot import iter_episodes
 
     _build_dataset(tmp_path, instruction=INSTRUCTION)
     info_path = tmp_path / "meta" / "info.json"
@@ -439,6 +511,9 @@ def test_backend_starts_without_optional_evaluator(tmp_path: Path, enabled: str)
     import physical_ai_curation
 
     shutil.copytree(Path(physical_ai_curation.__file__).parent, app_dir / "physical_ai_curation")
+    import physical_ai_dataset_io
+
+    shutil.copytree(Path(physical_ai_dataset_io.__file__).parent, app_dir / "physical_ai_dataset_io")
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     environment = {
@@ -511,8 +586,23 @@ async def verify_curation():
 with TestClient(app) as client:
     assert client.get("/health").status_code == 200
     assert get_vlm_judge_service(get_app_config()) is None
-    assert not hasattr(app.state, "judge_jobs")
+    if os.environ["VLM_JUDGE_ENABLED"] == "true":
+        assert client.get("/api/judge/jobs?dataset_id=test").json()["items"] == []
+        assert client.get("/api/judge/approvals?dataset_id=test").json()["items"] == []
+        token = client.get("/api/csrf-token").json()["csrf_token"]
+        response = client.post(
+            "/api/judge/jobs", json={"dataset_id": "test", "episode_indices": [0]},
+            headers={"X-CSRF-Token": token, "Idempotency-Key": "unavailable"},
+        )
+        assert response.status_code == 503, response.text
+        assert client.get("/api/judge/jobs?dataset_id=test").json()["items"] == []
+    else:
+        assert not hasattr(app.state, "judge_jobs")
     asyncio.run(verify_curation())
+    from physical_ai_curation.api import build_router
+    from physical_ai_curation import run, label_dataset
+    assert run.main(["--dataset", os.environ["DATA_DIR"], "--operation", "list"]) == 0
+    assert label_dataset.main(["--dataset-root", os.environ["DATA_DIR"], "--operation", "list"]) == 0
     assert importlib.util.find_spec("evaluation") is None
 """
 
@@ -547,30 +637,31 @@ def _write_mp4(path: Path, *, n_frames: int = 12, width: int = 64, height: int =
     container.close()
 
 
-def _build_dataset(root: Path, *, instruction: str | None, n_frames: int = 12) -> None:
-    """Materialize a minimal single-episode LeRobot v2.1 dataset at ``root``."""
+def _build_dataset(root: Path, *, instruction: str | None, n_frames: int = 12, n_episodes: int = 1) -> None:
+    """Materialize a minimal LeRobot v2.1 dataset at ``root``."""
     (root / "meta").mkdir(parents=True, exist_ok=True)
-    data_path = root / "data" / "chunk-000" / "episode_000000.parquet"
-    data_path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(
-        pa.table(
-            {
-                "frame_index": list(range(n_frames)),
-                "episode_index": [0] * n_frames,
-                "timestamp": np.arange(n_frames) / 30,
-                "observation.state": [[0.0]] * n_frames,
-                "action": [[0.0]] * n_frames,
-            }
-        ),
-        data_path,
-    )
-    _write_mp4(root / "videos" / "chunk-000" / "obs.front" / "episode_000000.mp4", n_frames=n_frames)
+    for episode_index in range(n_episodes):
+        data_path = root / "data" / "chunk-000" / f"episode_{episode_index:06d}.parquet"
+        data_path.parent.mkdir(parents=True, exist_ok=True)
+        pq.write_table(
+            pa.table(
+                {
+                    "frame_index": list(range(n_frames)),
+                    "episode_index": [episode_index] * n_frames,
+                    "timestamp": np.arange(n_frames) / 30,
+                    "observation.state": [[0.0]] * n_frames,
+                    "action": [[0.0]] * n_frames,
+                }
+            ),
+            data_path,
+        )
+        _write_mp4(root / "videos" / "chunk-000" / "obs.front" / f"episode_{episode_index:06d}.mp4", n_frames=n_frames)
     (root / "meta" / "info.json").write_text(
         json.dumps(
             {
                 "codebase_version": "v2.1",
                 "fps": 30,
-                "total_episodes": 1,
+                "total_episodes": n_episodes,
                 "chunks_size": 1000,
                 "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
                 "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
@@ -579,9 +670,13 @@ def _build_dataset(root: Path, *, instruction: str | None, n_frames: int = 12) -
         ),
     )
     (root / "meta" / "tasks.jsonl").write_text("")
-    episode: dict[str, object] = {"episode_index": 0, "length": n_frames}
-    episode["tasks"] = [instruction] if instruction else []
-    (root / "meta" / "episodes.jsonl").write_text(json.dumps(episode) + "\n")
+    (root / "meta" / "episodes.jsonl").write_text(
+        "".join(
+            json.dumps({"episode_index": index, "length": n_frames, "tasks": [instruction] if instruction else []})
+            + "\n"
+            for index in range(n_episodes)
+        )
+    )
 
 
 def _reload_app(environment_patch: pytest.MonkeyPatch, data_dir: Path) -> TestClient:
@@ -601,6 +696,10 @@ def _reload_app(environment_patch: pytest.MonkeyPatch, data_dir: Path) -> TestCl
     ann_service_mod._annotation_service = None
     ds_service_mod._dataset_service = None
     reset_vlm_judge_service()
+
+    from src.api.routers import labels
+
+    labels._label_storage = None
 
     # main.py snapshots config at import time; force a fresh module import.
     import src.api.main as main_mod
@@ -625,6 +724,10 @@ def restore_default_app() -> Iterator[pytest.MonkeyPatch]:
     ann_service_mod._annotation_service = None
     ds_service_mod._dataset_service = None
     reset_vlm_judge_service()
+
+    from src.api.routers import labels
+
+    labels._label_storage = None
 
     import src.api.main as main_mod
 
@@ -1106,8 +1209,8 @@ def test_selected_v3_episode_ignores_missing_unselected_media(
 def test_v3_jsonl_selection_preserves_trusted_and_validated_iteration(
     tmp_path: Path, indices: list[int] | None, validate_media: bool
 ) -> None:
-    from evaluation.vlm_judge.dataset import iter_episodes
-    from evaluation.vlm_judge.frames import validate_video_path
+    from physical_ai_dataset_io.lerobot import iter_episodes
+    from physical_ai_dataset_io.media import validate_video_path
 
     root = tmp_path / DATASET_ID
     _build_dataset(root, instruction=INSTRUCTION)
@@ -1151,7 +1254,7 @@ def test_media_and_backend_failures_do_not_disclose_paths(
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
 ) -> None:
-    import evaluation.vlm_judge.dataset as dataset_module
+    import physical_ai_dataset_io.lerobot as dataset_module
     from evaluation.vlm_judge.service import JudgeService
 
     video = tmp_path / DATASET_ID / "videos/chunk-000/obs.front/episode_000000.mp4"
@@ -1179,3 +1282,845 @@ def test_media_and_backend_failures_do_not_disclose_paths(
     assert job["targets"][0]["error"] == ("MediaInputError" if failure == "corrupt" else "ValueError")
     assert str(video) not in json.dumps(job)
     assert "private backend details" not in json.dumps(job)
+
+
+class StubService(JudgeService):
+    """Lightweight stand-in for ``JudgeService`` that records calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+        from evaluation.vlm_judge.service import (
+            BackendConfig,
+            FrameConfig,
+            ServiceConfig,
+        )
+
+        super().__init__(
+            ServiceConfig(
+                backend=BackendConfig(kind="echo", model_id="stub-model"),
+                frames=FrameConfig(),
+                cache_dir=None,
+            )
+        )
+
+    def judge_episode(
+        self,
+        *,
+        episode_id: str,
+        instruction: str,
+        video_paths: Mapping[str, Path | str],
+        from_s: float | None = None,
+        to_s: float | None = None,
+        force: bool = False,
+        **metadata: object,
+    ) -> JudgeResult:
+        self.calls.append(
+            {
+                "episode_id": episode_id,
+                "instruction": instruction,
+                "video_paths": dict(video_paths),
+                "from_s": from_s,
+                "to_s": to_s,
+                "force": force,
+            },
+        )
+        return JudgeResult(
+            episode_id=episode_id,
+            instruction=instruction,
+            judge_model="echo",
+            prompt_version=PROMPT_VERSION,
+            n_frames=8,
+            outcome_success=True,
+            outcome_confidence=0.9,
+            outcome_n_valid_votes=3,
+            progress_per_frame=[0, 14, 28, 42, 57, 71, 85, 100],
+            voc=0.95,
+            milestones=[],
+            failure_mode=None,
+        )
+
+
+def _write_dataset(root: Path, video_path: str, *, version: str = "v2.1") -> None:
+    (root / "meta").mkdir(exist_ok=True)
+    (root / "meta" / "info.json").write_text(
+        json.dumps(
+            {
+                "codebase_version": version,
+                "fps": 12,
+                "total_episodes": 1,
+                "features": {"front": {"dtype": "video", "videos_path": video_path}},
+                "data_path": "data/{episode_index}.parquet",
+                "video_path": video_path,
+            }
+        )
+    )
+    (root / "meta" / "episodes.jsonl").write_text(
+        json.dumps({"episode_index": 0, "tasks": ["pick orange"], "length": 12}) + "\n"
+    )
+
+
+def _connection(root: Path, service: JudgeService | None, *, prefix: str = "") -> TestClient:
+    app = fastapi.FastAPI()
+    app.include_router(
+        api_module.build_router(
+            service,
+            resolver=LocalDatasetResolver({"synthetic": root}),
+            local_actor="local-test",
+            job_store=LocalJobStore(root / ".judge-jobs"),
+            allow_unauthenticated=True,
+        ),
+        prefix=prefix,
+    )
+    return TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000))
+
+
+@pytest.fixture
+def client(tmp_path: Path) -> tuple[TestClient, StubService]:
+    service = StubService()
+    root = tmp_path / "media"
+    root.mkdir()
+    (root / "ep0.mp4").write_bytes(b"stub video")
+    _write_dataset(root, "ep0.mp4")
+    return _connection(root, service, prefix="/api/vlm-judge"), service
+
+
+def test_given_unavailable_evaluator_when_managing_then_reads_work_and_scoring_is_unavailable(tmp_path: Path) -> None:
+    _write_dataset(tmp_path, "ep0.mp4")
+    (tmp_path / "ep0.mp4").write_bytes(b"stub video")
+    with _connection(tmp_path, None) as connection:
+        assert connection.get("/jobs", params={"dataset_id": "synthetic"}).json()["items"] == []
+        assert connection.get("/episodes", params={"dataset_id": "synthetic"}).status_code == 200
+        assert connection.get("/health").json()["status"] == "unavailable"
+        response = connection.post("/judge", json={"dataset_id": "synthetic", "episode_index": 0})
+        assert response.status_code == 503
+        assert response.json() == {"detail": "Judge unavailable"}
+        assert connection.get("/jobs", params={"dataset_id": "synthetic"}).json()["items"] == []
+        assert connection.get("/jobs", headers={"origin": "https://other.invalid"}).status_code == 403
+
+
+_LIFECYCLE_ENDPOINTS = [
+    ("POST", "/judge"),
+    ("POST", "/jobs"),
+    ("GET", "/jobs?dataset_id=synthetic"),
+    ("GET", "/jobs/example"),
+    ("POST", "/jobs/example/cancel"),
+    ("POST", "/jobs/example/retry"),
+    ("POST", "/jobs/example/apply"),
+    ("POST", "/jobs/example/approve"),
+    ("GET", "/approvals?dataset_id=synthetic"),
+    ("POST", "/resets/preview"),
+    ("POST", "/resets"),
+    ("GET", "/resets?dataset_id=synthetic"),
+    ("POST", "/resets/retry"),
+    ("GET", "/episodes?dataset_id=synthetic"),
+    ("GET", "/results?dataset_id=synthetic&episode_index=0"),
+]
+
+
+@pytest.mark.parametrize(("method", "path"), _LIFECYCLE_ENDPOINTS)
+def test_given_cross_origin_lifecycle_request_when_parsing_then_denies_before_dependencies(
+    client: tuple[TestClient, StubService], method: str, path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection, service = client
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("Denied lifecycle request reached dataset resolution")
+
+    monkeypatch.setattr(LocalDatasetResolver, "resolve", forbidden)
+    monkeypatch.setattr(LocalDatasetResolver, "episode_indices", forbidden)
+    response = connection.request(
+        method,
+        f"/api/vlm-judge{path}",
+        content='{"private":',
+        headers={"content-type": "application/json", "origin": "https://attacker.example"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Request forbidden"}
+    assert not hasattr(connection.app.state, "judge_jobs")
+    assert service.calls == []
+
+
+@pytest.mark.parametrize("path", ["/jobs", "/episodes", "/approvals", "/results", "/resets"])
+def test_given_local_get_without_content_type_when_reading_lifecycle_then_admits(
+    client: tuple[TestClient, StubService], path: str
+) -> None:
+    connection, _ = client
+    response = connection.get(f"/api/vlm-judge{path}", params={"dataset_id": "synthetic", "episode_index": 0})
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("action", ["cancel", "retry"])
+def test_given_local_bodyless_request_when_controlling_job_then_admits(
+    client: tuple[TestClient, StubService], action: str
+) -> None:
+    connection, _ = client
+    response = connection.post(f"/api/vlm-judge/jobs/missing/{action}")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Judge job not found"}
+
+
+class TestApi:
+    def test_health_returns_model_id(self, client) -> None:
+        c, _ = client
+        rsp = c.get("/api/vlm-judge/health")
+        assert rsp.status_code == 200
+        body = rsp.json()
+        assert body["status"] == "ok"
+        assert body["model_id"] == "stub-model"
+
+    def test_judge_returns_result_payload(self, client) -> None:
+        c, service = client
+        rsp = c.post(
+            "/api/vlm-judge/judge",
+            json={
+                "dataset_id": "synthetic",
+                "episode_index": 0,
+            },
+        )
+        assert rsp.status_code == 202
+        assert len(service.calls) == 0
+        assert asyncio.run(c.app.state.judge_jobs.run_once())
+        job = c.get(rsp.headers["Location"]).json()
+        assert job["status"] == "succeeded"
+        body = job["targets"][0]["result"]
+        assert body["episode_id"] == "synthetic/episode_000000"
+        assert body["outcome_success"] is True
+        assert len(service.calls) == 1
+        assert service.calls[0]["instruction"] == "pick orange"
+
+    def test_judge_records_missing_video_as_execution_error(self, client) -> None:
+        c, service = client
+
+        def raise_fnf(**kwargs: object) -> JudgeResult:
+            raise FileNotFoundError(f"missing: {kwargs['video_paths']}")
+
+        service.judge_episode = raise_fnf  # type: ignore[assignment]
+        rsp = c.post(
+            "/api/vlm-judge/judge",
+            json={
+                "dataset_id": "synthetic",
+                "episode_index": 0,
+            },
+        )
+        assert rsp.status_code == 202
+        assert asyncio.run(c.app.state.judge_jobs.run_once())
+        job = c.get(rsp.headers["Location"]).json()
+        assert job["status"] == "failed"
+        assert job["targets"][0]["error"] == "FileNotFoundError"
+
+
+@pytest.mark.parametrize("version", ["v2.1", "v3.0"])
+@pytest.mark.parametrize(
+    "case",
+    [
+        "outside",
+        "absent-outside",
+        "traversal",
+        "symlink",
+        "prefix",
+        "symlink-prefix",
+        "missing",
+        "directory",
+        "fifo",
+        "suffix",
+        "url",
+    ],
+)
+def test_invalid_media_is_rejected_before_service(
+    client: tuple[TestClient, StubService],
+    tmp_path: Path,
+    case: str,
+    version: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from evaluation.vlm_judge.cache import JudgeCache
+
+    connection, service = client
+    root = tmp_path / "media"
+    outside = tmp_path / "outside.mp4"
+    outside.write_bytes(b"not opened")
+    (root / "escape.mp4").symlink_to(outside)
+    sibling = tmp_path / "media-other"
+    sibling.mkdir()
+    (sibling / "episode.mp4").write_bytes(b"not opened")
+    (root / "prefix.mp4").symlink_to(sibling / "episode.mp4")
+    (root / "directory.mp4").mkdir()
+    (root / "notes.txt").write_text("not media")
+    os.mkfifo(root / "pipe.mp4")
+    paths = {
+        "outside": str(outside),
+        "absent-outside": str(tmp_path / "absent.mp4"),
+        "traversal": "../outside.mp4",
+        "symlink": "escape.mp4",
+        "prefix": str(sibling / "episode.mp4"),
+        "symlink-prefix": "prefix.mp4",
+        "missing": "missing.mp4",
+        "directory": "directory.mp4",
+        "fifo": "pipe.mp4",
+        "suffix": "notes.txt",
+        "url": "https://example.org/a.mp4",
+    }
+
+    _write_dataset(root, paths[case], version=version)
+    original_exists = Path.exists
+
+    def guarded_exists(path: Path) -> bool:
+        if path == root / paths[case]:
+            pytest.fail("Invalid media reached the adapter existence probe")
+        return original_exists(path)
+
+    def forbidden_key(*args: object, **kwargs: object) -> None:
+        pytest.fail("Invalid media reached cache identity work")
+
+    monkeypatch.setattr(Path, "exists", guarded_exists)
+    monkeypatch.setattr(JudgeCache, "key", forbidden_key)
+    response = connection.post(
+        "/api/vlm-judge/judge",
+        json={"dataset_id": "synthetic", "episode_index": 0},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid media input"}
+    assert service.calls == []
+
+
+@pytest.mark.parametrize("version", ["v2.1", "v3.0"])
+def test_given_unselected_missing_media_when_judging_then_only_validates_selected_episode(
+    client: tuple[TestClient, StubService], tmp_path: Path, version: str
+) -> None:
+    connection, service = client
+    root = tmp_path / "media"
+    _write_dataset(root, "ep{episode_index}.mp4", version=version)
+    with (root / "meta" / "episodes.jsonl").open("a") as metadata:
+        metadata.write(json.dumps({"episode_index": 1, "tasks": ["unselected"], "length": 12}) + "\n")
+
+    response = connection.post("/api/vlm-judge/judge", json={"dataset_id": "synthetic", "episode_index": 0})
+
+    assert response.status_code == 202
+    assert asyncio.run(connection.app.state.judge_jobs.run_once())
+    assert len(service.calls) == 1
+    assert service.calls[0]["video_paths"] == {"front": root / "ep0.mp4"}
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"video_paths": {"front": "/private/input.mp4"}},
+        {"instruction": "caller override"},
+        {"from_s": 2.0, "to_s": 1.0},
+    ],
+)
+def test_given_legacy_media_fields_when_submitting_ids_then_rejects_and_sanitizes(
+    client: tuple[TestClient, StubService], extra: dict[str, object]
+) -> None:
+    connection, service = client
+    response = connection.post("/api/vlm-judge/judge", json={"dataset_id": "synthetic", "episode_index": 0, **extra})
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Invalid request"}
+    assert service.calls == []
+
+
+@pytest.mark.parametrize("path_kind", ["relative", "absolute", "nested", "symlink"])
+def test_contained_media_uses_canonical_path(client, tmp_path: Path, path_kind: str) -> None:
+    connection, service = client
+    root = tmp_path / "media"
+    (root / "alias.mp4").symlink_to(root / "ep0.mp4")
+    (root / "nested").mkdir()
+    (root / "nested" / "episode.mp4").write_bytes(b"stub video")
+    paths = {
+        "relative": "ep0.mp4",
+        "absolute": str(root / "ep0.mp4"),
+        "nested": "nested/episode.mp4",
+        "symlink": "alias.mp4",
+    }
+    expected = root / "nested" / "episode.mp4" if path_kind == "nested" else root / "ep0.mp4"
+
+    _write_dataset(root, paths[path_kind])
+    response = connection.post(
+        "/api/vlm-judge/judge",
+        json={"dataset_id": "synthetic", "episode_index": 0},
+    )
+
+    assert response.status_code == 202
+    assert asyncio.run(connection.app.state.judge_jobs.run_once())
+    assert service.calls[0]["video_paths"] == {"front": expected}
+
+
+@pytest.mark.parametrize("path_kind", ["relative", "alias-absolute", "canonical-absolute"])
+def test_symlinked_media_root_accepts_equivalent_paths(tmp_path: Path, path_kind: str) -> None:
+    root = tmp_path / "media"
+    root.mkdir()
+    video = root / "episode.mp4"
+    video.write_bytes(b"stub video")
+    alias = tmp_path / "configured-media"
+    alias.symlink_to(root, target_is_directory=True)
+    paths = {
+        "relative": "episode.mp4",
+        "alias-absolute": str(alias / "episode.mp4"),
+        "canonical-absolute": str(video),
+    }
+    service = StubService()
+    _write_dataset(root, paths[path_kind])
+    connection = _connection(alias, service)
+
+    response = connection.post(
+        "/judge",
+        json={"dataset_id": "synthetic", "episode_index": 0},
+    )
+
+    assert response.status_code == 202
+    assert asyncio.run(connection.app.state.judge_jobs.run_once())
+    assert service.calls[0]["video_paths"] == {"front": video}
+
+
+@pytest.mark.parametrize("path_kind", ["alias-prefix", "canonical-prefix", "escape", "traversal", "missing"])
+def test_symlinked_media_root_rejects_invalid_paths(tmp_path: Path, path_kind: str) -> None:
+    root = tmp_path / "media"
+    root.mkdir()
+    alias = tmp_path / "configured-media"
+    alias.symlink_to(root, target_is_directory=True)
+    sibling = tmp_path / "media-other"
+    sibling.mkdir()
+    outside = sibling / "episode.mp4"
+    outside.write_bytes(b"not opened")
+    sibling_alias = tmp_path / "configured-media-other"
+    sibling_alias.symlink_to(sibling, target_is_directory=True)
+    (root / "escape.mp4").symlink_to(outside)
+    paths = {
+        "alias-prefix": str(sibling_alias / "episode.mp4"),
+        "canonical-prefix": str(outside),
+        "escape": str(alias / "escape.mp4"),
+        "traversal": str(alias / ".." / "media-other" / "episode.mp4"),
+        "missing": str(alias / "missing.mp4"),
+    }
+    service = StubService()
+    _write_dataset(root, paths[path_kind])
+    connection = _connection(alias, service)
+
+    response = connection.post(
+        "/judge",
+        json={"dataset_id": "synthetic", "episode_index": 0},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid media input"}
+    assert service.calls == []
+
+
+@pytest.mark.parametrize("path_kind", ["outside", "prefix", "symlink-prefix"])
+def test_outside_media_is_rejected_before_additional_filesystem_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path_kind: str
+) -> None:
+    root = tmp_path / "media"
+    root.mkdir()
+    sibling = tmp_path / "media-other"
+    sibling.mkdir()
+    outside = sibling / "episode.mp4"
+    outside.write_bytes(b"not opened")
+    (root / "escape.mp4").symlink_to(outside)
+    paths = {"outside": tmp_path / "absent.mp4", "prefix": outside, "symlink-prefix": root / "escape.mp4"}
+
+    def forbidden_probe(*args: object, **kwargs: object) -> None:
+        pytest.fail("Rejected media reached a filesystem probe")
+
+    with monkeypatch.context() as patch:
+        original_realpath = os.path.realpath
+
+        def resolve_then_forbid_stat(candidate: str | Path, *, strict: bool = False) -> str:
+            resolved = original_realpath(candidate, strict=strict)
+            patch.setattr(Path, "stat", forbidden_probe)
+            return resolved
+
+        patch.setattr(
+            os.path, "realpath", resolve_then_forbid_stat if path_kind == "symlink-prefix" else forbidden_probe
+        )
+        with pytest.raises(MediaInputError, match=r"^Invalid media input$"):
+            validate_video_path(paths[path_kind], root)
+
+
+@pytest.mark.parametrize("root", [None, "/"])
+def test_unconfigured_or_filesystem_root_disables_judging(tmp_path: Path, root: str | None) -> None:
+    service = StubService()
+    app = fastapi.FastAPI()
+    app.include_router(
+        api_module.build_router(
+            service,
+            resolver=LocalDatasetResolver({"synthetic": Path(root)} if root else {}),
+            job_store=LocalJobStore(tmp_path / "jobs"),
+            local_actor="local-test",
+            allow_unauthenticated=True,
+        )
+    )
+    connection = TestClient(app)
+
+    response = connection.post("/judge", json={"dataset_id": "synthetic", "episode_index": 0})
+
+    assert response.status_code == 503
+    assert service.calls == []
+    assert connection.get("/health").status_code == 200
+
+
+def _write_video(path: Path) -> None:
+    import av
+    import numpy as np
+
+    with av.open(str(path), mode="w") as container:
+        stream = container.add_stream("libx264", rate=12)
+        stream.width, stream.height, stream.pix_fmt = 32, 32, "yuv420p"
+        for index in range(12):
+            frame = av.VideoFrame.from_ndarray(np.full((32, 32, 3), index * 16, dtype=np.uint8), format="rgb24")
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+
+
+@pytest.mark.parametrize("failure", [None, "corrupt", "backend"])
+def test_real_media_errors_and_cache_are_sanitized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str | None,
+) -> None:
+    from evaluation.vlm_judge.cache import JudgeCache
+    from evaluation.vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig
+
+    root = tmp_path / "media"
+    root.mkdir()
+    video = root / "episode.mp4"
+    _write_video(video)
+    _write_dataset(root, "episode.mp4")
+    service = JudgeService(
+        ServiceConfig(backend=BackendConfig(kind="echo"), frames=FrameConfig(n_frames=3), cache_dir=tmp_path / "cache")
+    )
+    connection = _connection(root, service)
+    payload = {"dataset_id": "synthetic", "episode_index": 0}
+    if failure == "corrupt":
+        video.write_bytes(b"invalid video")
+
+    def forbidden_inference(*args: object, **kwargs: object) -> None:
+        if failure == "backend":
+            raise ValueError(f"private backend details: {video}")
+        pytest.fail("Invalid media reached model inference")
+
+    if failure:
+        monkeypatch.setattr(service, "_ensure_agent", forbidden_inference)
+    response = connection.post("/judge", json=payload)
+    assert response.status_code == 202
+    assert asyncio.run(connection.app.state.judge_jobs.run_once())
+    job = connection.get(response.headers["Location"]).json()
+    if failure:
+        assert job["status"] == "failed"
+        assert job["targets"][0]["error"] == ("ValueError" if failure == "backend" else "MediaInputError")
+        assert "private backend details" not in json.dumps(job)
+        assert str(video) not in json.dumps(job)
+    else:
+        assert job["status"] == "succeeded"
+        monkeypatch.setattr(service, "_extract", forbidden_inference)
+        cached = connection.post("/judge", json=payload)
+        assert cached.status_code == 202
+        asyncio.run(connection.app.state.judge_jobs.run_once())
+        cached_job = connection.get(cached.headers["Location"]).json()
+        assert cached_job["targets"][0]["result"] == job["targets"][0]["result"]
+        outside = tmp_path / "outside.mp4"
+        video.rename(outside)
+        video.symlink_to(outside)
+        monkeypatch.setattr(JudgeCache, "key", forbidden_inference)
+        rejected = connection.post("/judge", json=payload)
+        assert rejected.status_code == 400
+        assert rejected.json() == {"detail": "Invalid media input"}
+
+
+@pytest.mark.parametrize("mounted", [False, True], ids=["standalone", "mounted"])
+@pytest.mark.parametrize("body", ["valid", "malformed", "schema"])
+@pytest.mark.parametrize(
+    "denial",
+    [
+        "disabled",
+        "no-datasets",
+        "no-actor",
+        "no-store",
+        "peer",
+        "unknown-peer",
+        "host",
+        "duplicate-host",
+        "malformed-host",
+        "origin",
+        "null-origin",
+        "cross-site",
+        "forwarded",
+        "not-json",
+    ],
+)
+def test_admission_precedes_body_and_media_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mounted: bool,
+    body: str,
+    denial: str,
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("VLM_JUDGE_ALLOW_UNAUTHENTICATED", "true")
+    monkeypatch.setenv("VLM_JUDGE_DATASETS", json.dumps({"synthetic": str(tmp_path)}))
+    monkeypatch.setenv("VLM_JUDGE_LOCAL_ACTOR", "local-test")
+    monkeypatch.setenv("VLM_JUDGE_JOB_DIR", str(tmp_path / "jobs"))
+    if denial == "disabled":
+        monkeypatch.delenv("VLM_JUDGE_ALLOW_UNAUTHENTICATED")
+    elif denial == "no-datasets":
+        monkeypatch.delenv("VLM_JUDGE_DATASETS")
+    elif denial == "no-actor":
+        monkeypatch.delenv("VLM_JUDGE_LOCAL_ACTOR")
+    elif denial == "no-store":
+        monkeypatch.delenv("VLM_JUDGE_JOB_DIR")
+    service = StubService()
+    if mounted:
+        app = FastAPI()
+        app.include_router(
+            api_module.build_router(
+                service,
+                resolver=LocalDatasetResolver({} if denial == "no-datasets" else {"synthetic": tmp_path}),
+                local_actor=None if denial == "no-actor" else "local-test",
+                job_store=None if denial == "no-store" else LocalJobStore(tmp_path / "jobs"),
+            ),
+            prefix="/mounted",
+        )
+        path = "/mounted/judge"
+    else:
+        monkeypatch.setattr("evaluation.vlm_judge.service.JudgeService", lambda config: service)
+        app = api_module.build_app()
+        path = "/judge"
+    peer = ("192.0.2.1", 50000) if denial in {"peer", "disabled", "no-datasets"} else ("127.0.0.1", 50000)
+    if denial == "unknown-peer":
+        peer = None
+    headers = {"content-type": "application/json"}
+    overrides = {
+        "host": {"host": "attacker.example"},
+        "malformed-host": {"host": "localhost:invalid"},
+        "origin": {"origin": "https://attacker.example"},
+        "null-origin": {"origin": "null"},
+        "cross-site": {"sec-fetch-site": "cross-site"},
+        "forwarded": {"x-forwarded-for": "127.0.0.1"},
+        "not-json": {"content-type": "text/plain"},
+    }
+    headers.update(overrides.get(denial, {}))
+    wire_headers = list(headers.items())
+    if denial == "duplicate-host":
+        wire_headers.extend([("host", "localhost"), ("host", "attacker.example")])
+    payload = {"dataset_id": "synthetic", "episode_index": 0}
+    content = (
+        json.dumps(payload)
+        if body == "valid"
+        else '{"private":'
+        if body == "malformed"
+        else '{"video_paths": "/private/input.mp4"}'
+    )
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("Denied request reached root/path/service work")
+
+    monkeypatch.setattr(LocalDatasetResolver, "resolve", forbidden)
+    monkeypatch.setattr(LocalDatasetResolver, "episode_indices", forbidden)
+    monkeypatch.setattr(service, "judge_episode", forbidden)
+    connection = TestClient(app, base_url="http://localhost", client=peer)
+    response = connection.post(path, content=content, headers=wire_headers)
+
+    expected = 503 if denial in {"disabled", "no-datasets", "no-actor", "no-store"} else 403
+    assert response.status_code == expected
+    assert response.json() == {"detail": "Judge unavailable" if expected == 503 else "Request forbidden"}
+
+
+@pytest.mark.parametrize("body", ['{"private":', '{"video_paths": "/private/input.mp4"}'])
+def test_admitted_validation_errors_are_sanitized(client, body: str) -> None:
+    connection, service = client
+    response = connection.post("/api/vlm-judge/judge", content=body, headers={"content-type": "application/json"})
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Invalid request"}
+    assert service.calls == []
+
+
+@pytest.mark.parametrize(
+    "host,peer", [("localhost:8080", "127.0.0.1"), ("127.0.0.1", "127.0.0.1"), ("[::1]:8080", "::1")]
+)
+def test_loopback_peer_host_and_matching_origin_are_admitted(
+    tmp_path: Path,
+    host: str,
+    peer: str,
+) -> None:
+    (tmp_path / "video.mp4").write_bytes(b"stub")
+    _write_dataset(tmp_path, "video.mp4")
+    service = StubService()
+    app = _connection(tmp_path, service).app
+    connection = TestClient(app, base_url="http://localhost", client=(peer, 50000))
+    response = connection.post(
+        "/judge",
+        headers={"host": host, "origin": f"http://{host}"},
+        json={
+            "dataset_id": "synthetic",
+            "episode_index": 0,
+        },
+    )
+    assert response.status_code == 202
+    assert asyncio.run(app.state.judge_jobs.run_once())
+    assert len(service.calls) == 1
+
+
+@pytest.mark.parametrize("host", [None, "127.0.0.1", "::1", "localhost", "0.0.0.0", "::", "192.0.2.1", "example.org"])
+def test_launcher_preview_is_loopback_only(host: str | None) -> None:
+    root = Path(__file__).resolve().parents[5]
+    command = [
+        "bash",
+        str(root / "data-management/curation/scripts/serve-api.sh"),
+        "--config-preview",
+        "--backend",
+        "echo",
+    ]
+    if host:
+        command.extend(["--host", host])
+    result = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=10, check=False)
+    if host in {None, "127.0.0.1", "::1", "localhost"}:
+        assert result.returncode == 0
+        assert "--no-proxy-headers" in result.stdout
+        assert f"--host {host or '127.0.0.1'}" in result.stdout
+    else:
+        assert result.returncode != 0
+        assert "loopback" in result.stderr.lower() + result.stdout.lower()
+
+
+@pytest.mark.parametrize(("method", "path"), _LIFECYCLE_ENDPOINTS)
+def test_global_app_is_default_deny(monkeypatch: pytest.MonkeyPatch, method: str, path: str) -> None:
+    import importlib
+
+    from fastapi.testclient import TestClient
+
+    monkeypatch.delenv("VLM_JUDGE_ALLOW_UNAUTHENTICATED", raising=False)
+    monkeypatch.delenv("VLM_JUDGE_DATASETS", raising=False)
+    app = importlib.reload(api_module).app
+    connection = TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000))
+    assert connection.get("/health").status_code == 200
+    assert connection.request(method, path, content="malformed").status_code == 503
+
+
+class TestAccessibilityDocumentationApps:
+    def test_vlm_echo_app_exposes_documentation_without_model_loading(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Arrange
+        monkeypatch.setenv("VLM_JUDGE_BACKEND", "echo")
+        monkeypatch.setenv("VLM_JUDGE_CACHE_DIR", "")
+
+        # Act
+        with TestClient(api_module.build_app()) as documentation_client:
+            responses = [documentation_client.get(path) for path in ("/docs", "/redoc", "/openapi.json", "/health")]
+
+        # Assert
+        assert all(response.status_code == fastapi.status.HTTP_200_OK for response in responses)
+        assert responses[-1].json()["backend_kind"] == "echo"
+
+
+def _curation_arguments(root: Path) -> list[str]:
+    return [
+        "--dataset",
+        str(root),
+        "--output",
+        str(root / "results.jsonl"),
+        "--backend",
+        "echo",
+        "--cache-dir",
+        "",
+        "--n-frames",
+        "3",
+    ]
+
+
+def test_given_config_preview_when_running_then_omits_endpoint_and_credentials(
+    jsonl_dataset: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    result = curation_run.main(
+        [
+            *_curation_arguments(jsonl_dataset),
+            "--config-preview",
+            "--api-key",
+            "synthetic-token",
+            "--base-url",
+            "https://example.invalid/v1",
+        ]
+    )
+
+    configuration = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert configuration["backend"] == "echo"
+    assert {"api_key", "base_url", "config_preview"}.isdisjoint(configuration)
+    assert not (jsonl_dataset / "results.jsonl").exists()
+
+
+def test_given_empty_episode_selection_when_dry_running_then_returns_failure(jsonl_dataset: Path) -> None:
+    assert curation_run.main([*_curation_arguments(jsonl_dataset), "--dry-run", "--indices", "99"]) == 1
+
+
+def test_given_real_episodes_when_dry_running_then_writes_inputs_and_config_without_inference(
+    jsonl_dataset: Path,
+) -> None:
+    result = curation_run.main(
+        [
+            *_curation_arguments(jsonl_dataset),
+            "--dry-run",
+            "--indices",
+            "0-1, 1, ",
+            "--instruction",
+            "Inspect the block",
+        ]
+    )
+
+    rows = [json.loads(line) for line in (jsonl_dataset / "results.jsonl").read_text().splitlines()]
+    configuration = json.loads((jsonl_dataset / "results.jsonl.config.json").read_text())
+    assert result == 0
+    assert len(rows) == 2
+    assert all(row["dry_run"] and row["instruction"] == "Inspect the block" for row in rows)
+    assert configuration["instruction_origin"] == "cli-override"
+    assert len(configuration["saved_inputs"]) == 2
+
+
+def test_given_unknown_dataset_when_running_status_then_reports_safe_command_failure(
+    jsonl_dataset: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    result = curation_run.main([*_curation_arguments(jsonl_dataset), "--operation", "status"])
+
+    assert result == 2
+    assert "category=ValueError" in caplog.text
+
+
+@pytest.mark.parametrize("instruction", [None, "Inspect", ""])
+def test_given_resolved_episode_when_processing_then_validates_instruction_and_records_echo_result(
+    jsonl_dataset: Path, instruction: str | None
+) -> None:
+    episode = next(iter_episodes(jsonl_dataset))
+    if instruction == "":
+        episode = replace(episode, instruction="")
+    service = JudgeService(ServiceConfig(backend=BackendConfig(kind="echo"), frames=FrameConfig(n_frames=3)))
+
+    if instruction == "":
+        with pytest.raises(ValueError, match="Invalid judge result field: instruction"):
+            curation_run._process_episode(
+                episode=episode,
+                service=service,
+                instruction_override=instruction,
+                dry_run=False,
+                force=True,
+            )
+        return
+
+    result = curation_run._process_episode(
+        episode=episode,
+        service=service,
+        instruction_override=instruction,
+        dry_run=False,
+        force=True,
+    )
+
+    assert result["instruction"] == (instruction or episode.instruction)
+    assert result["duration_s"] == 1
+    assert result["outcome_success"] is True
+    assert result["video_paths"] == {"front": str(episode.video_paths["front"])}

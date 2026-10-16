@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Evaluation workflow runtime dependencies"
 requires-python = ">=3.12"
 dependencies = [
+    "physical-ai-dataset-io==0.1.0",
     # Held below 2.3 because lerobot==0.6.1 declares numpy<2.3.
     "numpy==2.2.6",
     "azure-core==1.41.0",
@@ -66,7 +67,7 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.uv.sources]
-physical-ai-curation = { path = "../data-management/curation", editable = true }
+physical-ai-dataset-io = { path = "../data-management/dataset-io", editable = true }
 torch = [
     { index = "pytorch-cu130", marker = "platform_machine == 'x86_64' or platform_machine == 'AMD64'" },
     { index = "pytorch-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" },
@@ -81,7 +82,6 @@ prerelease = "allow"
 
 [dependency-groups]
 dev = [
-    "physical-ai-curation==0.1.0",
     # Held below 16 because lerobot[dataset]==0.6.1 requires av<16.
     "av==15.1.0",
     "fastapi==0.141.1",

@@ -15,6 +15,7 @@ packages = ["training/rl"]
 [dependency-groups]
 dev = [
     "physical-ai-curation==0.1.0",
+    "physical-ai-dataset-io==0.1.0",
     "hypothesis==6.168.3",
     "numpy==2.5.3",
     "ruff==0.16.9",
@@ -49,6 +50,7 @@ package = false
 
 [tool.uv.sources]
 physical-ai-curation = { path = "data-management/curation", editable = true }
+physical-ai-dataset-io = { path = "data-management/dataset-io", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = [

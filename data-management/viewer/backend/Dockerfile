@@ -22,6 +22,7 @@ COPY data-management/viewer/backend/pyproject.toml data-management/viewer/backen
 COPY data-management/viewer/backend/src/ ./src/
 COPY evaluation/vlm_judge/ /app/evaluation/vlm_judge/
 COPY data-management/curation/ /app/data-management/curation/
+COPY data-management/dataset-io/ /app/data-management/dataset-io/
 
 # Runtime feature extras, separated by commas or spaces.
 ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"

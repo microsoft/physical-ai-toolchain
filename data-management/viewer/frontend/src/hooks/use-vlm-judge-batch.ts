@@ -301,7 +301,7 @@ export function useVlmJudgeBatch(datasetId: string | null) {
         if (
           reference &&
           (reference.snapshotId !== snapshot.snapshotId ||
-            reference.annotationRevision !== snapshot.annotationRevision)
+            (reference.annotationRevision ?? null) !== (snapshot.annotationRevision ?? null))
         ) {
           throw new Error('Validation sample changed. Refresh its saved reference.')
         }

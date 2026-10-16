@@ -262,7 +262,8 @@ if [[ "$skip_build" == "false" ]]; then
     backend_context="$(mktemp -d)"
     trap 'rm -rf -- "$backend_context"' EXIT
     mkdir -p "$backend_context/data-management/viewer/backend" "$backend_context/evaluation/vlm_judge" \
-      "$backend_context/data-management/curation/physical_ai_curation/adapters"
+      "$backend_context/data-management/curation/physical_ai_curation/adapters" \
+      "$backend_context/data-management/dataset-io/physical_ai_dataset_io"
     tar -C "$SRC_DIR/backend" --exclude='__pycache__' --exclude='*.pyc' --exclude='.env*' \
       -cf - pyproject.toml uv.lock logging.json src \
       | tar -C "$backend_context/data-management/viewer/backend" -xf -
@@ -275,6 +276,9 @@ if [[ "$skip_build" == "false" ]]; then
       "$backend_context/data-management/curation/physical_ai_curation/"
     cp "$REPO_ROOT/data-management/curation/physical_ai_curation/adapters/"*.py \
       "$backend_context/data-management/curation/physical_ai_curation/adapters/"
+    cp "$REPO_ROOT/data-management/dataset-io/pyproject.toml" "$backend_context/data-management/dataset-io/"
+    cp "$REPO_ROOT/data-management/dataset-io/physical_ai_dataset_io/"*.py \
+      "$backend_context/data-management/dataset-io/physical_ai_dataset_io/"
     info "Building $backend_image ($build_mode)..."
     if [[ "$local_build" == "true" ]]; then
       docker buildx build \

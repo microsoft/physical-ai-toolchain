@@ -25,6 +25,12 @@ def content_etag(content: bytes) -> str:
     return f'"{hashlib.sha256(content).hexdigest()}"'
 
 
+class JobStore(Protocol):
+    def transaction(self) -> Any: ...
+
+    async def read(self) -> dict[str, Any]: ...
+
+
 class CurationStorage(Protocol):
     async def load_versioned(self, dataset_id: str) -> VersionedValue[DatasetLabelsFile]: ...
 

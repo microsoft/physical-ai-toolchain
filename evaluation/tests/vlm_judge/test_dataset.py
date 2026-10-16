@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from vlm_judge.dataset import _resolve_instruction_v3, iter_episodes, load_dataset_spec
+from physical_ai_dataset_io.lerobot import _resolve_instruction_v3, iter_episodes, load_dataset_spec
 
 
 @pytest.mark.parametrize("layout", ["nested", "flat"])

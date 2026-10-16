@@ -1,4 +1,4 @@
-"""Versioned caller-bound evidence and explicit, non-migrating legacy reads."""
+"""Versioned caller-bound evidence for durable curation results."""
 
 from __future__ import annotations
 
@@ -69,17 +69,17 @@ class EvidenceRecord(BaseModel):
     """Immutable evidence binding; applicability and actor authority live outside it."""
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
-    schema_version: Literal[1] | None
+    schema_version: Literal[1]
     kind: Literal["judge", "task-findings"]
     payload: dict[str, JsonValue]
-    invocation_id: str | None = None
-    input_id: str | None = None
-    declared_identity: dict[str, JsonValue] | None = None
+    invocation_id: str = Field(min_length=1)
+    input_id: str = Field(min_length=1)
+    declared_identity: dict[str, JsonValue]
     observed_identity: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Keep legacy bytes logically unchanged; versioned evidence is additive."""
-        return deepcopy(self.payload) if self.schema_version is None else self.model_dump(mode="json")
+        """Serialize the complete caller-bound evidence envelope."""
+        return self.model_dump(mode="json")
 
 
 def bind_evidence(invocation: JudgeInvocation, payload: dict[str, Any], *, kind: str = "judge") -> EvidenceRecord:
@@ -96,14 +96,10 @@ def bind_evidence(invocation: JudgeInvocation, payload: dict[str, Any], *, kind:
     return read_evidence(record, expected=invocation)
 
 
-def read_evidence(
-    value: dict[str, Any], *, kind: str = "judge", expected: JudgeInvocation | None = None
-) -> EvidenceRecord:
-    """Read v1 or explicit legacy payloads, rejecting unsupported versions and mismatches."""
+def read_evidence(value: dict[str, Any], *, expected: JudgeInvocation | None = None) -> EvidenceRecord:
+    """Read v1 evidence, rejecting missing bindings, unsupported versions and mismatches."""
     if "schema_version" not in value:
-        if expected is not None:
-            raise ValueError("Legacy evidence has no invocation binding")
-        return EvidenceRecord(schema_version=None, kind=kind, payload=validate_payload(value, kind))
+        raise ValueError("Missing evidence envelope")
     if type(value["schema_version"]) is not int or value["schema_version"] != 1:
         raise ValueError("Unsupported evidence version")
     try:
@@ -128,4 +124,48 @@ def read_evidence(
         or record.payload["instruction"] != expected.instruction
     ):
         raise ValueError("Evidence invocation mismatch")
+    return record
+
+
+def _job_invocation(job: dict[str, Any], target: dict[str, Any]) -> JudgeInvocation:
+    config = job["config"]
+    execution = config if job.get("result_kind") == "task-findings" else config.get("execution")
+    if not isinstance(execution, dict):
+        raise ValueError("Missing declared evidence identity")
+    model_id = "echo" if execution.get("backend") == "echo" else execution.get("model_id")
+    if not model_id or not config.get("prompt_version"):
+        raise ValueError("Missing declared evidence identity")
+    return JudgeInvocation(
+        invocation_id=f"{job['id']}:{target['input_key']}",
+        input_id=target["input"]["snapshot_id"],
+        episode_id=f"{job['dataset_id']}/episode_{target['episode_index']:06d}",
+        instruction=target["input"]["instruction"],
+        views=(),
+        options={},
+        declared_identity={
+            "model_id": model_id,
+            "prompt_version": config["prompt_version"],
+            "execution": {key: value for key, value in execution.items() if key != "force"},
+            "agent": config.get("agent", {}),
+        },
+    )
+
+
+def bind_job_evidence(job: dict[str, Any], target: dict[str, Any], payload: dict[str, Any]) -> EvidenceRecord:
+    """Bind new evidence to complete persisted caller declarations."""
+    kind = job.get("result_kind", "judge")
+    validated = validate_payload(payload, kind)
+    invocation = _job_invocation(job, target)
+    return bind_evidence(invocation, validated, kind=kind)
+
+
+def read_job_evidence(job: dict[str, Any], target: dict[str, Any]) -> EvidenceRecord:
+    """Require valid stored bindings before reads, reuse or application."""
+    kind = job.get("result_kind", "judge")
+    if "evidence" not in target:
+        raise ValueError("Missing evidence envelope")
+    invocation = _job_invocation(job, target)
+    record = read_evidence(target["evidence"], expected=invocation)
+    if record.kind != kind or record.payload != validate_payload(target["result"], kind):
+        raise ValueError("Stored evidence mismatch")
     return record
