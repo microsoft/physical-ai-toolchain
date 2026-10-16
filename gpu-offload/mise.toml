@@ -15,15 +15,11 @@
 # supply machine-local settings such as a private Python package index.
 _.file = ".env"
 
-# Reference for hosts that must build through an internal package proxy rather
-# than the public registries. Uncomment here, or set the same variables in .env
-# to keep them out of version control. The build tasks forward PIP_INDEX_URL and
-# UV_INDEX_URL to Podman only when they are set, so leaving these commented out
-# keeps public PyPI as the default on an unproxied machine.
-#
-# PIP_INDEX_URL = "https://packagefeedproxy.microsoft.io/pypi/simple/"
-# UV_INDEX_URL = "https://packagefeedproxy.microsoft.io/pypi/simple/"
-# npm_config_registry = "https://packagefeedproxy.microsoft.io/npm/"
+# Hosts that must restore through an approved internal package proxy set
+# PIP_INDEX_URL, UV_INDEX_URL, or npm_config_registry in the untracked .env file
+# only. The build tasks forward PIP_INDEX_URL and UV_INDEX_URL to Podman only when
+# they are set, so public PyPI stays the default on an unproxied machine. Never
+# commit proxy endpoints; see .github/instructions/dependency-feeds.instructions.md.
 
 # ==============================================================================
 # Resolution
