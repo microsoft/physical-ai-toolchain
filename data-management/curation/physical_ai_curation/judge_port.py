@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 if TYPE_CHECKING:
-    from physical_ai_curation.evidence import EvidenceRecord
+    from physical_ai_curation import evidence
 
 
 class ResolvedView(BaseModel):
@@ -46,6 +46,6 @@ class JudgeInvocation(BaseModel):
 
 
 class JudgePort(Protocol):
-    async def evaluate(self, invocation: JudgeInvocation) -> EvidenceRecord:
+    async def evaluate(self, invocation: JudgeInvocation) -> evidence.EvidenceRecord:
         """Return bound evidence without applying annotations or deciding author scope."""
         ...

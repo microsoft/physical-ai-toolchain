@@ -45,6 +45,167 @@ DATASET_ID = "synthetic-eval"
 INSTRUCTION = "Pick up the cube"
 
 
+@pytest.mark.parametrize("mode", ["preview", "dry-run", "score"])
+def test_given_viewer_dataset_when_using_inference_cli_then_scores_without_curation(
+    jsonl_dataset: Path, capsys: pytest.CaptureFixture[str], mode: str
+) -> None:
+    from evaluation.vlm_judge import run as inference_run
+
+    output = jsonl_dataset / "inference.jsonl"
+    arguments = [
+        "--dataset",
+        str(jsonl_dataset),
+        "--output",
+        str(output),
+        "--backend",
+        "echo",
+        "--cache-dir",
+        "",
+        "--n-frames",
+        "3",
+        "--indices",
+        "0-0,0",
+        "--instruction",
+        INSTRUCTION,
+    ]
+    if mode != "score":
+        arguments.append("--config-preview" if mode == "preview" else "--dry-run")
+
+    assert inference_run.main(arguments) == 0
+
+    if mode == "preview":
+        assert json.loads(capsys.readouterr().out)["backend"] == "echo"
+        assert not output.exists()
+    else:
+        row = json.loads(output.read_text())
+        assert row["instruction"] == INSTRUCTION
+        assert row["episode_id"].endswith("episode_000000")
+        assert row.get("dry_run") is True if mode == "dry-run" else row["outcome_success"] is True
+        declaration = json.loads(output.with_suffix(".jsonl.config.json").read_text())
+        assert declaration["instruction_origin"] == "cli-override"
+        assert declaration["episode_indices"] == [0]
+    assert not (jsonl_dataset.parent / ".curation").exists()
+
+
+@pytest.mark.parametrize("mode", ["preview", "dry-run", "score"])
+def test_given_rollout_media_when_using_inference_cli_then_preserves_episode_and_instruction(
+    rollout_video: Path, capsys: pytest.CaptureFixture[str], mode: str
+) -> None:
+    from evaluation.vlm_judge import policy_eval
+
+    root = rollout_video.parent
+    output = root / "rollout-results.jsonl"
+    overrides = root / "instructions.json"
+    overrides.write_text(json.dumps({"rollout": INSTRUCTION}))
+    arguments = [
+        "--rollout-root",
+        str(root),
+        str(root / "missing"),
+        str(root),
+        "--instructions-file",
+        str(overrides),
+        "--output",
+        str(output),
+        "--backend",
+        "echo",
+        "--cache-dir",
+        "",
+        "--n-frames",
+        "3",
+        "--limit",
+        "1",
+    ]
+    if mode != "score":
+        arguments.append("--config-preview" if mode == "preview" else "--dry-run")
+
+    assert policy_eval.main(arguments) == 0
+
+    if mode == "preview":
+        assert json.loads(capsys.readouterr().out)["backend"] == "echo"
+        assert not output.exists()
+    else:
+        row = json.loads(output.read_text())
+        assert row["episode_id"] == "rollout"
+        assert row["instruction"] == INSTRUCTION
+        assert row["video_path"] == str(rollout_video)
+        assert row.get("dry_run") is True if mode == "dry-run" else row["outcome_success"] is True
+    assert not (root / ".curation").exists()
+
+
+def test_given_echo_shim_when_using_multimodal_api_then_returns_documented_completion() -> None:
+    import base64
+    import io
+
+    from evaluation.vlm_judge.openai_shim import build_echo_app
+    from PIL import Image
+
+    image = io.BytesIO()
+    Image.new("RGB", (12, 12), "red").save(image, "PNG")
+    image_url = "data:image/png;base64," + base64.b64encode(image.getvalue()).decode("ascii")
+    with TestClient(build_echo_app()) as shim:
+        assert shim.get("/health").json() == {"status": "ok", "model": "echo"}
+        assert shim.get("/v1/models").json()["data"][0]["id"] == "echo"
+        assert shim.get("/docs").status_code == 200
+        assert shim.get("/redoc").status_code == 200
+        response = shim.post(
+            "/v1/chat/completions",
+            json={
+                "model": "echo",
+                "messages": [
+                    {"role": "system", "content": "Observe the frames"},
+                    {"role": "assistant", "content": "Previous observation"},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Describe progress"},
+                            {"type": "image_url", "image_url": {"url": image_url}},
+                            {"type": "image_url", "image_url": {"url": image_url}},
+                        ],
+                    },
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["model"] == "echo"
+    assert response.json()["choices"][0]["message"]["content"] == "[0, 100]"
+
+
+@pytest.mark.parametrize("request_kind", ["stream", "file-image", "remote-image"])
+def test_given_unsupported_shim_request_when_completing_then_rejects_without_network(
+    request_kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from evaluation.vlm_judge import openai_shim
+
+    monkeypatch.setattr(openai_shim, "_ALLOW_REMOTE_IMAGES", False)
+    request = (
+        {"messages": [], "stream": True}
+        if request_kind == "stream"
+        else {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "file:///example.png"
+                                if request_kind == "file-image"
+                                else "https://example.invalid/image.png",
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    with TestClient(openai_shim.build_echo_app()) as shim:
+        response = shim.post("/v1/chat/completions", json=request)
+
+    assert response.status_code == 400
+
+
 def test_given_judge_cli_when_detached_then_same_job_resumes_with_saved_evidence(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -226,7 +226,7 @@ async def test_given_pre_move_inputs_when_relocated_then_snapshot_config_and_cac
 
     assert snapshot.snapshot_id == "5c4af4b5b47420620d247d41859b6c8383704433891940e56d46af9a6f6b98dc"
     assert config_hash == "493eac88ef1936f0becf6fa042de863c3f1a70c1b327a8021703723a4cf7d6eb"
-    assert cache_key == "9dd6791484adc5a3df5ae5d332d9cf0d4a23806be680ebee72ac668efba2e438"
+    assert bytes.fromhex(cache_key) == bytes.fromhex("9dd6791484adc5a3df5ae5d332d9cf0d4a23806be680ebee72ac668efba2e438")
 
 
 @pytest.mark.parametrize(

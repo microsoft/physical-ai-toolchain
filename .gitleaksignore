@@ -1,0 +1,4 @@
+# Deterministic cache-digest regression assertions, not API credentials.
+# Historical copies remain in full-history scans after the assertion was corrected.
+1763327c7c4a6da31536fddf084e27036d38106e:data-management/viewer/backend/tests/api/test_judge_jobs.py:generic-api-key:229
+ea65e3880c0dd3f69299480f134ea6a8588ef3e7:data-management/viewer/backend/tests/api/test_judge_jobs.py:generic-api-key:229

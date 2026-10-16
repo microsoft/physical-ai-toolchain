@@ -261,6 +261,56 @@ def test_given_label_intent_when_saved_then_only_explicit_human_edit_claims_auth
     assert bool(contribution["author_id"]) == (origin == "human")
 
 
+@pytest.mark.parametrize(
+    "operation,value,status",
+    [
+        ("labels", "human-edit", 200),
+        ("labels", "human-edit\r\nprivate-log-injection", 422),
+        ("promotion", "\r\nobject\r\n", 200),
+        ("promotion", "object\r\nprivate-log-injection", 400),
+    ],
+)
+def test_given_label_input_when_logging_then_private_values_and_line_breaks_are_absent(
+    client: TestClient,
+    dataset_service: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+    operation: str,
+    value: str,
+    status: int,
+) -> None:
+    created = client.put(
+        "/api/datasets/ownership/episodes/0/analysis",
+        headers=_revision_headers(client, "ownership"),
+        json={"object": "private-analysis-value"},
+    )
+    assert created.status_code == 200
+    caplog.clear()
+    caplog.set_level(logging.DEBUG, logger=labels_mod.__name__)
+    headers = _revision_headers(client, "ownership")
+
+    if operation == "labels":
+        response = client.put(
+            "/api/datasets/ownership/episodes/0/labels",
+            headers=headers,
+            json={"labels": ["PRIVATE-LABEL-VALUE"], "intent": value},
+        )
+        event = "Saving label contributions"
+    else:
+        response = client.post(
+            "/api/datasets/ownership/labels/import-from-analysis",
+            headers=headers,
+            json={"field": value},
+        )
+        event = "Promoted analysis contributions"
+
+    assert response.status_code == status
+    messages = [record.getMessage() for record in caplog.records if record.name == labels_mod.__name__]
+    assert any(event in message for message in messages) == (status == 200)
+    assert all("\r" not in message and "\n" not in message for message in messages)
+    for private_value in ("private-log-injection", "private-analysis-value", "PRIVATE-LABEL-VALUE"):
+        assert private_value not in caplog.text
+
+
 @pytest.mark.parametrize("intent,origin", [("human-edit", "human"), ("legacy-unknown", "legacy-unknown")])
 def test_given_analysis_source_text_when_saved_then_intent_controls_authorship(
     client: TestClient, dataset_service: MagicMock, intent: str, origin: str

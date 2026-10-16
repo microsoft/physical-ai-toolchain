@@ -59,7 +59,7 @@ _DATA_TYPES = ["raw", "converted", "reports", "checkpoints"]
 
 # Dataviewer backend modules loaded via importlib to avoid full FastAPI import chain.
 # Sanitization lives in curation; validation re-exports only its public string helper.
-_curation = _load_module("curation_fuzz", "evaluation/vlm_judge/curation.py")
+_curation = _load_module("curation_fuzz", "data-management/curation/physical_ai_curation/models.py")
 _sanitize_user_string = _curation.sanitize_user_string
 _sanitize_nested_value = _curation._sanitize_nested_value
 

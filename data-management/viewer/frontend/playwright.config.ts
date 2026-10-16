@@ -1,12 +1,19 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { defineConfig, devices } from '@playwright/test'
 
 const dataDirectory = mkdtempSync(join(tmpdir(), 'dataviewer-e2e-'))
+const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url))
 process.once('exit', () => rmSync(dataDirectory, { recursive: true, force: true }))
 const isolatedEnvironment = {
+  PYTHONPATH: [
+    repositoryRoot,
+    join(repositoryRoot, 'data-management/curation'),
+    join(repositoryRoot, 'data-management/dataset-io'),
+  ].join(delimiter),
   DATAVIEWER_AUTH_DISABLED: 'true',
   STORAGE_BACKEND: 'local',
   DATA_DIR: dataDirectory,

@@ -324,7 +324,7 @@ async def set_episode_labels(
         "Saving label contributions dataset=%s episode=%d intent=%s",
         dataset_id.replace("\r", "").replace("\n", ""),
         int(episode_idx),
-        body.intent,
+        body.intent.replace("\r", "").replace("\n", ""),
     )
     response.headers["ETag"] = await _save_labels(dataset_id, labels_file, precondition)
     dataset_service.invalidate_episode_cache(dataset_id, episode_idx)
@@ -469,7 +469,7 @@ async def import_analysis_labels(
     logger.debug(
         "Promoted analysis contributions dataset=%s field=%s episodes=%d",
         dataset_id.replace("\r", "").replace("\n", ""),
-        field,
+        field.replace("\r", "").replace("\n", ""),
         len(updated),
     )
     return ImportAnalysisResult(

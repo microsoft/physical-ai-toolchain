@@ -108,6 +108,7 @@ physical-ai-vlm-judge = { path = "../../../evaluation/vlm_judge", editable = tru
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+pythonpath = ["../../.."]
 testpaths = ["tests", "../../curation/tests"]
 
 [tool.coverage.run]

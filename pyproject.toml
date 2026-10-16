@@ -60,7 +60,7 @@ testpaths = [
     "fleet-deployment/inference/tests",
     "shared/ci/tests",
 ]
-pythonpath = [".", "data-management/tools"]
+pythonpath = [".", "data-management/tools", "data-management/curation", "data-management/dataset-io"]
 python_files = ["test_*.py", "fuzz_harness.py"]
 addopts = [
     "-ra",
