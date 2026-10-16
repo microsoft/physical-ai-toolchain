@@ -139,7 +139,7 @@ class JwtProvider(AuthProvider):
         elif (
             request.method in {"GET", "HEAD"}
             and _MEDIA_PATH.fullmatch(request.url.path)
-            and request.headers.get("Sec-Fetch-Site", "same-origin") in {"same-origin", "none"}
+            and request.headers.get("Sec-Fetch-Site") == "same-origin"
         ):
             token = request.cookies.get(MEDIA_COOKIE_NAME, "")
         else:
