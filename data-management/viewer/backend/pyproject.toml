@@ -55,7 +55,7 @@ vlm-judge = [
 
 [dependency-groups]
 dev = [
-    "physical-ai-vlm-judge==0.1.0",
+    "physical-ai-vlm-judge[openai]==0.1.0",
     "ruff==0.16.10",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
