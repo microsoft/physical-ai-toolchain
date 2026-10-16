@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Literal
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from physical_ai_curation import judge_port
+from physical_ai_curation.judge_port import EvidenceRecord as EvidenceRecord
+from physical_ai_curation.judge_port import JudgeInvocation
 from physical_ai_curation.models import validate_task_result
 
 
@@ -65,26 +66,7 @@ def validate_payload(payload: dict[str, Any], kind: str) -> dict[str, Any]:
     return result
 
 
-class EvidenceRecord(BaseModel):
-    """Immutable evidence binding; applicability and actor authority live outside it."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
-    schema_version: Literal[1]
-    kind: Literal["judge", "task-findings"]
-    payload: dict[str, JsonValue]
-    invocation_id: str = Field(min_length=1)
-    input_id: str = Field(min_length=1)
-    declared_identity: dict[str, JsonValue]
-    observed_identity: dict[str, str] | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize the complete caller-bound evidence envelope."""
-        return self.model_dump(mode="json")
-
-
-def bind_evidence(
-    invocation: judge_port.JudgeInvocation, payload: dict[str, Any], *, kind: str = "judge"
-) -> EvidenceRecord:
+def bind_evidence(invocation: JudgeInvocation, payload: dict[str, Any], *, kind: str = "judge") -> EvidenceRecord:
     """Associate evidence with caller-owned identity, never with echoed authority."""
     record = {
         "schema_version": 1,
@@ -98,7 +80,7 @@ def bind_evidence(
     return read_evidence(record, expected=invocation)
 
 
-def read_evidence(value: dict[str, Any], *, expected: judge_port.JudgeInvocation | None = None) -> EvidenceRecord:
+def read_evidence(value: dict[str, Any], *, expected: JudgeInvocation | None = None) -> EvidenceRecord:
     """Read v1 evidence, rejecting missing bindings, unsupported versions and mismatches."""
     if "schema_version" not in value:
         raise ValueError("Missing evidence envelope")
@@ -129,7 +111,7 @@ def read_evidence(value: dict[str, Any], *, expected: judge_port.JudgeInvocation
     return record
 
 
-def _job_invocation(job: dict[str, Any], target: dict[str, Any]) -> judge_port.JudgeInvocation:
+def _job_invocation(job: dict[str, Any], target: dict[str, Any]) -> JudgeInvocation:
     config = job["config"]
     execution = config if job.get("result_kind") == "task-findings" else config.get("execution")
     if not isinstance(execution, dict):
@@ -137,7 +119,7 @@ def _job_invocation(job: dict[str, Any], target: dict[str, Any]) -> judge_port.J
     model_id = "echo" if execution.get("backend") == "echo" else execution.get("model_id")
     if not model_id or not config.get("prompt_version"):
         raise ValueError("Missing declared evidence identity")
-    return judge_port.JudgeInvocation(
+    return JudgeInvocation(
         invocation_id=f"{job['id']}:{target['input_key']}",
         input_id=target["input"]["snapshot_id"],
         episode_id=f"{job['dataset_id']}/episode_{target['episode_index']:06d}",

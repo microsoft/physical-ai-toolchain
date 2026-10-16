@@ -26,11 +26,10 @@ import av
 import fastapi
 import numpy as np
 import physical_ai_curation.api as api_module
+import physical_ai_dataset_io.lerobot as dataset_module
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-from evaluation.tests.vlm_judge.conftest import jsonl_dataset as jsonl_dataset
-from evaluation.tests.vlm_judge.conftest import rollout_video as rollout_video
 from evaluation.vlm_judge.judge import JudgeResult
 from evaluation.vlm_judge.prompts import PROMPT_VERSION
 from evaluation.vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig
@@ -38,11 +37,39 @@ from fastapi.testclient import TestClient
 from physical_ai_curation import run as curation_run
 from physical_ai_curation.adapters.job_storage import LocalJobStore
 from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
-from physical_ai_dataset_io.lerobot import iter_episodes
 from physical_ai_dataset_io.media import MediaInputError, validate_video_path
+
+pytest_plugins = ["evaluation.tests.vlm_judge.conftest"]
 
 DATASET_ID = "synthetic-eval"
 INSTRUCTION = "Pick up the cube"
+
+
+@pytest.mark.parametrize("first_module", ["judge_port", "evidence"])
+def test_given_curation_contracts_when_imported_in_either_order_then_types_resolve(first_module: str) -> None:
+    script = """
+import importlib
+import sys
+from typing import get_type_hints
+
+importlib.import_module(f"physical_ai_curation.{sys.argv[1]}")
+if sys.argv[1] == "judge_port":
+    assert "physical_ai_curation.evidence" not in sys.modules
+from physical_ai_curation import evidence, judge_port
+
+assert evidence.EvidenceRecord is judge_port.EvidenceRecord
+assert get_type_hints(judge_port.JudgePort.evaluate)["return"] is evidence.EvidenceRecord
+assert get_type_hints(evidence.bind_evidence)["invocation"] is judge_port.JudgeInvocation
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, first_module],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("mode", ["preview", "dry-run", "score"])
@@ -246,8 +273,6 @@ def test_given_judge_cli_when_detached_then_same_job_resumes_with_saved_evidence
 def test_given_explicit_sample_author_when_cli_submits_then_ambiguous_global_author_is_not_used(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    import asyncio
-
     from physical_ai_curation import run as judge_run
     from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
     from physical_ai_curation.models import ContributionLedger
@@ -328,16 +353,13 @@ def test_viewer_durable_job_publishes_canonical_evidence_without_labels(
     capsys: pytest.CaptureFixture[str],
     selected_view: bool,
 ) -> None:
-    import asyncio
-
     from physical_ai_curation import run as judge_run
     from physical_ai_curation.models import DatasetLabelsFile
-    from physical_ai_dataset_io.lerobot import load_dataset_spec
 
     _build_dataset(tmp_path / DATASET_ID, instruction=INSTRUCTION)
     restore_default_app.setenv("VLM_JUDGE_BASE_URL", "")
     client = _reload_app(restore_default_app, tmp_path)
-    views = [load_dataset_spec(tmp_path / DATASET_ID).video_keys[0]] if selected_view else []
+    views = [dataset_module.load_dataset_spec(tmp_path / DATASET_ID).video_keys[0]] if selected_view else []
     response = client.post(
         f"/api/datasets/{DATASET_ID}/episodes/0/judge",
         json={"views": views},
@@ -432,8 +454,6 @@ def test_viewer_recovers_accepted_job_on_startup_without_browser(
     tmp_path: Path,
     restore_default_app: pytest.MonkeyPatch,
 ) -> None:
-    import asyncio
-
     _build_dataset(tmp_path / DATASET_ID, instruction=INSTRUCTION)
     submitting = _reload_app(restore_default_app, tmp_path)
     response = submitting.post(
@@ -456,19 +476,16 @@ def test_viewer_recovers_accepted_job_on_startup_without_browser(
 
 
 def test_configured_standalone_api_resolves_saved_inputs_without_caller_paths(tmp_path: Path) -> None:
-    import asyncio
-
     from evaluation.vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig
     from fastapi import FastAPI
     from physical_ai_curation.adapters.job_storage import LocalJobStore
     from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
-    from physical_ai_curation.api import build_router
 
     _build_dataset(tmp_path, instruction=INSTRUCTION)
     service = JudgeService(ServiceConfig(backend=BackendConfig(kind="echo"), frames=FrameConfig(n_frames=4)))
     app = FastAPI()
     app.include_router(
-        build_router(
+        api_module.build_router(
             service,
             resolver=LocalDatasetResolver({DATASET_ID: tmp_path}),
             local_actor="local-test",
@@ -568,7 +585,6 @@ def test_remote_judge_cache_uses_source_versions_not_scratch_paths(tmp_path: Pat
 
 
 def test_v3_metadata_preserves_different_camera_windows(tmp_path: Path) -> None:
-    from physical_ai_dataset_io.lerobot import iter_episodes
 
     _build_dataset(tmp_path, instruction=INSTRUCTION)
     info_path = tmp_path / "meta" / "info.json"
@@ -592,7 +608,7 @@ def test_v3_metadata_preserves_different_camera_windows(tmp_path: Path) -> None:
             }
         )
     pq.write_table(pa.table(row), metadata)
-    record = next(iter_episodes(tmp_path))
+    record = next(dataset_module.iter_episodes(tmp_path))
     assert record.video_windows == {"obs.front": (2.0, 2.4), "obs.wrist": (5.0, 5.4)}
 
 
@@ -669,9 +685,7 @@ def test_cold_blob_judge_downloads_only_selected_media_and_reuses_cache(
 def test_backend_starts_without_optional_evaluator(tmp_path: Path, enabled: str) -> None:
     app_dir = tmp_path / "app"
     shutil.copytree(Path(__file__).resolve().parents[2] / "src", app_dir / "src")
-    import physical_ai_curation
-
-    shutil.copytree(Path(physical_ai_curation.__file__).parent, app_dir / "physical_ai_curation")
+    shutil.copytree(Path(api_module.__file__).parent, app_dir / "physical_ai_curation")
     import physical_ai_dataset_io
 
     shutil.copytree(Path(physical_ai_dataset_io.__file__).parent, app_dir / "physical_ai_dataset_io")
@@ -851,12 +865,12 @@ def _reload_app(environment_patch: pytest.MonkeyPatch, data_dir: Path) -> TestCl
     import src.api.config as config_mod
     import src.api.services.annotation_service as ann_service_mod
     import src.api.services.dataset_service.service as ds_service_mod
-    from src.api.services.vlm_judge_service import reset_vlm_judge_service
+    import src.api.services.vlm_judge_service as service_mod
 
     config_mod._app_config = None
     ann_service_mod._annotation_service = None
     ds_service_mod._dataset_service = None
-    reset_vlm_judge_service()
+    service_mod.reset_vlm_judge_service()
 
     from src.api.routers import labels
 
@@ -879,12 +893,12 @@ def restore_default_app() -> Iterator[pytest.MonkeyPatch]:
     import src.api.config as config_mod
     import src.api.services.annotation_service as ann_service_mod
     import src.api.services.dataset_service.service as ds_service_mod
-    from src.api.services.vlm_judge_service import reset_vlm_judge_service
+    import src.api.services.vlm_judge_service as service_mod
 
     config_mod._app_config = None
     ann_service_mod._annotation_service = None
     ds_service_mod._dataset_service = None
-    reset_vlm_judge_service()
+    service_mod.reset_vlm_judge_service()
 
     from src.api.routers import labels
 
@@ -984,8 +998,6 @@ def test_post_runs_judge_and_warms_cache(vlm_client: TestClient) -> None:
 
 
 def _finish_job(client: TestClient, response: object) -> dict[str, object]:
-    import asyncio
-
     assert response.status_code == 202, response.text
     assert asyncio.run(client.app.state.judge_jobs.run_once())
     status = client.get(response.headers["Location"])
@@ -1154,9 +1166,8 @@ def test_backend_and_pin_changes_invalidate_service_and_viewer_cache(
     import src.api.routers.vlm_judge as router_mod
     import src.api.services.vlm_judge_service as service_mod
     from src.api.config import get_app_config
-    from src.api.services.vlm_judge_service import get_vlm_judge_service
 
-    original = get_vlm_judge_service(get_app_config())
+    original = service_mod.get_vlm_judge_service(get_app_config())
     assert original is not None
     base = original.config
     calls = []
@@ -1370,7 +1381,6 @@ def test_selected_v3_episode_ignores_missing_unselected_media(
 def test_v3_jsonl_selection_preserves_trusted_and_validated_iteration(
     tmp_path: Path, indices: list[int] | None, validate_media: bool
 ) -> None:
-    from physical_ai_dataset_io.lerobot import iter_episodes
     from physical_ai_dataset_io.media import validate_video_path
 
     root = tmp_path / DATASET_ID
@@ -1386,7 +1396,9 @@ def test_v3_jsonl_selection_preserves_trusted_and_validated_iteration(
         validated.append(candidate)
         return validate_video_path(candidate, root)
 
-    records = list(iter_episodes(root, indices=indices, video_validator=validator if validate_media else None))
+    records = list(
+        dataset_module.iter_episodes(root, indices=indices, video_validator=validator if validate_media else None)
+    )
 
     assert [record.episode_index for record in records] == ([0, 1] if indices is None else indices)
     expected_paths = {path for record in records for path in record.video_paths.values()}
@@ -1415,7 +1427,6 @@ def test_media_and_backend_failures_do_not_disclose_paths(
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
 ) -> None:
-    import physical_ai_dataset_io.lerobot as dataset_module
     from evaluation.vlm_judge.service import JudgeService
 
     video = tmp_path / DATASET_ID / "videos/chunk-000/obs.front/episode_000000.mp4"
@@ -2154,8 +2165,6 @@ def test_launcher_preview_is_loopback_only(host: str | None) -> None:
 
 @pytest.mark.parametrize(("method", "path"), _LIFECYCLE_ENDPOINTS)
 def test_global_app_is_default_deny(monkeypatch: pytest.MonkeyPatch, method: str, path: str) -> None:
-    import importlib
-
     from fastapi.testclient import TestClient
 
     monkeypatch.delenv("VLM_JUDGE_ALLOW_UNAUTHENTICATED", raising=False)
@@ -2257,7 +2266,7 @@ def test_given_unknown_dataset_when_running_status_then_reports_safe_command_fai
 def test_given_resolved_episode_when_processing_then_validates_instruction_and_records_echo_result(
     jsonl_dataset: Path, instruction: str | None
 ) -> None:
-    episode = next(iter_episodes(jsonl_dataset))
+    episode = next(dataset_module.iter_episodes(jsonl_dataset))
     if instruction == "":
         episode = replace(episode, instruction="")
     service = JudgeService(ServiceConfig(backend=BackendConfig(kind="echo"), frames=FrameConfig(n_frames=3)))

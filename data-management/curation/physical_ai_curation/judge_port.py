@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
-
-if TYPE_CHECKING:
-    from physical_ai_curation import evidence
 
 
 class ResolvedView(BaseModel):
@@ -45,7 +42,23 @@ class JudgeInvocation(BaseModel):
     declared_identity: dict[str, JsonValue]
 
 
+class EvidenceRecord(BaseModel):
+    """Immutable evidence binding; applicability and actor authority live outside it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+    schema_version: Literal[1]
+    kind: Literal["judge", "task-findings"]
+    payload: dict[str, JsonValue]
+    invocation_id: str = Field(min_length=1)
+    input_id: str = Field(min_length=1)
+    declared_identity: dict[str, JsonValue]
+    observed_identity: dict[str, str] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the complete caller-bound evidence envelope."""
+        return self.model_dump(mode="json")
+
+
 class JudgePort(Protocol):
-    async def evaluate(self, invocation: JudgeInvocation) -> evidence.EvidenceRecord:
+    async def evaluate(self, invocation: JudgeInvocation) -> EvidenceRecord:
         """Return bound evidence without applying annotations or deciding author scope."""
-        ...

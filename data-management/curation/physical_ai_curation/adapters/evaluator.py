@@ -64,7 +64,7 @@ class EvaluatorJudge:
         try:
             result = await asyncio.shield(execution)
         except asyncio.CancelledError:
-            await execution
+            _completion = await execution
             raise
         return bind_evidence(invocation, result.to_dict())
 
@@ -117,7 +117,7 @@ class TaskExecutor:
         try:
             result = await asyncio.shield(execution)
         except asyncio.CancelledError:
-            await execution
+            _completion = await execution
             raise
         return bind_evidence(invocation, result, kind="task-findings").payload
 

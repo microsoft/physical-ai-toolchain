@@ -30,7 +30,8 @@ def fingerprint(value: object) -> str:
 
 
 class DatasetResolver(Protocol):
-    async def episode_indices(self, dataset_id: str, *, principal_scope_id: str) -> list[int]: ...
+    async def episode_indices(self, dataset_id: str, *, principal_scope_id: str) -> list[int]:
+        """List the episode indices visible to the caller."""
 
     async def validation_sample(
         self,
@@ -40,9 +41,11 @@ class DatasetResolver(Protocol):
         principal_scope_id: str,
         reference: dict[str, str],
         views: tuple[str, ...] = (),
-    ) -> dict[str, Any]: ...
+    ) -> dict[str, Any]:
+        """Resolve a saved validation sample under the caller's authority."""
 
-    async def resolve(self, dataset_id: str, episode_index: int, **kwargs: Any) -> tuple[Any, SavedInputSnapshot]: ...
+    async def resolve(self, dataset_id: str, episode_index: int, **kwargs: Any) -> tuple[Any, SavedInputSnapshot]:
+        """Resolve episode media and the matching saved-input snapshot."""
 
 
 class JudgeJobs:
@@ -903,7 +906,7 @@ class JudgeJobs:
             renewal.cancel()
             try:
                 with suppress(asyncio.CancelledError):
-                    await renewal
+                    _completion = await renewal
             finally:
                 await self.release(claim)
         return True

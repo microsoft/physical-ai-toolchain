@@ -26,13 +26,16 @@ def content_etag(content: bytes) -> str:
 
 
 class JobStore(Protocol):
-    def transaction(self) -> Any: ...
+    def transaction(self) -> Any:
+        """Open a serialized state transaction."""
 
-    async def read(self) -> dict[str, Any]: ...
+    async def read(self) -> dict[str, Any]:
+        """Read the current durable job state."""
 
 
 class CurationStorage(Protocol):
-    async def load_versioned(self, dataset_id: str) -> VersionedValue[DatasetLabelsFile]: ...
+    async def load_versioned(self, dataset_id: str) -> VersionedValue[DatasetLabelsFile]:
+        """Read labels with their revision validator."""
 
     async def save(
         self,
@@ -41,7 +44,8 @@ class CurationStorage(Protocol):
         *,
         if_match: str | None = None,
         if_none_match: bool = False,
-    ) -> str: ...
+    ) -> str:
+        """Persist labels conditionally and return the new revision validator."""
 
 
 def _present(namespace: str, value: Any) -> bool:

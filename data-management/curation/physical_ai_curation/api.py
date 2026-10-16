@@ -584,7 +584,7 @@ def build_router(
                 worker.cancel()
             for worker in workers:
                 with suppress(asyncio.CancelledError):
-                    await worker
+                    _completion = await worker
 
     router = APIRouter(tags=["vlm-judge"], route_class=LocalJudgeRoute, lifespan=lifespan)
 

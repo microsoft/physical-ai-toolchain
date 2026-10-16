@@ -43,13 +43,16 @@ class SavedResource:
 
 
 class SavedInputReader(Protocol):
-    async def annotation(self, dataset_id: str, episode_index: int) -> SavedResource: ...
+    async def annotation(self, dataset_id: str, episode_index: int) -> SavedResource:
+        """Read the saved episode annotation and its revision."""
 
     async def edits(
         self, dataset_id: str, episode_index: int, principal_scope_id: str, source: tuple[str, str]
-    ) -> SavedResource: ...
+    ) -> SavedResource:
+        """Read saved edits for the caller and source identity."""
 
-    async def source_revision(self, dataset_id: str, episode_index: int) -> tuple[str, str]: ...
+    async def source_revision(self, dataset_id: str, episode_index: int) -> tuple[str, str]:
+        """Return the current source identity and revision."""
 
 
 def _transforms_media(transform: dict[str, Any] | None) -> bool:
