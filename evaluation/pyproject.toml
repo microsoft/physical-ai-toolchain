@@ -3,6 +3,7 @@ name = "physical-ai-evaluation"
 version = "0.1.0"
 description = "Evaluation workflow runtime dependencies"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = [
     "physical-ai-dataset-io==0.1.0",
     # Held below 2.3 because lerobot==0.6.1 declares numpy<2.3.
@@ -38,6 +39,9 @@ dependencies = [
     "diffusers==0.40.0",
     "torchcodec==0.16.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/microsoft/physical-ai-toolchain"
 
 [build-system]
 requires = ["hatchling"]

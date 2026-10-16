@@ -3,6 +3,7 @@ name = "physical-ai-vlm-judge"
 version = "0.1.0"
 description = "VLM-as-judge harness for robot manipulation episodes"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = [
     "physical-ai-dataset-io==0.1.0",
     "av==18.1.0",
@@ -11,6 +12,9 @@ dependencies = [
     "pyarrow==25.0.1",
     "pydantic==2.13.5",
 ]
+
+[project.urls]
+Repository = "https://github.com/microsoft/physical-ai-toolchain"
 
 [project.optional-dependencies]
 api = [

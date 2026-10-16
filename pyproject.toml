@@ -4,6 +4,10 @@ version = "0.8.0"
 description = "Physical AI Toolchain for Isaac Lab training"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+
+[project.urls]
+Repository = "https://github.com/microsoft/physical-ai-toolchain"
 
 [build-system]
 requires = ["hatchling"]

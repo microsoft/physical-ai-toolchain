@@ -3,7 +3,11 @@ name = "physical-ai-curation"
 version = "0.1.0"
 description = "Data-management curation models, saved inputs, and conditional storage"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = ["pydantic==2.13.5", "physical-ai-dataset-io==0.1.0"]
+
+[project.urls]
+Repository = "https://github.com/microsoft/physical-ai-toolchain"
 
 [project.optional-dependencies]
 api = ["fastapi==0.142.2", "uvicorn[standard]==0.54.0"]

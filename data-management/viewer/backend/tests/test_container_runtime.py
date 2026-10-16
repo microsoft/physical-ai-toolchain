@@ -14,6 +14,190 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(scope="module")
+def first_party_wheels(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    repository = Path(__file__).resolve().parents[4]
+    build_root = tmp_path_factory.mktemp("first-party-wheels")
+    wheels = build_root / "dist"
+    for project_path in ("data-management/dataset-io", "data-management/curation", "evaluation/vlm_judge"):
+        project = build_root / project_path
+        shutil.copytree(
+            repository / project_path,
+            project,
+            ignore=shutil.ignore_patterns("__pycache__", ".venv", "build", "*.egg-info", ".pytest_cache"),
+        )
+        result = subprocess.run(
+            ["uv", "build", "--offline", "--wheel", "--out-dir", str(wheels), str(project)],
+            cwd=build_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+    return wheels
+
+
+@pytest.mark.parametrize(
+    "project_path",
+    [
+        ".",
+        "data-management/curation",
+        "data-management/dataset-io",
+        "data-management/viewer/backend",
+        "evaluation",
+        "evaluation/vlm_judge",
+    ],
+)
+def test_given_first_party_project_when_reading_metadata_then_license_and_repository_are_declared(
+    project_path: str,
+) -> None:
+    repository = Path(__file__).resolve().parents[4]
+    project = tomllib.loads((repository / project_path / "pyproject.toml").read_text())["project"]
+
+    assert project["license"] == "MIT"
+    assert project["urls"]["Repository"] == "https://github.com/microsoft/physical-ai-toolchain"
+
+
+@pytest.mark.parametrize(
+    ("project_path", "package_names"),
+    [
+        (".", ("physical-ai-curation", "physical-ai-dataset-io")),
+        ("data-management/curation", ("physical-ai-dataset-io",)),
+        (
+            "data-management/viewer/backend",
+            ("physical-ai-curation", "physical-ai-dataset-io", "physical-ai-vlm-judge"),
+        ),
+        ("evaluation", ("physical-ai-dataset-io",)),
+        ("evaluation/vlm_judge", ("physical-ai-dataset-io",)),
+    ],
+)
+def test_given_first_party_dependencies_when_resolving_then_sources_remain_local(
+    project_path: str, package_names: tuple[str, ...]
+) -> None:
+    repository = Path(__file__).resolve().parents[4]
+    locations = {
+        "physical-ai-curation": repository / "data-management/curation",
+        "physical-ai-dataset-io": repository / "data-management/dataset-io",
+        "physical-ai-vlm-judge": repository / "evaluation/vlm_judge",
+    }
+    project = repository / project_path
+    manifest = tomllib.loads((project / "pyproject.toml").read_text())
+    sources = manifest["tool"]["uv"]["sources"]
+    for name in package_names:
+        assert (project / sources[name]["path"]).resolve() == locations[name]
+    if (project / "uv.lock").exists():
+        lock = tomllib.loads((project / "uv.lock").read_text())
+        packages = {package["name"]: package for package in lock["package"]}
+        for name in package_names:
+            assert (project / packages[name]["source"]["editable"]).resolve() == locations[name]
+
+
+@pytest.mark.parametrize("profile", ["dataset-io", "curation", "vlm-judge"])
+def test_given_built_wheels_when_imported_outside_checkout_then_package_boundaries_hold(
+    first_party_wheels: Path, tmp_path: Path, profile: str
+) -> None:
+    distributions = ["physical_ai_dataset_io"]
+    if profile != "dataset-io":
+        distributions.append("physical_ai_" + profile.replace("-", "_"))
+    wheels = [next(first_party_wheels.glob(f"{name}-*.whl")) for name in distributions]
+    installed = tmp_path / "installed"
+    result = subprocess.run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            sys.executable,
+            "--target",
+            str(installed),
+            "--no-deps",
+            "--no-index",
+            *map(str, wheels),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    script = """
+import importlib.abc
+import importlib.metadata
+import json
+import sys
+from pathlib import Path
+
+installed, dependencies, profile = sys.argv[1:]
+sys.path.insert(0, installed)
+if profile != 'dataset-io':
+    sys.path.append(dependencies)
+
+forbidden = {'src', 'fastapi', 'starlette', 'azure', 'torch', 'transformers'}
+if profile != 'vlm-judge':
+    forbidden |= {'evaluation', 'vlm_judge', 'av', 'PIL'}
+if profile != 'curation':
+    forbidden.add('physical_ai_curation')
+if profile == 'dataset-io':
+    forbidden |= {'pydantic', 'pyarrow', 'pandas'}
+
+class UnavailableRuntime(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in forbidden:
+            raise ModuleNotFoundError('Optional runtime absent', name=fullname)
+
+sys.meta_path.insert(0, UnavailableRuntime())
+import physical_ai_dataset_io.lerobot as dataset_io
+import physical_ai_dataset_io.media
+
+dataset = Path.cwd() / 'dataset'
+(dataset / 'meta').mkdir(parents=True)
+(dataset / 'meta/info.json').write_text(json.dumps({
+    'codebase_version': 'v2.1', 'fps': 30, 'total_episodes': 1,
+    'data_path': 'data/{episode_index}.parquet',
+    'video_path': 'videos/{video_key}/{episode_index}.mp4',
+    'features': {'front': {'dtype': 'video'}},
+}))
+assert dataset_io.load_dataset_spec(dataset).total_episodes == 1
+modules = [dataset_io]
+names = ['physical-ai-dataset-io']
+if profile == 'curation':
+    import physical_ai_curation.application as application
+    from physical_ai_curation.adapters.job_storage import LocalJobStore
+    from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
+    from physical_ai_curation.adapters.local_storage import LocalCurationStorage
+    from physical_ai_curation.jobs import JudgeJobs
+    from physical_ai_curation.models import DatasetLabelsFile
+    assert DatasetLabelsFile(dataset_id='test').episodes == {}
+    modules.append(application)
+    names.append('physical-ai-curation')
+elif profile == 'vlm-judge':
+    import evaluation.vlm_judge as judge
+    from PIL import Image
+    agent = judge.JudgeAgent(judge.EchoBackend(), config=judge.AgentConfig(n_outcome_samples=1))
+    result = agent.judge(episode_id='test/0', instruction='Move cube',
+                         frames=[Image.new('RGB', (32, 32)) for _ in range(8)])
+    assert judge.JudgeResult.from_dict(result.to_dict()).episode_id == 'test/0'
+    modules.append(judge)
+    names.append('physical-ai-vlm-judge')
+for module in modules:
+    assert Path(module.__file__).is_relative_to(installed), module.__file__
+for name in names:
+    metadata = importlib.metadata.distribution(name).metadata
+    assert metadata['License-Expression'] == 'MIT'
+    assert 'Repository, https://github.com/microsoft/physical-ai-toolchain' in metadata.get_all('Project-URL')
+assert not forbidden.intersection(sys.modules)
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", script, str(installed), sysconfig.get_path("purelib"), profile],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize(
     "retired_path",
     ["evaluation/vlm_judge/api.py", "data-management/viewer/backend/scripts/vlm_label_dataset.py"],
