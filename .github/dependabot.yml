@@ -132,6 +132,50 @@ updates:
     prefix: chore
     include: scope
 - package-ecosystem: uv
+  directory: /data-management/curation
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    curation-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - python
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: uv
+  directory: /data-management/dataset-io
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    dataset-io-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - python
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /data-pipeline
   schedule:
     interval: weekly

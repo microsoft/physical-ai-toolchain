@@ -228,7 +228,7 @@ smoke_cpu() {
     uv export "${export_args[@]}" > "$requirements"
     grep -vE '^(nvidia-|cuda-|torchcodec==)' "$requirements" \
         | sed -E '/^(torch|torchvision)==/ s/\+cu[0-9]+//' \
-        | uv pip install --torch-backend cpu --no-cache-dir --no-deps --requirement -
+        | uv --directory "$project" pip install --torch-backend cpu --no-cache-dir --no-deps --requirement -
 
     run_probe "${venv}/bin/python"
 }

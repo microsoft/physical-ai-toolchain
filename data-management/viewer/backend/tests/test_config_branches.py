@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from src.api import config as config_mod
 from src.api.config import (
     AppConfig,
     create_annotation_storage,
@@ -143,9 +142,7 @@ class TestCreateBlobDatasetProvider:
             "sas_token": "sas",
         }
 
-    def test_returns_none_when_blob_dataset_import_fails(
-        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_raises_when_blob_dataset_import_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Force the import inside the function to raise ImportError.
         real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
 
@@ -165,8 +162,7 @@ class TestCreateBlobDatasetProvider:
         monkeypatch.setitem(sys.modules, "src.api.storage.blob_dataset", None)
 
         cfg = _azure_config()
-        with caplog.at_level("WARNING", logger=config_mod.logger.name):
-            provider = create_blob_dataset_provider(cfg)
+        with pytest.raises(ImportError, match="Azure dataset dependencies unavailable") as error:
+            create_blob_dataset_provider(cfg)
 
-        assert provider is None
-        assert any("BlobDatasetProvider unavailable" in rec.message for rec in caplog.records)
+        assert isinstance(error.value.__cause__, ImportError)

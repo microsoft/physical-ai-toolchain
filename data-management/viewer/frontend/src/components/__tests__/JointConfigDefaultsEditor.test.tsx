@@ -205,6 +205,83 @@ describe('JointConfigDefaultsEditor', () => {
     expect(screen.getByText('Saving…')).toBeInTheDocument()
   })
 
+  it('assigns, removes and reassigns an ungrouped joint before persisting it', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn()
+    render(
+      <JointConfigDefaultsEditor
+        {...baseProps}
+        labels={{ ...defaultLabels, '10': 'Extra Joint' }}
+        onSave={onSave}
+      />,
+    )
+    const ungrouped = screen.getByTestId('ungrouped-joints')
+    await user.click(within(ungrouped).getByLabelText('Assign to group'))
+    await user.click(within(ungrouped).getByRole('button', { name: 'Right Arm' }))
+    const extra =
+      screen.getByText('Extra Joint').closest('[data-joint-id]') ??
+      screen.getByText('Extra Joint').parentElement!
+    await user.click(within(extra as HTMLElement).getByLabelText('Remove joint from group'))
+    expect(within(screen.getByTestId('ungrouped-joints')).getByText('Extra Joint')).toBeVisible()
+    await user.click(
+      within(screen.getByTestId('ungrouped-joints')).getByLabelText('Assign to group'),
+    )
+    await user.click(
+      within(screen.getByTestId('ungrouped-joints')).getByRole('button', { name: 'Left Arm' }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groups: expect.arrayContaining([
+          expect.objectContaining({ id: 'left-pos', indices: [7, 8, 9, 10] }),
+        ]),
+      }),
+    )
+  })
+
+  it('cancels empty names and invalid indices and commits changed names on blur', async () => {
+    const user = userEvent.setup()
+    render(<JointConfigDefaultsEditor {...baseProps} />)
+    await user.click(screen.getAllByLabelText('Edit joint label')[0])
+    await user.clear(screen.getByRole('textbox'))
+    await user.keyboard('{Enter}')
+    expect(screen.getByText('Right X')).toBeVisible()
+    await user.click(screen.getAllByLabelText('Edit joint label')[0])
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    await user.click(screen.getAllByLabelText('Edit group label')[0])
+    await user.clear(screen.getByRole('textbox'))
+    await user.type(screen.getByRole('textbox'), 'Renamed')
+    await user.tab()
+    expect(screen.getByText('Renamed')).toBeVisible()
+    await user.click(screen.getAllByLabelText('Edit joint index')[0])
+    await user.clear(screen.getByRole('spinbutton'))
+    await user.keyboard('{Enter}')
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+    await user.click(screen.getAllByLabelText('Edit joint index')[0])
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+  })
+
+  it('retains the Save control during pending work and conflicts without duplicate submission', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn()
+    const { rerender } = render(<JointConfigDefaultsEditor {...baseProps} onSave={onSave} />)
+    const save = screen.getByRole('button', { name: 'Save' })
+    save.focus()
+    await user.keyboard('{Enter}')
+    expect(onSave).toHaveBeenCalledOnce()
+    rerender(<JointConfigDefaultsEditor {...baseProps} onSave={onSave} isSaving />)
+    expect(save).toHaveAttribute('aria-disabled', 'true')
+    expect(save).not.toBeDisabled()
+    expect(save).toHaveFocus()
+    await user.keyboard('{Enter}')
+    expect(onSave).toHaveBeenCalledOnce()
+    rerender(<JointConfigDefaultsEditor {...baseProps} onSave={onSave} saveError="Conflict" />)
+    expect(save).toHaveFocus()
+    expect(screen.getByRole('alert')).toHaveTextContent('Joint defaults were not saved.')
+  })
+
   describe('move joint between groups', () => {
     it('shows move-to-group options when clicking move button on a grouped joint', async () => {
       const user = userEvent.setup()

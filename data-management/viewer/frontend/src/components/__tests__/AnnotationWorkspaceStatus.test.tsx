@@ -7,6 +7,7 @@ import { AnnotationWorkspace } from '@/components/annotation-workspace/Annotatio
 
 import {
   mockResetEdits,
+  mockSaveAnnotation,
   mockSaveEpisodeLabels,
   setupAnnotationWorkspaceTestCase,
   teardownAnnotationWorkspaceTestCase,
@@ -16,6 +17,149 @@ import {
 describe('AnnotationWorkspace status and header actions', () => {
   beforeEach(setupAnnotationWorkspaceTestCase)
   afterEach(teardownAnnotationWorkspaceTestCase)
+
+  it('loads annotation state from the workspace even when the language widget is unmounted', () => {
+    render(<AnnotationWorkspace />)
+    expect(testState.annotationReadCount).toBeGreaterThan(0)
+  })
+
+  it('blocks whole-episode Save and announces annotation recovery failures', () => {
+    testState.annotationRecoveryError = 'Annotation draft recovery failed.'
+    render(<AnnotationWorkspace />)
+    expect(screen.getByRole('button', { name: /^save episode$/i })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Annotation draft recovery failed.')
+    expect(mockSaveAnnotation).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])(
+    'blocks whole-episode Save when label recovery is incomplete: %s',
+    (failed) => {
+      testState.labelDraftHydrated = false
+      testState.labelRecoveryError = failed ? 'Label draft recovery failed.' : null
+      render(<AnnotationWorkspace />)
+      expect(screen.getByRole('button', { name: /^save episode$/i })).toBeDisabled()
+      expect(screen.getByRole('status')).toHaveTextContent(
+        failed ? 'Label draft recovery failed.' : 'Loading label drafts.',
+      )
+      expect(mockSaveEpisodeLabels).not.toHaveBeenCalled()
+    },
+  )
+
+  it('includes annotation-only changes in standalone Save', async () => {
+    testState.hasAnnotationChanges = true
+    render(<AnnotationWorkspace />)
+    expect(screen.getByRole('status')).toHaveTextContent(/unsaved episode changes/i)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^save episode$/i }))
+    })
+    expect(mockSaveAnnotation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        datasetId: 'dataset-1',
+        episodeIndex: 0,
+        annotation: expect.objectContaining({ annotatorId: 'principal-test' }),
+      }),
+    )
+  })
+
+  it('saves the whole episode through Ctrl+S', async () => {
+    testState.hasAnnotationChanges = true
+    testState.episodeLabels = { 0: ['FAILURE'] }
+    render(<AnnotationWorkspace />)
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    })
+    expect(mockSaveAnnotation).toHaveBeenCalledOnce()
+    expect(mockSaveEpisodeLabels).toHaveBeenCalledOnce()
+  })
+
+  it('retains partial failures and retries only the remaining resource', async () => {
+    testState.hasAnnotationChanges = true
+    testState.episodeLabels = { 0: ['FAILURE'] }
+    mockSaveAnnotation.mockRejectedValueOnce(new Error('Forbidden'))
+    const { rerender } = render(<AnnotationWorkspace />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^save episode$/i }))
+    })
+    expect(screen.getByRole('status')).toHaveTextContent(/some episode changes could not be saved/i)
+    expect(testState.savedEpisodeLabels[0]).toEqual(['FAILURE'])
+    mockSaveAnnotation.mockImplementationOnce(async () => {
+      testState.hasAnnotationChanges = false
+    })
+    rerender(<AnnotationWorkspace />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^save episode$/i }))
+    })
+    expect(mockSaveEpisodeLabels).toHaveBeenCalledOnce()
+    expect(mockSaveAnnotation).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('status')).toHaveTextContent(/episode changes saved/i)
+  })
+
+  it('keeps edits made during Save dirty and excludes duplicate submissions', async () => {
+    testState.episodeLabels = { 0: ['FAILURE'] }
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    mockSaveEpisodeLabels.mockImplementationOnce(async ({ labels }: { labels: string[] }) => {
+      await pending
+      testState.savedEpisodeLabels = { 0: labels }
+    })
+    const { rerender } = render(<AnnotationWorkspace />)
+    const saveButton = screen.getByRole('button', { name: /^save episode$/i })
+    saveButton.focus()
+    await act(async () => {
+      fireEvent.click(saveButton)
+      fireEvent.click(saveButton)
+    })
+    expect(saveButton).not.toBeDisabled()
+    expect(saveButton).toHaveAttribute('aria-disabled', 'true')
+    expect(saveButton).toHaveAttribute('aria-busy', 'true')
+    expect(saveButton).toHaveFocus()
+    expect(mockSaveEpisodeLabels).toHaveBeenCalledOnce()
+    testState.episodeLabels = { 0: ['PARTIAL'] }
+    rerender(<AnnotationWorkspace />)
+    await act(async () => {
+      finish()
+      await pending
+    })
+    expect(screen.getByRole('status')).toHaveTextContent(/unsaved episode changes/i)
+    expect(testState.episodeLabels[0]).toEqual(['PARTIAL'])
+    expect(testState.savedEpisodeLabels[0]).toEqual(['FAILURE'])
+  })
+
+  it('offers separate Save and Next actions without saving when Next is selected', async () => {
+    const next = vi.fn()
+    render(<AnnotationWorkspace canGoNextEpisode onNextEpisode={next} />)
+    expect(screen.getByRole('button', { name: /^save episode$/i })).toBeEnabled()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^next episode$/i }))
+    })
+    expect(next).toHaveBeenCalledOnce()
+    expect(mockSaveEpisodeLabels).not.toHaveBeenCalled()
+  })
+
+  it('announces saved-edit load errors without hiding the current workspace', () => {
+    testState.editPersistenceError = 'Saved edits could not be loaded.'
+    render(<AnnotationWorkspace />)
+    expect(screen.getByRole('alert')).toHaveTextContent('Saved edits could not be loaded.')
+    expect(screen.getByRole('heading', { name: /episode 0/i })).toBeVisible()
+  })
+
+  it.each(['keep', 'discard'] as const)(
+    'lets the user %s recovered edits based on an older saved version',
+    (choice) => {
+      const resolve = vi.fn()
+      testState.editPersistenceError = 'Recovered edits are based on an older saved version.'
+      testState.resolveRecoveredEdits = resolve
+      render(<AnnotationWorkspace />)
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: choice === 'keep' ? 'Keep recovered edits' : 'Discard recovered edits',
+        }),
+      )
+      expect(resolve).toHaveBeenCalledWith(choice)
+    },
+  )
 
   it('keeps the save status hidden until a save occurs', () => {
     render(<AnnotationWorkspace />)
@@ -39,7 +183,7 @@ describe('AnnotationWorkspace status and header actions', () => {
     expect(mockSaveEpisodeLabels).not.toHaveBeenCalled()
   })
 
-  it('shows a saved message after Save & Next Episode and hides it after a short delay', async () => {
+  it('shows a saved message after standalone Save and hides it after a short delay', async () => {
     const handleSaveAndNextEpisode = vi.fn()
     const { rerender } = render(
       <AnnotationWorkspace canGoNextEpisode onSaveAndNextEpisode={handleSaveAndNextEpisode} />,
@@ -51,7 +195,7 @@ describe('AnnotationWorkspace status and header actions', () => {
     )
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save\s*&\s*next episode/i }))
+      fireEvent.click(screen.getByRole('button', { name: /^save episode$/i }))
       await Promise.resolve()
     })
 
@@ -64,30 +208,29 @@ describe('AnnotationWorkspace status and header actions', () => {
     expect(screen.queryByText(/episode changes saved/i)).not.toBeInTheDocument()
   })
 
-  it('does not show stale unsaved episode changes after Save & Next Episode advances to the next episode', async () => {
+  it('does not show stale unsaved changes after saving and separately navigating', async () => {
     const handleSaveAndNextEpisode = vi.fn(() => {
       testState.episodeIndex = 1
       testState.episodeLabels = { ...testState.episodeLabels, 1: [] }
       testState.savedEpisodeLabels = { ...testState.savedEpisodeLabels, 1: [] }
     })
     const { rerender } = render(
-      <AnnotationWorkspace canGoNextEpisode onSaveAndNextEpisode={handleSaveAndNextEpisode} />,
+      <AnnotationWorkspace canGoNextEpisode onNextEpisode={handleSaveAndNextEpisode} />,
     )
 
     testState.episodeLabels = { 0: ['FAILURE'], 1: [] }
     testState.savedEpisodeLabels = { 0: ['SUCCESS'], 1: [] }
-    rerender(
-      <AnnotationWorkspace canGoNextEpisode onSaveAndNextEpisode={handleSaveAndNextEpisode} />,
-    )
+    rerender(<AnnotationWorkspace canGoNextEpisode onNextEpisode={handleSaveAndNextEpisode} />)
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save\s*&\s*next episode/i }))
+      fireEvent.click(screen.getByRole('button', { name: /^save episode$/i }))
       await Promise.resolve()
     })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^next episode$/i }))
+    })
 
-    rerender(
-      <AnnotationWorkspace canGoNextEpisode onSaveAndNextEpisode={handleSaveAndNextEpisode} />,
-    )
+    rerender(<AnnotationWorkspace canGoNextEpisode onNextEpisode={handleSaveAndNextEpisode} />)
     expect(screen.queryByText(/unsaved episode changes/i)).not.toBeInTheDocument()
   })
 
@@ -154,7 +297,7 @@ describe('AnnotationWorkspace status and header actions', () => {
     expect(handlePreviousEpisode).toHaveBeenCalledTimes(1)
   })
 
-  it('renders a Save & Next Episode action in the workspace header when navigation is available', async () => {
+  it('renders standalone Save even when navigation is available', async () => {
     const handleSaveAndNextEpisode = vi.fn()
 
     render(<AnnotationWorkspace canGoNextEpisode onSaveAndNextEpisode={handleSaveAndNextEpisode} />)
@@ -162,7 +305,7 @@ describe('AnnotationWorkspace status and header actions', () => {
     const saveAndNextButton = within(screen.getByTestId('workspace-header-actions')).getByRole(
       'button',
       {
-        name: /save\s*&\s*next episode/i,
+        name: /^save episode$/i,
       },
     )
 
@@ -173,10 +316,10 @@ describe('AnnotationWorkspace status and header actions', () => {
       await Promise.resolve()
     })
 
-    expect(handleSaveAndNextEpisode).toHaveBeenCalledTimes(1)
+    expect(handleSaveAndNextEpisode).not.toHaveBeenCalled()
   })
 
-  it('saves labels and advances when Save & Next Episode is clicked', async () => {
+  it('saves labels without advancing when standalone Save is clicked', async () => {
     const handleSaveAndNextEpisode = vi.fn()
     const { rerender } = render(
       <AnnotationWorkspace canGoNextEpisode onSaveAndNextEpisode={handleSaveAndNextEpisode} />,
@@ -188,12 +331,12 @@ describe('AnnotationWorkspace status and header actions', () => {
     )
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save\s*&\s*next episode/i }))
+      fireEvent.click(screen.getByRole('button', { name: /^save episode$/i }))
       await Promise.resolve()
     })
 
     expect(mockSaveEpisodeLabels).toHaveBeenCalledWith({ episodeIdx: 0, labels: ['FAILURE'] })
-    expect(handleSaveAndNextEpisode).toHaveBeenCalledTimes(1)
+    expect(handleSaveAndNextEpisode).not.toHaveBeenCalled()
   })
 
   it('saves labels on the final episode without advancing', async () => {
@@ -228,7 +371,7 @@ describe('AnnotationWorkspace status and header actions', () => {
     await act(async () => {
       fireEvent.click(
         within(screen.getByTestId('workspace-header-actions')).getByRole('button', {
-          name: /^reset all$/i,
+          name: /^discard changes$/i,
         }),
       )
       await Promise.resolve()

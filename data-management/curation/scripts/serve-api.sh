@@ -27,10 +27,13 @@ OPTIONS:
 ENV:
     VLM_JUDGE_BACKEND, VLM_JUDGE_MODEL_ID, VLM_JUDGE_BASE_URL,
     VLM_JUDGE_API_KEY, VLM_JUDGE_N_FRAMES, VLM_JUDGE_CACHE_DIR,
-    VLM_JUDGE_MODEL_REVISION, VLM_JUDGE_MEDIA_ROOT,
+    VLM_JUDGE_MODEL_REVISION, VLM_JUDGE_DATASETS,
+    VLM_JUDGE_LOCAL_ACTOR, VLM_JUDGE_JOB_DIR,
     VLM_JUDGE_ALLOW_UNAUTHENTICATED=true (trusted local host only).
 
-  Judging is disabled without explicit local opt-in and a narrow media root.
+  Judging requires explicit local opt-in, a JSON dataset ID-to-root map,
+  a local actor and a durable job directory. Dataset roots must be confined
+  directories narrower than the filesystem root.
   Proxies, tunnels, port forwarding and shared-host exposure are unsupported.
 
 EXAMPLES:
@@ -81,7 +84,7 @@ print_kv "Model"      "$model_id"
 print_kv "Base URL"   "${base_url:-(n/a)}"
 print_kv "Reload"     "$reload"
 
-cmd=(python3 -m uvicorn evaluation.vlm_judge.api:app --host "$host" --port "$port" --no-proxy-headers)
+cmd=(python3 -m uvicorn physical_ai_curation.api:app --host "$host" --port "$port" --no-proxy-headers)
 [[ "$reload" == "true" ]] && cmd+=(--reload)
 print_kv "Command" "${cmd[*]}"
 

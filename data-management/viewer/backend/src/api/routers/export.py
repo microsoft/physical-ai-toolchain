@@ -200,7 +200,7 @@ def _latest_instruction(annotation_file: EpisodeAnnotationFile | None) -> Langua
     return LanguageInstruction(
         language.instruction,
         tuple(language.paraphrases),
-        tuple(language.subtask_instructions),
+        tuple(instruction.text for instruction in language.subtask_instructions),
         latest.annotator_id,
         latest.timestamp.isoformat(),
     )
