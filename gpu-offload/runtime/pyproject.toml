@@ -9,9 +9,9 @@ description = "Xavier remoter runtime with safe MessagePack wire codec"
 requires-python = ">=3.12"
 dependencies = [
     "cryptography==50.0.2",
-    "filelock==3.20.3",
+    "filelock==4.0.11",
     "flask==3.1.3",
-    "kubernetes==35.0.0",
+    "kubernetes==36.0.3",
     "msgpack==1.2.3",
     "pyyaml==6.0.3",
     "requests==2.34.2",
