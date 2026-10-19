@@ -11,13 +11,13 @@ Read the skill file `.github/skills/osmo-lerobot-training/SKILL.md` for paramete
 
 ## Prerequisites
 
-| Requirement | Purpose |
-|-------------|---------|
-| `osmo` CLI | Workflow submission and monitoring |
-| `az` CLI | Azure authentication and model registry |
-| `terraform` | Infrastructure output resolution |
-| `zip` | Training payload packaging |
-| Python 3.12+ with `azure-ai-ml`, `mlflow` | Metric retrieval from Azure ML |
+| Requirement                               | Purpose                                 |
+|-------------------------------------------|-----------------------------------------|
+| `osmo` CLI                                | Workflow submission and monitoring      |
+| `az` CLI                                  | Azure authentication and model registry |
+| `terraform`                               | Infrastructure output resolution        |
+| `zip`                                     | Training payload packaging              |
+| Python 3.12+ with `azure-ai-ml`, `mlflow` | Metric retrieval from Azure ML          |
 
 Authentication must be configured before any OSMO or Azure ML operations:
 
@@ -186,77 +186,77 @@ While the background eval poller is running, monitor the poller log and navigate
 
 ### Training Submission Parameters
 
-| Parameter | Flag | Default | Description |
-|-----------|------|---------|-------------|
-| Dataset repo ID | `-d`, `--dataset` | (required) | HuggingFace dataset or blob dataset name |
-| Policy type | `-p`, `--policy` | `act` | `act` or `diffusion` |
-| Job name | `-j`, `--job-name` | `lerobot-act-training` | Unique job identifier |
-| Training steps | `--steps` | `100000` | Total training iterations |
-| Batch size | `--batch-size` | `32` | Training batch size (64 for 48GB GPUs) |
-| Learning rate | `--learning-rate` | `1e-4` | Maps to `--policy.optimizer_lr` internally |
-| Save frequency | `--save-freq` | `5000` | Checkpoint interval (model registered at each) |
-| Validation split | `--val-split` | `0.1` | Ratio for train/val split |
-| No val split | `--no-val-split` | — | Disable validation splitting |
-| Register checkpoint | `-r` | (none) | Model name for Azure ML registration |
-| From blob | `--from-blob` | `false` | Use Azure Blob Storage as data source |
-| Storage account | `--storage-account` | (terraform) | Azure Storage account name |
-| Blob prefix | `--blob-prefix` | (none) | Blob path prefix for dataset |
+| Parameter           | Flag                | Default                | Description                                    |
+|---------------------|---------------------|------------------------|------------------------------------------------|
+| Dataset repo ID     | `-d`, `--dataset`   | (required)             | HuggingFace dataset or blob dataset name       |
+| Policy type         | `-p`, `--policy`    | `act`                  | `act` or `diffusion`                           |
+| Job name            | `-j`, `--job-name`  | `lerobot-act-training` | Unique job identifier                          |
+| Training steps      | `--steps`           | `100000`               | Total training iterations                      |
+| Batch size          | `--batch-size`      | `32`                   | Training batch size (64 for 48GB GPUs)         |
+| Learning rate       | `--learning-rate`   | `1e-4`                 | Maps to `--policy.optimizer_lr` internally     |
+| Save frequency      | `--save-freq`       | `5000`                 | Checkpoint interval (model registered at each) |
+| Validation split    | `--val-split`       | `0.1`                  | Ratio for train/val split                      |
+| No val split        | `--no-val-split`    | —                      | Disable validation splitting                   |
+| Register checkpoint | `-r`                | (none)                 | Model name for Azure ML registration           |
+| From blob           | `--from-blob`       | `false`                | Use Azure Blob Storage as data source          |
+| Storage account     | `--storage-account` | (terraform)            | Azure Storage account name                     |
+| Blob prefix         | `--blob-prefix`     | (none)                 | Blob path prefix for dataset                   |
 
 ### Inference Submission Parameters
 
-| Parameter | Flag | Default | Description |
-|-----------|------|---------|-------------|
-| Policy repo ID | `--policy-repo-id` | (required) | HuggingFace repo, or use `--from-aml-model` |
-| From AML model | `--from-aml-model` | `false` | Load from AzureML model registry |
-| Model name | `--model-name` | (none) | AzureML model registry name |
-| Model version | `--model-version` | (none) | AzureML model version |
-| Dataset repo ID | `-d`, `--dataset-repo-id` | (none) | HuggingFace dataset |
-| From blob dataset | `--from-blob-dataset` | `false` | Download dataset from Azure Blob |
-| Eval episodes | `--eval-episodes` | `10` | Number of episodes to evaluate |
-| MLflow enable | `--mlflow-enable` | `false` | Log trajectory plots to AzureML |
+| Parameter         | Flag                      | Default    | Description                                 |
+|-------------------|---------------------------|------------|---------------------------------------------|
+| Policy repo ID    | `--policy-repo-id`        | (required) | HuggingFace repo, or use `--from-aml-model` |
+| From AML model    | `--from-aml-model`        | `false`    | Load from AzureML model registry            |
+| Model name        | `--model-name`            | (none)     | AzureML model registry name                 |
+| Model version     | `--model-version`         | (none)     | AzureML model version                       |
+| Dataset repo ID   | `-d`, `--dataset-repo-id` | (none)     | HuggingFace dataset                         |
+| From blob dataset | `--from-blob-dataset`     | `false`    | Download dataset from Azure Blob            |
+| Eval episodes     | `--eval-episodes`         | `10`       | Number of episodes to evaluate              |
+| MLflow enable     | `--mlflow-enable`         | `false`    | Log trajectory plots to AzureML             |
 
 ### Continuous Evaluation Parameters (`poll-and-eval-checkpoints.sh`)
 
-| Parameter | Flag | Default | Description |
-|-----------|------|---------|-------------|
-| Model name | `--model-name` | (required) | AzureML model registry name to watch |
-| Training workflow | `--training-workflow-id` | (required) | OSMO workflow ID of the training job |
-| Blob prefix | `--blob-prefix` | (required) | Blob path prefix for the evaluation dataset |
-| Storage account | `--storage-account` | (from .env) | Azure Storage account |
-| Eval episodes | `--eval-episodes` | `10` | Episodes per inference run |
-| Job prefix | `--job-prefix` | (from model name) | Prefix for inference job names |
-| Experiment name | `--experiment-name` | (from model name) | MLflow experiment for inference runs |
-| Poll interval | `--poll-interval` | `60` | Seconds between AzureML registry polls |
-| Max concurrent | `--max-concurrent` | `2` | Max simultaneous inference workflows |
+| Parameter         | Flag                     | Default           | Description                                 |
+|-------------------|--------------------------|-------------------|---------------------------------------------|
+| Model name        | `--model-name`           | (required)        | AzureML model registry name to watch        |
+| Training workflow | `--training-workflow-id` | (required)        | OSMO workflow ID of the training job        |
+| Blob prefix       | `--blob-prefix`          | (required)        | Blob path prefix for the evaluation dataset |
+| Storage account   | `--storage-account`      | (from .env)       | Azure Storage account                       |
+| Eval episodes     | `--eval-episodes`        | `10`              | Episodes per inference run                  |
+| Job prefix        | `--job-prefix`           | (from model name) | Prefix for inference job names              |
+| Experiment name   | `--experiment-name`      | (from model name) | MLflow experiment for inference runs        |
+| Poll interval     | `--poll-interval`        | `60`              | Seconds between AzureML registry polls      |
+| Max concurrent    | `--max-concurrent`       | `2`               | Max simultaneous inference workflows        |
 
 ### GPU Configuration Guidelines
 
-| GPU | VRAM | Recommended Batch Size | Notes |
-|-----|------|----------------------|-------|
-| A10 | 24GB | 32 | Standard configuration |
-| RTX PRO 6000 | 96GB (whole GPU) | 64 | Requires `mig.strategy: single`; fractional sizes have 48GB or 24GB |
-| H100 | 80GB | 128 | Standard MIG disabled |
+| GPU          | VRAM             | Recommended Batch Size | Notes                                                               |
+|--------------|------------------|------------------------|---------------------------------------------------------------------|
+| A10          | 24GB             | 32                     | Standard configuration                                              |
+| RTX PRO 6000 | 96GB (whole GPU) | 64                     | Requires `mig.strategy: single`; fractional sizes have 48GB or 24GB |
+| H100         | 80GB             | 128                    | Standard MIG disabled                                               |
 
 ### Azure ML Context
 
 Resolved from CLI flags > environment variables > Terraform outputs:
 
-| Variable | Flag | Env Var |
-|----------|------|---------|
-| Subscription ID | `--azure-subscription-id` | `AZURE_SUBSCRIPTION_ID` |
-| Resource group | `--azure-resource-group` | `AZURE_RESOURCE_GROUP` |
-| Workspace name | `--azure-workspace-name` | `AZUREML_WORKSPACE_NAME` |
+| Variable        | Flag                      | Env Var                  |
+|-----------------|---------------------------|--------------------------|
+| Subscription ID | `--azure-subscription-id` | `AZURE_SUBSCRIPTION_ID`  |
+| Resource group  | `--azure-resource-group`  | `AZURE_RESOURCE_GROUP`   |
+| Workspace name  | `--azure-workspace-name`  | `AZUREML_WORKSPACE_NAME` |
 
 ## Training Completion Estimation
 
 Estimate training duration based on dataset and configuration:
 
-| Dataset Size | Steps | GPU | Approximate Duration |
-|-------------|-------|-----|---------------------|
-| 20K frames / 64 episodes | 10,000 | A10 | ~30 minutes |
-| 20K frames / 64 episodes | 100,000 | A10 | ~5 hours |
-| 80K frames / 174 episodes | 100,000 | A10 | ~8 hours |
-| 20K frames / 64 episodes | 100,000 | RTX PRO 6000 | ~3 hours |
+| Dataset Size              | Steps   | GPU          | Approximate Duration |
+|---------------------------|---------|--------------|----------------------|
+| 20K frames / 64 episodes  | 10,000  | A10          | ~30 minutes          |
+| 20K frames / 64 episodes  | 100,000 | A10          | ~5 hours             |
+| 80K frames / 174 episodes | 100,000 | A10          | ~8 hours             |
+| 20K frames / 64 episodes  | 100,000 | RTX PRO 6000 | ~3 hours             |
 
 Checkpoints are registered to AzureML at every `--save-freq` interval. Jobs may be evicted on spot GPU instances — checkpoints already registered remain available for inference even if the job is interrupted.
 
@@ -294,29 +294,29 @@ pkill -f poll-and-eval-checkpoints
 
 ## Key Metrics Logged
 
-| Metric | Description |
-|--------|-------------|
-| `train/loss` | Training loss per step |
-| `train/grad_norm` | Gradient norm |
+| Metric                | Description                                      |
+|-----------------------|--------------------------------------------------|
+| `train/loss`          | Training loss per step                           |
+| `train/grad_norm`     | Gradient norm                                    |
 | `train/learning_rate` | Current learning rate (verify `1e-4` not `1e-5`) |
-| `val/loss` | Validation loss (when val split enabled) |
-| `gpu_percent` | GPU utilization (when system metrics enabled) |
+| `val/loss`            | Validation loss (when val split enabled)         |
+| `gpu_percent`         | GPU utilization (when system metrics enabled)    |
 
 ## Troubleshooting
 
-| Symptom | Likely Cause | Resolution |
-|---------|-------------|------------|
-| `lr: 1e-05` in logs | `LEARNING_RATE` not mapped | Verify `train.py` maps to `--policy.optimizer_lr` |
-| `KeyError: chunk_index` | v3.0 dataset not converted | Verify `download_dataset.py` has `patch_info_paths()` |
-| `codebase_version` warning | Dataset still marked v3.0 | Verify `patch_info_paths()` sets `codebase_version = "v2.1"` |
-| `CUDA_ERROR_NO_DEVICE` | MIG strategy misconfigured | Set `mig.strategy: single` for vGPU nodes |
-| VM eviction mid-training | Spot GPU preempted | Checkpoints already registered to AML survive eviction |
-| `ImportError: patch_info_paths` | Payload missing training fixes | Ensure `training/il/` includes `download_dataset.py` with `patch_info_paths` |
-| OOM during training | Batch size too large | Reduce `--batch-size` (32 for 24GB, 64 for 48GB) |
-| Poller exits immediately | Training workflow already terminal | Check `osmo workflow query <id>`; rerun poller or submit inference manually |
-| Poller stalls at max-concurrent | Inference jobs not finishing | Check inference workflow status; increase `--max-concurrent` or cancel stuck jobs |
+| Symptom                                           | Likely Cause                                          | Resolution                                                                                                                                                                           |
+|---------------------------------------------------|-------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `lr: 1e-05` in logs                               | `LEARNING_RATE` not mapped                            | Verify `train.py` maps to `--policy.optimizer_lr`                                                                                                                                    |
+| `KeyError: chunk_index`                           | v3.0 dataset not converted                            | Verify `download_dataset.py` has `patch_info_paths()`                                                                                                                                |
+| `codebase_version` warning                        | Dataset still marked v3.0                             | Verify `patch_info_paths()` sets `codebase_version = "v2.1"`                                                                                                                         |
+| `CUDA_ERROR_NO_DEVICE`                            | MIG strategy misconfigured                            | Set `mig.strategy: single` for vGPU nodes                                                                                                                                            |
+| VM eviction mid-training                          | Spot GPU preempted                                    | Checkpoints already registered to AML survive eviction                                                                                                                               |
+| `ImportError: patch_info_paths`                   | Payload missing training fixes                        | Ensure `training/il/` includes `download_dataset.py` with `patch_info_paths`                                                                                                         |
+| OOM during training                               | Batch size too large                                  | Reduce `--batch-size` (32 for 24GB, 64 for 48GB)                                                                                                                                     |
+| Poller exits immediately                          | Training workflow already terminal                    | Check `osmo workflow query <id>`; rerun poller or submit inference manually                                                                                                          |
+| Poller stalls at max-concurrent                   | Inference jobs not finishing                          | Check inference workflow status; increase `--max-concurrent` or cancel stuck jobs                                                                                                    |
 | Many pending inference jobs after stopping poller | Poller submitted jobs faster than cluster could drain | `osmo workflow list` only returns the last 12 — iterate over expected ID range to cancel all: `for id in $(seq <first> <last>); do osmo workflow cancel lerobot-inference-$id; done` |
-| `info: command not found` in poller | `common.sh` not sourced | Verify `scripts/lib/common.sh` exists and is readable |
+| `info: command not found` in poller               | `common.sh` not sourced                               | Verify `scripts/lib/common.sh` exists and is readable                                                                                                                                |
 
 See [references/REFERENCE.md](references/REFERENCE.md) for detailed debugging commands.
 

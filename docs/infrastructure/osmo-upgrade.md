@@ -2,7 +2,7 @@
 title: OSMO Upgrade from Pre-6.3 Releases
 description: Staged upgrade of a pre-6.3 OSMO control plane to OSMO 6.3 in ConfigMap mode, with backups and rollback
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-01
+ms.date: 2026-10-08
 ms.topic: how-to
 keywords:
   - osmo
@@ -72,6 +72,7 @@ NVIDIA's migrations expect a 6.0 release schema. A pre-release build can differ,
 Review `<bundle>/osmo-platforms.yaml` before you continue:
 
 - The values replace the database config. Add or remove pools, platforms, and pod templates to match the node pools you run.
+- The export keeps the database's resource validations. Rules that use `{{K8_CPU}}`, `{{K8_MEMORY}}`, or `{{K8_STORAGE}}` reject workflows for a pool with no nodes. On pools that scale from zero, replace them with the static rules in `osmo-control-plane.yaml`, and select each pool by `agentpool` in its pod template. See [Scale-from-zero GPU Pools](../training/osmo-training.md#-scale-from-zero-gpu-pools).
 - Create a Kubernetes Secret in `osmo-control-plane` for each secret reference that `export` reports, or remove the settings that use it.
 - The pinned exporter copies secrets that the API masks, such as storage `access_key`, `backend_images.credential.auth`, and alert tokens, as literal asterisks. ConfigMap mode would load them as real values. Remove those settings or replace them with secret references; with workload identity, storage credentials need only `endpoint`. `export` lists them, and `hop-6.3` refuses values that still contain them.
 - The 6.3 chart's default pool sets `common_pod_template`. Check that the `default` pool keeps the templates you intend.

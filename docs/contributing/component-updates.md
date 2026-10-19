@@ -3,7 +3,7 @@ sidebar_position: 12
 title: Updating External Components
 description: Process for identifying, updating, and vetting reused externally-maintained components
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-05
+ms.date: 2026-10-07
 ms.topic: how-to
 keywords:
   - component-updates
@@ -18,18 +18,18 @@ For quick dependency commands, see the [Component Updates](pull-request-process.
 
 ## Component Inventory
 
-| Component                 | Source    | Version Location                                               | Current Version   | Update Method        |
-|---------------------------|-----------|----------------------------------------------------------------|-------------------|----------------------|
-| NVIDIA GPU Operator       | Helm      | `infrastructure/setup/defaults.conf` → `GPU_OPERATOR_VERSION`  | v26.3.2           | Manual               |
-| KAI Scheduler             | Helm      | `infrastructure/setup/defaults.conf` → `KAI_SCHEDULER_VERSION` | v0.20.1           | Manual               |
-| OSMO Chart                | Helm      | `infrastructure/setup/defaults.conf` → `OSMO_CHART_VERSION`    | 1.3.1             | Manual               |
-| OSMO Image                | Container | `infrastructure/setup/defaults.conf` → `OSMO_IMAGE_VERSION`    | 6.3.1             | Manual               |
-| AzureML K8s Extension     | Azure CLI | `02-deploy-azureml-extension.sh` → `--release-train stable`    | Latest stable     | Automatic            |
-| Isaac Lab                 | Container | Shared default plus direct-workflow fallbacks                  | 3.0.0-beta2-post1 | Image digest updater |
-| ORAS                      | Binary    | `scripts/security/tool-checksums.json`                         | 1.2.0             | Manual               |
-| Azure Terraform Providers | Terraform | `versions.tf` across 4 deployment directories                  | Floor-pinned      | Dependabot           |
-| Python Packages           | uv        | `pyproject.toml`, `uv.lock`                                    | Mixed             | Dependabot           |
-| GitHub Actions            | GitHub    | Workflow YAML (18 files)                                       | SHA-pinned        | Dependabot           |
+| Component                 | Source    | Version Location                                                   | Current Version   | Update Method                            |
+|---------------------------|-----------|--------------------------------------------------------------------|-------------------|------------------------------------------|
+| NVIDIA GPU Operator       | Helm      | `infrastructure/setup/defaults.conf` → `GPU_OPERATOR_VERSION`      | v26.3.2           | Manual                                   |
+| KAI Scheduler             | Helm      | `infrastructure/setup/defaults.conf` → `KAI_SCHEDULER_VERSION`     | v0.14.9           | Manual, with the OSMO pin                |
+| OSMO Chart                | Helm      | `infrastructure/setup/defaults.conf` → `OSMO_CHART_VERSION`        | 1.3.1             | Manual                                   |
+| OSMO Image                | Container | `infrastructure/setup/defaults.conf` → `OSMO_IMAGE_VERSION`        | 6.3.1             | Manual                                   |
+| AzureML K8s Extension     | Azure CLI | `02-deploy-azureml-extension.sh` → `--release-train stable`        | Latest stable     | Automatic                                |
+| Isaac Lab                 | Container | Shared default plus direct-workflow fallbacks                      | 3.0.0-beta2-post1 | Image digest updater                     |
+| ORAS                      | Binary    | `scripts/security/tool-checksums.json`                             | 1.2.0             | Manual                                   |
+| Azure Terraform Providers | Terraform | `versions.tf` in 4 deployment directories and 6 module directories | Floor-pinned      | Dependabot (deployment directories only) |
+| Python Packages           | uv        | `pyproject.toml`, `uv.lock`                                        | Mixed             | Dependabot                               |
+| GitHub Actions            | GitHub    | Workflow YAML (18 files)                                           | SHA-pinned        | Dependabot                               |
 
 > [!IMPORTANT]
 > Isaac Lab defaults to `DEFAULT_ISAAC_LAB_IMAGE` in `scripts/lib/common.sh`. Direct OSMO workflow fallbacks repeat the digest-pinned reference and must stay synchronized.
@@ -76,10 +76,10 @@ Version updates use a seven-day cooldown, with a fourteen-day major-version cool
 
 Grouping reduces PR overhead; it does not waive CI or workload-specific validation. Development dependencies can affect generated assets and test servers. Review every changed manifest and lockfile, not only the PR title. Existing open PRs may be superseded as Dependabot reevaluates the configuration after it reaches the default branch; this change does not merge or approve them.
 
-PR flow: Dependabot opens PR → CI runs → maintainer optionally requests an advisory review → maintainer reviews changelog and test results → merge.
+PR flow: Dependabot opens a PR → CI runs the checks its paths select → a maintainer runs the [verification categories](dependabot-verification.md) the PR touches, including Azure ML GPU checks for training runtimes → a maintainer optionally requests an advisory review with `/aw-dependabot-review` → the maintainer reviews the changelog and test results → merge.
 
 > [!NOTE]
-> Dependabot covers only the configured Dockerfile directories, not every container reference. Helm charts and image references in workflow YAML or shell defaults still require manual updates.
+> Dependabot covers only the configured Dockerfile directories, not every container reference. Helm charts, image references in workflow YAML or shell defaults, and the Terraform module directories under `infrastructure/terraform/modules/` still require manual updates.
 
 ### Advisory Reviewer Agent
 
@@ -176,11 +176,11 @@ tracks Dockerfiles, so these tag-plus-digest references are bumped manually.
 
 ### Terraform Providers
 
-Dependabot coordinates patch/minor provider updates across all four deployment directories. For grouped or manual provider updates:
+Dependabot coordinates patch/minor provider updates across the four deployment directories (the `root`, `dns`, `vpn`, and `automation` stacks). It does not update the module directories under `infrastructure/terraform/modules/`. For grouped, module, or manual provider updates:
 
-1. Review provider release notes and identify each affected deployment directory
-2. Run `terraform init -upgrade` in each affected directory
-3. Review `terraform plan -var-file=terraform.tfvars` in each configured environment for unexpected changes
+1. Review provider release notes and identify each affected stack, including every stack that uses a changed module
+2. Update the provider constraint in each changed module's `versions.tf`, or run `terraform init -upgrade` in each affected deployment directory
+3. Commit the change, then run `infrastructure/terraform/scripts/compare-plans.sh --stack <stack>` for each affected stack in each configured environment; it plans the base and head refs read-only against the deployed state and reports only changed resources
 4. Include provider changelog references and plan results in the PR
 
 ## Vetting Criteria
@@ -216,6 +216,8 @@ These workflows validate dependency update PRs automatically.
 | `codeql-analysis.yml`         | Static analysis for code + workflows | Repository-wide    |
 | `scorecard.yml`               | OpenSSF Scorecard assessment         | Repository-wide    |
 | `uv-lock-consistency.yml`     | Fail on `uv.lock`/manifest drift     | Python lockfiles   |
+
+CI has no GPU nodes and no access to deployed environments. [Verifying Dependabot Updates](dependabot-verification.md) lists the checks for each category, including the Azure ML GPU checks to run before merging updates to training runtimes.
 
 ## Security-Critical Updates
 

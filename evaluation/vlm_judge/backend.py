@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -58,9 +60,9 @@ class Qwen3VLBackend(JudgeBackend):
     Defaults to ``Qwen/Qwen3-VL-4B-Instruct`` which fits on a 24GB GPU in
     bf16. Larger variants (``8B``, ``30B-A3B``) work the same way; pass the
     model id via ``model_id`` and adjust ``dtype`` / ``device_map`` as needed.
-    Pass ``revision`` (an immutable commit SHA) to pin the Hub download for
-    reproducible, tamper-evident judging; ``None`` resolves the mutable default
-    branch.
+    Hub models require ``revision`` as a full commit SHA. Explicit absolute,
+    ``./`` or ``../`` directories load offline without a revision. Repository
+    Python code is never enabled.
     """
 
     def __init__(
@@ -71,8 +73,27 @@ class Qwen3VLBackend(JudgeBackend):
         device_map: str = "auto",
         dtype: str = "bfloat16",
         attn_implementation: str | None = "sdpa",
-        trust_remote_code: bool = True,
+        trust_remote_code: bool = False,
     ) -> None:
+        if trust_remote_code:
+            raise ValueError("trust_remote_code=True is unsupported; use a native model implementation")
+        local_files_only = Path(model_id).is_absolute() or model_id.startswith(("./", "../"))
+        if local_files_only:
+            directory = Path(model_id).resolve()
+            if not directory.is_dir():
+                raise ValueError("Explicit model directory must exist; no Hub fallback is allowed")
+            if revision is not None:
+                raise ValueError("Omit revision for a local model directory; a Hub pin cannot verify local artifacts")
+            model_id = str(directory)
+        else:
+            if revision is None or re.fullmatch(r"[0-9a-fA-F]{40}", revision) is None:
+                raise ValueError("Hub model revision must be a full 40-hex commit SHA")
+            if Path(model_id).exists():
+                raise ValueError(
+                    "Hub ID shadows a local path; use an explicit ./ directory or a different working directory"
+                )
+            revision = revision.lower()
+
         import torch
         from transformers import AutoProcessor
 
@@ -83,6 +104,7 @@ class Qwen3VLBackend(JudgeBackend):
             model_id,
             revision=revision,
             trust_remote_code=trust_remote_code,
+            local_files_only=local_files_only,
         )
         self._model = _load_qwen3_vl_model(
             model_id=model_id,
@@ -91,6 +113,7 @@ class Qwen3VLBackend(JudgeBackend):
             dtype=self._dtype,
             attn_implementation=attn_implementation,
             trust_remote_code=trust_remote_code,
+            local_files_only=local_files_only,
         )
         self._model.eval()
 
@@ -150,10 +173,11 @@ def _load_qwen3_vl_model(
     model_id: str,
     revision: str | None,
     device_map: str,
-    dtype,
+    dtype: Any,
     attn_implementation: str | None,
     trust_remote_code: bool,
-):
+    local_files_only: bool,
+) -> Any:
     """Resolve the correct Qwen3-VL model class against the installed transformers."""
     import transformers
 
@@ -176,6 +200,7 @@ def _load_qwen3_vl_model(
                 device_map=device_map,
                 attn_implementation=attn_implementation,
                 trust_remote_code=trust_remote_code,
+                local_files_only=local_files_only,
             )
         except Exception as err:
             last_err = err

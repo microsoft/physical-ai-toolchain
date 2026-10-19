@@ -30,6 +30,11 @@ OPTIONS:
     --job-name NAME              Azure ML job name
     --experiment-name NAME       Azure ML experiment name (default: osmo-proxy)
     --output-url URL             Durable azure:// workflow output URL
+    --subscription-id ID         Azure subscription (default: AZURE_SUBSCRIPTION_ID or az account)
+    --resource-group NAME        Resource group (default: AZURE_RESOURCE_GROUP or Terraform)
+    --workspace-name NAME        Azure ML workspace (default: AZUREML_WORKSPACE_NAME or Terraform)
+    --compute NAME               AKS-attached Azure ML compute (default: AZUREML_COMPUTE_NAME,
+                                 derived from AKS_CLUSTER_NAME, or Terraform)
     --config-preview             Print configuration and exit
 
 ENVIRONMENT VARIABLES:
@@ -54,6 +59,10 @@ workflow_yaml="workflows/osmo/smoke-test-proxy-e2e.yaml"
 job_name=""
 experiment_name="osmo-proxy"
 output_url=""
+subscription_id=""
+resource_group=""
+workspace_name=""
+compute_name=""
 config_preview=false
 
 #------------------------------------------------------------------------------
@@ -67,6 +76,10 @@ while [[ $# -gt 0 ]]; do
     --job-name)        job_name="$2"; shift 2 ;;
     --experiment-name) experiment_name="$2"; shift 2 ;;
     --output-url)      output_url="$2"; shift 2 ;;
+    --subscription-id) subscription_id="$2"; shift 2 ;;
+    --resource-group)  resource_group="$2"; shift 2 ;;
+    --workspace-name)  workspace_name="$2"; shift 2 ;;
+    --compute)         compute_name="$2"; shift 2 ;;
     --config-preview)  config_preview=true; shift ;;
     *)                 fatal "Unknown option: $1" ;;
   esac
@@ -78,12 +91,13 @@ require_tools az
 # Gather Configuration
 #------------------------------------------------------------------------------
 
-subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
-resource_group="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
-workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
+# Flags win over environment variables, including those loaded from .env.local.
+subscription_id="${subscription_id:-${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}}"
+resource_group="${resource_group:-${AZURE_RESOURCE_GROUP:-$(get_resource_group)}}"
+workspace_name="${workspace_name:-${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}}"
 storage_account="${AZURE_STORAGE_ACCOUNT_NAME:-$(get_storage_account)}"
 output_container="${OSMO_WORKFLOW_BUCKET:-osmo}"
-compute_name="${AZUREML_COMPUTE_NAME:-}"
+compute_name="${compute_name:-${AZUREML_COMPUTE_NAME:-}}"
 if [[ -z "$compute_name" && -n "${AKS_CLUSTER_NAME:-}" ]]; then
   compute_name="k8s-${AKS_CLUSTER_NAME#aks-}"
   compute_name="${compute_name:0:16}"

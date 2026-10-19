@@ -555,3 +555,66 @@ run "rejects_reserved_accelerator_label" {
 
   expect_failures = [var.node_pools]
 }
+
+// ============================================================
+// Node OS SKU
+// ============================================================
+
+run "os_sku_passthrough" {
+  command = plan
+
+  variables {
+    resource_prefix         = run.setup.resource_prefix
+    environment             = run.setup.environment
+    instance                = run.setup.instance
+    location                = run.setup.location
+    resource_group          = run.setup.resource_group
+    virtual_network         = run.setup.virtual_network
+    subnets                 = run.setup.subnets
+    network_security_group  = run.setup.network_security_group
+    nat_gateway             = run.setup.nat_gateway
+    log_analytics_workspace = run.setup.log_analytics_workspace
+    container_registry      = run.setup.container_registry
+    node_pools = {
+      gpu = {
+        vm_size                 = "Standard_NV36ads_A10_v5"
+        node_count              = 1
+        subnet_address_prefixes = ["10.0.20.0/24"]
+        os_sku                  = "Ubuntu2204"
+      }
+    }
+  }
+
+  assert {
+    condition     = azurerm_kubernetes_cluster_node_pool.gpu["gpu"].os_sku == "Ubuntu2204"
+    error_message = "os_sku should pass through to the node pool"
+  }
+}
+
+run "rejects_invalid_os_sku" {
+  command = plan
+
+  variables {
+    resource_prefix         = run.setup.resource_prefix
+    environment             = run.setup.environment
+    instance                = run.setup.instance
+    location                = run.setup.location
+    resource_group          = run.setup.resource_group
+    virtual_network         = run.setup.virtual_network
+    subnets                 = run.setup.subnets
+    network_security_group  = run.setup.network_security_group
+    nat_gateway             = run.setup.nat_gateway
+    log_analytics_workspace = run.setup.log_analytics_workspace
+    container_registry      = run.setup.container_registry
+    node_pools = {
+      gpu = {
+        vm_size                 = "Standard_NV36ads_A10_v5"
+        node_count              = 1
+        subnet_address_prefixes = ["10.0.20.0/24"]
+        os_sku                  = "Ubuntu1804"
+      }
+    }
+  }
+
+  expect_failures = [var.node_pools]
+}

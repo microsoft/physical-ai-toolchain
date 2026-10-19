@@ -6,6 +6,7 @@
  * - AKS cluster with Azure CNI Overlay networking
  * - System node pool for core workloads
  * - GPU node pools via for_each (configurable)
+ * - Optional cluster autoscaler profile
  * - Workload identity and OIDC issuer enabled
  * - Private endpoint for private clusters
  *
@@ -70,6 +71,14 @@ resource "azurerm_kubernetes_cluster" "main" {
       max_surge                     = "10%"
       drain_timeout_in_minutes      = 0
       node_soak_duration_in_minutes = 0
+    }
+  }
+
+  dynamic "auto_scaler_profile" {
+    for_each = var.aks_config.auto_scaler_profile == null ? [] : [var.aks_config.auto_scaler_profile]
+    content {
+      expander               = auto_scaler_profile.value.expander
+      new_pod_scale_up_delay = auto_scaler_profile.value.new_pod_scale_up_delay
     }
   }
 
@@ -143,6 +152,7 @@ resource "azurerm_kubernetes_cluster_node_pool" "gpu" {
   eviction_policy       = each.value.priority == "Spot" ? each.value.eviction_policy : null
   gpu_driver            = each.value.gpu_driver
   node_labels           = each.value.node_labels
+  os_sku                = each.value.os_sku
 
   // Spot pools do not support upgrade_settings (Azure rejects maxUnavailable for Spot)
   dynamic "upgrade_settings" {

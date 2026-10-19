@@ -94,7 +94,7 @@ describe('edit-store-action-factories', () => {
           >(),
           trajectoryAdjustments: new Map<
             number,
-            { frameIndex: number; rightArmDelta?: [number, number, number] }
+            { frameIndex: number; channelDeltas?: Record<number, number> }
           >(),
         })
 

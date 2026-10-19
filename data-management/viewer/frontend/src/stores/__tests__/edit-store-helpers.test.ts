@@ -32,7 +32,7 @@ function makeBaseState() {
     }[],
     trajectoryAdjustments: new Map<
       number,
-      { frameIndex: number; rightArmDelta?: [number, number, number] }
+      { frameIndex: number; channelDeltas?: Record<number, number> }
     >(),
   }
 }
@@ -226,7 +226,7 @@ describe('edit-store-helpers', () => {
         hasEditContent({
           datasetId: 'ds',
           episodeIndex: 0,
-          trajectoryAdjustments: [{ frameIndex: 0, rightArmDelta: [0.1, 0, 0] }],
+          trajectoryAdjustments: [{ frameIndex: 0, channelDeltas: { 0: 0.1 } }],
         }),
       ).toBe(true)
     })
@@ -294,9 +294,7 @@ describe('edit-store-helpers', () => {
 
     it('returns true for trajectoryAdjustments diff', () => {
       const state = makeFullState({
-        trajectoryAdjustments: new Map([
-          [0, { frameIndex: 0, rightArmDelta: [0.1, 0, 0] as [number, number, number] }],
-        ]),
+        trajectoryAdjustments: new Map([[0, { frameIndex: 0, channelDeltas: { 0: 0.1 } }]]),
       })
 
       expect(computeDirty(state)).toBe(true)

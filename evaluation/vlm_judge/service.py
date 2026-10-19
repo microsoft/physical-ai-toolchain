@@ -40,7 +40,7 @@ class BackendConfig:
 
     model_id: str = "Qwen/Qwen3-VL-4B-Instruct"
     revision: str | None = None
-    """Immutable HF commit SHA pinning the qwen3-vl download; None uses the default branch."""
+    """Required full HF commit SHA for qwen3-vl Hub models; omit for explicit local directories."""
     base_url: str | None = None
     api_key: str | None = None
     device_map: str = "auto"
@@ -116,6 +116,8 @@ class JudgeService:
             instruction=instruction,
             judge_model=self.model_id,
             prompt_version=PROMPT_VERSION,
+            backend_kind=self._config.backend.kind,
+            model_revision=self._config.backend.revision,
             from_s=from_s,
             to_s=to_s,
             agent_config=agent_config,

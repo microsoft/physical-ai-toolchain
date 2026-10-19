@@ -79,16 +79,22 @@ async def test_cookie_never_grants_general_api_access(
     path: str,
 ) -> None:
     provider, token = token_provider
-    request = make_asgi_request(method, path, {"Cookie": f"{COOKIE}={token}"})
+    request = make_asgi_request(method, path, {"Cookie": f"{COOKIE}={token}", "Sec-Fetch-Site": "same-origin"})
     assert await provider.authenticate(request) is None
 
 
-@pytest.mark.parametrize("site", ["cross-site", "same-site"])
+@pytest.mark.parametrize("site", ["cross-site", "same-site", "none", "", "unexpected"])
 async def test_cross_origin_media_cookie_rejected(token_provider: tuple[auth.JwtProvider, str], site: str) -> None:
     provider, token = token_provider
     request = make_asgi_request(
         "GET", "/api/datasets/example/episodes/0/video/front", {"Cookie": f"{COOKIE}={token}", "Sec-Fetch-Site": site}
     )
+    assert await provider.authenticate(request) is None
+
+
+async def test_media_cookie_without_fetch_metadata_rejected(token_provider: tuple[auth.JwtProvider, str]) -> None:
+    provider, token = token_provider
+    request = make_asgi_request("GET", "/api/datasets/example/episodes/0/frames/0", {"Cookie": f"{COOKIE}={token}"})
     assert await provider.authenticate(request) is None
 
 
@@ -101,7 +107,7 @@ async def test_invalid_header_does_not_fall_back_to_cookie(
     request = make_asgi_request(
         "GET",
         "/api/datasets/example/episodes/0/video/front",
-        {"Cookie": f"{COOKIE}={token}", "Authorization": authorization},
+        {"Cookie": f"{COOKIE}={token}", "Authorization": authorization, "Sec-Fetch-Site": "same-origin"},
     )
     assert await provider.authenticate(request) is None
 
@@ -111,7 +117,9 @@ async def test_cookie_signature_is_verified(token_provider: tuple[auth.JwtProvid
     parts = token.split(".")
     parts[2] = ("A" if parts[2][0] != "A" else "B") + parts[2][1:]
     request = make_asgi_request(
-        "GET", "/api/datasets/example/episodes/0/video/front", {"Cookie": f"{COOKIE}={'.'.join(parts)}"}
+        "GET",
+        "/api/datasets/example/episodes/0/video/front",
+        {"Cookie": f"{COOKIE}={'.'.join(parts)}", "Sec-Fetch-Site": "same-origin"},
     )
     assert await provider.authenticate(request) is None
 
@@ -162,7 +170,7 @@ async def test_cookie_requires_valid_expiration_audience_and_issuer(
     request = make_asgi_request(
         "GET",
         "/api/datasets/example/episodes/0/video/front",
-        {"Cookie": f"{COOKIE}={token}"},
+        {"Cookie": f"{COOKIE}={token}", "Sec-Fetch-Site": "same-origin"},
     )
     assert await provider.authenticate(request) is None
 
@@ -197,7 +205,7 @@ async def test_cookie_accepts_head_requests(token_provider: tuple[auth.JwtProvid
     request = make_asgi_request(
         "HEAD",
         "/api/datasets/example/episodes/0/video/front",
-        {"Cookie": f"{COOKIE}={token}"},
+        {"Cookie": f"{COOKIE}={token}", "Sec-Fetch-Site": "same-origin"},
     )
     assert await provider.authenticate(request) is not None
 

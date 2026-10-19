@@ -147,6 +147,17 @@ class FrameInsertion(BaseModel):
     )
 
 
+class RecordedSubtask(BaseModel):
+    """A subtask recorded with an episode, which the subtask editor starts from."""
+
+    id: str = Field(description="Stable segment ID")
+    label: str = Field(description="Subtask label")
+    frame_range: tuple[int, int] = Field(description="First and last frame, inclusive")
+    color: str | None = Field(default=None, description="Display color (hex), when recorded")
+    source: str = Field(description="How the subtask was created: manual, auto or recorded")
+    description: str | None = Field(default=None, description="Optional description")
+
+
 class EpisodeData(BaseModel):
     """Complete episode data for viewing."""
 
@@ -162,6 +173,7 @@ class EpisodeData(BaseModel):
         description="Named variables available for trajectory plots",
     )
     trajectory_data: list[TrajectoryPoint] = Field(default_factory=list, description="Trajectory data points")
+    subtasks: list[RecordedSubtask] = Field(default_factory=list, description="Subtasks recorded with the episode")
 
 
 # ============================================================================

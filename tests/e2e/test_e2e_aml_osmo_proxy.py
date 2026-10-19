@@ -8,14 +8,18 @@ uv run pytest -vv -s -m e2e tests/e2e/test_e2e_aml_osmo_proxy.py
 
 from __future__ import annotations
 
+import os
 import runpy
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from tests.e2e import _aml
 from tests.e2e._aml import (
+    AzureMLCompute,
     AzureMLJob,
     AzureMLWorkspace,
     _aml_job_from_submission,
@@ -23,6 +27,7 @@ from tests.e2e._aml import (
     assert_aml_data_asset_exists,
     cancel_aml_job,
     fetch_aml_job_logs,
+    submit_target_args,
     wait_until_aml_completed,
     wait_until_aml_started,
 )
@@ -104,6 +109,88 @@ def test_proxy_output_urls_reject_boundary_mismatch(
         _validate_output_urls(repo_root, ["azure://trusted/other/path/"])
 
 
+_PROXY_SCRIPT = "workflows/azureml/submit-osmo-proxy-job.sh"
+
+
+def test_submit_proxy_names_the_validated_target(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run(args: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="stopped by the test")
+
+    monkeypatch.setattr(sys.modules[__name__], "run_command", fake_run)
+    workspace = AzureMLWorkspace(subscription_id="sub", resource_group="rg", workspace_name="mlw")
+
+    with pytest.raises(AssertionError, match="proxy submission failed"):
+        _submit_proxy(
+            tmp_path,
+            workspace,
+            job_name="job",
+            experiment_name="experiment",
+            output_url="azure://account/osmo/prefix/",
+            handle=E2EHandle(),
+            compute="k8s-validated",
+        )
+
+    command = commands[0]
+    for flag, value in (
+        ("--subscription-id", "sub"),
+        ("--resource-group", "rg"),
+        ("--workspace-name", "mlw"),
+        ("--compute", "k8s-validated"),
+    ):
+        assert command[command.index(flag) + 1] == value
+
+
+@pytest.mark.skipif(shutil.which("bash") is None or shutil.which("jq") is None, reason="requires bash and jq")
+def test_proxy_flags_win_over_local_env(tmp_path: Path, repo_root: Path) -> None:
+    for relative in (_PROXY_SCRIPT, "scripts/lib/common.sh", "scripts/lib/terraform-outputs.sh"):
+        (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(repo_root / relative, tmp_path / relative)
+    (tmp_path / ".env.local").write_text(
+        "AZURE_SUBSCRIPTION_ID=sub-from-file\n"
+        "AZURE_RESOURCE_GROUP=rg-from-file\n"
+        "AZUREML_WORKSPACE_NAME=mlw-from-file\n"
+        "AZURE_STORAGE_ACCOUNT_NAME=account\n"
+        "AZUREML_COMPUTE_NAME=k8s-from-file\n",
+        encoding="utf-8",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "az").write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+    (bin_dir / "az").chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+    for name in ("AZURE_SUBSCRIPTION_ID", "AZURE_RESOURCE_GROUP", "AZUREML_WORKSPACE_NAME", "AZUREML_COMPUTE_NAME"):
+        env.pop(name, None)
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(tmp_path / _PROXY_SCRIPT),
+            "--config-preview",
+            "--subscription-id",
+            "sub-from-flag",
+            "--resource-group",
+            "rg-from-flag",
+            "--workspace-name",
+            "mlw-from-flag",
+            "--compute",
+            "k8s-from-flag",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    for value in ("sub-from-flag", "rg-from-flag", "mlw-from-flag", "k8s-from-flag"):
+        assert value in result.stdout
+    assert "from-file" not in result.stdout
+
+
 def _submit_proxy(
     repo_root: Path,
     aml_workspace: AzureMLWorkspace,
@@ -112,16 +199,18 @@ def _submit_proxy(
     experiment_name: str,
     output_url: str,
     handle: E2EHandle,
+    compute: str,
 ) -> AzureMLJob:
     result = run_command(
         [
-            str(repo_root / "workflows/azureml/submit-osmo-proxy-job.sh"),
+            str(repo_root / _PROXY_SCRIPT),
             "--job-name",
             job_name,
             "--experiment-name",
             experiment_name,
             "--output-url",
             output_url,
+            *submit_target_args(aml_workspace, compute),
         ],
         cwd=repo_root,
     )
@@ -138,11 +227,11 @@ def _submit_proxy(
 
 
 @pytest.mark.e2e
-@pytest.mark.usefixtures("aml_compute_target")
 @pytest.mark.usefixtures("ensure_osmo_cli_available")
 def test_aml_osmo_proxy_e2e(
     request: pytest.FixtureRequest,
     aml_workspace: AzureMLWorkspace,
+    aml_compute_target: AzureMLCompute,
     repo_root: Path,
     storage_account: str,
 ) -> None:
@@ -190,6 +279,7 @@ def test_aml_osmo_proxy_e2e(
         experiment_name=experiment_name,
         output_url=output_url,
         handle=handle,
+        compute=aml_compute_target.name,
     )
 
     wait_until_aml_started(job, repo_root, timeout_minutes=15, poll_interval_seconds=30)

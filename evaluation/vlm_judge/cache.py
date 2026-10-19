@@ -36,16 +36,24 @@ class JudgeCache:
         instruction: str,
         judge_model: str,
         prompt_version: str,
+        backend_kind: str = "unspecified",
+        model_revision: str | None = None,
         from_s: float | None = None,
         to_s: float | None = None,
         agent_config: object | None = None,
     ) -> str:
         """Return a stable hex digest for the given judgement input."""
+        model_locator = judge_model
+        if backend_kind == "qwen3-vl" and (Path(judge_model).is_absolute() or judge_model.startswith(("./", "../"))):
+            model_locator = str(Path(judge_model).resolve())
         payload = {
+            "schema_version": 2,
+            "backend_kind": backend_kind,
+            "model_revision": model_revision.lower() if model_revision else None,
             "videos": _video_fingerprints(video_paths),
             "time_window": {"from_s": from_s, "to_s": to_s},
             "instruction": instruction,
-            "judge_model": judge_model,
+            "judge_model": model_locator,
             "prompt_version": prompt_version,
             "agent_config": _serialise_config(agent_config),
         }

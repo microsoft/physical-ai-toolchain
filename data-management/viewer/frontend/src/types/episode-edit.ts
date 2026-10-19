@@ -5,6 +5,8 @@
  * frame removal, and sub-task segmentation.
  */
 
+import type { RecordedSubtask } from './api'
+
 // ============================================================================
 // Image Transform Types
 // ============================================================================
@@ -74,18 +76,14 @@ export interface FrameInsertion {
 // Episode Edit Operations
 // ============================================================================
 
-/** XYZ position adjustment for a single frame */
+/** Per-channel adjustment of the state vector at one frame; it changes the plot preview, not exported data */
 export interface TrajectoryAdjustment {
   /** Frame index this adjustment applies to */
   frameIndex: number
-  /** Delta adjustments for right arm XYZ (indices 0, 1, 2) */
-  rightArmDelta?: [number, number, number]
-  /** Delta adjustments for left arm XYZ (indices 8, 9, 10) */
-  leftArmDelta?: [number, number, number]
-  /** Override for right gripper value (index 7) */
-  rightGripperOverride?: number
-  /** Override for left gripper value (index 15) */
-  leftGripperOverride?: number
+  /** Additive deltas keyed by state channel index */
+  channelDeltas?: Record<number, number>
+  /** Absolute values keyed by state channel index; a value replaces the channel's delta */
+  channelValues?: Record<number, number>
 }
 
 /** Complete set of edit operations for an episode */
@@ -113,7 +111,7 @@ export interface EpisodeEditOperations {
 // ============================================================================
 
 /** Source of a sub-task segment */
-export type SubtaskSource = 'manual' | 'auto'
+export type SubtaskSource = 'manual' | 'auto' | 'recorded'
 
 /** Color presets for sub-task visualization */
 export const SUBTASK_COLORS = [
@@ -146,23 +144,6 @@ export interface SubtaskSegment {
 // ============================================================================
 // Export Types
 // ============================================================================
-
-/** HDF5 export format options */
-export type HDF5ExportFormat = 'hdf5' | 'parquet'
-
-/** Export request payload */
-export interface ExportRequest {
-  /** Episode indices to export */
-  episodeIndices: number[]
-  /** Output directory path */
-  outputPath: string
-  /** Whether to apply edit operations */
-  applyEdits: boolean
-  /** Whether to include sub-task metadata */
-  includeSubtasks: boolean
-  /** Output format */
-  format: HDF5ExportFormat
-}
 
 /** Export progress update from SSE */
 export interface ExportProgress {
@@ -227,6 +208,18 @@ export function createDefaultSubtask(
     color: getNextSubtaskColor(existingSegments),
     source: 'manual',
   }
+}
+
+/** Turn an episode's recorded subtasks into editor segments, coloring any without a color in list order */
+export function recordedSubtaskSegments(recorded: readonly RecordedSubtask[]): SubtaskSegment[] {
+  return recorded.map((subtask, index) => ({
+    id: subtask.id,
+    label: subtask.label,
+    frameRange: [subtask.frameRange[0], subtask.frameRange[1]],
+    color: subtask.color ?? SUBTASK_COLORS[index % SUBTASK_COLORS.length],
+    source: subtask.source === 'manual' || subtask.source === 'auto' ? subtask.source : 'recorded',
+    ...(subtask.description ? { description: subtask.description } : {}),
+  }))
 }
 
 /** Check if two frame ranges overlap */

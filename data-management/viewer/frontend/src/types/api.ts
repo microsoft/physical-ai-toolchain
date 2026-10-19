@@ -137,6 +137,22 @@ export interface TrajectoryVariable {
   kind: string
 }
 
+/** A subtask recorded with an episode, which the subtask editor starts from */
+export interface RecordedSubtask {
+  /** Stable segment ID */
+  id: string
+  /** Subtask label */
+  label: string
+  /** First and last frame, inclusive */
+  frameRange: [number, number]
+  /** Display color (hex), when recorded */
+  color: string | null
+  /** How the subtask was created: manual, auto or recorded */
+  source: string
+  /** Optional description */
+  description: string | null
+}
+
 /** Complete episode data for viewing */
 export interface EpisodeData {
   /** Episode metadata */
@@ -151,6 +167,8 @@ export interface EpisodeData {
   trajectoryVariables?: TrajectoryVariable[]
   /** Trajectory data points */
   trajectoryData: TrajectoryPoint[]
+  /** Subtasks recorded with the episode */
+  subtasks?: RecordedSubtask[]
 }
 
 /**

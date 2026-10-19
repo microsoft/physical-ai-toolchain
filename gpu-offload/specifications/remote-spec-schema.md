@@ -34,14 +34,14 @@ keeps the robot container lightweight while GPU capacity is reserved for inferen
 configured without `serverstages`, the controller materializes the default
 unnamed stage.
 
-| Key              | Type             | Required | Purpose                                      |
-|------------------|------------------|----------|----------------------------------------------|
-| `serverstages`   | list of objects  | No       | Define named GPU worker pods                 |
-| `remoteclasses`  | list of mappings | No       | Classes whose methods execute in stages      |
-| `remotefuncs`    | list of mappings | No       | Functions that execute in stages             |
-| `allowedmodules` | list of strings  | No       | Permit additional runtime module imports     |
+| Key              | Type             | Required | Purpose                                               |
+|------------------|------------------|----------|-------------------------------------------------------|
+| `serverstages`   | list of objects  | No       | Define named GPU worker pods                          |
+| `remoteclasses`  | list of mappings | No       | Classes whose methods execute in stages               |
+| `remotefuncs`    | list of mappings | No       | Functions that execute in stages                      |
+| `allowedmodules` | list of strings  | No       | Permit additional runtime module imports              |
 | `encryption`     | boolean          | No       | Encrypt and authenticate RPC payloads; default `true` |
-| `networkPolicy`  | boolean          | No       | Restrict server ingress to the namespace     |
+| `networkPolicy`  | boolean          | No       | Restrict server ingress to the namespace              |
 
 ## networkPolicy
 

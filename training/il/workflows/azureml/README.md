@@ -161,6 +161,13 @@ The `preprocess` Component is a newly authored script (`training/il/scripts/lero
 
 The `register` Component wraps `workflows/azureml/scripts/register_model.py`.
 
+## 🔍 Troubleshooting
+
+| Symptom                                                         | Cause                                                                                                                                                                                                                                                                                                  | Fix                                                                                                                                                                                        |
+|-----------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| The pipeline stays `NotStarted` and never shows child jobs      | Likely an Azure ML job-creation timeout: when creating the job takes longer than the 30-second gateway limit, the CLI retries and can return a record that never starts. Confirm it with a `GatewayTimeout` on `Microsoft.MachineLearningServices/workspaces/jobs/write` in the workspace Activity Log | Cancel it with `az ml job cancel`, archive it with `az ml job archive`, then submit again. A pipeline that never started ran no step, so it tells you nothing about the code you submitted |
+| The submit script takes several minutes before it prints a name | The train and evaluate components upload the repository root, and the Azure ML CLI scans every file under it, including ignored folders such as `node_modules` and `.venv`, before uploading                                                                                                           | Wait for it; Azure ML reuses an unchanged snapshot instead of uploading it again                                                                                                           |
+
 ## 📚 Related
 
 - [LeRobot training entry](../../scripts/lerobot/train.py)

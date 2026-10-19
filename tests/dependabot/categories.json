@@ -1,0 +1,1842 @@
+{
+  "schema_version": 1,
+  "base_ref": "origin/main",
+  "root_routes": [
+    {
+      "pattern": "^package\\.json$",
+      "categories": [
+        "tooling"
+      ]
+    },
+    {
+      "pattern": "^package-lock\\.json$",
+      "categories": [
+        "tooling",
+        "dataviewer"
+      ]
+    },
+    {
+      "pattern": "^(pyproject\\.toml|uv\\.lock)$",
+      "categories": [
+        "tooling"
+      ]
+    },
+    {
+      "pattern": "^\\.github/(workflows|actions)/",
+      "categories": [
+        "tooling"
+      ]
+    }
+  ],
+  "categories": [
+    {
+      "id": "baseline",
+      "title": "Baseline for every Dependabot PR",
+      "always": true,
+      "summary": "Lock files match manifests, dependency feeds stay public, pins stay pinned, and known vulnerabilities are surfaced.",
+      "dependabot": [],
+      "paths": [],
+      "setup": [],
+      "notes": [
+        "Dependency Review runs only in CI because it needs the GitHub API."
+      ],
+      "checks": [
+        {
+          "id": "uv-lock-consistency",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Every uv.lock matches its pyproject.toml.",
+          "command": [
+            "npm",
+            "run",
+            "lint:uvlock"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm",
+            "pwsh",
+            "uv"
+          ],
+          "ci_lanes": [
+            "uv-lock-consistency"
+          ]
+        },
+        {
+          "id": "npm-lock-root",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "The root package-lock.json matches the root and workspace manifests.",
+          "command": [
+            "npm",
+            "ci",
+            "--dry-run",
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm"
+          ],
+          "ci_lanes": []
+        },
+        {
+          "id": "npm-lock-docs",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "The docs package-lock.json matches its manifest.",
+          "command": [
+            "npm",
+            "ci",
+            "--dry-run",
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "cwd": "docs/docusaurus",
+          "requires": [
+            "npm"
+          ],
+          "ci_lanes": []
+        },
+        {
+          "id": "public-dependency-feeds",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Dependencies resolve only from public feeds.",
+          "command": [
+            "npm",
+            "run",
+            "lint:public-dependency-feeds"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm",
+            "pwsh"
+          ],
+          "ci_lanes": [
+            "public-dependency-feeds"
+          ]
+        },
+        {
+          "id": "dependency-pinning",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Dependency pinning scan with the PR lane's inputs and exit status.",
+          "command": [
+            "pwsh",
+            "-NoProfile",
+            "-File",
+            "scripts/security/Invoke-DependencyPinningWorkflow.ps1"
+          ],
+          "cwd": ".",
+          "requires": [
+            "pwsh"
+          ],
+          "ci_lanes": [
+            "dependency-pinning"
+          ],
+          "set_env": {
+            "PINNING_THRESHOLD": "95",
+            "PINNING_DEPENDENCY_TYPES": "github-actions,npm,pip,shell-downloads,shell-inline-pip,gh-extension,powershell-modules,docker,dockerfile-base-image,workflow-npm-commands",
+            "PINNING_SOFT_FAIL": "false",
+            "PINNING_UPLOAD_SARIF": "false",
+            "PINNING_EXCLUDE_PATHS": "scripts/tests/Fixtures/**,shared/ci/tests/Fixtures/**"
+          }
+        },
+        {
+          "id": "osv-scan",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": true,
+          "description": "OSV vulnerability scan of every lock file.",
+          "command": [
+            "npm",
+            "run",
+            "lint:vuln"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm",
+            "osv-scanner"
+          ],
+          "ci_lanes": [
+            "osv-scanner"
+          ],
+          "notes": "CI runs this on every PR; install osv-scanner to run it locally."
+        }
+      ]
+    },
+    {
+      "id": "tooling",
+      "title": "Repository tooling and GitHub Actions",
+      "summary": "Root npm dev tools, the root uv dev group (pytest, ruff, and the e2e harness's Azure SDK), and GitHub Actions pins.",
+      "dependabot": [
+        {
+          "ecosystem": "npm",
+          "directory": "/"
+        },
+        {
+          "ecosystem": "uv",
+          "directory": "/"
+        },
+        {
+          "ecosystem": "github-actions",
+          "directory": "/"
+        }
+      ],
+      "paths": [],
+      "setup": [
+        {
+          "command": [
+            "npm",
+            "ci",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "cwd": "."
+        }
+      ],
+      "notes": [
+        "A GitHub Actions bump is only fully proven by a CI run on a pushed branch; these checks prove syntax, references, and the workflow contract.",
+        "Root uv runtime pins (azure-ai-ml, pyjwt, urllib3) are exercised live by any environment check, because the e2e harness runs in the root environment."
+      ],
+      "checks": [
+        {
+          "id": "markdown-lint",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Markdown lint with the bumped markdownlint-cli2.",
+          "command": [
+            "npm",
+            "run",
+            "lint:md"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm"
+          ],
+          "ci_lanes": [
+            "markdown-lint"
+          ]
+        },
+        {
+          "id": "spell-check",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Spell check with the bumped cspell.",
+          "command": [
+            "npm",
+            "run",
+            "spell-check"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm"
+          ],
+          "ci_lanes": [
+            "spell-check"
+          ]
+        },
+        {
+          "id": "yaml-lint",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Workflow and YAML lint (actionlint).",
+          "command": [
+            "npm",
+            "run",
+            "lint:yaml"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm",
+            "pwsh",
+            "actionlint"
+          ],
+          "ci_lanes": [
+            "yaml-lint"
+          ]
+        },
+        {
+          "id": "workflow-contract-lint",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Workflow graph and CI contract validation.",
+          "command": [
+            "npm",
+            "run",
+            "lint:ci"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm",
+            "node"
+          ],
+          "ci_lanes": [
+            "workflow-refs-check"
+          ]
+        },
+        {
+          "id": "workflow-contract-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "CI contract unit tests.",
+          "command": [
+            "npm",
+            "run",
+            "test:ci"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm",
+            "node"
+          ],
+          "ci_lanes": [
+            "workflow-refs-check"
+          ]
+        },
+        {
+          "id": "python-lint",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Ruff lint with the CI-pinned version.",
+          "command": [
+            "npm",
+            "run",
+            "lint:py"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm",
+            "uv"
+          ],
+          "ci_lanes": [
+            "python-lint"
+          ]
+        },
+        {
+          "id": "root-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Root unit tests, excluding live e2e tests.",
+          "command": [
+            "uv",
+            "run",
+            "--frozen",
+            "pytest",
+            "-o",
+            "addopts=",
+            "-m",
+            "not e2e",
+            "tests"
+          ],
+          "cwd": ".",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": []
+        },
+        {
+          "id": "shared-ci-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Shared CI script tests.",
+          "command": [
+            "uv",
+            "run",
+            "--frozen",
+            "pytest",
+            "-o",
+            "addopts=",
+            "shared/ci/tests"
+          ],
+          "cwd": ".",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": [
+            "pytest-shared-ci"
+          ]
+        },
+        {
+          "id": "dm-tools-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Data management tool tests.",
+          "command": [
+            "uv",
+            "run",
+            "--frozen",
+            "pytest",
+            "-o",
+            "addopts=",
+            "data-management/tools/tests"
+          ],
+          "cwd": ".",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": [
+            "pytest-dm-tools"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dataviewer",
+      "title": "Dataviewer frontend, backend, and images",
+      "summary": "The React frontend workspace, the FastAPI backend, and their container images.",
+      "dependabot": [
+        {
+          "ecosystem": "npm",
+          "directory": "/"
+        },
+        {
+          "ecosystem": "uv",
+          "directory": "/data-management/viewer/backend"
+        },
+        {
+          "ecosystem": "docker",
+          "directory": "/data-management/viewer/backend"
+        },
+        {
+          "ecosystem": "docker",
+          "directory": "/data-management/viewer/frontend"
+        }
+      ],
+      "paths": [
+        "data-management/viewer/"
+      ],
+      "setup": [
+        {
+          "command": [
+            "npm",
+            "ci",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "cwd": "."
+        },
+        {
+          "command": [
+            "uv",
+            "sync",
+            "--frozen",
+            "--group",
+            "dev",
+            "--extra",
+            "analysis",
+            "--extra",
+            "hdf5",
+            "--extra",
+            "export",
+            "--extra",
+            "auth"
+          ],
+          "cwd": "data-management/viewer/backend"
+        }
+      ],
+      "notes": [
+        "Frontend checks mirror CI rather than npm run validate, which skips the coverage gate."
+      ],
+      "checks": [
+        {
+          "id": "dataviewer-frontend-lint",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Frontend lint, as CI runs it.",
+          "command": [
+            "npm",
+            "run",
+            "lint",
+            "--workspace",
+            "robotic-training-data-tool"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm"
+          ],
+          "ci_lanes": [
+            "dataviewer-frontend-tests"
+          ]
+        },
+        {
+          "id": "dataviewer-frontend-type-check",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Frontend type-check, as CI runs it.",
+          "command": [
+            "npm",
+            "run",
+            "type-check",
+            "--workspace",
+            "robotic-training-data-tool"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm"
+          ],
+          "ci_lanes": [
+            "dataviewer-frontend-tests"
+          ]
+        },
+        {
+          "id": "dataviewer-frontend-format",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Frontend format, as CI runs it.",
+          "command": [
+            "npm",
+            "run",
+            "format",
+            "--workspace",
+            "robotic-training-data-tool"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm"
+          ],
+          "ci_lanes": [
+            "dataviewer-frontend-tests"
+          ]
+        },
+        {
+          "id": "dataviewer-frontend-test",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Frontend test, as CI runs it.",
+          "command": [
+            "npm",
+            "run",
+            "test",
+            "--workspace",
+            "robotic-training-data-tool"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm"
+          ],
+          "ci_lanes": [
+            "dataviewer-frontend-tests"
+          ]
+        },
+        {
+          "id": "dataviewer-frontend-test-coverage",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Frontend test:coverage, as CI runs it.",
+          "command": [
+            "npm",
+            "run",
+            "test:coverage",
+            "--workspace",
+            "robotic-training-data-tool"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm"
+          ],
+          "ci_lanes": [
+            "dataviewer-frontend-tests"
+          ]
+        },
+        {
+          "id": "dataviewer-frontend-build",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Frontend build, as CI runs it.",
+          "command": [
+            "npm",
+            "run",
+            "build",
+            "--workspace",
+            "robotic-training-data-tool"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm"
+          ],
+          "ci_lanes": [
+            "dataviewer-frontend-tests"
+          ]
+        },
+        {
+          "id": "dataviewer-backend-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Backend tests with the 90% coverage gate.",
+          "command": [
+            "uv",
+            "run",
+            "--no-sync",
+            "pytest",
+            "--cov=src",
+            "--cov-report=term-missing",
+            "--cov-fail-under=90"
+          ],
+          "cwd": "data-management/viewer/backend",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": [
+            "dataviewer-backend-pytests"
+          ]
+        },
+        {
+          "id": "dataviewer-compose-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": true,
+          "description": "Build the compose images on their pinned bases and wait for healthy services.",
+          "command": [
+            "shared/ci/smoke-docker.sh"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": [
+            "smoke"
+          ],
+          "notes": "CI runs this on PRs that touch the dataviewer; it builds both images."
+        }
+      ]
+    },
+    {
+      "id": "docs",
+      "title": "Docusaurus documentation site",
+      "summary": "The docs site build, unit tests, accessibility lint, and production browser tests, including the Express static server.",
+      "dependabot": [
+        {
+          "ecosystem": "npm",
+          "directory": "/docs/docusaurus"
+        }
+      ],
+      "paths": [
+        "docs/docusaurus/"
+      ],
+      "setup": [
+        {
+          "command": [
+            "npm",
+            "ci",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "cwd": "docs/docusaurus"
+        }
+      ],
+      "notes": [
+        "Local browser runs can differ from CI on contrast; the container runner compares failures against the base ref."
+      ],
+      "checks": [
+        {
+          "id": "docs-validate",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Docs lint, label registry, typecheck, build, unit tests, and Mermaid accessibility.",
+          "command": [
+            "npm",
+            "run",
+            "validate:docs"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm"
+          ],
+          "ci_lanes": [
+            "docusaurus-tests"
+          ]
+        },
+        {
+          "id": "docs-e2e-container",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": true,
+          "description": "Production browser tests in a Linux Playwright container, compared with the base ref.",
+          "command": [
+            "bash",
+            "docs/docusaurus/scripts/run-e2e-container.sh",
+            "--compare-base",
+            "{base_ref}",
+            "--output-dir",
+            "{run_dir}/docs-e2e"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker",
+            "git",
+            "jq"
+          ],
+          "ci_lanes": [
+            "docusaurus-tests"
+          ],
+          "not_run_exit_codes": [
+            3
+          ],
+          "notes": "CI runs these tests on docs pull requests. Locally one snapshot takes about an hour on Apple Silicon: system Chrome needs amd64 emulation, and CI retries rerun the serial 13-minute site crawl when the local contrast gate fails."
+        }
+      ]
+    },
+    {
+      "id": "data-pipeline",
+      "title": "Data pipeline",
+      "summary": "Capture pipeline code tested against data-pipeline's own lock.",
+      "dependabot": [
+        {
+          "ecosystem": "uv",
+          "directory": "/data-pipeline"
+        }
+      ],
+      "paths": [
+        "data-pipeline/"
+      ],
+      "setup": [],
+      "notes": [
+        "CI runs these tests in the root environment today; this check uses data-pipeline/uv.lock."
+      ],
+      "checks": [
+        {
+          "id": "data-pipeline-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Capture tests in data-pipeline's own locked environment.",
+          "command": [
+            "uv",
+            "run",
+            "--frozen",
+            "--group",
+            "dev",
+            "pytest",
+            "-o",
+            "addopts="
+          ],
+          "cwd": "data-pipeline",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": [
+            "pytest-data-pipeline"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "evaluation",
+      "title": "Evaluation packages",
+      "summary": "The evaluation dev and test lock and the optional VLM judge runtime. GPU evaluation runs inside the rl and il lifecycles.",
+      "dependabot": [
+        {
+          "ecosystem": "uv",
+          "directory": "/evaluation"
+        },
+        {
+          "ecosystem": "uv",
+          "directory": "/evaluation/vlm_judge"
+        }
+      ],
+      "paths": [
+        "evaluation/"
+      ],
+      "setup": [],
+      "notes": [
+        "The evaluation lock has no runtime consumer; GPU evaluation jobs install the training locks, so no environment check is needed here."
+      ],
+      "checks": [
+        {
+          "id": "evaluation-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Evaluation tests in its Linux-only locked environment.",
+          "command": [
+            "bash",
+            "-c",
+            "export UV_PROJECT_ENVIRONMENT=/tmp/evaluation-venv && uv sync --frozen --only-group dev && uv run --frozen --only-group dev pytest -o addopts="
+          ],
+          "cwd": "evaluation",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": [
+            "evaluation-pytests"
+          ],
+          "container": {
+            "image": "ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
+            "platform": "linux/amd64"
+          }
+        },
+        {
+          "id": "evaluation-import-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Install and import the evaluation lock with CPU wheels.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "evaluation",
+            "--mode",
+            "cpu"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": [
+            "smoke"
+          ]
+        },
+        {
+          "id": "vlm-judge-import-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Install and import the VLM judge runtime with CPU wheels.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "vlm-judge",
+            "--mode",
+            "cpu"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": [
+            "smoke"
+          ]
+        },
+        {
+          "id": "evaluation-image-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": true,
+          "description": "Import the IL runtime lock in the evaluation production image.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "evaluation"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": [
+            "smoke"
+          ],
+          "notes": "CI runs the runtime-image smoke on PRs that touch this domain; it pulls a multi-gigabyte image."
+        }
+      ]
+    },
+    {
+      "id": "rl",
+      "title": "Reinforcement learning runtime (Isaac Lab)",
+      "summary": "The training/rl lock that Isaac Lab training and evaluation jobs install.",
+      "dependabot": [
+        {
+          "ecosystem": "uv",
+          "directory": "/training/rl"
+        }
+      ],
+      "paths": [
+        "training/rl/"
+      ],
+      "setup": [],
+      "notes": [
+        "The rsl_rl backend (rsl-rl-lib, tensordict) has no Azure ML path and is broken on the current Isaac Lab image; its updates get install and import coverage only."
+      ],
+      "checks": [
+        {
+          "id": "training-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Training unit tests in the root environment, as CI runs them.",
+          "command": [
+            "uv",
+            "run",
+            "--frozen",
+            "pytest",
+            "-o",
+            "addopts=",
+            "training/tests"
+          ],
+          "cwd": ".",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": [
+            "pytest-training"
+          ]
+        },
+        {
+          "id": "rl-import-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Install and import the training/rl lock with CPU wheels.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "rl",
+            "--mode",
+            "cpu"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": [
+            "smoke"
+          ]
+        },
+        {
+          "id": "rl-image-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": true,
+          "description": "Import the training/rl lock in the Isaac Lab image.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "rl"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": [
+            "smoke"
+          ],
+          "notes": "CI runs the runtime-image smoke on PRs that touch this domain; it pulls a multi-gigabyte image."
+        },
+        {
+          "id": "aml-rl-lifecycle",
+          "tier": "environment",
+          "gpu": true,
+          "optional": false,
+          "description": "Azure ML skrl training, registration, and Isaac Lab evaluation on a GPU node.",
+          "timeout_minutes": 150,
+          "pytest": "tests/e2e/test_e2e_aml_rl_lifecycle.py::test_aml_rl_lifecycle_e2e",
+          "requires": [
+            "az"
+          ],
+          "ci_lanes": [],
+          "set_env": {
+            "E2E_AML_ISAAC_EVAL_MODEL": ""
+          },
+          "notes": "Always trains: the runner clears E2E_AML_ISAAC_EVAL_MODEL, which would skip training and evaluate an existing model."
+        }
+      ]
+    },
+    {
+      "id": "il",
+      "title": "Imitation learning runtime (LeRobot)",
+      "summary": "The training/il/lerobot lock that LeRobot training, evaluation, and inference install.",
+      "dependabot": [
+        {
+          "ecosystem": "uv",
+          "directory": "/training/il/lerobot"
+        }
+      ],
+      "paths": [
+        "training/il/"
+      ],
+      "setup": [],
+      "notes": [],
+      "checks": [
+        {
+          "id": "training-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Training unit tests in the root environment, as CI runs them.",
+          "command": [
+            "uv",
+            "run",
+            "--frozen",
+            "pytest",
+            "-o",
+            "addopts=",
+            "training/tests"
+          ],
+          "cwd": ".",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": [
+            "pytest-training"
+          ]
+        },
+        {
+          "id": "inference-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Fleet inference tests, which depend on the LeRobot stack.",
+          "command": [
+            "uv",
+            "run",
+            "--frozen",
+            "pytest",
+            "-o",
+            "addopts=",
+            "fleet-deployment/inference/tests"
+          ],
+          "cwd": ".",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": [
+            "pytest-inference"
+          ]
+        },
+        {
+          "id": "il-import-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Install and import the LeRobot lock with CPU wheels.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "il",
+            "--mode",
+            "cpu"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": [
+            "smoke"
+          ]
+        },
+        {
+          "id": "il-image-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": true,
+          "description": "Import the LeRobot lock in its PyTorch production image.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "il"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": [
+            "smoke"
+          ],
+          "notes": "CI runs the runtime-image smoke on PRs that touch this domain; it pulls a multi-gigabyte image."
+        },
+        {
+          "id": "evaluation-image-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": true,
+          "description": "Import the IL runtime lock in the evaluation production image.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "evaluation"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": [
+            "smoke"
+          ],
+          "notes": "CI runs the runtime-image smoke on PRs that touch this domain; it pulls a multi-gigabyte image."
+        },
+        {
+          "id": "aml-il-lifecycle",
+          "tier": "environment",
+          "gpu": true,
+          "optional": false,
+          "description": "Azure ML LeRobot training, registration, and evaluation on a GPU node.",
+          "timeout_minutes": 150,
+          "pytest": "tests/e2e/test_e2e_aml_il_lifecycle.py::test_aml_il_lifecycle_e2e",
+          "requires": [
+            "az"
+          ],
+          "ci_lanes": [],
+          "set_env": {
+            "E2E_AML_LEROBOT_EVAL_MODEL": ""
+          },
+          "notes": "Always trains: the runner clears E2E_AML_LEROBOT_EVAL_MODEL, which would skip training and evaluate an existing model."
+        },
+        {
+          "id": "aml-il-pipeline-diffusion",
+          "tier": "environment",
+          "gpu": false,
+          "optional": false,
+          "description": "Azure ML LeRobot pipeline (preprocess, train, evaluate) on the compute's default instance type, which is CPU-only on Kubernetes computes.",
+          "timeout_minutes": 120,
+          "pytest": "tests/e2e/test_e2e_aml_il_pipeline.py::test_aml_il_pipeline_e2e[diffusion-without-register]",
+          "requires": [
+            "az"
+          ],
+          "ci_lanes": []
+        }
+      ]
+    },
+    {
+      "id": "vla",
+      "title": "Vision-language-action runtime (LeRobot pi0)",
+      "summary": "The training/vla/lerobot lock that VLA training and pi0 evaluation install.",
+      "dependabot": [
+        {
+          "ecosystem": "uv",
+          "directory": "/training/vla/lerobot"
+        }
+      ],
+      "paths": [
+        "training/vla/"
+      ],
+      "setup": [],
+      "notes": [
+        "The live check needs HF_TOKEN with access to the gated pi0 base model; without it the check is not run."
+      ],
+      "checks": [
+        {
+          "id": "training-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Training unit tests in the root environment, as CI runs them.",
+          "command": [
+            "uv",
+            "run",
+            "--frozen",
+            "pytest",
+            "-o",
+            "addopts=",
+            "training/tests"
+          ],
+          "cwd": ".",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": [
+            "pytest-training"
+          ]
+        },
+        {
+          "id": "vla-import-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Install and import the VLA lock with CPU wheels.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "vla",
+            "--mode",
+            "cpu"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": [
+            "smoke"
+          ]
+        },
+        {
+          "id": "vla-image-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": true,
+          "description": "Import the VLA lock in its PyTorch production image.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "vla"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": [
+            "smoke"
+          ],
+          "notes": "CI runs the runtime-image smoke on PRs that touch this domain; it pulls a multi-gigabyte image."
+        },
+        {
+          "id": "aml-vla-pi0",
+          "tier": "environment",
+          "gpu": true,
+          "optional": false,
+          "description": "Azure ML pi0 training, registration, and evaluation on a GPU node.",
+          "timeout_minutes": 180,
+          "pytest": "tests/e2e/test_e2e_aml_vla_pi0_training.py::test_aml_vla_pi0_lifecycle_e2e",
+          "requires": [
+            "az"
+          ],
+          "ci_lanes": [],
+          "env": [
+            "HF_TOKEN"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gpu-smoke",
+      "title": "Azure ML GPU smoke runtime",
+      "summary": "The training/smoke lock that the Azure ML GPU smoke job installs.",
+      "dependabot": [
+        {
+          "ecosystem": "uv",
+          "directory": "/training/smoke"
+        }
+      ],
+      "paths": [
+        "training/smoke/"
+      ],
+      "setup": [],
+      "notes": [],
+      "checks": [
+        {
+          "id": "training-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Training unit tests in the root environment, as CI runs them.",
+          "command": [
+            "uv",
+            "run",
+            "--frozen",
+            "pytest",
+            "-o",
+            "addopts=",
+            "training/tests"
+          ],
+          "cwd": ".",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": [
+            "pytest-training"
+          ]
+        },
+        {
+          "id": "gpu-smoke-import-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Install and import the training/smoke lock with CPU wheels.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "gpu-smoke",
+            "--mode",
+            "cpu"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": []
+        },
+        {
+          "id": "aml-gpu-smoke",
+          "tier": "environment",
+          "gpu": true,
+          "optional": false,
+          "description": "Azure ML GPU job: device, training loop, MLflow, checkpoints, storage, and model registry checks.",
+          "timeout_minutes": 120,
+          "pytest": "tests/e2e/test_e2e_aml_gpu_smoke.py::test_aml_gpu_smoke_e2e",
+          "requires": [
+            "az"
+          ],
+          "ci_lanes": []
+        }
+      ]
+    },
+    {
+      "id": "workflows",
+      "title": "Azure ML and OSMO integration workflows",
+      "summary": "The Azure ML register component, the Azure ML-to-OSMO proxy job, and the OSMO-to-Azure ML replay mirror.",
+      "dependabot": [
+        {
+          "ecosystem": "uv",
+          "directory": "/workflows/azureml/scripts"
+        },
+        {
+          "ecosystem": "uv",
+          "directory": "/workflows/azureml/osmo-proxy"
+        },
+        {
+          "ecosystem": "uv",
+          "directory": "/workflows/osmo"
+        }
+      ],
+      "paths": [
+        "workflows/"
+      ],
+      "setup": [],
+      "notes": [
+        "The replay mirror runs only inside OSMO, so its lock gets import smokes but no environment check.",
+        "The proxy check is opt-in: it is an Azure ML job, but it drives OSMO and fails where the OSMO control template requests more storage than its workflow does."
+      ],
+      "checks": [
+        {
+          "id": "osmo-replay-import-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Install and import the replay mirror lock with CPU wheels.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "osmo-replay",
+            "--mode",
+            "cpu"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": [
+            "smoke"
+          ]
+        },
+        {
+          "id": "osmo-replay-image-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": true,
+          "description": "Import the replay mirror lock in its Python production image.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "osmo-replay"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": [
+            "smoke"
+          ],
+          "notes": "CI runs the runtime-image smoke on PRs that touch this domain; it pulls a multi-gigabyte image."
+        },
+        {
+          "id": "azureml-register-import-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Install and import the register component lock with CPU wheels.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "azureml-register",
+            "--mode",
+            "cpu"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": []
+        },
+        {
+          "id": "osmo-proxy-import-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Install and import the proxy lock with CPU wheels.",
+          "command": [
+            "shared/ci/smoke-image.sh",
+            "osmo-proxy",
+            "--mode",
+            "cpu"
+          ],
+          "cwd": ".",
+          "requires": [
+            "docker"
+          ],
+          "ci_lanes": []
+        },
+        {
+          "id": "e2e-helper-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Infrastructure-free tests for the e2e harness and its Azure ML and OSMO helpers.",
+          "command": [
+            "uv",
+            "run",
+            "--frozen",
+            "pytest",
+            "-o",
+            "addopts=",
+            "-m",
+            "not e2e",
+            "tests/e2e"
+          ],
+          "cwd": ".",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": []
+        },
+        {
+          "id": "aml-il-pipeline-register",
+          "tier": "environment",
+          "gpu": false,
+          "optional": false,
+          "description": "Azure ML LeRobot pipeline ending in the register component, on the compute's default instance type, which is CPU-only on Kubernetes computes.",
+          "timeout_minutes": 120,
+          "pytest": "tests/e2e/test_e2e_aml_il_pipeline.py::test_aml_il_pipeline_e2e[act-with-register]",
+          "requires": [
+            "az"
+          ],
+          "ci_lanes": []
+        },
+        {
+          "id": "aml-osmo-proxy",
+          "tier": "environment",
+          "gpu": false,
+          "optional": true,
+          "description": "Azure ML proxy job that submits and mirrors an OSMO workflow.",
+          "timeout_minutes": 90,
+          "pytest": "tests/e2e/test_e2e_aml_osmo_proxy.py::test_aml_osmo_proxy_e2e",
+          "requires": [
+            "az",
+            "osmo"
+          ],
+          "ci_lanes": []
+        }
+      ]
+    },
+    {
+      "id": "gpu-offload",
+      "title": "GPU offload controller, runtime, and examples",
+      "summary": "The GPU offload controller and runtime packages, the SO-101 example, and the offload container images.",
+      "dependabot": [
+        {
+          "ecosystem": "uv",
+          "directory": "/gpu-offload/controller"
+        },
+        {
+          "ecosystem": "uv",
+          "directory": "/gpu-offload/runtime"
+        },
+        {
+          "ecosystem": "uv",
+          "directory": "/gpu-offload/examples/so101-real-hardware"
+        },
+        {
+          "ecosystem": "docker",
+          "directory": "/gpu-offload/controller"
+        },
+        {
+          "ecosystem": "docker",
+          "directory": "/gpu-offload/examples/first-run"
+        },
+        {
+          "ecosystem": "docker",
+          "directory": "/gpu-offload/examples/ur10e-single"
+        },
+        {
+          "ecosystem": "docker",
+          "directory": "/gpu-offload/examples/so101-real-hardware/docker"
+        }
+      ],
+      "paths": [
+        "gpu-offload/"
+      ],
+      "setup": [],
+      "notes": [
+        "GPU checks need a local NVIDIA host, not an Azure ML environment: run the c-cluster-31-gpu-check, d-offload-61-check-gpu-allocation, and d-offload-62-check-gpu-model mise tasks in gpu-offload.",
+        "The SO-101 example needs the robot hardware; its lock is covered by the baseline lock check."
+      ],
+      "checks": [
+        {
+          "id": "gpu-offload-controller-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Controller tests in its own locked environment.",
+          "command": [
+            "uv",
+            "run",
+            "--frozen",
+            "--extra",
+            "test",
+            "pytest",
+            "-o",
+            "addopts=",
+            "tests"
+          ],
+          "cwd": "gpu-offload/controller",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": [
+            "pytest-gpu-offload"
+          ]
+        },
+        {
+          "id": "gpu-offload-runtime-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Runtime tests in its own locked environment.",
+          "command": [
+            "uv",
+            "run",
+            "--frozen",
+            "--extra",
+            "test",
+            "pytest",
+            "-o",
+            "addopts=",
+            "tests"
+          ],
+          "cwd": "gpu-offload/runtime",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": [
+            "pytest-gpu-offload"
+          ]
+        },
+        {
+          "id": "gpu-offload-runtime-build",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Build the runtime wheel with the locked build backend.",
+          "command": [
+            "uv",
+            "build",
+            "--out-dir",
+            "{run_dir}/gpu-offload-runtime-dist"
+          ],
+          "cwd": "gpu-offload/runtime",
+          "requires": [
+            "uv"
+          ],
+          "ci_lanes": []
+        },
+        {
+          "id": "gpu-offload-kind-smoke",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": true,
+          "description": "First-run example on a local kind cluster (CPU).",
+          "command": [
+            "bash",
+            "-c",
+            "mise run f-10-setup && mise run f-20-verify; status=$?; mise run f-40-teardown-all; exit $status"
+          ],
+          "cwd": "gpu-offload",
+          "requires": [
+            "mise",
+            "docker"
+          ],
+          "ci_lanes": [
+            "gpu-offload-kind-smoke"
+          ],
+          "platforms": [
+            "linux"
+          ],
+          "notes": "Linux only; CI runs it on PRs that touch gpu-offload."
+        }
+      ]
+    },
+    {
+      "id": "infrastructure",
+      "title": "Terraform providers and contract tests",
+      "summary": "Terraform provider constraints for the root, dns, vpn, and automation stacks, plus the Go output contract tests.",
+      "dependabot": [
+        {
+          "ecosystem": "terraform",
+          "directory": "/infrastructure/terraform"
+        },
+        {
+          "ecosystem": "terraform",
+          "directory": "/infrastructure/terraform/dns"
+        },
+        {
+          "ecosystem": "terraform",
+          "directory": "/infrastructure/terraform/vpn"
+        },
+        {
+          "ecosystem": "terraform",
+          "directory": "/infrastructure/terraform/automation"
+        },
+        {
+          "ecosystem": "gomod",
+          "directory": "/infrastructure/terraform/e2e"
+        }
+      ],
+      "paths": [
+        "infrastructure/terraform/"
+      ],
+      "setup": [],
+      "notes": [
+        "Validation and tests run on a clean snapshot so gitignored local .terraform.lock.hcl files don't pin old providers.",
+        "Plan comparisons read local state read-only and never apply; the vpn, automation, and dns stacks are opt-in."
+      ],
+      "checks": [
+        {
+          "id": "terraform-validate",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Terraform format and validation for every stack and module.",
+          "command": [
+            "pwsh",
+            "-NoProfile",
+            "-File",
+            "scripts/linting/Invoke-TerraformValidation.ps1"
+          ],
+          "cwd": ".",
+          "requires": [
+            "pwsh",
+            "terraform"
+          ],
+          "ci_lanes": [
+            "terraform-validation"
+          ],
+          "snapshot": [
+            "infrastructure/terraform",
+            "scripts/linting",
+            "scripts/lib"
+          ]
+        },
+        {
+          "id": "terraform-test",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Terraform native tests for every module with tests.",
+          "command": [
+            "pwsh",
+            "-NoProfile",
+            "-File",
+            "scripts/linting/Invoke-TerraformTest.ps1"
+          ],
+          "cwd": ".",
+          "requires": [
+            "pwsh",
+            "terraform"
+          ],
+          "ci_lanes": [
+            "terraform-tests"
+          ],
+          "snapshot": [
+            "infrastructure/terraform",
+            "scripts/linting",
+            "scripts/lib"
+          ]
+        },
+        {
+          "id": "tflint",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "TFLint with the repository rules.",
+          "command": [
+            "npm",
+            "run",
+            "lint:tf"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm",
+            "pwsh",
+            "tflint"
+          ],
+          "ci_lanes": [
+            "terraform-lint"
+          ],
+          "min_versions": {
+            "tflint": "0.61.0"
+          }
+        },
+        {
+          "id": "go-tests",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": false,
+          "description": "Terraform output contract tests (Go).",
+          "command": [
+            "npm",
+            "run",
+            "test:go"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm",
+            "pwsh",
+            "go"
+          ],
+          "ci_lanes": [
+            "go-tests"
+          ]
+        },
+        {
+          "id": "go-lint",
+          "tier": "cpu",
+          "gpu": false,
+          "optional": true,
+          "description": "Go lint for the contract tests.",
+          "command": [
+            "npm",
+            "run",
+            "lint:go"
+          ],
+          "cwd": ".",
+          "requires": [
+            "npm",
+            "pwsh",
+            "golangci-lint"
+          ],
+          "ci_lanes": [
+            "go-lint"
+          ]
+        },
+        {
+          "id": "terraform-plan-compare",
+          "tier": "environment",
+          "gpu": false,
+          "optional": false,
+          "description": "Read-only plan comparison of the root stack against deployed state.",
+          "timeout_minutes": 60,
+          "command": [
+            "bash",
+            "infrastructure/terraform/scripts/compare-plans.sh",
+            "--base",
+            "{base_ref}",
+            "--head",
+            "HEAD",
+            "--stack",
+            "root",
+            "--output-dir",
+            "{run_dir}/terraform-plans"
+          ],
+          "cwd": ".",
+          "requires": [
+            "terraform",
+            "jq",
+            "az"
+          ],
+          "ci_lanes": [],
+          "not_run_exit_codes": [
+            3
+          ]
+        },
+        {
+          "id": "terraform-plan-compare-vpn",
+          "tier": "environment",
+          "gpu": false,
+          "optional": true,
+          "description": "Read-only plan comparison of the vpn stack against deployed state.",
+          "timeout_minutes": 60,
+          "command": [
+            "bash",
+            "infrastructure/terraform/scripts/compare-plans.sh",
+            "--base",
+            "{base_ref}",
+            "--head",
+            "HEAD",
+            "--stack",
+            "vpn",
+            "--output-dir",
+            "{run_dir}/terraform-plans"
+          ],
+          "cwd": ".",
+          "requires": [
+            "terraform",
+            "jq",
+            "az"
+          ],
+          "ci_lanes": [],
+          "not_run_exit_codes": [
+            3
+          ]
+        },
+        {
+          "id": "terraform-plan-compare-automation",
+          "tier": "environment",
+          "gpu": false,
+          "optional": true,
+          "description": "Read-only plan comparison of the automation stack against deployed state.",
+          "timeout_minutes": 60,
+          "command": [
+            "bash",
+            "infrastructure/terraform/scripts/compare-plans.sh",
+            "--base",
+            "{base_ref}",
+            "--head",
+            "HEAD",
+            "--stack",
+            "automation",
+            "--output-dir",
+            "{run_dir}/terraform-plans"
+          ],
+          "cwd": ".",
+          "requires": [
+            "terraform",
+            "jq",
+            "az"
+          ],
+          "ci_lanes": [],
+          "not_run_exit_codes": [
+            3
+          ]
+        },
+        {
+          "id": "terraform-plan-compare-dns",
+          "tier": "environment",
+          "gpu": false,
+          "optional": true,
+          "description": "Read-only plan comparison of the dns stack against deployed state.",
+          "timeout_minutes": 60,
+          "command": [
+            "bash",
+            "infrastructure/terraform/scripts/compare-plans.sh",
+            "--base",
+            "{base_ref}",
+            "--head",
+            "HEAD",
+            "--stack",
+            "dns",
+            "--output-dir",
+            "{run_dir}/terraform-plans"
+          ],
+          "cwd": ".",
+          "requires": [
+            "terraform",
+            "jq",
+            "az"
+          ],
+          "ci_lanes": [],
+          "not_run_exit_codes": [
+            3
+          ]
+        }
+      ]
+    }
+  ]
+}

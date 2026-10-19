@@ -3,7 +3,7 @@ sidebar_position: 2
 title: ACSA Setup for ROS 2 Bag Sync
 description: Deploy Azure Container Storage enabled by Azure Arc (ACSA) on edge clusters to sync ROS 2 bag files to Azure Blob Storage
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-13
+ms.date: 2026-10-13
 ms.topic: how-to
 keywords:
   - acsa

@@ -651,6 +651,38 @@ Describe 'Get-HelmOciLatestVersion' -Tag 'Unit' {
             -RequestInvoker $invoker | Should -Be 'v0.20.1'
     }
 
+    It 'Skips retracted versions and pre-release tags' {
+        $invoker = {
+            param($Uri)
+            if ($Uri -like 'https://ghcr.io/token?*') { return @{ token = 'test-token' } }
+            return @{ tags = @('v0.20.1', 'v0.20.0', 'v0.13.0-rc1', 'v0.0.0-abc1234', 'v0.18.3', 'v0.14.9', 'v0.19.0-rc.2') }
+        }
+        Get-HelmOciLatestVersion -Chart 'oci://ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler' `
+            -ExcludeVersions @('v0.20.0', 'v0.20.1') -RequestInvoker $invoker | Should -Be 'v0.18.3'
+    }
+
+    It 'Matches excluded versions with or without a v prefix' {
+        $invoker = {
+            param($Uri)
+            if ($Uri -like 'https://ghcr.io/token?*') { return @{ token = 'test-token' } }
+            return @{ tags = @('v0.20.1', 'v0.18.3') }
+        }
+        Get-HelmOciLatestVersion -Chart 'oci://ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler' `
+            -ExcludeVersions @('0.20.1') -RequestInvoker $invoker | Should -Be 'v0.18.3'
+    }
+
+    It 'Throws when every stable tag is excluded' {
+        $invoker = {
+            param($Uri)
+            if ($Uri -like 'https://ghcr.io/token?*') { return @{ token = 'test-token' } }
+            return @{ tags = @('v0.20.1', 'v0.21.0-rc1') }
+        }
+        {
+            Get-HelmOciLatestVersion -Chart 'oci://ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler' `
+                -ExcludeVersions @('v0.20.1') -RequestInvoker $invoker
+        } | Should -Throw '*no stable, non-excluded chart versions*'
+    }
+
     It 'Throws when the anonymous pull token is unavailable' {
         $invoker = { @{ token = $null } }
         {
@@ -699,6 +731,7 @@ KAI_SCHEDULER_VERSION="${KAI_SCHEDULER_VERSION:-v0.20.1}"
 OSMO_CHART_VERSION="${OSMO_CHART_VERSION:-1.0.0}"
 HELM_REPO_GPU_OPERATOR="${HELM_REPO_GPU_OPERATOR:-https://example.com/gpu}"
 HELM_REPO_KAI="${HELM_REPO_KAI:-oci://ghcr.io/nvidia/kai-scheduler}"
+KAI_SCHEDULER_RETRACTED_VERSIONS="${KAI_SCHEDULER_RETRACTED_VERSIONS:-v0.20.0 v0.20.1}"
 HELM_REPO_OSMO="${HELM_REPO_OSMO:-https://example.com/osmo}"
 '@ | Set-Content -Path (Join-Path $defaultsDir 'defaults.conf')
     }
@@ -748,6 +781,13 @@ HELM_REPO_OSMO="${HELM_REPO_OSMO:-https://example.com/osmo}"
         $sarif = Get-Content $script:SarifOutput -Raw | ConvertFrom-Json
         $sarif.runs[0].results[0].ruleId | Should -Be 'binary-freshness/hash-mismatch'
         $sarif.runs[0].results[0].level | Should -Be 'warning'
+    }
+
+    It 'Passes the retracted KAI versions from defaults.conf to the OCI lookup' {
+        $null = Invoke-BinaryFreshnessCheck -RepoRoot $script:FixturesRoot -SarifFile $script:SarifOutput -Repository 'owner/repo'
+        Should -Invoke Get-HelmOciLatestVersion -Times 1 -Exactly -ParameterFilter {
+            $Chart -eq 'oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler' -and ($ExcludeVersions -join ' ') -eq 'v0.20.0 v0.20.1'
+        }
     }
 
     It 'Keeps chart version drift advisory with exit 0' {

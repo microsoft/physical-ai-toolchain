@@ -11,10 +11,19 @@ import io
 import logging
 import shutil
 import subprocess
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ...models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, FeatureSchema, TaskInfo, TrajectoryPoint
+from ...models.datasources import (
+    DatasetInfo,
+    EpisodeData,
+    EpisodeMeta,
+    FeatureSchema,
+    RecordedSubtask,
+    TaskInfo,
+    TrajectoryPoint,
+)
 from .base import build_trajectory, build_trajectory_variables, normalize_feature_names
 
 if TYPE_CHECKING:
@@ -237,6 +246,7 @@ class LeRobotFormatHandler:
                 cameras=list(video_urls.keys()),
                 trajectory_variables=trajectory_variables,
                 trajectory_data=trajectory_data,
+                subtasks=[RecordedSubtask(**asdict(segment)) for segment in lr_data.subtasks],
             )
         except Exception as e:
             logger.warning(

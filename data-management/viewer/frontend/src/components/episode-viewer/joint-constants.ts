@@ -59,6 +59,26 @@ export function getJointLabel(idx: number): string {
   return OBSERVATION_LABELS[idx] || `Ch ${idx}`
 }
 
+/** Strip the `State:` or `Action:` prefix the backend adds to trajectory variable labels. */
+export function removeVariableLabelPrefix(label: string): string {
+  return label.replace(/^(State|Action):\s+/i, '')
+}
+
+/**
+ * Label state channel `index`: its named state variable when the dataset has one,
+ * else the joint-config label, else the built-in channel name.
+ */
+export function resolveStateChannelLabel(
+  index: number,
+  stateVariables: readonly { label: string }[],
+  jointConfigLabels: Readonly<Record<string, string>>,
+): string {
+  const variable = stateVariables[index]
+  return variable
+    ? removeVariableLabelPrefix(variable.label)
+    : (jointConfigLabels[String(index)] ?? getJointLabel(index))
+}
+
 export function getJointColor(idx: number, colors: string[] = JOINT_COLORS): string {
   return colors[idx % colors.length]
 }

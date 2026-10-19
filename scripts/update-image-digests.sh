@@ -27,7 +27,7 @@ AzureML environment versions derived from checked-in image defaults are synchron
 Check mode is a CI signal that supports SARIF and exits 2 on drift.
 Dry-run mode is a local preview of the changes that write mode would apply.
 Anonymous OCI registries are supported. Anonymous pull tokens are acquired only for
-Docker Hub and NGC; other registries that require authentication are not supported.
+Docker Hub, GHCR, and NGC; other registries that require authentication are not supported.
 
 OPTIONS:
     -h, --help               Show this help message
@@ -128,6 +128,7 @@ fetch_manifest_headers() {
   # resolved here, so there is nothing to checksum.
   case "$host" in
   registry-1.docker.io) token_url="https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull" ;;
+  ghcr.io) token_url="https://ghcr.io/token?scope=repository:${repo}:pull" ;;
   nvcr.io) token_url="https://nvcr.io/proxy_auth?scope=repository:${repo}:pull" ;;
   esac
   if [[ -n "$token_url" ]]; then
@@ -143,6 +144,10 @@ fetch_manifest_headers() {
 resolve_digest() {
   local ref="$1" host repo tag
   case "$ref" in
+  docker.io/*)
+    host="registry-1.docker.io"
+    repo="${ref#docker.io/}"
+    ;;
   nvcr.io/*)
     host="nvcr.io"
     repo="${ref#nvcr.io/}"

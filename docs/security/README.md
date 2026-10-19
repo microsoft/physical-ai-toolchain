@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Security Documentation
 description: Index of security documentation including threat model and deployment security guide
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-28
+ms.date: 2026-10-05
 ms.topic: overview
 keywords:
   - security
@@ -64,7 +64,7 @@ Script parameters vary by check: `Test-BinaryFreshness.ps1` uses `-SarifFile` an
 
 `update-image-digests.sh --check` exits 0 when pins are current, 2 when image-digest or AzureML environment-version drift findings are written to SARIF, and 1 for resolution or report-generation failures. The scheduled workflow keeps drift non-gating while propagating failures.
 
-The script resolves anonymous OCI registries, including hosts with ports. It acquires anonymous pull tokens only for Docker Hub and NGC; registries that require other authentication flows are not supported.
+The script resolves anonymous OCI registries, including hosts with ports. It acquires anonymous pull tokens only for Docker Hub, GHCR, and NGC; registries that require other authentication flows are not supported.
 
 Run `scripts/update-chart-hashes.sh` locally whenever a pinned Helm chart version is updated so `defaults.conf` stays in sync. Likewise, run `scripts/update-image-digests.sh` after bumping a container image tag so the `@sha256` digest pins stay in sync.
 
