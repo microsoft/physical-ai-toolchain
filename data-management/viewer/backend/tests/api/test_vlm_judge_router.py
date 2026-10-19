@@ -1221,13 +1221,154 @@ def test_post_falls_back_to_dataset_instruction_when_request_omits_instruction(
     assert _finish_job(client, rsp)["targets"][0]["result"]["instruction"] == "Dataset fallback instruction"
 
 
-def test_post_accepts_safe_view_filter(vlm_client: TestClient) -> None:
+@pytest.mark.parametrize("views", [["obs.front"], None])
+def test_post_accepts_safe_view_filter(vlm_client: TestClient, views: list[str] | None) -> None:
     path = f"/api/datasets/{DATASET_ID}/episodes/0/judge"
     rsp = vlm_client.post(
         path,
-        json={"views": ["obs.front"], "force": True},
+        json={"views": views, "force": True},
     )
     assert _finish_job(vlm_client, rsp)["targets"][0]["result"]["episode_id"] == f"{DATASET_ID}/episode_000000"
+
+
+@pytest.mark.parametrize("failure", ["saved-input", "conflict"])
+def test_given_submission_failure_when_posting_judge_then_returns_expected_conflict(
+    vlm_client: TestClient, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from physical_ai_curation.jobs import JudgeJobs
+
+    from src.api.services.saved_input_service import SavedInputError
+
+    async def reject_submission(self: JudgeJobs, *args: Any, **kwargs: Any) -> None:
+        if failure == "saved-input":
+            raise SavedInputError("Saved snapshot changed", 412)
+        raise ValueError("private-submission-details")
+
+    monkeypatch.setattr(JudgeJobs, "submit", reject_submission)
+
+    response = vlm_client.post(f"/api/datasets/{DATASET_ID}/episodes/0/judge", json={})
+
+    assert response.status_code == (412 if failure == "saved-input" else 409)
+    assert response.json() == {
+        "detail": "Saved snapshot changed" if failure == "saved-input" else "Judge request conflicts with saved state"
+    }
+    assert "private-submission-details" not in response.text
+
+
+@pytest.mark.parametrize("endpoint", ["judge", "judge/snapshot"])
+@pytest.mark.parametrize("failure", ["source", "storage"])
+def test_given_saved_input_failure_when_reading_judge_then_returns_sanitized_error(
+    vlm_client: TestClient, monkeypatch: pytest.MonkeyPatch, endpoint: str, failure: str
+) -> None:
+    from src.api.services.dataset_service import DatasetService
+    from src.api.storage import StorageError
+
+    async def unavailable_source(self: DatasetService, dataset_id: str, episode_index: int) -> str:
+        if failure == "source":
+            raise ValueError("private-source-details")
+        raise StorageError("private-storage-details")
+
+    monkeypatch.setattr(DatasetService, "get_source_revision", unavailable_source)
+
+    response = vlm_client.get(f"/api/datasets/{DATASET_ID}/episodes/0/{endpoint}")
+
+    assert response.status_code == (409 if failure == "source" else 503)
+    assert response.json() == {
+        "detail": "Saved input source changed or is unavailable"
+        if failure == "source"
+        else "Saved input storage unavailable"
+    }
+    assert "private-source-details" not in response.text
+    assert "private-storage-details" not in response.text
+
+
+@pytest.mark.parametrize("change", ["removed", "instruction"])
+def test_given_media_changes_during_resolution_when_reading_snapshot_then_rejects_stale_input(
+    vlm_client: TestClient, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    from physical_ai_dataset_io.lerobot import EpisodeRecord
+
+    from src.api.services.dataset_service import DatasetService
+
+    original = DatasetService.get_episode_media_record
+    reads = []
+
+    async def changed_media(self: DatasetService, dataset_id: str, episode_index: int) -> EpisodeRecord | None:
+        record = await original(self, dataset_id, episode_index)
+        reads.append(record)
+        if len(reads) == 2:
+            return None if change == "removed" else replace(record, instruction="Replacement instruction")
+        return record
+
+    monkeypatch.setattr(DatasetService, "get_episode_media_record", changed_media)
+
+    response = vlm_client.get(f"/api/datasets/{DATASET_ID}/episodes/0/judge/snapshot")
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Media changed while resolving saved inputs"}
+    assert len(reads) == 2
+
+
+def test_given_unknown_camera_when_submitting_judge_then_rejects_selection(vlm_client: TestClient) -> None:
+    response = vlm_client.post(f"/api/datasets/{DATASET_ID}/episodes/0/judge", json={"views": ["obs.missing"]})
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Unknown camera selection"}
+
+
+@pytest.mark.parametrize("helper", ["_resolve_episode", "_dataset_root"])
+def test_given_missing_local_root_when_resolving_judge_media_then_reports_unavailable(helper: str) -> None:
+    from types import SimpleNamespace
+
+    from src.api.routers import vlm_judge
+
+    resolve = getattr(vlm_judge, helper)
+    arguments = (
+        (SimpleNamespace(base_path=None), DATASET_ID, 0)
+        if helper == "_resolve_episode"
+        else (
+            SimpleNamespace(base_path=None),
+            DATASET_ID,
+        )
+    )
+
+    with pytest.raises(fastapi.HTTPException) as error:
+        resolve(*arguments)
+
+    assert error.value.status_code == 503
+    assert error.value.detail == "VLM judge requires a local dataset path (base_path)"
+
+
+@pytest.mark.parametrize("scenario", ["found", "missing-episode", "missing-dataset", "invalid-metadata"])
+def test_given_local_dataset_when_resolving_judge_media_then_preserves_lookup_contract(
+    tmp_path: Path, scenario: str
+) -> None:
+    from types import SimpleNamespace
+
+    from src.api.routers import vlm_judge
+
+    root = tmp_path / DATASET_ID
+    if scenario != "missing-dataset":
+        _build_dataset(root, instruction=INSTRUCTION)
+    if scenario == "invalid-metadata":
+        (root / "meta" / "info.json").write_text("{")
+    service = SimpleNamespace(base_path=tmp_path)
+
+    if scenario in ("missing-dataset", "invalid-metadata"):
+        with pytest.raises(fastapi.HTTPException) as error:
+            vlm_judge._resolve_episode(service, DATASET_ID, 0)
+        assert error.value.status_code == (404 if scenario == "missing-dataset" else 400)
+        if scenario == "invalid-metadata":
+            assert error.value.detail == "Invalid media input"
+    else:
+        record = vlm_judge._resolve_episode(
+            service, DATASET_ID, 7 if scenario == "missing-episode" else 0, views=("obs.front",)
+        )
+        if scenario == "missing-episode":
+            assert record is None
+        else:
+            assert record.instruction == INSTRUCTION
+            assert record.video_paths == {"obs.front": root / "videos/chunk-000/obs.front/episode_000000.mp4"}
 
 
 def test_post_rejects_invalid_process_method(vlm_client: TestClient) -> None:
