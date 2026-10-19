@@ -906,7 +906,7 @@ class JudgeJobs:
             renewal.cancel()
             try:
                 with suppress(asyncio.CancelledError):
-                    _completion = await renewal
+                    _ = await renewal
             finally:
                 await self.release(claim)
         return True

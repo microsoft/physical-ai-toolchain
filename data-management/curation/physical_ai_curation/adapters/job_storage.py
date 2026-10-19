@@ -94,7 +94,7 @@ class LocalJobStore:
             try:
                 await asyncio.shield(publication)
             except asyncio.CancelledError:
-                _completion = await publication
+                _ = await publication
                 raise
         finally:
             os.close(descriptor)
@@ -171,6 +171,6 @@ class BlobJobStore:
         finally:
             renewal.cancel()
             with suppress(asyncio.CancelledError):
-                _completion = await renewal
+                _ = await renewal
             with suppress(HttpResponseError):
                 await lease.release()
