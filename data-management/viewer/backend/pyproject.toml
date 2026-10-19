@@ -36,7 +36,7 @@ analysis = [
     "pandas==3.0.5",
 ]
 huggingface = [
-    "huggingface-hub==1.33.0",
+    "huggingface-hub==2.1.1",
 ]
 auth = [
     "pyjwt[crypto]==2.15.1",
