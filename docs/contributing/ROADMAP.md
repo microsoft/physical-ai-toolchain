@@ -3,7 +3,7 @@ sidebar_position: 3
 title: "Physical AI Toolchain Roadmap"
 description: "Project roadmap covering documentation, testing, CI/CD, governance, security, and OpenSSF compliance through Q1 2027."
 author: wberry
-ms.date: 2026-09-22
+ms.date: 2026-10-19
 ms.topic: reference
 keywords:
   - roadmap
@@ -230,8 +230,8 @@ Fleet intelligence (`T5`) is not a single leap. It decomposes into four ordered 
 
 | Metric                       | Current | Q2 2026 Target | Q4 2026 Target |
 |------------------------------|---------|----------------|----------------|
-| OpenSSF Passing criteria met | ~85%    | 95%            | 100%           |
-| OpenSSF Silver criteria met  | ~30%    | 50%            | 80%            |
+| OpenSSF Passing criteria met | 100%    | 95%            | 100%           |
+| OpenSSF Silver criteria met  | 100%    | 50%            | 100%           |
 | Test coverage (Python)       | 0%      | 60%            | 80%            |
 | CI workflow count            | 4       | 8              | 10             |
 | Contributing guide count     | 7       | 8              | 9              |
