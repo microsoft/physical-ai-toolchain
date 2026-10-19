@@ -1286,14 +1286,14 @@ def test_given_saved_input_failure_when_reading_judge_then_returns_sanitized_err
 def test_given_media_changes_during_resolution_when_reading_snapshot_then_rejects_stale_input(
     vlm_client: TestClient, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
-    from physical_ai_dataset_io.lerobot import EpisodeRecord
-
     from src.api.services.dataset_service import DatasetService
 
     original = DatasetService.get_episode_media_record
     reads = []
 
-    async def changed_media(self: DatasetService, dataset_id: str, episode_index: int) -> EpisodeRecord | None:
+    async def changed_media(
+        self: DatasetService, dataset_id: str, episode_index: int
+    ) -> dataset_module.EpisodeRecord | None:
         record = await original(self, dataset_id, episode_index)
         reads.append(record)
         if len(reads) == 2:
