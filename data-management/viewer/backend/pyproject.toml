@@ -99,6 +99,11 @@ constraint-dependencies = [
     "pygments==2.21.0",
 ]
 
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
+
 [tool.uv.sources]
 physical-ai-vlm-judge = { path = "../../../evaluation/vlm_judge", editable = true }
 

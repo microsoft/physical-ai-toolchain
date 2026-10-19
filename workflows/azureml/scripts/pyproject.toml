@@ -20,3 +20,8 @@ dependencies = [
 # deterministic build-time `uv export`.
 environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 package = false
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
