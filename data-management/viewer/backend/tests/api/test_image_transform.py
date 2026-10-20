@@ -233,20 +233,24 @@ class TestApplyGamma:
 class TestApplyHueRotation:
     """Tests for apply_hue_rotation function."""
 
-    def test_hue_rotation_positive(self, sample_rgb_frame: np.ndarray) -> None:
-        """Test positive hue rotation."""
-        result = apply_hue_rotation(sample_rgb_frame, 90)
+    @pytest.mark.parametrize(
+        ("degrees", "expected_colors"),
+        [
+            pytest.param(120, [(0, 255, 0), (0, 0, 255), (255, 0, 0)], id="positive"),
+            pytest.param(-120, [(0, 0, 255), (255, 0, 0), (0, 255, 0)], id="negative"),
+        ],
+    )
+    def test_hue_rotation_direction(self, degrees: float, expected_colors: list[tuple[int, int, int]]) -> None:
+        """Test both rotation directions against known primary-color outputs."""
+        frame = np.array([[(255, 0, 0), (0, 255, 0), (0, 0, 255)]], dtype=np.uint8)
+        expected = np.array([expected_colors], dtype=np.uint8)
 
-        assert result.shape == sample_rgb_frame.shape
+        result = apply_hue_rotation(frame, degrees)
+
+        assert result.shape == frame.shape
         assert result.dtype == np.uint8
-        assert not np.array_equal(result, sample_rgb_frame)
-
-    def test_hue_rotation_negative(self, sample_rgb_frame: np.ndarray) -> None:
-        """Test negative hue rotation."""
-        result = apply_hue_rotation(sample_rgb_frame, -45)
-
-        assert result.shape == sample_rgb_frame.shape
-        assert not np.array_equal(result, sample_rgb_frame)
+        # One 8-bit hue step can shift an RGB channel by approximately six levels.
+        np.testing.assert_allclose(result, expected, rtol=0, atol=6)
 
     def test_hue_rotation_full_circle(self, sample_rgb_frame: np.ndarray) -> None:
         """Test 360 degree rotation returns similar to original."""
