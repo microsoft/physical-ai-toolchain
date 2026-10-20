@@ -57,6 +57,32 @@ describe('LabelPanel', () => {
     useLabelStore.getState().setAvailableLabels(['SUCCESS', 'FAILURE', 'REVIEW'])
   })
 
+  it('adds normalized labels from Enter and retains input when creation fails', async () => {
+    const user = userEvent.setup()
+    render(<LabelPanel episodeIndex={3} />)
+    const input = screen.getByPlaceholderText('Add custom label...')
+    await user.type(input, '  custom  {Enter}')
+    expect(mockAddLabelOption).toHaveBeenCalledWith('CUSTOM')
+    expect(input).toHaveValue('')
+    mockAddLabelOption.mockRejectedValueOnce(new Error('denied'))
+    await user.type(input, 'next')
+    await user.click(screen.getByRole('button', { name: 'Add' }))
+    expect(screen.getByText('Failed to add label: denied')).toBeVisible()
+    expect(input).toHaveValue('next')
+  })
+
+  it('retains a failed deletion for review and cancels without changing labels', async () => {
+    const user = userEvent.setup()
+    mockRemoveLabelOption.mockRejectedValueOnce(new Error('revision conflict'))
+    render(<LabelPanel episodeIndex={3} />)
+    await user.click(screen.getByRole('button', { name: 'Delete label REVIEW' }))
+    await user.click(screen.getByRole('button', { name: /delete label/i }))
+    expect(screen.getByText('Failed to delete label: revision conflict')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'REVIEW' })).toBeVisible()
+  })
+
   it('does not show save-all or inline autosave copy in the label panel', () => {
     render(<LabelPanel episodeIndex={3} />)
 

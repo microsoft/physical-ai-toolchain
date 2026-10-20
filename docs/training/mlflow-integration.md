@@ -3,7 +3,7 @@ sidebar_position: 6
 title: MLflow Integration for SKRL Training
 description: Metric logging integration for SKRL agent training during Isaac Lab runs using monkey-patching
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-30
+ms.date: 2026-10-14
 ms.topic: reference
 keywords:
   - mlflow
@@ -13,7 +13,7 @@ keywords:
   - isaac lab
 ---
 
-The training pipeline uses monkey-patching to wrap the agent's `update` method, intercepting training updates to extract and log metrics to MLflow. This approach provides comprehensive experiment tracking without modifying the underlying SKRL agent implementation or training code.
+The training pipeline uses monkey-patching to wrap the agent's `update` method, intercepting training updates to extract and log metrics to MLflow. This approach provides comprehensive experiment tracking without modifying the underlying SKRL agent implementation or training code. Metrics go to the tracking server selected by `TRACKING_BACKEND`; see [Experiment Tracking](experiment-tracking.md#-tracking-backends).
 
 ## Available Metrics
 
@@ -79,6 +79,8 @@ System resource metrics are collected via psutil and pynvml with a `system/` pre
 ### Custom Metrics
 
 All entries in `agent.tracking_data` are automatically extracted, supporting algorithm-specific metrics from PPO, SAC, TD3, DDPG, A2C, and other SKRL implementations.
+
+Metric names keep to the characters every MLflow tracking server accepts: letters, digits, underscores, dashes, periods, spaces, colons, and slashes. Azure ML accepts more, but a self-hosted server rejects a batch that contains any other character. SKRL's units therefore lose their parentheses, so `Stats / Algorithm update time (ms)` logs as `Stats / Algorithm update time ms` on every backend.
 
 ## Implementation Details
 
@@ -152,10 +154,10 @@ The monkey-patching approach is applied after creating the SKRL Runner:
 import mlflow
 from skrl.utils.runner.torch import Runner
 from training.rl.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
+from training.utils.tracking import create_tracking_backend
 
-mlflow.set_tracking_uri("azureml://...")
-mlflow.set_registry_uri("azureml://...")
-mlflow.set_experiment("isaaclab-training")
+tracking = create_tracking_backend(experiment_name="isaaclab-training")
+tracking.configure_mlflow(mlflow)
 
 with mlflow.start_run():
     runner = Runner(env, agent_cfg)
@@ -226,7 +228,7 @@ The training script handles MLflow setup and monkey-patching automatically. To c
 
 Training runs complete but no metrics appear in MLflow.
 
-1. **MLflow not configured** - Verify `mlflow.set_tracking_uri()` and `mlflow.set_registry_uri()` use the Azure ML workspace URI and authentication is valid. The Isaac Lab image may otherwise retain a local SQLite registry URI.
+1. **MLflow not configured** - Verify `TRACKING_BACKEND` selects the intended backend and that `mlflow.set_tracking_uri()` and `mlflow.set_registry_uri()` use its tracking URI: the Azure ML workspace URI with valid authentication, or `MLFLOW_TRACKING_URI`. The Isaac Lab image may otherwise retain a local SQLite registry URI.
 2. **Monkey-patching not applied** - Ensure `create_mlflow_logging_wrapper` is called after Runner instantiation and `runner.agent.update` is replaced before `runner.run()`.
 3. **Short training runs** - Training updates occur after rollouts complete. Very short runs may finish before metrics are captured.
 4. **Empty tracking data** - Agent `tracking_data` may not populate until after the first rollout. If using `metric_filter`, verify the filter set contains matching metric names.
@@ -236,7 +238,7 @@ Training runs complete but no metrics appear in MLflow.
 Some expected metrics are not logged while others are.
 
 1. **Algorithm differences** - Different SKRL algorithms expose different metrics. Check `agent.tracking_data` for available entries.
-2. **Metric filtered** - If using `metric_filter`, ensure metric names match exactly (case-sensitive).
+2. **Metric filtered** - If using `metric_filter`, ensure metric names match the logged names exactly (case-sensitive, after the character normalization in [Custom Metrics](#custom-metrics)).
 3. **Extraction failure** - Check logs for metric extraction warnings. Some metrics may have incompatible types.
 
 ### AttributeError on Agent
@@ -300,6 +302,7 @@ Log messages like `"Failed to log metrics at timestep X"` indicate transient dat
 ## Related Documentation
 
 * [Training Guide](README.md)
+* [Experiment Tracking](experiment-tracking.md)
 * [Workflow Templates](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/README.md)
 
 ---

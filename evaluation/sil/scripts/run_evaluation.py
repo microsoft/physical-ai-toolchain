@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +28,10 @@ _EVALUATION_SCHEMA_VERSION = 1
 _VERDICT_PASS = "pass"
 _VERDICT_SKIPPED = "skipped"
 _BASELINE_NONE = "none"
+# Stochastic policies (Diffusion, SmolVLA) sample noise per action, so a fixed seed makes replays of the same
+# weights comparable, for example a checkpoint and the carrier image built from it.
+_REPLAY_SEED = 0
+_RESULT_FILES = ("eval_results.json", "metrics.json", "failure_cases.jsonl")
 
 _TOOLCHAIN_TO_VLA_METRIC = {
     "mse": "action_accuracy_l2",
@@ -93,6 +99,34 @@ def _write_vla_schema_v1(
             }
             f.write(json.dumps(record) + "\n")
     print(f"[INFO] VLA schema v1 failure cases: {failure_cases_path}")
+
+
+def _seed_replay(seed: int) -> None:
+    """Seed every random source a policy can sample from."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+
+def _aggregate_metrics(episode_metrics: list[dict]) -> dict[str, float]:
+    """Average the per-episode metrics; an evaluation without episodes has none to report."""
+    if not episode_metrics:
+        raise ValueError("No episode was evaluated; check that the dataset has data and video files for its episodes")
+    return {
+        name: float(np.mean([episode[name] for episode in episode_metrics]))
+        for name in ("mse", "mae", "avg_inference_ms", "throughput_hz")
+    }
+
+
+def _log_evaluation_results(
+    mlflow: Any, output_dir: Path, aggregate: dict[str, float], episodes_evaluated: int
+) -> None:
+    """Log the aggregate metrics, the evaluated episode count, and the result files to the active run."""
+    mlflow.log_metrics(
+        {f"aggregate_{name}": value for name, value in aggregate.items()} | {"episodes_evaluated": episodes_evaluated}
+    )
+    for name in _RESULT_FILES:
+        mlflow.log_artifact(str(output_dir / name))
 
 
 def _setup_matplotlib():
@@ -466,10 +500,64 @@ def _slice_episode_frames(
     return frames[start_frame:end_frame]
 
 
+def _camera_keys(features: dict) -> list[str]:
+    """Return every camera the dataset records; the policy uses the ones its configuration names."""
+    keys = [key for key, feature in features.items() if feature.get("dtype") in ("video", "image")]
+    return keys or ["observation.images.color"]
+
+
+def _decode_video(video_file: str) -> list[np.ndarray]:
+    """Decode every frame of a video file as an RGB array."""
+    import av
+
+    with av.open(video_file) as container:
+        return [frame.to_ndarray(format="rgb24") for frame in container.decode(container.streams.video[0])]
+
+
+def _load_episode_frames(
+    dataset_dir: str,
+    camera_keys: list[str],
+    ep: int,
+    episode_record: dict | None,
+    fps: int | float,
+    decode_video: Callable[[str], list[np.ndarray]] = _decode_video,
+) -> dict[str, list[np.ndarray]] | None:
+    """Return each camera's frames for one episode, or None when any camera has no video or no frames in it."""
+    frames_by_key: dict[str, list[np.ndarray]] = {}
+    for camera_key in camera_keys:
+        video_file = _find_video_file(dataset_dir, camera_key, ep, episode_record)
+        if not video_file:
+            print(f"  [WARNING] No video for episode {ep} ({camera_key}), skipping")
+            return None
+        frames = _slice_episode_frames(decode_video(video_file), episode_record, camera_key, fps)
+        if not frames:
+            print(f"  [WARNING] No video frames for episode {ep} ({camera_key}), skipping")
+            return None
+        frames_by_key[camera_key] = frames
+    return frames_by_key
+
+
+def _replay_observation(state: np.ndarray, frames_by_key: dict[str, list[np.ndarray]], step: int) -> dict:
+    """Build the policy input for one replayed frame: the joint state and every camera, under the dataset's keys."""
+    obs = {"observation.state": torch.from_numpy(state).float()}
+    for key, frames in frames_by_key.items():
+        obs[key] = torch.from_numpy(frames[step]).float().permute(2, 0, 1) / 255.0
+    return obs
+
+
+def _parse_rename_map(raw: str) -> dict[str, str] | None:
+    """Parse ``RENAME_MAP``, a JSON object mapping dataset feature keys to the policy's, or return None."""
+    if not raw.strip():
+        return None
+    value = json.loads(raw)
+    if not isinstance(value, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
+        raise ValueError("RENAME_MAP must be a JSON object of string keys to string values")
+    return value
+
+
 def main() -> int:
     global JOINT_NAMES
 
-    import av
     import pyarrow.parquet as pq
 
     policy_repo_id = os.environ.get("POLICY_REPO_ID", "").strip()
@@ -495,7 +583,7 @@ def main() -> int:
     dataset_dir_env = os.environ.get("DATASET_DIR", "")
     if dataset_dir_env and os.path.isdir(dataset_dir_env):
         dataset_dir = dataset_dir_env
-        print(f"[INFO] Using blob-downloaded dataset: {dataset_dir}")
+        print(f"[INFO] Using dataset directory: {dataset_dir}")
     elif dataset_repo_id and dataset_repo_id != "none":
         try:
             dataset_revision = resolve_hf_revision(dataset_repo_id, dataset_revision, revision_name="DATASET_REVISION")
@@ -521,15 +609,14 @@ def main() -> int:
     action_names = info.get("features", {}).get("action", {}).get("names")
     JOINT_NAMES = list(action_names) if isinstance(action_names, list) else []
 
-    # Identify video key from features
-    features = info.get("features", {})
-    video_keys = [k for k, v in features.items() if v.get("dtype") in ("video", "image")]
-    # Prefer an observation.images.* key for a deterministic choice on
-    # multi-camera datasets; fall back to the first video/image feature.
-    image_key = next(
-        (k for k in video_keys if k.startswith("observation.images.")),
-        video_keys[0] if video_keys else "observation.images.color",
-    )
+    # Every camera goes to the policy under the dataset's key; the policy's preprocessor renames keys
+    # through its rename map, and the policy reads the cameras its configuration names.
+    camera_keys = _camera_keys(info.get("features", {}))
+    try:
+        rename_map = _parse_rename_map(os.environ.get("RENAME_MAP", ""))
+    except ValueError as exc:
+        print(f"[ERROR] {exc}")
+        return 1
 
     # Load policy (normalization is handled internally by select_action)
     print(f"[INFO] Loading policy from: {policy_repo_id}")
@@ -544,6 +631,7 @@ def main() -> int:
             policy_type=policy_type,
             device=str(device),
             revision=policy_revision,
+            rename_map=rename_map,
         )
     except ValueError as exc:
         print(f"[ERROR] {exc}")
@@ -567,9 +655,11 @@ def main() -> int:
                 "eval_episodes": num_episodes,
                 "device": str(device),
                 "fps": fps,
+                "seed": _REPLAY_SEED,
             }
         )
 
+    _seed_replay(_REPLAY_SEED)
     all_episode_metrics = []
 
     for ep in episode_indices:
@@ -590,19 +680,8 @@ def main() -> int:
             continue
         n_frames = len(data["timestamp"])
 
-        # Load video frames
-        video_file = _find_video_file(dataset_dir, image_key, ep, episode_record)
-        if not video_file:
-            print(f"  [WARNING] No video for episode {ep} ({image_key}), skipping")
-            continue
-
-        container = av.open(video_file)
-        stream = container.streams.video[0]
-        frames = [av_frame.to_ndarray(format="rgb24") for av_frame in container.decode(stream)]
-        container.close()
-        frames = _slice_episode_frames(frames, episode_record, image_key, fps)
-        if not frames:
-            print(f"  [WARNING] No video frames for episode {ep}, skipping")
+        frames_by_key = _load_episode_frames(dataset_dir, camera_keys, ep, episode_record, fps)
+        if frames_by_key is None:
             continue
 
         policy.reset()
@@ -610,15 +689,10 @@ def main() -> int:
         actions_ground_truth = []
         inference_times_list = []
 
-        for step in range(min(n_frames - 1, len(frames))):
+        for step in range(min(n_frames - 1, *(len(frames) for frames in frames_by_key.values()))):
             state = np.array(data["observation.state"][step], dtype=np.float32)
             gt_action = np.array(data["action"][step], dtype=np.float32)
-            image = frames[step]
-
-            obs = {
-                "observation.state": torch.from_numpy(state).float(),
-                image_key: torch.from_numpy(image).float().permute(2, 0, 1) / 255.0,
-            }
+            obs = _replay_observation(state, frames_by_key, step)
             if bundle.policy_type in VLA_POLICY_TYPES:
                 task = _resolve_frame_task(step, ep, data, task_descriptions, episode_tasks)
                 if not task:
@@ -702,13 +776,15 @@ def main() -> int:
             print(f"  Logged 4 plots + metrics to MLflow for episode {ep}")
 
     # Aggregate metrics
-    if all_episode_metrics:
-        agg_mse = float(np.mean([m["mse"] for m in all_episode_metrics]))
-        agg_mae = float(np.mean([m["mae"] for m in all_episode_metrics]))
-        agg_inf_ms = float(np.mean([m["avg_inference_ms"] for m in all_episode_metrics]))
-        agg_throughput = float(np.mean([m["throughput_hz"] for m in all_episode_metrics]))
-    else:
-        agg_mse = agg_mae = agg_inf_ms = agg_throughput = 0.0
+    try:
+        aggregate = _aggregate_metrics(all_episode_metrics)
+    except ValueError as exc:
+        print(f"[ERROR] {exc}")
+        if mlflow_enable:
+            import mlflow
+
+            mlflow.end_run(status="FAILED")
+        return 1
 
     results = {
         "job_name": job_name,
@@ -717,10 +793,7 @@ def main() -> int:
         "dataset_repo_id": dataset_repo_id,
         "device": str(device),
         "episodes_evaluated": len(all_episode_metrics),
-        "aggregate_mse": agg_mse,
-        "aggregate_mae": agg_mae,
-        "aggregate_avg_inference_ms": agg_inf_ms,
-        "aggregate_throughput_hz": agg_throughput,
+        **{f"aggregate_{name}": value for name, value in aggregate.items()},
         "per_episode": all_episode_metrics,
         "status": "completed",
     }
@@ -732,12 +805,7 @@ def main() -> int:
 
     _write_vla_schema_v1(
         output_dir=output_dir,
-        aggregate={
-            "mse": agg_mse,
-            "mae": agg_mae,
-            "avg_inference_ms": agg_inf_ms,
-            "throughput_hz": agg_throughput,
-        },
+        aggregate=aggregate,
         per_episode=all_episode_metrics,
         dataset_repo_id=dataset_repo_id,
         policy_repo_id=policy_repo_id,
@@ -746,15 +814,7 @@ def main() -> int:
     if mlflow_enable:
         import mlflow
 
-        mlflow.log_metrics(
-            {
-                "aggregate_mse": agg_mse,
-                "aggregate_mae": agg_mae,
-                "aggregate_avg_inference_ms": agg_inf_ms,
-                "aggregate_throughput_hz": agg_throughput,
-            }
-        )
-        mlflow.log_artifact(str(results_path))
+        _log_evaluation_results(mlflow, output_dir, aggregate, len(all_episode_metrics))
 
         if len(all_episode_metrics) >= 2:
             import matplotlib

@@ -1,4 +1,4 @@
-"""SKRL training orchestration with Isaac Lab environments and Azure MLflow integration.
+"""SKRL training orchestration with Isaac Lab environments and MLflow tracking.
 
 This module provides the main training loop for reinforcement learning agents using
 the SKRL library with Isaac Lab simulation environments. It handles:
@@ -6,7 +6,7 @@ the SKRL library with Isaac Lab simulation environments. It handles:
 - Checkpoint loading and model registration
 - MLflow metric logging and artifact tracking
 - Video recording of training rollouts
-- Integration with Azure ML workspaces
+- Tracking and registration through the selected backend (Azure ML or an MLflow server)
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from training.utils import set_env_defaults
 from training.utils.integrity import safe_load_skrl_checkpoint
 
 if TYPE_CHECKING:
-    from training.utils.context import AzureMLContext
+    from training.utils.tracking import TrackingBackend
 
 _LOGGER = logging.getLogger("isaaclab.skrl")
 
@@ -254,30 +254,27 @@ def _log_artifacts(mlflow: Any, log_dir: Path, resume_path: str | None) -> str |
 
 def _register_checkpoint_model(
     *,
-    context: AzureMLContext | None,
+    context: TrackingBackend | None,
     model_name: str,
     checkpoint_uri: str,
     checkpoint_mode: str | None,
     task: str | None,
     algorithm: str | None = None,
 ) -> None:
-    """Register a checkpoint artifact as an Azure ML model when context is available.
+    """Register a checkpoint artifact in the tracking backend's model registry.
+
+    Registration failures are logged and never fail the training job.
 
     Args:
-        context: Azure ML context responsible for model registration.
-        model_name: Target Azure ML model name.
+        context: Tracking backend responsible for model registration.
+        model_name: Target registered model name.
         checkpoint_uri: MLflow URI for the checkpoint artifact.
         checkpoint_mode: Checkpoint mode metadata tag.
         task: Isaac Lab task identifier for tagging.
         algorithm: RL algorithm (e.g., PPO, IPPO) for tagging.
     """
     if context is None:
-        _LOGGER.info("Skipping checkpoint registration (no Azure ML context)")
-        return
-    try:
-        from azure.ai.ml.entities import Model
-    except ImportError as exc:
-        _LOGGER.error("Azure ML SDK missing; cannot register checkpoint: %s", exc)
+        _LOGGER.info("Skipping checkpoint registration (no tracking backend)")
         return
 
     tags = {
@@ -295,18 +292,21 @@ def _register_checkpoint_model(
     }
 
     try:
-        model = Model(
+        registered = context.register_checkpoint(
             name=model_name,
-            path=checkpoint_uri,
-            type="custom_model",
+            artifact_uri=checkpoint_uri,
             description="Isaac Lab SKRL checkpoint artifact",
             tags=tags,
             properties=properties,
         )
-        context.client.models.create_or_update(model)
-        _LOGGER.info("Registered checkpoint as Azure ML model: %s", model_name)
+    except ImportError as exc:
+        _LOGGER.error("Registry SDK missing; cannot register checkpoint: %s", exc)
+        return
     except Exception as exc:
         _LOGGER.error("Failed to register checkpoint model %s: %s", model_name, exc)
+        return
+    if registered is not None:
+        _LOGGER.info("Registered checkpoint %s as %s", model_name, registered.uri)
 
 
 def _resolve_env_count(env_cfg: Any) -> int | None:
@@ -550,7 +550,7 @@ class MLflowRunState:
     mlflow: Any
     log_interval: int
     owns_run: bool = False
-    context: AzureMLContext | None = None
+    context: TrackingBackend | None = None
     args: argparse.Namespace | None = None
     cli_args: argparse.Namespace | None = None
     log_dir: Path | None = None
@@ -567,7 +567,7 @@ def _is_azureml_managed_run() -> bool:
 def mlflow_run_context(
     mlflow: Any,
     *,
-    context: AzureMLContext | None,
+    context: TrackingBackend | None,
     args: argparse.Namespace,
     cli_args: argparse.Namespace,
     env_cfg: Any,
@@ -595,9 +595,7 @@ def mlflow_run_context(
     env_experiment_id = os.environ.get("MLFLOW_EXPERIMENT_ID")
 
     if context is not None:
-        tracking_uri = context.tracking_uri
-        mlflow.set_tracking_uri(tracking_uri)
-        mlflow.set_registry_uri(tracking_uri)
+        context.configure_mlflow(mlflow)
 
     # Log all relevant MLflow environment variables for debugging
     mlflow_env_vars = {k: v for k, v in os.environ.items() if k.startswith(("MLFLOW_", "AZURE_"))}
@@ -669,8 +667,8 @@ def mlflow_run_context(
     }
     if resume_path:
         tags["checkpoint_resume"] = resume_path
-    if context:
-        tags["azureml_workspace"] = context.workspace_name
+    if context is not None:
+        tags.update(context.run_tags())
     if args.checkpoint_uri:
         tags["checkpoint_source_uri"] = args.checkpoint_uri
     if correlation_id := os.environ.get("MLFLOW_CORRELATION_ID", "").strip():
@@ -802,7 +800,7 @@ def _initialize_simulation(
 
 def _load_training_modules(
     cli_args: argparse.Namespace,
-    context: AzureMLContext | None,
+    context: TrackingBackend | None,
 ) -> TrainingModules:
     """Import Isaac Lab, SKRL, and optional MLflow modules."""
 
@@ -982,7 +980,7 @@ def _run_hydra_training(
     *,
     args: argparse.Namespace,
     cli_args: argparse.Namespace,
-    context: AzureMLContext | None,
+    context: TrackingBackend | None,
     app_launcher: Any,
     modules: TrainingModules,
 ) -> None:
@@ -1038,7 +1036,7 @@ def _run_training_with_mlflow(
     env_cfg: Any,
     args: argparse.Namespace,
     cli_args: argparse.Namespace,
-    context: AzureMLContext | None,
+    context: TrackingBackend | None,
     modules: TrainingModules,
 ) -> None:
     """Execute training loop with optional MLflow tracking."""
@@ -1080,14 +1078,14 @@ def run_training(
     *,
     args: argparse.Namespace,
     hydra_args: Sequence[str],
-    context: AzureMLContext | None,
+    context: TrackingBackend | None,
 ) -> None:
-    """Execute SKRL training with Isaac Lab environment and optional Azure ML tracking.
+    """Execute SKRL training with Isaac Lab environment and optional MLflow tracking.
 
     Args:
         args: Parsed launch arguments including checkpoint behavior.
         hydra_args: Sequence of Hydra overrides to forward to Isaac Lab launcher.
-        context: Azure ML context enabling MLflow tracking and model registration.
+        context: Tracking backend for MLflow runs and model registration, or None to train untracked.
 
     Raises:
         SystemExit: If Isaac Lab dependencies are missing or task is unavailable.

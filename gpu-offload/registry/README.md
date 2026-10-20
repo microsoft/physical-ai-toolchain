@@ -21,6 +21,10 @@ first. Running on the host also keeps the cache intact across cluster rebuilds.
 port and its own blob directory. Every endpoint binds `127.0.0.1`; k3s runs on the host,
 so its containerd reaches the same loopback address the build tooling pushes to.
 
+The [local OSMO profile](../../infrastructure/local/README.md) runs its own hosting
+registry on `127.0.0.1:5000`. Only one of the two can bind the port, so stop one before
+starting the other.
+
 Two consumers are registered against these endpoints:
 
 | Consumer | File                                                      | Privilege          |

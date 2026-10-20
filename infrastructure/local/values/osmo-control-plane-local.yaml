@@ -1,0 +1,158 @@
+# Local profile overlay for the OSMO service chart, layered after
+# infrastructure/setup/values/osmo-control-plane.yaml. It replaces the Azure-specific parts: managed
+# PostgreSQL and Redis, Blob Storage with workload identity, the internal load balancer, and A100 pools.
+# Rendered by 02-deploy-osmo.sh, which substitutes only LOCAL_ placeholders.
+services:
+  configs:
+    # One URL for pods and host CLIs: the pinned gateway ClusterIP.
+    service:
+      service_base_url: "http://${LOCAL_OSMO_GATEWAY_CLUSTER_IP}"
+
+    # The storage Secret is mounted at /etc/osmo/secrets/<name>; every secretName below merges its keys
+    # (access_key_id, access_key, region, override_url, addressing_style) into that credential.
+    secretRefs:
+      - secretName: ${LOCAL_OSMO_STORAGE_SECRET}
+
+    workflow:
+      workflow_data:
+        credential:
+          secretName: ${LOCAL_OSMO_STORAGE_SECRET}
+          endpoint: "s3://${LOCAL_OSMO_BUCKET}/workflows/data"
+      workflow_log:
+        credential:
+          secretName: ${LOCAL_OSMO_STORAGE_SECRET}
+          endpoint: "s3://${LOCAL_OSMO_BUCKET}/workflows/logs"
+      workflow_app:
+        credential:
+          secretName: ${LOCAL_OSMO_STORAGE_SECRET}
+          endpoint: "s3://${LOCAL_OSMO_BUCKET}/apps"
+      # OSMO checks task images by querying their registry from the service pod. The local registry
+      # listens only on the host loopback, so the check is skipped for it; K3s still pulls the image.
+      # OSMO matches the registry host without its port.
+      credential_config:
+        disable_registry_validation: ["${LOCAL_REGISTRY_HOSTNAME}"]
+
+    # Workflows read and write the training bucket with this default credential; OSMO derives its endpoint
+    # from dataset_path. The host CLI uses its own DATA credential (connect-osmo-cli.sh).
+    dataset:
+      buckets:
+        training:
+          dataset_path: "s3://${LOCAL_OSMO_BUCKET}/datasets"
+          region: "${LOCAL_S3_REGION}"
+          default_credential:
+            secretName: ${LOCAL_OSMO_STORAGE_SECRET}
+      default_bucket: training
+
+    podTemplates:
+      # Workflow pods opt in to Azure workload identity only when 02-deploy-osmo.sh receives a client ID:
+      # the Arc webhook in this cluster mutates only pods labeled "true".
+      default_ctrl:
+        metadata:
+          labels:
+            azure.workload.identity/use: "${LOCAL_OSMO_WORKLOAD_IDENTITY}"
+      # Every task sees the host datasets read-only and a persistent cache shared across jobs. OSMO host
+      # mounts are always read-write, so these mounts live in the pool template instead.
+      local_data:
+        spec:
+          volumes:
+            - name: local-datasets
+              hostPath:
+                path: ${LOCAL_DATASETS_DIR}
+                type: Directory
+            - name: local-cache
+              hostPath:
+                path: ${LOCAL_CACHE_DIR}
+                type: Directory
+          containers:
+            - name: "{{USER_CONTAINER_NAME}}"
+              env:
+                - name: HF_HOME
+                  value: ${LOCAL_JOB_CACHE_PATH}/huggingface
+                - name: UV_CACHE_DIR
+                  value: ${LOCAL_JOB_CACHE_PATH}/uv
+                - name: PIP_CACHE_DIR
+                  value: ${LOCAL_JOB_CACHE_PATH}/pip
+              volumeMounts:
+                - name: local-datasets
+                  mountPath: ${LOCAL_JOB_DATASETS_PATH}
+                  readOnly: true
+                - name: local-cache
+                  mountPath: ${LOCAL_JOB_CACHE_PATH}
+      # NVIDIA is the node's default container runtime, so a GPU request needs no runtime class.
+      local_gpu:
+        spec:
+          containers:
+            - name: "{{USER_CONTAINER_NAME}}"
+              resources:
+                requests: { nvidia.com/gpu: "{{USER_GPU}}" }
+                limits: { nvidia.com/gpu: "{{USER_GPU}}" }
+
+    resourceValidations:
+      local_node_capacity:
+        - { operator: LE, left_operand: "{{USER_CPU}}", right_operand: "{{K8_CPU}}", assert_message: "CPU {{USER_CPU}} exceeds this host's allocatable CPU {{K8_CPU}}" }
+        - { operator: LE, left_operand: "{{USER_MEMORY}}", right_operand: "{{K8_MEMORY}}", assert_message: "Memory {{USER_MEMORY}} exceeds this host's allocatable memory {{K8_MEMORY}}" }
+        - { operator: LE, left_operand: "{{USER_STORAGE}}", right_operand: "{{K8_STORAGE}}", assert_message: "Storage {{USER_STORAGE}} exceeds this host's allocatable storage {{K8_STORAGE}}" }
+        - { operator: LE, left_operand: "{{USER_GPU}}", right_operand: "{{K8_GPU}}", assert_message: "GPU {{USER_GPU}} exceeds this host's allocatable GPUs {{K8_GPU}}" }
+      local_gpu_required:
+        - { operator: GE, left_operand: "{{USER_GPU}}", right_operand: "1", assert_message: "GPU platform: GPU must be >= 1" }
+
+    # Platform names match the workflow templates: default for CPU tasks, gpu_platform for GPU tasks.
+    # allowed_mounts stays empty, so tasks cannot request other host paths.
+    pools:
+      ${LOCAL_OSMO_POOL}:
+        description: "Local K3s pool"
+        backend: default
+        default_platform: default
+        common_pod_template: [default_ctrl, default_user, local_data]
+        common_resource_validations: [static_cpu, static_memory, static_storage, static_gpu_non_negative, local_node_capacity]
+        common_default_variables:
+          USER_CPU: 1
+          USER_GPU: 0
+          USER_MEMORY: "2Gi"
+          USER_STORAGE: "10Gi"
+          USER_SHM_SIZE: "1Gi"
+        platforms:
+          default:
+            description: "CPU tasks"
+            resource_validations: [default_gpu_zero]
+            allowed_mounts: []
+          ${LOCAL_OSMO_GPU_PLATFORM}:
+            description: "GPU tasks, one GPU each by default"
+            override_pod_template: [local_gpu]
+            resource_validations: [local_gpu_required]
+            allowed_mounts: []
+            default_variables:
+              USER_GPU: ${LOCAL_TASK_GPU}
+              USER_CPU: ${LOCAL_TASK_CPU}
+              USER_MEMORY: "${LOCAL_TASK_MEMORY}"
+              USER_STORAGE: "${LOCAL_TASK_STORAGE}"
+              USER_SHM_SIZE: "${LOCAL_TASK_SHM}"
+
+  postgres:
+    enabled: false
+    serviceName: "postgres.${LOCAL_PLATFORM_NAMESPACE}.svc.cluster.local"
+    port: 5432
+    db: "${LOCAL_OSMO_DATABASE}"
+    user: "${LOCAL_OSMO_DATABASE}"
+
+  redis:
+    enabled: false
+    serviceName: "redis.${LOCAL_PLATFORM_NAMESPACE}.svc.cluster.local"
+    port: 6379
+    tlsEnabled: false
+
+  # The AKS values give the router its own service account for an Azure identity; locally it uses the
+  # chart's service account.
+  router:
+    serviceAccountName: ""
+
+# The gateway stays a ClusterIP Service with no ingress; 02-deploy-osmo.sh adds a second Service at the
+# pinned ClusterIP so the URL never changes across reinstalls.
+gateway:
+  envoy:
+    service:
+      type: ClusterIP
+    ingress:
+      enabled: false
+    defaultIdentity:
+      allowedPools: "${LOCAL_OSMO_POOL}"

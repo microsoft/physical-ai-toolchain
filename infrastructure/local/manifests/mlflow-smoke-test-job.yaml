@@ -1,0 +1,87 @@
+# Proves MLflow works the way jobs use it, with only the tracking URI and no object-store credential: a run
+# logs metrics and a checkpoint directory through the server's artifact proxy, the checkpoint registers as a
+# model version, and a models:/ download returns the same bytes.
+# Rendered by 03-deploy-mlflow.sh, which substitutes only LOCAL_ placeholders.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mlflow-smoke-test
+  namespace: ${LOCAL_MLFLOW_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: mlflow-smoke-test
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mlflow-smoke-test
+        app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: smoke-test
+          image: ${LOCAL_MLFLOW_IMAGE}
+          env:
+            - name: HOME
+              value: /tmp
+            - name: MLFLOW_TRACKING_URI
+              value: http://mlflow.${LOCAL_MLFLOW_NAMESPACE}.svc.cluster.local:${LOCAL_MLFLOW_PORT}
+            # The image has no git; MLflow's optional repository lookup would only warn.
+            - name: GIT_PYTHON_REFRESH
+              value: quiet
+          command: ["python", "-c"]
+          args:
+            - |
+              import filecmp
+              import os
+              import tempfile
+
+              import mlflow
+              from mlflow.exceptions import MlflowException
+              from mlflow.tracking import MlflowClient
+
+              name = "local-platform-smoke-test"
+              mlflow.set_experiment(name)
+              checkpoint = tempfile.mkdtemp()
+              with open(os.path.join(checkpoint, "model.bin"), "wb") as handle:
+                  handle.write(os.urandom(8 * 1024 * 1024))
+              with mlflow.start_run(run_name="smoke-test") as run:
+                  mlflow.log_param("purpose", "smoke-test")
+                  for step in range(3):
+                      mlflow.log_metric("loss", 1.0 / (step + 1), step=step)
+                  mlflow.log_artifacts(checkpoint, artifact_path="checkpoint")
+
+              # Checkpoints are plain directories, not MLflow models, so they register from the run's artifacts.
+              client = MlflowClient()
+              try:
+                  client.create_registered_model(name)
+              except MlflowException as error:
+                  if error.error_code != "RESOURCE_ALREADY_EXISTS":
+                      raise
+              version = client.create_model_version(
+                  name, source=f"{run.info.artifact_uri}/checkpoint", run_id=run.info.run_id, tags={"purpose": "smoke-test"}
+              )
+              downloaded = mlflow.artifacts.download_artifacts(f"models:/{name}/{version.version}")
+              if not filecmp.cmp(os.path.join(checkpoint, "model.bin"), os.path.join(downloaded, "model.bin"), shallow=False):
+                  raise SystemExit("The registered checkpoint downloaded with different bytes")
+              print(f"MLFLOW_RESULT=run {run.info.run_id} registered as version {version.version}, round-trip identical")
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

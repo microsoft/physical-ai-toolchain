@@ -11,6 +11,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import tempfile
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -22,8 +24,9 @@ _LOGGER = logging.getLogger("evaluation.vlm_judge")
 class JudgeCache:
     """Filesystem-backed JSON cache for ``JudgeResult.to_dict()`` payloads."""
 
-    def __init__(self, root: Path | None) -> None:
+    def __init__(self, root: Path | None, *, execution_config: Mapping[str, object] | None = None) -> None:
         self._root = Path(root) if root is not None else None
+        self._execution_config = dict(execution_config or {})
 
     @property
     def enabled(self) -> bool:
@@ -36,24 +39,25 @@ class JudgeCache:
         instruction: str,
         judge_model: str,
         prompt_version: str,
-        backend_kind: str = "unspecified",
-        model_revision: str | None = None,
         from_s: float | None = None,
         to_s: float | None = None,
         agent_config: object | None = None,
+        media_identity: Mapping[str, str] | None = None,
+        video_windows: Mapping[str, tuple[float, float]] | None = None,
+        episode_id: str | None = None,
+        snapshot_id: str | None = None,
     ) -> str:
         """Return a stable hex digest for the given judgement input."""
-        model_locator = judge_model
-        if backend_kind == "qwen3-vl" and (Path(judge_model).is_absolute() or judge_model.startswith(("./", "../"))):
-            model_locator = str(Path(judge_model).resolve())
         payload = {
             "schema_version": 2,
-            "backend_kind": backend_kind,
-            "model_revision": model_revision.lower() if model_revision else None,
-            "videos": _video_fingerprints(video_paths),
+            "execution_config": self._execution_config,
+            "episode_id": episode_id,
+            "snapshot_id": snapshot_id,
+            "videos": dict(media_identity) if media_identity is not None else _video_fingerprints(video_paths),
             "time_window": {"from_s": from_s, "to_s": to_s},
+            "video_windows": dict(video_windows or {}),
             "instruction": instruction,
-            "judge_model": model_locator,
+            "judge_model": self._execution_config.get("model_id", judge_model),
             "prompt_version": prompt_version,
             "agent_config": _serialise_config(agent_config),
         }
@@ -77,9 +81,21 @@ class JudgeCache:
             return
         self._root.mkdir(parents=True, exist_ok=True)
         path = self._path_for(key)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload, sort_keys=True))
-        tmp.replace(path)
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=self._root, suffix=".tmp", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            try:
+                json.dump(payload, stream, sort_keys=True, allow_nan=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            except BaseException:
+                temporary.unlink(missing_ok=True)
+                raise
+        try:
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _path_for(self, key: str) -> Path:
         assert self._root is not None

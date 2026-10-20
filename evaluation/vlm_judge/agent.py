@@ -144,11 +144,8 @@ class JudgeAgent:
         )
         milestones = parse_milestone_response(text)
         if milestones is None:
-            _LOGGER.warning(
-                "Milestone decomposition format violation; truncated response: %r",
-                (text or "")[:160],
-            )
-            return []
+            _LOGGER.warning("Judge milestone format violation")
+            raise ValueError("Invalid judge milestone result")
         return milestones
 
     def _run_failure_attribution(
@@ -169,8 +166,6 @@ class JudgeAgent:
         )
         label = parse_failure_response(text)
         if label is None:
-            _LOGGER.warning(
-                "Failure-mode format violation; truncated response: %r",
-                (text or "")[:160],
-            )
+            _LOGGER.warning("Judge failure-mode format violation")
+            raise ValueError("Invalid judge failure-mode result")
         return label

@@ -4,6 +4,7 @@ const backend = spawn(
   "uv",
   [
     "run",
+    "--no-sync",
     "--frozen",
     "--directory",
     "backend",

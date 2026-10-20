@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Training Guide
 description: Training workflows, experiment tracking, and ML pipeline documentation for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-14
+ms.date: 2026-10-13
 ms.topic: overview
 keywords:
   - training

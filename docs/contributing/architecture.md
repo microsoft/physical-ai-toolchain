@@ -2,7 +2,7 @@
 sidebar_position: 2
 title: Repository Architecture
 description: Tiered architecture for the Physical AI Toolchain, organized around the T0–T5 adoption ladder with the eight lifecycle domains presented as components adopted per tier.
-ms.date: 2026-08-12
+ms.date: 2026-10-16
 ms.topic: concept
 ---
 
@@ -52,22 +52,24 @@ Each tier below adds a defined slice of edge and cloud infrastructure on top of 
 
 ### T0 — Dev
 
-One robot, one laptop, and no cloud. Kubernetes is not required; plain local processes are the baseline, and a single-laptop cluster is an optional orchestration profile. This is the honest floor for Goal: Full Training Lifecycle. This path exists in the code today: training detects available CUDA devices at runtime, evaluation has an explicit local path, and the dataviewer defaults to `local` mode.
+One robot, one laptop, and no cloud. Kubernetes is not required; plain local processes are the baseline. This is the honest floor for Goal: Full Training Lifecycle. This path exists in the code today: training detects available CUDA devices at runtime, evaluation has an explicit local path, and the dataviewer defaults to `local` mode.
 
-| Concern      | Implementation                                                              |
-|--------------|-----------------------------------------------------------------------------|
-| Capture      | ROS 2 bag recording to local disk. No Arc, no ACSA, no PVC.                 |
-| Move data    | `cp` or `rsync` from robot to laptop.                                       |
-| Curate       | Dataviewer in `local` mode on the laptop.                                   |
-| Train        | `lerobot-train` on the laptop, on CPU or a local GPU.                       |
-| Track        | Training outputs written to local disk; hosted tracking enters at T2.       |
-| Validate     | `run-local-lerobot-eval.py` / `play.py` locally.                            |
-| Run on robot | The ACT inference node as a plain process or container. No Flux, no gating. |
+A GPU workstation can add the optional [local orchestration profile](#local-orchestration-profile), which runs the repository's OSMO workflows in a single-node K3s cluster without Azure.
 
-| Surface | Infrastructure      |
-|---------|---------------------|
-| Edge    | ROS 2 + Docker only |
-| Cloud   | None                |
+| Concern      | Implementation                                                                                      |
+|--------------|-----------------------------------------------------------------------------------------------------|
+| Capture      | ROS 2 bag recording to local disk. No Arc, no ACSA, no PVC.                                         |
+| Move data    | `cp` or `rsync` from robot to laptop.                                                               |
+| Curate       | Dataviewer in `local` mode on the laptop or in the local profile's cluster.                         |
+| Train        | `lerobot-train` on the laptop, on CPU or a local GPU, or OSMO workflows on the local profile.       |
+| Track        | Training outputs on local disk, or the local profile's MLflow server; hosted tracking enters at T2. |
+| Validate     | `run-local-lerobot-eval.py` / `play.py` locally, or OSMO evaluation workflows on the local profile. |
+| Run on robot | The ACT inference node as a plain process or container. No Flux, no gating.                         |
+
+| Surface | Infrastructure                                                 |
+|---------|----------------------------------------------------------------|
+| Edge    | ROS 2 + Docker; optional single-node K3s for the local profile |
+| Cloud   | None                                                           |
 
 **Domains active:** Data Pipeline (local capture), Data Management (local viewer), Training, Evaluation.
 
@@ -139,10 +141,7 @@ Local k3s + FluxCD, **no Arc**. Several robots at one site you control, updated 
 
 **Domains active:** adds `fleet-deployment` (GitOps + gating) at single-site scope.
 
-T3 can also host a HiL compute plane on local K3s. When the site uses the OSMO
-control plane in Azure, the local cluster runs only the backend operator and
-HiL workloads; it does not run a second OSMO control plane. Azure Arc remains
-optional at T3 and becomes the management and identity broker at T4.
+T3 can also host a HiL compute plane on local K3s. A K3s cluster runs OSMO in one of the two [OSMO orchestration profiles](#osmo-orchestration-profiles). As a HiL backend of the OSMO control plane in Azure, it runs only the backend operator and HiL workloads. As the standalone [local orchestration profile](#local-orchestration-profile), it runs its own control plane and is not attached to the cloud one. Azure Arc remains optional at T3 and becomes the management and identity broker at T4.
 
 **Graduate when:** robots span multiple sites, or sites become unreachable from a single operator network. That is the point at which a cross-site reachability and identity broker becomes genuinely necessary.
 
@@ -168,7 +167,33 @@ Multi-site **fleet delivery** is the legitimate top of the necessary ladder. Thi
 
 **Graduate when:** the operator explicitly wants production signals to drive retraining and fleet-wide health analytics. This is a deliberate decision, not an automatic consequence of scale.
 
-## Cloud OSMO Control Plane and Edge HiL
+### T5 — Operate
+
+> [!WARNING]
+> **Roadmap / not shipped.** `T5` is **fleet intelligence**, the aspirational cognition layer. The fleet-intelligence domain is currently specified, with implementation planned. The components below are documented intent, not working capability. Treat this tier as a roadmap direction.
+
+Drift detection, automated retraining triggers, aggregate telemetry, and health analytics over the robot fleet.
+
+| Concern              | Implementation                                    | Status      |
+|----------------------|---------------------------------------------------|-------------|
+| Edge telemetry       | Azure IoT Operations MQTT aggregation             | Placeholder |
+| Analytics            | Microsoft Fabric Real-Time Intelligence, Grafana  | Placeholder |
+| Drift and retraining | Drift detection, retraining triggers, closed loop | Placeholder |
+
+| Surface | Infrastructure                                               |
+|---------|--------------------------------------------------------------|
+| Edge    | + Azure IoT Operations                                       |
+| Cloud   | + Microsoft Fabric Real-Time Intelligence + drift/retraining |
+
+`T5` decomposes into an ordered **autonomy ladder** (`T5.0`–`T5.3`) rather than a single leap; autonomy is a different axis from infrastructure reach. See [The Autonomy Ladder](ROADMAP.md#the-autonomy-ladder-t50t53) in the roadmap. Human-in-the-loop gating is recommended over fully autonomous retraining.
+
+**Domains active:** `fleet-intelligence` (roadmap/placeholder).
+
+## OSMO Orchestration Profiles
+
+OSMO runs the repository's training, evaluation, and data workflows in two shapes. Both use the same workflow templates, submit scripts, and pinned OSMO and KAI Scheduler charts, and the platform profile (`PLATFORM_PROFILE`: `azure`, the default, or `local`) selects the shape a submission targets. The repository's scripts set up one shape per K3s cluster, because both install the cluster-wide KAI Scheduler and an OSMO backend operator.
+
+### Cloud Control Plane and Edge HiL
 
 The supported edge shape keeps the OSMO control plane in AKS and deploys the
 backend operator to a separate Ubuntu K3s cluster. The backend operator
@@ -197,27 +222,29 @@ Identity responsibilities remain separate:
 - The OSMO backend uses an expiring service token with the `osmo-backend` role.
 - HiL storage upload uses the federated managed identity only.
 
-### T5 — Operate
+### Local Orchestration Profile
 
-> [!WARNING]
-> **Roadmap / not shipped.** `T5` is **fleet intelligence**, the aspirational cognition layer. The fleet-intelligence domain is currently specified, with implementation planned. The components below are documented intent, not working capability. Treat this tier as a roadmap direction.
+The local profile is the optional `T0` orchestration path for one GPU workstation. It deploys a standalone OSMO control plane and backend into the workstation's single-node K3s cluster, attached to no other OSMO deployment. PostgreSQL, Valkey, RustFS object storage, a loopback image registry, and an MLflow server run beside OSMO in the cluster in place of the Azure services under [Backend Strategies](#backend-strategies). Datasets stay plain files in one host data root.
 
-Drift detection, automated retraining triggers, aggregate telemetry, and health analytics over the robot fleet.
+Every service is a ClusterIP Service without a NodePort, and the registry listens only on loopback, so nothing is reachable from other machines. That boundary is why the OSMO dev login and the dataviewer run without authentication; open them from the workstation directly or through `kubectl proxy` or a port-forward. The [Local OSMO Profile guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/local/README.md) covers setup, operations, validation, and teardown.
 
-| Concern              | Implementation                                    | Status      |
-|----------------------|---------------------------------------------------|-------------|
-| Edge telemetry       | Azure IoT Operations MQTT aggregation             | Placeholder |
-| Analytics            | Microsoft Fabric Real-Time Intelligence, Grafana  | Placeholder |
-| Drift and retraining | Drift detection, retraining triggers, closed loop | Placeholder |
+Pods inside the cluster are within the same boundary: a workflow can call the dataviewer's API, which writes the datasets that workflow tasks mount read-only.
 
-| Surface | Infrastructure                                               |
-|---------|--------------------------------------------------------------|
-| Edge    | + Azure IoT Operations                                       |
-| Cloud   | + Microsoft Fabric Real-Time Intelligence + drift/retraining |
+Local jobs and the local dataviewer can still use Azure ML tracking, Blob Storage, and ACR images. That needs federated credentials that trust the cluster's Arc OIDC issuer for the local ServiceAccounts, plus an OSMO registry credential for ACR, because kubelet image pulls cannot use workload identity. [Optional Azure Access](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/local/azure-access.md) previews these changes, and applying them is a separate, explicit step.
 
-`T5` decomposes into an ordered **autonomy ladder** (`T5.0`–`T5.3`) rather than a single leap; autonomy is a different axis from infrastructure reach. See [The Autonomy Ladder](ROADMAP.md#the-autonomy-ladder-t50t53) in the roadmap. Human-in-the-loop gating is recommended over fully autonomous retraining.
+### Backend Strategies
 
-**Domains active:** `fleet-intelligence` (roadmap/placeholder).
+Shared code selects each backend by configuration, so one set of scripts and workflows serves both profiles. The `azure` profile and the `azureml` tracking backend remain the defaults.
+
+| Concern                     | Local orchestration profile                                | Azure                                                      | Selected by                                                                   |
+|-----------------------------|------------------------------------------------------------|------------------------------------------------------------|-------------------------------------------------------------------------------|
+| Orchestration               | Standalone OSMO and KAI Scheduler in the workstation's K3s | OSMO control plane on AKS, with optional K3s HiL backends  | `PLATFORM_PROFILE` in the submit scripts and e2e tests                        |
+| Workflow storage            | RustFS S3 buckets in the cluster                           | Azure Blob Storage                                         | Platform profile                                                              |
+| Datasets                    | Host data root, mounted read-only in every task            | Azure Blob Storage or the Hugging Face Hub                 | `--local-dataset` on IL, VLA, LeRobot evaluation, and judge submissions       |
+| Tracking and model registry | MLflow server with a PostgreSQL store and RustFS artifacts | Azure ML MLflow tracking and model registry                | The profile's default, or `TRACKING_BACKEND` (`azureml`, `mlflow`, or `none`) |
+| Policy images               | Registry at `localhost:5000`                               | Azure Container Registry                                   | `build-model-image.sh --profile`                                              |
+| Workload identity           | None; local services take no credentials                   | Managed identity federated with the AKS or Arc OIDC issuer | Platform profile                                                              |
+| Dataviewer                  | In-cluster on the data root, without authentication        | Azure Container Apps with Entra ID, reading Blob Storage   | Deployment script; the local viewer can add a Blob account                    |
 
 ## Lifecycle Domains
 
@@ -236,7 +263,9 @@ The codebase reorganizes around eight lifecycle domains for robotics and physica
 
 ### Infrastructure
 
-Shared Azure services required from `T1` upward. Terraform modules provision AKS clusters with GPU node pools, AzureML workspaces, Azure Container Registry, Key Vault, managed identities, networking (VNet, subnets, NAT Gateway), and observability (Azure Monitor, DCGM metrics). Domain-specific infrastructure that stands alone (VPN, automation, DNS) deploys from subdirectories within each domain rather than the shared module. At `T0` no Azure infrastructure is required.
+Shared Azure services required from `T1` upward. Terraform modules provision AKS clusters with GPU node pools, AzureML workspaces, Azure Container Registry, Key Vault, managed identities, networking (VNet, subnets, NAT Gateway), and observability (Azure Monitor, DCGM metrics). Domain-specific infrastructure that stands alone (VPN, automation, DNS) deploys from subdirectories within each domain rather than the shared module.
+
+At `T0` no Azure infrastructure is required. `infrastructure/local/` deploys the optional [local orchestration profile](#local-orchestration-profile) for a workstation that runs OSMO workflows without Azure.
 
 ### Data Pipeline
 
@@ -251,9 +280,9 @@ Episodic data follows the [LeRobot dataset format](https://huggingface.co/docs/l
 
 ### Data Management
 
-An episodic data viewer and curator built on top of LeRobot's visualization tooling. The viewer runs locally for development (`T0`) and can optionally be deployed to an Azure-hosted web app (`T2`) through the included setup scripts. Capabilities include:
+An episodic data viewer and curator built on top of LeRobot's visualization tooling. The viewer runs locally for development (`T0`), in the local orchestration profile's cluster without authentication, or as an Azure-hosted web app (`T2`) through the included setup scripts. Capabilities include:
 
-- Browsing, labeling, and categorizing episodic datasets across Blob Storage containers
+- Browsing, labeling, and categorizing episodic datasets in local directories and Blob Storage containers
 - Assigning datasets to training workflows and triggering OSMO or AzureML jobs directly from the viewer
 - Evaluating synthetic data generation outputs for quality and diversity
 - Reviewing playback video captured during policy evaluation runs
@@ -286,8 +315,9 @@ End-to-end training pipeline from raw data to packaged, deployable model artifac
 Cross-cutting concerns shared across approaches:
 
 - Multi-GPU and multi-node training orchestration through OSMO workflows and AzureML jobs
+- Experiment tracking and model registration through one strategy in `training/utils/tracking.py`: Azure ML, a self-hosted MLflow server, or none
 - Policy export and packaging into TensorRT and ONNX formats for edge inference
-- Container image creation with packaged policies, versioned and pushed to the AzureML model registry
+- Policy container images packaged from a registered model or a checkpoint directory and pushed to Azure Container Registry or the local profile's registry
 - Model distribution through [Azure AI Foundry](https://learn.microsoft.com/azure/ai-foundry/) for centralized model management and deployment
 - Setup scripts for deploying training pipelines to OSMO and AzureML compute targets
 - Full end-to-end pipelines that chain training, export, packaging, and registration into a single orchestrated workflow
@@ -305,11 +335,13 @@ Software-in-the-loop (SiL) and hardware-in-the-loop (HiL) evaluation pipelines f
 
 Evaluation metrics capture to:
 
-- AzureML experiment tracking for per-episode performance metrics
+- The tracking backend, Azure ML or a self-hosted MLflow server, for per-episode performance metrics
 - Azure Monitor for operational dashboards and Grafana visualization
 - Microsoft Fabric Real-Time Intelligence for streaming telemetry analysis
 
 Setup scripts deploy evaluation pipelines to OSMO and AzureML compute targets. Full end-to-end evaluation pipelines orchestrate policy loading, simulation execution, metric collection, and result publishing as a single workflow.
+
+On OSMO, an evaluation task loads the policy from a checkpoint, a registered model, or its packaged container image, so the same evaluation covers the checkpoint and the image that ships. Isaac Lab evaluation gates on success rate; LeRobot evaluation reports action error against the dataset's recorded actions. A VLM judge workflow scores rollout videos or dataset episodes as an informational signal beside them.
 
 Isaac Sim connects to the deployed policy endpoint, generating control signals and receiving observations to produce evaluation episodes that the Data Management domain can review.
 
@@ -354,15 +386,16 @@ This repository will not maintain a separate codebase domain for simulation. Ins
 
 ## Source Code Organization
 
-The `src/` directory currently contains three packages, being migrated into the per-domain layout described above:
+Source code lives in the domain directories above; the earlier `src/` tree has moved into them. Each domain keeps its Python packages, scripts, workflow templates, and tests together, such as `training/rl`, `training/il`, and `training/vla` for the three training approaches and `evaluation/sil` and `evaluation/vlm_judge` for evaluation. Code shared across domains has a few homes:
 
-| Package      | Contents                                                                                                |
-|--------------|---------------------------------------------------------------------------------------------------------|
-| `common/`    | Shared CLI argument parsing utilities                                                                   |
-| `training/`  | Isaac Lab training scripts with skrl, RSL-RL, and LeRobot integration plus Azure MLflow metric tracking |
-| `inference/` | Policy export, playback, and inference node scripts                                                     |
+| Location          | Contents                                                                                                 |
+|-------------------|----------------------------------------------------------------------------------------------------------|
+| `training/utils/` | Python helpers that training and evaluation share: the tracking strategy, metric naming, and run context |
+| `scripts/lib/`    | Shell libraries for the setup and submit scripts, including the platform profile resolver                |
+| `shared/ci/`      | Dependency-diff and container smoke-test helpers for continuous integration                              |
+| `tests/`          | Repository-level tests, including the OSMO lifecycle e2e tests that run against either platform profile  |
 
-Training scripts and Python code act as integration shims between NVIDIA's open-source repositories and Azure connectivity features: MLflow from AzureML for tracking training metrics, logs, and checkpoints; the AzureML model registry for checkpoint versioning; and Azure Blob Storage for dataset access.
+Training and evaluation code act as integration shims between NVIDIA's open-source repositories and the services that hold their outputs. The tracking strategy sends metrics, checkpoints, and model versions to Azure ML or a self-hosted MLflow server, and datasets come from Azure Blob Storage, the Hugging Face Hub, or a local data root.
 
 The root `pyproject.toml` serves local development dependency management, providing module availability for intellisense and verification. This setup is not intended for building publishable Python packages; the build target only packages `training/rl` into a wheel for in-container use.
 
@@ -464,6 +497,7 @@ physical-ai-toolchain/
 ├── infrastructure/                        # Shared Azure IaC and cluster setup
 │   ├── terraform/                         # Terraform modules and root configurations
 │   ├── setup/                             # Post-IaC Kubernetes and OSMO setup scripts
+│   ├── local/                             # Optional local orchestration profile on single-node K3s
 │   └── specifications/                   # Infrastructure specifications for Agent Skills
 ├── data-pipeline/                         # Robot-to-cloud data capture
 │   ├── setup/                             # Deploy Arc, edge agents, and transfer components
@@ -497,6 +531,7 @@ physical-ai-toolchain/
 │   ├── hil/                               # Hardware-in-the-loop pipelines
 │   ├── pipelines/                         # End-to-end evaluation workflows
 │   ├── metrics/                           # Metric collection and reporting
+│   ├── vlm_judge/                         # VLM-as-a-judge scoring of rollouts and episodes
 │   ├── examples/                          # Evaluation pipeline examples
 │   └── specifications/                    # Evaluation specifications for Agent Skills
 ├── fleet-deployment/                      # Fleet delivery: edge delivery via GitOps

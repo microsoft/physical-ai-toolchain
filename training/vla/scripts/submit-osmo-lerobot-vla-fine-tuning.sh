@@ -8,6 +8,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../..
 source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=../../../scripts/lib/terraform-outputs.sh
 source "$REPO_ROOT/scripts/lib/terraform-outputs.sh"
+# shellcheck source=../../../scripts/lib/platform-profile.sh
+source "$REPO_ROOT/scripts/lib/platform-profile.sh"
 read_terraform_outputs "$REPO_ROOT/infrastructure/terraform" 2>/dev/null || true
 
 ENV_FILE="${SCRIPT_DIR}/.env"
@@ -36,8 +38,13 @@ REQUIRED:
                                   (defaults to a pinned SHA for the selected --vla-version)
         --data-config CONFIG      GR00T data config key (embodiment identifier)
 
-DATA SOURCE:
+PLATFORM:
+        --profile NAME            Platform profile: azure (default) or local (PLATFORM_PROFILE)
+
+DATA SOURCE (provide one):
         --blob-url URL            Full Azure Blob URL to LeRobot dataset
+        --local-dataset NAME      Dataset directory under the profile's datasets root, mounted
+                                  read-only in the job (local profile)
         --dataset-path PATH       Container-local dataset path (default: /data/dataset)
 
 TRAINING HYPERPARAMETERS:
@@ -69,7 +76,12 @@ WORKFLOW:
     -w, --workflow PATH           Workflow template (default: training/vla/workflows/osmo/groot-train.yaml)
     -j, --job-name NAME           Job identifier (default: groot-train)
     -i, --image IMAGE             Container image (default: $DEFAULT_GROOT_IMAGE, digest-pinned in scripts/lib/common.sh)
-        --platform PLATFORM       OSMO platform name (default: gpu_platform)
+        --platform PLATFORM       OSMO platform name (default: the profile's GPU platform)
+
+RESOURCES (defaults come from the platform profile, then these values):
+        --cpu COUNT               CPU cores (default: 14)
+        --memory SIZE             Memory with unit (default: 48Gi)
+        --storage SIZE            Storage with unit (default: 200Gi)
 
 AZURE CONTEXT:
         --azure-subscription-id ID    Azure subscription ID
@@ -81,7 +93,8 @@ OTHER:
         --config-preview          Print configuration and exit
     -h, --help                    Show this help message
 
-Values resolved: CLI > Environment variables > Terraform outputs
+Values resolved: CLI > Environment variables > Platform profile > Terraform outputs
+Azure values are needed only for --azure-upload and --acr-registry.
 Additional arguments after -- are forwarded to osmo workflow submit.
 
 EXAMPLES:
@@ -121,6 +134,7 @@ image="${IMAGE:-$DEFAULT_GROOT_IMAGE}"
 
 blob_url="${BLOB_URL:-}"
 dataset_path="${DATASET_PATH:-/data/dataset}"
+local_dataset="${LOCAL_DATASET:-}"
 
 vla_version="${VLA_VERSION:-1.5}"
 base_model="${BASE_MODEL:-}"
@@ -137,7 +151,11 @@ max_steps="${MAX_STEPS:-500}"
 batch_size="${BATCH_SIZE:-4}"
 save_steps="${SAVE_STEPS:-100}"
 dataloader_workers="${DATALOADER_WORKERS:-0}"
-platform="${PLATFORM:-gpu_platform}"
+platform="${PLATFORM:-}"
+cpu="${OSMO_CPU:-}"
+memory="${OSMO_MEMORY:-}"
+storage="${OSMO_STORAGE:-}"
+profile=""
 
 resume="false"
 run_id_override="${RUN_ID_OVERRIDE:-}"
@@ -166,7 +184,12 @@ while [[ $# -gt 0 ]]; do
     -w|--workflow)                workflow="$2"; shift 2 ;;
     -j|--job-name)                job_name="$2"; shift 2 ;;
     -i|--image)                   image="$2"; shift 2 ;;
+    --profile)                    profile="$2"; shift 2 ;;
     --blob-url)                   blob_url="$2"; shift 2 ;;
+    --local-dataset)              local_dataset="$2"; shift 2 ;;
+    --cpu)                        cpu="$2"; shift 2 ;;
+    --memory)                     memory="$2"; shift 2 ;;
+    --storage)                    storage="$2"; shift 2 ;;
     --dataset-path)               dataset_path="$2"; shift 2 ;;
     --base-model)                 base_model="$2"; shift 2 ;;
     --base-model-revision)        base_model_revision="$2"; shift 2 ;;
@@ -241,9 +264,23 @@ esac
 # pinned to an immutable commit; absolute paths are exempt because no Hub download occurs.
 require_hf_pin "$base_model" "$base_model_revision" "--base-model-revision"
 
+load_platform_profile "$profile"
+platform="${platform:-$PROFILE_OSMO_GPU_PLATFORM}"
+cpu="${cpu:-${PROFILE_TASK_CPU:-14}}"
+memory="${memory:-${PROFILE_TASK_MEMORY:-48Gi}}"
+storage="${storage:-${PROFILE_TASK_STORAGE:-200Gi}}"
+
 [[ -z "$data_config" ]] && fatal "--data-config is required"
-[[ -z "$blob_url" ]] && fatal "--blob-url is required (no dataset source configured)"
+if [[ -n "$local_dataset" ]]; then
+  [[ -n "$blob_url" ]] && fatal "--blob-url and --local-dataset are mutually exclusive"
+  # The entry trains from an existing dataset at DATASET_PATH instead of downloading one.
+  dataset_path="$(platform_local_dataset_path "$local_dataset")"
+fi
+[[ -z "$blob_url" && -z "$local_dataset" ]] && fatal "--blob-url or --local-dataset is required (no dataset source configured)"
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
+# Only the Azure ML mirror and ACR push read the Azure context.
+needs_azure=false
+[[ "$azure_upload" == "true" || -n "$acr_registry" ]] && needs_azure=true
 
 # Auto-resolve data config Python file from training/vla/configs/groot/ when the
 # caller only supplies --data-config NAME and a matching file exists on disk.
@@ -312,11 +349,13 @@ fi
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
+  print_kv "Platform Profile" "$PROFILE_NAME"
+  print_kv "OSMO Service" "${PROFILE_OSMO_URL:-<current CLI login>}"
   print_kv "Job Name" "$job_name"
   print_kv "Image" "$image"
   print_kv "Workflow" "$workflow"
   print_kv "VLA Version" "$vla_version"
-  print_kv "Blob URL" "$blob_url"
+  print_kv "Blob URL" "${blob_url:-<none>}"
   print_kv "Dataset Path" "$dataset_path"
   print_kv "Base Model" "$base_model"
   print_kv "Data Config" "$data_config"
@@ -327,17 +366,24 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Batch Size" "$batch_size"
   print_kv "Save Steps" "$save_steps"
   print_kv "Platform" "$platform"
+  print_kv "CPU" "$cpu"
+  print_kv "Memory" "$memory"
+  print_kv "Storage" "$storage"
   print_kv "Resume" "$resume"
   [[ -n "$run_id_override" ]] && print_kv "Run ID Override" "$run_id_override"
   print_kv "Azure Upload" "$azure_upload"
   [[ "$azure_upload" == "true" ]] && print_kv "Model Name" "$azureml_model_name"
   [[ -n "$acr_registry" ]] && print_kv "ACR Registry" "$acr_registry"
   [[ -n "$acr_registry" ]] && print_kv "ACR Model Repo" "$acr_model_repo"
-  print_kv "Subscription" "${subscription_id:-<not set>}"
-  print_kv "Resource Group" "${resource_group:-<not set>}"
-  print_kv "Workspace" "${workspace_name:-<not set>}"
+  if [[ "$needs_azure" == "true" ]]; then
+    print_kv "Subscription" "${subscription_id:-<not set>}"
+    print_kv "Resource Group" "${resource_group:-<not set>}"
+    print_kv "Workspace" "${workspace_name:-<not set>}"
+  fi
   exit 0
 fi
+
+use_platform_osmo_login
 
 #------------------------------------------------------------------------------
 # Build Submission Command
@@ -359,6 +405,9 @@ submit_args=(
   "isaac_groot_ref=$groot_ref"
   "dataloader_workers=$dataloader_workers"
   "platform=$platform"
+  "cpu=$cpu"
+  "memory=$memory"
+  "storage=$storage"
   "resume=$resume"
   "azure_upload=$azure_upload"
   "azureml_model_name=$azureml_model_name"
@@ -372,9 +421,11 @@ submit_args=(
 [[ -n "$modality_config_b64" ]] && submit_args+=("modality_config_b64=$modality_config_b64")
 [[ -n "$acr_registry" ]]     && submit_args+=("acr_registry=$acr_registry")
 [[ -n "$acr_registry" ]]     && submit_args+=("acr_model_repo=$acr_model_repo")
-[[ -n "$subscription_id" ]]  && submit_args+=("azure_subscription_id=$subscription_id")
-[[ -n "$resource_group" ]]   && submit_args+=("azureml_resource_group=$resource_group")
-[[ -n "$workspace_name" ]]   && submit_args+=("azureml_workspace_name=$workspace_name")
+if [[ "$needs_azure" == "true" ]]; then
+  [[ -n "$subscription_id" ]]  && submit_args+=("azure_subscription_id=$subscription_id")
+  [[ -n "$resource_group" ]]   && submit_args+=("azureml_resource_group=$resource_group")
+  [[ -n "$workspace_name" ]]   && submit_args+=("azureml_workspace_name=$workspace_name")
+fi
 [[ -n "$hf_token" ]]         && submit_args+=("hf_token=$hf_token")
 
 [[ ${#forward_args[@]} -gt 0 ]] && submit_args+=("${forward_args[@]}")

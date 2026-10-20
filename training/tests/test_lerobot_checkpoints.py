@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -36,6 +37,7 @@ def fake_azure_modules(monkeypatch):
     mlflow = ModuleType("mlflow")
     mlflow.log_artifacts = MagicMock()
     mlflow.set_tag = MagicMock()
+    mlflow.last_active_run = MagicMock(return_value=None)
 
     azure_pkg = ModuleType("azure")
     azure_ai = ModuleType("azure.ai")
@@ -149,8 +151,22 @@ class TestUploadNewCheckpoints:
         _MOD.upload_new_checkpoints(MagicMock(), tmp_path, uploaded, source="src")
         assert "005000" in uploaded
         fake_azure_modules.mlflow.log_artifacts.assert_called_once()
-        fake_azure_modules.mlflow.set_tag.assert_called_once()
+        fake_azure_modules.mlflow.set_tag.assert_any_call("checkpoint_005000_artifact", "checkpoints/005000")
+        fake_azure_modules.mlflow.set_tag.assert_any_call("checkpoint_005000_registered", "true")
         fake_azure_modules.models.create_or_update.assert_called_once()
+
+    def test_skips_the_last_alias(self, azure_env: None, fake_azure_modules: SimpleNamespace, tmp_path: Path) -> None:
+        """LeRobot's checkpoints/last symlink moves to the newest checkpoint; logging it would freeze a stale copy."""
+        ckpt = tmp_path / "checkpoints" / "001000" / "pretrained_model"
+        ckpt.mkdir(parents=True)
+        (ckpt / "model.safetensors").write_bytes(b"x")
+        (tmp_path / "checkpoints" / "last").symlink_to("001000")
+        uploaded: set[str] = set()
+
+        _MOD.upload_new_checkpoints(MagicMock(), tmp_path, uploaded)
+
+        assert uploaded == {"001000"}
+        fake_azure_modules.mlflow.log_artifacts.assert_called_once()
 
     def test_skips_already_uploaded(self, azure_env, fake_azure_modules, tmp_path):
         ckpt = tmp_path / "checkpoints" / "005000" / "pretrained_model"
@@ -193,6 +209,8 @@ class TestUploadNewCheckpoints:
         # handled by register_final_checkpoint with its own exit code.
         assert "005000" in uploaded
         assert fake_azure_modules.models.create_or_update.call_count == _MOD._AML_REGISTER_MAX_ATTEMPTS
+        tagged = [call.args[0] for call in fake_azure_modules.mlflow.set_tag.call_args_list]
+        assert "checkpoint_005000_registered" not in tagged
 
 
 class TestRegisterFinalCheckpoint:
@@ -234,3 +252,144 @@ class TestRegisterFinalCheckpoint:
         (tmp_path / "checkpoints" / "001000").mkdir(parents=True)
         assert _MOD.register_final_checkpoint() == _MOD.EXIT_SUCCESS
         fake_azure_modules.models.create_or_update.assert_called_once()
+
+
+@pytest.fixture
+def mlflow_backend(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Select the MLflow backend and capture registrations instead of calling a server."""
+    monkeypatch.setenv("TRACKING_BACKEND", "mlflow")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow.local:5000")
+    monkeypatch.setenv("JOB_NAME", "act_pick")
+    monkeypatch.setenv("POLICY_TYPE", "act")
+    monkeypatch.delenv("REGISTER_CHECKPOINT", raising=False)
+    for name in ("BLOB_URLS", "DATASET_ASSETS", "AZUREML_RUN_ID", "MLFLOW_RUN_ID", "MLFLOW_EXPERIMENT_ID"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DATASET_REPO_ID", "local/pick-place")
+
+    backend = MagicMock()
+    backend.register_checkpoint.return_value = SimpleNamespace(name="act-pick", version="4", uri="models:/act-pick/4")
+    backend_cls = MagicMock(return_value=backend)
+    monkeypatch.setattr(_MOD, "MLflowTracking", backend_cls)
+
+    mlflow = ModuleType("mlflow")
+    mlflow.log_artifacts = MagicMock()
+    mlflow.set_tag = MagicMock()
+    mlflow.last_active_run = MagicMock(return_value=None)
+    monkeypatch.setitem(sys.modules, "mlflow", mlflow)
+    return SimpleNamespace(backend=backend, backend_cls=backend_cls, mlflow=mlflow)
+
+
+class TestMlflowRegistration:
+    def test_upload_registers_logged_artifacts(self, mlflow_backend: SimpleNamespace, tmp_path: Path) -> None:
+        ckpt = tmp_path / "checkpoints" / "005000" / "pretrained_model"
+        ckpt.mkdir(parents=True)
+        (ckpt / "model.safetensors").write_bytes(b"x")
+        run = SimpleNamespace(info=SimpleNamespace(run_id="run-9"))
+        uploaded: set[str] = set()
+
+        _MOD.upload_new_checkpoints(run, tmp_path, uploaded, source="osmo-lerobot-local")
+
+        assert uploaded == {"005000"}
+        mlflow_backend.mlflow.log_artifacts.assert_called_once_with(str(ckpt), "checkpoints/005000")
+        kwargs = mlflow_backend.backend.register_checkpoint.call_args.kwargs
+        assert kwargs["name"] == "act-pick"
+        assert kwargs["artifact_uri"] == "runs:/run-9/checkpoints/005000"
+        assert kwargs["local_path"] == ckpt
+        assert kwargs["tags"]["source"] == "osmo-lerobot-local"
+        assert kwargs["tags"]["dataset_source"] == "huggingface"
+        assert "Lineage artifact" not in kwargs["description"]
+        assert not (ckpt / "azureml_lineage.json").exists()
+
+    def test_final_registration_reuses_logged_checkpoint(
+        self, mlflow_backend: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("REGISTER_CHECKPOINT", "pick_policy")
+        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+        (tmp_path / "checkpoints" / "002000" / "pretrained_model").mkdir(parents=True)
+        mlflow_backend.mlflow.last_active_run.return_value = SimpleNamespace(
+            info=SimpleNamespace(run_id="run-9"),
+            data=SimpleNamespace(tags={"checkpoint_002000_artifact": "checkpoints/002000"}),
+        )
+
+        assert _MOD.register_final_checkpoint() == _MOD.EXIT_SUCCESS
+
+        kwargs = mlflow_backend.backend.register_checkpoint.call_args.kwargs
+        assert kwargs["name"] == "pick-policy"
+        assert kwargs["artifact_uri"] == "runs:/run-9/checkpoints/002000"
+        assert kwargs["tags"]["source"] == "osmo-workflow"
+
+    def test_final_registration_uploads_local_checkpoint(
+        self, mlflow_backend: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("REGISTER_CHECKPOINT", "pick-policy")
+        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+        pretrained = tmp_path / "pretrained_model"
+        pretrained.mkdir()
+
+        assert _MOD.register_final_checkpoint() == _MOD.EXIT_SUCCESS
+
+        kwargs = mlflow_backend.backend.register_checkpoint.call_args.kwargs
+        assert kwargs["artifact_uri"] is None
+        assert kwargs["local_path"] == pretrained
+
+    def test_registration_failure_returns_exit_failure(
+        self, mlflow_backend: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("REGISTER_CHECKPOINT", "pick-policy")
+        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+        (tmp_path / "pretrained_model").mkdir()
+        mlflow_backend.backend.register_checkpoint.side_effect = RuntimeError("registry down")
+
+        assert _MOD.register_final_checkpoint() == _MOD.EXIT_FAILURE
+
+    def test_final_registration_registers_the_newest_step_not_the_last_alias(
+        self, mlflow_backend: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("REGISTER_CHECKPOINT", "pick-policy")
+        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+        for step in ("001000", "002000"):
+            (tmp_path / "checkpoints" / step / "pretrained_model").mkdir(parents=True)
+        (tmp_path / "checkpoints" / "last").symlink_to("002000")
+        mlflow_backend.mlflow.last_active_run.return_value = SimpleNamespace(
+            info=SimpleNamespace(run_id="run-9"),
+            data=SimpleNamespace(
+                tags={
+                    "checkpoint_last_artifact": "checkpoints/last",
+                    "checkpoint_002000_artifact": "checkpoints/002000",
+                }
+            ),
+        )
+
+        assert _MOD.register_final_checkpoint() == _MOD.EXIT_SUCCESS
+
+        kwargs = mlflow_backend.backend.register_checkpoint.call_args.kwargs
+        assert kwargs["artifact_uri"] == "runs:/run-9/checkpoints/002000"
+        assert kwargs["local_path"] == tmp_path / "checkpoints" / "002000" / "pretrained_model"
+
+    def test_final_registration_skips_a_checkpoint_the_run_registered(
+        self, mlflow_backend: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("REGISTER_CHECKPOINT", "pick-policy")
+        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+        (tmp_path / "checkpoints" / "002000" / "pretrained_model").mkdir(parents=True)
+        mlflow_backend.mlflow.last_active_run.return_value = SimpleNamespace(
+            info=SimpleNamespace(run_id="run-9"),
+            data=SimpleNamespace(tags={"checkpoint_002000_registered": "true"}),
+        )
+
+        assert _MOD.register_final_checkpoint() == _MOD.EXIT_SUCCESS
+
+        mlflow_backend.backend.register_checkpoint.assert_not_called()
+
+
+class TestUntrackedRegistration:
+    def test_none_backend_skips_registry(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setenv("TRACKING_BACKEND", "none")
+        backend_cls = MagicMock()
+        monkeypatch.setattr(_MOD, "MLflowTracking", backend_cls)
+        aml = MagicMock()
+        monkeypatch.setattr(_MOD, "_get_aml_client", aml)
+
+        assert _MOD._register_checkpoint(tmp_path, "001000", source="s") is False
+        backend_cls.assert_not_called()
+        aml.assert_not_called()

@@ -44,8 +44,10 @@ Write natural, direct, reader-focused prose. Avoid corporate filler, inflated cl
 
 ## Agent Workflows
 
-* The primary agent writes and updates RPI plans; do not use `RPI Planner` subagents.
-* Follow the active RPI and HVE skill contracts for review, delegation, and validation. Respect the user's model selection rather than requiring a repository-specific model or local plugin.
+* Follow the active RPI and HVE skill contracts for review, delegation, and validation, as narrowed by the RPI rules below. Respect the user's model selection rather than requiring a repository-specific model or local plugin, except for the RPI subagent model below.
+* When using the `RPI Agent` or an `rpi-*` skill, orchestrate `Claude Haiku 5.5 (copilot)` subagents (unless the user explicitly selects another model to use for subagent(s)) using `long_context` for `context_tier` and one of (`low`, `medium`, `high`, `xhigh`, `max`) for `reasoning_effort` depending on which effort is needed.
+* For `rpi-research` and `rpi-review` subagents you will likely always want `max` for `reasoning_effort`
+* The primary agent writes and updates RPI plans and performs every `rpi-plan-critique` itself. Do not delegate plan authoring, plan edits, or plan critiques to subagents, and do not use `RPI Planner`.
 * Cloud agents use the [pinned RPI skill bootstrap](../docs/reference/copilot-artifacts.md), not the retired umbrella agents. Before cloud RPI work, verify required skill files, their `metadata.github-pinned` values against `RPI_SKILLS_REF`, and the generated tracking instruction. Stop on an incomplete bootstrap.
 * In cloud-agent PR work, persist completed RPI phases as PR comments and maintain an artifact index with the resolved upstream SHA in the PR description. If PR writes are unavailable, return the complete phase artifacts without claiming persistence.
 * Apply scoped dataviewer and OpenVEX instructions when those areas are affected, and call out AzureRM provider major-version changes explicitly.

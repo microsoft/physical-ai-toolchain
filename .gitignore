@@ -495,7 +495,7 @@ AGENTS.md
 envs/
 
 datasets/
-local/
+/local/
 
 *.etli
 

@@ -330,7 +330,11 @@ class TestLanguageInstructionRoundTrip:
         assert language["instruction"] == "pick the red block"
         assert language["source"] == "human"
         assert language["paraphrases"] == ["grab the red cube", "lift the red block"]
-        assert language["subtask_instructions"] == ["approach", "grasp", "lift"]
+        assert language["subtask_instructions"] == [
+            {"id": "legacy-0", "text": "approach"},
+            {"id": "legacy-1", "text": "grasp"},
+            {"id": "legacy-2", "text": "lift"},
+        ]
 
     def test_rejects_oversized_paraphrases_list(self, client, registered_dataset, sample_annotation):
         """Excessively long paraphrase lists must fail validation at the API."""

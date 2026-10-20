@@ -73,6 +73,10 @@ coverage:
         flags:
           - pytest-evaluation
         target: 80%
+      pytest-vlm-judge:
+        flags:
+          - pytest-vlm-judge
+        target: 80%
       docusaurus:
         flags:
           - docusaurus
@@ -124,6 +128,11 @@ flags:
   pytest-evaluation:
     paths:
       - evaluation/
+      - "!evaluation/vlm_judge/**"
+    carryforward: true
+  pytest-vlm-judge:
+    paths:
+      - evaluation/vlm_judge/
     carryforward: true
   vitest:
     paths:
@@ -202,6 +211,21 @@ component_management:
       paths:
         - evaluation/sil/**
         - evaluation/metrics/**
+    - component_id: vlm-judge
+      name: VLM Judge
+      paths:
+        - evaluation/vlm_judge/**
+      statuses:
+        - type: project
+          target: 89%
+          threshold: 0%
+          if_not_found: failure
+        - type: patch
+          target: 89%
+          threshold: 0%
+          only_pulls: true
+          if_ci_failed: error
+          if_not_found: success
     - component_id: data-pipeline-capture
       name: Data Pipeline / Capture
       paths:

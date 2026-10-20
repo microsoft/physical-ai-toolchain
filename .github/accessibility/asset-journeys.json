@@ -48,7 +48,7 @@
       "retest": "Run both renderers against all three schemas",
       "evidence_refs": [
         "data-management/viewer/backend/src/api/main.py",
-        "evaluation/vlm_judge/api.py",
+        "data-management/curation/physical_ai_curation/api.py",
         "evaluation/vlm_judge/openai_shim.py"
       ],
       "dependency_refs": []
@@ -1574,7 +1574,7 @@
         "PLAYWRIGHT_VISUAL"
       ],
       "evidence_refs": [
-        "evaluation/vlm_judge/api.py"
+        "data-management/curation/physical_ai_curation/api.py"
       ],
       "dependency_refs": []
     },
@@ -1602,7 +1602,7 @@
         "PLAYWRIGHT_VISUAL"
       ],
       "evidence_refs": [
-        "evaluation/vlm_judge/api.py"
+        "data-management/curation/physical_ai_curation/api.py"
       ],
       "dependency_refs": []
     },
@@ -2759,7 +2759,7 @@
       ],
       "evidence_refs": [
         "data-management/viewer/backend/src/api/main.py",
-        "evaluation/vlm_judge/api.py",
+        "data-management/curation/physical_ai_curation/api.py",
         "evaluation/vlm_judge/openai_shim.py"
       ],
       "dependency_refs": []

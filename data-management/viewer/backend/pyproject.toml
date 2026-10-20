@@ -3,7 +3,10 @@ name = "lerobot-annotation-api"
 version = "0.1.0"
 description = "API for LeRobot episode annotation system"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = [
+    "physical-ai-curation==0.1.0",
+    "physical-ai-dataset-io==0.1.0",
     "fastapi==0.142.2",
     "uvicorn[standard]==0.54.0",
     "pydantic==2.13.5",
@@ -17,6 +20,9 @@ dependencies = [
     "av==18.1.0",
     "cachetools==7.2.1",
 ]
+
+[project.urls]
+Repository = "https://github.com/microsoft/physical-ai-toolchain"
 
 [project.optional-dependencies]
 azure = [
@@ -53,7 +59,7 @@ vlm-judge = [
 
 [dependency-groups]
 dev = [
-    "physical-ai-vlm-judge==0.1.0",
+    "physical-ai-vlm-judge[openai]==0.1.0",
     "ruff==0.16.10",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
@@ -100,11 +106,14 @@ constraint-dependencies = [
 ]
 
 [tool.uv.sources]
+physical-ai-curation = { path = "../../curation", editable = true }
+physical-ai-dataset-io = { path = "../../dataset-io", editable = true }
 physical-ai-vlm-judge = { path = "../../../evaluation/vlm_judge", editable = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+pythonpath = ["../../.."]
+testpaths = ["tests", "../../curation/tests"]
 
 [tool.coverage.run]
 source = ["src"]

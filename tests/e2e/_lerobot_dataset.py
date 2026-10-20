@@ -395,6 +395,15 @@ _DEFAULT_IL_DATASET_CONTAINER = "osmo"
 
 
 @dataclass(frozen=True)
+class LeRobotDatasetSource:
+    """The submit-script options that select one dataset for LeRobot training and for evaluation."""
+
+    training_args: tuple[str, ...]
+    eval_args: tuple[str, ...]
+    description: str
+
+
+@dataclass(frozen=True)
 class StagedDataset:
     storage_account: str
     container: str
@@ -403,6 +412,38 @@ class StagedDataset:
     @property
     def blob_url(self) -> str:
         return f"https://{self.storage_account}.blob.core.windows.net/{self.container}/{self.prefix}"
+
+    def source(self) -> LeRobotDatasetSource:
+        return LeRobotDatasetSource(
+            training_args=("--blob-url", self.blob_url),
+            eval_args=(
+                "--from-blob-dataset",
+                "--storage-account",
+                self.storage_account,
+                "--storage-container",
+                self.container,
+                "--blob-prefix",
+                self.prefix,
+            ),
+            description=f"Azure Blob dataset {self.storage_account}/{self.container}/{self.prefix}",
+        )
+
+
+def data_root_dataset_source(datasets_dir: str, name: str) -> LeRobotDatasetSource:
+    """Select a LeRobot dataset in the local profile's data root, skipping when it is not there.
+
+    The local profile mounts the datasets directory read-only in every job, so the dataset is used in place.
+    """
+    if not (Path(datasets_dir) / name / "meta" / "info.json").is_file():
+        pytest.skip(
+            f"LeRobot dataset {name!r} is not in {datasets_dir}; add it with infrastructure/local/datasets.sh "
+            "or name another dataset there"
+        )
+    return LeRobotDatasetSource(
+        training_args=("--local-dataset", name),
+        eval_args=("--local-dataset", name),
+        description=f"data-root dataset {name}",
+    )
 
 
 def _materialize_synthetic_dataset(request: pytest.FixtureRequest, *, prefix: str, log_message: str) -> Path:

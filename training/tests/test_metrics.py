@@ -1,6 +1,9 @@
 """Tests for training metrics utility helpers."""
 
+from __future__ import annotations
+
 import builtins
+import re
 import sys
 from types import SimpleNamespace
 
@@ -274,3 +277,56 @@ def test_extract_from_tracking_data_respects_prefix_and_depth() -> None:
     assert metrics["process/loss"] == 1.5
     assert metrics["process/nested/reward"] == 3.0
     assert "process/nested/deeper/ignored" not in metrics
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Stats / Algorithm update time (ms)", "Stats / Algorithm update time ms"),
+        ("Reward / Total reward (mean)", "Reward / Total reward mean"),
+        ("Loss / Policy loss", "Loss / Policy loss"),
+        ("system/gpu_0_utilization_percentage", "system/gpu_0_utilization_percentage"),
+        ("gpu%util [x]", "gpu_util x"),
+    ],
+)
+def test_mlflow_metric_name_keeps_names_every_server_accepts(raw: str, expected: str) -> None:
+    """Drop grouping characters and replace other characters MLflow servers reject."""
+    assert metrics_module.mlflow_metric_name(raw) == expected
+
+
+def test_extract_from_tracking_data_names_metrics_every_mlflow_server_accepts() -> None:
+    """skrl reports units in parentheses, which a self-hosted MLflow server rejects with the whole batch."""
+    metrics: dict[str, float] = {}
+
+    metrics_module._extract_from_tracking_data(
+        {"Reward / Total reward (mean)": 1.0, "Stats / Algorithm update time (ms)": 2.0},
+        metrics,
+        prefix="",
+    )
+
+    assert metrics == {"Reward / Total reward mean": 1.0, "Stats / Algorithm update time ms": 2.0}
+    assert all(re.fullmatch(r"[/\w.\- :]*", name) for name in metrics)
+
+
+def test_extract_from_tracking_data_reduces_interval_values_like_skrl() -> None:
+    """skrl accumulates values between writes and reduces each tag by its suffix when it writes them."""
+    metrics: dict[str, float] = {}
+
+    metrics_module._extract_from_tracking_data(
+        {
+            "Reward / Total reward (mean)": [1.0, 3.0],
+            "Reward / Total reward (max)": [1.0, 3.0],
+            "Reward / Total reward (min)": [1.0, 3.0],
+            "Loss / Policy loss": [0.5, 0.25],
+            "Episode / Total timesteps (mean)": [],
+        },
+        metrics,
+        prefix="",
+    )
+
+    assert metrics == {
+        "Reward / Total reward mean": 2.0,
+        "Reward / Total reward max": 3.0,
+        "Reward / Total reward min": 1.0,
+        "Loss / Policy loss": 0.375,
+    }

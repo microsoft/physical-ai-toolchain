@@ -1,0 +1,79 @@
+# Local OSMO platform smoke test, submitted by infrastructure/local/smoke-test-osmo.sh.
+# Proves CPU and GPU scheduling, the read-only dataset and writable cache mounts every local task gets,
+# url inputs and outputs through the local object store, and a task image pulled from the local registry.
+# cspell:ignore nvidiactl
+workflow:
+  name: "{{ workflow_name }}"
+  timeout:
+    exec_timeout: 15m
+    queue_timeout: 15m
+  resources:
+    default:
+      cpu: 1
+      memory: 512Mi
+      storage: 1Gi
+      gpu: 0
+      platform: default
+    gpu:
+      cpu: 2
+      memory: 4Gi
+      storage: 4Gi
+      gpu: 1
+      platform: "{{ gpu_platform }}"
+  tasks:
+    - name: mounts
+      image: "{{ utility_image }}"
+      command: [sh]
+      args:
+        - -ceu
+        - |
+          test ! -e /dev/nvidiactl
+          test -d "{{ datasets_path }}"
+          if touch "{{ datasets_path }}/.osmo-smoke-write" 2>/dev/null; then
+            echo "The datasets mount is writable"
+            exit 1
+          fi
+          marker="{{ cache_path }}/.osmo-smoke-{{workflow_id}}"
+          echo ok > "$marker"
+          rm "$marker"
+          test "$HF_HOME" = "{{ cache_path }}/huggingface"
+          echo "MOUNTS_RESULT=datasets-read-only,cache-writable,cache-env"
+    - name: gpu
+      resource: gpu
+      image: "{{ gpu_image }}"
+      environment:
+        NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      command: [sh]
+      args:
+        - -ceu
+        - |
+          nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | tee "{{output}}/gpu.txt"
+          echo "GPU_RESULT=$(head -n 1 "{{output}}/gpu.txt")"
+    - name: data
+      image: "{{ utility_image }}"
+      command: [sh]
+      args:
+        - -ceu
+        - |
+          test -f "{{input:0}}/hello.txt"
+          tr '[:lower:]' '[:upper:]' < "{{input:0}}/hello.txt" > "{{output}}/hello-processed.txt"
+          echo "DATA_RESULT=$(cat "{{output}}/hello-processed.txt")"
+      inputs:
+        - url: "{{ input_url }}"
+      outputs:
+        - url: "{{ output_url }}"
+    - name: registry-image
+      image: "{{ registry_image }}"
+      command: [sh]
+      args: [-c, "echo REGISTRY_RESULT=pulled-from-local-registry"]
+
+default-values:
+  workflow_name: local-osmo-smoke
+  gpu_platform: gpu_platform
+  utility_image: busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+  gpu_image: ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
+  datasets_path: /mnt/datasets
+  cache_path: /mnt/cache
+  input_url: s3://osmo/smoke/input
+  output_url: s3://osmo/smoke/output
+  registry_image: localhost:5000/physical-ai-local/registry-smoke-test:latest

@@ -1,4 +1,8 @@
-"""Azure ML MLflow bootstrap and HuggingFace authentication for LeRobot training."""
+"""MLflow tracking bootstrap and HuggingFace authentication for LeRobot training.
+
+``TRACKING_BACKEND`` selects the tracking server: the Azure ML workspace (``azureml``, default), the
+MLflow server at ``MLFLOW_TRACKING_URI`` (``mlflow``), or no tracking (``none``).
+"""
 
 from __future__ import annotations
 
@@ -7,13 +11,28 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from training.utils.tracking import MLflowTracking, TrackingConfigError, resolve_tracking_backend_name
+
 
 @dataclass(frozen=True)
 class MLflowConfig:
-    """Resolved MLflow configuration after Azure ML bootstrap."""
+    """Resolved tracking configuration for a LeRobot training job.
+
+    Attributes:
+        tracking_uri: MLflow tracking URI; empty when tracking is off.
+        experiment_name: Active MLflow experiment; empty when tracking is off.
+        backend: Selected tracking backend (``azureml``, ``mlflow``, or ``none``).
+    """
 
     tracking_uri: str
     experiment_name: str
+    backend: str = "azureml"
+
+
+def _write_mlflow_config(tracking_uri: str, experiment_name: str) -> None:
+    """Write the tracking settings for downstream scripts in the same container."""
+    config_path = Path("/tmp/mlflow_config.env")
+    config_path.write_text(f"MLFLOW_TRACKING_URI={tracking_uri}\nMLFLOW_EXPERIMENT_NAME={experiment_name}\n")
 
 
 def bootstrap_mlflow(
@@ -22,7 +41,7 @@ def bootstrap_mlflow(
     policy_type: str = "act",
     job_name: str = "training",
 ) -> MLflowConfig:
-    """Initialize Azure ML connection and configure MLflow tracking.
+    """Configure MLflow tracking for the backend selected by ``TRACKING_BACKEND``.
 
     Args:
         experiment_name: Explicit experiment name (auto-derived if empty).
@@ -30,11 +49,49 @@ def bootstrap_mlflow(
         job_name: Job identifier for default experiment naming.
 
     Returns:
-        MLflowConfig with tracking URI and resolved experiment name.
+        MLflowConfig with the tracking URI, resolved experiment name, and backend.
 
     Raises:
-        SystemExit: On missing Azure environment variables or connection failure.
+        SystemExit: On an unknown backend, missing configuration, or connection failure.
     """
+    try:
+        backend = resolve_tracking_backend_name()
+    except TrackingConfigError as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if backend == "none":
+        print("[INFO] Tracking disabled (TRACKING_BACKEND=none); training writes local outputs only")
+        return MLflowConfig(tracking_uri="", experiment_name="", backend="none")
+
+    if backend == "mlflow":
+        return _bootstrap_mlflow_server(experiment_name or f"lerobot-{policy_type}-{job_name}")
+    return _bootstrap_azure_ml(experiment_name=experiment_name, policy_type=policy_type, job_name=job_name)
+
+
+def _bootstrap_mlflow_server(experiment_name: str) -> MLflowConfig:
+    """Point MLflow tracking and registry at the server named by ``MLFLOW_TRACKING_URI``."""
+    try:
+        import mlflow
+    except ImportError as exc:
+        print(f"[ERROR] Missing required package: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        tracking = MLflowTracking(experiment_name=experiment_name)
+        tracking.configure_mlflow(mlflow)
+    except Exception as exc:
+        print(f"[ERROR] Failed to configure MLflow tracking: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"[INFO] MLflow tracking URI: {tracking.tracking_uri}")
+    print(f"[INFO] MLflow experiment: {experiment_name}")
+    _write_mlflow_config(tracking.tracking_uri, experiment_name)
+    return MLflowConfig(tracking_uri=tracking.tracking_uri, experiment_name=experiment_name, backend="mlflow")
+
+
+def _bootstrap_azure_ml(*, experiment_name: str, policy_type: str, job_name: str) -> MLflowConfig:
+    """Connect to the Azure ML workspace and point MLflow tracking at it."""
     # Point MLflow's registry URI at a local file path BEFORE importing mlflow
     # or azure.ai.ml. azure.ai.ml.MLClient.__init__ initializes mlflow as a
     # side effect, which then probes the tracking URI as a registry URI and
@@ -119,18 +176,16 @@ def bootstrap_mlflow(
         print(f"[INFO] MLflow tracking URI: {tracking_uri}")
         print(f"[INFO] MLflow experiment: {resolved_name}")
 
-        # Write config for downstream scripts
-        config_path = Path("/tmp/mlflow_config.env")
-        config_path.write_text(f"MLFLOW_TRACKING_URI={tracking_uri}\nMLFLOW_EXPERIMENT_NAME={resolved_name}\n")
+        _write_mlflow_config(tracking_uri, resolved_name)
 
-        return MLflowConfig(tracking_uri=tracking_uri, experiment_name=resolved_name)
+        return MLflowConfig(tracking_uri=tracking_uri, experiment_name=resolved_name, backend="azureml")
 
     except Exception as exc:
         import traceback
 
         print(f"[ERROR] Failed to configure Azure ML: {exc}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
-        sys.exit(1)
+        raise SystemExit(1) from exc
 
 
 def authenticate_huggingface() -> str | None:

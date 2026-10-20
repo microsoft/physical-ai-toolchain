@@ -100,6 +100,13 @@ describe('LanguageInstructionWidget', () => {
     const langInst = useAnnotationStore.getState().currentAnnotation?.languageInstruction
     expect(langInst?.instruction).toBe('pick the block')
     expect(langInst?.source).toBe('template')
+    expect(useAnnotationStore.getState().currentAnnotation?.instructionAdoption).toEqual({
+      instruction: 'template',
+    })
+
+    await user.type(screen.getByLabelText('Task Instruction'), ' carefully')
+
+    expect(useAnnotationStore.getState().currentAnnotation?.instructionAdoption).toBeUndefined()
   })
 
   it('falls back to a blank instruction when no dataset task description exists', async () => {
@@ -154,15 +161,46 @@ describe('LanguageInstructionWidget', () => {
     await user.type(subtaskInput, 'approach{Enter}')
     await user.type(subtaskInput, 'grasp{Enter}')
 
-    expect(
-      useAnnotationStore.getState().currentAnnotation?.languageInstruction?.subtaskInstructions,
-    ).toEqual(['approach', 'grasp'])
+    const added =
+      useAnnotationStore.getState().currentAnnotation?.languageInstruction?.subtaskInstructions
+    expect(added).toEqual([
+      { id: expect.any(String), text: 'approach' },
+      { id: expect.any(String), text: 'grasp' },
+    ])
+    expect(added?.[0].id).not.toBe(added?.[1].id)
 
     await user.click(screen.getByRole('button', { name: /remove subtask 1/i }))
 
     expect(
       useAnnotationStore.getState().currentAnnotation?.languageInstruction?.subtaskInstructions,
-    ).toEqual(['grasp'])
+    ).toEqual([added?.[1]])
+  })
+
+  it('retains legacy subtask identity when another item is removed', async () => {
+    const user = userEvent.setup()
+    useAnnotationStore.getState().loadAnnotation(
+      JSON.parse(
+        JSON.stringify({
+          ...baseAnnotation,
+          languageInstruction: {
+            instruction: 'lift',
+            source: 'template',
+            language: 'en',
+            paraphrases: [],
+            subtaskInstructions: ['approach', 'grasp'],
+          },
+        }),
+      ),
+    )
+    render(<LanguageInstructionWidget />)
+
+    await user.click(screen.getByRole('button', { name: /remove subtask 1/i }))
+
+    expect(
+      useAnnotationStore.getState().currentAnnotation?.languageInstruction?.subtaskInstructions,
+    ).toEqual([{ id: 'legacy-1', text: 'grasp' }])
+    expect(screen.getByRole('button', { name: 'Add subtask' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: 'Subtask step' })).toBeInTheDocument()
   })
 
   it('clears the language instruction via Remove Instruction', async () => {
@@ -170,7 +208,7 @@ describe('LanguageInstructionWidget', () => {
     useAnnotationStore.getState().updateLanguageInstruction({
       instruction: 'lift',
       paraphrases: ['raise'],
-      subtaskInstructions: ['approach'],
+      subtaskInstructions: [{ id: 'approach', text: 'approach' }],
     })
 
     render(<LanguageInstructionWidget />)
@@ -209,7 +247,7 @@ describe('LanguageInstructionWidget', () => {
       instruction: 'soulever la boîte',
       language: 'fr-FR',
       paraphrases: ['lever la boîte'],
-      subtaskInstructions: ['approcher'],
+      subtaskInstructions: [{ id: 'approcher', text: 'approcher' }],
     })
 
     render(<LanguageInstructionWidget />)

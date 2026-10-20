@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from vlm_judge.cache import JudgeCache
+from vlm_judge.service import BackendConfig, JudgeService, ServiceConfig
 
 
 def _touch(path: Path, size_bytes: int = 64) -> Path:
@@ -16,6 +17,19 @@ def _touch(path: Path, size_bytes: int = 64) -> Path:
 
 
 class TestJudgeCache:
+    def test_given_nonfinite_result_when_writing_then_preserves_previous_entry_and_removes_temporary_file(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "cache"
+        cache = JudgeCache(root)
+        cache.put("result", {"confidence": 0.8})
+
+        with pytest.raises(ValueError):
+            cache.put("result", {"confidence": float("nan")})
+
+        assert cache.get("result") == {"confidence": 0.8}
+        assert sorted(path.name for path in root.iterdir()) == ["result.json"]
+
     def test_legacy_payload_cannot_match_new_identity(self, tmp_path: Path) -> None:
         video = _touch(tmp_path / "ep.mp4")
         legacy = {
@@ -42,24 +56,29 @@ class TestJudgeCache:
     def test_explicit_local_locator_is_canonical(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(tmp_path)
         (tmp_path / "model").mkdir()
-        cache = JudgeCache(None)
-        arguments = {"video_paths": {}, "instruction": "x", "prompt_version": "v1", "backend_kind": "qwen3-vl"}
-        assert cache.key(**arguments, judge_model="./model") == cache.key(
-            **arguments, judge_model=str(tmp_path / "model")
+        relative = JudgeService(ServiceConfig(backend=BackendConfig(model_id="./model")))
+        absolute = JudgeService(ServiceConfig(backend=BackendConfig(model_id=str(tmp_path / "model"))))
+        arguments = {"video_paths": {}, "instruction": "x", "prompt_version": "v1"}
+
+        assert relative.execution_config == absolute.execution_config
+        assert relative.cache_for().key(**arguments, judge_model=relative.model_id) == absolute.cache_for().key(
+            **arguments, judge_model=absolute.model_id
         )
 
     def test_backend_and_normalized_revision_separate_cache_entries(self, tmp_path: Path) -> None:
-        cache = JudgeCache(tmp_path / "cache")
         arguments = {
             "video_paths": {"front": _touch(tmp_path / "ep.mp4")},
             "instruction": "pick cube",
             "judge_model": "owner/model",
             "prompt_version": "v1",
         }
-        echo = cache.key(**arguments, backend_kind="echo", model_revision="a" * 40)
-        native = cache.key(**arguments, backend_kind="qwen3-vl", model_revision="a" * 40)
-        changed = cache.key(**arguments, backend_kind="qwen3-vl", model_revision="b" * 40)
-        normalized = cache.key(**arguments, backend_kind="qwen3-vl", model_revision="A" * 40)
+        keys = []
+        for kind, revision in (("echo", "a"), ("qwen3-vl", "a"), ("qwen3-vl", "b"), ("qwen3-vl", "A")):
+            service = JudgeService(
+                ServiceConfig(backend=BackendConfig(kind=kind, model_id="owner/model", revision=revision * 40))
+            )
+            keys.append(service.cache_for(tmp_path / "cache").key(**arguments))
+        echo, native, changed, normalized = keys
 
         assert len({echo, native, changed}) == 3
         assert native == normalized
