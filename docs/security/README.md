@@ -54,7 +54,7 @@ OpenSSF Best Practices project [12195](https://www.bestpractices.dev/projects/12
 | Silver  |     100% |
 | Gold    |      43% |
 
-The public award and current repository evidence are distinct. The root `.bestpractices.json` records `static_analysis_fixed` and `vulnerabilities_fixed_60_days` as unmet because current code-scanning findings and medium-or-higher Dependabot alerts older than 60 days remain open. Run the `openssf-badge-audit` skill to compare the evidence proposal with the live project before a maintainer submits changes through the authenticated OpenSSF interface.
+The public award and current repository evidence are distinct. The root `.bestpractices.json` records `static_analysis_fixed`, `vulnerabilities_critical_fixed`, and `vulnerabilities_fixed_60_days` as unmet because code-scanning findings, critical Dependabot alerts, and aged medium-or-higher Dependabot alerts remain open. Run the `openssf-badge-audit` skill to compare the proposal with the live project before a maintainer submits changes through the authenticated OpenSSF interface.
 
 ## 🛠️ Operational Scripts
 

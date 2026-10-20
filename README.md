@@ -9,7 +9,7 @@
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://microsoft.github.io/physical-ai-toolchain/)
 <!-- markdownlint-enable MD013 -->
 
-OpenSSF Best Practices project [12195](https://www.bestpractices.dev/projects/12195) publicly awards the Silver badge: Passing 100%, Silver 100%, and Gold 43% as verified on 2026-10-20. The repository's current evidence proposal records `static_analysis_fixed` and `vulnerabilities_fixed_60_days` as unmet; the public award does not establish that these known gaps are resolved.
+OpenSSF Best Practices project [12195](https://www.bestpractices.dev/projects/12195) publicly awards the Silver badge: Passing 100%, Silver 100%, and Gold 43% as verified on 2026-10-20. The repository's current evidence proposal records `static_analysis_fixed`, `vulnerabilities_critical_fixed`, and `vulnerabilities_fixed_60_days` as unmet; the public award does not establish that these known gaps are resolved.
 
 ## Overview
 
