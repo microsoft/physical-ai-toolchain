@@ -18,6 +18,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     from PIL.Image import Image
@@ -219,7 +220,8 @@ def _load_qwen3_vl_model(
 class OpenAICompatibleBackend(JudgeBackend):
     """Drives any OpenAI-compatible chat-completions endpoint.
 
-    Resolves the API key from ``api_key`` or the ``OPENAI_API_KEY`` env var.
+    Azure endpoints use refreshable Azure CLI bearer tokens. Other endpoints
+    resolve the API key from ``api_key`` or the ``OPENAI_API_KEY`` env var.
     Frames are JPEG-encoded and embedded as ``image_url`` data URIs.
     """
 
@@ -233,10 +235,21 @@ class OpenAICompatibleBackend(JudgeBackend):
     ) -> None:
         from openai import OpenAI
 
+        endpoint = urlsplit(base_url)
+        credential = api_key or os.environ.get("OPENAI_API_KEY", "EMPTY")
+        if (endpoint.hostname or "").endswith(
+            (".openai.azure.com", ".services.ai.azure.com", ".cognitiveservices.azure.com")
+        ):
+            if endpoint.scheme != "https" or endpoint.username is not None or endpoint.password is not None:
+                raise ValueError("Azure endpoints require HTTPS without URL credentials")
+            from azure.identity import AzureCliCredential, get_bearer_token_provider
+
+            credential = get_bearer_token_provider(AzureCliCredential(), "https://cognitiveservices.azure.com/.default")
+
         self.name = model
         self._client = OpenAI(
             base_url=base_url,
-            api_key=api_key or os.environ.get("OPENAI_API_KEY", "EMPTY"),
+            api_key=credential,
             timeout=timeout_s,
         )
         self._model = model

@@ -9,8 +9,8 @@ REPO_ROOT="$(cd "${SMOKE_DIR}/../.." && pwd)"
 
 # Same uv release as training/rl/scripts/setup_isaac_runtime.sh. The image has no
 # curl, so install the PyPI wheel with its hash pinned.
-UV_VERSION="0.12.8"
-UV_WHEEL_SHA256="9d63d046051d33b36260146df5aef03e9166b30b4546e9b6e554be152b69f9f9"
+UV_VERSION="0.12.20"
+UV_WHEEL_SHA256="d0837cb0ec80f830198e4a0fe86385e2a8ba8846f066acd243a1c15f4d52ca74"
 
 if ! command -v uv &>/dev/null; then
   echo "Installing uv ${UV_VERSION}..."

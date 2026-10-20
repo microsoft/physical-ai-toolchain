@@ -155,7 +155,7 @@ describe('edit-store-selectors', () => {
       const { result } = renderHook(() => useEditDirtyState())
 
       expect(result.current.isDirty).toBe(false)
-      expect(result.current.markSaved).toBeTypeOf('function')
+      expect(result.current.acknowledgeSave).toBeTypeOf('function')
       expect(result.current.resetEdits).toBeTypeOf('function')
     })
   })

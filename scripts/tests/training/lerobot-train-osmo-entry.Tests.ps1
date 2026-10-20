@@ -30,14 +30,15 @@ BeforeAll {
         param(
             [Parameter(Mandatory)][string]$Workspace,
             [Parameter(Mandatory)][string]$ZipPath,
-            [switch]$IncludeLockfile
+            [switch]$IncludeLockfile,
+            [string]$LockProject = 'training/il/lerobot'
         )
 
         $zipSource = Join-Path $Workspace 'zip-source'
         New-Item -ItemType Directory -Path $zipSource -Force | Out-Null
         Set-Content -Path (Join-Path $zipSource 'README.txt') -Value 'payload' -Encoding utf8
         if ($IncludeLockfile) {
-            $lockPath = Join-Path $zipSource 'training/il/lerobot/uv.lock'
+            $lockPath = Join-Path $zipSource "$LockProject/uv.lock"
             New-Item -ItemType Directory -Path (Split-Path $lockPath -Parent) -Force | Out-Null
             Set-Content -Path $lockPath -Value 'version = 1' -Encoding utf8
         }
@@ -79,15 +80,16 @@ if [[ "$1" == "sync" ]]; then
   [[ " $* " == *" --frozen "* ]] || exit 92
   [[ " $* " == *" --no-config "* ]] || exit 93
   [[ " $* " == *" --no-install-project "* ]] || exit 94
-  [[ " $* " == *" --project "*"training/il/lerobot"* ]] || exit 95
+  [[ " $* " == *" --project "*"${EXPECTED_LEROBOT_PROJECT:-training/il/lerobot}"* ]] || exit 95
   exit 0
 fi
 echo "unexpected uv invocation: $*" >&2
 exit 1
 '@
             'python' = @'
-if [[ "$1" == "-c" && "$2" == *"has_blob_urls"* ]]; then
-  exit "${PYTHON_HAS_BLOB_URLS_EXIT:-1}"
+if [[ "$1" == "-c" && "$2" == *"dataset_source"* ]]; then
+  echo "${PYTHON_DATASET_SOURCE:-hf}"
+  exit 0
 fi
 if [[ "$1" == "-m" ]]; then
   exit 0
@@ -123,7 +125,7 @@ Describe 'lerobot-train-osmo-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPres
                 JOB_NAME                   = 'lerobot-job'
                 OUTPUT_DIR                 = $outputRoot
                 DATASET_ROOT               = (Join-Path $workspace 'datasets')
-                PYTHON_HAS_BLOB_URLS_EXIT  = '1'
+                PYTHON_DATASET_SOURCE      = 'hf'
             } -Stubs (New-LerobotStubSet)
 
             $result.ExitCode | Should -Not -Be 0
@@ -148,7 +150,7 @@ Describe 'lerobot-train-osmo-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPres
                 JOB_NAME                   = 'lerobot-job'
                 OUTPUT_DIR                 = $outputRoot
                 DATASET_ROOT               = (Join-Path $workspace 'datasets')
-                PYTHON_HAS_BLOB_URLS_EXIT  = '1'
+                PYTHON_DATASET_SOURCE      = 'hf'
             } -Stubs (New-LerobotStubSet)
 
             $result.ExitCode | Should -Not -Be 0
@@ -176,7 +178,7 @@ Describe 'lerobot-train-osmo-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPres
                 JOB_NAME                   = 'lerobot-job'
                 OUTPUT_DIR                 = $outputRoot
                 DATASET_ROOT               = $datasetRoot
-                PYTHON_HAS_BLOB_URLS_EXIT  = '0'
+                PYTHON_DATASET_SOURCE      = 'blob'
             } -Stubs (New-LerobotStubSet)
 
             $trainCall = $result.Calls | Where-Object { $_ -like 'python -m training.il.scripts.lerobot.train*' } | Select-Object -First 1
@@ -213,7 +215,7 @@ Describe 'lerobot-train-osmo-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPres
                 JOB_NAME                   = 'lerobot-job'
                 OUTPUT_DIR                 = $outputRoot
                 DATASET_ROOT               = $datasetRoot
-                PYTHON_HAS_BLOB_URLS_EXIT  = '1'
+                PYTHON_DATASET_SOURCE      = 'hf'
             } -Stubs (New-LerobotStubSet)
 
             $trainCall = $result.Calls | Where-Object { $_ -like 'python -m training.il.scripts.lerobot.train*' } | Select-Object -First 1
@@ -226,6 +228,119 @@ Describe 'lerobot-train-osmo-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPres
             $trainCall | Should -Match '--dataset\.video_backend=pyav'
             $trainCall | Should -Not -Match '--dataset\.root='
             $trainCall | Should -Not -Match '--dataset\.use_imagenet_stats=false'
+        }
+
+        It 'trains from a mounted local dataset without downloading' {
+            $workspace = New-TestWorkspace -Name 'local-datasource'
+            $inputRoot = Join-Path $workspace 'input'
+            $payloadRoot = Join-Path $workspace 'payload'
+            $outputRoot = Join-Path $workspace 'output'
+            $datasetDir = Join-Path $workspace 'mnt/datasets/so101/pick'
+            New-Item -ItemType Directory -Path $inputRoot, $payloadRoot, $outputRoot, (Join-Path $datasetDir 'meta') -Force | Out-Null
+            Set-Content -Path (Join-Path $datasetDir 'meta/info.json') -Value '{}' -Encoding utf8
+            New-PayloadArchive -Workspace $workspace -ZipPath (Join-Path $inputRoot 'payload.zip') -IncludeLockfile
+            $bashEnvPath = New-StubBashEnv -Workspace $workspace
+
+            $result = Invoke-BashEntryScript -ScriptPath $script:ScriptPath -WorkDir $workspace -EnvVars @{
+                BASH_ENV              = $bashEnvPath
+                OSMO_INPUT_0          = $inputRoot
+                PAYLOAD_ROOT          = $payloadRoot
+                DATASET_REPO_ID       = 'local/so101-pick'
+                DATASET_DIR           = $datasetDir
+                POLICY_TYPE           = 'act'
+                JOB_NAME              = 'lerobot-job'
+                OUTPUT_DIR            = $outputRoot
+                DATASET_ROOT          = (Join-Path $workspace 'datasets')
+                TRACKING_BACKEND      = 'mlflow'
+                PYTHON_DATASET_SOURCE = 'local'
+            } -Stubs (New-LerobotStubSet)
+
+            $trainCall = $result.Calls | Where-Object { $_ -like 'python -m training.il.scripts.lerobot.train*' } | Select-Object -First 1
+
+            $result.ExitCode | Should -Be 0
+            $result.StdOut | Should -Match 'Tracking: mlflow'
+            $result.StdOut | Should -Match ([regex]::Escape("Data Source: local dataset at $datasetDir"))
+            $result.Calls | Should -Not -Contain 'python -m training.il.scripts.lerobot.download_dataset'
+            $trainCall | Should -Match ([regex]::Escape("--dataset.root=$datasetDir"))
+            $trainCall | Should -Not -Match '--dataset\.use_imagenet_stats=false'
+        }
+
+        It 'fails when the local dataset directory has no LeRobot metadata' {
+            $workspace = New-TestWorkspace -Name 'local-datasource-missing'
+            $inputRoot = Join-Path $workspace 'input'
+            $payloadRoot = Join-Path $workspace 'payload'
+            $outputRoot = Join-Path $workspace 'output'
+            New-Item -ItemType Directory -Path $inputRoot, $payloadRoot, $outputRoot -Force | Out-Null
+            New-PayloadArchive -Workspace $workspace -ZipPath (Join-Path $inputRoot 'payload.zip') -IncludeLockfile
+            $bashEnvPath = New-StubBashEnv -Workspace $workspace
+
+            $result = Invoke-BashEntryScript -ScriptPath $script:ScriptPath -WorkDir $workspace -EnvVars @{
+                BASH_ENV              = $bashEnvPath
+                OSMO_INPUT_0          = $inputRoot
+                PAYLOAD_ROOT          = $payloadRoot
+                DATASET_REPO_ID       = 'local/missing'
+                DATASET_DIR           = (Join-Path $workspace 'mnt/datasets/missing')
+                POLICY_TYPE           = 'act'
+                JOB_NAME              = 'lerobot-job'
+                OUTPUT_DIR            = $outputRoot
+                PYTHON_DATASET_SOURCE = 'local'
+            } -Stubs (New-LerobotStubSet)
+
+            $result.ExitCode | Should -Not -Be 0
+            $result.StdErr | Should -Match 'ERROR: no LeRobot dataset at'
+        }
+    }
+
+    Context 'LeRobot dependency project selection' {
+        It 'installs from the project named by LEROBOT_PROJECT' {
+            $workspace = New-TestWorkspace -Name 'vla-project'
+            $inputRoot = Join-Path $workspace 'input'
+            $payloadRoot = Join-Path $workspace 'payload'
+            $outputRoot = Join-Path $workspace 'output'
+            New-Item -ItemType Directory -Path $inputRoot, $payloadRoot, $outputRoot -Force | Out-Null
+            New-PayloadArchive -Workspace $workspace -ZipPath (Join-Path $inputRoot 'payload.zip') -IncludeLockfile -LockProject 'training/vla/lerobot'
+            $bashEnvPath = New-StubBashEnv -Workspace $workspace
+
+            $result = Invoke-BashEntryScript -ScriptPath $script:ScriptPath -WorkDir $workspace -EnvVars @{
+                BASH_ENV                 = $bashEnvPath
+                OSMO_INPUT_0             = $inputRoot
+                PAYLOAD_ROOT             = $payloadRoot
+                DATASET_REPO_ID          = 'org/dataset'
+                POLICY_TYPE              = 'smolvla'
+                JOB_NAME                 = 'lerobot-job'
+                OUTPUT_DIR               = $outputRoot
+                LEROBOT_PROJECT          = 'training/vla/lerobot'
+                EXPECTED_LEROBOT_PROJECT = 'training/vla/lerobot'
+                PYTHON_DATASET_SOURCE    = 'hf'
+            } -Stubs (New-LerobotStubSet)
+
+            $result.ExitCode | Should -Be 0
+            ($result.Calls | Where-Object { $_ -like 'uv sync*' }) | Should -Match ([regex]::Escape("--project $payloadRoot/training/vla/lerobot"))
+        }
+
+        It 'rejects a LEROBOT_PROJECT that leaves the payload' {
+            $workspace = New-TestWorkspace -Name 'project-traversal'
+            $inputRoot = Join-Path $workspace 'input'
+            $payloadRoot = Join-Path $workspace 'payload'
+            $outputRoot = Join-Path $workspace 'output'
+            New-Item -ItemType Directory -Path $inputRoot, $payloadRoot, $outputRoot -Force | Out-Null
+            New-PayloadArchive -Workspace $workspace -ZipPath (Join-Path $inputRoot 'payload.zip') -IncludeLockfile
+            $bashEnvPath = New-StubBashEnv -Workspace $workspace
+
+            $result = Invoke-BashEntryScript -ScriptPath $script:ScriptPath -WorkDir $workspace -EnvVars @{
+                BASH_ENV              = $bashEnvPath
+                OSMO_INPUT_0          = $inputRoot
+                PAYLOAD_ROOT          = $payloadRoot
+                DATASET_REPO_ID       = 'org/dataset'
+                POLICY_TYPE           = 'act'
+                JOB_NAME              = 'lerobot-job'
+                OUTPUT_DIR            = $outputRoot
+                LEROBOT_PROJECT       = '../outside'
+                PYTHON_DATASET_SOURCE = 'hf'
+            } -Stubs (New-LerobotStubSet)
+
+            $result.ExitCode | Should -Not -Be 0
+            $result.StdErr | Should -Match 'LEROBOT_PROJECT must be a repo-relative path'
         }
     }
 }

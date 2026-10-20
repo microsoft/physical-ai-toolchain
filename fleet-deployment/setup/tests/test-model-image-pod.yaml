@@ -1,18 +1,21 @@
-# Test consumer for an AML-model OCI image built by build-aml-model-image.sh.
+# Test consumer for a model carrier image built by build-model-image.sh.
 # Mounts the scratch model carrier via an OCI image volume (KEP-4639) and
 # prints the materialized /policy tree + a short head of each file so an
 # operator can confirm the end-to-end pull → mount → contents flow.
 #
 # The image volume exposes the IMAGE ROOT filesystem at mountPath. The
-# Dockerfile copies the AML artifact under /policy/.
+# Dockerfile copies the model artifact under /policy/.
 #
-# Requires Kubernetes >= 1.33 (ImageVolume beta, default-on) or >= 1.31 with
-# the ImageVolume feature gate enabled. The kubelet must be able to pull
-# the model image from the target ACR (image pull secret or workload identity).
+# Requires the ImageVolume feature gate, on by default from Kubernetes 1.35
+# (enable it on 1.31 to 1.34), and containerd 2.1 or newer on the node; see
+# "Enabling OCI Image Volumes on k3s" in fleet-deployment/setup/README.md.
+# The kubelet must be able to pull the model image from the target ACR (image
+# pull secret or workload identity), or from the local profile's loopback
+# registry, which needs no pull secret.
 #
 # Usage:
 #   1. Replace <ACR>.azurecr.io/<repo>@sha256:<digest> below with the image
-#      reference printed by build-aml-model-image.sh.
+#      reference printed by build-model-image.sh.
 #   2. kubectl apply -f fleet-deployment/setup/tests/test-model-image-pod.yaml
 #      kubectl -n inference logs -f pod/test-model-image
 #      kubectl -n inference delete pod test-model-image

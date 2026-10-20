@@ -4,7 +4,7 @@ sidebar_label: Evaluation Job Debugging
 sidebar_position: 2
 description: Troubleshooting guide for AzureML evaluation job failures and common issues.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-14
+ms.date: 2026-10-13
 ms.topic: troubleshooting
 ---
 

@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Deployment Guide
 description: Infrastructure deployment and cluster configuration for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-30
+ms.date: 2026-10-15
 ms.topic: overview
 keywords:
   - deployment
@@ -13,22 +13,23 @@ keywords:
   - osmo
 ---
 
-End-to-end deployment of Azure infrastructure and Kubernetes services for the robotics reference architecture. This guide covers prerequisites, Terraform provisioning, VPN access, cluster configuration, and teardown.
+End-to-end deployment of Azure infrastructure and Kubernetes services for the robotics reference architecture. This guide covers prerequisites, Terraform provisioning, VPN access, cluster configuration, and teardown. To run the same OSMO workflows on one GPU workstation without Azure, deploy the [Local OSMO Profile](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/local/README.md) instead.
 
 ## 📖 Deployment Guides
 
-| Guide                                                   | Description                                                              |
-|---------------------------------------------------------|--------------------------------------------------------------------------|
-| [Prerequisites](prerequisites.md)                       | Azure subscription initialization and resource provider registration     |
-| [Infrastructure Deployment](infrastructure.md)          | Terraform configuration for AKS, Azure ML, storage, and backend services |
-| [Infrastructure Reference](infrastructure-reference.md) | Architecture, module structure, outputs, and troubleshooting             |
-| [VPN Gateway](vpn.md)                                   | Point-to-site and site-to-site VPN for private cluster access            |
-| [Private DNS](dns.md)                                   | DNS zone setup for OSMO UI access                                        |
-| [Cluster Automation](automation.md)                     | Scheduled start/stop automation for cost management                      |
-| [Cluster Setup](cluster-setup.md)                       | Kubernetes service deployment and OSMO configuration                     |
-| [Cluster Operations](cluster-setup-advanced.md)         | Accessing OSMO, troubleshooting, and optional scripts                    |
-| [OSMO Upgrade](osmo-upgrade.md)                         | Staged upgrade of a pre-6.3 OSMO install to 6.3, with rollback           |
-| [Cleanup and Destroy](cleanup.md)                       | Remove cluster components and destroy Azure infrastructure               |
+| Guide                                                                                                             | Description                                                                  |
+|-------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------|
+| [Prerequisites](prerequisites.md)                                                                                 | Azure subscription initialization and resource provider registration         |
+| [Infrastructure Deployment](infrastructure.md)                                                                    | Terraform configuration for AKS, Azure ML, storage, and backend services     |
+| [Infrastructure Reference](infrastructure-reference.md)                                                           | Architecture, module structure, outputs, and troubleshooting                 |
+| [VPN Gateway](vpn.md)                                                                                             | Point-to-site and site-to-site VPN for private cluster access                |
+| [Private DNS](dns.md)                                                                                             | DNS zone setup for OSMO UI access                                            |
+| [Cluster Automation](automation.md)                                                                               | Scheduled start/stop automation for cost management                          |
+| [Cluster Setup](cluster-setup.md)                                                                                 | Kubernetes service deployment and OSMO configuration                         |
+| [Cluster Operations](cluster-setup-advanced.md)                                                                   | Accessing OSMO, troubleshooting, and optional scripts                        |
+| [OSMO Upgrade](osmo-upgrade.md)                                                                                   | Staged upgrade of a pre-6.3 OSMO install to 6.3, with rollback               |
+| [Cleanup and Destroy](cleanup.md)                                                                                 | Remove cluster components and destroy Azure infrastructure                   |
+| [Local OSMO Profile](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/local/README.md) | Standalone OSMO, MLflow, and the dataviewer on a single-node K3s workstation |
 
 ## 📋 Deployment Order
 

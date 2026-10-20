@@ -15,9 +15,9 @@ workflow:
 
   resources:
     default:
-      cpu: 14
-      memory: 48Gi
-      storage: 200Gi
+      cpu: {{cpu}}
+      memory: {{memory}}
+      storage: {{storage}}
       gpu: {{gpu}}
       platform: "{{platform}}"
 
@@ -79,6 +79,9 @@ default-values:
   # This value is the direct-workflow fallback; keep it in sync with DEFAULT_GROOT_IMAGE.
   image: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel@sha256:0cf3402e946b7c384ba943ee05c90b4c5a4a05227923921f2b0918c011cfaf56
   gpu: 1
+  cpu: 14
+  memory: 48Gi
+  storage: 200Gi
   platform: gpu_platform
   blob_url: ""
   dataset_path: "/data/dataset"

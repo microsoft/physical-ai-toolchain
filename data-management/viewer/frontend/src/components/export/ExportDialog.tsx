@@ -38,7 +38,8 @@ function describeExport(count: number, lerobot: boolean | undefined): string {
  * Dialog for configuring and executing episode exports
  */
 export function ExportDialog({ open, onOpenChange, datasetId, episodeIndices }: ExportDialogProps) {
-  const [outputPath, setOutputPath] = useState('/exports')
+  const [customOutputPath, setOutputPath] = useState<string | null>(null)
+  const outputPath = customOutputPath ?? `${datasetId}-export`
   const [applyEdits, setApplyEdits] = useState(true)
   const [includeSubtasks, setIncludeSubtasks] = useState(true)
   const [includeLanguage, setIncludeLanguage] = useState(true)
@@ -118,8 +119,13 @@ export function ExportDialog({ open, onOpenChange, datasetId, episodeIndices }: 
                 id="output-path"
                 value={outputPath}
                 onChange={(e) => setOutputPath(e.target.value)}
-                placeholder="/path/to/exports"
+                placeholder="new-dataset-name"
+                aria-describedby="output-path-hint"
               />
+              <p id="output-path-hint" className="text-muted-foreground text-xs">
+                A name or path inside the datasets directory, where the export appears as a new
+                dataset.
+              </p>
             </div>
 
             <div className="flex items-center space-x-2">

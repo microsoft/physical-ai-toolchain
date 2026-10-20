@@ -66,12 +66,12 @@ test('V05 and V15 analyzer state has no axe violations', async ({ page }, testIn
 
 test('V02 dataset chooser has no axe violations', async ({ page }, testInfo) => {
   const errors = await openViewer(page, testInfo)
-  await page.getByRole('button', { name: 'Dataset' }).click()
-  await expect(page.getByRole('dialog', { name: 'Select dataset' })).toBeVisible()
+  await page.getByRole('button', { name: 'Dataset', exact: true }).click()
+  await expect(page.getByRole('main', { name: 'Dataset catalog' })).toBeVisible()
   await attachJson(testInfo, 'state-proof-dataset-open', {
     journeyIds: ['V02'],
     expected: 'Dataset chooser is open and focused',
-    observed: 'Select dataset dialog is visible',
+    observed: 'Dataset catalog landmark is visible',
   })
   await expectNoAxeViolations(page, testInfo, 'dataset-open', ['V02'])
   expect(errors.consoleErrors).toEqual([])
@@ -101,9 +101,11 @@ test('V02 V05 and V18 expose exact page and component semantics', async ({ page 
   await expect(page.getByRole('complementary')).toBeVisible()
   await expect(page.getByRole('main')).toBeVisible()
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Robotic Training Data Analysis')
-  await expect(page.getByRole('heading', { level: 2 })).toHaveText('Episode 0')
+  await expect(
+    page.getByRole('heading', { level: 2, name: 'Episode 0', exact: true }),
+  ).toBeVisible()
 
-  const datasetButton = page.getByRole('button', { name: 'Dataset' })
+  const datasetButton = page.getByRole('button', { name: 'Dataset', exact: true })
   await expect(datasetButton).toHaveAttribute('aria-expanded', 'false')
   await datasetButton.click()
   await expect(datasetButton).toHaveAttribute('aria-expanded', 'true')

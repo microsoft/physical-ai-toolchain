@@ -1,5 +1,5 @@
-import { fireEvent, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, renderHook, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   buildDiagnosticsStateSummary,
@@ -9,6 +9,13 @@ import {
   type WorkspaceDiagnosticsSummaryInput,
 } from '@/components/annotation-workspace/annotation-workspace-diagnostics'
 import { AnnotationWorkspaceDiagnosticsPanel } from '@/components/annotation-workspace/AnnotationWorkspaceDiagnosticsPanel'
+import { useAnnotationWorkspaceDiagnostics } from '@/components/annotation-workspace/useAnnotationWorkspaceDiagnostics'
+import {
+  clearDiagnosticEvents,
+  disableDiagnostics,
+  enableDiagnostics,
+  recordDiagnosticEvent,
+} from '@/lib/playback-diagnostics'
 import { renderWithQuery } from '@/test-utils/render'
 
 const baseEvents = [
@@ -25,6 +32,85 @@ const baseEvents = [
     timestamp: '2026-03-08T00:00:01.000Z',
   },
 ] as const
+
+afterEach(() => {
+  disableDiagnostics()
+  clearDiagnosticEvents()
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
+
+describe('diagnostics interaction state', () => {
+  it('copies and downloads only the selected channel and clears visible events', async () => {
+    enableDiagnostics()
+    clearDiagnosticEvents()
+    recordDiagnosticEvent('workspace', 'saved')
+    recordDiagnosticEvent('playback', 'paused')
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    const createObjectURL = vi.fn(() => 'blob:synthetic')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const options = {
+      diagnosticsVisible: true,
+      activeTab: 'trajectory',
+      currentDatasetId: 'synthetic',
+      currentEpisodeIndex: 0,
+      currentFrame: 0,
+      totalFrames: 10,
+      isPlaying: false,
+      selectedRange: null,
+      selectedSubtaskId: null,
+    }
+    const { result, rerender } = renderHook((props) => useAnnotationWorkspaceDiagnostics(props), {
+      initialProps: options,
+    })
+    act(() => result.current.setSelectedDiagnosticsChannel('playback'))
+    await act(async () => result.current.handleCopyDiagnostics())
+    expect(JSON.parse(writeText.mock.lastCall![0])).toEqual([
+      expect.objectContaining({ channel: 'playback', type: 'paused' }),
+    ])
+    expect(result.current.diagnosticsClipboardStatus).toBe('Copied diagnostics JSON.')
+    act(() => result.current.handleDownloadDiagnostics())
+    expect(click).toHaveBeenCalledOnce()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:synthetic')
+    act(() => result.current.handleClearVisibleDiagnostics())
+    expect(result.current.recentDiagnosticEvents).toEqual([])
+    rerender({ ...options, diagnosticsVisible: false })
+    expect(result.current.selectedDiagnosticsChannel).toBe('all')
+    expect(result.current.diagnosticsClipboardStatus).toBeNull()
+  })
+
+  it('announces enabling diagnostics and an unavailable clipboard without writing', async () => {
+    disableDiagnostics()
+    vi.stubGlobal('navigator', {})
+    const options = {
+      diagnosticsVisible: false,
+      activeTab: 'trajectory',
+      currentDatasetId: null,
+      currentEpisodeIndex: null,
+      currentFrame: 0,
+      totalFrames: 0,
+      isPlaying: false,
+      selectedRange: null,
+      selectedSubtaskId: null,
+    }
+    const { result, rerender } = renderHook((props) => useAnnotationWorkspaceDiagnostics(props), {
+      initialProps: options,
+    })
+    act(() => enableDiagnostics())
+    rerender({ ...options, diagnosticsVisible: true })
+    expect(
+      result.current.recentDiagnosticEvents.some((event) => event.type === 'diagnostics-enabled'),
+    ).toBe(true)
+    await act(async () => result.current.handleCopyDiagnostics())
+    expect(result.current.diagnosticsClipboardStatus).toBe(
+      'Clipboard is unavailable in this browser.',
+    )
+    act(() => result.current.handleDownloadDiagnostics())
+  })
+})
 
 describe('annotation workspace diagnostics helpers', () => {
   it('returns configured and observed channels while keeping all first', () => {

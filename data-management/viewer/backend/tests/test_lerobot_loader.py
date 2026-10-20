@@ -324,6 +324,77 @@ class TestEpisodeLoading:
             loader.load_episode(9)
 
 
+class TestEpisodeTables:
+    def test_given_no_episode_record_when_reading_table_then_uses_episode_path(self, loader: LeRobotLoader) -> None:
+        table = loader.load_episode_table(0)
+
+        assert table.column("frame_index").to_pylist() == [0, 1, 2]
+        assert table.column("episode_index").to_pylist() == [0, 0, 0]
+
+    def test_given_v3_record_when_reading_table_then_uses_recorded_location(self, tmp_path: Path) -> None:
+        dataset = _write_v3_dataset(tmp_path)
+        record_path = dataset / "meta/episodes/chunk-000/file-000.parquet"
+        table = pq.read_table(record_path)
+        table = table.append_column("data/chunk_index", pa.array([2]))
+        table = table.append_column("data/file_index", pa.array([3]))
+        table = table.append_column("stats/qpos/mean", pa.array([[2.0, 3.0]]))
+        pq.write_table(table, record_path)
+        loader = LeRobotLoader(dataset)
+
+        record = loader.episode_record(5)
+        episode = loader.load_episode_table(5)
+
+        assert record is not None and "stats/qpos/mean" not in record
+        assert episode.column("frame_index").to_pylist() == [0, 1]
+
+    def test_given_unindexed_metadata_when_reading_record_then_skips_it(self, tmp_path: Path) -> None:
+        dataset = _write_v3_dataset(tmp_path)
+        path = dataset / "meta/episodes/chunk-000/file-000.parquet"
+        pq.write_table(pa.table({"length": [2]}), path)
+
+        assert LeRobotLoader(dataset).episode_record(5) is None
+
+    def test_given_missing_record_when_reading_table_then_scans_data(self, tmp_path: Path) -> None:
+        loader = LeRobotLoader(_write_v3_dataset(tmp_path))
+
+        assert loader.episode_record(4) is None
+        assert loader.load_episode_table(5).column("frame_index").to_pylist() == [0, 1]
+
+    def test_given_missing_episode_rows_when_reading_table_then_preserves_loader_error(
+        self, dataset_path: Path
+    ) -> None:
+        path = dataset_path / "data/chunk-000/episode_000000.parquet"
+        table = pq.read_table(path)
+        table = table.set_column(table.schema.get_field_index("episode_index"), "episode_index", pa.array([9, 9, 9]))
+        pq.write_table(table, path)
+
+        with pytest.raises(LeRobotLoaderError, match="Episode 0 not found") as error:
+            LeRobotLoader(dataset_path).load_episode_table(0)
+
+        assert error.value.cause is None
+
+    def test_given_corrupt_parquet_when_reading_table_then_preserves_read_failure(self, dataset_path: Path) -> None:
+        (dataset_path / "data/chunk-000/episode_000000.parquet").write_bytes(b"not parquet")
+
+        with pytest.raises(LeRobotLoaderError, match="Failed to load episode 0") as error:
+            LeRobotLoader(dataset_path).load_episode_table(0)
+
+        assert isinstance(error.value.cause, pa.ArrowInvalid)
+
+    def test_given_jsonl_when_reading_export_table_then_rejects_non_parquet(self, tmp_path: Path) -> None:
+        loader = LeRobotLoader(_write_jsonl_dataset(tmp_path))
+
+        with pytest.raises(LeRobotLoaderError, match="not stored in a parquet data file"):
+            loader.load_episode_table(0)
+
+    def test_given_no_frame_or_episode_columns_when_reading_table_then_preserves_rows(self, dataset_path: Path) -> None:
+        path = dataset_path / "data/chunk-000/episode_000000.parquet"
+        table = pq.read_table(path).drop(["episode_index", "frame_index"])
+        pq.write_table(table, path)
+
+        assert LeRobotLoader(dataset_path).load_episode_table(0).equals(table)
+
+
 class TestTasksAndVideo:
     def test_returns_tasks(self, loader):
         assert loader.get_tasks() == {0: "pick", 1: "place"}

@@ -72,7 +72,18 @@ jobs:
 
       - name: Run pytest
         id: test
-        run: uv run --frozen --only-group dev pytest -v --junitxml=logs/evaluation-pytest-results.xml
+        run: >-
+          PYTHONPATH=.. uv run --frozen --only-group dev pytest -v
+          --junitxml=logs/evaluation-pytest-results.xml
+          --cov=vlm_judge --cov-report= --cov-fail-under=0
+
+      - name: Generate scoped coverage reports and enforce gates
+        id: coverage_gate
+        run: |
+          uv run --no-sync coverage xml --include='*/sil/*,*/hil/*,*/metrics/*' --fail-under=0 -o logs/coverage.xml
+          uv run --no-sync coverage xml --include='*/vlm_judge/*' --fail-under=0 -o logs/coverage-vlm-judge.xml
+          uv run --no-sync coverage report --include='*/sil/*,*/hil/*,*/metrics/*' --fail-under=80
+          uv run --no-sync coverage report --include='*/vlm_judge/*' --fail-under=35
 
       - name: Upload coverage.xml artifact
         if: ${{ inputs.code-coverage && !cancelled() }}
@@ -80,7 +91,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: evaluation-pytest-coverage-xml
-          path: evaluation/logs/coverage.xml
+          path: |
+            evaluation/logs/coverage.xml
+            evaluation/logs/coverage-vlm-judge.xml
           if-no-files-found: error
           retention-days: 30
 
@@ -95,6 +108,17 @@ jobs:
           flags: pytest-evaluation
           name: evaluation-pytest-coverage
 
+      - name: Upload judge coverage to Codecov
+        if: ${{ inputs.code-coverage && !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: evaluation/logs/coverage-vlm-judge.xml
+          use_oidc: true
+          fail_ci_if_error: false
+          verbose: true
+          flags: pytest-vlm-judge
+          name: pytest-vlm-judge-evaluation-coverage
+
       - name: Publish execution evidence
         id: outcome
         if: always()
@@ -102,5 +126,5 @@ jobs:
         with:
           workflow: evaluation-pytests
           steps-json: ${{ toJSON(steps) }}
-          required-steps: '["install","test"]'
+          required-steps: '["install","test","coverage_gate"]'
           reports: '[{"path":"evaluation/logs/evaluation-pytest-results.xml","kind":"junit"}]'

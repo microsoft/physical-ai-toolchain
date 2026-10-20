@@ -304,12 +304,11 @@ class HDF5FormatHandler:
                     for segment in loader.recorded_subtasks(episode_idx, hdf5_data.length)
                 ],
             )
-        except Exception as e:
+        except Exception:
             logger.warning(
-                "HDF5 load_episode failed for %s ep %d: %s",
-                dataset_id,
-                episode_idx,
-                e,
+                "HDF5 load_episode failed for %s ep %d: unavailable",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                int(episode_idx),
             )
             return None
 

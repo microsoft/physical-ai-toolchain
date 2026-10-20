@@ -27,8 +27,9 @@ from .robot_types import (
     RobotObservation,
 )
 
-SUPPORTED_POLICY_TYPES = frozenset({"act", "diffusion", "pi0", "pi0_fast"})
-VLA_POLICY_TYPES = frozenset({"pi0", "pi0_fast"})
+SUPPORTED_POLICY_TYPES = frozenset({"act", "diffusion", "pi0", "pi0_fast", "smolvla"})
+# Language-conditioned policies: observations carry a task, and the processor pipelines tokenize it.
+VLA_POLICY_TYPES = frozenset({"pi0", "pi0_fast", "smolvla"})
 
 
 def _resolve_device(requested: str) -> str:
@@ -73,8 +74,13 @@ def load_pretrained_policy(
     policy_type: str = "act",
     device: str = "cuda",
     revision: str | None = None,
+    rename_map: dict[str, str] | None = None,
 ) -> PolicyBundle:
-    """Load a supported LeRobot policy and its persisted processors."""
+    """Load a supported LeRobot policy and its persisted processors.
+
+    ``rename_map`` maps observation keys to the policy's, as ``lerobot-train --rename_map`` does; a policy
+    fine-tuned with a rename map already carries it in its saved preprocessor.
+    """
     normalized_policy_type = policy_type.strip().lower()
     if normalized_policy_type not in SUPPORTED_POLICY_TYPES:
         supported = ", ".join(sorted(SUPPORTED_POLICY_TYPES))
@@ -98,6 +104,9 @@ def load_pretrained_policy(
     policy.to(resolved_device)
 
     device_override = {"device_processor": {"device": resolved_device}}
+    preprocessor_override = dict(device_override)
+    if rename_map:
+        preprocessor_override["rename_observations_processor"] = {"rename_map": rename_map}
     if normalized_policy_type in VLA_POLICY_TYPES:
         from lerobot.policies.factory import make_pre_post_processors
 
@@ -105,7 +114,7 @@ def load_pretrained_policy(
             policy.config,
             pretrained_path=repo_id,
             pretrained_revision=revision,
-            preprocessor_overrides=device_override,
+            preprocessor_overrides=preprocessor_override,
             postprocessor_overrides=device_override,
         )
     else:
@@ -113,7 +122,7 @@ def load_pretrained_policy(
             repo_id,
             "policy_preprocessor.json",
             revision=revision,
-            overrides=device_override,
+            overrides=preprocessor_override,
         )
         postprocessor = PolicyProcessorPipeline.from_pretrained(
             repo_id,

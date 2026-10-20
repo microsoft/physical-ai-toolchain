@@ -12,6 +12,8 @@ STAGING_DIR="$TMP_DIR/osmo-dataset-staging"
 source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=../../../scripts/lib/terraform-outputs.sh
 source "$REPO_ROOT/scripts/lib/terraform-outputs.sh"
+# shellcheck source=../../../scripts/lib/platform-profile.sh
+source "$REPO_ROOT/scripts/lib/platform-profile.sh"
 read_terraform_outputs "$REPO_ROOT/infrastructure/terraform" 2>/dev/null || true
 
 #------------------------------------------------------------------------------
@@ -25,6 +27,9 @@ Usage: submit-osmo-dataset-training.sh [OPTIONS] [-- osmo-submit-flags]
 Submit an OSMO training workflow using dataset folder injection.
 The training folder is uploaded as a versioned OSMO dataset via localpath.
 
+PLATFORM:
+        --profile NAME            Platform profile: azure (default) or local (PLATFORM_PROFILE)
+
 WORKFLOW OPTIONS:
     -w, --workflow PATH           Workflow template (default: training/rl/workflows/osmo/train-dataset.yaml)
     -t, --task NAME               Isaac Lab task (default: Isaac-Velocity-Rough-Anymal-C-v0)
@@ -33,7 +38,7 @@ WORKFLOW OPTIONS:
     -i, --image IMAGE             Container image (default: ${DEFAULT_ISAAC_LAB_IMAGE})
     -b, --backend BACKEND         Training backend: skrl (default), rsl_rl
 
-RESOURCE OPTIONS:
+RESOURCE OPTIONS (defaults come from the platform profile, then these values):
         --gpu COUNT               Number of GPUs (default: 1)
         --cpu COUNT               CPU cores (default: 30)
         --memory SIZE             Memory with unit (default: 400Gi)
@@ -61,7 +66,8 @@ OTHER:
         --config-preview          Print configuration and exit
     -h, --help                    Show this help message
 
-Values resolved: CLI > Environment variables > Terraform outputs
+Values resolved: CLI > Environment variables > Platform profile > Terraform outputs
+TRACKING_BACKEND (azureml, mlflow, or none) overrides the profile's tracking backend.
 Additional arguments after -- are forwarded to osmo workflow submit.
 EOF
 }
@@ -111,10 +117,11 @@ max_iterations="${MAX_ITERATIONS:-}"
 image="${IMAGE:-$DEFAULT_ISAAC_LAB_IMAGE}"
 backend="${TRAINING_BACKEND:-skrl}"
 
-gpu="${OSMO_GPU:-1}"
-cpu="${OSMO_CPU:-30}"
-memory="${OSMO_MEMORY:-400Gi}"
-storage="${OSMO_STORAGE:-200Gi}"
+gpu="${OSMO_GPU:-}"
+cpu="${OSMO_CPU:-}"
+memory="${OSMO_MEMORY:-}"
+storage="${OSMO_STORAGE:-}"
+profile=""
 
 # Dataset configuration
 dataset_bucket="${OSMO_DATASET_BUCKET:-training}"
@@ -142,6 +149,7 @@ forward_args=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)                    show_help; exit 0 ;;
+    --profile)                    profile="$2"; shift 2 ;;
     -w|--workflow)                workflow="$2"; shift 2 ;;
     -t|--task)                    task="$2"; shift 2 ;;
     -n|--num-envs)                num_envs="$2"; shift 2 ;;
@@ -178,6 +186,12 @@ done
 
 require_tools osmo rsync
 
+load_platform_profile "$profile"
+gpu="${gpu:-${PROFILE_TASK_GPU:-1}}"
+cpu="${cpu:-${PROFILE_TASK_CPU:-30}}"
+memory="${memory:-${PROFILE_TASK_MEMORY:-400Gi}}"
+storage="${storage:-${PROFILE_TASK_STORAGE:-200Gi}}"
+
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
 [[ -d "$training_path" ]] || fatal "Training directory not found: $training_path"
 [[ -f "$training_path/scripts/train.sh" ]] || fatal "Training path must contain scripts/train.sh: $training_path"
@@ -188,6 +202,13 @@ entry_script_b64="$(base64 < "$entry_script" | tr -d '\n')"
 
 checkpoint_mode="$(normalize_checkpoint_mode "$checkpoint_mode")"
 
+if [[ "$PROFILE_TRACKING_BACKEND" == "none" ]]; then
+  [[ -n "$checkpoint_uri" ]] && fatal "--checkpoint-uri needs a tracking backend; TRACKING_BACKEND is none"
+  [[ -n "$register_checkpoint" && "$skip_register" == "false" ]] \
+    && fatal "--register-checkpoint needs a tracking backend; TRACKING_BACKEND is none"
+  skip_register=true
+fi
+
 if [[ "$skip_register" == "false" && -z "$register_checkpoint" ]]; then
   register_checkpoint="$(derive_model_name "$task")"
   info "Auto-derived model name: $register_checkpoint"
@@ -197,6 +218,8 @@ fi
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
+  print_platform_profile_preview
+  print_kv "OSMO Platform" "$PROFILE_OSMO_GPU_PLATFORM"
   print_kv "Task" "$task"
   print_kv "Backend" "$backend"
   print_kv "Image" "$image"
@@ -213,11 +236,15 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Checkpoint URI" "${checkpoint_uri:-<not set>}"
   print_kv "Register Model" "${register_checkpoint:-<none>}"
   print_kv "Workflow" "$workflow"
-  print_kv "Subscription" "${subscription_id:-<not set>}"
-  print_kv "Resource Group" "${resource_group:-<not set>}"
-  print_kv "Workspace" "${workspace_name:-<not set>}"
+  if [[ "$PROFILE_TRACKING_BACKEND" == "azureml" ]]; then
+    print_kv "Subscription" "${subscription_id:-<not set>}"
+    print_kv "Resource Group" "${resource_group:-<not set>}"
+    print_kv "Workspace" "${workspace_name:-<not set>}"
+  fi
   exit 0
 fi
+
+use_platform_osmo_login
 
 #------------------------------------------------------------------------------
 # Stage Training Folder (exclude cache and build artifacts)
@@ -274,11 +301,17 @@ submit_args=(
   "dataset_bucket=$dataset_bucket"
   "dataset_name=$dataset_name"
   "training_localpath=$rel_training_path"
+  "platform=$PROFILE_OSMO_GPU_PLATFORM"
 )
+mapfile -t tracking_values < <(platform_tracking_workflow_values)
+submit_args+=("${tracking_values[@]}")
 
-[[ -n "$subscription_id" ]] && submit_args+=("azure_subscription_id=$subscription_id")
-[[ -n "$resource_group" ]] && submit_args+=("azure_resource_group=$resource_group")
-[[ -n "$workspace_name" ]] && submit_args+=("azure_workspace_name=$workspace_name")
+# Only AzureML tracking reads the Azure context, so other backends never receive it.
+if [[ "$PROFILE_TRACKING_BACKEND" == "azureml" ]]; then
+  [[ -n "$subscription_id" ]] && submit_args+=("azure_subscription_id=$subscription_id")
+  [[ -n "$resource_group" ]] && submit_args+=("azure_resource_group=$resource_group")
+  [[ -n "$workspace_name" ]] && submit_args+=("azure_workspace_name=$workspace_name")
+fi
 
 if [[ -n "$max_iterations" ]]; then
   submit_args+=("max_iterations=$max_iterations")
@@ -298,6 +331,8 @@ osmo "${submit_args[@]}" || fatal "Failed to submit workflow"
 # Summary
 #------------------------------------------------------------------------------
 section "Deployment Summary"
+print_kv "Platform Profile" "$PROFILE_NAME"
+print_kv "Tracking Backend" "$PROFILE_TRACKING_BACKEND"
 print_kv "Task" "$task"
 print_kv "Backend" "$backend"
 print_kv "Image" "$image"

@@ -62,7 +62,7 @@ BeforeAll {
         $status = if ($Route.StartsWith('/api/')) { 404 } else { 200 }
         $message = [System.Net.Http.HttpResponseMessage]::new($status)
         $message.Content = [System.Net.Http.StringContent]::new(
-            '<!doctype html><script type="module" src="/assets/index.js"></script>',
+            "<!doctype html><script type=`"module`" crossorigin src=`"$($HeaderTestState.RootAsset)`"></script>",
             [System.Text.Encoding]::UTF8, 'text/html'
         )
         foreach ($entry in $policy.GetEnumerator()) {
@@ -87,6 +87,7 @@ Describe 'Data Viewer browser security policy' -Tag 'Unit' {
         BeforeEach {
             $script:HeaderTestState = @{
                 Mutation = $null
+                RootAsset = './assets/index.js'
                 Routes = [System.Collections.Generic.List[string]]::new()
             }
             Mock Invoke-WebRequest {
@@ -102,6 +103,22 @@ Describe 'Data Viewer browser security policy' -Tag 'Unit' {
                     '/api/security-policy-smoke', '/health', '/redirect.html')) {
                 $script:HeaderTestState.Routes | Should -Contain $route
             }
+        }
+
+        It 'checks the built asset that a <Form> script URL references' -TestCases @(
+            @{ Form = 'relative'; RootAsset = './assets/index.js' }
+            @{ Form = 'root-relative'; RootAsset = '/assets/index.js' }
+        ) {
+            param($Form, $RootAsset)
+            $script:HeaderTestState.RootAsset = $RootAsset
+            & (Join-Path $script:RepoRoot 'scripts/security/Test-DataviewerSecurityHeaders.ps1')
+            $script:HeaderTestState.Routes | Should -Contain '/assets/index.js' -Because $Form
+        }
+
+        It 'rejects a root document that references no built script' {
+            $script:HeaderTestState.RootAsset = '/vendor/index.js'
+            { & (Join-Path $script:RepoRoot 'scripts/security/Test-DataviewerSecurityHeaders.ps1') } |
+                Should -Throw '*does not reference a built JS asset*'
         }
 
         It 'rejects <Case> independently of the NGINX template' -TestCases @(

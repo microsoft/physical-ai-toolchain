@@ -8,6 +8,8 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
   return {
+    // Relative asset URLs let the built app run under a path prefix, such as a kubectl proxy service URL.
+    base: './',
     plugins: [
       react(),
       tailwindcss(),

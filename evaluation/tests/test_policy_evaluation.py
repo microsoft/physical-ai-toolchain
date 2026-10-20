@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -403,23 +404,42 @@ class TestEvaluate:
         metrics = evaluate(env, agent, num_episodes=2, framework="skrl")
         assert metrics.count == 2
 
-    def test_truncated_episode_not_counted_as_success(self) -> None:
-        class TruncEnv(_StubEnv):
-            def step(self, actions):
-                self._step_count += 1
-                rewards = torch.ones(self.num_envs, 1)
-                terminated = torch.zeros(self.num_envs, 1, dtype=torch.bool)
-                truncated = torch.ones(self.num_envs, 1, dtype=torch.bool)
-                info = {"success": torch.ones(self.num_envs, dtype=torch.bool)}
-                return torch.zeros(self.num_envs, 4), rewards, terminated, truncated, info
+    @pytest.mark.parametrize(
+        ("terminated", "truncated", "success", "expected"),
+        [
+            pytest.param(False, True, None, 2, id="time-out-survival"),
+            pytest.param(True, False, None, 0, id="failure-termination"),
+            pytest.param(True, True, None, 0, id="failure-at-time-limit"),
+            pytest.param(False, True, True, 2, id="reported-success-at-time-limit"),
+            pytest.param(False, True, False, 0, id="reported-failure-at-time-limit"),
+            pytest.param(True, False, True, 2, id="reported-success-termination"),
+        ],
+    )
+    def test_success_follows_the_task_signal_or_time_out_survival(
+        self, terminated: bool, truncated: bool, success: bool | None, expected: int
+    ) -> None:
+        class SignalEnv(_StubEnv):
+            def step(
+                self, actions: object
+            ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+                done = torch.ones(self.num_envs, 1, dtype=torch.bool)
+                info = {} if success is None else {"success": torch.full((self.num_envs,), success, dtype=torch.bool)}
+                return (
+                    torch.zeros(self.num_envs, 4),
+                    torch.ones(self.num_envs, 1),
+                    done & terminated,
+                    done & truncated,
+                    info,
+                )
 
-        env = TruncEnv(num_envs=2, episode_len=1)
+        env = SignalEnv(num_envs=2, episode_len=1)
         agent = MagicMock()
         agent.act.return_value = (torch.zeros(2, 1),)
 
         metrics = evaluate(env, agent, num_episodes=2, framework="skrl")
+
         assert metrics.count == 2
-        assert metrics.successes == 0
+        assert metrics.successes == expected
 
 
 def _skrl_module_stubs(decorator_calls_inner: bool = True, cfg: object | None = None):
@@ -578,6 +598,41 @@ class TestMain:
         assert rc == 1
         mock_exit.assert_called_once_with(1)
 
+    @pytest.mark.parametrize(("success_rate", "passed"), [(0.9, True), (0.2, False)])
+    def test_output_metrics_record_the_verdict(self, tmp_path: Path, success_rate: float, passed: bool) -> None:
+        output = tmp_path / "metrics" / "eval_metrics.json"
+        argv = [
+            "prog",
+            "--model-path",
+            "/tmp/m",
+            "--task",
+            "Lift-v0",
+            "--success-threshold",
+            "0.5",
+            "--output-metrics",
+            str(output),
+        ]
+        metrics = MagicMock()
+        metrics.to_dict.return_value = {"success_rate": success_rate, "eval_episodes": 10}
+        with (
+            patch.object(sys, "argv", argv),
+            patch.dict(sys.modules, _main_module_stubs()),
+            patch("sil.policy_evaluation.find_checkpoint", return_value="/tmp/ckpt.pt"),
+            patch("sil.policy_evaluation.load_agent", return_value=MagicMock()),
+            patch("sil.policy_evaluation.evaluate", return_value=metrics),
+            patch("sil.policy_evaluation.prepare_for_shutdown"),
+            patch.object(policy_evaluation.os, "_exit"),
+        ):
+            rc = main()
+
+        assert rc == (0 if passed else 1)
+        assert json.loads(output.read_text()) == {
+            "success_rate": success_rate,
+            "eval_episodes": 10,
+            "success_threshold": 0.5,
+            "passed": passed,
+        }
+
     def test_rsl_rl_framework_skips_skrl_wrapper(self) -> None:
         argv = [
             "prog",
@@ -617,3 +672,50 @@ class TestMain:
             rc = main()
         assert rc == 1
         mock_exit.assert_called_once_with(1)
+
+    @staticmethod
+    def _passing_gate_argv(output: Path) -> list[str]:
+        return [
+            "prog",
+            "--model-path",
+            "/tmp/m",
+            "--task",
+            "Lift-v0",
+            "--success-threshold",
+            "0.5",
+            "--output-metrics",
+            str(output),
+        ]
+
+    def test_failed_verdict_write_after_a_passing_gate_exits_one(self, tmp_path: Path) -> None:
+        metrics = MagicMock()
+        metrics.to_dict.return_value = {"success_rate": 1.0, "eval_episodes": 10}
+        with (
+            patch.object(sys, "argv", self._passing_gate_argv(tmp_path / "eval_metrics.json")),
+            patch.dict(sys.modules, _main_module_stubs()),
+            patch("sil.policy_evaluation.find_checkpoint", return_value="/tmp/ckpt.pt"),
+            patch("sil.policy_evaluation.load_agent", return_value=MagicMock()),
+            patch("sil.policy_evaluation.evaluate", return_value=metrics),
+            patch("sil.policy_evaluation.prepare_for_shutdown"),
+            patch.object(Path, "write_text", side_effect=OSError("disk full")),
+            patch.object(policy_evaluation.os, "_exit") as mock_exit,
+        ):
+            main()
+        mock_exit.assert_called_once_with(1)
+
+    def test_teardown_error_after_a_recorded_verdict_keeps_the_gate_result(self, tmp_path: Path) -> None:
+        output = tmp_path / "eval_metrics.json"
+        metrics = MagicMock()
+        metrics.to_dict.return_value = {"success_rate": 1.0, "eval_episodes": 10}
+        with (
+            patch.object(sys, "argv", self._passing_gate_argv(output)),
+            patch.dict(sys.modules, _main_module_stubs()),
+            patch("sil.policy_evaluation.find_checkpoint", return_value="/tmp/ckpt.pt"),
+            patch("sil.policy_evaluation.load_agent", return_value=MagicMock()),
+            patch("sil.policy_evaluation.evaluate", return_value=metrics),
+            patch("sil.policy_evaluation.prepare_for_shutdown", side_effect=RuntimeError("teardown")),
+            patch.object(policy_evaluation.os, "_exit") as mock_exit,
+        ):
+            main()
+        assert json.loads(output.read_text())["passed"] is True
+        mock_exit.assert_called_once_with(0)

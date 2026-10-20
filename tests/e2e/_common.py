@@ -26,6 +26,18 @@ class E2EHandle:
     terminal_states: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class RegisteredModel:
+    """A concrete registered model version in Azure ML or MLflow — never the mutable ``latest`` alias."""
+
+    name: str
+    version: str
+
+    @property
+    def uri(self) -> str:
+        return f"models:/{self.name}/{self.version}"
+
+
 class FinalizerRegistrar(Protocol):
     def addfinalizer(self, finalizer: Callable[[], object]) -> None:
         pass

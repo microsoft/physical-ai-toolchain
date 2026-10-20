@@ -29,6 +29,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../..
 source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=defaults.conf
 source "$SCRIPT_DIR/defaults.conf"
+# shellcheck source=../../scripts/lib/osmo-cluster.sh
+source "$REPO_ROOT/scripts/lib/osmo-cluster.sh"
 
 VALUES_DIR="$SCRIPT_DIR/values"
 MANIFESTS_DIR="$SCRIPT_DIR/manifests"
@@ -441,28 +443,12 @@ apply_secret_provider_class "$NS_OSMO_CONTROL_PLANE" "$kv_name" "$osmo_identity_
 # Phase 1d: Configure MEK (Master Encryption Key)
 #------------------------------------------------------------------------------
 
-generate_mek_config() {
-    local key jwk encoded
-    key="$(openssl rand -base64 32 | tr -d '\n')"
-    jwk="{\"k\":\"${key}\",\"kid\":\"key1\",\"kty\":\"oct\"}"
-    encoded="$(echo -n "$jwk" | base64 | tr -d '\n')"
-    cat <<EOF
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: $SECRET_MEK
-data:
-  mek.yaml: |
-    currentMek: key1
-    meks:
-      key1: ${encoded}
-EOF
-}
-
 if [[ "$skip_mek" == "false" ]]; then
     section "Configure MEK"
+    mek_state=$(osmo_mek_state "$NS_OSMO_CONTROL_PLANE" "$SECRET_MEK") \
+        || fatal "Stopping before changing the master encryption key"
     mek_exists=false
-    kubectl get configmap "$SECRET_MEK" -n "$NS_OSMO_CONTROL_PLANE" &>/dev/null && mek_exists=true
+    [[ "$mek_state" == "present" ]] && mek_exists=true
 
     if [[ "$mek_exists" == "true" && "$force_mek" == "false" ]]; then
         info "MEK ConfigMap already exists; skipping (use --force-mek to replace)"
@@ -473,7 +459,7 @@ if [[ "$skip_mek" == "false" ]]; then
     else
         [[ "$mek_exists" == "true" ]] && warn "Replacing existing MEK - encrypted data will be unrecoverable!"
         info "Generating and applying MEK ConfigMap..."
-        generate_mek_config | kubectl apply -n "$NS_OSMO_CONTROL_PLANE" -f -
+        osmo_mek_configmap "$SECRET_MEK" | kubectl apply -n "$NS_OSMO_CONTROL_PLANE" -f -
         warn "Back up MEK for production: kubectl get configmap $SECRET_MEK -n $NS_OSMO_CONTROL_PLANE -o yaml > mek-backup.yaml"
 
         # Clear service_auth from DB — it was encrypted with the old MEK and is now
@@ -548,7 +534,7 @@ service_helm_args=(
     --set-string "services.configs.dataset.buckets.training.dataset_path=${endpoint}/datasets"
     --set-string "services.configs.workflow.backend_images.init=${osmo_image_location}/init-container:${image_version}"
     --set-string "services.configs.workflow.backend_images.client=${osmo_image_location}/client:${image_version}"
-    --set-string "gateway.envoy.image=envoyproxy/envoy@sha256:4e3c734cbe9892a3513c97cf3974ff73cfef5d784f5cceed9ea758a2b80e0c31"
+    --set-string "gateway.envoy.image=$OSMO_GATEWAY_ENVOY_IMAGE"
 )
 
 if [[ -n "$pg_fqdn" ]]; then
@@ -633,8 +619,8 @@ if [[ "$use_acr" == "true" ]]; then
                 ] | unique | .[]
                 ')
         [[ -z "$invalid_images" ]] || fatal "Running OSMO Pods use unexpected image references: $invalid_images"
-        kubectl get pods -n "$NS_OSMO_CONTROL_PLANE" -o json | jq -e '
-            any(.items[]; any(.spec.containers[]?; .name == "envoy" and .image == "envoyproxy/envoy@sha256:4e3c734cbe9892a3513c97cf3974ff73cfef5d784f5cceed9ea758a2b80e0c31")) and
+        kubectl get pods -n "$NS_OSMO_CONTROL_PLANE" -o json | jq -e --arg envoy_image "$OSMO_GATEWAY_ENVOY_IMAGE" '
+            any(.items[]; any(.spec.containers[]?; .name == "envoy" and .image == $envoy_image)) and
             all(.items[].status.containerStatuses[]?; (.imageID // "") | test("sha256:[0-9a-f]{64}"))
         ' >/dev/null || fatal "Running OSMO Pods do not report the approved image references and runtime image IDs"
 fi
@@ -715,59 +701,9 @@ else
         --from-literal=token="" \
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-    # Create incluster-kubeconfig ConfigMap for the dev-mode operator.
-    # Dev mode calls load_kube_config() (not load_incluster_config()), which reads a
-    # kubeconfig 'tokenFile' ONCE at startup and never refreshes it — so an AKS projected
-    # SA token (~1h TTL) goes stale and every K8s API call 401s after ~1h. Use an exec
-    # credential plugin instead: the kubernetes client re-invokes it when the cached
-    # credential expires, and the plugin re-reads the freshly-rotated projected token.
-    # This keeps short-lived, per-pod-SA tokens (no standing credential). The plugin and
-    # kubeconfig are two keys in the same ConfigMap, both mounted at /etc/kubeconfig.
+    # Dev mode needs a self-refreshing kubeconfig; see osmo_apply_operator_kubeconfig.
     info "Creating incluster-kubeconfig ConfigMap (self-refreshing exec credential)..."
-    cat > "$_WORK_DIR/incluster-config" <<'KUBECONFIG_EOF'
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-    server: https://kubernetes.default.svc
-  name: incluster
-contexts:
-- context:
-    cluster: incluster
-    user: sa
-  name: incluster
-current-context: incluster
-users:
-- name: sa
-  user:
-    exec:
-      apiVersion: client.authentication.k8s.io/v1
-      command: python3
-      args:
-      - /etc/kubeconfig/token-cred.py
-      interactiveMode: Never
-      provideClusterInfo: false
-KUBECONFIG_EOF
-    cat > "$_WORK_DIR/token-cred.py" <<'PYTHON_EOF'
-import base64, datetime, json
-_t = open('/var/run/secrets/kubernetes.io/serviceaccount/token').read().strip()
-# Expire the cached credential ~5min before the projected token does, so the next
-# request re-invokes this plugin and re-reads the freshly-rotated on-disk token.
-try:
-    _seg = _t.split('.')[1]
-    _seg += '=' * (-len(_seg) % 4)
-    _exp = json.loads(base64.urlsafe_b64decode(_seg))['exp'] - 300
-    _ts = datetime.datetime.fromtimestamp(_exp, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-except Exception:
-    _ts = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%SZ')
-print(json.dumps({'apiVersion': 'client.authentication.k8s.io/v1', 'kind': 'ExecCredential',
-                  'status': {'token': _t, 'expirationTimestamp': _ts}}))
-PYTHON_EOF
-    kubectl create configmap incluster-kubeconfig -n "$NS_OSMO_OPERATOR" \
-        --from-file=config="$_WORK_DIR/incluster-config" \
-        --from-file=token-cred.py="$_WORK_DIR/token-cred.py" \
-        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    osmo_apply_operator_kubeconfig "$kubeconfig" "$context" "$NS_OSMO_OPERATOR"
 
     backend_helm_args=(
         --version "$backend_chart_version"

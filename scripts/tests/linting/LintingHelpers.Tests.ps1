@@ -376,6 +376,20 @@ Describe 'Get-FilesRecursive' -Tag 'Unit' {
             $result = Get-FilesRecursive -Path 'TestDrive:/project' -Include @('*.ps1')
             $result.Count | Should -Be 2
         }
+
+        It 'Excludes an anchored directory only at the gitignore root' {
+            New-Item -Path 'TestDrive:/project/local' -ItemType Directory -Force | Out-Null
+            New-Item -Path 'TestDrive:/project/local/scratch.ps1' -ItemType File -Force | Out-Null
+            New-Item -Path 'TestDrive:/project/src/local' -ItemType Directory -Force | Out-Null
+            New-Item -Path 'TestDrive:/project/src/local/tracked.ps1' -ItemType File -Force | Out-Null
+            '/local/' | Set-Content 'TestDrive:/project/.gitignore'
+
+            $result = Get-FilesRecursive -Path 'TestDrive:/project' `
+                -Include @('*.ps1') `
+                -GitIgnorePath 'TestDrive:/project/.gitignore'
+            $result.Name | Should -Contain 'tracked.ps1'
+            $result.Name | Should -Not -Contain 'scratch.ps1'
+        }
     }
 
     Context 'Non-existent gitignore file' {
@@ -495,6 +509,17 @@ Describe 'Get-GitIgnorePatterns' -Tag 'Unit' {
             @('node_modules/', 'dist/', '*.tmp', 'logs/debug.log') | Set-Content 'TestDrive:/.gitignore-multi'
             $result = Get-GitIgnorePatterns -GitIgnorePath 'TestDrive:/.gitignore-multi'
             $result.Count | Should -Be 4
+        }
+
+        It 'Anchors leading-slash patterns to the gitignore directory' {
+            $root = Join-Path $TestDrive 'anchored'
+            New-Item -Path $root -ItemType Directory -Force | Out-Null
+            @('/local/', '/notes.txt') | Set-Content (Join-Path $root '.gitignore')
+            $result = @(Get-GitIgnorePatterns -GitIgnorePath (Join-Path $root '.gitignore'))
+            $sep = [System.IO.Path]::DirectorySeparatorChar
+            $escapedRoot = [System.Management.Automation.WildcardPattern]::Escape((Resolve-Path $root).ProviderPath)
+            $result[0] | Should -Be "$escapedRoot${sep}local${sep}*"
+            $result[1] | Should -Be "$escapedRoot${sep}notes.txt*"
         }
     }
 

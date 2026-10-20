@@ -6,7 +6,7 @@ echo "Dataset: ${DATASET_REPO_ID}"
 echo "Policy Type: ${POLICY_TYPE}"
 echo "Job Name: ${JOB_NAME}"
 echo "Output Dir: ${OUTPUT_DIR}"
-echo "Logging: Azure ML MLflow"
+echo "Tracking: ${TRACKING_BACKEND:-azureml}"
 echo "Val Split: ${VAL_SPLIT:-0.1}"
 echo "System Metrics: ${SYSTEM_METRICS:-true}"
 echo "Mixed Precision: ${MIXED_PRECISION:-no}"
@@ -60,25 +60,38 @@ unzip -oq "${ARCHIVE_PATH}" -d "${PAYLOAD_ROOT}"
 export PYTHONPATH="${PAYLOAD_ROOT}:${PYTHONPATH:-}"
 echo "Training scripts unpacked to ${PAYLOAD_ROOT} from ${ARCHIVE_PATH}"
 
-# Decide blob-vs-HuggingFace via the canonical Python helper so
-# whitespace, pretty-printed JSON, and [""] / [null] payloads agree
-# with download_dataset.prepare_dataset() instead of routing through
-# the blob branch and crashing.
-if python -c 'from training.il.scripts.lerobot._env import has_blob_urls; raise SystemExit(0 if has_blob_urls() else 1)'; then
-  BLOB_DATASOURCE=1
-  echo "Data Source: Azure Blob URLs"
-else
-  BLOB_DATASOURCE=0
-  echo "Data Source: HuggingFace Hub"
-fi
+# Choose the data source with the canonical Python helper so whitespace,
+# pretty-printed JSON, and [""] / [null] payloads agree with
+# download_dataset.prepare_dataset() instead of routing through the blob
+# branch and crashing.
+DATASET_SOURCE="$(python -c 'from training.il.scripts.lerobot._env import dataset_source; print(dataset_source())')"
+case "${DATASET_SOURCE}" in
+  local)
+    echo "Data Source: local dataset at ${DATASET_DIR}"
+    if [[ ! -f "${DATASET_DIR}/meta/info.json" ]]; then
+      echo "ERROR: no LeRobot dataset at ${DATASET_DIR} (expected meta/info.json)" >&2
+      exit 1
+    fi
+    ;;
+  blob) echo "Data Source: Azure Blob URLs" ;;
+  *) echo "Data Source: HuggingFace Hub" ;;
+esac
 
-# Install runtime dependencies directly from the frozen lock.
-LEROBOT_PROJECT="${PAYLOAD_ROOT}/training/il/lerobot"
-if [[ ! -f "${LEROBOT_PROJECT}/uv.lock" ]]; then
-  echo "ERROR: LeRobot lockfile not found at ${LEROBOT_PROJECT}/uv.lock" >&2
+# Install runtime dependencies directly from the frozen lock of the selected
+# LeRobot project (training/il/lerobot by default; VLA policies use their own).
+LEROBOT_PROJECT_DIR="${LEROBOT_PROJECT:-training/il/lerobot}"
+case "${LEROBOT_PROJECT_DIR}" in
+  /*|../*|*/../*|*/..)
+    echo "ERROR: LEROBOT_PROJECT must be a repo-relative path without parent traversal: ${LEROBOT_PROJECT_DIR}" >&2
+    exit 1
+    ;;
+esac
+LEROBOT_PROJECT_PATH="${PAYLOAD_ROOT}/${LEROBOT_PROJECT_DIR}"
+if [[ ! -f "${LEROBOT_PROJECT_PATH}/uv.lock" ]]; then
+  echo "ERROR: LeRobot lockfile not found at ${LEROBOT_PROJECT_PATH}/uv.lock" >&2
   exit 1
 fi
-uv sync --active --frozen --no-config --no-install-project --project "${LEROBOT_PROJECT}"
+uv sync --active --frozen --no-config --no-install-project --project "${LEROBOT_PROJECT_PATH}"
 
 # Build training command arguments
 TRAIN_ARGS=(
@@ -87,8 +100,13 @@ TRAIN_ARGS=(
   "--dataset.video_backend=pyav"
 )
 
+# A local dataset is complete on disk, so LeRobot loads it from its root without the Hub.
+if [[ "${DATASET_SOURCE}" == "local" ]]; then
+  TRAIN_ARGS+=("--dataset.root=${DATASET_DIR}")
+fi
+
 # Download dataset from Azure Blob Storage when configured
-if [[ "${BLOB_DATASOURCE}" == "1" ]]; then
+if [[ "${DATASET_SOURCE}" == "blob" ]]; then
   echo "Downloading dataset from Azure Blob Storage..."
   python -m training.il.scripts.lerobot.download_dataset
 

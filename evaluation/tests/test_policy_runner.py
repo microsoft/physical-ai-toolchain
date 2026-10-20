@@ -291,7 +291,7 @@ class TestPolicyRunnerFromPretrained:
             == "0123456789abcdef0123456789abcdef01234567"
         )
 
-    @pytest.mark.parametrize("policy_type", ["pi0", "pi0_fast"])
+    @pytest.mark.parametrize("policy_type", ["pi0", "pi0_fast", "smolvla"])
     def test_loads_vla_policy_with_paired_processors(
         self,
         policy_type: str,
@@ -325,6 +325,39 @@ class TestPolicyRunnerFromPretrained:
         assert bundle.preprocessor is preprocessor
         assert bundle.postprocessor is postprocessor
         assert bundle.policy_type == policy_type
+
+    def test_rename_map_reaches_the_vla_preprocessor(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        factory = MagicMock()
+        factory.make_pre_post_processors.return_value = (MagicMock(), MagicMock())
+        monkeypatch.setitem(sys.modules, "lerobot.processor.pipeline", MagicMock())
+        monkeypatch.setitem(sys.modules, "lerobot.policies.factory", factory)
+        rename_map = {"observation.images.external": "observation.images.camera1"}
+
+        load_pretrained_policy(str(tmp_path), policy_type="smolvla", device="cpu", rename_map=rename_map)
+
+        kwargs = factory.make_pre_post_processors.call_args.kwargs
+        assert kwargs["preprocessor_overrides"] == {
+            "device_processor": {"device": "cpu"},
+            "rename_observations_processor": {"rename_map": rename_map},
+        }
+        assert kwargs["postprocessor_overrides"] == {"device_processor": {"device": "cpu"}}
+
+    def test_rename_map_reaches_the_persisted_preprocessor_only(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        lerobot_mocks: tuple[MagicMock, MagicMock],
+        tmp_path: Path,
+    ) -> None:
+        _mock_act, mock_pipeline = lerobot_mocks
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
+        rename_map = {"observation.images.front": "observation.images.top"}
+
+        load_pretrained_policy(str(tmp_path), policy_type="act", device="cpu", rename_map=rename_map)
+
+        preprocessor_call, postprocessor_call = mock_pipeline.PolicyProcessorPipeline.from_pretrained.call_args_list
+        assert preprocessor_call.kwargs["overrides"]["rename_observations_processor"] == {"rename_map": rename_map}
+        assert "rename_observations_processor" not in postprocessor_call.kwargs["overrides"]
 
     def test_loads_diffusion_policy_with_persisted_processors(
         self,

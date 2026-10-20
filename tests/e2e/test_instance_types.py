@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from tests.e2e import _aml
+from tests.e2e._common import RegisteredModel
 from tests.e2e._environment import (
     INSTANCE_TYPE_VARIABLE,
     LOCAL_ENV_FILE,
@@ -319,7 +320,7 @@ def _isaac_eval(root: Path, instance_type: str | None) -> None:
     _aml.submit_aml_isaaclab_eval(
         root,
         _WORKSPACE,
-        model=_aml.AmlModelRef("sample-model", "1"),
+        model=RegisteredModel("sample-model", "1"),
         task="Sample-Task-v0",
         eval_episodes=1,
         num_envs=1,

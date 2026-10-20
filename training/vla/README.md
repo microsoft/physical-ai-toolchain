@@ -1,6 +1,7 @@
 # VLA Training
 
-Vision-Language-Action (VLA) training for `pi0`, `pi0_fast`, and `pi05` policies via `lerobot[dataset,pi]`. Jobs submit to Azure ML as a single `CommandJob`, reusing the IL LeRobot entry script with a VLA dependency lockfile and policy whitelist.
+Vision-Language-Action (VLA) training for `pi0`, `pi0_fast`, and `pi05` policies via `lerobot[dataset,pi,smolvla]`. Jobs submit to Azure ML as a single `CommandJob`, reusing the IL LeRobot entry script with a VLA dependency lockfile and policy whitelist.
+SmolVLA fine-tuning runs through OSMO with the IL LeRobot submission script and this VLA lockfile, and fits one workstation GPU on the [local OSMO profile](../../infrastructure/local/README.md).
 NVIDIA GR00T fine-tuning runs through OSMO using the same lifecycle domain.
 
 ## 📁 Directory Structure
@@ -14,7 +15,7 @@ vla/
 │           ├── modality_config.py              # GR00T N1.7+ example modality config
 │           └── README.md                       # How to adapt for a custom embodiment
 ├── lerobot/
-│   ├── pyproject.toml                           # lerobot[dataset,pi] dependencies and overrides
+│   ├── pyproject.toml                           # lerobot[dataset,pi,smolvla] dependencies and overrides
 │   └── uv.lock                                  # Reproducible Linux x86_64 and ARM64 dependency lock
 ├── scripts/
 │   ├── groot/
@@ -132,6 +133,22 @@ require this variable only when they carry the `requires_hf_token` marker.
 
 Dependabot verification runs this test as the `aml-vla-pi0` check in the `vla` category. See
 [Verifying Dependabot Updates](../../docs/contributing/dependabot-verification.md).
+
+## 🚀 SmolVLA Fine-Tuning
+
+[SmolVLA](https://huggingface.co/lerobot/smolvla_base) is a compact VLA of about 450 million parameters that fine-tunes on one workstation GPU. Submit it through the IL LeRobot OSMO script with `-p smolvla`; the job installs LeRobot from [lerobot/uv.lock](lerobot/uv.lock) and fine-tunes `lerobot/smolvla_base` at the commit pinned in `scripts/lib/common.sh`:
+
+```bash
+training/il/scripts/submit-osmo-lerobot-training.sh \
+  --profile local \
+  --local-dataset my-learner-dataset \
+  -p smolvla \
+  --rename-map '{"observation.images.front": "observation.images.camera1"}' \
+  --batch-size 8 \
+  -r my-smolvla-policy
+```
+
+The base model names its cameras `observation.images.camera1` through `camera3`; `--rename-map` maps the dataset's camera keys onto them. Pass `--policy-path` and `--policy-path-revision` to fine-tune another SmolVLA checkpoint. See [SmolVLA Fine-Tuning](../../docs/training/lerobot-training.md#smolvla-fine-tuning-osmo) for the options.
 
 ## 🚀 GR00T-N1.5 Fine-Tuning
 

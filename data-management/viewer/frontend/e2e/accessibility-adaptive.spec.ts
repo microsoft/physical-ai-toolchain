@@ -107,7 +107,7 @@ test('V19 preserves loaded and transient content under adaptive rendering', asyn
       1,
     )
     await assertNoLayoutLoss(page, testInfo, `text-resize-${scale * 100}`)
-    const datasetButton = page.getByRole('button', { name: 'Dataset' })
+    const datasetButton = page.getByRole('button', { name: 'Dataset', exact: true })
     await datasetButton.click()
     await expect(page.getByPlaceholder('Filter datasets')).toBeVisible()
     await page.keyboard.press('Escape')
@@ -131,7 +131,7 @@ test('V19 preserves loaded and transient content under adaptive rendering', asyn
   await expect(page.getByRole('heading', { name: 'Episode 0' })).toBeVisible()
   await page.setViewportSize({ width: 320, height: 720 })
   await assertNoLayoutLoss(page, testInfo, 'reflow-loaded')
-  await page.getByRole('button', { name: 'Dataset' }).click()
+  await page.getByRole('button', { name: 'Dataset', exact: true }).click()
   await assertNoLayoutLoss(page, testInfo, 'reflow-dataset-open')
   await page.keyboard.press('Escape')
   const exportButton = page.getByRole('button', { name: 'Export', exact: true })
@@ -210,14 +210,15 @@ test('V02 V03 V05 and V19 primary focus stops stay visible and unobscured', asyn
 }, testInfo) => {
   const errors = await openViewer(page, testInfo)
   const stops = [
-    page.getByRole('button', { name: 'Dataset' }),
+    page.getByRole('button', { name: 'Dataset', exact: true }),
     page.getByRole('button', { name: 'Toggle Diagnostics' }),
     page.getByRole('link', { name: 'Help' }),
     page.getByRole('link', { name: 'Report problem' }),
     page.getByRole('button', { name: /Episode 0/ }),
     page.getByRole('button', { name: /Episode 1/ }),
     page.getByRole('button', { name: 'Export', exact: true }),
-    page.getByRole('button', { name: 'Save & Next Episode' }),
+    page.getByRole('button', { name: 'Save Episode', exact: true }),
+    page.getByRole('button', { name: 'Next Episode', exact: true }),
     page.getByRole('tab', { name: 'Trajectory Viewer' }),
   ]
   const findings = []
@@ -232,7 +233,7 @@ test('V02 V03 V05 and V19 primary focus stops stay visible and unobscured', asyn
   ]
   for (const stop of diagnosticsStops) findings.push(await focusFinding(stop))
 
-  await page.getByRole('button', { name: 'Dataset' }).click()
+  await page.getByRole('button', { name: 'Dataset', exact: true }).click()
   findings.push(await focusFinding(page.getByRole('combobox', { name: 'Filter datasets' })))
   await page.keyboard.press('Escape')
 
@@ -241,7 +242,7 @@ test('V02 V03 V05 and V19 primary focus stops stay visible and unobscured', asyn
   await exportTrigger.press('Enter')
   const exportDialog = page.getByRole('dialog', { name: 'Export Episodes' })
   const exportStops = [
-    exportDialog.getByPlaceholder('/path/to/exports'),
+    exportDialog.getByRole('textbox', { name: 'Output Directory' }),
     exportDialog.getByRole('checkbox', { name: 'Apply crop, resize, and frame removal' }),
     exportDialog.getByRole('checkbox', { name: 'Include subtask metadata' }),
     exportDialog.getByRole('button', { name: 'Cancel' }),
@@ -339,12 +340,18 @@ test('V08 V09 and V19 targets satisfy size or spacing and pointer cancellation',
   await page.getByRole('menuitem', { name: 'Move right' }).click()
   expect(await jointOrder()).toEqual(['target_joint', 'shoulder_joint'])
 
-  const nativeSlider = page.locator('input[type="range"]').first()
+  const pause = page.getByRole('button', { name: 'Pause playback', exact: true })
+  if (await pause.isVisible()) await pause.click()
+  const nativeSlider = page.getByRole('slider', { name: 'Playback frame', exact: true })
   const initialSliderValue = await nativeSlider.inputValue()
+  const minimum = Number(await nativeSlider.getAttribute('min'))
   const sliderBox = await nativeSlider.boundingBox()
   expect(sliderBox).not.toBeNull()
   await nativeSlider.click({
-    position: { x: 2, y: (sliderBox?.height ?? 10) / 2 },
+    position: {
+      x: Number(initialSliderValue) === minimum ? sliderBox!.width - 2 : 2,
+      y: sliderBox!.height / 2,
+    },
   })
   expect(await nativeSlider.inputValue()).not.toBe(initialSliderValue)
   expect(errors.consoleErrors).toEqual([])

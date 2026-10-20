@@ -8,6 +8,7 @@ import { VideoPlayer } from '../VideoPlayer'
 
 const seekToMock = vi.fn()
 const lastPlayerProps: { current: Record<string, unknown> | null } = { current: null }
+let internalPlayer: { currentTime: number } | null = null
 
 vi.mock('react-player', () => ({
   __esModule: true,
@@ -15,7 +16,7 @@ vi.mock('react-player', () => ({
     lastPlayerProps.current = props
     useImperativeHandle(ref, () => ({
       seekTo: seekToMock,
-      getInternalPlayer: () => null,
+      getInternalPlayer: () => internalPlayer,
     }))
     return (
       // eslint-disable-next-line jsx-a11y/media-has-caption -- mock element for tests
@@ -122,6 +123,29 @@ describe('VideoPlayer', () => {
   beforeEach(() => {
     seekToMock.mockReset()
     lastPlayerProps.current = null
+    internalPlayer = null
+  })
+
+  it('seeks to the selected frame when ready and corrects the source position when playback resumes', () => {
+    setup({ currentFrame: 30 })
+    internalPlayer = { currentTime: 0 }
+    const { rerender } = render(<VideoPlayer />)
+    act(() => {
+      ;(lastPlayerProps.current?.onDuration as (duration: number) => void)(10)
+      ;(lastPlayerProps.current?.onReady as () => void)()
+    })
+    expect(seekToMock).toHaveBeenCalledWith(1, 'seconds')
+    seekToMock.mockClear()
+    setup({ currentFrame: 60, isPlaying: true })
+    rerender(<VideoPlayer />)
+    expect(seekToMock).toHaveBeenCalledWith(2, 'seconds')
+  })
+
+  it('steps ten frames backward without crossing the episode start', () => {
+    const { setCurrentFrame } = setup({ currentFrame: 5 })
+    render(<VideoPlayer />)
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp' })))
+    expect(setCurrentFrame).toHaveBeenCalledWith(0)
   })
 
   afterEach(() => {
