@@ -137,7 +137,7 @@ After Terraform succeeds, the driver previews and runs these scripts from `infra
 2. `02-deploy-azureml-extension.sh`
 3. `03-deploy-osmo.sh`
 
-When subscription policy disables the Key Vault public data plane and no private endpoint is configured, Terraform writes the OSMO, PostgreSQL, and Redis secrets through the ARM plane. The OSMO setup script initializes static Kubernetes secrets from sensitive Terraform outputs and disables Key Vault CSI mounts for that deployment. It never prints the secret values.
+The deployment requires working Key Vault data-plane access, directly or through a private endpoint. Terraform can provision secret resources through ARM, and the OSMO setup script can fall back to a sensitive Terraform output only for the OSMO admin password. PostgreSQL and Managed Redis credentials still use `az keyvault secret show`, and Key Vault CSI mounts remain enabled. Stop when policy blocks those reads; do not describe the deployment as supporting a fully blocked Key Vault data plane.
 
 The OSMO script receives a stable private service IP selected through Azure's VNet availability API. Existing deployments retain the service annotation's current address.
 
@@ -169,9 +169,9 @@ This is the sole exception to the general prohibition on switching regions. It m
 
 ## Undeploy Behavior
 
-Undeploy requires non-empty local Terraform state for its first invocation and never discovers a destroy target by enumerating Azure resources. It captures available Terraform outputs under `infrastructure/setup/generated/<environment>/` before making changes and reuses that context when resuming cleanup after Terraform state becomes empty.
+Undeploy requires non-empty local Terraform state or a valid saved destroy context and never discovers a destroy target by enumerating Azure resources. The driver writes context under `infrastructure/setup/generated/<environment>/` as soon as it creates the external resource group, enriches it with available Terraform outputs before making changes, and reuses it when cleanup starts or resumes after Terraform state becomes empty.
 
-Before any state removal, destroy, purge, or resource-group deletion, `--confirm-resource-group` must exactly match `rg-<resource-prefix>-<environment>-<instance>` and any Terraform-resolved resource-group name. The driver writes destroy context immediately after creating the external resource group so cleanup can resume even when deployment stops before Terraform creates state.
+Before any state removal, destroy, purge, or resource-group deletion, the active Azure subscription and live full resource-group ID must match the captured identity, and `--confirm-resource-group` must exactly match `rg-<resource-prefix>-<environment>-<instance>`. The driver scopes Azure cleanup operations to the captured subscription so a same-named group elsewhere cannot become the deletion target.
 
 Before destroy, the driver removes E2E resources protected by `prevent_destroy` from Terraform state so the final resource-group deletion retains responsibility for those resources. It also removes ARM-plane Key Vault secret children because that resource API does not support `DELETE`. The driver destroys the remaining state with bounded retries, verifies that state is empty, purges soft-deleted Azure ML workspaces retained in the group, and deletes the externally managed resource group.
 

@@ -26,8 +26,8 @@ Execute the workflow autonomously. Do not ask the user to run commands, monitor 
 3. Validate Azure authentication, storage, and Azure ML compute before submitting tests. Validate OSMO authentication, the gateway, and AKS GPU pools when the selected subset includes OSMO tests.
 4. Launch the requested test files concurrently, or every discovered default test when no subset is requested. Azure ML and OSMO use independent compute and do not contend with each other.
 5. Capture `E2E_HANDLE` and take ownership of monitoring. The launcher never retries or diagnoses a completed attempt.
-6. For every non-pass, inspect the exact command and complete output. Resubmit classified transient failures individually. Investigate other failures, correct clear in-scope defects, validate locally, then resubmit only the affected test.
-7. Continue until the handle reports `PASSED`. Never alter Terraform or node-pool configuration to work around unavailable GPU capacity.
+6. For every non-pass, inspect the exact command and complete output. Resubmit a classified transient failure only after evidence shows a supported remedy or changed cloud condition. Investigate other failures, correct clear in-scope defects, validate locally, then resubmit only the affected test.
+7. Treat `PASSED` as success. Stop automatic submissions and report the unresolved result when the latest attempt repeats the same terminal error, cloud state, and evidence without a supported intervention or observable progress. Never alter Terraform or node-pool configuration to work around unavailable GPU capacity.
 8. Report each test's commands, attempts, cloud job or workflow identifiers, durations, and final state. Run handle cleanup after all tests reach terminal states.
 
 Each handle owns an `XDG_CONFIG_HOME` under its run directory. OSMO reads and rewrites `login.yaml` in that directory, so every launch, detached attempt, resubmission, and diagnostic command must load the handle's non-executable `config.json`.
@@ -56,8 +56,17 @@ Never write the token to `config.json`, `command.sh`, logs, manifests, or chat o
 Run this first:
 
 ```bash
-terraform -chdir=infrastructure/terraform output -json
+terraform -chdir=infrastructure/terraform output -json |
+  jq '{
+    resource_group,
+    aks_cluster,
+    azureml_workspace,
+    storage_account,
+    node_pools
+  }'
 ```
+
+This projection is safe for operator and Copilot output. Do not print or paste the unfiltered JSON because Terraform includes values marked `sensitive`, including credentials and connection details. The launcher stores the complete output only in the handle's owner-only `terraform-output.json`.
 
 When the current feature worktree has no Terraform state or returns empty outputs, locate the `main` worktree with `git worktree list --porcelain` and use its `infrastructure/terraform` directory as the authoritative deployment source. Keep the feature worktree as the launcher repository root so pytest collects and runs the branch code:
 
@@ -199,7 +208,9 @@ The launcher labels these conditions transient but does not resubmit them:
 - `did not .* complete within`
 - `to start within`
 
-Copilot resubmits every transient terminal attempt with `--resubmit` and continues until it passes. Each resubmission creates a new workflow or job. OSMO's `_await_osmo_status_with_restarts` already handles task-level spot disruptions inside one invocation; do not add another disruption restart mechanism.
+Before resubmitting, compare the latest attempt's command, exit status, cloud job or workflow state, and terminal error signature with the preceding attempt. Resubmit only when a supported intervention occurred or the evidence shows progress, such as refreshed authentication, recovered gateway health, changed capacity state, or a corrected in-scope defect. Each resubmission creates a billable workflow or job.
+
+Stop automatic submissions when consecutive attempts repeat the same failure evidence without a supported remedy or changed condition. Report the command, attempts, cloud identifiers, and blocking evidence as an unresolved terminal handoff. Do not impose a universal retry count; evidence and progress determine whether another submission is justified. OSMO's `_await_osmo_status_with_restarts` already handles task-level spot disruptions inside one invocation; do not duplicate it.
 
 Each E2E handle exports a private `XDG_CONFIG_HOME` and selects a free handle-local `OSMO_GATEWAY_PORT` before OSMO login. Preserve that profile and port for every attempt and resubmission so concurrent sessions targeting different deployments cannot rewrite each other's endpoint or contend for the same localhost listener. Every OSMO resubmission re-establishes the handle-local gateway login and selects the default pool inside that isolated profile.
 

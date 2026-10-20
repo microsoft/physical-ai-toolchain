@@ -312,7 +312,7 @@ terraform_state_list() {
 terraform_state_count() {
     local state
 
-    state=$(terraform_state_list)
+    state=$(terraform_state_list) || return $?
     if [[ -z "$state" ]]; then
         printf '0\n'
     else
@@ -335,7 +335,7 @@ create_resource_group() {
         --only-show-errors
     info "Created resource group $resource_group"
     write_destroy_context "$resource_group"
-    purge_soft_deleted_resources "$resource_group"
+    purge_soft_deleted_resources "$resource_group" "$ARM_SUBSCRIPTION_ID"
 }
 
 write_destroy_context() {
@@ -348,11 +348,13 @@ write_destroy_context() {
         --arg environment "$environment" \
         --arg instance "$(read_tfvar instance)" \
         --arg location "$location" \
+        --arg subscription_id "$ARM_SUBSCRIPTION_ID" \
         --arg resource_group_id "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/${resource_group}" \
         '{
             environment: $environment,
             instance: $instance,
             location: $location,
+            subscriptionId: $subscription_id,
             keyVaultName: "",
             resourceGroupId: $resource_group_id,
             aksId: ""
@@ -362,10 +364,12 @@ write_destroy_context() {
 
 purge_soft_deleted_resources() {
     local resource_group="$1"
+    local subscription_id="$2"
     local resources resource name type type_lower deleted_vaults vault_name vault_location
     local resource_group_lower
 
     resources=$(az resource list \
+        --subscription "$subscription_id" \
         --resource-group "$resource_group" \
         --output json \
         --only-show-errors)
@@ -376,6 +380,7 @@ purge_soft_deleted_resources() {
         case "$type_lower" in
         microsoft.machinelearningservices/workspaces)
             az ml workspace delete \
+                --subscription "$subscription_id" \
                 --name "$name" \
                 --resource-group "$resource_group" \
                 --permanently-delete \
@@ -392,12 +397,16 @@ purge_soft_deleted_resources() {
             <<<"$resources"
     )
 
-    deleted_vaults=$(az keyvault list-deleted --output json --only-show-errors)
+    deleted_vaults=$(az keyvault list-deleted \
+        --subscription "$subscription_id" \
+        --output json \
+        --only-show-errors)
     resource_group_lower=$(printf '%s' "$resource_group" | lowercase)
     while IFS= read -r resource; do
         vault_name=$(jq -er '.name' <<<"$resource")
         vault_location=$(jq -er '.properties.location' <<<"$resource")
         az keyvault purge \
+            --subscription "$subscription_id" \
             --name "$vault_name" \
             --location "$vault_location" \
             --only-show-errors
@@ -449,7 +458,8 @@ ensure_tfvars() {
     info "Generated $tfvars from the E2E infrastructure template"
 
     terraform -chdir="$tf_dir" init -input=false
-    state_count=$(terraform_state_count)
+    state_count=$(terraform_state_count) ||
+        fatal "Terraform state count could not be determined"
     [[ "$state_count" -gt 0 ]] || return 0
 
     outputs=$(terraform -chdir="$tf_dir" output -json 2>/dev/null || true)
@@ -462,12 +472,13 @@ ensure_tfvars() {
 
 key_vault_name_available() {
     local name="$1"
+    local subscription_id="${2:-$ARM_SUBSCRIPTION_ID}"
     local body
 
     body=$(jq -cn --arg name "$name" '{name: $name, type: "Microsoft.KeyVault/vaults"}')
     az rest \
         --method post \
-        --url "https://management.azure.com/subscriptions/${ARM_SUBSCRIPTION_ID}/providers/Microsoft.KeyVault/checkNameAvailability?api-version=2023-07-01" \
+        --url "https://management.azure.com/subscriptions/${subscription_id}/providers/Microsoft.KeyVault/checkNameAvailability?api-version=2023-07-01" \
         --body "$body" \
         --query nameAvailable \
         --output tsv \
@@ -882,13 +893,19 @@ verify_platform() {
 
 deploy() {
     local state_count selected_instance setup_script osmo_private_ip resource_group group_exists
+    local destroy_context
 
     terraform -chdir="$tf_dir" init -input=false
     record_operation_event "deploy" "validating"
-    state_count=$(terraform_state_count)
+    state_count=$(terraform_state_count) ||
+        fatal "Terraform state count could not be determined"
     load_configured_tags
 
     if [[ "$state_count" -eq 0 ]]; then
+        destroy_context="$generated_dir/$environment/e2e-destroy-context.json"
+        if [[ -e "$destroy_context" || -L "$destroy_context" ]]; then
+            fatal "Pending destroy context exists at $destroy_context; complete undeploy before starting another deployment"
+        fi
         selected_instance=$(select_instance)
         info "Selected unused Azure instance: $selected_instance"
         if [[ "$config_preview" == "true" ]]; then
@@ -966,14 +983,21 @@ deploy() {
 undeploy() {
     local state_count outputs environment_name instance location key_vault_name resource_group_id aks_id
     local destroy_context kubeconfig resource_group_name deleted_vault_count attempt
-    local context_environment context_instance
+    local context_environment context_instance context_subscription_id
+    local captured_subscription_id active_subscription_id live_resource_group_id group_exists
+    local resource_group_id_lower context_subscription_id_lower captured_subscription_id_lower
+    local active_subscription_id_lower live_resource_group_id_lower
+    local post_destroy_state_count
 
     terraform -chdir="$tf_dir" init -input=false
     environment_name=$(read_tfvar environment)
     instance=$(read_tfvar instance)
     location=$(read_tfvar location)
     destroy_context="$generated_dir/$environment_name/e2e-destroy-context.json"
-    state_count=$(terraform_state_count)
+    [[ ! -L "$destroy_context" ]] ||
+        fatal "Destroy context must not be a symbolic link: $destroy_context"
+    state_count=$(terraform_state_count) ||
+        fatal "Terraform state count could not be determined"
 
     if [[ "$state_count" -gt 0 ]]; then
         outputs=$(terraform -chdir="$tf_dir" output -json)
@@ -1005,14 +1029,51 @@ undeploy() {
             resource_group_id=$(jq -r '.resourceGroupId // empty' "$destroy_context")
         [[ -n "$aks_id" ]] ||
             aks_id=$(jq -r '.aksId // empty' "$destroy_context")
-    fi
-    if [[ -z "$resource_group_name" && -n "$resource_group_id" ]]; then
-        resource_group_name="${resource_group_id##*/}"
+        context_subscription_id=$(jq -r '.subscriptionId // empty' "$destroy_context")
     fi
 
-    if [[ -n "$resource_group_name" ]] &&
-        ! az group show --name "$resource_group_name" --output none --only-show-errors 2>/dev/null; then
-        warn "Terraform-resolved resource group is already absent: $resource_group_name"
+    [[ -n "$resource_group_id" ]] ||
+        fatal "Resource-group ID is unavailable; refusing subscription-ambiguous undeploy"
+    resource_group_id_lower=$(printf '%s' "$resource_group_id" | lowercase)
+    if [[ ! "$resource_group_id_lower" =~ ^/subscriptions/([^/]+)/resourcegroups/([^/]+)$ ]]; then
+        fatal "Resource-group ID has an invalid shape: $resource_group_id"
+    fi
+    captured_subscription_id="${BASH_REMATCH[1]}"
+    captured_subscription_id_lower=$(printf '%s' "$captured_subscription_id" | lowercase)
+    resource_group_name="${resource_group_id##*/}"
+    context_subscription_id_lower=$(printf '%s' "$context_subscription_id" | lowercase)
+    if [[ -n "$context_subscription_id" &&
+        "$context_subscription_id_lower" != "$captured_subscription_id_lower" ]]; then
+        fatal "Destroy context subscription '$context_subscription_id' does not match resource-group ID subscription '$captured_subscription_id'"
+    fi
+    active_subscription_id=$(az account show --query id --output tsv --only-show-errors)
+    [[ -n "$active_subscription_id" ]] ||
+        fatal "Azure CLI did not return the active subscription ID"
+    active_subscription_id_lower=$(printf '%s' "$active_subscription_id" | lowercase)
+    [[ "$active_subscription_id_lower" == "$captured_subscription_id_lower" ]] ||
+        fatal "Active Azure subscription '$active_subscription_id' does not match captured subscription '$captured_subscription_id'"
+
+    if ! group_exists=$(az group exists \
+        --subscription "$captured_subscription_id" \
+        --name "$resource_group_name" \
+        --output tsv \
+        --only-show-errors 2>&1); then
+        fatal "Resource-group existence check failed: $group_exists"
+    fi
+    if [[ "$group_exists" == "true" ]]; then
+        live_resource_group_id=$(az group show \
+            --subscription "$captured_subscription_id" \
+            --name "$resource_group_name" \
+            --query id \
+            --output tsv \
+            --only-show-errors)
+        live_resource_group_id_lower=$(printf '%s' "$live_resource_group_id" | lowercase)
+        [[ "$live_resource_group_id_lower" == "$resource_group_id_lower" ]] ||
+            fatal "Live resource-group ID '$live_resource_group_id' does not match captured ID '$resource_group_id'"
+    elif [[ "$group_exists" == "false" ]]; then
+        warn "Captured resource group is already absent: $resource_group_name"
+    else
+        fatal "Azure returned an invalid resource-group existence result: $group_exists"
     fi
     if [[ -n "$aks_id" ]] &&
         ! az resource show --ids "$aks_id" --output none --only-show-errors 2>/dev/null; then
@@ -1032,10 +1093,11 @@ undeploy() {
         --arg environment "$environment_name" \
         --arg instance "$instance" \
         --arg location "$location" \
+        --arg subscription_id "$captured_subscription_id" \
         --arg key_vault_name "$key_vault_name" \
         --arg resource_group_id "$resource_group_id" \
         --arg aks_id "$aks_id" \
-        '{environment: $environment, instance: $instance, location: $location, keyVaultName: $key_vault_name, resourceGroupId: $resource_group_id, aksId: $aks_id}' \
+        '{environment: $environment, instance: $instance, location: $location, subscriptionId: $subscription_id, keyVaultName: $key_vault_name, resourceGroupId: $resource_group_id, aksId: $aks_id}' \
         >"$destroy_context"
 
     if [[ "$state_count" -gt 0 ]]; then
@@ -1043,28 +1105,52 @@ undeploy() {
         forget_prevent_destroy_resources
         run_terraform_operation_with_retries destroy
     fi
-    [[ "$(terraform_state_count)" -eq 0 ]] || fatal "Terraform state is not empty after destroy"
+    post_destroy_state_count=$(terraform_state_count) ||
+        fatal "Terraform state count could not be determined after destroy"
+    [[ "$post_destroy_state_count" -eq 0 ]] || fatal "Terraform state is not empty after destroy"
     if [[ -n "$resource_group_name" ]]; then
-        if [[ "$(az group exists --name "$resource_group_name" --output tsv --only-show-errors)" == "true" ]]; then
-            purge_soft_deleted_resources "$resource_group_name"
+        if ! group_exists=$(az group exists \
+            --subscription "$captured_subscription_id" \
+            --name "$resource_group_name" \
+            --output tsv \
+            --only-show-errors 2>&1); then
+            fatal "Resource-group existence check failed after Terraform destroy: $group_exists"
+        fi
+        if [[ "$group_exists" == "true" ]]; then
+            purge_soft_deleted_resources "$resource_group_name" "$captured_subscription_id"
             az group delete \
+                --subscription "$captured_subscription_id" \
                 --name "$resource_group_name" \
                 --yes \
                 --only-show-errors
             record_operation_event "resource-group-delete" "submitted" "$resource_group_name"
+        elif [[ "$group_exists" != "false" ]]; then
+            fatal "Azure returned an invalid resource-group existence result after Terraform destroy: $group_exists"
         fi
-        [[ "$(az group exists --name "$resource_group_name" --output tsv --only-show-errors)" == "false" ]] ||
+        if ! group_exists=$(az group exists \
+            --subscription "$captured_subscription_id" \
+            --name "$resource_group_name" \
+            --output tsv \
+            --only-show-errors 2>&1); then
+            fatal "Resource-group deletion verification failed: $group_exists"
+        fi
+        [[ "$group_exists" == "false" ]] ||
             fatal "Resource group still exists after deletion"
     fi
 
     if [[ -n "$key_vault_name" ]]; then
         deleted_vault_count=$(az keyvault list-deleted \
+            --subscription "$captured_subscription_id" \
             --query "[?name=='${key_vault_name}'] | length(@)" \
             --output tsv \
             --only-show-errors)
         if [[ "$deleted_vault_count" -gt 0 ]]; then
             for attempt in $(seq 1 10); do
-                if az keyvault purge --name "$key_vault_name" --location "$location" --only-show-errors; then
+                if az keyvault purge \
+                    --subscription "$captured_subscription_id" \
+                    --name "$key_vault_name" \
+                    --location "$location" \
+                    --only-show-errors; then
                     break
                 fi
                 [[ "$attempt" -lt 10 ]] || fatal "Key Vault purge failed after 10 attempts"
@@ -1072,7 +1158,7 @@ undeploy() {
             done
 
             for attempt in $(seq 1 20); do
-                if [[ "$(key_vault_name_available "$key_vault_name")" == "true" ]]; then
+                if [[ "$(key_vault_name_available "$key_vault_name" "$captured_subscription_id")" == "true" ]]; then
                     break
                 fi
                 [[ "$attempt" -lt 20 ]] || fatal "Key Vault name did not become available after purge"
@@ -1099,7 +1185,8 @@ ensure_tfvars
 resource_prefix=$(read_tfvar resource_prefix)
 environment=$(read_tfvar environment)
 location=$(read_tfvar location)
-state_count=$(terraform_state_count)
+state_count=$(terraform_state_count) ||
+    fatal "Terraform state count could not be determined"
 prepare_resource_prefix
 validate_generated_names
 initialize_operation_evidence

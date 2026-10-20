@@ -13,6 +13,7 @@ SKILL_REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null ||
 source "$SKILL_REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=lib/handle-state.sh
 source "$SCRIPT_DIR/lib/handle-state.sh"
+unset OSMO_SERVICE_URL
 DEFAULT_TESTS=()
 KNOWN_TESTS=()
 TESTS=()
@@ -158,6 +159,7 @@ write_attempt_command() {
         printf 'export E2E_VLA_STORAGE_ACCOUNT=%q\n' "$E2E_VLA_STORAGE_ACCOUNT"
         printf 'export KUBECONFIG=%q\n' "$KUBECONFIG"
         printf 'export XDG_CONFIG_HOME=%q\n' "$XDG_CONFIG_HOME"
+        printf 'unset OSMO_SERVICE_URL\n'
         if [[ -n "${REQUESTS_CA_BUNDLE:-}" && -f "$REQUESTS_CA_BUNDLE" ]]; then
             printf 'export REQUESTS_CA_BUNDLE=%q\n' "$REQUESTS_CA_BUNDLE"
         else
@@ -181,7 +183,8 @@ write_attempt_command() {
 }
 
 run_one() {
-    local handle="$1" test_name="$2" test_dir attempt attempt_dir command_file output_log return_code status
+    local handle="$1" test_name="$2" attempt="$3"
+    local test_dir attempt_dir command_file output_log return_code status reserved_attempt
 
     load_handle_config "$handle" || return
     discover_tests "$REPO_ROOT" || return
@@ -190,12 +193,17 @@ run_one() {
         return 2
     }
 
+    [[ "$attempt" =~ ^[1-9][0-9]*$ ]] || {
+        printf 'Invalid reserved attempt for %s: %s\n' "$test_name" "$attempt" >&2
+        return 2
+    }
     test_dir="$handle/$test_name"
-    mkdir -p "$test_dir"
-    attempt=$(( $(cat "$test_dir/latest-attempt" 2>/dev/null || printf '0') + 1 ))
     attempt_dir="$test_dir/attempt-${attempt}"
-    mkdir -p "$attempt_dir"
-    printf '%s\n' "$attempt" >"$test_dir/latest-attempt"
+    reserved_attempt=$(cat "$test_dir/latest-attempt" 2>/dev/null || true)
+    [[ "$reserved_attempt" == "$attempt" && -d "$attempt_dir" ]] || {
+        printf 'Attempt %s for %s was not reserved by the launcher\n' "$attempt" "$test_name" >&2
+        return 2
+    }
     printf '%s\n' "$$" >"$test_dir/pid"
     write_status "$test_dir/status" "RUNNING"
     write_status "$attempt_dir/status" "RUNNING"
@@ -239,8 +247,9 @@ run_one() {
     [[ "$status" == "PASSED" ]]
 }
 
-start_one() {
-    local handle="$1" test_name="$2" test_dir pid status previous_attempt KUBECONFIG=""
+# shellcheck disable=SC2030  # Handle configuration is intentionally isolated to this launch subshell.
+start_one() (
+    local handle="$1" test_name="$2" test_dir attempt attempt_dir pid status lock_dir KUBECONFIG=""
     [[ -f "$handle/config.json" ]] || {
         printf 'Invalid E2E handle: %s\n' "$handle" >&2
         return 2
@@ -257,35 +266,52 @@ start_one() {
     }
     test_dir="$handle/$test_name"
     mkdir -p "$test_dir"
-    previous_attempt=$(cat "$test_dir/latest-attempt" 2>/dev/null || printf '0')
-    printf '%s\n' "$previous_attempt" >"$test_dir/launch-previous-attempt"
+    lock_dir="$test_dir/.launch.lock"
+    if ! mkdir "$lock_dir" 2>/dev/null; then
+        if [[ -d "$lock_dir" ]]; then
+            printf 'Another launch reservation is active for %s; remove %s only if the prior launcher was interrupted\n' \
+                "$test_name" "$lock_dir" >&2
+            return 1
+        fi
+        printf 'Could not create launch reservation for %s: %s\n' "$test_name" "$lock_dir" >&2
+        return 1
+    fi
+    trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
     status=$(cat "$test_dir/status" 2>/dev/null || true)
     [[ "$status" != "RUNNING" && "$status" != "STARTING" ]] ||
         {
             printf '%s is already running\n' "$test_name" >&2
             return 1
         }
+    attempt=$(( $(cat "$test_dir/latest-attempt" 2>/dev/null || printf '0') + 1 ))
+    attempt_dir="$test_dir/attempt-${attempt}"
+    mkdir "$attempt_dir"
+    printf '%s\n' "$attempt" >"$test_dir/latest-attempt"
     write_status "$test_dir/status" "STARTING"
-    nohup "$SCRIPT_PATH" --run-one "$handle" "$test_name" \
+    write_status "$attempt_dir/status" "STARTING"
+    nohup "$SCRIPT_PATH" --run-one "$handle" "$test_name" "$attempt" \
         >"$test_dir/launcher.log" 2>&1 < /dev/null &
     pid=$!
     printf '%s\n' "$pid" >"$test_dir/pid"
     record_process_identity "$pid" "$test_dir/process.json" "test-attempt" ||
         warn "Could not record process identity for $test_name"
-    append_handle_event "$handle" "attempt-launch" "started" "$test_name"
-}
+    append_handle_event "$handle" "attempt-launch" "started" "$test_name attempt $attempt"
+)
 
 print_latest_command() {
-    local handle="$1" test_name="$2" test_dir previous_attempt attempt command_file flattened_command
+    local handle="$1" test_name="$2" test_dir attempt command_file flattened_command
     test_dir="$handle/$test_name"
-    previous_attempt=$(cat "$test_dir/launch-previous-attempt" 2>/dev/null || printf '0')
+    attempt=$(cat "$test_dir/latest-attempt" 2>/dev/null || true)
+    [[ "$attempt" =~ ^[1-9][0-9]*$ ]] || {
+        printf 'No reserved attempt exists for %s\n' "$test_name" >&2
+        return 1
+    }
+    command_file="$test_dir/attempt-${attempt}/command.sh"
     for _ in {1..100}; do
-        attempt=$(cat "$test_dir/latest-attempt" 2>/dev/null || true)
-        command_file="$test_dir/attempt-${attempt}/command.sh"
-        [[ -n "$attempt" && "$attempt" -gt "$previous_attempt" && -f "$command_file" ]] && break
+        [[ -f "$command_file" ]] && break
         sleep 0.1
     done
-    [[ -n "${attempt:-}" && "$attempt" -gt "$previous_attempt" && -f "${command_file:-}" ]] ||
+    [[ -f "$command_file" ]] ||
         {
             printf 'Command file was not created for %s\n' "$test_name" >&2
             return 1
@@ -308,11 +334,8 @@ resubmit_one() {
     }
     if [[ "$test_name" == test_e2e_osmo_* ]]; then
         load_handle_config "$handle" || return
-        osmo_endpoint="${OSMO_SERVICE_URL:-}"
-        if [[ -z "$osmo_endpoint" ]]; then
-            ensure_gateway "$handle"
-            osmo_endpoint="http://localhost:${OSMO_GATEWAY_PORT}/"
-        fi
+        ensure_gateway "$handle"
+        osmo_endpoint="http://localhost:${OSMO_GATEWAY_PORT}/"
         osmo login "$osmo_endpoint" --method dev --username admin >/dev/null ||
             fatal "OSMO CLI login failed"
         osmo profile set pool default >/dev/null ||
@@ -444,8 +467,8 @@ case "${1:-}" in
         exit
         ;;
     --run-one)
-        [[ $# -eq 3 ]] || exit 2
-        run_one "$2" "$3"
+        [[ $# -eq 4 ]] || exit 2
+        run_one "$2" "$3" "$4"
         exit
         ;;
     --gateway-keepalive)
@@ -661,6 +684,7 @@ while (echo >/dev/tcp/127.0.0.1/"$OSMO_GATEWAY_PORT") 2>/dev/null; do
 done
 printf '%s\n' "${TESTS[@]}" >"$handle/tests.txt"
 connect_aks "$resource_group" "$aks_cluster" "$handle/kubeconfig" "$aks_cluster"
+# shellcheck disable=SC2031  # This top-level value is independent of launch-subshell configuration.
 export KUBECONFIG="$handle/kubeconfig"
 write_handle_config "$handle"
 append_handle_event "$handle" "handle" "created"
@@ -709,11 +733,8 @@ chmod 600 "$manifest_json" "$handle/manifest.tsv"
 printf 'TIMESTAMP\tTEST\tATTEMPT\tPID\tCOMMAND_FILE\tOUTPUT_LOG\n' >"$handle/commands.tsv"
 
 if [[ "$needs_osmo" == "true" ]]; then
-    osmo_endpoint="${OSMO_SERVICE_URL:-}"
-    if [[ -z "$osmo_endpoint" ]]; then
-        ensure_gateway "$handle" || fatal "OSMO gateway is unavailable on localhost:${OSMO_GATEWAY_PORT}"
-        osmo_endpoint="http://localhost:${OSMO_GATEWAY_PORT}/"
-    fi
+    ensure_gateway "$handle" || fatal "OSMO gateway is unavailable on localhost:${OSMO_GATEWAY_PORT}"
+    osmo_endpoint="http://localhost:${OSMO_GATEWAY_PORT}/"
     osmo login "$osmo_endpoint" --method dev --username admin >/dev/null ||
         fatal "OSMO CLI login failed"
     osmo profile set pool default >/dev/null ||

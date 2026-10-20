@@ -50,7 +50,11 @@ def _create_handle(tmp_path: Path, statuses: dict[str, str]) -> Path:
     return handle
 
 
-def _create_runner_attempt(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
+def _create_runner_attempt(
+    tmp_path: Path,
+    *,
+    reserved_attempt: bool = True,
+) -> tuple[Path, Path, dict[str, str]]:
     repo_root = tmp_path / "repo"
     (repo_root / "tests" / "e2e").mkdir(parents=True)
     fake_bin = tmp_path / "bin"
@@ -106,6 +110,12 @@ def _create_runner_attempt(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     config_path = handle / "config.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")
     config_path.chmod(0o600)
+    if reserved_attempt:
+        test_dir = handle / "test_e2e_sample"
+        (test_dir / "attempt-1").mkdir(parents=True)
+        (test_dir / "latest-attempt").write_text("1\n", encoding="utf-8")
+        (test_dir / "status").write_text("STARTING\n", encoding="utf-8")
+        (test_dir / "attempt-1" / "status").write_text("STARTING\n", encoding="utf-8")
 
     environment = os.environ.copy()
     environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
@@ -147,6 +157,10 @@ def _create_infrastructure_fixture(
             init) exit 0 ;;
             state)
                 [[ "${1:-}" == "list" ]] || exit 2
+                if [[ "${FAKE_STATE_FAILURE:-false}" == "true" ]]; then
+                    printf '%s\n' 'backend authentication failed' >&2
+                    exit 1
+                fi
                 [[ -f "${FAKE_DESTROYED_MARKER:?}" ]] || printf '%s' "${FAKE_TERRAFORM_STATE:-}"
                 ;;
             show) printf '%s\n' '{"values":{}}' ;;
@@ -197,7 +211,15 @@ def _create_infrastructure_fixture(
             "account show --query user.name"*)
                 printf 'build.agent@example.com\n'
                 ;;
-            "group show"*) exit 0 ;;
+            "account show --query id"*)
+                printf '%s\n' "${FAKE_ACTIVE_SUBSCRIPTION_ID:-subscription}"
+                ;;
+            "group show"*)
+                if [[ "$command_line" == *"--query id"* ]]; then
+                    default_group_id="/subscriptions/subscription/resourceGroups/rg-e2e-dev-000"
+                    printf '%s\n' "${FAKE_LIVE_RESOURCE_GROUP_ID:-$default_group_id}"
+                fi
+                ;;
             "group delete"*)
                 touch "${FAKE_GROUP_DELETED_MARKER:?}"
                 exit 0
@@ -229,6 +251,8 @@ def _create_infrastructure_fixture(
     environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
     environment["FAKE_TERRAFORM_STATE"] = state
     environment["FAKE_TERRAFORM_OUTPUT"] = terraform_output
+    environment["FAKE_ACTIVE_SUBSCRIPTION_ID"] = "subscription"
+    environment["FAKE_LIVE_RESOURCE_GROUP_ID"] = "/subscriptions/subscription/resourceGroups/rg-e2e-dev-000"
     environment["FAKE_FIRST_INSTANCE_UNAVAILABLE"] = str(first_instance_unavailable).lower()
     environment["FAKE_COMMAND_LOG"] = str(command_log)
     environment["FAKE_DESTROYED_MARKER"] = str(tmp_path / "destroyed")
@@ -301,7 +325,6 @@ def test_e2e_handle_config_writer_preserves_schema_with_empty_optional_values(
             WATCHDOG_SECONDS=60
             REQUESTS_CA_BUNDLE=
             E2E_PYTHON=
-            OSMO_SERVICE_URL=
             write_handle_config "$2"
             """,
             "write-handle-config",
@@ -317,7 +340,7 @@ def test_e2e_handle_config_writer_preserves_schema_with_empty_optional_values(
     assert config["schemaVersion"] == 1
     assert config["requestsCaBundle"] is None
     assert config["e2ePython"] is None
-    assert config["osmoServiceUrl"] is None
+    assert "osmoServiceUrl" not in config
 
 
 def test_e2e_launcher_isolates_discovery_and_exports_subscription() -> None:
@@ -325,9 +348,66 @@ def test_e2e_launcher_isolates_discovery_and_exports_subscription() -> None:
 
     assert "--collect-only -q --disable-warnings --no-cov -m e2e" in script
     assert "export AZURE_SUBSCRIPTION_ID=%q" in script
-    assert '"$attempt" -gt "$previous_attempt"' in script
+    assert 'mkdir "$lock_dir"' in script
+    assert 'run_one "$2" "$3" "$4"' in script
+    assert 'nohup "$SCRIPT_PATH" --run-one "$handle" "$test_name" "$attempt"' in script
     assert '[[ -n "${REQUESTS_CA_BUNDLE:-}" && -f "$REQUESTS_CA_BUNDLE" ]]' in script
     assert "unset REQUESTS_CA_BUNDLE" in script
+
+
+def test_e2e_launcher_binds_osmo_to_handle_gateway() -> None:
+    script = (TESTS_SKILL / "scripts" / "run-e2e-tests.sh").read_text(encoding="utf-8")
+    handle_state = (TESTS_SKILL / "scripts" / "lib" / "handle-state.sh").read_text(encoding="utf-8")
+
+    assert "OSMO_SERVICE_URL" not in handle_state
+    assert "${OSMO_SERVICE_URL:-}" not in script
+    assert script.count('osmo_endpoint="http://localhost:${OSMO_GATEWAY_PORT}/"') == 2
+    assert "unset OSMO_SERVICE_URL" in script
+
+
+def test_e2e_tests_skill_projects_only_non_sensitive_terraform_outputs() -> None:
+    skill = (TESTS_SKILL / "SKILL.md").read_text(encoding="utf-8")
+    output_section = skill.split("## Required Terraform Outputs", maxsplit=1)[1].split(
+        "## Compute Validation",
+        maxsplit=1,
+    )[0]
+
+    for output_name in (
+        "resource_group",
+        "aks_cluster",
+        "azureml_workspace",
+        "storage_account",
+        "node_pools",
+    ):
+        assert output_name in output_section
+    assert "osmo_admin_password" not in output_section
+    assert "application_insights" not in output_section
+    assert "Do not print or paste the unfiltered JSON" in output_section
+
+
+def test_e2e_tests_skill_stops_retries_without_progress() -> None:
+    skill = (TESTS_SKILL / "SKILL.md").read_text(encoding="utf-8")
+    retry_section = skill.split("## Retry Classification", maxsplit=1)[1].split(
+        "## Failure Rules",
+        maxsplit=1,
+    )[0]
+
+    assert "continues until it passes" not in retry_section
+    assert "Stop automatic submissions" in retry_section
+    assert "repeat the same failure evidence" in retry_section
+    assert "Do not impose a universal retry count" in retry_section
+    assert "_await_osmo_status_with_restarts" in retry_section
+
+
+def test_e2e_infrastructure_skill_documents_actual_recovery_contracts() -> None:
+    skill = (INFRASTRUCTURE_SKILL / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "requires working Key Vault data-plane access" in skill
+    assert "only for the OSMO admin password" in skill
+    assert "PostgreSQL and Managed Redis credentials still use `az keyvault secret show`" in skill
+    assert "Key Vault CSI mounts remain enabled" in skill
+    assert "non-empty local Terraform state or a valid saved destroy context" in skill
+    assert "active Azure subscription and live full resource-group ID" in skill
 
 
 @pytest.mark.parametrize(
@@ -528,6 +608,82 @@ def test_e2e_infrastructure_azure_api_failure_fails_closed(tmp_path: Path) -> No
     assert not (repo_root / "infrastructure" / "terraform" / "terraform.tfvars").exists()
 
 
+@pytest.mark.parametrize("action", ["deploy", "undeploy"])
+def test_e2e_infrastructure_state_read_failure_fails_closed(
+    tmp_path: Path,
+    action: str,
+) -> None:
+    script = INFRASTRUCTURE_SKILL / "scripts" / "manage-e2e-infrastructure.sh"
+    repo_root, environment = _create_infrastructure_fixture(
+        tmp_path,
+        existing_tfvars=True,
+    )
+    tfvars = repo_root / "infrastructure" / "terraform" / "terraform.tfvars"
+    original_tfvars = tfvars.read_bytes()
+    environment["FAKE_STATE_FAILURE"] = "true"
+
+    result = subprocess.run(
+        ["bash", str(script), action, "--repo-root", str(repo_root), "--config-preview"],
+        check=False,
+        cwd=REPO_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "Terraform state could not be read: backend authentication failed" in result.stderr
+    command_log = Path(environment["FAKE_COMMAND_LOG"]).read_text(encoding="utf-8")
+    assert "group exists" not in command_log
+    assert tfvars.read_bytes() == original_tfvars
+
+
+@pytest.mark.parametrize("context_kind", ["file", "symlink"])
+def test_e2e_infrastructure_refuses_deploy_with_pending_destroy_context(
+    tmp_path: Path,
+    context_kind: str,
+) -> None:
+    script = INFRASTRUCTURE_SKILL / "scripts" / "manage-e2e-infrastructure.sh"
+    repo_root, environment = _create_infrastructure_fixture(
+        tmp_path,
+        existing_tfvars=True,
+    )
+    context = repo_root / "infrastructure" / "setup" / "generated" / "dev" / "e2e-destroy-context.json"
+    context.parent.mkdir(parents=True, exist_ok=True)
+    if context_kind == "file":
+        context.write_text(
+            json.dumps(
+                {
+                    "environment": "dev",
+                    "instance": "000",
+                    "location": "eastus2",
+                    "subscriptionId": "subscription",
+                    "resourceGroupId": ("/subscriptions/subscription/resourceGroups/rg-e2e-dev-000"),
+                }
+            ),
+            encoding="utf-8",
+        )
+    else:
+        context.symlink_to(tmp_path / "missing-context")
+    original_context = context.readlink() if context.is_symlink() else context.read_bytes()
+
+    result = subprocess.run(
+        ["bash", str(script), "deploy", "--repo-root", str(repo_root), "--config-preview"],
+        check=False,
+        cwd=REPO_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "complete undeploy before starting another deployment" in result.stderr
+    command_log = Path(environment["FAKE_COMMAND_LOG"]).read_text(encoding="utf-8")
+    assert "group exists" not in command_log
+    preserved_context = context.readlink() if context.is_symlink() else context.read_bytes()
+    assert preserved_context == original_context
+
+
 def test_e2e_infrastructure_rejects_resume_state_for_another_instance(tmp_path: Path) -> None:
     script = INFRASTRUCTURE_SKILL / "scripts" / "manage-e2e-infrastructure.sh"
     terraform_output = '{"resource_group":{"value":{"name":"rg-e2e-dev-999"}}}'
@@ -566,6 +722,33 @@ def test_e2e_infrastructure_refuses_undeploy_without_state_or_context(tmp_path: 
 
     assert result.returncode != 0
     assert "refusing to infer an environment to destroy" in result.stderr
+
+
+def test_e2e_infrastructure_refuses_symlinked_destroy_context(tmp_path: Path) -> None:
+    script = INFRASTRUCTURE_SKILL / "scripts" / "manage-e2e-infrastructure.sh"
+    repo_root, environment = _create_infrastructure_fixture(
+        tmp_path,
+        existing_tfvars=True,
+    )
+    target = tmp_path / "outside-context.json"
+    target.write_text("{}\n", encoding="utf-8")
+    context = repo_root / "infrastructure" / "setup" / "generated" / "dev" / "e2e-destroy-context.json"
+    context.parent.mkdir(parents=True, exist_ok=True)
+    context.symlink_to(target)
+
+    result = subprocess.run(
+        ["bash", str(script), "undeploy", "--repo-root", str(repo_root), "--config-preview"],
+        check=False,
+        cwd=REPO_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "Destroy context must not be a symbolic link" in result.stderr
+    command_log = Path(environment["FAKE_COMMAND_LOG"]).read_text(encoding="utf-8")
+    assert "group exists" not in command_log
 
 
 def _undeploy_output(instance: str = "000") -> str:
@@ -659,12 +842,88 @@ def test_e2e_infrastructure_retries_destroy_and_targets_confirmed_group(tmp_path
     assert result.returncode == 0, result.stderr
     command_log = Path(environment["FAKE_COMMAND_LOG"]).read_text(encoding="utf-8")
     assert command_log.count(" destroy ") == 2
-    assert "az group delete --name rg-e2e-dev-000 --yes --only-show-errors" in command_log
+    assert ("az group delete --subscription subscription --name rg-e2e-dev-000 --yes --only-show-errors") in command_log
     summaries = list(
         (repo_root / "infrastructure" / "setup" / "generated" / "dev" / "e2e-operations").glob("*/summary.json")
     )
     assert len(summaries) == 1
     assert json.loads(summaries[0].read_text(encoding="utf-8"))["status"] == "succeeded"
+
+
+def test_e2e_infrastructure_refuses_cross_subscription_undeploy(tmp_path: Path) -> None:
+    script = INFRASTRUCTURE_SKILL / "scripts" / "manage-e2e-infrastructure.sh"
+    terraform_output = _undeploy_output().replace(
+        "/subscriptions/subscription/",
+        "/subscriptions/captured-subscription/",
+    )
+    repo_root, environment = _create_infrastructure_fixture(
+        tmp_path,
+        state="module.platform.resource\n",
+        terraform_output=terraform_output,
+        existing_tfvars=True,
+    )
+    environment["FAKE_ACTIVE_SUBSCRIPTION_ID"] = "active-subscription"
+    environment["FAKE_GROUP_EXISTS"] = "true"
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(script),
+            "undeploy",
+            "--repo-root",
+            str(repo_root),
+            "--confirm-resource-group",
+            "rg-e2e-dev-000",
+        ],
+        check=False,
+        cwd=REPO_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "does not match captured subscription 'captured-subscription'" in result.stderr
+    command_log = Path(environment["FAKE_COMMAND_LOG"]).read_text(encoding="utf-8")
+    assert " destroy " not in command_log
+    assert " state rm " not in command_log
+    assert "group delete" not in command_log
+
+
+def test_e2e_infrastructure_refuses_mismatched_live_resource_group_id(tmp_path: Path) -> None:
+    script = INFRASTRUCTURE_SKILL / "scripts" / "manage-e2e-infrastructure.sh"
+    repo_root, environment = _create_infrastructure_fixture(
+        tmp_path,
+        state="module.platform.resource\n",
+        terraform_output=_undeploy_output(),
+        existing_tfvars=True,
+    )
+    environment["FAKE_GROUP_EXISTS"] = "true"
+    environment["FAKE_LIVE_RESOURCE_GROUP_ID"] = "/subscriptions/subscription/resourceGroups/rg-e2e-dev-999"
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(script),
+            "undeploy",
+            "--repo-root",
+            str(repo_root),
+            "--confirm-resource-group",
+            "rg-e2e-dev-000",
+        ],
+        check=False,
+        cwd=REPO_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "does not match captured ID" in result.stderr
+    command_log = Path(environment["FAKE_COMMAND_LOG"]).read_text(encoding="utf-8")
+    assert " destroy " not in command_log
+    assert " state rm " not in command_log
+    assert "group delete" not in command_log
 
 
 def test_e2e_infrastructure_destroy_retry_exhaustion_fails_closed(tmp_path: Path) -> None:
@@ -1183,7 +1442,7 @@ def test_e2e_runner_classifies_attempt_results(
     environment["FAKE_TEST_OUTPUT"] = output
 
     result = subprocess.run(
-        ["bash", str(script), "--run-one", str(handle), "test_e2e_sample"],
+        ["bash", str(script), "--run-one", str(handle), "test_e2e_sample", "1"],
         check=False,
         cwd=REPO_ROOT,
         env=environment,
@@ -1205,7 +1464,7 @@ def test_e2e_runner_command_preserves_isolation_without_persisting_hf_token(tmp_
     environment["HF_TOKEN"] = "sensitive-test-value"
 
     result = subprocess.run(
-        ["bash", str(script), "--run-one", str(handle), "test_e2e_sample"],
+        ["bash", str(script), "--run-one", str(handle), "test_e2e_sample", "1"],
         check=False,
         cwd=REPO_ROOT,
         env=environment,
@@ -1249,7 +1508,7 @@ def test_e2e_runner_rejects_symlinked_config(tmp_path: Path) -> None:
     config.symlink_to(target)
 
     result = subprocess.run(
-        ["bash", str(script), "--run-one", str(handle), "test_e2e_sample"],
+        ["bash", str(script), "--run-one", str(handle), "test_e2e_sample", "1"],
         check=False,
         cwd=REPO_ROOT,
         env=environment,
@@ -1298,7 +1557,7 @@ def test_e2e_runner_parallel_handles_keep_evidence_isolated(tmp_path: Path) -> N
 
     processes = [
         subprocess.Popen(
-            ["bash", str(script), "--run-one", str(handle), "test_e2e_sample"],
+            ["bash", str(script), "--run-one", str(handle), "test_e2e_sample", "1"],
             cwd=REPO_ROOT,
             env=environment,
             stdout=subprocess.PIPE,
@@ -1315,6 +1574,60 @@ def test_e2e_runner_parallel_handles_keep_evidence_isolated(tmp_path: Path) -> N
         assert str(handle) not in events
         assert '"event":"attempt"' in events
         assert (handle / "test_e2e_sample" / "attempt-1" / "status").read_text(encoding="utf-8").strip() == "PASSED"
+
+
+def test_e2e_runner_serializes_same_test_resubmission(tmp_path: Path) -> None:
+    script = TESTS_SKILL / "scripts" / "run-e2e-tests.sh"
+    handle, _, environment = _create_runner_attempt(tmp_path, reserved_attempt=False)
+    ready_fifo = tmp_path / "ps-ready"
+    release_fifo = tmp_path / "ps-release"
+    os.mkfifo(ready_fifo)
+    os.mkfifo(release_fifo)
+    environment["FAKE_PS_READY_FIFO"] = str(ready_fifo)
+    environment["FAKE_PS_RELEASE_FIFO"] = str(release_fifo)
+    environment["FAKE_PS_ONCE_MARKER"] = str(tmp_path / "ps-once")
+    _write_executable(
+        Path(environment["PATH"].split(os.pathsep, maxsplit=1)[0]) / "ps",
+        """
+        #!/usr/bin/env bash
+        if mkdir "${FAKE_PS_ONCE_MARKER:?}" 2>/dev/null; then
+            printf 'ready\n' >"${FAKE_PS_READY_FIFO:?}"
+            IFS= read -r _ <"${FAKE_PS_RELEASE_FIFO:?}"
+        fi
+        exec /bin/ps "$@"
+        """,
+    )
+
+    first = subprocess.Popen(
+        ["bash", str(script), "--resubmit", str(handle), "test_e2e_sample"],
+        cwd=REPO_ROOT,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    with ready_fifo.open(encoding="utf-8") as barrier:
+        assert barrier.readline().strip() == "ready"
+
+    second = subprocess.run(
+        ["bash", str(script), "--resubmit", str(handle), "test_e2e_sample"],
+        check=False,
+        cwd=REPO_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    with release_fifo.open("w", encoding="utf-8") as barrier:
+        barrier.write("continue\n")
+    first_output = first.communicate(timeout=30)
+
+    assert first.returncode == 0, first_output
+    assert second.returncode != 0
+    assert "Another launch reservation is active" in second.stderr
+    test_dir = handle / "test_e2e_sample"
+    assert (test_dir / "latest-attempt").read_text(encoding="utf-8").strip() == "1"
+    assert sorted(path.name for path in test_dir.glob("attempt-*")) == ["attempt-1"]
+    assert len((handle / "commands.tsv").read_text(encoding="utf-8").splitlines()) == 2
 
 
 def test_e2e_skills_do_not_embed_local_paths_or_fixed_cloud_ids() -> None:

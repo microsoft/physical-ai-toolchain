@@ -96,12 +96,11 @@ load_handle_config() {
     WATCHDOG_SECONDS=$(jq -er '.watchdogSeconds | select(type == "number")' "$config_file")
     REQUESTS_CA_BUNDLE=$(jq -r '.requestsCaBundle // ""' "$config_file")
     E2E_PYTHON=$(jq -r '.e2ePython // ""' "$config_file")
-    OSMO_SERVICE_URL=$(jq -r '.osmoServiceUrl // ""' "$config_file")
 
     export REPO_ROOT ARM_SUBSCRIPTION_ID AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP AKS_CLUSTER_NAME
     export AZUREML_WORKSPACE_NAME AZUREML_COMPUTE AZURE_STORAGE_ACCOUNT_NAME
     export E2E_VLA_STORAGE_ACCOUNT KUBECONFIG XDG_CONFIG_HOME OSMO_GATEWAY_PORT
-    export WATCHDOG_SECONDS REQUESTS_CA_BUNDLE E2E_PYTHON OSMO_SERVICE_URL
+    export WATCHDOG_SECONDS REQUESTS_CA_BUNDLE E2E_PYTHON
 }
 
 write_handle_config() {
@@ -122,7 +121,6 @@ write_handle_config() {
         --arg xdg_config_home "$XDG_CONFIG_HOME" \
         --arg requests_ca_bundle "${REQUESTS_CA_BUNDLE:-}" \
         --arg e2e_python "${E2E_PYTHON:-}" \
-        --arg osmo_service_url "${OSMO_SERVICE_URL:-}" \
         --argjson osmo_gateway_port "$OSMO_GATEWAY_PORT" \
         --argjson watchdog_seconds "$WATCHDOG_SECONDS" \
         '{
@@ -140,8 +138,7 @@ write_handle_config() {
             osmoGatewayPort: $osmo_gateway_port,
             watchdogSeconds: $watchdog_seconds,
             requestsCaBundle: ($requests_ca_bundle | if length > 0 then . else null end),
-            e2ePython: ($e2e_python | if length > 0 then . else null end),
-            osmoServiceUrl: ($osmo_service_url | if length > 0 then . else null end)
+            e2ePython: ($e2e_python | if length > 0 then . else null end)
         }' >"$temporary"
     chmod 600 "$temporary"
     mv "$temporary" "$config_file"
