@@ -3,6 +3,7 @@
 
 mock_provider "azurerm" {}
 mock_provider "azuread" {}
+mock_provider "azapi" {}
 mock_provider "random" {}
 
 override_data {
@@ -147,11 +148,11 @@ run "proxy_bound_auth_configuration" {
   }
 
   assert {
-    condition = anytrue([
+    condition = !anytrue([
       for item in azurerm_container_app.frontend.template[0].container[0].env :
-      item.name == "DATAVIEWER_PROXY_KEY" && item.secret_name == "dataviewer-proxy-key"
+      item.name == "DATAVIEWER_PROXY_KEY"
     ])
-    error_message = "Frontend should reference the proxy credential through DATAVIEWER_PROXY_KEY"
+    error_message = "Terraform bootstrap must not make the public frontend a proxy-proof oracle"
   }
 
   assert {
@@ -160,6 +161,21 @@ run "proxy_bound_auth_configuration" {
       item.name == "DATAVIEWER_AUTH_PROVIDER" && item.value == "easy_auth"
     ])
     error_message = "Backend should select Easy Auth when authentication is enabled"
+  }
+
+  assert {
+    condition     = azapi_resource.frontend_auth[0].body.properties.platform.enabled
+    error_message = "Terraform must enable frontend Easy Auth before deployment injects proxy proof"
+  }
+
+  assert {
+    condition     = azapi_resource.frontend_auth[0].body.properties.globalValidation.unauthenticatedClientAction == "RedirectToLoginPage"
+    error_message = "Terraform must reject anonymous frontend requests with the Entra login flow"
+  }
+
+  assert {
+    condition     = azapi_resource.frontend_auth[0].body.properties.identityProviders.azureActiveDirectory.registration.clientSecretSettingName == "microsoft-provider-authentication-secret"
+    error_message = "Terraform Easy Auth must use the Container App secret created for the Entra application"
   }
 }
 

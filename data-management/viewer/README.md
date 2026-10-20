@@ -462,11 +462,13 @@ The frontend-to-backend proxy preserves native browser requests for images and v
 
 2. Note the **Application (client) ID** and **Directory (tenant) ID** from the app registration.
 
-Terraform creates the app registration when authentication is enabled. The deployment script validates the Easy Auth web callback and configures Easy Auth without changing redirect URIs. The [Terraform module](../../infrastructure/terraform/modules/dataviewer/variables.tf) defaults to MSAL bridge URIs on local ports 5173 and 5174. Supply `dataviewer_redirect_uris` explicitly for production direct JWT origins or different development ports; caller-supplied lists are used unchanged.
+Terraform creates the app registration and enables frontend Easy Auth when authentication is enabled. The deployment script validates the Easy Auth web callback and reconciles the provider without changing redirect URIs.
+
+The [Terraform module](../../infrastructure/terraform/modules/dataviewer/variables.tf) defaults to MSAL bridge URIs on local ports 5173 and 5174. Supply `dataviewer_redirect_uris` explicitly for production direct JWT origins or different development ports; caller-supplied lists are used unchanged.
 
 ### Azure Container Apps Configuration
 
-Terraform creates one random proxy credential and installs it under the stable `dataviewer-proxy-key` secret name on both Container Apps. Each app receives the value through a `DATAVIEWER_PROXY_KEY` secret reference; the credential is not exposed as a Terraform output.
+Terraform creates one random proxy credential and installs it under the stable `dataviewer-proxy-key` secret name on both Container Apps. The backend bootstrap revision receives the secret reference and enforces proof validation. The public frontend bootstrap revision does not receive the reference; `deploy-dataviewer.sh` adds it only after verifying Easy Auth. The credential is not exposed as a Terraform output.
 
 ```env
 DATAVIEWER_AUTH_DISABLED=false
@@ -571,13 +573,13 @@ The backend accesses Azure Storage using managed identity, not the user's token.
 Run `data-management/setup/deploy-dataviewer.sh` interactively. For authenticated deployments, the script:
 
 1. Verifies both Container Apps already contain the Terraform-owned `dataviewer-proxy-key` secret and the frontend contains the Terraform-owned Easy Auth client credential.
-2. Captures the current images, authentication settings, and secret references for rollback.
+2. Captures the current images, authentication settings, and secret references and classifies whether they form a secure recovery pair.
 3. Deploys the backend in `easy_auth` mode with its proxy-key secret reference.
-4. Configures frontend Easy Auth to use the Terraform-owned credential by secret name.
+4. Verifies frontend Easy Auth uses the Terraform-owned credential and denies an anonymous forged-principal probe.
 5. Deploys the frontend with its proxy-key secret reference.
-6. Requires one terminal browser and media verification gate before reporting success.
+6. Repeats the negative probe, then requires one terminal browser and media verification gate before reporting success.
 
-`--skip-backend` requires an existing backend already using `easy_auth` and `dataviewer-proxy-key`. `--skip-frontend` requires enabled frontend Easy Auth and an existing proxy-key reference. A failed paired rollout restores the frontend first and then the backend; if the rollout enabled Easy Auth, rollback also disables it. Terraform retains ownership of both credentials throughout deployment and rollback.
+`--skip-backend` requires an existing backend already using `easy_auth` and `dataviewer-proxy-key`. `--skip-frontend` requires enabled frontend Easy Auth and an existing proxy-key reference. A failed rollout restores only a previously verified secure pair while Easy Auth remains enabled. If no secure pair exists or any restore step fails, the script disables frontend ingress and verifies the deny state. Terraform retains ownership of both credentials throughout deployment and recovery.
 
 ### Authentication Smoke Test
 

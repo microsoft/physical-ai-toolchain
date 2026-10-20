@@ -45,16 +45,17 @@ The local OSMO profile implements this contract in `infrastructure/local/manifes
 
 The Terraform module in `infrastructure/terraform/modules/dataviewer/` provisions:
 
-| Resource                   | Purpose                                            |
-|----------------------------|----------------------------------------------------|
-| Container Apps Environment | Shared networking and logging                      |
-| Container App (backend)    | FastAPI with managed identity for storage access   |
-| Container App (frontend)   | nginx with backend service binding                 |
-| Managed Identity           | Azure RBAC for Blob Storage and Container Registry |
-| Entra ID App Registration  | OAuth authentication, when auth is enabled         |
-| Random password            | Shared frontend-to-backend proxy credential        |
+| Resource                    | Purpose                                            |
+|-----------------------------|----------------------------------------------------|
+| Container Apps Environment  | Shared networking and logging                      |
+| Container App (backend)     | FastAPI with managed identity for storage access   |
+| Container App (frontend)    | nginx with backend service binding                 |
+| Frontend auth configuration | Easy Auth with anonymous requests redirected       |
+| Managed Identity            | Azure RBAC for Blob Storage and Container Registry |
+| Entra ID App Registration   | OAuth authentication, when auth is enabled         |
+| Random password             | Shared frontend-to-backend proxy credential        |
 
-Terraform owns the initial application registration, Container Apps secrets, secret-reference environment variables, and `easy_auth` backend provider selection. The deployment script owns image rollout, existing-revision environment updates, Easy Auth platform configuration, readiness checks, and paired rollback.
+Terraform owns the initial application registration, Container Apps secrets, frontend Easy Auth configuration, and `easy_auth` backend provider selection. The public frontend bootstrap revision does not receive the proxy credential, so it cannot convert an unauthenticated forged principal into trusted backend proof. The deployment script adds the frontend secret reference only after verifying that Easy Auth rejects anonymous traffic.
 
 ## Authentication
 
@@ -89,11 +90,13 @@ Backend rollouts through `deploy-dataviewer.sh` set `STORAGE_BACKEND=azure`. The
 
 ## Authenticated Rollout
 
-The deployment script verifies that both Container Apps contain the Terraform-owned `dataviewer-proxy-key` secret and that the frontend contains the Terraform-owned Easy Auth client credential before mutation. It then captures the existing images, backend provider settings, proxy-key references, and Easy Auth state.
+The deployment script verifies that both Container Apps contain the Terraform-owned `dataviewer-proxy-key` secret and that the frontend contains the Terraform-owned Easy Auth client credential before mutation. It then captures the existing images, backend provider settings, proxy-key references, and Easy Auth state and classifies whether the snapshot is a secure recovery pair.
 
-The rollout order is backend, Easy Auth configuration, then frontend. Each new revision must become ready before the script proceeds. One terminal browser gate verifies `/api/auth/context`, images, frames, videos, `HEAD`, and HTTP Range behavior before success is reported.
+The rollout order is backend, Easy Auth verification, then frontend proof injection. Each update must return a revision, that exact revision must become ready, and its image and secret references must match the intended target. A forged-principal request without a session must return a redirect or denial before and after proof injection. One terminal browser gate verifies `/api/auth/context`, images, frames, videos, `HEAD`, and HTTP Range behavior before success is reported.
 
-If the paired rollout fails, automatic rollback restores the frontend before the backend. Easy Auth enabled by the failed rollout is disabled. Terraform retains ownership of the Entra credential, so rollback does not create, replace, print, or delete credential values. Recovery output names resources and secret references but never prints secret values or principal payloads.
+If the paired rollout fails, automatic recovery restores only a captured pair that already enforced Easy Auth, backend proof validation, and matching proxy-secret references. It restores and verifies both selected revisions while Easy Auth remains enabled. If the snapshot is unsafe or any restore step fails, the script disables frontend ingress and verifies the deny state.
+
+Terraform retains ownership of the Entra credential, so recovery does not create, replace, print, or delete credential values. Recovery output names resources and secret references but never prints secret values or principal payloads.
 
 `--skip-backend` is valid only when the existing backend uses `easy_auth` and references `dataviewer-proxy-key`. `--skip-frontend` is valid only when frontend Easy Auth is enabled and the existing frontend revision references that secret.
 

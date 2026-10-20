@@ -78,7 +78,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-require_tools az terraform jq
+require_tools az terraform jq curl base64
 [[ "$local_build" == "true" && "$skip_build" == "false" ]] && require_tools docker
 
 proxy_secret_name="dataviewer-proxy-key"
@@ -86,12 +86,8 @@ easy_auth_secret_name="microsoft-provider-authentication-secret"
 
 wait_for_ready_revision() {
   local app="$1"
-  local expected_revision ready_revision
-
-  expected_revision=$(az containerapp show \
-    --name "$app" \
-    --resource-group "$rg" \
-    --query properties.latestRevisionName -o tsv)
+  local expected_revision="$2"
+  local ready_revision
 
   for _ in {1..60}; do
     ready_revision=$(az containerapp show \
@@ -106,6 +102,150 @@ wait_for_ready_revision() {
 
   error "Timed out waiting for revision $expected_revision on $app"
   return 1
+}
+
+update_app_and_wait() {
+  local app="$1"
+  shift
+  local revision
+
+  revision=$(az containerapp update \
+    --name "$app" \
+    --resource-group "$rg" \
+    "$@" \
+    --query properties.latestRevisionName \
+    --output tsv) || return 1
+  if [[ -z "$revision" ]]; then
+    error "Container App update returned no revision for $app"
+    return 1
+  fi
+  wait_for_ready_revision "$app" "$revision" || return 1
+  printf '%s\n' "$revision"
+}
+
+verify_app_rollout() {
+  local app="$1"
+  local revision="$2"
+  local image="$3"
+  local proxy_secret_ref="$4"
+  local app_state
+
+  app_state=$(az containerapp show \
+    --name "$app" \
+    --resource-group "$rg" \
+    --output json) || return 1
+  jq -e \
+    --arg revision "$revision" \
+    --arg image "$image" \
+    --arg proxy_secret_ref "$proxy_secret_ref" \
+    '
+      .properties.latestRevisionName == $revision
+      and .properties.latestReadyRevisionName == $revision
+      and .properties.template.containers[0].image == $image
+      and (
+        ([.properties.template.containers[0].env[]? | select(.name == "DATAVIEWER_PROXY_KEY")][0].secretRef // "")
+        == $proxy_secret_ref
+      )
+    ' <<<"$app_state" >/dev/null
+}
+
+verify_backend_auth_enforced() {
+  local app_state
+
+  app_state=$(az containerapp show \
+    --name "$backend_app" \
+    --resource-group "$rg" \
+    --output json) || return 1
+  jq -e \
+    --arg proxy_secret_name "$proxy_secret_name" \
+    '
+      ([.properties.template.containers[0].env[]? | select(.name == "DATAVIEWER_AUTH_PROVIDER")][0].value // "")
+        == "easy_auth"
+      and ([.properties.template.containers[0].env[]? | select(.name == "DATAVIEWER_AUTH_DISABLED")][0].value // "")
+        == "false"
+      and ([.properties.template.containers[0].env[]? | select(.name == "DATAVIEWER_PROXY_KEY")][0].secretRef // "")
+        == $proxy_secret_name
+    ' <<<"$app_state" >/dev/null
+}
+
+verify_frontend_auth_enforced() {
+  local auth_state
+
+  auth_state=$(az containerapp auth show \
+    --name "$frontend_app" \
+    --resource-group "$rg" \
+    --output json) || return 1
+  jq -e \
+    '
+      .platform.enabled == true
+      and .globalValidation.unauthenticatedClientAction == "RedirectToLoginPage"
+    ' <<<"$auth_state" >/dev/null
+}
+
+verify_anonymous_request_denied() {
+  local forged_principal status
+
+  forged_principal=$(printf '%s' \
+    '{"auth_typ":"aad","claims":[{"typ":"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier","val":"forged-subject"}]}' \
+    | base64 | tr -d '\n')
+  status=$(curl \
+    --silent \
+    --show-error \
+    --output /dev/null \
+    --write-out '%{http_code}' \
+    --max-time 30 \
+    --header "X-MS-CLIENT-PRINCIPAL: ${forged_principal}" \
+    "${frontend_url}/api/auth/context") || return 1
+  case "$status" in
+    302|401|403) return 0 ;;
+    *)
+      error "Anonymous forged-principal probe returned HTTP $status"
+      return 1
+      ;;
+  esac
+}
+
+close_frontend_ingress() {
+  local ingress_external
+
+  warn "Closing frontend ingress because no verified secure recovery pair is available."
+  az containerapp ingress disable \
+    --name "$frontend_app" \
+    --resource-group "$rg" \
+    --output none || return 1
+  ingress_external=$(az containerapp show \
+    --name "$frontend_app" \
+    --resource-group "$rg" \
+    --query properties.configuration.ingress.external \
+    --output tsv) || return 1
+  [[ "$ingress_external" != "true" ]]
+}
+
+ensure_frontend_ingress() {
+  local ingress_external
+
+  ingress_external=$(az containerapp show \
+    --name "$frontend_app" \
+    --resource-group "$rg" \
+    --query properties.configuration.ingress.external \
+    --output tsv) || return 1
+  if [[ "$ingress_external" == "true" ]]; then
+    return 0
+  fi
+
+  az containerapp ingress enable \
+    --name "$frontend_app" \
+    --resource-group "$rg" \
+    --target-port 8080 \
+    --transport auto \
+    --type external \
+    --output none || return 1
+  ingress_external=$(az containerapp show \
+    --name "$frontend_app" \
+    --resource-group "$rg" \
+    --query properties.configuration.ingress.external \
+    --output tsv) || return 1
+  [[ "$ingress_external" == "true" ]]
 }
 
 operator_auth_gate() {
@@ -130,8 +270,6 @@ restore_app_rollout() {
   local -a update_args env_args=("$@")
 
   update_args=(
-    --name "$app"
-    --resource-group "$rg"
     --image "$image"
   )
   if [[ -n "$proxy_secret_ref" ]]; then
@@ -142,26 +280,14 @@ restore_app_rollout() {
   if [[ "${#env_args[@]}" -gt 0 ]]; then
     update_args+=(--set-env-vars "${env_args[@]}")
   fi
-  update_args+=(--output none)
-
-  az containerapp update "${update_args[@]}"
-  wait_for_ready_revision "$app"
-}
-
-restore_frontend_auth() {
-  if [[ "$frontend_auth_changed" != "true" ]]; then
-    return 0
-  fi
-
-  az containerapp auth update \
-    --name "$frontend_app" \
-    --resource-group "$rg" \
-    --enabled false \
-    --output none
+  local revision
+  revision=$(update_app_and_wait "$app" "${update_args[@]}") || return 1
+  verify_app_rollout "$app" "$revision" "$image" "$proxy_secret_ref"
 }
 
 rollback_backend() {
   local -a update_args backend_env remove_env
+  local revision
 
   backend_env=("DATAVIEWER_AUTH_DISABLED=${old_auth_disabled}")
   remove_env=()
@@ -188,39 +314,48 @@ rollback_backend() {
   fi
 
   update_args=(
-    --name "$backend_app"
-    --resource-group "$rg"
     --image "$old_backend_image"
     --set-env-vars "${backend_env[@]}"
   )
   if [[ "${#remove_env[@]}" -gt 0 ]]; then
     update_args+=(--remove-env-vars "${remove_env[@]}")
   fi
-  update_args+=(--output none)
-
-  az containerapp update "${update_args[@]}"
-  wait_for_ready_revision "$backend_app"
+  revision=$(update_app_and_wait "$backend_app" "${update_args[@]}") || return 1
+  verify_app_rollout \
+    "$backend_app" \
+    "$revision" \
+    "$old_backend_image" \
+    "$old_backend_proxy_secret_ref" || return 1
+  verify_backend_auth_enforced
 }
 
-rollback_complete_rollout() {
-  local restore_failed=false
+recover_authenticated_rollout() {
+  local recovery_failed=false
 
+  if [[ "$old_rollout_secure" != "true" ]]; then
+    close_frontend_ingress
+    return
+  fi
+
+  if [[ "$skip_backend" == "false" ]]; then
+    rollback_backend || recovery_failed=true
+  fi
   if [[ "$skip_frontend" == "false" ]]; then
     restore_app_rollout \
       "$frontend_app" \
       "$old_frontend_image" \
-      "$old_frontend_proxy_secret_ref" || restore_failed=true
-    restore_frontend_auth || restore_failed=true
-  fi
-  if [[ "$skip_backend" == "false" ]]; then
-    rollback_backend || restore_failed=true
+      "$old_frontend_proxy_secret_ref" || recovery_failed=true
+    verify_frontend_auth_enforced || recovery_failed=true
+    verify_anonymous_request_denied || recovery_failed=true
   fi
 
-  [[ "$restore_failed" == "false" ]]
+  if [[ "$recovery_failed" == "true" ]]; then
+    close_frontend_ingress || return 1
+  fi
 }
 
 rollback_failed() {
-  error "Automatic rollback failed. Restore the previous images and environment secret references for:"
+  error "Automatic secure recovery failed. Keep frontend ingress closed while repairing:"
   error "Frontend: $frontend_app"
   error "Backend: $backend_app"
   exit 1
@@ -375,7 +510,7 @@ old_tenant_id=""
 old_client_id=""
 old_backend_proxy_secret_ref=""
 old_frontend_proxy_secret_ref=""
-frontend_auth_changed=false
+old_rollout_secure=false
 
 if [[ "$skip_update" == "false" ]]; then
   old_backend_image=$(az containerapp show \
@@ -462,6 +597,14 @@ if [[ "$skip_update" == "false" ]]; then
       --name "$frontend_app" \
       --resource-group "$rg" \
       --query platform.enabled -o tsv)
+
+    if [[ "$easy_auth_enabled" == "true" &&
+      "$old_provider" == "easy_auth" &&
+      "$old_auth_disabled" == "false" &&
+      "$old_backend_proxy_secret_ref" == "$proxy_secret_name" &&
+      "$old_frontend_proxy_secret_ref" == "$proxy_secret_name" ]]; then
+      old_rollout_secure=true
+    fi
 
     if [[ "$skip_backend" == "true" && ( "$old_provider" != "easy_auth" || "$old_backend_proxy_secret_ref" != "$proxy_secret_name" ) ]]; then
       fatal "--skip-backend requires an existing easy_auth backend that references secret '${proxy_secret_name}'."
@@ -583,11 +726,10 @@ fi
 
 if [[ "$skip_update" == "false" && "$auth_enabled" == "true" ]]; then
   if [[ "$skip_backend" == "false" ]]; then
+    backend_revision=""
     section "Updating Backend Container App"
     info "Deploying $backend_image with proxy-bound Easy Auth..."
-    if ! az containerapp update \
-      --name "$backend_app" \
-      --resource-group "$rg" \
+    if ! backend_revision=$(update_app_and_wait "$backend_app" \
       --image "$backend_image" \
       --set-env-vars \
         "$backend_storage_env" \
@@ -597,21 +739,16 @@ if [[ "$skip_update" == "false" && "$auth_enabled" == "true" ]]; then
       --remove-env-vars \
         "$legacy_backend_storage_env" \
         DATAVIEWER_AZURE_TENANT_ID \
-        DATAVIEWER_AZURE_CLIENT_ID \
-      --output none ||
-      ! wait_for_ready_revision "$backend_app"; then
-      rollback_backend || rollback_failed
-      restore_frontend_auth || rollback_failed
-      fatal "Backend deployment failed and was rolled back."
+        DATAVIEWER_AZURE_CLIENT_ID) ||
+      ! verify_app_rollout "$backend_app" "$backend_revision" "$backend_image" "$proxy_secret_name" ||
+      ! verify_backend_auth_enforced; then
+      recover_authenticated_rollout || rollback_failed
+      fatal "Backend deployment failed; a verified secure pair was restored or frontend ingress was closed."
     fi
   fi
 
   if [[ "$skip_frontend" == "false" ]]; then
     section "Configuring Easy Auth on Frontend"
-    if [[ "$easy_auth_enabled" != "true" ]]; then
-      frontend_auth_changed=true
-    fi
-
     if ! az containerapp auth microsoft update \
       --name "$frontend_app" \
       --resource-group "$rg" \
@@ -626,39 +763,38 @@ if [[ "$skip_update" == "false" && "$auth_enabled" == "true" ]]; then
         --enabled true \
         --unauthenticated-client-action RedirectToLoginPage \
         --redirect-provider azureactivedirectory \
-        --output none; then
-      restore_frontend_auth || rollback_failed
-      if [[ "$skip_backend" == "false" ]]; then
-        rollback_backend || rollback_failed
-      fi
-      fatal "Frontend Easy Auth configuration failed and the prior rollout state was restored."
+        --output none ||
+      ! verify_frontend_auth_enforced ||
+      ! ensure_frontend_ingress ||
+      ! verify_anonymous_request_denied; then
+      recover_authenticated_rollout || rollback_failed
+      fatal "Frontend Easy Auth configuration failed; a verified secure pair was restored or frontend ingress was closed."
     fi
 
+    frontend_revision=""
     section "Updating Frontend Container App"
     info "Deploying $frontend_image with the proxy credential reference..."
-    if ! az containerapp update \
-      --name "$frontend_app" \
-      --resource-group "$rg" \
+    if ! frontend_revision=$(update_app_and_wait "$frontend_app" \
       --image "$frontend_image" \
-      --set-env-vars "DATAVIEWER_PROXY_KEY=secretref:${proxy_secret_name}" \
-      --output none ||
-      ! wait_for_ready_revision "$frontend_app"; then
-      rollback_complete_rollout || rollback_failed
-      fatal "Frontend deployment failed and the paired rollout was rolled back."
+      --set-env-vars "DATAVIEWER_PROXY_KEY=secretref:${proxy_secret_name}") ||
+      ! verify_app_rollout "$frontend_app" "$frontend_revision" "$frontend_image" "$proxy_secret_name" ||
+      ! verify_frontend_auth_enforced ||
+      ! verify_anonymous_request_denied; then
+      recover_authenticated_rollout || rollback_failed
+      fatal "Frontend deployment failed; a verified secure pair was restored or frontend ingress was closed."
     fi
   fi
 
   if ! operator_auth_gate; then
-    rollback_complete_rollout || rollback_failed
-    fatal "Authentication validation failed and the paired rollout was rolled back."
+    recover_authenticated_rollout || rollback_failed
+    fatal "Authentication validation failed; a verified secure pair was restored or frontend ingress was closed."
   fi
 
 elif [[ "$skip_update" == "false" ]]; then
   if [[ "$skip_backend" == "false" ]]; then
+    backend_revision=""
     section "Updating Backend Container App"
-    az containerapp update \
-      --name "$backend_app" \
-      --resource-group "$rg" \
+    backend_revision=$(update_app_and_wait "$backend_app" \
       --image "$backend_image" \
       --set-env-vars \
         "$backend_storage_env" \
@@ -668,20 +804,17 @@ elif [[ "$skip_update" == "false" ]]; then
         DATAVIEWER_AUTH_PROVIDER \
         DATAVIEWER_AZURE_TENANT_ID \
         DATAVIEWER_AZURE_CLIENT_ID \
-        DATAVIEWER_PROXY_KEY \
-      --output none
-    wait_for_ready_revision "$backend_app"
+        DATAVIEWER_PROXY_KEY)
+    verify_app_rollout "$backend_app" "$backend_revision" "$backend_image" ""
   fi
 
   if [[ "$skip_frontend" == "false" ]]; then
+    frontend_revision=""
     section "Updating Frontend Container App"
-    az containerapp update \
-      --name "$frontend_app" \
-      --resource-group "$rg" \
+    frontend_revision=$(update_app_and_wait "$frontend_app" \
       --image "$frontend_image" \
-      --remove-env-vars DATAVIEWER_PROXY_KEY \
-      --output none
-    wait_for_ready_revision "$frontend_app"
+      --remove-env-vars DATAVIEWER_PROXY_KEY)
+    verify_app_rollout "$frontend_app" "$frontend_revision" "$frontend_image" ""
 
     info "Allowing anonymous access on $frontend_app..."
     az containerapp auth update \

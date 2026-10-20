@@ -211,13 +211,6 @@ resource "azurerm_container_app" "frontend" {
         name  = "NGINX_BACKEND_SCHEME"
         value = "https"
       }
-      dynamic "env" {
-        for_each = var.should_deploy_dataviewer_auth ? [1] : []
-        content {
-          name        = "DATAVIEWER_PROXY_KEY"
-          secret_name = "dataviewer-proxy-key"
-        }
-      }
     }
   }
 
@@ -225,5 +218,38 @@ resource "azurerm_container_app" "frontend" {
   // Prevent Terraform from reverting deploy-time changes.
   lifecycle {
     ignore_changes = [template, registry]
+  }
+}
+
+resource "azapi_resource" "frontend_auth" {
+  count = var.should_deploy_dataviewer_auth ? 1 : 0
+
+  type      = "Microsoft.App/containerApps/authConfigs@2025-01-01"
+  name      = "current"
+  parent_id = azurerm_container_app.frontend.id
+
+  body = {
+    properties = {
+      globalValidation = {
+        redirectToProvider          = "azureactivedirectory"
+        unauthenticatedClientAction = "RedirectToLoginPage"
+      }
+      httpSettings = {
+        requireHttps = true
+      }
+      identityProviders = {
+        azureActiveDirectory = {
+          enabled = true
+          registration = {
+            clientId                = azuread_application.dataviewer[0].client_id
+            clientSecretSettingName = "microsoft-provider-authentication-secret"
+            openIdIssuer            = "https://login.microsoftonline.com/${data.azuread_client_config.current.tenant_id}/v2.0"
+          }
+        }
+      }
+      platform = {
+        enabled = true
+      }
+    }
   }
 }

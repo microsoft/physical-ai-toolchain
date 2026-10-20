@@ -277,6 +277,44 @@ def test_build_upload_is_allowlisted_and_compose_keeps_jobs_durable() -> None:
     assert 'cp "$REPO_ROOT/data-management/dataset-io/physical_ai_dataset_io/"*.py' in deploy
 
 
+def test_authenticated_deployment_recovery_fails_closed() -> None:
+    backend = Path(__file__).resolve().parents[1]
+    deploy = (backend.parents[1] / "setup" / "deploy-dataviewer.sh").read_text()
+    terraform = (backend.parents[2] / "infrastructure/terraform/modules/dataviewer/container-apps.tf").read_text()
+
+    update_helper = deploy.split("update_app_and_wait() {", 1)[1].split("\n}", 1)[0]
+    recovery = deploy.split("recover_authenticated_rollout() {", 1)[1].split("\n}", 1)[0]
+    authenticated_rollout = deploy.split(
+        'if [[ "$skip_update" == "false" && "$auth_enabled" == "true" ]]; then',
+        1,
+    )[1].split('elif [[ "$skip_update" == "false" ]]; then', 1)[0]
+    frontend_rollout = authenticated_rollout.split('if [[ "$skip_frontend" == "false" ]]; then', 1)[1]
+    frontend_container = terraform.split('resource "azurerm_container_app" "frontend"', 1)[1].split(
+        'resource "azapi_resource" "frontend_auth"',
+        1,
+    )[0]
+
+    assert "revision=$(az containerapp update \\\n" in update_helper
+    assert ") || return 1" in update_helper
+    assert 'wait_for_ready_revision "$app" "$revision" || return 1' in update_helper
+    assert 'if [[ "$old_rollout_secure" != "true" ]]; then' in recovery
+    assert "close_frontend_ingress" in recovery
+    assert "rollback_backend || recovery_failed=true" in recovery
+    assert "restore_app_rollout \\\n" in recovery
+    assert "|| recovery_failed=true" in recovery
+    assert "restore_frontend_auth" not in deploy
+    assert frontend_rollout.index("az containerapp auth microsoft update") < frontend_rollout.index(
+        '"DATAVIEWER_PROXY_KEY=secretref:${proxy_secret_name}"'
+    )
+    assert "verify_frontend_auth_enforced" in authenticated_rollout
+    assert "verify_anonymous_request_denied" in authenticated_rollout
+    assert '--header "X-MS-CLIENT-PRINCIPAL: ${forged_principal}"' in deploy
+    assert "302|401|403) return 0" in deploy
+    assert "DATAVIEWER_PROXY_KEY" not in frontend_container
+    assert 'resource "azapi_resource" "frontend_auth"' in terraform
+    assert 'unauthenticatedClientAction = "RedirectToLoginPage"' in terraform
+
+
 def test_browser_gate_cannot_reuse_live_services_or_resolve_dependencies() -> None:
     frontend = Path(__file__).resolve().parents[2] / "frontend"
     config = (frontend / "playwright.config.ts").read_text()
