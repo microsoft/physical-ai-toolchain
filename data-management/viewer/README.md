@@ -479,7 +479,9 @@ DATAVIEWER_AZURE_CLIENT_ID=<your-client-id>
 DATAVIEWER_SECURE_COOKIES=true
 ```
 
-Do not put the proxy credential in source, command output, Terraform outputs, or deployment logs. Rotate it by replacing both Container Apps secrets and creating paired frontend and backend revisions before directing traffic to either new revision.
+Do not put the proxy credential in source, command output, Terraform outputs, or deployment logs. [Container Apps secret updates](https://learn.microsoft.com/azure/container-apps/manage-secrets) do not create revisions or update values already loaded by running revisions.
+
+Rotate the Terraform-owned password on both apps first, then close frontend ingress, restart both active revisions, verify proof enforcement and anonymous denial, and reopen ingress. Keep ingress closed after any partial restart or failed verification. The [deployment specification](../specifications/viewer-deployment.specification.md#credential-rotation) defines the complete sequence.
 
 ### Other Authentication Modes
 

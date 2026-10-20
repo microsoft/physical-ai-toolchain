@@ -102,12 +102,13 @@ Terraform retains ownership of the Entra credential, so recovery does not create
 
 ## Credential Rotation
 
-Rotate the proxy credential as a paired operation:
+[Container Apps secrets are application-scoped](https://learn.microsoft.com/azure/container-apps/manage-secrets). Updating a secret does not create a revision or change the value loaded by an existing revision. Rotate the proxy credential through a reviewed maintenance operation:
 
-1. Replace `dataviewer-proxy-key` with the same new random value on both Container Apps.
-2. Create backend and frontend revisions that reference the updated secret.
-3. Wait for both revisions to become ready before changing traffic.
-4. Run the authenticated smoke test, including direct-backend rejection probes.
-5. Retire revisions that reference the previous credential.
+1. Run a Terraform plan that replaces `module.dataviewer[0].random_password.dataviewer_proxy_key[0]`. Confirm the plan changes the generated password and both Container App secret values without changing either active template.
+2. Apply the reviewed plan. Do not restart either app until both application-scoped secrets contain the new value; the running revisions continue using the previous loaded value.
+3. Disable frontend ingress and verify that it is closed.
+4. Restart the active backend and frontend revisions so both load the new value. Keep ingress closed if either restart or readiness check fails.
+5. Verify the backend and frontend revision identities, Easy Auth enforcement, the anonymous forged-principal denial, and direct-backend missing/incorrect-proof rejection.
+6. Re-enable frontend ingress and run the authenticated media and annotation smoke tests.
 
 Do not expose the credential through Terraform outputs, source files, shell tracing, deployment logs, or recovery commands.
