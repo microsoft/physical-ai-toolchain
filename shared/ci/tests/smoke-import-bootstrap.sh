@@ -113,3 +113,22 @@ run_case bad_hash '200,200' "$test_root/valid.tar.gz" "$(printf '%064d' 0)" 1 1
 run_case bad_archive '200,200' "$test_root/invalid.tar.gz" "$invalid_hash" 1 1
 
 echo 'uv bootstrap transfer and archive checks passed'
+
+uv() {
+    case "$1" in
+        venv) return 0 ;;
+        export) printf '%s\n' '-e ../data-management/dataset-io' ;;
+        --directory)
+            [[ "$2" == evaluation && "$3" == pip && "$4" == install ]]
+            [[ "$(cat)" == '-e ../data-management/dataset-io' ]]
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+run_probe() { [[ "$1" == /tmp/smoke-venv-evaluation/bin/python ]]; }
+
+project=evaluation
+domain=evaluation
+smoke_cpu
+echo 'CPU smoke installs exported local paths from the project directory'

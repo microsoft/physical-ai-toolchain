@@ -5,9 +5,18 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 
+import { type DraftSource, episodeDraftSource } from '@/lib/edit-draft-storage'
+import { useEpisodeStore } from '@/stores/episode-store'
 import type { EpisodeAnalysisRecord } from '@/types/api'
 
 interface LabelState {
+  sourceScopes: Record<number, DraftSource>
+  principalScopeId: string | null
+  draftHydrated: boolean
+  draftError: string | null
+  isSaving: boolean
+  contextGeneration: number
+  baseEtag: string | null
   /** Dataset whose labels currently hydrate this store */
   datasetId: string | null
   /** Available label options for the current dataset */
@@ -26,6 +35,7 @@ interface LabelState {
   editGeneration: number
   /** Stale-write conflict retained for explicit resolution */
   conflict: {
+    sourceChanged?: boolean
     currentEtag: string | null
     episodeIndex: number
     submittedLabels: string[]
@@ -34,7 +44,7 @@ interface LabelState {
 
 interface LabelActions {
   /** Reset dataset-scoped state when the selected dataset changes */
-  prepareDatasetLabels: (datasetId: string | null) => void
+  prepareDatasetLabels: (datasetId: string | null, principalScopeId?: string | null) => void
   /** Set available label options */
   setAvailableLabels: (labels: string[]) => void
   /** Add a new label option */
@@ -90,6 +100,13 @@ type LabelStore = LabelState & LabelActions
 export const DEFAULT_LABELS: string[] = ['SUCCESS', 'FAILURE', 'PARTIAL']
 
 const initialState: LabelState = {
+  sourceScopes: {},
+  principalScopeId: null,
+  draftHydrated: false,
+  draftError: null,
+  isSaving: false,
+  contextGeneration: 0,
+  baseEtag: null,
   datasetId: null,
   availableLabels: DEFAULT_LABELS,
   episodeLabels: {},
@@ -106,10 +123,17 @@ export const useLabelStore = create<LabelStore>()(
     (set, get) => ({
       ...initialState,
 
-      prepareDatasetLabels: (datasetId) => {
-        if (get().datasetId === datasetId) return
+      prepareDatasetLabels: (datasetId, principalScopeId = null) => {
+        if (get().datasetId === datasetId && get().principalScopeId === principalScopeId) return
         set(
           {
+            sourceScopes: {},
+            principalScopeId,
+            draftHydrated: false,
+            draftError: null,
+            isSaving: false,
+            contextGeneration: get().contextGeneration + 1,
+            baseEtag: null,
             datasetId,
             availableLabels: DEFAULT_LABELS,
             episodeLabels: {},
@@ -195,6 +219,7 @@ export const useLabelStore = create<LabelStore>()(
         }
         set(
           {
+            contextGeneration: get().contextGeneration + 1,
             datasetId,
             episodeLabels: parsed,
             savedEpisodeLabels: parsed,
@@ -262,8 +287,20 @@ export const useLabelStore = create<LabelStore>()(
 
       setEpisodeLabels: (episodeIndex, labels) => {
         const { episodeLabels } = get()
+        const episode = useEpisodeStore.getState()
+        const source =
+          episode.currentDatasetId === get().datasetId && episode.currentIndex === episodeIndex
+            ? episodeDraftSource(episode.currentEpisode)
+            : null
+        const wasClean =
+          JSON.stringify(episodeLabels[episodeIndex] ?? []) ===
+          JSON.stringify(get().savedEpisodeLabels[episodeIndex] ?? [])
         set(
           {
+            sourceScopes:
+              source && wasClean
+                ? { ...get().sourceScopes, [episodeIndex]: source }
+                : get().sourceScopes,
             episodeLabels: { ...episodeLabels, [episodeIndex]: labels },
             editGeneration: get().editGeneration + 1,
           },
@@ -340,14 +377,7 @@ export const useLabelStore = create<LabelStore>()(
         const updated = current.includes(label)
           ? current.filter((l) => l !== label)
           : [...current, label]
-        set(
-          {
-            episodeLabels: { ...episodeLabels, [episodeIndex]: updated },
-            editGeneration: get().editGeneration + 1,
-          },
-          false,
-          'toggleLabel',
-        )
+        get().setEpisodeLabels(episodeIndex, updated)
       },
 
       setFilterLabels: (labels) => {
@@ -367,7 +397,7 @@ export const useLabelStore = create<LabelStore>()(
       },
 
       reset: () => {
-        set(initialState, false, 'reset')
+        set({ ...initialState, contextGeneration: get().contextGeneration + 1 }, false, 'reset')
       },
     }),
     { name: 'label-store' },

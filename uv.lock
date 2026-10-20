@@ -2280,6 +2280,37 @@ wheels = [
 ]
 
 [[package]]
+name = "physical-ai-curation"
+version = "0.1.0"
+source = { editable = "data-management/curation" }
+dependencies = [
+    { name = "physical-ai-dataset-io" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", marker = "extra == 'api'", specifier = "==0.142.2" },
+    { name = "physical-ai-dataset-io", editable = "data-management/dataset-io" },
+    { name = "physical-ai-dataset-io", extras = ["parquet"], marker = "extra == 'parquet'", editable = "data-management/dataset-io" },
+    { name = "pydantic", specifier = "==2.13.5" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'api'", specifier = "==0.54.0" },
+]
+provides-extras = ["api", "parquet"]
+
+[[package]]
+name = "physical-ai-dataset-io"
+version = "0.1.0"
+source = { editable = "data-management/dataset-io" }
+
+[package.metadata]
+requires-dist = [
+    { name = "pandas", marker = "extra == 'parquet'", specifier = "==3.0.5" },
+    { name = "pyarrow", marker = "extra == 'parquet'", specifier = "==25.0.1" },
+]
+provides-extras = ["parquet"]
+
+[[package]]
 name = "physical-ai-toolchain"
 version = "0.8.0"
 source = { virtual = "." }
@@ -2296,6 +2327,8 @@ dev = [
     { name = "jsonschema", extra = ["format"] },
     { name = "matplotlib" },
     { name = "numpy" },
+    { name = "physical-ai-curation" },
+    { name = "physical-ai-dataset-io" },
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pytest" },
@@ -2323,6 +2356,8 @@ dev = [
     { name = "jsonschema", extras = ["format"], specifier = "==4.26.0" },
     { name = "matplotlib", specifier = "==3.11.2" },
     { name = "numpy", specifier = "==2.5.3" },
+    { name = "physical-ai-curation", editable = "data-management/curation" },
+    { name = "physical-ai-dataset-io", editable = "data-management/dataset-io" },
     { name = "pyarrow", specifier = "==25.0.1" },
     { name = "pydantic", specifier = "==2.13.5" },
     { name = "pytest", specifier = "==9.1.1" },

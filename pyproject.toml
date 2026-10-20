@@ -4,6 +4,10 @@ version = "0.8.0"
 description = "Physical AI Toolchain for Isaac Lab training"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+
+[project.urls]
+Repository = "https://github.com/microsoft/physical-ai-toolchain"
 
 [build-system]
 requires = ["hatchling"]
@@ -14,6 +18,8 @@ packages = ["training/rl"]
 
 [dependency-groups]
 dev = [
+    "physical-ai-curation==0.1.0",
+    "physical-ai-dataset-io==0.1.0",
     "hypothesis==6.168.3",
     "numpy==2.5.3",
     "ruff==0.16.9",
@@ -46,6 +52,10 @@ override-dependencies = [
 ]
 package = false
 
+[tool.uv.sources]
+physical-ai-curation = { path = "data-management/curation", editable = true }
+physical-ai-dataset-io = { path = "data-management/dataset-io", editable = true }
+
 [tool.pytest.ini_options]
 testpaths = [
     "tests",
@@ -54,7 +64,7 @@ testpaths = [
     "fleet-deployment/inference/tests",
     "shared/ci/tests",
 ]
-pythonpath = [".", "data-management/tools"]
+pythonpath = [".", "data-management/tools", "data-management/curation", "data-management/dataset-io"]
 python_files = ["test_*.py", "fuzz_harness.py"]
 addopts = [
     "-ra",

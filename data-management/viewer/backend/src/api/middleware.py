@@ -2,9 +2,26 @@
 
 from __future__ import annotations
 
+import re
 from typing import ClassVar
 
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import JSONResponse as _StarletteJSONResponse
+from starlette.types import Receive, Scope, Send
+
+
+class EpisodeCompressionMiddleware(GZipMiddleware):
+    """Compress episode reads without buffering media streams or changing mutations."""
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] == "http"
+            and scope["method"] == "GET"
+            and re.fullmatch(r"/api/datasets/[^/]+/episodes/[0-9]+", scope["path"])
+        ):
+            await super().__call__(scope, receive, send)
+        else:
+            await self.app(scope, receive, send)
 
 
 class SecurityHeadersMiddleware:

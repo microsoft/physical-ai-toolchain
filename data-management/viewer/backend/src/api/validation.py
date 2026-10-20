@@ -1,49 +1,38 @@
 """Input validation dependencies for the dataviewer API."""
 
+from __future__ import annotations
+
 import os
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from fastapi import Header, HTTPException, Query
 from fastapi import Path as PathParam
-from pydantic import BaseModel, model_validator
+from physical_ai_curation.models import SanitizedModel as SanitizedModel
+from physical_ai_curation.models import sanitize_user_string as sanitize_user_string
+
+__all__ = [
+    "SAFE_CAMERA_NAME_PATTERN",
+    "SAFE_DATASET_ID_PATTERN",
+    "SanitizedModel",
+    "path_int_param",
+    "path_string_param",
+    "query_bool_param",
+    "query_csv_ints_param",
+    "query_int_param",
+    "query_string_param",
+    "range_header_param",
+    "sanitize_user_string",
+    "validate_path_containment",
+    "validate_safe_string",
+]
 
 SAFE_DATASET_ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9._\- ]{0,254}$"
 SAFE_CAMERA_NAME_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
 
 _DATASET_ID_RE = re.compile(SAFE_DATASET_ID_PATTERN)
 _CAMERA_NAME_RE = re.compile(SAFE_CAMERA_NAME_PATTERN)
-
-
-def sanitize_user_string(value: str) -> str:
-    """Strip CR/LF characters from user-provided strings."""
-    return value.replace("\r", "").replace("\n", "")
-
-
-def _sanitize_nested_value(value: Any) -> Any:
-    if isinstance(value, str):
-        return sanitize_user_string(value)
-    if isinstance(value, list):
-        return [_sanitize_nested_value(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_sanitize_nested_value(item) for item in value)
-    if isinstance(value, set):
-        return {_sanitize_nested_value(item) for item in value}
-    if isinstance(value, dict):
-        return {_sanitize_nested_value(key): _sanitize_nested_value(item) for key, item in value.items()}
-    return value
-
-
-class SanitizedModel(BaseModel):
-    """Pydantic base model that strips CR/LF from nested string values."""
-
-    @model_validator(mode="after")
-    def sanitize_strings(self) -> "SanitizedModel":
-        for field_name in type(self).model_fields:
-            object.__setattr__(self, field_name, _sanitize_nested_value(getattr(self, field_name)))
-        return self
 
 
 def validate_safe_string(

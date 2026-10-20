@@ -227,6 +227,71 @@ class TestRunTraining:
         assert "exit code 2" in str(exc.value)
 
 
+class TestRunTrainingTracking:
+    def _capture(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
+        captured = {}
+
+        def fake_run(cmd: list[str], check: bool = False) -> SimpleNamespace:
+            captured["cmd"] = cmd
+            return SimpleNamespace(returncode=0)
+
+        monkeypatch.setattr(_MOD.subprocess, "run", fake_run)
+        return captured
+
+    def test_forwards_backend_and_model_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured = self._capture(monkeypatch)
+        args = SimpleNamespace(
+            task="Walk",
+            num_envs=None,
+            max_iterations=None,
+            headless=True,
+            checkpoint=None,
+            tracking_backend="mlflow",
+            disable_mlflow=False,
+            register_checkpoint="walk-policy",
+        )
+        _MOD._run_training(args=args, hydra_args=[])
+        cmd = captured["cmd"]
+        assert cmd[cmd.index("--tracking_backend") + 1] == "mlflow"
+        assert cmd[cmd.index("--register_checkpoint") + 1] == "walk-policy"
+
+    def test_disable_mlflow_forwards_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured = self._capture(monkeypatch)
+        args = SimpleNamespace(
+            task=None,
+            num_envs=None,
+            max_iterations=None,
+            headless=False,
+            checkpoint=None,
+            tracking_backend="azureml",
+            disable_mlflow=True,
+            register_checkpoint=None,
+        )
+        _MOD._run_training(args=args, hydra_args=[])
+        cmd = captured["cmd"]
+        assert cmd[cmd.index("--tracking_backend") + 1] == "none"
+        assert "--register_checkpoint" not in cmd
+
+
+class TestInitializeMlflowBackend:
+    def test_mlflow_backend_uses_server_uri(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow.local:5000")
+        bootstrap = MagicMock()
+        monkeypatch.setattr(_MOD, "bootstrap_azure_ml", bootstrap)
+        args = SimpleNamespace(disable_mlflow=False, tracking_backend="mlflow", experiment_name=None, task="Walk")
+        ctx, name = _MOD._initialize_mlflow_context(args)
+        assert isinstance(ctx, _MOD.MLflowTracking)
+        assert ctx.tracking_uri == "http://mlflow.local:5000"
+        assert ctx.experiment_name == name == "isaaclab-rsl-rl-Walk"
+        bootstrap.assert_not_called()
+
+    def test_mlflow_backend_requires_uri(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+        args = SimpleNamespace(disable_mlflow=False, tracking_backend="mlflow", experiment_name=None, task=None)
+        with pytest.raises(_MOD.TrackingConfigError, match="MLFLOW_TRACKING_URI"):
+            _MOD._initialize_mlflow_context(args)
+
+
 class TestRunSmokeTest:
     def test_invokes_smoke(self, monkeypatch):
         fake_module = ModuleType("training.rl.scripts.smoke_test_azure")
@@ -259,10 +324,18 @@ class TestValidateMlflowFlags:
             _MOD._validate_mlflow_flags(args)
         assert "--checkpoint-uri requires MLflow" in str(exc.value)
 
+    def test_registration_requires_tracking(self) -> None:
+        args = SimpleNamespace(
+            disable_mlflow=False, tracking_backend="none", checkpoint_uri=None, register_checkpoint="m"
+        )
+        with pytest.raises(SystemExit) as exc:
+            _MOD._validate_mlflow_flags(args)
+        assert "--register-checkpoint requires MLflow" in str(exc.value)
+
 
 class TestMain:
     def _patch_dependencies(self, monkeypatch):
-        monkeypatch.setattr(_MOD, "_ensure_dependencies", lambda: None)
+        monkeypatch.setattr(_MOD, "_ensure_dependencies", lambda *args, **kwargs: None)
 
     def test_smoke_mode(self, monkeypatch):
         self._patch_dependencies(monkeypatch)
@@ -293,7 +366,7 @@ class TestMain:
         from contextlib import contextmanager
 
         @contextmanager
-        def fake_ckpt(uri):
+        def fake_ckpt(uri, tracking=None):
             yield str(tmp_path / "ckpt")
 
         monkeypatch.setattr(_MOD, "_materialized_checkpoint", fake_ckpt)

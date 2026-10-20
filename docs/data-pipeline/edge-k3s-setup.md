@@ -2,7 +2,7 @@
 title: Ubuntu HiL Host and K3s Setup
 description: Prepare Ubuntu and install one owned local K3s compute plane for the progressive T3 HiL journey.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-29
+ms.date: 2026-10-16
 ms.topic: how-to
 ---
 
@@ -61,7 +61,15 @@ The script:
 * Creates one current-user kubeconfig with mode `0600`
 * Verifies the explicit context, node identity, version, and readiness
 
-Rerunning the same target verifies owned state. A changed or foreign target stops before mutation.
+Rerunning the same target verifies owned state. A changed or foreign target stops before mutation: when the managed configuration of an existing node would change, the script prints the difference and stops unless you pass `--allow-config-change`. Without `--node-name`, an existing node keeps its registered name.
+
+### Upgrade K3s
+
+`EDGE_K3S_VERSION` in `data-pipeline/setup/defaults.conf` pins the release. When the installed release is older, rerunning the script upgrades the node in place, one minor version at a time, through the releases listed in `EDGE_K3S_UPGRADE_STEPS`, because Kubernetes can't skip minor versions. The preview lists the planned release steps. A newer installed release is never downgraded.
+
+Before changing anything, the script downloads every release and checks it against its pinned SHA-256, so a failed download leaves the node and its configuration as they were. It then backs up the datastore: an etcd snapshot, or a copy of the SQLite database, token, and certificates under `server/db/upgrade-backups` in the K3s data directory.
+
+After each release starts, the script waits for the API, the node, and every kube-system Deployment and DaemonSet to be ready on two consecutive checks before it installs the next release. `EDGE_K3S_WORKLOAD_TIMEOUT_SECONDS` bounds that wait at 300 seconds by default; raise it on hosts with slow image pulls. Configuration drop-ins under `/etc/rancher/k3s/config.yaml.d`, such as the Arc workload identity and NVIDIA runtime settings, carry over unchanged.
 
 ## Connect to Azure Arc
 

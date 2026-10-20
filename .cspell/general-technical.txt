@@ -202,6 +202,7 @@ clickstream
 clickthrough
 Clis
 cloneable
+closefd
 cloudadmin
 cloudamize
 cloudera
@@ -453,6 +454,7 @@ fileshares
 filesystem
 Finalizer
 firewalls
+fixturenames
 flatdict
 flatmap
 flexbox
@@ -473,6 +475,7 @@ fromarray
 frontend
 frontends
 frontmatter
+fspath
 fullstack
 fulltext
 fuser
@@ -853,6 +856,7 @@ nodejs
 nodesource
 nodistro
 nojekyll
+nonblock
 noncompliance
 noncompliant
 nosql
@@ -1100,6 +1104,7 @@ rdbms
 rdma
 reactjs
 readall
+readback
 readonly
 realtime
 rearchitect
@@ -1565,6 +1570,8 @@ wwwroot
 xamarin
 xbox
 xcode
+xffprivate
+xhigh
 xlat
 xlong
 xlsx
@@ -1832,3 +1839,23 @@ textareas
 unclipped
 unreviewed
 zoomable
+
+# Local OSMO profile: PostgreSQL, Valkey, RustFS, and jq terms
+appendonly
+datname
+isready
+pgdata
+pgdatabase
+pghost
+pguser
+psqlrc
+rediscli
+requirepass
+rolname
+rustfs
+slurpfile
+urandom
+valkey
+envoyproxy
+unpadded
+urlsafe

@@ -1,8 +1,14 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useDataviewerShellState } from '@/hooks/use-dataviewer-shell-state'
-import { useDatasetStore } from '@/stores'
+import {
+  useAnnotationStore,
+  useDatasetStore,
+  useEditStore,
+  useEpisodeStore,
+  useLabelStore,
+} from '@/stores'
 import type { DatasetInfo } from '@/types'
 
 const { mockEnableDiagnostics, mockDisableDiagnostics, mockIsDiagnosticsEnabled } = vi.hoisted(
@@ -45,12 +51,72 @@ describe('useDataviewerShellState', () => {
 
   beforeEach(() => {
     useDatasetStore.getState().reset()
+    useAnnotationStore.getState().clear()
+    useEditStore.getState().clear()
+    useLabelStore.getState().reset()
     mockEnableDiagnostics.mockClear()
     mockDisableDiagnostics.mockClear()
     mockIsDiagnosticsEnabled.mockReturnValue(false)
   })
 
-  it('selects the first available dataset and keeps the dataset store in sync', async () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('protects every navigation entry point while annotations are dirty', async () => {
+    const confirm = vi.fn(() => false)
+    vi.stubGlobal('confirm', confirm)
+    const { result } = renderHook(() => useDataviewerShellState({ datasets }))
+    act(() => result.current.setDatasetId('dataset-a'))
+    await waitFor(() => expect(result.current.isWarmingCache).toBe(false))
+    act(() => result.current.setSelectedEpisode(1))
+    act(() => {
+      useAnnotationStore.getState().initializeAnnotation('principal-one')
+      useAnnotationStore.getState().updateNotes('Unsaved')
+    })
+    act(() => result.current.handlePreviousEpisode())
+    expect(result.current.selectedEpisode).toBe(1)
+    act(() => result.current.handleNextEpisode())
+    expect(result.current.selectedEpisode).toBe(1)
+    act(() => result.current.setSelectedEpisode(3))
+    expect(result.current.selectedEpisode).toBe(1)
+    act(() => result.current.setDatasetId('dataset-b'))
+    expect(result.current.datasetId).toBe('dataset-a')
+    expect(confirm).toHaveBeenCalledTimes(4)
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('(annotation changes)'))
+    expect(useAnnotationStore.getState().currentAnnotation?.notes).toBe('Unsaved')
+  })
+
+  it('lets episode navigation leave retained label drafts on other episodes but guards dataset switches', async () => {
+    const confirm = vi.fn(() => false)
+    vi.stubGlobal('confirm', confirm)
+    const { result } = renderHook(() => useDataviewerShellState({ datasets }))
+    act(() => result.current.setDatasetId('dataset-a'))
+    await waitFor(() => expect(result.current.isWarmingCache).toBe(false))
+    act(() => {
+      useEpisodeStore.setState({ currentIndex: 3 })
+      useLabelStore.setState({ episodeLabels: { 1: ['PARTIAL'] }, savedEpisodeLabels: {} })
+    })
+    act(() => result.current.setSelectedEpisode(2))
+    expect(result.current.selectedEpisode).toBe(2)
+    expect(confirm).not.toHaveBeenCalled()
+    act(() => result.current.setDatasetId('dataset-b'))
+    expect(result.current.datasetId).toBe('dataset-a')
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('label changes for episode 1'))
+  })
+
+  it('warns before browser unload with dirty labels and removes the listener on unmount', async () => {
+    const { result, unmount } = renderHook(() => useDataviewerShellState({ datasets }))
+    await waitFor(() => expect(result.current.isWarmingCache).toBe(false))
+    act(() => useLabelStore.getState().setEpisodeLabels(0, ['FAILURE']))
+    const event = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    unmount()
+    const after = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(after)
+    expect(after.defaultPrevented).toBe(false)
+  })
+
+  it('waits for explicit dataset selection and keeps the dataset store in sync', async () => {
     const { result } = renderHook(() =>
       useDataviewerShellState({
         datasets,
@@ -62,6 +128,9 @@ describe('useDataviewerShellState', () => {
       }),
     )
 
+    expect(result.current.datasetId).toBe('')
+    expect(useDatasetStore.getState().currentDataset).toBeNull()
+    act(() => result.current.setDatasetId('dataset-a'))
     expect(result.current.datasetId).toBe('dataset-a')
     expect(useDatasetStore.getState().datasets).toHaveLength(2)
     expect(useDatasetStore.getState().currentDataset?.id).toBe('dataset-a')
@@ -71,7 +140,7 @@ describe('useDataviewerShellState', () => {
     await waitFor(() => expect(result.current.isWarmingCache).toBe(false))
   })
 
-  it('resets to the next available dataset when the selected dataset disappears and toggles diagnostics', async () => {
+  it('returns to explicit selection when the selected dataset disappears and toggles diagnostics', async () => {
     const { result, rerender } = renderHook(
       ({ nextDatasets }) =>
         useDataviewerShellState({
@@ -101,7 +170,7 @@ describe('useDataviewerShellState', () => {
       })
     })
 
-    await waitFor(() => expect(result.current.datasetId).toBe('dataset-a'))
+    await waitFor(() => expect(result.current.datasetId).toBe(''))
     expect(result.current.selectedEpisode).toBe(0)
 
     act(() => {

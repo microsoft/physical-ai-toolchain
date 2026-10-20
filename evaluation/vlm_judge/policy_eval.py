@@ -170,6 +170,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         elapsed / max(1, n_ok),
         output_path,
     )
+    if args.require_all and n_fail:
+        _LOGGER.error("%d of %d rollouts could not be judged", n_fail, n_ok + n_fail)
+        return 1
     return 0 if n_ok > 0 else 1
 
 
@@ -217,6 +220,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--n-frames", type=int, default=12)
     parser.add_argument("--cache-dir", default="outputs/vlm-judge/cache")
     parser.add_argument("--force", action="store_true", help="Ignore the cache")
+    parser.add_argument(
+        "--require-all",
+        action="store_true",
+        help="Exit 1 when any selected rollout cannot be judged; the other verdicts are still written",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",

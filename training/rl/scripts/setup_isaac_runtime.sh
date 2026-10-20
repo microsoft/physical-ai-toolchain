@@ -54,21 +54,23 @@ if command -v uv &>/dev/null; then
   # replace the container's and split-load the package across the prebundle and
   # site-packages, breaking skrl. Therefore, torch/CUDA/nvidia-cu* are excluded via
   # regex and every other locked package is installed with --no-deps. pynvml/nvidia-ml-py
-  # are pure-Python NVML bindings and are intentionally retained.
+  # are pure-Python NVML bindings and are intentionally retained. --no-config keeps uv from
+  # reading the image's working-directory workspace (/workspace/isaaclab), whose overrides
+  # would replace the locked pins with newer releases.
   isaac_provided_re='^(torch|torchvision|triton|cuda-bindings|cuda-pathfinder|cuda-toolkit|nvidia-(cu|nccl|nvjitlink|nvshmem|nvtx)[a-z0-9.-]*)=='
   reqs_file="$(mktemp)"
   uv export --frozen --no-hashes --no-emit-project --project "${ISAAC_PROJECT_DIR}" \
     | grep -Ev "${isaac_provided_re}" >"${reqs_file}"
   runtime_provenance_args=()
   if [[ -n "${VIRTUAL_ENV:-}" ]]; then
-    uv pip install --no-cache-dir --no-deps --reinstall --requirement "${reqs_file}"
+    uv pip install --no-config --no-cache-dir --no-deps --reinstall --requirement "${reqs_file}"
   elif [[ -w "$("${python_cmd[@]}" -c 'import site; print(site.getsitepackages()[0])')" ]]; then
-    uv pip install --no-cache-dir --no-deps --reinstall --system --requirement "${reqs_file}"
+    uv pip install --no-config --no-cache-dir --no-deps --reinstall --system --requirement "${reqs_file}"
   else
     runtime_site_packages="${ISAAC_RUNTIME_SITE_PACKAGES:-/tmp/isaac-runtime-site-packages}"
     rm -rf "${runtime_site_packages}"
     mkdir -p "${runtime_site_packages}"
-    uv pip install --no-cache-dir --no-deps --reinstall \
+    uv pip install --no-config --no-cache-dir --no-deps --reinstall \
       --target "${runtime_site_packages}" --requirement "${reqs_file}"
     export PYTHONPATH="${runtime_site_packages}:${PYTHONPATH}"
     runtime_provenance_args=(--install-root "${runtime_site_packages}")

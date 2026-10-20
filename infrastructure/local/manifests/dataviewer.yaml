@@ -1,0 +1,209 @@
+# Dataviewer for the local profile: the backend reads and writes the host datasets directory as its owner,
+# and the frontend serves the app and proxies /api to the backend. Authentication is off because only this
+# host reaches the ClusterIP, kubectl proxy, or a port-forward. The Azure Blob values stay empty unless
+# 04-deploy-dataviewer.sh enables the Blob option, which lists Blob datasets beside the local ones.
+# Rendered by 04-deploy-dataviewer.sh, which substitutes only LOCAL_ placeholders.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dataviewer-backend
+  namespace: ${LOCAL_DATAVIEWER_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: dataviewer-backend
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+  annotations:
+    azure.workload.identity/client-id: "${LOCAL_DATAVIEWER_AZURE_CLIENT_ID}"
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dataviewer-backend
+  namespace: ${LOCAL_DATAVIEWER_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: dataviewer-backend
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+data:
+  DATAVIEWER_AUTH_DISABLED: "true"
+  STORAGE_BACKEND: ${LOCAL_DATAVIEWER_STORAGE_BACKEND}
+  DATA_DIR: /data
+  AZURE_STORAGE_ACCOUNT_NAME: "${LOCAL_DATAVIEWER_AZURE_STORAGE_ACCOUNT}"
+  AZURE_STORAGE_DATASET_CONTAINER: "${LOCAL_DATAVIEWER_AZURE_DATASET_CONTAINER}"
+  AZURE_STORAGE_ANNOTATION_CONTAINER: "${LOCAL_DATAVIEWER_AZURE_ANNOTATION_CONTAINER}"
+  HOME: /tmp
+  LOG_LEVEL: info
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dataviewer-backend
+  namespace: ${LOCAL_DATAVIEWER_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: dataviewer-backend
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: dataviewer-backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dataviewer-backend
+  namespace: ${LOCAL_DATAVIEWER_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: dataviewer-backend
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  replicas: 1
+  # One writer on the datasets directory at a time.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dataviewer-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dataviewer-backend
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+        azure.workload.identity/use: "${LOCAL_DATAVIEWER_WORKLOAD_IDENTITY}"
+    spec:
+      serviceAccountName: dataviewer-backend
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # The datasets directory's owner, so every file the dataviewer writes stays yours.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: ${LOCAL_DATAVIEWER_UID}
+        runAsGroup: ${LOCAL_DATAVIEWER_GID}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backend
+          image: ${LOCAL_DATAVIEWER_BACKEND_IMAGE}
+          envFrom:
+            - configMapRef:
+                name: dataviewer-backend
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              memory: 8Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: datasets
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: datasets
+          hostPath:
+            path: ${LOCAL_DATASETS_DIR}
+            type: Directory
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dataviewer
+  namespace: ${LOCAL_DATAVIEWER_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: dataviewer-frontend
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  type: ClusterIP
+  clusterIP: ${LOCAL_DATAVIEWER_CLUSTER_IP}
+  selector:
+    app.kubernetes.io/name: dataviewer-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dataviewer-frontend
+  namespace: ${LOCAL_DATAVIEWER_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: dataviewer-frontend
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dataviewer-frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dataviewer-frontend
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # The nginx-unprivileged image's nginx user, numeric so the kubelet can verify it is not root.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: frontend
+          image: ${LOCAL_DATAVIEWER_FRONTEND_IMAGE}
+          env:
+            # nginx resolves the backend per request, so it needs cluster DNS and a fully qualified name.
+            - name: NGINX_BACKEND_HOST
+              value: dataviewer-backend.${LOCAL_DATAVIEWER_NAMESPACE}.svc.cluster.local:8000
+            - name: NGINX_BACKEND_SCHEME
+              value: http
+            - name: NGINX_RESOLVER
+              value: ${LOCAL_CLUSTER_DNS_IP}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

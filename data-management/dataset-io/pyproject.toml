@@ -1,0 +1,20 @@
+[project]
+name = "physical-ai-dataset-io"
+version = "0.1.0"
+description = "LeRobot dataset metadata and confined local media paths"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/microsoft/physical-ai-toolchain"
+
+[project.optional-dependencies]
+parquet = ["pyarrow==25.0.1", "pandas==3.0.5"]
+
+[build-system]
+requires = ["setuptools>=83.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["physical_ai_dataset_io*"]

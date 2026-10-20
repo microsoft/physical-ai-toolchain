@@ -5,26 +5,16 @@ All storage adapters must implement this interface to support
 annotation persistence across different storage backends.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+
+from physical_ai_curation.storage import RevisionConflictError as RevisionConflictError
+from physical_ai_curation.storage import VersionedValue as VersionedValue
 
 from ..models.annotations import EpisodeAnnotationFile
 
-
-@dataclass(frozen=True)
-class VersionedValue[T]:
-    """A stored value and its strong revision validator."""
-
-    value: T | None
-    etag: str | None
-
-
-class RevisionConflictError(Exception):
-    """A conditional storage operation did not match the current revision."""
-
-    def __init__(self, current_etag: str | None) -> None:
-        super().__init__("Resource revision precondition failed")
-        self.current_etag = current_etag
+__all__ = ["RevisionConflictError", "StorageAdapter", "StorageError", "VersionedValue"]
 
 
 class StorageAdapter(ABC):
@@ -51,6 +41,7 @@ class StorageAdapter(ABC):
         episode_index: int,
         annotation: EpisodeAnnotationFile,
         *,
+        resource_scope: str | None = None,
         if_match: str | None = None,
         if_none_match: bool = False,
     ) -> str:
@@ -71,8 +62,12 @@ class StorageAdapter(ABC):
         self,
         dataset_id: str,
         episode_index: int,
+        *,
+        resource_scope: str | None = None,
     ) -> VersionedValue[EpisodeAnnotationFile]:
         """Retrieve an annotation with its revision validator."""
+        if resource_scope is not None:
+            raise StorageError("This storage backend does not support scoped edit resources")
         return VersionedValue(value=await self.get_annotation(dataset_id, episode_index), etag=None)
 
     @abstractmethod
@@ -87,6 +82,10 @@ class StorageAdapter(ABC):
             List of episode indices that have annotations.
         """
         pass
+
+    async def list_annotation_revisions(self, dataset_id: str) -> dict[int, str | None]:
+        """List annotated episodes with a cheap change marker; None means content must be reread."""
+        return dict.fromkeys(await self.list_annotated_episodes(dataset_id))
 
     @abstractmethod
     async def delete_annotation(

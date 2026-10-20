@@ -344,6 +344,28 @@ uv run pytest -vv -s -m e2e tests/e2e/test_e2e_osmo_rl_lifecycle.py
 uv run pytest -vv -s -m e2e tests/e2e/
 ```
 
+#### Local Platform Profile
+
+`PLATFORM_PROFILE=local` runs the OSMO tests against the [local orchestration profile](infrastructure/local/README.md) on one GPU workstation, with no Azure value. Each test resolves the profile through `scripts/platform-profile.sh`, as the submit scripts do, and points the OSMO CLI and `kubectl` at the profile's login and kubeconfig. Azure ML and Blob tests skip.
+
+| Requirement        | Details                                                                                                                                                                                                                                                                                  |
+|--------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Local stack        | `infrastructure/local` deployed through MLflow, with allocatable GPUs on the node.                                                                                                                                                                                                       |
+| OSMO CLI           | Logged in to the local OSMO through `infrastructure/local/connect-osmo-cli.sh`.                                                                                                                                                                                                          |
+| Datasets           | `ur10e-gear-to-bin-learner` ([derive it](data-management/tools/README.md#derive-the-ur10e-learner-dataset)) and `so101-learner` ([derive it](infrastructure/local/README.md#-datasets)) in the data root, or other LeRobot datasets named by `E2E_IL_DATASET` and `E2E_SMOLVLA_DATASET`. |
+| Docker with Buildx | Builds the policy carrier images that the tests push to the local registry.                                                                                                                                                                                                              |
+
+The local scenarios gate more than the Azure smoke tests do:
+
+- The RL lifecycle trains `Isaac-Velocity-Flat-Anymal-C-v0`, whose episodes end when the robot falls. The gated evaluation must reach a 0.7 success rate from the registered checkpoint and from its carrier image.
+- The IL (ACT) and SmolVLA lifecycles train on the data-root datasets. Their evaluations must report schema-valid finite metrics for every episode, and the trained policy must beat its untrained baseline on action error. The carrier image must reproduce the checkpoint's action error exactly.
+
+```bash
+PLATFORM_PROFILE=local uv run pytest -vv -s -m e2e tests/e2e/test_e2e_osmo_rl_lifecycle.py
+PLATFORM_PROFILE=local uv run pytest -vv -s -m e2e tests/e2e/test_e2e_osmo_il_lifecycle.py
+PLATFORM_PROFILE=local uv run pytest -vv -s -m e2e tests/e2e/test_e2e_osmo_vla_finetune.py
+```
+
 #### Bug Fix PR Requirements
 
 When submitting a bug fix:

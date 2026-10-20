@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -24,9 +25,27 @@ from tests.e2e._environment import (
     derive_compute_target,
     read_local_env,
 )
+from tests.e2e._platform import (
+    AzurePlatform,
+    E2EPlatform,
+    LocalPlatform,
+    mlflow_server_reachable,
+)
+from tests.e2e._profile import (
+    LOCAL_PROFILE,
+    PROFILE_VARIABLE,
+    PlatformProfile,
+    PlatformProfileError,
+    osmo_login_url,
+    profile_selected,
+    resolve_platform_profile,
+    selected_profile_name,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HF_TOKEN_BEFORE = pytest.StashKey[str | None]()
+# Fixtures that reach Azure ML or Azure Blob Storage; tests that use them run only under the azure profile.
+_AZURE_ONLY_FIXTURES = frozenset({"aml_workspace", "storage_account"})
 
 TFVARS_FALLBACK_OUTPUT_KEYS = ("resource_group", "azureml_workspace", "aks_cluster", "storage_account")
 AKS_RESOURCE_ID = re.compile(
@@ -45,6 +64,12 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_setup(item: pytest.Item) -> None:
+    # Skip Azure tests under the local profile before any gate or fixture runs, so none reaches Azure.
+    azure_only = sorted(_AZURE_ONLY_FIXTURES.intersection(getattr(item, "fixturenames", ())))
+    if azure_only and profile_selected(LOCAL_PROFILE):
+        pytest.skip(
+            f"Needs the azure platform profile for {', '.join(azure_only)}; {PROFILE_VARIABLE} is {LOCAL_PROFILE}"
+        )
     if item.get_closest_marker("requires_hf_token") is None:
         return
     # Match scripts/lib/common.sh, which sources the untracked .env.local over the environment.
@@ -268,6 +293,49 @@ def repo_root() -> Path:
     return root
 
 
+def _skip_under_local_profile(what: str) -> None:
+    try:
+        name = selected_profile_name()
+    except PlatformProfileError as error:
+        pytest.fail(str(error), pytrace=False)
+    if name == LOCAL_PROFILE:
+        pytest.skip(f"{what} needs the azure platform profile; {PROFILE_VARIABLE} is {LOCAL_PROFILE}")
+
+
+@pytest.fixture(scope="session")
+def platform_profile(repo_root: Path) -> Iterator[PlatformProfile]:
+    """Resolve the ``PLATFORM_PROFILE`` profile through ``scripts/platform-profile.sh``.
+
+    Under the local profile, every OSMO CLI and kubectl call in the session targets the profile's
+    login and kubeconfig, as the submit scripts do, so no test reaches another cluster.
+    """
+    try:
+        profile = resolve_platform_profile(repo_root)
+    except PlatformProfileError as error:
+        pytest.fail(str(error), pytrace=False)
+    with pytest.MonkeyPatch.context() as patch:
+        for name, value in profile.client_environment().items():
+            patch.setenv(name, value)
+        yield profile
+
+
+@pytest.fixture(scope="session")
+def e2e_platform(request: pytest.FixtureRequest, repo_root: Path, platform_profile: PlatformProfile) -> E2EPlatform:
+    """Return the tracking, model registry, and carrier services of the selected platform profile."""
+    if platform_profile.is_local:
+        if not mlflow_server_reachable(platform_profile.mlflow_host_uri):
+            pytest.skip(
+                f"The local MLflow server at {platform_profile.mlflow_host_uri} is unreachable; "
+                "deploy it with infrastructure/local/03-deploy-mlflow.sh"
+            )
+        return LocalPlatform(profile=platform_profile, repo_root=repo_root)
+    return AzurePlatform(
+        profile=platform_profile,
+        workspace=request.getfixturevalue("aml_workspace"),
+        repo_root=repo_root,
+    )
+
+
 def _subscription_id_from_az_cli() -> str:
     if shutil.which("az") is None:
         pytest.skip("Azure CLI is not installed")
@@ -331,8 +399,9 @@ def aml_workspace(repo_root: Path) -> AzureMLWorkspace:
     Resolves the AML workspace to use for tests, skipping if it cannot be determined or accessed.
     With ``E2E_ENVIRONMENT`` set, the workspace comes only from env vars and the named environment
     bundle; otherwise it comes from env vars, Terraform outputs, or terraform.tfvars. The workspace
-    is validated for accessibility via the Azure CLI.
+    is validated for accessibility via the Azure CLI. Skips under the local platform profile.
     """
+    _skip_under_local_profile("Azure ML")
     subscription_id, resource_group, workspace_name = _resolve_workspace_identity(repo_root)
 
     result = run_command(
@@ -368,8 +437,10 @@ def storage_account(repo_root: Path) -> str:
 
     Resolution order: ``E2E_VLA_STORAGE_ACCOUNT`` env var, ``AZURE_STORAGE_ACCOUNT_NAME`` env var
     (which a selected ``E2E_ENVIRONMENT`` bundle may supply), then the ``storage_account`` Terraform
-    output (or its terraform.tfvars fallback) when no named environment is selected.
+    output (or its terraform.tfvars fallback) when no named environment is selected. Skips under the
+    local platform profile, whose datasets live in the data root.
     """
+    _skip_under_local_profile("Azure Blob dataset staging")
     account = _resolve_storage_account(repo_root)
     if not account:
         pytest.skip("Storage account is not configured in env vars, Terraform outputs, or terraform.tfvars")
@@ -462,10 +533,20 @@ def _attached_aks_power_state(compute: dict[str, Any], repo_root: Path) -> str |
 
 
 @pytest.fixture(scope="session")
-def ensure_osmo_cli_available(repo_root: Path) -> None:
-    """Ensures OSMO CLI is available and authenticated, skipping tests if not."""
+def ensure_osmo_cli_available(repo_root: Path, platform_profile: PlatformProfile) -> None:
+    """Ensures OSMO CLI is available and authenticated, skipping tests if not.
+
+    Under the local profile, the login must also target the profile's OSMO service.
+    """
     if shutil.which("osmo") is None:
         pytest.skip("OSMO CLI is not installed")
+    if platform_profile.osmo_config_dir:
+        login_url = osmo_login_url(platform_profile.osmo_config_dir)
+        if (login_url or "").rstrip("/") != platform_profile.osmo_url.rstrip("/"):
+            pytest.skip(
+                f"The OSMO CLI in {platform_profile.osmo_config_dir} is logged in to {login_url or 'no service'}, "
+                f"not {platform_profile.osmo_url}; run infrastructure/local/connect-osmo-cli.sh"
+            )
 
     args = ["osmo", "workflow", "list", "--count", "1", "--format-type", "json"]
     result = run_command(args, cwd=repo_root)
@@ -495,32 +576,31 @@ def _is_scalable_gpu_node_pool(pool: Any) -> bool:
     return isinstance(vm_size, str) and _is_gpu_vm_size(vm_size)
 
 
+def _node_has_gpu(item: Any) -> bool:
+    """Return whether a node advertises GPUs, by GPU feature discovery's label or its allocatable devices."""
+    if not isinstance(item, dict):
+        return False
+    metadata = item.get("metadata")
+    labels = metadata.get("labels") if isinstance(metadata, dict) else None
+    if isinstance(labels, dict) and labels.get("nvidia.com/gpu.present") == "true":
+        return True
+    status = item.get("status")
+    allocatable = status.get("allocatable") if isinstance(status, dict) else None
+    count = allocatable.get("nvidia.com/gpu") if isinstance(allocatable, dict) else None
+    return isinstance(count, str) and count.isdigit() and int(count) > 0
+
+
 def _cluster_has_present_gpu_node(repo_root: Path) -> bool:
     """Returns whether the cluster currently has a registered GPU node."""
     if shutil.which("kubectl") is None:
         return False
 
-    result = run_command(
-        ["kubectl", "get", "nodes", "-l", "nvidia.com/gpu.present=true", "-o", "json"],
-        cwd=repo_root,
-    )
+    result = run_command(["kubectl", "get", "nodes", "-o", "json"], cwd=repo_root)
     if result.returncode != 0:
         return False
 
     items = _json_object_from_output(result.stdout).get("items")
-    if not isinstance(items, list):
-        return False
-
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        metadata = item.get("metadata")
-        if not isinstance(metadata, dict):
-            continue
-        name = metadata.get("name")
-        if isinstance(name, str) and name:
-            return True
-    return False
+    return isinstance(items, list) and any(_node_has_gpu(item) for item in items)
 
 
 def _cluster_has_scalable_gpu_node_pool(repo_root: Path) -> bool:
@@ -564,16 +644,18 @@ def _cluster_has_scalable_gpu_node_pool(repo_root: Path) -> bool:
 
 
 @pytest.fixture(scope="session")
-def ensure_gpu_nodes_available(repo_root: Path) -> None:
+def ensure_gpu_nodes_available(repo_root: Path, platform_profile: PlatformProfile) -> None:
     """Ensures the cluster can run GPU workloads, skipping tests if it cannot.
 
-    The cluster qualifies if it currently has a registered GPU node, or if it has an
-    autoscaling GPU node pool that can scale up (max_count > 0). The latter covers
+    The cluster qualifies if it currently has a node with GPUs, or, under the azure profile, if
+    it has an autoscaling GPU node pool that can scale up (max_count > 0). The latter covers
     scale-from-zero setups (e.g. OSMO Spot GPU pools) where GPU nodes are provisioned on
     demand and are therefore absent while the cluster is idle.
     """
     if _cluster_has_present_gpu_node(repo_root):
         return
+    if platform_profile.is_local:
+        pytest.skip("The local cluster has no node with allocatable GPUs; run infrastructure/local/00-prepare-host.sh")
     if _cluster_has_scalable_gpu_node_pool(repo_root):
         return
     pytest.skip("No registered GPU nodes and no autoscaling GPU node pool (max_count > 0) are available")

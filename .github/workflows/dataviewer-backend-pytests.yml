@@ -72,20 +72,30 @@ jobs:
 
       - name: Install dependencies
         id: install
-        run: uv sync --frozen --group dev --extra analysis --extra hdf5 --extra export --extra auth
+        run: uv sync --frozen --group dev --extra analysis --extra hdf5 --extra export --extra auth --extra azure
 
       - name: Run pytest with coverage
         id: test
         run: >-
           uv run --no-sync pytest -v
           --junitxml=../../../logs/pytest-dataviewer-results.xml
-          --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml
-          --cov-report=term-missing --cov-fail-under=90
+          --cov=src --cov=../../../evaluation/vlm_judge
+          --cov-report= --cov-fail-under=0
+
+      - name: Generate scoped coverage reports and enforce gates
+        id: coverage_gate
+        run: |
+          uv run --no-sync coverage xml --include='*/backend/src/*' --fail-under=0 -o ../../../logs/coverage-dataviewer.xml
+          uv run --no-sync coverage xml --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' --fail-under=0 -o ../../../logs/coverage-vlm-judge-backend.xml
+          uv run --no-sync coverage report --include='*/backend/src/*' --fail-under=90
+          uv run --no-sync coverage report --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' --fail-under=70
 
       - name: Validate coverage report
         id: coverage_report
         if: ${{ success() && inputs.code-coverage }}
-        run: test -s ../../../logs/coverage-dataviewer.xml
+        run: |
+          test -s ../../../logs/coverage-dataviewer.xml
+          test -s ../../../logs/coverage-vlm-judge-backend.xml
 
       - name: Upload coverage.xml artifact
         id: coverage_upload
@@ -94,7 +104,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pytest-dataviewer-coverage-xml
-          path: logs/coverage-dataviewer.xml
+          path: |
+            logs/coverage-dataviewer.xml
+            logs/coverage-vlm-judge-backend.xml
           retention-days: 30
 
       - name: Upload coverage to Codecov
@@ -109,6 +121,18 @@ jobs:
           flags: pytest-dataviewer
           name: pytest-dataviewer-coverage
 
+      - name: Upload judge coverage to Codecov
+        if: ${{ inputs.code-coverage && always() }}
+        continue-on-error: ${{ job.status == 'failure' || steps.test.outcome != 'success' || steps.coverage_report.outcome == 'failure' || steps.coverage_upload.outcome == 'failure' }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: logs/coverage-vlm-judge-backend.xml
+          use_oidc: true
+          fail_ci_if_error: false
+          verbose: true
+          flags: pytest-vlm-judge
+          name: pytest-vlm-judge-backend-coverage
+
       - name: Publish execution evidence
         id: outcome
         if: always()
@@ -116,5 +140,5 @@ jobs:
         with:
           workflow: dataviewer-backend-pytests
           steps-json: ${{ toJSON(steps) }}
-          required-steps: '["system-dependencies","install","test"]'
+          required-steps: '["system-dependencies","install","test","coverage_gate"]'
           reports: '[{"path":"logs/pytest-dataviewer-results.xml","kind":"junit"}]'

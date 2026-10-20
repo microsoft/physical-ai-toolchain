@@ -5,15 +5,37 @@ import { attachJson, openViewer } from './accessibility-fixture'
 
 // cspell:words opblock
 
+test('dataset workspace disclosure excludes hidden editors and returns keyboard focus without autoplay', async ({
+  page,
+}, testInfo) => {
+  const errors = await openViewer(page, testInfo)
+  const toggle = page.getByRole('button', { name: 'Dataset workspace' })
+  await toggle.focus()
+  await page.keyboard.press('Enter')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByRole('button', { name: /^(Play|Pause) playback$/ })).toHaveCount(0)
+  await expect(page.getByText('Judge operations are unavailable.')).toBeVisible()
+  const returnButton = page.getByRole('button', { name: 'Return to episode' })
+  await returnButton.focus()
+  await page.keyboard.press('Enter')
+  await expect(toggle).toBeFocused()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByRole('button', { name: 'Play playback' })).toBeVisible()
+  expect(errors.pageErrors).toEqual([])
+})
+
 test('V02 and V03 support keyboard dataset and episode selection', async ({ page }, testInfo) => {
   const errors = await openViewer(page, testInfo)
-  const datasetButton = page.getByRole('button', { name: 'Dataset' })
+  const datasetButton = page.getByRole('button', { name: 'Dataset', exact: true })
 
   await datasetButton.focus()
   await page.keyboard.press('Enter')
   const filter = page.getByPlaceholder('Filter datasets')
   await expect(filter).toBeFocused()
   await filter.fill('secondary')
+  const results = page.getByRole('listbox')
+  await expect(results.getByRole('option')).toHaveCount(1)
+  await expect(results.getByRole('option', { name: /a11y-secondary/ })).toBeVisible()
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
   await expect(datasetButton).toContainText('a11y-secondary')
@@ -59,7 +81,7 @@ test('V05 V06 V08 V13 V14 and V18 expose exact workspace semantics', async ({ pa
   await exportButton.click()
   const dialog = page.getByRole('dialog', { name: 'Export Episodes' })
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByPlaceholder('/path/to/exports')).toBeFocused()
+  await expect(dialog.getByRole('textbox', { name: 'Output Directory' })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(dialog).toBeHidden()
   const focusReturned = await exportButton.evaluate((element) => document.activeElement === element)
@@ -83,8 +105,8 @@ test('V05 V06 V08 V13 V14 and V18 expose exact workspace semantics', async ({ pa
 
 test('V02 and V18 preserve forward and reverse focus boundaries', async ({ page }, testInfo) => {
   const errors = await openViewer(page, testInfo)
-  const datasetButton = page.getByRole('button', { name: 'Dataset' })
-  const datasetDialog = page.getByRole('dialog', { name: 'Select dataset' })
+  const datasetButton = page.getByRole('button', { name: 'Dataset', exact: true })
+  const datasetDialog = page.getByRole('main', { name: 'Dataset catalog' })
   const diagnosticsButton = page.getByRole('button', { name: 'Toggle Diagnostics' })
 
   await datasetButton.focus()
@@ -92,7 +114,9 @@ test('V02 and V18 preserve forward and reverse focus boundaries', async ({ page 
   const filterInput = page.getByPlaceholder('Filter datasets')
   await expect(filterInput).toBeFocused()
   await page.keyboard.press('Tab')
-  await expect(filterInput).toBeFocused()
+  await expect(
+    page.getByRole('listbox', { name: 'Available datasets' }).getByRole('option').first(),
+  ).toBeFocused()
   await page.keyboard.press('Shift+Tab')
   await expect(filterInput).toBeFocused()
   await page.keyboard.press('Escape')
@@ -107,7 +131,7 @@ test('V02 and V18 preserve forward and reverse focus boundaries', async ({ page 
   await exportButton.focus()
   await exportButton.press('Enter')
   const exportDialog = page.getByRole('dialog', { name: 'Export Episodes' })
-  await expect(exportDialog.getByPlaceholder('/path/to/exports')).toBeFocused()
+  await expect(exportDialog.getByRole('textbox', { name: 'Output Directory' })).toBeFocused()
 
   const dialogStops = exportDialog.locator(
     'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
@@ -131,8 +155,8 @@ test('V02 and V18 preserve forward and reverse focus boundaries', async ({ page 
   await attachJson(testInfo, 'focus-boundary-trace', {
     journeys: ['V02', 'V18'],
     assertions: [
-      'dataset popover contains forward and reverse focus',
-      'Escape closes dataset popover and restores trigger focus',
+      'catalog search and rows support forward and reverse focus without entering hidden episode controls',
+      'Escape closes dataset catalog and restores trigger focus',
       'forward and reverse shell navigation resumes after dismissal',
       'export modal contains forward focus',
       'export modal contains reverse focus',
@@ -222,7 +246,7 @@ test('V19 preserves adaptive layout focus and target geometry', async ({ page },
   await expect(page.getByRole('heading', { name: 'Episode 0' })).toBeVisible()
   await page.setViewportSize({ width: 320, height: 720 })
   const reflow = await collectGeometry()
-  const datasetButton = page.getByRole('button', { name: 'Dataset' })
+  const datasetButton = page.getByRole('button', { name: 'Dataset', exact: true })
   await datasetButton.focus()
   const focusStyle = await datasetButton.evaluate((element) => {
     const style = getComputedStyle(element)
@@ -370,7 +394,7 @@ const documentationCases: Array<{
   {
     id: 'F01',
     name: 'Viewer Swagger UI',
-    url: 'http://127.0.0.1:8000/docs',
+    url: 'http://127.0.0.1:18000/docs',
     selector: '#swagger-ui',
     title: 'LeRobot Annotation API',
     task: {
@@ -384,7 +408,7 @@ const documentationCases: Array<{
   {
     id: 'F02',
     name: 'Viewer ReDoc',
-    url: 'http://127.0.0.1:8000/redoc',
+    url: 'http://127.0.0.1:18000/redoc',
     selector: 'redoc, .redoc-wrap',
     title: 'LeRobot Annotation API',
     task: {
@@ -397,7 +421,7 @@ const documentationCases: Array<{
   {
     id: 'F03',
     name: 'VLM Judge Swagger UI',
-    url: 'http://127.0.0.1:8001/docs',
+    url: 'http://127.0.0.1:18001/docs',
     selector: '#swagger-ui',
     title: 'VLM-as-Judge',
     task: {
@@ -411,7 +435,7 @@ const documentationCases: Array<{
   {
     id: 'F04',
     name: 'VLM Judge ReDoc',
-    url: 'http://127.0.0.1:8001/redoc',
+    url: 'http://127.0.0.1:18001/redoc',
     selector: 'redoc, .redoc-wrap',
     title: 'VLM-as-Judge',
     task: {
@@ -424,7 +448,7 @@ const documentationCases: Array<{
   {
     id: 'F05',
     name: 'OpenAI Shim Swagger UI',
-    url: 'http://127.0.0.1:8002/docs',
+    url: 'http://127.0.0.1:18002/docs',
     selector: '#swagger-ui',
     title: 'Qwen3-VL OpenAI-compat shim',
     task: {
@@ -438,7 +462,7 @@ const documentationCases: Array<{
   {
     id: 'F06',
     name: 'OpenAI Shim ReDoc',
-    url: 'http://127.0.0.1:8002/redoc',
+    url: 'http://127.0.0.1:18002/redoc',
     selector: 'redoc, .redoc-wrap',
     title: 'Qwen3-VL OpenAI-compat shim',
     task: {

@@ -5,7 +5,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect } from 'react'
 
-import { apiRequest } from '@/lib/api-client'
+import {
+  ApiClientError,
+  apiRequestVersioned,
+  type MutationPrecondition,
+  mutationPreconditionHeaders,
+  type VersionedResource,
+} from '@/lib/api-client'
+import { recordDiagnosticEvent } from '@/lib/playback-diagnostics'
 import { useDatasetStore } from '@/stores'
 import { type JointConfig, useJointConfigStore } from '@/stores/joint-config-store'
 
@@ -13,31 +20,53 @@ function toApiPayload(config: JointConfig) {
   return { labels: config.labels, groups: config.groups }
 }
 
-async function fetchJointConfig(datasetId: string): Promise<JointConfig> {
-  return apiRequest<JointConfig>(`/datasets/${datasetId}/joint-config`)
+async function fetchJointConfig(datasetId: string): Promise<VersionedResource<JointConfig>> {
+  return apiRequestVersioned<JointConfig>(`/datasets/${datasetId}/joint-config`)
 }
 
 export async function saveJointConfigApi(
   datasetId: string,
   config: JointConfig,
-): Promise<JointConfig> {
-  return apiRequest<JointConfig>(`/datasets/${datasetId}/joint-config`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(toApiPayload(config)),
-  })
+  precondition: MutationPrecondition,
+): Promise<VersionedResource<JointConfig>> {
+  return saveVersionedJointConfig(`/datasets/${datasetId}/joint-config`, config, precondition)
 }
 
-async function fetchJointConfigDefaults(): Promise<JointConfig> {
-  return apiRequest<JointConfig>('/joint-config/defaults')
+async function fetchJointConfigDefaults(): Promise<VersionedResource<JointConfig>> {
+  return apiRequestVersioned<JointConfig>('/joint-config/defaults')
 }
 
-export async function saveJointConfigDefaultsApi(config: JointConfig): Promise<JointConfig> {
-  return apiRequest<JointConfig>('/joint-config/defaults', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(toApiPayload(config)),
-  })
+export async function saveJointConfigDefaultsApi(
+  config: JointConfig,
+  precondition: MutationPrecondition,
+): Promise<VersionedResource<JointConfig>> {
+  return saveVersionedJointConfig('/joint-config/defaults', config, precondition)
+}
+
+async function saveVersionedJointConfig(
+  path: string,
+  config: JointConfig,
+  precondition: MutationPrecondition,
+): Promise<VersionedResource<JointConfig>> {
+  const datasetId = config.datasetId.replace(/[\r\n]/g, '')
+  recordDiagnosticEvent('persistence', 'joint-config-save-started', { datasetId })
+  try {
+    const saved = await apiRequestVersioned<JointConfig>(path, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...mutationPreconditionHeaders(precondition) },
+      body: JSON.stringify(toApiPayload(config)),
+    })
+    if (!saved.etag)
+      throw new Error('Settings save revision was not returned. Reload before saving again.')
+    recordDiagnosticEvent('persistence', 'joint-config-save-completed', { datasetId })
+    return saved
+  } catch (error) {
+    recordDiagnosticEvent('persistence', 'joint-config-save-failed', {
+      datasetId,
+      status: error instanceof ApiClientError ? error.status : null,
+    })
+    throw error
+  }
 }
 
 export const jointConfigKeys = {
@@ -58,64 +87,74 @@ export function useJointConfig() {
   })
 
   useEffect(() => {
-    if (query.data) {
-      setConfig(query.data)
-    }
-  }, [query.data, setConfig])
+    if (!query.data || query.data.data.datasetId !== currentDataset?.id) return
+    const current = useJointConfigStore.getState()
+    if (
+      current.config.datasetId === currentDataset.id &&
+      current.savedConfig &&
+      current.config !== current.savedConfig
+    )
+      return
+    setConfig(query.data.data, query.data.etag)
+  }, [query.data, currentDataset?.id, setConfig])
 
-  return query
+  return { ...query, data: query.data?.data }
 }
 
 export function useSaveJointConfig() {
-  const currentDataset = useDatasetStore((state) => state.currentDataset)
-  const config = useJointConfigStore((state) => state.config)
   const queryClient = useQueryClient()
 
   const mutation = useMutation({
-    mutationFn: () => {
-      if (!currentDataset) throw new Error('No dataset selected')
-      return saveJointConfigApi(currentDataset.id, config)
+    mutationFn: ({ config, etag }: { config: JointConfig; etag: string | null | undefined }) => {
+      if (etag === undefined) throw new Error('Load joint configuration before saving')
+      return saveJointConfigApi(config.datasetId, config, etag ? { etag } : { createOnly: true })
     },
-    onSuccess: () => {
-      if (currentDataset) {
-        queryClient.invalidateQueries({
-          queryKey: jointConfigKeys.dataset(currentDataset.id),
-        })
-      }
+    onSuccess: (saved, submitted) => {
+      useJointConfigStore.getState().acknowledgeSave(submitted.config, saved.data, saved.etag)
+      queryClient.setQueryData(jointConfigKeys.dataset(submitted.config.datasetId), saved)
     },
   })
 
   const save = useCallback(
     (onSuccess?: () => void) => {
-      if (!currentDataset) return
+      const dataset = useDatasetStore.getState().currentDataset
+      const current = useJointConfigStore.getState()
+      if (!dataset || current.config.datasetId !== dataset.id) return
 
-      mutation.mutate(undefined, {
-        onSuccess: () => {
-          onSuccess?.()
+      mutation.mutate(
+        { config: current.config, etag: current.baseEtag },
+        {
+          onSuccess: () => {
+            onSuccess?.()
+          },
         },
-      })
+      )
     },
-    [currentDataset, mutation],
+    [mutation],
   )
 
   return { save, ...mutation }
 }
 
 export function useJointConfigDefaults() {
-  return useQuery({
+  const query = useQuery({
     queryKey: jointConfigKeys.defaults(),
     queryFn: fetchJointConfigDefaults,
     staleTime: 5 * 60 * 1000,
   })
+  return { ...query, data: query.data?.data, etag: query.data?.etag }
 }
 
 export function useSaveJointConfigDefaults() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (config: JointConfig) => saveJointConfigDefaultsApi(config),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: jointConfigKeys.defaults() })
+    mutationFn: ({ config, etag }: { config: JointConfig; etag: string | null | undefined }) => {
+      if (etag === undefined) throw new Error('Load joint defaults before saving')
+      return saveJointConfigDefaultsApi(config, etag ? { etag } : { createOnly: true })
+    },
+    onSuccess: (saved) => {
+      queryClient.setQueryData(jointConfigKeys.defaults(), saved)
     },
   })
 }

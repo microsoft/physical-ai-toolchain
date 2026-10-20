@@ -37,6 +37,10 @@ Images are pushed to the Azure Container Registry provisioned by the infrastruct
 | ConfigMap             | Runtime configuration (storage paths, CORS origins) |
 | Secret                | Storage credentials, auth provider secrets          |
 
+The frontend resolves its assets and API paths against the document URL, so it runs at the root or under a path prefix such as a `kubectl proxy` service URL.
+
+The local OSMO profile implements this contract in `infrastructure/local/manifests/dataviewer.yaml` without an Ingress or Secret. The backend runs with `DATAVIEWER_AUTH_DISABLED=true` as the owner of the host datasets directory, which it mounts read-write, and images come from the workstation's loopback registry. An optional Azure Blob mode adds `STORAGE_BACKEND=azure`, the account and container values, and a workload identity ServiceAccount, and keeps authentication off.
+
 ## Azure Container Apps Deployment
 
 The Terraform module in `infrastructure/terraform/modules/dataviewer/` provisions:

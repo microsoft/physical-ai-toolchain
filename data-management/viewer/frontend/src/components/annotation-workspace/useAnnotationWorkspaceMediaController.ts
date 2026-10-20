@@ -81,6 +81,7 @@ export function useAnnotationWorkspaceMediaController({
   const videoSync = useAnnotationWorkspaceVideoSync({
     currentFrame,
     totalFrames,
+    sourceFrameCount: currentEpisode?.meta.length ?? totalFrames,
     originalFrameIndex,
     activePlaybackRange,
     playbackRangeStart,

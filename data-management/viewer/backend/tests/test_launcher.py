@@ -45,7 +45,8 @@ def launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     uv.write_text(
         "#!/usr/bin/env bash\n"
         f"printf '%q ' \"$@\" >> {shlex.quote(str(backend / 'uv-calls.txt'))}\n"
-        f"printf '\\n' >> {shlex.quote(str(backend / 'uv-calls.txt'))}\n",
+        f"printf '\\n' >> {shlex.quote(str(backend / 'uv-calls.txt'))}\n"
+        'if [[ "$1 $2" == "pip check" ]]; then exit "${TEST_DEPENDENCY_CHECK_EXIT:-0}"; fi\n',
         encoding="utf-8",
     )
     uv.chmod(0o755)
@@ -153,15 +154,50 @@ def _option_value(args: list[str], option: str) -> str | None:
     return args[args.index(option) + 1] if option in args else None
 
 
+@pytest.mark.parametrize(("backend", "extra"), [("qwen3-vl", "qwen3-vl"), ("openai-compat", "openai")])
+@pytest.mark.parametrize("dependency_status", [0, 19])
+def test_judge_runtime_uses_frozen_evaluator_profile(
+    launcher: Path, monkeypatch: pytest.MonkeyPatch, backend: str, extra: str, dependency_status: int
+) -> None:
+    monkeypatch.setenv("VLM_JUDGE_ENABLED", "true")
+    monkeypatch.setenv("VLM_JUDGE_BACKEND", backend)
+    monkeypatch.setenv("TEST_DEPENDENCY_CHECK_EXIT", str(dependency_status))
+    result = subprocess.run(
+        ["bash", str(launcher), "--backend"], capture_output=True, text=True, timeout=10, check=False
+    )
+    assert result.returncode == (dependency_status or 23), result.stdout + result.stderr
+    assert ("Backend child invoked" in result.stdout) is (dependency_status == 0)
+    calls = [shlex.split(line) for line in (launcher.parent / "backend" / "uv-calls.txt").read_text().splitlines()]
+    assert len(calls) == 3
+    assert all(args[0] == "sync" and "--frozen" in args and "--inexact" in args for args in calls[:2])
+    assert _option_value(calls[0], "--extra") == extra
+    assert _option_value(calls[0], "--project") == str(launcher.parents[2] / "evaluation" / "vlm_judge")
+    assert _option_value(calls[0], "--python") == "3.12"
+    assert "vlm-judge" not in calls[1]
+    assert "--group" in calls[1]
+    assert calls[2] == ["pip", "check", "--python", str(launcher.parent / "backend/.venv/bin/python")]
+
+
 @pytest.mark.parametrize(("log_level", "expected_level"), [(None, "info"), ("debug", "debug")])
+@pytest.mark.parametrize("entrypoint", ["bash", "node"])
 def test_backend_runs_on_loopback_with_logging_config(
-    launcher: Path, monkeypatch: pytest.MonkeyPatch, log_level: str | None, expected_level: str
+    launcher: Path, monkeypatch: pytest.MonkeyPatch, log_level: str | None, expected_level: str, entrypoint: str
 ) -> None:
     if log_level is not None:
         monkeypatch.setenv("LOG_LEVEL", log_level)
-    subprocess.run(["bash", str(launcher), "--backend"], capture_output=True, text=True, timeout=10, check=False)
+    command = (
+        ["bash", str(launcher), "--backend"]
+        if entrypoint == "bash"
+        else ["node", str(Path(__file__).resolve().parents[2] / "start-backend.mjs")]
+    )
+    subprocess.run(command, cwd=launcher.parent, capture_output=True, text=True, timeout=10, check=False)
 
-    args = (launcher.parent / "backend" / "uvicorn-args.txt").read_text(encoding="utf-8").splitlines()
+    if entrypoint == "bash":
+        args = (launcher.parent / "backend" / "uvicorn-args.txt").read_text(encoding="utf-8").splitlines()
+    else:
+        args = shlex.split((launcher.parent / "backend" / "uv-calls.txt").read_text(encoding="utf-8"))
+        assert args[:5] == ["run", "--no-sync", "--frozen", "--directory", "backend"]
+        args = args[args.index("uvicorn") + 1 :]
     assert args[0] == "src.api.main:app"
     assert _option_value(args, "--log-config") == "logging.json"
     assert _option_value(args, "--log-level") == expected_level

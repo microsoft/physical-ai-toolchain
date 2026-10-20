@@ -98,3 +98,27 @@ class TestHasBlobUrls:
     def test_returns_true_for_mixed_valid_and_empty(self, monkeypatch):
         monkeypatch.setenv("BLOB_URLS", '["", "https://a.blob.core.windows.net/c/p"]')
         assert _ENV.has_blob_urls() is True
+
+
+class TestDatasetSource:
+    @pytest.fixture(autouse=True)
+    def _clear(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name in ("DATASET_DIR", "BLOB_URLS", "DATASET_REPO_ID"):
+            monkeypatch.delenv(name, raising=False)
+
+    def test_local_dataset_dir_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DATASET_DIR", "/mnt/datasets/so101/pick")
+        monkeypatch.setenv("BLOB_URLS", '["https://a.blob.core.windows.net/c/p"]')
+        assert _ENV.dataset_source() == "local"
+
+    def test_blob_urls_select_blob(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("BLOB_URLS", '["https://a.blob.core.windows.net/c/p"]')
+        assert _ENV.dataset_source() == "blob"
+
+    def test_blank_dataset_dir_falls_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DATASET_DIR", "  ")
+        monkeypatch.setenv("BLOB_URLS", "[]")
+        assert _ENV.dataset_source() == "hf"
+
+    def test_defaults_to_hugging_face(self) -> None:
+        assert _ENV.dataset_source() == "hf"

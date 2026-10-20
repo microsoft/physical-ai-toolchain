@@ -8,9 +8,10 @@ import {
   useDatasetLabels,
   useImportAnalysisLabels,
   useRemoveLabelOption,
+  useSavedEpisodeAnalysis,
   useSaveEpisodeLabels,
 } from '@/hooks/use-labels'
-import { useDatasetStore, useLabelStore } from '@/stores'
+import { useDatasetStore, useEpisodeStore, useLabelStore } from '@/stores'
 import { TEST_CSRF_TOKEN } from '@/test-utils/constants'
 import {
   installFetchMock,
@@ -26,7 +27,8 @@ const labelDraftMocks = vi.hoisted(() => ({
 }))
 const principalMocks = vi.hoisted(() => ({ fetch: vi.fn() }))
 
-vi.mock('@/lib/edit-draft-storage', () => ({
+vi.mock('@/lib/edit-draft-storage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/edit-draft-storage')>()),
   loadPersistedLabelDraft: labelDraftMocks.load,
   persistLabelDraft: labelDraftMocks.persist,
 }))
@@ -57,9 +59,11 @@ function selectDataset(id = 'ds-1') {
 beforeEach(() => {
   installFetchMock({ csrf: false })
   useDatasetStore.getState().reset()
+  useEpisodeStore.getState().reset()
   useLabelStore.getState().reset()
   labelDraftMocks.load.mockReset()
   labelDraftMocks.persist.mockReset()
+  labelDraftMocks.persist.mockResolvedValue(undefined)
   labelDraftMocks.load.mockResolvedValue(undefined)
   principalMocks.fetch.mockReset()
   principalMocks.fetch.mockResolvedValue({ scopeId: 'principal-one', authMode: 'local' })
@@ -70,7 +74,606 @@ afterEach(() => {
 })
 
 describe('use-labels hooks', () => {
+  it.each([
+    { runOrder: 2, sequence: 1, retained: true },
+    { runOrder: 1, sequence: 3, retained: true },
+    { runOrder: 1, sequence: 0, retained: false },
+  ])(
+    'filters transitive stale findings while resolving run order: %j',
+    async ({ runOrder, sequence, retained }) => {
+      selectDataset()
+      useEpisodeStore.setState({
+        currentEpisode: {
+          sourceId: 'source',
+          sourceRevision: 'new',
+          meta: { index: 0, length: 3, taskIndex: 0, hasAnnotations: false },
+          cameras: [],
+          videoUrls: {},
+          trajectoryData: [],
+        },
+      })
+      const machine = {
+        run_id: 'old',
+        result_id: 'old',
+        run_order: 1,
+        source_revision: 'old',
+        input_revision: 'input',
+        config_revision: 'config',
+      }
+      mockFetch.mockResolvedValue(
+        jsonResponse({
+          dataset_id: 'ds-1',
+          available_labels: [],
+          episodes: {},
+          analysis: {
+            '0': {
+              object: 'Current cup',
+              notes: 'Derived notes',
+              movement_quality: 'Derived quality',
+              motion_score: 4,
+            },
+          },
+          provenance: {
+            '0': {
+              schema_version: '1.0.0',
+              withdrawn: ['withdrawn'],
+              acceptances: {},
+              contributions: [
+                {
+                  id: 'quality',
+                  field: 'analysis/movement_quality',
+                  origin: 'legacy-unknown',
+                  sequence: 3,
+                  derived_from: ['notes'],
+                },
+                {
+                  id: 'notes',
+                  field: 'analysis/notes',
+                  origin: 'legacy-unknown',
+                  sequence: 2,
+                  derived_from: ['old-object'],
+                },
+                {
+                  id: 'old-object',
+                  field: 'analysis/object',
+                  origin: 'machine',
+                  sequence: 1,
+                  machine,
+                },
+                {
+                  id: 'current-object',
+                  field: 'analysis/object',
+                  origin: 'machine',
+                  sequence,
+                  machine: {
+                    ...machine,
+                    run_id: 'current',
+                    result_id: 'current',
+                    run_order: runOrder,
+                    source_revision: 'new',
+                  },
+                },
+                {
+                  id: 'withdrawn',
+                  field: 'analysis/motion_score',
+                  origin: 'machine',
+                  sequence: 10,
+                  machine,
+                },
+              ],
+            },
+          },
+        }),
+      )
+      const { result } = renderHookWithProviders(() => useSavedEpisodeAnalysis(0))
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+      expect(result.current.record?.object).toBe(retained ? 'Current cup' : undefined)
+      expect(result.current.record?.notes).toBeUndefined()
+      expect(result.current.record?.movementQuality).toBeUndefined()
+      expect(result.current.record?.motionScore).toBe(4)
+      expect(result.current.replaced).toBe(true)
+    },
+  )
+
+  it.each([401, 403, 404])(
+    'hides retained saved analysis after access failure %s',
+    async (status) => {
+      selectDataset()
+      useEpisodeStore.setState({
+        currentEpisode: {
+          sourceId: 'source',
+          sourceRevision: 'one',
+          meta: { index: 0, length: 3, taskIndex: 0, hasAnnotations: false },
+          cameras: [],
+          videoUrls: {},
+          trajectoryData: [],
+        },
+      })
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          dataset_id: 'ds-1',
+          available_labels: [],
+          episodes: {},
+          analysis: { '0': { notes: 'Saved analysis' } },
+          provenance: {
+            '0': {
+              schema_version: '1.0.0',
+              withdrawn: [],
+              acceptances: {},
+              contributions: [
+                {
+                  id: 'saved-notes',
+                  field: 'analysis/notes',
+                  origin: 'human',
+                  author_id: 'principal-one',
+                  sequence: 1,
+                },
+              ],
+            },
+          },
+        }),
+      )
+      const { result } = renderHookWithProviders(() => useSavedEpisodeAnalysis(0))
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+      expect(result.current.record?.notes).toBe('Saved analysis')
+      expect(result.current.ledger?.contributions).toHaveLength(1)
+      mockFetch.mockResolvedValue(jsonResponse({ detail: 'Unavailable' }, status))
+
+      await act(async () => {
+        await result.current.refetch()
+      })
+
+      await waitFor(() => expect(result.current.isError).toBe(true))
+
+      expect(result.current.data?.data.analysis?.[0]?.notes).toBe('Saved analysis')
+      expect(result.current.record).toBeUndefined()
+      expect(result.current.ledger).toBeUndefined()
+      expect(result.current.replaced).toBe(false)
+    },
+  )
+
+  it('excludes old-source machine findings without hiding human or independent motion evidence', async () => {
+    selectDataset()
+    useEpisodeStore.setState({
+      currentEpisode: {
+        sourceId: 'source',
+        sourceRevision: 'new',
+        meta: { index: 0, length: 3, taskIndex: 0, hasAnnotations: false },
+        cameras: [],
+        videoUrls: {},
+        trajectoryData: [],
+      },
+    })
+    const machine = {
+      run_id: 'run',
+      result_id: 'result',
+      run_order: 1,
+      source_revision: 'old',
+      input_revision: 'input',
+      config_revision: 'config',
+    }
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        dataset_id: 'ds-1',
+        available_labels: [],
+        episodes: {},
+        analysis: { '0': { object: 'cup', notes: 'Human correction', motion_score: 4 } },
+        provenance: {
+          '0': {
+            schema_version: '1.0.0',
+            withdrawn: [],
+            acceptances: {},
+            contributions: [
+              {
+                id: 'object',
+                field: 'analysis/object',
+                origin: 'machine',
+                value: 'cup',
+                sequence: 1,
+                machine,
+              },
+              {
+                id: 'old-notes',
+                field: 'analysis/notes',
+                origin: 'machine',
+                value: 'Old notes',
+                sequence: 2,
+                machine,
+              },
+              {
+                id: 'human',
+                field: 'analysis/notes',
+                origin: 'human',
+                value: 'Human correction',
+                sequence: 3,
+                machine: null,
+              },
+            ],
+          },
+        },
+      }),
+    )
+    const { result } = renderHookWithProviders(() => useSavedEpisodeAnalysis(0))
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.record?.object).toBeUndefined()
+    expect(result.current.record?.notes).toBe('Human correction')
+    expect(result.current.record?.motionScore).toBe(4)
+    expect(result.current.replaced).toBe(true)
+  })
+  it('refreshes saved analysis independently without overwriting dirty labels', async () => {
+    selectDataset()
+    useEpisodeStore.setState({
+      currentEpisode: {
+        sourceId: 'source',
+        sourceRevision: 'one',
+        meta: { index: 0, length: 3, taskIndex: 0, hasAnnotations: false },
+        cameras: [],
+        videoUrls: {},
+        trajectoryData: [],
+      },
+    })
+    mockFetch.mockImplementation(() =>
+      jsonResponse(
+        {
+          dataset_id: 'ds-1',
+          available_labels: [],
+          episodes: {},
+          analysis: { '0': { object: 'cup' } },
+        },
+        { headers: { ETag: 'first' } },
+      ),
+    )
+    const { result } = renderHookWithProviders(() => ({
+      read: useDatasetLabels(),
+      analysis: useSavedEpisodeAnalysis(0),
+    }))
+    await waitFor(() => expect(result.current.analysis.record?.object).toBe('cup'))
+    await waitFor(() => expect(useLabelStore.getState().draftHydrated).toBe(true))
+    act(() => useLabelStore.getState().setEpisodeLabels(0, ['HUMAN DRAFT']))
+    mockFetch.mockImplementation(() =>
+      jsonResponse(
+        {
+          dataset_id: 'ds-1',
+          available_labels: [],
+          episodes: {},
+          analysis: { '0': { object: null, motion_score: 4 } },
+        },
+        { headers: { ETag: 'second' } },
+      ),
+    )
+    await act(async () => {
+      await result.current.analysis.refetch()
+    })
+    await waitFor(() => expect(result.current.analysis.record?.motionScore).toBe(4))
+    expect(result.current.analysis.record?.object).toBeNull()
+    expect(useLabelStore.getState().episodeLabels[0]).toEqual(['HUMAN DRAFT'])
+    expect(useLabelStore.getState().baseEtag).toBe('first')
+    expect(useLabelStore.getState().conflict).not.toBeNull()
+  })
   describe('useDatasetLabels', () => {
+    it('ignores a server labels body belonging to a different dataset', async () => {
+      selectDataset()
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          dataset_id: 'other',
+          available_labels: ['OTHER'],
+          episodes: { '0': ['OTHER'] },
+        }),
+      )
+      const { result } = renderHookWithProviders(() => useDatasetLabels())
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+      expect(useLabelStore.getState().datasetId).toBe('ds-1')
+      expect(useLabelStore.getState().isLoaded).toBe(false)
+      expect(useLabelStore.getState().episodeLabels).toEqual({})
+      expect(labelDraftMocks.load).not.toHaveBeenCalled()
+      expect(labelDraftMocks.persist).not.toHaveBeenCalled()
+    })
+
+    it('does not report a late persistence failure into a new label context', async () => {
+      selectDataset()
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ dataset_id: 'ds-1', available_labels: ['SUCCESS'], episodes: {} }),
+      )
+      const { unmount } = renderHookWithProviders(() => useDatasetLabels())
+      await waitFor(() => expect(useLabelStore.getState().draftHydrated).toBe(true))
+      let rejectWrite!: (cause: Error) => void
+      labelDraftMocks.persist.mockReturnValueOnce(
+        new Promise((_, reject) => {
+          rejectWrite = reject
+        }),
+      )
+      act(() => useLabelStore.getState().setEpisodeLabels(0, ['SUCCESS']))
+      await waitFor(() =>
+        expect(labelDraftMocks.persist).toHaveBeenLastCalledWith(
+          'ds-1',
+          'principal-one',
+          expect.any(Object),
+        ),
+      )
+      unmount()
+      useLabelStore.getState().prepareDatasetLabels('ds-2', 'principal-two')
+
+      await act(async () => rejectWrite(new Error('Late persistence failure')))
+
+      expect(useLabelStore.getState().datasetId).toBe('ds-2')
+      expect(useLabelStore.getState().draftError).toBeNull()
+    })
+
+    it.each(['saving', 'conflict'])(
+      'retains the loaded label baseline during %s on refetch',
+      async (mode) => {
+        selectDataset()
+        mockFetch.mockResolvedValueOnce(
+          jsonResponse(
+            { dataset_id: 'ds-1', available_labels: ['SUCCESS'], episodes: { '0': ['SUCCESS'] } },
+            { headers: { ETag: 'one' } },
+          ),
+        )
+        const { result } = renderHookWithProviders(() => useDatasetLabels())
+        await waitFor(() => expect(useLabelStore.getState().draftHydrated).toBe(true))
+        act(() => {
+          if (mode === 'saving') useLabelStore.setState({ isSaving: true })
+          else useLabelStore.getState().setConflict('conflicted', 0, ['SUCCESS'])
+        })
+        mockFetch.mockResolvedValueOnce(
+          jsonResponse(
+            { dataset_id: 'ds-1', available_labels: ['FAILURE'], episodes: { '0': ['FAILURE'] } },
+            { headers: { ETag: 'two' } },
+          ),
+        )
+
+        await act(async () => {
+          await result.current.refetch()
+        })
+
+        expect(useLabelStore.getState().episodeLabels[0]).toEqual(['SUCCESS'])
+        expect(useLabelStore.getState().baseEtag).toBe('one')
+        expect(useLabelStore.getState().conflict?.currentEtag).toBe(
+          mode === 'saving' ? undefined : 'conflicted',
+        )
+      },
+    )
+
+    it('blocks saves after persisted label recovery fails', async () => {
+      selectDataset()
+      labelDraftMocks.load.mockRejectedValueOnce(new Error('Synthetic storage failure'))
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          dataset_id: 'ds-1',
+          available_labels: ['SUCCESS'],
+          episodes: { '0': ['SUCCESS'] },
+        }),
+      )
+      const { result } = renderHookWithProviders(() => ({
+        read: useDatasetLabels(),
+        save: useSaveEpisodeLabels(),
+      }))
+
+      await waitFor(() =>
+        expect(useLabelStore.getState().draftError).toBe('Label draft recovery failed.'),
+      )
+      expect(useLabelStore.getState().draftHydrated).toBe(false)
+      await act(async () => {
+        await expect(
+          result.current.save.mutateAsync({ episodeIdx: 0, labels: ['FAILURE'] }),
+        ).rejects.toThrow(/recovery/)
+      })
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('retains the dirty draft when recovery persistence fails', async () => {
+      selectDataset()
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(
+          {
+            dataset_id: 'ds-1',
+            available_labels: ['SUCCESS', 'FAILURE'],
+            episodes: { '0': ['SUCCESS'] },
+          },
+          { headers: { ETag: 'one' } },
+        ),
+      )
+      renderHookWithProviders(() => useDatasetLabels())
+      await waitFor(() => expect(useLabelStore.getState().draftHydrated).toBe(true))
+      labelDraftMocks.persist.mockRejectedValueOnce(new Error('Synthetic storage failure'))
+
+      act(() => useLabelStore.getState().setEpisodeLabels(0, ['FAILURE']))
+
+      await waitFor(() =>
+        expect(useLabelStore.getState().draftError).toBe('Label draft recovery storage failed.'),
+      )
+      expect(useLabelStore.getState().episodeLabels[0]).toEqual(['FAILURE'])
+      expect(useLabelStore.getState().savedEpisodeLabels[0]).toEqual(['SUCCESS'])
+    })
+
+    it('does not report a late draft recovery failure into a new context', async () => {
+      selectDataset()
+      let rejectDraft!: (error: Error) => void
+      labelDraftMocks.load.mockReturnValueOnce(
+        new Promise((_, reject) => {
+          rejectDraft = reject
+        }),
+      )
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ dataset_id: 'ds-1', available_labels: [], episodes: {} }),
+      )
+      const { unmount } = renderHookWithProviders(() => useDatasetLabels())
+      await waitFor(() => expect(labelDraftMocks.load).toHaveBeenCalled())
+      unmount()
+      useLabelStore.getState().prepareDatasetLabels('ds-2', 'principal-two')
+
+      await act(async () => rejectDraft(new Error('Late storage failure')))
+
+      expect(useLabelStore.getState().draftError).toBeNull()
+      expect(useLabelStore.getState().datasetId).toBe('ds-2')
+    })
+
+    it('retains recovered labels as a conflict after source replacement', async () => {
+      selectDataset()
+      useEpisodeStore.setState({
+        currentDatasetId: 'ds-1',
+        currentIndex: 0,
+        currentEpisode: {
+          sourceId: 'source-a',
+          sourceRevision: 'new',
+          meta: { index: 0, length: 10, taskIndex: 0, hasAnnotations: false },
+          cameras: [],
+          videoUrls: {},
+          trajectoryData: [],
+        },
+      })
+      labelDraftMocks.load.mockResolvedValue({
+        baseEtag: 'one',
+        baseline: { episodeLabels: { 0: ['SUCCESS'] } },
+        draft: { availableLabels: ['SUCCESS', 'FAILURE'], episodeLabels: { 0: ['FAILURE'] } },
+        sourceScopes: { 0: { sourceId: 'source-a', sourceRevision: 'old' } },
+      })
+      mockFetch.mockResolvedValue(
+        jsonResponse(
+          {
+            dataset_id: 'ds-1',
+            available_labels: ['SUCCESS', 'FAILURE'],
+            episodes: { '0': ['SUCCESS'] },
+          },
+          { headers: { ETag: 'one' } },
+        ),
+      )
+      const { result } = renderHookWithProviders(() => ({
+        read: useDatasetLabels(),
+        save: useSaveEpisodeLabels(),
+      }))
+      await waitFor(() => expect(useLabelStore.getState().draftHydrated).toBe(true))
+      expect(useLabelStore.getState().episodeLabels[0]).toEqual(['FAILURE'])
+      expect(useLabelStore.getState().conflict).toMatchObject({
+        sourceChanged: true,
+        episodeIndex: 0,
+      })
+      act(() => useLabelStore.setState({ conflict: null }))
+      mockFetch.mockClear()
+      await act(async () => {
+        await expect(
+          result.current.save.mutateAsync({ episodeIdx: 0, labels: ['FAILURE'] }),
+        ).rejects.toThrow(/source/i)
+      })
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('waits for draft recovery before persisting or clearing labels', async () => {
+      let resolveDraft!: (value: unknown) => void
+      labelDraftMocks.load.mockReturnValueOnce(new Promise((resolve) => (resolveDraft = resolve)))
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(
+          {
+            dataset_id: 'ds-1',
+            available_labels: ['SUCCESS', 'FAILURE'],
+            episodes: { '0': ['SUCCESS'] },
+          },
+          { headers: { ETag: 'one' } },
+        ),
+      )
+      selectDataset()
+      renderHookWithProviders(() => useDatasetLabels())
+      await waitFor(() => expect(labelDraftMocks.load).toHaveBeenCalled())
+      expect(labelDraftMocks.persist).not.toHaveBeenCalled()
+      await act(async () =>
+        resolveDraft({
+          baseEtag: 'one',
+          baseline: { episodeLabels: { 0: ['SUCCESS'] } },
+          draft: { availableLabels: ['SUCCESS', 'FAILURE'], episodeLabels: { 0: ['FAILURE'] } },
+        }),
+      )
+      await waitFor(() => expect(useLabelStore.getState().episodeLabels[0]).toEqual(['FAILURE']))
+      expect(labelDraftMocks.persist.mock.calls.every((call) => call[2] !== null)).toBe(true)
+    })
+
+    it('isolates dirty labels when the principal changes on the same dataset', async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse(
+          {
+            dataset_id: 'ds-1',
+            available_labels: ['SUCCESS', 'FAILURE'],
+            episodes: { '0': ['SUCCESS'] },
+          },
+          { headers: { ETag: 'one' } },
+        ),
+      )
+      selectDataset()
+      const { queryClient } = renderHookWithProviders(() => useDatasetLabels())
+      await waitFor(() => expect(useLabelStore.getState().isLoaded).toBe(true))
+      act(() => useLabelStore.getState().setEpisodeLabels(0, ['FAILURE']))
+      await waitFor(() =>
+        expect(labelDraftMocks.persist).toHaveBeenCalledWith(
+          'ds-1',
+          'principal-one',
+          expect.objectContaining({ episodeLabels: { 0: ['FAILURE'] } }),
+        ),
+      )
+      mockFetch.mockResolvedValue(
+        jsonResponse(
+          {
+            dataset_id: 'ds-1',
+            available_labels: ['SUCCESS', 'FAILURE'],
+            episodes: { '0': [] },
+          },
+          { headers: { ETag: 'two' } },
+        ),
+      )
+      await act(async () => {
+        queryClient.setQueryData(['auth', 'principal-context'], {
+          scopeId: 'principal-two',
+          authMode: 'local',
+        })
+      })
+      await waitFor(() => expect(useLabelStore.getState().baseEtag).toBe('two'))
+      expect(useLabelStore.getState().episodeLabels[0]).toEqual([])
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+      expect(
+        labelDraftMocks.persist.mock.calls.some(
+          (call) => call[1] === 'principal-two' && call[2]?.episodeLabels[0]?.includes('FAILURE'),
+        ),
+      ).toBe(false)
+    })
+
+    it('pins dirty label drafts to their baseline when the server revision changes', async () => {
+      selectDataset('ds-1')
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(
+          {
+            dataset_id: 'ds-1',
+            available_labels: ['SUCCESS', 'FAILURE', 'CUSTOM'],
+            episodes: { '0': ['SUCCESS'] },
+          },
+          { headers: { ETag: 'one' } },
+        ),
+      )
+      const { result } = renderHookWithProviders(() => useDatasetLabels())
+      await waitFor(() => expect(useLabelStore.getState().isLoaded).toBe(true))
+      act(() => useLabelStore.getState().setEpisodeLabels(0, ['FAILURE']))
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(
+          {
+            dataset_id: 'ds-1',
+            available_labels: ['SUCCESS', 'FAILURE', 'CUSTOM'],
+            episodes: { '0': ['CUSTOM'] },
+          },
+          { headers: { ETag: 'two' } },
+        ),
+      )
+      await act(async () => {
+        await result.current.refetch()
+      })
+      await waitFor(() => expect(result.current.data?.etag).toBe('two'))
+      expect(useLabelStore.getState().episodeLabels[0]).toEqual(['FAILURE'])
+      expect(useLabelStore.getState().savedEpisodeLabels[0]).toEqual(['SUCCESS'])
+      expect(useLabelStore.getState().baseEtag).toBe('one')
+      expect(useLabelStore.getState().conflict?.currentEtag).toBe('two')
+    })
+
     it('fetches labels and syncs them into the label store', async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse(
@@ -97,9 +700,10 @@ describe('use-labels hooks', () => {
       expect(store.episodeLabels[0]).toEqual(['SUCCESS'])
       expect(store.episodeLabels[1]).toEqual(['CUSTOM'])
       expect(store.isLoaded).toBe(true)
-      expect(queryClient.getQueryData(labelKeys.dataset('ds-1'))).toMatchObject({
+      expect(queryClient.getQueryData(labelKeys.dataset('ds-1', 'principal-one'))).toMatchObject({
         etag: '"revision-one"',
       })
+      expect(queryClient.getQueryData(labelKeys.dataset('ds-1'))).toBeUndefined()
     })
 
     it('restores a persisted label draft over the server baseline', async () => {
@@ -255,9 +859,187 @@ describe('use-labels hooks', () => {
   })
 
   describe('useSaveEpisodeLabels', () => {
+    it('rejects a save without a selected dataset', async () => {
+      const { result } = renderHookWithProviders(() => useSaveEpisodeLabels())
+
+      await act(async () => {
+        await expect(result.current.mutateAsync({ episodeIdx: 0, labels: [] })).rejects.toThrow(
+          'No dataset selected',
+        )
+      })
+
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('rejects an unresolved conflict without dispatching a write', async () => {
+      selectDataset()
+      useLabelStore.setState({
+        datasetId: 'ds-1',
+        principalScopeId: 'principal-one',
+        draftHydrated: true,
+        conflict: { episodeIndex: 0, currentEtag: 'new', submittedLabels: ['FAILURE'] },
+      })
+      const { result } = renderHookWithProviders(() => useSaveEpisodeLabels())
+
+      await act(async () => {
+        await expect(
+          result.current.mutateAsync({ episodeIdx: 0, labels: ['FAILURE'] }),
+        ).rejects.toThrow('Resolve label conflicts')
+      })
+
+      expect(mockFetch).not.toHaveBeenCalled()
+      expect(useLabelStore.getState().conflict).not.toBeNull()
+    })
+
+    it('allows a clean explicit label write against the current source', async () => {
+      installFetchMock({ csrf: true })
+      selectDataset()
+      useLabelStore.setState({
+        datasetId: 'ds-1',
+        principalScopeId: 'principal-one',
+        draftHydrated: true,
+        isLoaded: true,
+        baseEtag: 'one',
+      })
+      useEpisodeStore.setState({
+        currentDatasetId: 'ds-1',
+        currentIndex: 0,
+        currentEpisode: {
+          sourceId: 'source-a',
+          sourceRevision: 'one',
+          meta: { index: 0, length: 1, taskIndex: 0, hasAnnotations: false },
+          cameras: [],
+          videoUrls: {},
+          trajectoryData: [],
+        },
+      })
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ episode_index: 0, labels: ['SUCCESS'] }, { headers: { ETag: 'two' } }),
+      )
+      const { result, queryClient } = renderHookWithProviders(() => useSaveEpisodeLabels())
+      const groundingKey = [
+        'judge-dataset',
+        'ds-1',
+        'principal-one',
+        'source-a',
+        'one',
+        'grounding',
+      ]
+      queryClient.setQueryDefaults(['judge-dataset'], { gcTime: Infinity })
+      queryClient.setQueryData(groundingKey, { usable: [] })
+      await act(async () => {
+        await result.current.mutateAsync({ episodeIdx: 0, labels: ['SUCCESS'] })
+      })
+      expect(useLabelStore.getState().savedEpisodeLabels[0]).toEqual(['SUCCESS'])
+      expect(queryClient.getQueryState(groundingKey)?.isInvalidated).toBe(true)
+    })
+
+    it('blocks saving while label draft recovery is pending or failed', async () => {
+      installFetchMock({ csrf: true })
+      selectDataset()
+      useLabelStore.getState().prepareDatasetLabels('ds-1', 'principal-one')
+      useLabelStore.getState().setLoaded(true)
+      useLabelStore.getState().setEpisodeLabels(0, ['FAILURE'])
+      const { result } = renderHookWithProviders(() => useSaveEpisodeLabels())
+      await act(async () => {
+        await expect(
+          result.current.mutateAsync({ episodeIdx: 0, labels: ['FAILURE'] }),
+        ).rejects.toThrow(/recovery/)
+      })
+      act(() =>
+        useLabelStore.setState({ draftHydrated: true, draftError: 'Label draft recovery failed.' }),
+      )
+      await act(async () => {
+        await expect(
+          result.current.mutateAsync({ episodeIdx: 0, labels: ['FAILURE'] }),
+        ).rejects.toThrow(/recovery/)
+      })
+      expect(mockFetch).not.toHaveBeenCalled()
+      expect(useLabelStore.getState().episodeLabels[0]).toEqual(['FAILURE'])
+    })
+
+    it('excludes concurrent label saves from independent controls', async () => {
+      installFetchMock({ csrf: true })
+      selectDataset()
+      useLabelStore.getState().setDatasetEpisodeLabels('ds-1', { '0': ['SUCCESS'] })
+      let complete!: (response: JsonResponseLike) => void
+      mockFetch.mockReturnValueOnce(new Promise((resolve) => (complete = resolve)))
+      const { result } = renderHookWithProviders(() => ({
+        first: useSaveEpisodeLabels(),
+        second: useSaveEpisodeLabels(),
+      }))
+      act(() => result.current.first.mutate({ episodeIdx: 0, labels: ['FAILURE'] }))
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2))
+      await act(async () => {
+        await expect(
+          result.current.second.mutateAsync({ episodeIdx: 0, labels: ['FAILURE'] }),
+        ).rejects.toThrow(/already in progress/)
+      })
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+      expect(useLabelStore.getState().isSaving).toBe(true)
+      complete(
+        jsonResponse({ episode_index: 0, labels: ['FAILURE'] }, { headers: { ETag: 'saved' } }),
+      )
+      await waitFor(() => expect(result.current.first.isSuccess).toBe(true))
+      expect(useLabelStore.getState().isSaving).toBe(false)
+    })
+
+    it.each([
+      { episode_index: 0, etag: undefined },
+      { episode_index: 1, etag: 'wrong-episode' },
+    ])(
+      'rejects an incomplete or mismatched label acknowledgment: %j',
+      async ({ episode_index, etag }) => {
+        installFetchMock({ csrf: true })
+        selectDataset('ds-1')
+        useLabelStore.getState().setDatasetEpisodeLabels('ds-1', { '0': ['SUCCESS'] })
+        useLabelStore.getState().setEpisodeLabels(0, ['FAILURE'])
+        mockFetch.mockResolvedValueOnce(
+          jsonResponse(
+            { episode_index, labels: ['FAILURE'] },
+            { headers: etag ? { ETag: etag } : {} },
+          ),
+        )
+        const { result } = renderHookWithProviders(() => useSaveEpisodeLabels())
+        act(() => result.current.mutate({ episodeIdx: 0, labels: ['FAILURE'] }))
+        await waitFor(() => expect(result.current.isError).toBe(true))
+        expect(useLabelStore.getState().savedEpisodeLabels[0]).toEqual(['SUCCESS'])
+        expect(useLabelStore.getState().episodeLabels[0]).toEqual(['FAILURE'])
+      },
+    )
+
+    it('does not acknowledge old dataset labels into the newly selected dataset', async () => {
+      installFetchMock({ csrf: true })
+      let complete!: (response: JsonResponseLike) => void
+      mockFetch.mockReturnValueOnce(
+        new Promise((resolve) => {
+          complete = resolve
+        }),
+      )
+      selectDataset('ds-1')
+      useLabelStore.getState().setDatasetEpisodeLabels('ds-1', { '0': ['SUCCESS'] })
+      useLabelStore.getState().setEpisodeLabels(0, ['FAILURE'])
+      const { result } = renderHookWithProviders(() => useSaveEpisodeLabels())
+      act(() => result.current.mutate({ episodeIdx: 0, labels: ['FAILURE'] }))
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2))
+      act(() => {
+        selectDataset('ds-2')
+        useLabelStore.getState().setDatasetEpisodeLabels('ds-2', { '0': ['SUCCESS'] })
+        useLabelStore.getState().setEpisodeLabels(0, ['CUSTOM'])
+      })
+      complete(
+        jsonResponse({ episode_index: 0, labels: ['FAILURE'] }, { headers: { ETag: 'saved-a' } }),
+      )
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+      expect(useLabelStore.getState().savedEpisodeLabels[0]).toEqual(['SUCCESS'])
+      expect(useLabelStore.getState().episodeLabels[0]).toEqual(['CUSTOM'])
+    })
+
     it('PUTs labels and commits them to the store', async () => {
       installFetchMock({ csrf: true })
-      mockFetch.mockResolvedValueOnce(jsonResponse({ episode_index: 0, labels: ['SUCCESS'] }))
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ episode_index: 0, labels: ['SUCCESS'] }, { headers: { ETag: 'saved' } }),
+      )
 
       selectDataset('ds-1')
 
@@ -274,7 +1056,7 @@ describe('use-labels hooks', () => {
       const [url, init] = mockFetch.mock.calls[1]
       expect(url).toBe('/api/datasets/ds-1/episodes/0/labels')
       expect(init.method).toBe('PUT')
-      expect(JSON.parse(init.body)).toEqual({ labels: ['SUCCESS'] })
+      expect(JSON.parse(init.body)).toEqual({ labels: ['SUCCESS'], intent: 'human-edit' })
       expect(init.headers).toHaveProperty('If-None-Match', '*')
 
       expect(useLabelStore.getState().episodeLabels[0]).toEqual(['SUCCESS'])
@@ -282,7 +1064,9 @@ describe('use-labels hooks', () => {
 
     it('sends X-CSRF-Token on PUT', async () => {
       installFetchMock({ csrf: true })
-      mockFetch.mockResolvedValueOnce(jsonResponse({ episode_index: 0, labels: ['SUCCESS'] }))
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ episode_index: 0, labels: ['SUCCESS'] }, { headers: { ETag: 'saved' } }),
+      )
 
       selectDataset('ds-1')
 
@@ -329,7 +1113,9 @@ describe('use-labels hooks', () => {
       })
 
       unmount()
-      resolveFetch(jsonResponse({ episode_index: 0, labels: ['SUCCESS'] }))
+      resolveFetch(
+        jsonResponse({ episode_index: 0, labels: ['SUCCESS'] }, { headers: { ETag: 'saved' } }),
+      )
       await Promise.resolve()
     })
 

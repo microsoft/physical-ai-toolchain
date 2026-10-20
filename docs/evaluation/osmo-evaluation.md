@@ -3,7 +3,7 @@ sidebar_position: 3
 title: OSMO Inference Workflows
 description: Execute trained robotics policy inference using NVIDIA OSMO with Isaac Lab and LeRobot frameworks
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-29
+ms.date: 2026-10-15
 ms.topic: how-to
 keywords:
   - OSMO
@@ -27,54 +27,66 @@ Run trained policy inference through NVIDIA OSMO workflows on GPU-accelerated Ku
 
 ## 🚀 Quick Start
 
-Submit an Isaac Lab inference workflow:
+Evaluate an Isaac Lab checkpoint from the model registry:
 
 ```bash
-osmo workflow submit \
-  --file workflows/osmo/infer.yaml \
-  --set checkpoint_uri=runs:/<run-id>/model \
-  --set task=Isaac-Cartpole-v0
+evaluation/sil/scripts/submit-osmo-eval.sh \
+  --checkpoint-uri models:/<name>/<version> \
+  --task Isaac-Cartpole-v0
 ```
+
+On the [local OSMO profile](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/local/README.md), add `--profile local`: the checkpoint comes from the local MLflow server, and the results are logged there.
 
 ## ⚖️ Workflow Comparison
 
-| Feature            | Isaac Lab                   | LeRobot                                |
-|--------------------|-----------------------------|----------------------------------------|
-| Config file        | `infer.yaml`                | `lerobot-eval.yaml`                    |
-| Checkpoint format  | ONNX, TorchScript           | PyTorch (.pt)                          |
-| Task specification | `--task` (Isaac Gym env)    | `--policy-type` (model arch)           |
-| Video recording    | `--video-length`            | `--record-video`                       |
-| Evaluation         | `--num-envs`, `--max-steps` | `--eval-episodes`, `--eval-batch-size` |
+| Feature            | Isaac Lab                                      | LeRobot                                |
+|--------------------|------------------------------------------------|----------------------------------------|
+| Workflow template  | `evaluation/sil/workflows/osmo/eval.yaml`      | `lerobot-eval.yaml`                    |
+| Submission script  | `submit-osmo-eval.sh`                          | `submit-osmo-lerobot-eval.sh`          |
+| Checkpoint format  | skrl or RSL-RL `.pt`, exported to ONNX and JIT | LeRobot pretrained model               |
+| Task specification | `--task` (Isaac Lab environment)               | `--policy-type` (model arch)           |
+| Video recording    | `--video-length`                               | `--record-video`                       |
+| Evaluation         | Success gate over `--eval-episodes`            | `--eval-episodes`, `--eval-batch-size` |
 
-## 🔬 Isaac Lab Inference
+## 🔬 Isaac Lab Evaluation
 
-### Checkpoint URI Formats
+The workflow downloads the checkpoint, gates it on its success rate, exports it to ONNX and JIT, replays the exported policy with video, and logs the results through the tracking backend. It fails when the success rate is below the threshold, after the replay and uploads, so the videos of a failing policy stay available.
 
-| Format       | Example                                       | Use Case             |
-|--------------|-----------------------------------------------|----------------------|
-| MLflow run   | `runs:/<run-id>/model`                        | Direct from training |
-| MLflow model | `models:/<name>/<version>`                    | Model registry       |
-| Azure Blob   | `https://<account>.blob.core.windows.net/...` | External storage     |
-| HTTP(S)      | `https://<url>/model.onnx`                    | Public endpoints     |
+### Success Gate
 
-### Supported Model Formats
+An episode succeeds when the task reports `success` for it. For tasks that report none, an episode succeeds when it reaches its time limit without a failure termination. Isaac Lab reports time-outs as truncations, so a policy that keeps Cartpole balanced until the time limit succeeds, and one that drives the cart out of bounds fails.
 
-| Format      | Extension       | Frameworks         |
-|-------------|-----------------|--------------------|
-| ONNX        | `.onnx`         | Isaac Lab          |
-| TorchScript | `.pt`           | Isaac Lab, LeRobot |
-| Both        | `.onnx` + `.pt` | Full compatibility |
+The gate evaluates `--eval-episodes` episodes, 100 by default, across `--num-envs` environments and requires the `--success-threshold` success rate, 0.7 by default. `--framework` names the training library that wrote the checkpoint, `skrl` by default, or `rsl_rl`. The verdict, with the success rate, mean reward, and episode count, is logged as the run's metrics and as `metrics/eval_metrics.json`.
+
+### Checkpoint Sources
+
+| Source         | Example                                       | Use Case                                     |
+|----------------|-----------------------------------------------|----------------------------------------------|
+| MLflow run     | `runs:/<run-id>/<path>`                       | Direct from training                         |
+| MLflow model   | `models:/<name>/<version>`                    | Model registry of the tracking backend       |
+| Azure Blob     | `https://<account>.blob.core.windows.net/...` | External storage                             |
+| HTTP(S)        | `https://<url>/model.pt`                      | Public endpoints, with `--checkpoint-sha256` |
+| Container path | `/mnt/datasets/<dataset>/checkpoints`         | A path inside the task                       |
+| Policy carrier | `--policy-image <image>@sha256:<digest>`      | Containerized policy, evaluated at `/policy` |
+
+From a directory, the evaluation picks `best_agent.pt`, or else the highest-numbered checkpoint. `--policy-image` takes a runnable carrier built by [build-model-image.sh](https://github.com/microsoft/physical-ai-toolchain/blob/main/fleet-deployment/setup/README.md#-local-profile) on the Isaac Lab image: the carrier runs as the task image, and the gate evaluates the policy it carries.
 
 ### Isaac Lab CLI Parameters
 
-| Parameter              | Required | Default       | Description                |
-|------------------------|----------|---------------|----------------------------|
-| `-c, --checkpoint-uri` | Yes      | —             | Checkpoint location URI    |
-| `--task`               | No       | from workflow | Isaac Gym environment name |
-| `--format`             | No       | `onnx`        | Model format               |
-| `--num-envs`           | No       | `1`           | Parallel environments      |
-| `--max-steps`          | No       | `1000`        | Maximum simulation steps   |
-| `--video-length`       | No       | `200`         | Video recording frames     |
+| Parameter              | Default                   | Description                                           |
+|------------------------|---------------------------|-------------------------------------------------------|
+| `-c, --checkpoint-uri` | `/policy` with a carrier  | Checkpoint source; required without `--policy-image`  |
+| `--policy-image`       | —                         | Runnable policy carrier to evaluate as the task image |
+| `-t, --task`           | `Isaac-Ant-v0`            | Isaac Lab environment name                            |
+| `--framework`          | `skrl`                    | Training framework of the checkpoint                  |
+| `--eval-episodes`      | `100`                     | Episodes the success gate evaluates                   |
+| `--success-threshold`  | evaluator default (`0.7`) | Success rate required to pass                         |
+| `-f, --format`         | `both`                    | Replay format: `onnx`, `jit`, or `both`               |
+| `-n, --num-envs`       | `4`                       | Parallel environments for the gate and replay         |
+| `-m, --max-steps`      | `500`                     | Maximum replay steps                                  |
+| `-v, --video-length`   | `200`                     | Video recording steps                                 |
+| `--output-dataset`     | —                         | Publish the videos and metrics as an OSMO dataset     |
+| `--profile`            | `azure`                   | Platform profile: `azure` or `local`                  |
 
 ### Locating Checkpoints
 
@@ -85,20 +97,25 @@ osmo workflow logs <workflow-id> | grep "checkpoint"
 
 ### Configuration Resolution Order
 
-| Priority    | Source                | Example                    |
-|-------------|-----------------------|----------------------------|
-| 1 (highest) | CLI arguments         | `--set checkpoint_uri=...` |
-| 2           | Environment variables | `CHECKPOINT_URI=...`       |
-| 3 (lowest)  | Terraform outputs     | Auto-detected from state   |
+| Priority    | Source                | Example                  |
+|-------------|-----------------------|--------------------------|
+| 1 (highest) | CLI arguments         | `--checkpoint-uri ...`   |
+| 2           | Environment variables | `CHECKPOINT_URI=...`     |
+| 3           | Platform profile      | `--profile local`        |
+| 4 (lowest)  | Terraform outputs     | Auto-detected from state |
 
 ### Workflow Outputs
 
-| Artifact      | Path               | Description          |
-|---------------|--------------------|----------------------|
-| `policy.onnx` | `outputs/`         | Exported ONNX policy |
-| `policy.pt`   | `outputs/`         | TorchScript policy   |
-| Metrics JSON  | `outputs/metrics/` | Evaluation results   |
-| Videos        | `outputs/videos/`  | Recorded episodes    |
+The tracking backend's run, in the `inference-<task>` experiment, receives:
+
+| Artifact      | Run path                    | Description                     |
+|---------------|-----------------------------|---------------------------------|
+| `policy.onnx` | `exported_models/`          | Exported ONNX policy            |
+| `policy.pt`   | `exported_models/`          | TorchScript policy              |
+| Metrics JSON  | `metrics/`                  | Gate verdict and replay metrics |
+| Videos        | `videos/onnx`, `videos/jit` | Recorded replay episodes        |
+
+With `--output-dataset NAME`, the task also publishes the `videos/` and `metrics/` directories as a version of the OSMO dataset `training/NAME`, which a later workflow, such as the VLM judge, can take as input.
 
 ## 🤖 LeRobot Inference
 
