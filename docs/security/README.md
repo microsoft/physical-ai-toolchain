@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Security Documentation
 description: Index of security documentation including threat model and deployment security guide
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-07
+ms.date: 2026-10-20
 ms.topic: overview
 keywords:
   - security
@@ -46,7 +46,7 @@ The [security guide](../operations/security-guide.md) documents:
 
 ## 🏅 OpenSSF Best Practices
 
-OpenSSF Best Practices project [12195](https://www.bestpractices.dev/projects/12195) holds the Silver badge. The status was verified on 2026-10-19 against the public project data.
+OpenSSF Best Practices project [12195](https://www.bestpractices.dev/projects/12195) publicly awards the Silver badge. The status was verified on 2026-10-20 against the public project data.
 
 | Level   | Progress |
 |---------|---------:|
@@ -54,7 +54,7 @@ OpenSSF Best Practices project [12195](https://www.bestpractices.dev/projects/12
 | Silver  |     100% |
 | Gold    |      43% |
 
-The root `.bestpractices.json` stores evidence-backed proposed questionnaire answers. Run the `openssf-badge-audit` skill to compare that proposal with the live project before a maintainer submits changes through the authenticated OpenSSF interface.
+The public award and current repository evidence are distinct. The root `.bestpractices.json` records `static_analysis_fixed` and `vulnerabilities_fixed_60_days` as unmet because current code-scanning findings and medium-or-higher Dependabot alerts older than 60 days remain open. Run the `openssf-badge-audit` skill to compare the evidence proposal with the live project before a maintainer submits changes through the authenticated OpenSSF interface.
 
 ## 🛠️ Operational Scripts
 
