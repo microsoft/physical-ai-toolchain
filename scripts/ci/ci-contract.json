@@ -273,6 +273,8 @@
     },
     "shared_ci": {
       "patterns": [
+        "^\\.bestpractices\\.json$",
+        "^\\.github/skills/openssf-badge-audit/",
         "^shared/ci/",
         "^scripts/security/zap-to-sarif\\.py$"
       ],
@@ -1561,7 +1563,7 @@
               "run-sha256": "bdad651685dd88187b0bfcb38ae85755c6e45544c99a4e8eabef48dbb20a4a68"
             },
             "test": {
-              "run-sha256": "d19dbf6fc6753ed265ec47dd971f2d75aaeb674706824616faeed6d114a82abb"
+              "run-sha256": "19c98b44897d90a811fb42a093a7b837be867840bba9e09236d5803b62bb7c82"
             }
           }
         }

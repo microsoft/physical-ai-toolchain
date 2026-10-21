@@ -74,6 +74,7 @@ jobs:
           uv run --frozen pytest -o addopts="" shared/ci/tests scripts/tests/security/test_zap_to_sarif.py -v
           --junitxml=logs/pytest-shared-ci-results.xml
           --cov=shared/ci
+          --cov=.github/skills/openssf-badge-audit/scripts
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-shared-ci.xml
           --cov-fail-under=80

@@ -1053,9 +1053,9 @@
         "/security"
       ],
       "rule": "color-contrast",
-      "signature": "564c5751dec79d4d",
+      "signature": "5491d485d48eaf12",
       "state": "default",
-      "target": "[\".tableWrapper[role=\\\"group\\\"][aria-labelledby=\\\"-documents\\\"] > table > tbody > tr:nth-child(4) > td:nth-child(2)\"]",
+      "target": "[\"table[aria-labelledby=\\\"-documents\\\"] > tbody > tr:nth-child(4) > td:nth-child(2)\"]",
       "theme": "dark"
     },
     {
@@ -2109,9 +2109,9 @@
         "/security"
       ],
       "rule": "color-contrast",
-      "signature": "b9e90ad270932eb2",
+      "signature": "e387692675cd733f",
       "state": "default",
-      "target": "[\".tableWrapper[role=\\\"group\\\"][aria-labelledby=\\\"-documents\\\"] > table > tbody > tr:nth-child(4) > td:nth-child(2)\"]",
+      "target": "[\"table[aria-labelledby=\\\"-documents\\\"] > tbody > tr:nth-child(4) > td:nth-child(2)\"]",
       "theme": "light"
     },
     {

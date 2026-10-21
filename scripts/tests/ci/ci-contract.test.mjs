@@ -477,6 +477,8 @@ const selectionCases = [
   ['training image defaults also select training, accessibility, and fuzz tests', 'training/setup/defaults.conf', [...imageConsumers, 'training', 'accessibility', 'fuzz']],
   ['shared shell defaults conservatively select every consumer', 'scripts/lib/common.sh', allSelectors],
   ['shared image scripts also select their own tests', 'shared/ci/smoke-image.sh', [...imageConsumers, 'shared_ci']],
+  ['OpenSSF proposal changes select shared CI', '.bestpractices.json', ['shared_ci']],
+  ['OpenSSF collector changes select shared CI', '.github/skills/openssf-badge-audit/scripts/audit_badge.py', ['shared_ci']],
   ['VLM judge selects evaluation, the viewer backend, and accessibility', 'evaluation/vlm_judge/judge.py', ['evaluation', 'dv_backend', 'accessibility']],
   ...['physical_ai_curation/jobs.py', 'tests/test_jobs.py', 'pyproject.toml', 'uv.lock'].map(path => [
     `curation package ${path} selects backend, fuzz, and accessibility`,
