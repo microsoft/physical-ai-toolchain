@@ -1,0 +1,25 @@
+# Copyright (c) Microsoft Corporation.
+# SPDX-License-Identifier: MIT
+
+version: '3.8'
+
+services:
+  odd-pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: odd-component:latest
+    container_name: odd-pipeline
+    network_mode: host
+    environment:
+      - VLM_URL=http://127.0.0.1:8010/v1
+      - VLM_MODEL=nvidia/Cosmos-Reason2-2B
+      - ODD_SCORE_THRESHOLD=0.8
+    volumes:
+      - ${ODD_INPUT_DIR:?Set ODD_INPUT_DIR to the dataset directory}:/input:ro
+      - ${ODD_OUTPUT_DIR:-./output}:/output
+    command: >
+      --input-dir /input
+      --output-dir /output
+      --threshold 0.8
+      --host-video-dir ${ODD_HOST_VIDEO_DIR:?Set ODD_HOST_VIDEO_DIR to the host path of the videos}

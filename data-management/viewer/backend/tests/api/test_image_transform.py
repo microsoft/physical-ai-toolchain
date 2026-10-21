@@ -165,6 +165,7 @@ class TestApplyContrast:
 
         assert result.shape == sample_rgb_frame.shape
         assert result.dtype == np.uint8
+        assert np.std(result) > np.std(sample_rgb_frame)
 
     def test_contrast_decrease(self, sample_rgb_frame: np.ndarray) -> None:
         """Test decreasing contrast."""
@@ -184,14 +185,17 @@ class TestApplySaturation:
 
         assert result.shape == sample_rgb_frame.shape
         assert result.dtype == np.uint8
+        original_chroma = np.mean(np.ptp(sample_rgb_frame.astype(np.int16), axis=2))
+        adjusted_chroma = np.mean(np.ptp(result.astype(np.int16), axis=2))
+        assert adjusted_chroma > original_chroma
 
     def test_saturation_decrease(self, sample_rgb_frame: np.ndarray) -> None:
         """Test decreasing saturation (towards grayscale)."""
         result = apply_saturation(sample_rgb_frame, -1.0)
 
         assert result.shape == sample_rgb_frame.shape
-        # Should be close to grayscale (R ≈ G ≈ B)
-        # With -1 saturation, colors should be nearly equal
+        np.testing.assert_array_equal(result[:, :, 0], result[:, :, 1])
+        np.testing.assert_array_equal(result[:, :, 1], result[:, :, 2])
 
 
 class TestApplyGamma:
@@ -229,25 +233,31 @@ class TestApplyGamma:
 class TestApplyHueRotation:
     """Tests for apply_hue_rotation function."""
 
-    def test_hue_rotation_positive(self, sample_rgb_frame: np.ndarray) -> None:
-        """Test positive hue rotation."""
-        result = apply_hue_rotation(sample_rgb_frame, 90)
+    @pytest.mark.parametrize(
+        ("degrees", "expected_colors"),
+        [
+            pytest.param(120, [(0, 255, 0), (0, 0, 255), (255, 0, 0)], id="positive"),
+            pytest.param(-120, [(0, 0, 255), (255, 0, 0), (0, 255, 0)], id="negative"),
+        ],
+    )
+    def test_hue_rotation_direction(self, degrees: float, expected_colors: list[tuple[int, int, int]]) -> None:
+        """Test both rotation directions against known primary-color outputs."""
+        frame = np.array([[(255, 0, 0), (0, 255, 0), (0, 0, 255)]], dtype=np.uint8)
+        expected = np.array([expected_colors], dtype=np.uint8)
 
-        assert result.shape == sample_rgb_frame.shape
+        result = apply_hue_rotation(frame, degrees)
+
+        assert result.shape == frame.shape
         assert result.dtype == np.uint8
-
-    def test_hue_rotation_negative(self, sample_rgb_frame: np.ndarray) -> None:
-        """Test negative hue rotation."""
-        result = apply_hue_rotation(sample_rgb_frame, -45)
-
-        assert result.shape == sample_rgb_frame.shape
+        # One 8-bit hue step can shift an RGB channel by approximately six levels.
+        np.testing.assert_allclose(result, expected, rtol=0, atol=6)
 
     def test_hue_rotation_full_circle(self, sample_rgb_frame: np.ndarray) -> None:
         """Test 360 degree rotation returns similar to original."""
         result = apply_hue_rotation(sample_rgb_frame, 360)
 
-        assert result.shape == sample_rgb_frame.shape
-        # Should be close to original (may have minor differences due to rounding)
+        channel_error = np.abs(result.astype(np.int16) - sample_rgb_frame.astype(np.int16))
+        assert np.max(channel_error) <= 12
 
     def test_hue_rotation_grayscale_raises_error(self, sample_gray_frame: np.ndarray) -> None:
         """Test that grayscale image raises error."""
@@ -279,6 +289,8 @@ class TestApplyColorFilter:
 
         assert result.shape == sample_rgb_frame.shape
         assert result.dtype == np.uint8
+        assert np.mean(result[:, :, 0]) > np.mean(result[:, :, 1])
+        assert np.mean(result[:, :, 1]) > np.mean(result[:, :, 2])
 
     def test_filter_invert(self, sample_rgb_frame: np.ndarray) -> None:
         """Test invert filter."""
@@ -294,13 +306,18 @@ class TestApplyColorFilter:
         result = apply_color_filter(sample_rgb_frame, "warm")
 
         assert result.shape == sample_rgb_frame.shape
-        # Red channel should generally increase
+        assert np.mean(result[:, :, 0]) > np.mean(sample_rgb_frame[:, :, 0])
+        assert np.mean(result[:, :, 1]) > np.mean(sample_rgb_frame[:, :, 1])
+        assert np.mean(result[:, :, 2]) < np.mean(sample_rgb_frame[:, :, 2])
 
     def test_filter_cool(self, sample_rgb_frame: np.ndarray) -> None:
         """Test cool filter."""
         result = apply_color_filter(sample_rgb_frame, "cool")
 
         assert result.shape == sample_rgb_frame.shape
+        assert np.mean(result[:, :, 0]) < np.mean(sample_rgb_frame[:, :, 0])
+        assert np.mean(result[:, :, 1]) < np.mean(sample_rgb_frame[:, :, 1])
+        assert np.mean(result[:, :, 2]) > np.mean(sample_rgb_frame[:, :, 2])
 
 
 class TestErrorPathsAndPILUnavailable:
@@ -500,7 +517,6 @@ class TestGetOutputDimensions:
             resize=ResizeDimensions(width=64, height=64),
         )
         assert get_output_dimensions((640, 480), transform) == (64, 64)
-        # Blue channel should generally increase
 
     def test_filter_unknown_raises_error(self, sample_rgb_frame: np.ndarray) -> None:
         """Test unknown filter raises error."""
@@ -516,7 +532,8 @@ class TestApplyColorAdjustment:
         adjustment = ColorAdjustment(brightness=0.3)
         result = apply_color_adjustment(sample_rgb_frame, adjustment)
 
-        assert result.shape == sample_rgb_frame.shape
+        expected = apply_brightness(sample_rgb_frame, 0.3)
+        np.testing.assert_array_equal(result, expected, strict=True)
 
     def test_adjustment_multiple_params(self, sample_rgb_frame: np.ndarray) -> None:
         """Test adjustment with multiple parameters."""
@@ -527,8 +544,11 @@ class TestApplyColorAdjustment:
         )
         result = apply_color_adjustment(sample_rgb_frame, adjustment)
 
-        assert result.shape == sample_rgb_frame.shape
-        assert result.dtype == np.uint8
+        expected = apply_saturation(
+            apply_contrast(apply_brightness(sample_rgb_frame, 0.2), 0.1),
+            -0.3,
+        )
+        np.testing.assert_array_equal(result, expected, strict=True)
 
     def test_adjustment_all_params(self, sample_rgb_frame: np.ndarray) -> None:
         """Test adjustment with all parameters."""
@@ -541,7 +561,17 @@ class TestApplyColorAdjustment:
         )
         result = apply_color_adjustment(sample_rgb_frame, adjustment)
 
-        assert result.shape == sample_rgb_frame.shape
+        expected = apply_hue_rotation(
+            apply_gamma(
+                apply_saturation(
+                    apply_contrast(apply_brightness(sample_rgb_frame, 0.1), 0.1),
+                    0.1,
+                ),
+                1.2,
+            ),
+            30,
+        )
+        np.testing.assert_array_equal(result, expected, strict=True)
 
     def test_adjustment_empty(self, sample_rgb_frame: np.ndarray) -> None:
         """Test empty adjustment returns original."""
@@ -579,7 +609,11 @@ class TestApplyTransform:
         )
         result = apply_transform(sample_rgb_frame, transform)
 
-        assert result.shape == sample_rgb_frame.shape
+        expected = apply_color_adjustment(
+            sample_rgb_frame,
+            ColorAdjustment(brightness=0.3, contrast=0.2),
+        )
+        np.testing.assert_array_equal(result, expected, strict=True)
 
     def test_transform_color_filter_only(self, sample_rgb_frame: np.ndarray) -> None:
         """Test transform with color filter only."""
@@ -587,6 +621,8 @@ class TestApplyTransform:
         result = apply_transform(sample_rgb_frame, transform)
 
         assert result.shape == sample_rgb_frame.shape
+        np.testing.assert_array_equal(result[:, :, 0], result[:, :, 1])
+        np.testing.assert_array_equal(result[:, :, 1], result[:, :, 2])
 
     def test_transform_full_pipeline(self, sample_rgb_frame: np.ndarray) -> None:
         """Test full transform pipeline: crop -> resize -> color."""
@@ -598,8 +634,17 @@ class TestApplyTransform:
         )
         result = apply_transform(sample_rgb_frame, transform)
 
-        assert result.shape == (40, 40, 3)
-        assert result.dtype == np.uint8
+        expected = apply_color_filter(
+            apply_color_adjustment(
+                apply_resize(
+                    apply_crop(sample_rgb_frame, CropRegion(x=10, y=10, width=80, height=80)),
+                    ResizeDimensions(width=40, height=40),
+                ),
+                ColorAdjustment(brightness=0.1),
+            ),
+            "warm",
+        )
+        np.testing.assert_array_equal(result, expected, strict=True)
 
     def test_transform_empty(self, sample_rgb_frame: np.ndarray) -> None:
         """Test empty transform returns original."""

@@ -1,0 +1,9 @@
+{
+  "weatherType": "Transform this driving scene into {value} weather conditions with realistic lighting and road appearance. Preserve camera motion, road layout, and vehicle trajectories.",
+  "timeOfDay": {
+    "morning": "Transform this driving scene into early morning with soft low-angle sunlight and long shadows. Preserve camera motion, road layout, and vehicle trajectories.",
+    "noon": "Transform this driving scene into midday with bright overhead sunlight and short shadows. Preserve camera motion, road layout, and vehicle trajectories.",
+    "evening": "Transform this driving scene into evening dusk with warm low light and vehicle headlights on. Preserve camera motion, road layout, and vehicle trajectories.",
+    "night": "Transform this driving scene into night with street lighting and vehicle headlights. Preserve camera motion, road layout, and vehicle trajectories."
+  }
+}
