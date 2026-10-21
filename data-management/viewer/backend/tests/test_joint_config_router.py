@@ -231,6 +231,31 @@ def test_given_azure_write_failure_when_saving_then_reports_safe_error(
     assert provider.objects == {}
 
 
+@pytest.mark.parametrize("path", ["/api/datasets/test-dataset/joint-config", "/api/joint-config/defaults"])
+@pytest.mark.parametrize("index", [False, True, "1", 1.5])
+def test_joint_indices_reject_non_integers(client, path: str, index: object) -> None:
+    response = client.put(
+        path,
+        json={"groups": [{"id": "arm", "label": "Arm", "indices": [index]}]},
+        headers={"If-None-Match": "*"},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("path", ["/api/datasets/test-dataset/joint-config", "/api/joint-config/defaults"])
+@pytest.mark.parametrize("index", [0, 1, 1.0])
+def test_joint_indices_accept_schema_integers(client, path: str, index: int | float) -> None:
+    response = client.put(
+        path,
+        json={"groups": [{"id": "arm", "label": "Arm", "indices": [index]}]},
+        headers={"If-None-Match": "*"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["groups"][0]["indices"] == [int(index)]
+
+
 def _build_lerobot_dataset(root: Path, state_names: list[str]) -> None:
     """Materialize the minimal LeRobot layout discovery reads, with named state channels."""
     (root / "meta").mkdir(parents=True, exist_ok=True)

@@ -15,6 +15,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
+from starlette.datastructures import MutableHeaders
 
 from ..config import AppConfig, get_app_config
 from ..models.datasources import (
@@ -25,6 +26,7 @@ from ..models.datasources import (
     EpisodeMeta,
     TrajectoryPoint,
 )
+from ..models.errors import error_responses
 from ..services.dataset_service import DatasetService, EpisodeLoadError, get_dataset_service
 from ..services.video_transcode import ensure_browser_compatible
 from ..validation import (
@@ -40,6 +42,15 @@ from ..validation import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+_VIDEO_MEDIA_TYPES = {
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".avi": "video/x-msvideo",
+    ".mov": "video/quicktime",
+}
+_VIDEO_CONTENT = {
+    media_type: {"schema": {"type": "string", "format": "binary"}} for media_type in _VIDEO_MEDIA_TYPES.values()
+}
 
 
 class DatasetCapabilities(BaseModel):
@@ -80,7 +91,7 @@ async def list_datasets(
     return await service.list_datasets()
 
 
-@router.get("/catalog", response_model=DatasetCatalogPage)
+@router.get("/catalog", response_model=DatasetCatalogPage, responses=error_responses(409, 503))
 async def query_catalog(
     query: str = Query(default="", max_length=200),
     group: str | None = Query(default=None, max_length=300),
@@ -114,7 +125,7 @@ async def query_catalog(
         raise HTTPException(status_code=503, detail="Catalog discovery unavailable") from error
 
 
-@router.get("/{dataset_id}", response_model=DatasetInfo)
+@router.get("/{dataset_id}", response_model=DatasetInfo, responses=error_responses(400, 404))
 async def get_dataset(
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     service: DatasetService = Depends(get_dataset_service),
@@ -131,7 +142,7 @@ async def get_dataset(
     return dataset
 
 
-@router.get("/{dataset_id}/capabilities", response_model=DatasetCapabilities)
+@router.get("/{dataset_id}/capabilities", response_model=DatasetCapabilities, responses=error_responses(400))
 async def get_dataset_capabilities(
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     service: DatasetService = Depends(get_dataset_service),
@@ -161,7 +172,7 @@ async def get_dataset_capabilities(
     )
 
 
-@router.get("/{dataset_id}/episodes", response_model=list[EpisodeMeta])
+@router.get("/{dataset_id}/episodes", response_model=list[EpisodeMeta], responses=error_responses(400, 404))
 async def list_episodes(
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     offset: int = Depends(query_int_param("offset", default=0, ge=0, description="Number of episodes to skip")),
@@ -195,7 +206,7 @@ async def list_episodes(
     )
 
 
-@router.get("/{dataset_id}/episodes/{episode_idx}", response_model=EpisodeData)
+@router.get("/{dataset_id}/episodes/{episode_idx}", response_model=EpisodeData, responses=error_responses(400, 404))
 async def get_episode(
     response: Response,
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
@@ -237,6 +248,7 @@ async def get_episode(
 @router.get(
     "/{dataset_id}/episodes/{episode_idx}/trajectory",
     response_model=list[TrajectoryPoint],
+    responses=error_responses(400, 404),
 )
 async def get_episode_trajectory(
     response: Response,
@@ -260,7 +272,14 @@ async def get_episode_trajectory(
     return trajectory
 
 
-@router.get("/{dataset_id}/episodes/{episode_idx}/frames/{frame_idx}")
+@router.get(
+    "/{dataset_id}/episodes/{episode_idx}/frames/{frame_idx}",
+    responses={
+        **error_responses(400, 404, 500),
+        200: {"content": {"image/jpeg": {"schema": {"type": "string", "format": "binary"}}}},
+    },
+    response_class=Response,
+)
 async def get_episode_frame(
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
     frame_idx: int = Depends(path_int_param("frame_idx", ge=0, description="Frame index")),
@@ -302,7 +321,7 @@ async def get_episode_frame(
         )
 
 
-@router.get("/{dataset_id}/episodes/{episode_idx}/cameras")
+@router.get("/{dataset_id}/episodes/{episode_idx}/cameras", responses=error_responses(400))
 async def get_episode_cameras(
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
@@ -318,6 +337,16 @@ async def get_episode_cameras(
 @router.get(
     "/{dataset_id}/episodes/{episode_idx}/video/{camera}",
     response_model=None,
+    response_class=Response,
+    responses={
+        **error_responses(400, 404, 502),
+        200: {"content": _VIDEO_CONTENT},
+        206: {
+            "description": "Partial video content",
+            "content": _VIDEO_CONTENT,
+        },
+        416: {"description": "Requested range is not satisfiable"},
+    },
 )
 @router.head(
     "/{dataset_id}/episodes/{episode_idx}/video/{camera}",
@@ -342,6 +371,11 @@ async def get_episode_video(
 
     Note: camera parameter can include dots (e.g., 'observation.images.color')
     """
+    offset, length = range_values
+    if offset is not None:
+        # FileResponse must consume the same normalized range as Blob streaming.
+        end = "" if length is None else str(offset + length - 1)
+        MutableHeaders(scope=request.scope)["range"] = f"bytes={offset}-{end}"
     video_path = await asyncio.to_thread(service.get_video_file_path, dataset_id, episode_idx, camera)
 
     if video_path is not None:
@@ -357,13 +391,7 @@ async def get_episode_video(
         # (e.g. mpeg4 / MPEG-4 Part 2). Cached after first request.
         video_file = await ensure_browser_compatible(video_file)
         suffix = video_file.suffix.lower()
-        media_types = {
-            ".mp4": "video/mp4",
-            ".webm": "video/webm",
-            ".avi": "video/x-msvideo",
-            ".mov": "video/quicktime",
-        }
-        media_type = media_types.get(suffix, "video/mp4")
+        media_type = _VIDEO_MEDIA_TYPES.get(suffix, "video/mp4")
         # Force inline disposition so HTML <video> elements stream the bytes
         # instead of treating the response as a downloadable attachment.
         # FileResponse switches to attachment whenever `filename=` is set, so
@@ -412,13 +440,7 @@ async def get_episode_video(
 
         local_path = await ensure_browser_compatible(local_path)
         suffix = local_path.suffix.lower()
-        media_types = {
-            ".mp4": "video/mp4",
-            ".webm": "video/webm",
-            ".avi": "video/x-msvideo",
-            ".mov": "video/quicktime",
-        }
-        media_type = media_types.get(suffix, "video/mp4")
+        media_type = _VIDEO_MEDIA_TYPES.get(suffix, "video/mp4")
         download_name = f"{dataset_id}_ep{episode_idx}_{camera.replace('.', '_')}{suffix}"
         return FileResponse(
             path=str(local_path),
@@ -464,7 +486,7 @@ async def get_cache_stats(
     )
 
 
-@router.post("/{dataset_id}/cache/warm")
+@router.post("/{dataset_id}/cache/warm", responses=error_responses(400, 404))
 async def warm_cache(
     count: int = Depends(query_int_param("count", default=5, ge=1, le=20, description="Number of episodes to preload")),
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),

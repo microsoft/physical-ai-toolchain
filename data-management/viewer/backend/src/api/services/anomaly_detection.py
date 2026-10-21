@@ -1,3 +1,4 @@
+# cspell:ignore prec
 """
 Anomaly detection service.
 
@@ -5,12 +6,54 @@ Automatically detects anomalies in robot trajectories using
 statistical methods and threshold-based detection.
 """
 
+from __future__ import annotations
+
 import uuid
 from dataclasses import dataclass
+from decimal import Decimal, localcontext
 from enum import StrEnum
 
 import numpy as np
 from numpy.typing import NDArray
+
+from .trajectory_numerics import MetricArray, decimal_array, decimal_row_norms, differentiate, time_deltas
+
+
+def _magnitudes(values: MetricArray) -> MetricArray:
+    if values.dtype != object:
+        try:
+            with np.errstate(over="raise", invalid="raise", under="raise"):
+                return np.linalg.norm(values, axis=1)
+        except FloatingPointError:
+            pass
+    return decimal_row_norms(values)
+
+
+def _z_scores(magnitudes: MetricArray) -> NDArray[np.float64] | None:
+    if magnitudes.dtype != object:
+        try:
+            with np.errstate(over="raise", invalid="raise", divide="raise"):
+                mean = np.mean(magnitudes)
+                std = np.std(magnitudes)
+                if std < 1e-10:
+                    return None
+                return (magnitudes - mean) / std
+        except FloatingPointError:
+            pass
+
+    with localcontext() as context:
+        context.prec = 34
+        values = decimal_array(magnitudes)
+        offsets = values - values[0]
+        centered = offsets - sum(offsets) / len(offsets)
+        scale = max(abs(value) for value in centered)
+        if scale == 0:
+            return None
+        normalized = np.asarray(centered / scale, dtype=np.float64)
+        std = float(np.sqrt(np.mean(normalized**2)))
+        if scale * Decimal(std) < Decimal.from_float(1e-10):
+            return None
+        return normalized / std
 
 
 class AnomalyType(StrEnum):
@@ -130,15 +173,14 @@ class AnomalyDetector:
             return anomalies
 
         # Compute velocity
-        dt = np.diff(timestamps)
-        dt = np.where(dt > 0, dt, 1e-6)
-        velocity = np.diff(positions, axis=0) / dt[:, np.newaxis]
+        velocity = differentiate(positions, time_deltas(timestamps))
+        vel_magnitude = _magnitudes(velocity)
 
         # Detect velocity spikes
-        anomalies.extend(self._detect_velocity_spikes(velocity))
+        anomalies.extend(self._detect_velocity_spikes(vel_magnitude))
 
         # Detect unexpected stops
-        anomalies.extend(self._detect_unexpected_stops(velocity))
+        anomalies.extend(self._detect_unexpected_stops(vel_magnitude))
 
         # Detect oscillations
         anomalies.extend(self._detect_oscillations(positions))
@@ -157,22 +199,15 @@ class AnomalyDetector:
 
         return anomalies
 
-    def _detect_velocity_spikes(self, velocity: NDArray[np.float64]) -> list[DetectedAnomaly]:
+    def _detect_velocity_spikes(self, vel_magnitude: MetricArray) -> list[DetectedAnomaly]:
         """
         Detect velocity spikes using z-score thresholding.
         """
         anomalies = []
 
-        vel_magnitude = np.linalg.norm(velocity, axis=1)
-
-        # Compute z-scores
-        mean_vel = np.mean(vel_magnitude)
-        std_vel = np.std(vel_magnitude)
-
-        if std_vel < 1e-10:
+        z_scores = _z_scores(vel_magnitude)
+        if z_scores is None:
             return anomalies
-
-        z_scores = (vel_magnitude - mean_vel) / std_vel
 
         # Find spikes
         spike_mask = z_scores > self.velocity_zscore_threshold
@@ -202,13 +237,12 @@ class AnomalyDetector:
 
         return anomalies
 
-    def _detect_unexpected_stops(self, velocity: NDArray[np.float64]) -> list[DetectedAnomaly]:
+    def _detect_unexpected_stops(self, vel_magnitude: MetricArray) -> list[DetectedAnomaly]:
         """
         Detect unexpected stops (velocity near zero for extended period).
         """
         anomalies = []
 
-        vel_magnitude = np.linalg.norm(velocity, axis=1)
         is_stopped = vel_magnitude < self.stop_velocity_threshold
 
         # Find consecutive stopped segments
@@ -217,7 +251,7 @@ class AnomalyDetector:
         for group in groups:
             if len(group) >= self.stop_min_frames:
                 # Exclude if at start or end (normal stops)
-                if group[0] < 5 or group[-1] > len(velocity) - 5:
+                if group[0] < 5 or group[-1] > len(vel_magnitude) - 5:
                     continue
 
                 start_frame = int(group[0])
@@ -255,11 +289,10 @@ class AnomalyDetector:
             return anomalies
 
         # Detect sign changes in velocity for each joint
-        velocity = np.diff(positions, axis=0)
+        directions = (positions[1:] > positions[:-1]).astype(np.int8) - (positions[1:] < positions[:-1])
 
         for joint_idx in range(positions.shape[1]):
-            joint_vel = velocity[:, joint_idx]
-            sign_changes = np.diff(np.sign(joint_vel))
+            sign_changes = np.diff(directions[:, joint_idx])
             zero_crossings = np.where(sign_changes != 0)[0]
 
             # Look for rapid oscillations (multiple sign changes in short window)
@@ -301,15 +334,9 @@ class AnomalyDetector:
         """
         anomalies = []
 
-        force_magnitude = np.linalg.norm(forces, axis=1)
-
-        mean_force = np.mean(force_magnitude)
-        std_force = np.std(force_magnitude)
-
-        if std_force < 1e-10:
+        z_scores = _z_scores(_magnitudes(forces))
+        if z_scores is None:
             return anomalies
-
-        z_scores = (force_magnitude - mean_force) / std_force
         spike_mask = z_scores > self.velocity_zscore_threshold
         spike_indices = np.where(spike_mask)[0]
 
@@ -344,7 +371,11 @@ class AnomalyDetector:
         anomalies = []
 
         # Simple threshold for mismatch detection
-        mismatch = np.abs(gripper_states - gripper_commands) > 0.3
+        try:
+            with np.errstate(over="raise", invalid="raise"):
+                mismatch = np.abs(gripper_states - gripper_commands) > 0.3
+        except FloatingPointError:
+            mismatch = np.abs(decimal_array(gripper_states) - decimal_array(gripper_commands)) > 0.3
         mismatch_indices = np.where(mismatch)[0]
 
         groups = self._group_consecutive(mismatch_indices)
