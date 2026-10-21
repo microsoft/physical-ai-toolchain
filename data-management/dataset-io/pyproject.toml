@@ -10,7 +10,7 @@ dependencies = []
 Repository = "https://github.com/microsoft/physical-ai-toolchain"
 
 [project.optional-dependencies]
-parquet = ["pyarrow==25.0.1", "pandas==3.0.5"]
+parquet = ["pyarrow==25.0.1", "pandas==3.0.6"]
 
 [build-system]
 requires = ["setuptools>=83.0.0", "wheel"]
