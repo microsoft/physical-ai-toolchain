@@ -132,6 +132,7 @@ run "dataviewer_auth_enabled" {
     target          = module.dataviewer[0].azuread_application.dataviewer[0]
     override_during = plan
     values = {
+      id        = "/applications/00000000-0000-0000-0000-000000000022"
       client_id = "00000000-0000-0000-0000-000000000021"
     }
   }
