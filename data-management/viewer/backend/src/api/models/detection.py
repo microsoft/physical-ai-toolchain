@@ -7,19 +7,23 @@ endpoints and match the frontend TypeScript type definitions.
 
 from __future__ import annotations
 
-from pydantic import Field, field_validator
+from typing import Annotated
 
-from ..validation import SanitizedModel
+from pydantic import Field, StrictFloat, field_validator
+
+from ..validation import WHITESPACE_PATTERN, JsonInteger, SanitizedModel
+
+_LABEL_INPUT_PATTERN = rf"^{WHITESPACE_PATTERN}*[\s\S]{{0,100}}{WHITESPACE_PATTERN}*$"
 
 
 class DetectionRequest(SanitizedModel):
     """Request parameters for running object detection."""
 
-    frames: list[int] | None = Field(
+    frames: list[Annotated[JsonInteger, Field(json_schema_extra={"minimum": 0})]] | None = Field(
         default=None,
         description="Specific frame indices to process. If None, processes all frames.",
     )
-    confidence: float | None = Field(
+    confidence: StrictFloat | None = Field(
         default=None,
         ge=0.0,
         le=1.0,
@@ -34,11 +38,12 @@ class DetectionRequest(SanitizedModel):
             "yolov8l-world, yolov8x-worldv2."
         ),
     )
-    labels: list[str] | None = Field(
+    labels: list[Annotated[str, Field(json_schema_extra={"pattern": _LABEL_INPUT_PATTERN})]] | None = Field(
         default=None,
         description=(
             "Optional open-vocabulary class names. When provided, detection switches to "
-            "YOLO-World and only returns boxes matching these labels."
+            "YOLO-World and only returns boxes matching these labels. Whitespace is trimmed; "
+            "blank labels are ignored. Each trimmed label must be at most 100 characters."
         ),
         max_length=64,
     )

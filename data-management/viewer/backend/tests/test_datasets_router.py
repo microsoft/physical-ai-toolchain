@@ -1,3 +1,4 @@
+# cspell:ignore cdefghij rtes
 """Unit tests for the datasets router (`src/api/routers/datasets.py`).
 
 Exercises listing, capabilities, episode metadata, trajectory, frame
@@ -542,10 +543,18 @@ class TestGetVideo:
             (None, 200, b"abcdefghij", None),
             ("bytes=2-4", 206, b"cde", "bytes 2-4/10"),
             ("bytes=8-99", 206, b"ij", "bytes 8-9/10"),
+            ("bytes=2-", 206, b"cdefghij", "bytes 2-9/10"),
+            ("bytes= +02 - +04 ", 206, b"cde", "bytes 2-4/10"),
+            ("bytes=0_2-0_4", 206, b"cde", "bytes 2-4/10"),
+            ("by\rtes=0\r2-0\n4", 206, b"cde", "bytes 2-4/10"),
+            (" BYTES =2-4", 206, b"cde", "bytes 2-4/10"),
+            ("bytes=0--0", 206, b"a", "bytes 0-0/10"),
             ("bytes=20-", 416, b"", "bytes */10"),
         ],
     )
-    def test_compatible_blob_uses_actual_range_route(
+    @pytest.mark.parametrize("source", ["local", "blob-stream", "blob-file"])
+    @pytest.mark.parametrize("method", ["GET", "HEAD"])
+    def test_video_sources_use_actual_range_route(
         self,
         client: TestClient,
         override_service: MagicMock,
@@ -554,6 +563,9 @@ class TestGetVideo:
         status: int,
         body: bytes,
         content_range: str | None,
+        source: str,
+        method: str,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         provider = MagicMock()
         provider.get_blob_properties = AsyncMock(
@@ -573,15 +585,65 @@ class TestGetVideo:
         override_service.blob_video_is_browser_compatible.return_value = True
         override_service.get_blob_video_stream = service.get_blob_video_stream
         override_service.materialize_blob_video = AsyncMock(side_effect=AssertionError("Compatible media must stream"))
-        response = client.get(
-            "/api/datasets/ds-1/episodes/0/video/front", headers={"Range": range_header} if range_header else {}
+        if source != "blob-stream":
+            video = tmp_path / "video.mp4"
+            video.write_bytes(b"abcdefghij")
+            monkeypatch.setattr("src.api.routers.datasets.ensure_browser_compatible", AsyncMock(return_value=video))
+            if source == "local":
+                override_service.get_video_file_path.return_value = str(video)
+            else:
+                override_service.blob_video_is_browser_compatible.return_value = False
+                override_service.materialize_blob_video = AsyncMock(return_value=video)
+        response = client.request(
+            method,
+            "/api/datasets/ds-1/episodes/0/video/front",
+            headers={"Range": range_header} if range_header is not None else {},
         )
         assert response.status_code == status
-        assert response.content == body
+        assert response.content == (b"" if method == "HEAD" else body)
         assert response.headers.get("content-range") == content_range
         assert response.headers["content-length"] == str(len(body))
         assert "content-encoding" not in response.headers
+        if source != "blob-file":
+            override_service.materialize_blob_video.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "value", ["items=0-3", "", "bytes=-3", "bytes=abc", "bytes=4-1", "bytes=0-1,3-4", "bytes=0- "]
+    )
+    @pytest.mark.parametrize("source", ["local", "blob-stream", "blob-file"])
+    @pytest.mark.parametrize("method", ["GET", "HEAD"])
+    def test_invalid_range_rejected_before_video_io(
+        self,
+        client: TestClient,
+        override_service: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        value: str,
+        source: str,
+        method: str,
+    ) -> None:
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"abcdefghij")
+        transcode = AsyncMock(return_value=video)
+        monkeypatch.setattr("src.api.routers.datasets.ensure_browser_compatible", transcode)
+        override_service.get_video_file_path.return_value = str(video) if source == "local" else None
+        override_service.has_blob_provider.return_value = source != "local"
+        override_service.blob_video_is_browser_compatible.return_value = source == "blob-stream"
+        override_service.get_blob_video_path.return_value = "dataset/video.mp4"
+        override_service.materialize_blob_video.return_value = video
+        response = client.request(method, "/api/datasets/ds-1/episodes/0/video/front", headers={"Range": value})
+        assert response.status_code == 400
+        assert response.headers["content-type"] == "application/json"
+        if method == "GET":
+            assert response.json() == {"detail": "Invalid Range header"}
+        else:
+            assert response.content == b""
+        override_service.get_video_file_path.assert_not_called()
+        override_service.get_blob_video_path.assert_not_called()
+        override_service.blob_video_is_browser_compatible.assert_not_called()
+        override_service.get_blob_video_stream.assert_not_called()
         override_service.materialize_blob_video.assert_not_called()
+        transcode.assert_not_called()
 
     def test_video_file_response(self, client: TestClient, override_service, tmp_path: Path) -> None:
         video = tmp_path / "ep0.mp4"

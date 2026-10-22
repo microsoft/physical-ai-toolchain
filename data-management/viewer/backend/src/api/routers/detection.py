@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..csrf import require_csrf_token
 from ..models.detection import DetectionRequest, EpisodeDetectionSummary
+from ..models.errors import error_responses
 from ..rate_limiter import limiter
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..services.detection_service import (
@@ -24,7 +25,7 @@ from ..services.detection_service import (
 )
 from ..validation import SAFE_DATASET_ID_PATTERN, path_int_param, path_string_param
 
-router = APIRouter()
+router = APIRouter(responses=error_responses(400, 429))
 logger = logging.getLogger(__name__)
 
 
@@ -40,6 +41,7 @@ RATE_LIMIT_DETECTIONS = os.environ.get("RATE_LIMIT_DETECTIONS", "120/minute")
 @router.post(
     "/{dataset_id}/episodes/{episode_idx}/detect",
     response_model=EpisodeDetectionSummary,
+    responses=error_responses(404, 500, 503),
     dependencies=[Depends(require_csrf_token)],
 )
 @limiter.limit(RATE_LIMIT_DETECT)
@@ -67,6 +69,8 @@ async def run_detection(
     )
 
     # Validate episode exists
+    if await dataset_service.get_dataset(dataset_id) is None:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
     episode = await dataset_service.get_episode(dataset_id, episode_idx)
     if episode is None:
         logger.warning("Episode %d not found in dataset %s", int(episode_idx), _sanitize_for_log(dataset_id))

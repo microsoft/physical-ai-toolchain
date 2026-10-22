@@ -1,3 +1,4 @@
+# cspell:ignore rtes
 """Branch-coverage tests for src/api/validation.py dependency factories."""
 
 import pytest
@@ -128,9 +129,13 @@ class TestRangeHeader:
         dep = range_header_param()
         assert dep(header_value=None) == (None, None)
 
-    def test_no_bytes_prefix_returns_none_pair(self):
+    @pytest.mark.parametrize("value", ["items=0-10", "", "bytes=0-1,3-4", "bytes=0- ", "bytes=0-1\njunk"])
+    def test_invalid_syntax_raises(self, value: str) -> None:
         dep = range_header_param()
-        assert dep(header_value="items=0-10") == (None, None)
+        with pytest.raises(HTTPException) as exc:
+            dep(header_value=value)
+        assert exc.value.status_code == 400
+        assert exc.value.detail == "Invalid Range header"
 
     def test_missing_start_raises(self):
         dep = range_header_param()
@@ -157,6 +162,18 @@ class TestRangeHeader:
         dep = range_header_param()
         assert dep(header_value="bytes=100-") == (100, None)
 
-    def test_bounded(self):
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("bytes=0-9", (0, 10)),
+            ("bytes= +02 - +04 ", (2, 3)),
+            ("bytes=0_2-0_4", (2, 3)),
+            ("by\rtes=0\r2-0\n4", (2, 3)),
+            (" bytes =2-4", (2, 3)),
+            ("BYTES=2-4", (2, 3)),
+            ("bytes=0--0", (0, 1)),
+        ],
+    )
+    def test_bounded(self, value: str, expected: tuple[int, int]) -> None:
         dep = range_header_param()
-        assert dep(header_value="bytes=0-9") == (0, 10)
+        assert dep(header_value=value) == expected

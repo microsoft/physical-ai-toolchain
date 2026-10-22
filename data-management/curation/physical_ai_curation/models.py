@@ -3,12 +3,49 @@
 from __future__ import annotations
 
 import json
+import re
 from copy import deepcopy
 from datetime import UTC, datetime
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    JsonValue,
+    StrictBool,
+    StrictFloat,
+    model_validator,
+)
+
+
+def validate_json_integer(value: object) -> object:
+    """Reject nonnumeric JSON inputs before integer parsing."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("Expected an integer JSON number")
+    return value
+
+
+JsonInteger = Annotated[int, BeforeValidator(validate_json_integer)]
+
+EPISODE_KEY_PATTERN = r"^-?[0-9]+$(?![\s\S])"
+
+
+def validate_episode_key(value: object) -> object:
+    """Require an ASCII decimal key before integer conversion."""
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (str, int))
+        or re.fullmatch(EPISODE_KEY_PATTERN, str(value)) is None
+    ):
+        raise ValueError("Expected an ASCII decimal integer key")
+    return value
+
+
+EpisodeIndexKey = Annotated[int, BeforeValidator(validate_episode_key)]
 
 
 def sanitize_user_string(value: str) -> str:
@@ -301,19 +338,19 @@ class EpisodeAnalysisRecord(SanitizedModel):
 
     pick_from: str | None = None
     object: str | None = None
-    grasp_success: bool | None = None
-    place_success: bool | None = None
+    grasp_success: StrictBool | None = None
+    place_success: StrictBool | None = None
     movement_quality: str | None = None
     notes: str | None = None
     instruction: str | None = None
-    duration_s: float | None = None
-    smoothness: float | None = None
-    normalized_smoothness: float | None = None
-    efficiency: float | None = None
-    jitter: float | None = None
-    hesitation_count: int | None = None
-    correction_count: int | None = None
-    motion_score: int | None = None
+    duration_s: StrictFloat | None = None
+    smoothness: StrictFloat | None = None
+    normalized_smoothness: StrictFloat | None = None
+    efficiency: StrictFloat | None = None
+    jitter: StrictFloat | None = None
+    hesitation_count: JsonInteger | None = None
+    correction_count: JsonInteger | None = None
+    motion_score: JsonInteger | None = None
     motion_flags: list[str] = Field(default_factory=list)
     source: str | None = None
 

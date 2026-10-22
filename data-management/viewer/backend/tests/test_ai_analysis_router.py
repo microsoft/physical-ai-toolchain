@@ -91,6 +91,39 @@ class TestAnalyzeTrajectory:
 
 
 class TestDetectAnomalies:
+    @pytest.mark.parametrize("amplitude", [1.0, 1e200])
+    def test_extreme_force_spike_retains_anomaly_and_suggestion(self, client: TestClient, amplitude: float) -> None:
+        forces = [[0.0] for _ in range(101)]
+        forces[50] = [amplitude]
+        payload = {
+            "positions": [[float(i)] for i in range(101)],
+            "timestamps": [float(i) for i in range(101)],
+            "forces": forces,
+        }
+
+        response = client.post("/api/ai/anomaly-detection", json=payload)
+
+        assert response.status_code == 200, response.text
+        detection = response.json()
+        assert detection["total_count"] == 1
+        assert detection["severity_counts"] == {"low": 0, "medium": 0, "high": 1}
+        anomaly = detection["anomalies"][0]
+        assert anomaly["type"] == "force_spike"
+        assert (anomaly["frame_start"], anomaly["frame_end"]) == (50, 51)
+        assert anomaly["severity"] == "high"
+        assert anomaly["confidence"] == 1.0
+
+        response = client.post("/api/ai/suggest-annotation", json=payload)
+
+        assert response.status_code == 200, response.text
+        suggestion = response.json()
+        assert suggestion["task_completion_rating"] == 4
+        assert suggestion["trajectory_quality_score"] == 5
+        assert suggestion["confidence"] == 0.8
+        assert suggestion["suggested_flags"] == ["has_severe_anomalies"]
+        assert len(suggestion["detected_anomalies"]) == 1
+        assert suggestion["detected_anomalies"][0]["severity"] == "high"
+
     def test_success_with_all_optionals(self, client: TestClient) -> None:
         positions, timestamps = _smooth_trajectory(num_points=40)
         forces = [[0.1] * 6 for _ in range(40)]

@@ -25,13 +25,14 @@ from ..models.annotations import (
 )
 from ..models.datasources import EpisodeData
 from ..models.episode_edits import EpisodeEditState, SaveEpisodeEditsRequest
+from ..models.errors import EditSourceConflictResponse, ErrorResponse, ValidationErrorResponse, error_responses
 from ..services.annotation_service import AnnotationService, EditSourceChangedError, get_annotation_service
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..storage import StorageError
 from ..validation import SAFE_DATASET_ID_PATTERN, path_int_param, path_string_param
 from .labels import RevisionPrecondition, _get_label_storage, require_revision_precondition
 
-router = APIRouter()
+router = APIRouter(responses=error_responses(400, 404))
 logger = logging.getLogger(__name__)
 
 
@@ -63,7 +64,14 @@ async def _edit_source(
     return source_id, source_revision, episode
 
 
-@router.get("/datasets/{dataset_id}/episodes/{episode_idx}/edits", response_model=EpisodeEditState)
+@router.get(
+    "/datasets/{dataset_id}/episodes/{episode_idx}/edits",
+    response_model=EpisodeEditState,
+    responses={
+        **error_responses(500, 503),
+        409: {"model": ErrorResponse | EditSourceConflictResponse},
+    },
+)
 async def get_episode_edits(
     response: Response,
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
@@ -105,6 +113,10 @@ async def get_episode_edits(
     "/datasets/{dataset_id}/episodes/{episode_idx}/edits",
     response_model=EpisodeEditState,
     dependencies=[Depends(require_csrf_token)],
+    responses={
+        **error_responses(409, 412, 428, 500, 503),
+        422: {"model": ErrorResponse | ValidationErrorResponse},
+    },
 )
 async def save_episode_edits(
     response: Response,
@@ -195,6 +207,7 @@ async def get_annotations(
     "/datasets/{dataset_id}/episodes/{episode_idx}/annotations",
     response_model=EpisodeAnnotationFile,
     dependencies=[Depends(require_csrf_token)],
+    responses=error_responses(412, 428),
 )
 async def save_annotations(
     response: Response,
@@ -203,7 +216,7 @@ async def save_annotations(
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
     principal: PrincipalContext = Depends(require_principal_context),
     if_match: str | None = Header(default=None),
-    if_none_match: str | None = Header(default=None),
+    if_none_match: str | None = Header(default=None, json_schema_extra={"enum": ["*"]}),
     service: AnnotationService = Depends(get_annotation_service),
     dataset_service: DatasetService = Depends(get_dataset_service),
 ) -> EpisodeAnnotationFile:
@@ -252,6 +265,7 @@ async def save_annotations(
     "/datasets/{dataset_id}/episodes/{episode_idx}/annotations",
     response_model=dict,
     dependencies=[Depends(require_csrf_token)],
+    responses=error_responses(412, 428),
 )
 async def delete_annotations(
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),

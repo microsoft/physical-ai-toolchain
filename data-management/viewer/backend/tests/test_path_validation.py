@@ -1,5 +1,9 @@
 """Security tests for path traversal remediation (issue #387)."""
 
+from __future__ import annotations
+
+from pathlib import Path
+
 import pytest
 from fastapi import HTTPException
 
@@ -113,11 +117,11 @@ class TestValidatePathContainment:
 class TestRequestModelSanitization:
     """Tests for request-body sanitization that should happen before service logic."""
 
-    def test_detection_request_sanitizes_model_and_coerces_primitives(self):
+    def test_detection_request_sanitizes_model_and_preserves_json_numbers(self) -> None:
         request = DetectionRequest.model_validate(
             {
-                "frames": ["1", "2"],
-                "confidence": "0.4",
+                "frames": [1, 2.0],
+                "confidence": 0.4,
                 "model": "yolo11n\r\n",
             }
         )
@@ -125,12 +129,12 @@ class TestRequestModelSanitization:
         assert request.confidence == 0.4
         assert request.model == "yolo11n"
 
-    def test_export_request_sanitizes_output_path_and_coerces_primitives(self, tmp_path):
+    def test_export_request_sanitizes_output_path_and_preserves_json_types(self, tmp_path: Path) -> None:
         request = ExportRequest.model_validate(
             {
-                "episodeIndices": ["1", "2"],
+                "episodeIndices": [1, 2.0],
                 "outputPath": f"{tmp_path / 'export-output'}\r\n",
-                "applyEdits": "true",
+                "applyEdits": True,
             }
         )
         assert request.episodeIndices == [1, 2]
