@@ -22,6 +22,14 @@ resource "azurerm_container_app" "backend" {
     identity_ids = [azurerm_user_assigned_identity.dataviewer.id]
   }
 
+  dynamic "secret" {
+    for_each = var.should_deploy_dataviewer_auth ? [random_password.dataviewer_proxy_key[0].result] : []
+    content {
+      name  = "dataviewer-proxy-key"
+      value = secret.value
+    }
+  }
+
   dynamic "registry" {
     for_each = local.use_acr_images ? [1] : []
     content {
@@ -95,6 +103,20 @@ resource "azurerm_container_app" "backend" {
         name  = "DATAVIEWER_AUTH_DISABLED"
         value = var.should_enable_internal && !var.should_deploy_dataviewer_auth ? "true" : "false"
       }
+      dynamic "env" {
+        for_each = var.should_deploy_dataviewer_auth ? [1] : []
+        content {
+          name  = "DATAVIEWER_AUTH_PROVIDER"
+          value = "easy_auth"
+        }
+      }
+      dynamic "env" {
+        for_each = var.should_deploy_dataviewer_auth ? [1] : []
+        content {
+          name        = "DATAVIEWER_PROXY_KEY"
+          secret_name = "dataviewer-proxy-key"
+        }
+      }
       env {
         name  = "CORS_ORIGINS"
         value = "https://*.${azurerm_container_app_environment.main.default_domain}"
@@ -135,6 +157,22 @@ resource "azurerm_container_app" "frontend" {
   identity {
     type         = "UserAssigned"
     identity_ids = [azurerm_user_assigned_identity.dataviewer.id]
+  }
+
+  dynamic "secret" {
+    for_each = var.should_deploy_dataviewer_auth ? [random_password.dataviewer_proxy_key[0].result] : []
+    content {
+      name  = "dataviewer-proxy-key"
+      value = secret.value
+    }
+  }
+
+  dynamic "secret" {
+    for_each = var.should_deploy_dataviewer_auth ? [azuread_application_password.dataviewer_easy_auth[0].value] : []
+    content {
+      name  = "microsoft-provider-authentication-secret"
+      value = secret.value
+    }
   }
 
   dynamic "registry" {
@@ -180,5 +218,38 @@ resource "azurerm_container_app" "frontend" {
   // Prevent Terraform from reverting deploy-time changes.
   lifecycle {
     ignore_changes = [template, registry]
+  }
+}
+
+resource "azapi_resource" "frontend_auth" {
+  count = var.should_deploy_dataviewer_auth ? 1 : 0
+
+  type      = "Microsoft.App/containerApps/authConfigs@2025-01-01"
+  name      = "current"
+  parent_id = azurerm_container_app.frontend.id
+
+  body = {
+    properties = {
+      globalValidation = {
+        redirectToProvider          = "azureactivedirectory"
+        unauthenticatedClientAction = "RedirectToLoginPage"
+      }
+      httpSettings = {
+        requireHttps = true
+      }
+      identityProviders = {
+        azureActiveDirectory = {
+          enabled = true
+          registration = {
+            clientId                = azuread_application.dataviewer[0].client_id
+            clientSecretSettingName = "microsoft-provider-authentication-secret"
+            openIdIssuer            = "https://login.microsoftonline.com/${data.azuread_client_config.current.tenant_id}/v2.0"
+          }
+        }
+      }
+      platform = {
+        enabled = true
+      }
+    }
   }
 }

@@ -9,7 +9,7 @@ COPY package.json package-lock.json ./
 COPY data-management/viewer/frontend/package.json data-management/viewer/frontend/package.json
 RUN --mount=type=cache,target=/root/.npm \
     --mount=type=secret,id=npmrc,target=/root/.npmrc \
-    npm ci --ignore-scripts --workspace robotic-training-data-tool --include-workspace-root=false
+    npm ci --ignore-scripts
 
 COPY data-management/viewer/frontend data-management/viewer/frontend
 COPY data-management/viewer/specifications/language-tag-corpus.json data-management/viewer/specifications/language-tag-corpus.json
@@ -43,6 +43,7 @@ COPY data-management/viewer/frontend/nginx.conf.template /etc/nginx/templates/de
 ENV NGINX_BACKEND_HOST=backend:8000
 ENV NGINX_BACKEND_SCHEME=http
 ENV NGINX_RESOLVER=127.0.0.11
+ENV DATAVIEWER_PROXY_KEY=""
 
 EXPOSE 8080
 
@@ -53,4 +54,4 @@ USER nginx
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --start-interval=3s --retries=3 \
     CMD wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1
 
-CMD ["/bin/sh", "-c", "envsubst '${NGINX_BACKEND_HOST} ${NGINX_BACKEND_SCHEME} ${NGINX_RESOLVER}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+CMD ["/bin/sh", "-c", "if [ -n \"$DATAVIEWER_PROXY_KEY\" ]; then export NGINX_PROXY_KEY_HEADER=\"$DATAVIEWER_PROXY_KEY\" NGINX_AUTHORIZATION_HEADER='\"\"'; else export NGINX_PROXY_KEY_HEADER='\"\"' NGINX_AUTHORIZATION_HEADER='$http_authorization'; fi && envsubst '${NGINX_BACKEND_HOST} ${NGINX_BACKEND_SCHEME} ${NGINX_RESOLVER} ${NGINX_PROXY_KEY_HEADER} ${NGINX_AUTHORIZATION_HEADER}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]

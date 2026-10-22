@@ -24,8 +24,11 @@ COPY evaluation/vlm_judge/ /app/evaluation/vlm_judge/
 COPY data-management/curation/ /app/data-management/curation/
 COPY data-management/dataset-io/ /app/data-management/dataset-io/
 
-# Runtime feature extras, separated by commas or spaces.
+# Runtime feature extras, separated by commas. The yolo extra pulls CUDA torch,
+# so Azure Container Apps builds pass a smaller list to fit the Consumption
+# profile image limit.
 ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"
+ARG UV_DEFAULT_INDEX="https://pypi.org/simple"
 ARG JUDGE_EXTRAS=""
 # Keep installation caches out of the runtime image.
 RUN set -eu; extras=""; \

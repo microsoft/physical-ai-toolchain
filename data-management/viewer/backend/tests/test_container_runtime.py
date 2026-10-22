@@ -216,7 +216,9 @@ def test_dependency_installation_is_isolated_from_runtime_layers() -> None:
     install = "uv sync --frozen --no-dev --no-editable --inexact ${extras}"
     assert install in build
     assert 'ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"' in build
-    assert "tr ',' ' '" in build
+    assert 'ARG UV_DEFAULT_INDEX="https://pypi.org/simple"' in build
+    assert 'ARG JUDGE_EXTRAS=""' in build
+    assert "uv sync --project /app/evaluation/vlm_judge" in build
     assert "uv sync" not in base
     assert "uv sync" not in runtime
     assert "COPY --from=build --chown=appuser:appuser /app/.venv /app/.venv" in runtime
@@ -273,6 +275,128 @@ def test_build_upload_is_allowlisted_and_compose_keeps_jobs_durable() -> None:
     assert 'cp "$REPO_ROOT/data-management/curation/physical_ai_curation/adapters/"*.py' in deploy
     assert 'cp "$REPO_ROOT/data-management/dataset-io/pyproject.toml"' in deploy
     assert 'cp "$REPO_ROOT/data-management/dataset-io/physical_ai_dataset_io/"*.py' in deploy
+
+
+def test_authenticated_deployment_recovery_fails_closed() -> None:
+    backend = Path(__file__).resolve().parents[1]
+    deploy = (backend.parents[1] / "setup" / "deploy-dataviewer.sh").read_text()
+    terraform = (backend.parents[2] / "infrastructure/terraform/modules/dataviewer/container-apps.tf").read_text()
+
+    update_helper = deploy.split("update_app_and_wait() {", 1)[1].split("\n}", 1)[0]
+    recovery = deploy.split("recover_authenticated_rollout() {", 1)[1].split("\n}", 1)[0]
+    authenticated_rollout = deploy.split(
+        'if [[ "$skip_update" == "false" && "$auth_enabled" == "true" ]]; then',
+        1,
+    )[1].split('elif [[ "$skip_update" == "false" ]]; then', 1)[0]
+    frontend_rollout = authenticated_rollout.split('if [[ "$skip_frontend" == "false" ]]; then', 1)[1]
+    frontend_container = terraform.split('resource "azurerm_container_app" "frontend"', 1)[1].split(
+        'resource "azapi_resource" "frontend_auth"',
+        1,
+    )[0]
+
+    assert "revision=$(az containerapp update \\\n" in update_helper
+    assert ") || return 1" in update_helper
+    assert 'wait_for_ready_revision "$app" "$revision" || return 1' in update_helper
+    assert 'if [[ "$old_rollout_secure" != "true" ]]; then' in recovery
+    assert "close_frontend_ingress" in recovery
+    assert "rollback_backend || recovery_failed=true" in recovery
+    assert "restore_app_rollout \\\n" in recovery
+    assert "|| recovery_failed=true" in recovery
+    assert "restore_frontend_auth" not in deploy
+    assert frontend_rollout.index("az containerapp auth microsoft update") < frontend_rollout.index(
+        '"DATAVIEWER_PROXY_KEY=secretref:${proxy_secret_name}"'
+    )
+    assert "verify_frontend_auth_enforced" in authenticated_rollout
+    assert "verify_anonymous_request_denied" in authenticated_rollout
+    assert '--header "X-MS-CLIENT-PRINCIPAL: ${forged_principal}"' in deploy
+    assert "302|401|403) return 0" in deploy
+    assert "DATAVIEWER_PROXY_KEY" not in frontend_container
+    assert 'resource "azapi_resource" "frontend_auth"' in terraform
+    assert 'unauthenticatedClientAction = "RedirectToLoginPage"' in terraform
+
+
+def _deployment_function_source() -> str:
+    backend = Path(__file__).resolve().parents[1]
+    deploy = (backend.parents[1] / "setup" / "deploy-dataviewer.sh").read_text()
+    return deploy.split("wait_for_ready_revision() {", 1)[1].split('\nSRC_DIR="$SCRIPT_DIR/../viewer"', 1)[0]
+
+
+def _run_deployment_fault_harness(tmp_path: Path, scenario: str) -> list[str]:
+    trace = tmp_path / "trace"
+    harness = f"""
+set -o nounset
+error() {{ :; }}
+warn() {{ :; }}
+wait_for_ready_revision() {{
+{_deployment_function_source()}
+{scenario}
+"""
+    result = subprocess.run(
+        ["bash", "-c", harness],
+        env={**os.environ, "TRACE": str(trace)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return trace.read_text().splitlines() if trace.exists() else []
+
+
+def test_failed_container_app_update_does_not_check_stale_revision(tmp_path: Path) -> None:
+    trace = _run_deployment_fault_harness(
+        tmp_path,
+        """
+rg=test-rg
+az() {
+  printf '%s\n' "$*" >>"$TRACE"
+  return 23
+}
+if update_app_and_wait test-app --image test-image; then
+  exit 90
+fi
+""",
+    )
+    assert trace == [
+        "containerapp update --name test-app --resource-group test-rg --image test-image "
+        "--query properties.latestRevisionName --output tsv"
+    ]
+
+
+def test_partial_secure_restore_attempts_both_apps_then_closes_ingress(tmp_path: Path) -> None:
+    trace = _run_deployment_fault_harness(
+        tmp_path,
+        """
+old_rollout_secure=true
+skip_backend=false
+skip_frontend=false
+frontend_app=frontend
+old_frontend_image=old-frontend
+old_frontend_proxy_secret_ref=dataviewer-proxy-key
+rollback_backend() { echo backend >>"$TRACE"; return 1; }
+restore_app_rollout() { echo frontend >>"$TRACE"; return 0; }
+verify_frontend_auth_enforced() { echo auth >>"$TRACE"; return 0; }
+verify_anonymous_request_denied() { echo probe >>"$TRACE"; return 0; }
+close_frontend_ingress() { echo close >>"$TRACE"; return 0; }
+recover_authenticated_rollout
+""",
+    )
+    assert trace == ["backend", "frontend", "auth", "probe", "close"]
+
+
+def test_unsafe_snapshot_closes_ingress_without_restoring_apps(tmp_path: Path) -> None:
+    trace = _run_deployment_fault_harness(
+        tmp_path,
+        """
+old_rollout_secure=false
+skip_backend=false
+skip_frontend=false
+rollback_backend() { echo unexpected-backend >>"$TRACE"; return 1; }
+restore_app_rollout() { echo unexpected-frontend >>"$TRACE"; return 1; }
+close_frontend_ingress() { echo close >>"$TRACE"; return 0; }
+recover_authenticated_rollout
+""",
+    )
+    assert trace == ["close"]
 
 
 def test_browser_gate_cannot_reuse_live_services_or_resolve_dependencies() -> None:

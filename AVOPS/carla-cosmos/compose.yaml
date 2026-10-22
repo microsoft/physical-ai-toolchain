@@ -1,0 +1,73 @@
+services:
+  carla:
+    image: carla-cosmos-simulator:0.9.15
+    build:
+      context: .
+      dockerfile: Dockerfile.carla
+      args:
+        CARLA_IMAGE: carlasim/carla:0.9.15
+    command:
+      - ./CarlaUE4.sh
+      - -RenderOffScreen
+      - -nosound
+      - -opengl
+      - -carla-rpc-port=2000
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: all
+      NVIDIA_VISIBLE_DEVICES: "${CARLA_GPU_ID:-0}"
+    ports:
+      - "2000:2000"
+      - "2001:2001"
+    shm_size: 8gb
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${CARLA_GPU_ID:-0}"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/2000'"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
+  pipeline:
+    image: carla-cosmos-pipeline:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        COSMOS_IMAGE: "${COSMOS_IMAGE:-cosmos-transfer2.5:local}"
+        SCENARIO_RUNNER_REF: "${SCENARIO_RUNNER_REF:-v0.9.15}"
+    depends_on:
+      carla:
+        condition: service_healthy
+    environment:
+      CARLA_HOST: carla
+      CARLA_PORT: "2000"
+      CARLA_TRAFFIC_MANAGER_PORT: "8005"
+      CARLA_PYTHON: /opt/carla-venv/bin/python
+      HF_HOME: /root/.cache/huggingface
+      HF_TOKEN: "${HF_TOKEN:-}"
+      HUGGING_FACE_HUB_TOKEN: "${HF_TOKEN:-}"
+      CARLA_COSMOS_VIEWS: "${CARLA_COSMOS_VIEWS:-all}"
+      COSMOS_GPU_IDS: "${COSMOS_GPU_IDS:-}"
+      NVIDIA_DRIVER_CAPABILITIES: all
+      NVIDIA_VISIBLE_DEVICES: all
+    volumes:
+      - ./data:/workspace/data
+      - hf-cache:/root/.cache/huggingface
+    ipc: host
+    shm_size: 16gb
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  hf-cache:

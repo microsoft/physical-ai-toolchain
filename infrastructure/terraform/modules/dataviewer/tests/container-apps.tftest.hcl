@@ -3,6 +3,7 @@
 
 mock_provider "azurerm" {}
 mock_provider "azuread" {}
+mock_provider "azapi" {}
 mock_provider "random" {}
 
 override_data {
@@ -94,6 +95,87 @@ run "custom_images" {
   assert {
     condition     = azurerm_container_app.frontend.template[0].container[0].image == "acrtestdev001.azurecr.io/dataviewer-frontend:v1.0"
     error_message = "Frontend should use custom image when specified"
+  }
+}
+
+run "proxy_bound_auth_configuration" {
+  command = plan
+
+  variables {
+    resource_prefix               = run.setup.resource_prefix
+    environment                   = run.setup.environment
+    instance                      = run.setup.instance
+    location                      = run.setup.location
+    resource_group                = run.setup.resource_group
+    virtual_network               = run.setup.virtual_network
+    network_security_group        = run.setup.network_security_group
+    log_analytics_workspace       = run.setup.log_analytics_workspace
+    container_registry            = run.setup.container_registry
+    storage_account               = run.setup.storage_account
+    should_deploy_dataviewer_auth = true
+  }
+
+  assert {
+    condition = anytrue([
+      for item in azurerm_container_app.backend.secret :
+      item.name == "dataviewer-proxy-key"
+    ])
+    error_message = "Backend should define the Terraform-owned proxy credential"
+  }
+
+  assert {
+    condition = anytrue([
+      for item in azurerm_container_app.frontend.secret :
+      item.name == "dataviewer-proxy-key"
+    ])
+    error_message = "Frontend should define the Terraform-owned proxy credential"
+  }
+
+  assert {
+    condition = anytrue([
+      for item in azurerm_container_app.frontend.secret :
+      item.name == "microsoft-provider-authentication-secret"
+    ])
+    error_message = "Frontend should define the Terraform-owned Easy Auth credential"
+  }
+
+  assert {
+    condition = anytrue([
+      for item in azurerm_container_app.backend.template[0].container[0].env :
+      item.name == "DATAVIEWER_PROXY_KEY" && item.secret_name == "dataviewer-proxy-key"
+    ])
+    error_message = "Backend should reference the proxy credential through DATAVIEWER_PROXY_KEY"
+  }
+
+  assert {
+    condition = !anytrue([
+      for item in azurerm_container_app.frontend.template[0].container[0].env :
+      item.name == "DATAVIEWER_PROXY_KEY"
+    ])
+    error_message = "Terraform bootstrap must not make the public frontend a proxy-proof oracle"
+  }
+
+  assert {
+    condition = anytrue([
+      for item in azurerm_container_app.backend.template[0].container[0].env :
+      item.name == "DATAVIEWER_AUTH_PROVIDER" && item.value == "easy_auth"
+    ])
+    error_message = "Backend should select Easy Auth when authentication is enabled"
+  }
+
+  assert {
+    condition     = azapi_resource.frontend_auth[0].body.properties.platform.enabled
+    error_message = "Terraform must enable frontend Easy Auth before deployment injects proxy proof"
+  }
+
+  assert {
+    condition     = azapi_resource.frontend_auth[0].body.properties.globalValidation.unauthenticatedClientAction == "RedirectToLoginPage"
+    error_message = "Terraform must reject anonymous frontend requests with the Entra login flow"
+  }
+
+  assert {
+    condition     = azapi_resource.frontend_auth[0].body.properties.identityProviders.azureActiveDirectory.registration.clientSecretSettingName == "microsoft-provider-authentication-secret"
+    error_message = "Terraform Easy Auth must use the Container App secret created for the Entra application"
   }
 }
 

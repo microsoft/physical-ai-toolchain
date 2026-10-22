@@ -23,6 +23,18 @@ from src.api.auth import (
 from tests.conftest import make_asgi_request
 
 
+def _easy_auth_principal(*, subject: str = "user-1") -> str:
+    principal = {
+        "claims": [
+            {"typ": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", "val": subject},
+            {"typ": "name", "val": "Alice"},
+            {"typ": "roles", "val": "admin"},
+            {"typ": "roles", "val": "viewer"},
+        ]
+    }
+    return base64.b64encode(json.dumps(principal).encode()).decode()
+
+
 @pytest.fixture(autouse=True)
 def _reset_provider():
     reset_auth_provider()
@@ -60,19 +72,17 @@ class TestApiKeyProvider:
 
 class TestEasyAuthProvider:
     @pytest.mark.asyncio
-    async def test_decodes_principal(self):
-        principal = {
-            "claims": [
-                {"typ": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", "val": "user-1"},
-                {"typ": "name", "val": "Alice"},
-                {"typ": "roles", "val": "admin"},
-                {"typ": "roles", "val": "viewer"},
-            ]
-        }
-        encoded = base64.b64encode(json.dumps(principal).encode()).decode()
-        provider = EasyAuthProvider()
+    async def test_bound_principal_is_authenticated(self):
+        provider = EasyAuthProvider("proxy-secret")
         result = await provider.authenticate(
-            make_asgi_request("POST", "/api/x", headers={"X-MS-CLIENT-PRINCIPAL": encoded})
+            make_asgi_request(
+                "POST",
+                "/api/x",
+                headers={
+                    "X-MS-CLIENT-PRINCIPAL": _easy_auth_principal(),
+                    "X-Dataviewer-Proxy-Key": "proxy-secret",
+                },
+            )
         )
         assert result == {
             "sub": "user-1",
@@ -81,35 +91,55 @@ class TestEasyAuthProvider:
             "auth_method": "easy_auth",
         }
 
+    @pytest.mark.parametrize(
+        "headers",
+        [
+            {"X-MS-CLIENT-PRINCIPAL": _easy_auth_principal()},
+            {
+                "X-MS-CLIENT-PRINCIPAL": _easy_auth_principal(),
+                "X-Dataviewer-Proxy-Key": "wrong",
+            },
+            {
+                "X-MS-CLIENT-PRINCIPAL": _easy_auth_principal(),
+                "X-Dataviewer-Proxy-Key": "é",
+            },
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_missing_principal_returns_none(self):
-        assert await EasyAuthProvider().authenticate(make_asgi_request("POST", "/api/x")) is None
+    async def test_unbound_principal_is_rejected(self, headers: dict[str, str]):
+        provider = EasyAuthProvider("proxy-secret")
+        assert await provider.authenticate(make_asgi_request("POST", "/api/x", headers=headers)) is None
 
+    @pytest.mark.parametrize(
+        "principal",
+        [
+            "not-valid-base64!!!",
+            base64.b64encode(b"not-json").decode(),
+            base64.b64encode(json.dumps({}).encode()).decode(),
+            _easy_auth_principal(subject=" "),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_invalid_base64_returns_none(self):
-        result = await EasyAuthProvider().authenticate(
-            make_asgi_request("POST", "/api/x", headers={"X-MS-CLIENT-PRINCIPAL": "not-valid-base64!!!"})
+    async def test_malformed_or_incomplete_principal_is_rejected(self, principal: str):
+        provider = EasyAuthProvider("proxy-secret")
+        result = await provider.authenticate(
+            make_asgi_request(
+                "POST",
+                "/api/x",
+                headers={
+                    "X-MS-CLIENT-PRINCIPAL": principal,
+                    "X-Dataviewer-Proxy-Key": "proxy-secret",
+                },
+            )
         )
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_invalid_json_payload_returns_none(self):
-        encoded = base64.b64encode(b"not-json").decode()
-        result = await EasyAuthProvider().authenticate(
-            make_asgi_request("POST", "/api/x", headers={"X-MS-CLIENT-PRINCIPAL": encoded})
-        )
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_missing_claims_yields_blank_identity(self):
-        encoded = base64.b64encode(json.dumps({}).encode()).decode()
-        result = await EasyAuthProvider().authenticate(
-            make_asgi_request("POST", "/api/x", headers={"X-MS-CLIENT-PRINCIPAL": encoded})
-        )
-        assert result == {"sub": "", "name": "", "roles": [], "auth_method": "easy_auth"}
+    def test_empty_proxy_key_is_rejected_at_initialization(self):
+        with pytest.raises(ValueError, match="DATAVIEWER_PROXY_KEY"):
+            EasyAuthProvider("")
 
     def test_www_authenticate_header(self):
-        assert EasyAuthProvider().www_authenticate == 'EasyAuth realm="DataViewer API"'
+        assert "EasyAuth" in EasyAuthProvider("proxy-secret").www_authenticate
 
 
 class TestJwtProvider:
@@ -229,19 +259,24 @@ class TestProviderSelection:
             await self._expect_challenge("ApiKey")
         assert "DATAVIEWER_API_KEY is not set; all API-key auth will fail" in caplog.messages
 
-    async def test_unknown_falls_back_to_apikey(
-        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-    ):
+    async def test_unknown_provider_fails_closed(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "bogus")
         monkeypatch.setenv("DATAVIEWER_API_KEY", "k")
-        with caplog.at_level("ERROR", logger="src.api.auth"):
-            await self._expect_challenge("ApiKey")
-        assert "Unknown DATAVIEWER_AUTH_PROVIDER value: bogus; falling back to API-key" in caplog.messages
+        with pytest.raises(ValueError, match="DATAVIEWER_AUTH_PROVIDER"):
+            await require_auth(make_asgi_request("POST", "/api/x"))
+
+    async def test_easy_auth_selection_requires_proxy_key(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
+        monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "easy_auth")
+        monkeypatch.delenv("DATAVIEWER_PROXY_KEY", raising=False)
+        with pytest.raises(ValueError, match="DATAVIEWER_PROXY_KEY"):
+            await require_auth(make_asgi_request("POST", "/api/x"))
 
     async def test_easy_auth_selection(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "easy_auth")
+        monkeypatch.setenv("DATAVIEWER_PROXY_KEY", "proxy-secret")
         await self._expect_challenge("EasyAuth")
 
     async def test_azure_ad_selection(self, monkeypatch: pytest.MonkeyPatch):
@@ -276,11 +311,30 @@ class TestRequireAuth:
         assert exc_info.value.detail == "Authentication required"
         assert exc_info.value.headers["WWW-Authenticate"] == 'ApiKey realm="DataViewer API"'
 
+    @pytest.mark.parametrize("proxy_key", [None, "wrong", "é"])
+    async def test_forged_easy_auth_header_is_rejected(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        proxy_key: str | None,
+    ):
+        monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
+        monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "easy_auth")
+        monkeypatch.setenv("DATAVIEWER_PROXY_KEY", "proxy-secret")
+        headers = {"X-MS-CLIENT-PRINCIPAL": _easy_auth_principal()}
+        if proxy_key is not None:
+            headers["X-Dataviewer-Proxy-Key"] = proxy_key
+
+        with pytest.raises(HTTPException) as exc_info:
+            await require_auth(make_asgi_request("POST", "/api/x", headers=headers))
+
+        assert exc_info.value.status_code == 401
+
     async def test_failure_logs_unknown_client_when_missing(
         self,
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ):
+        # Build a request with no client tuple to exercise the "unknown" branch.
         from fastapi import FastAPI
         from starlette.requests import Request
 
@@ -328,9 +382,10 @@ class TestPrincipalContext:
 
     def test_given_different_providers_when_resolved_then_scopes_are_distinct(self):
         azure = resolve_principal_context({"sub": "shared-subject", "auth_method": "azure_ad"})
-        auth0 = resolve_principal_context({"sub": "shared-subject", "auth_method": "auth0"})
+        easy_auth = resolve_principal_context({"sub": "shared-subject", "auth_method": "easy_auth"})
 
-        assert azure.scope_id != auth0.scope_id
+        assert azure.scope_id != easy_auth.scope_id
+        assert easy_auth.auth_mode == "easy_auth"
 
     def test_given_disabled_auth_when_resolved_then_local_scope_is_non_personal(self):
         context = resolve_principal_context(None)
