@@ -16,7 +16,7 @@ import json
 import random
 import re
 
-PROMPT_VERSION = "outcome-mcq-v1+gvl-process-v1+milestones-v1+failuremode-v1"
+PROMPT_VERSION = "outcome-mcq-v1+gvl-process-v2+milestones-v1+failuremode-v1"
 
 
 # -------------------------------------------------------------------------
@@ -92,8 +92,17 @@ estimating how much of the task is completed in that frame:
 
 Output ONLY a single JSON array of {n_frames} integers and nothing else. Example:
 
-  [0, 27, 13, 88, 41, 100]
+    {example}
 """
+
+
+def _process_example(n_frames: int, *, shuffled: bool = False) -> str:
+    scores = [round(index * 100 / max(1, n_frames - 1)) for index in range(n_frames)]
+    if shuffled:
+        remaining = scores[1:]
+        random.Random(0).shuffle(remaining)
+        scores[1:] = remaining
+    return json.dumps(scores)
 
 
 def render_process_prompt(*, instruction: str, n_frames: int) -> str:
@@ -101,6 +110,7 @@ def render_process_prompt(*, instruction: str, n_frames: int) -> str:
         instruction=instruction,
         n_frames=n_frames,
         n_shuffled=max(0, n_frames - 1),
+        example=_process_example(n_frames, shuffled=True),
     )
 
 
@@ -118,12 +128,14 @@ estimating how much of the task is completed in that frame:
 
 Output ONLY a single JSON array of {n_frames} integers and nothing else. Example:
 
-  [0, 14, 33, 60, 100]
+    {example}
 """
 
 
 def render_chronological_process_prompt(*, instruction: str, n_frames: int) -> str:
-    return CHRONOLOGICAL_PROCESS_USER_TEMPLATE.format(instruction=instruction, n_frames=n_frames)
+    return CHRONOLOGICAL_PROCESS_USER_TEMPLATE.format(
+        instruction=instruction, n_frames=n_frames, example=_process_example(n_frames)
+    )
 
 
 _JSON_ARRAY_RE = re.compile(r"\[[^\[\]]*\]", re.DOTALL)

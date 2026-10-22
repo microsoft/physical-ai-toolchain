@@ -6,6 +6,7 @@ import pytest
 
 from evaluation.vlm_judge.prompts import (
     FAILURE_MODES,
+    PROMPT_VERSION,
     parse_failure_response,
     parse_milestone_response,
     parse_outcome_response,
@@ -137,6 +138,21 @@ class TestShuffleAnchor:
 
 
 class TestPromptRendering:
+    @pytest.mark.parametrize("n_frames", [1, 2, 8, 12, 16])
+    @pytest.mark.parametrize("chronological", [False, True])
+    def test_given_frame_count_when_rendering_then_example_matches_strict_parser(
+        self, n_frames: int, chronological: bool
+    ) -> None:
+        renderer = render_chronological_process_prompt if chronological else render_process_prompt
+
+        text = renderer(instruction="task", n_frames=n_frames)
+        example = text.split("Example:", 1)[1].strip()
+        scores = parse_process_response(example, n_frames=n_frames)
+
+        assert scores is not None
+        assert scores[0] == 0
+        assert "gvl-process-v2" in PROMPT_VERSION
+
     def test_outcome_prompt_includes_instruction(self) -> None:
         text = render_outcome_prompt(instruction="Pick up cube", n_frames=5)
         assert "Pick up cube" in text
