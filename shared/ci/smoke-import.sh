@@ -120,10 +120,10 @@ case "$domain" in
         probe=(-c "import azure.ai.ml, azure.identity, azureml.mlflow, mlflow, tbparse; import training.utils.aml_mirror")
         ;;
     vlm-judge)
-        project="evaluation/vlm_judge"
+        project="."
         py_version="3.12"
         has_image=false
-        probe=(-c "import torch, torchvision, transformers; from transformers import AutoProcessor")
+        probe=(-c "import torch, torchvision, transformers; from transformers import AutoProcessor; import evaluation.vlm_judge.agent, physical_ai_dataset_io")
         ;;
     gpu-smoke)
         project="training/smoke"
@@ -154,7 +154,7 @@ esac
 [[ "$mode" == "cpu" || "$has_image" == "true" ]] || fatal "${domain} has no runtime-image smoke; use --mode cpu"
 
 export_args=(--frozen --no-hashes --no-emit-project --project "$project")
-[[ "$domain" == "vlm-judge" ]] && export_args+=(--extra qwen3-vl)
+[[ "$domain" == "vlm-judge" ]] && export_args+=(--package physical-ai-vlm-judge --extra qwen3-vl --no-default-groups --no-emit-workspace)
 
 ensure_uv() {
     # Bootstrap a pinned uv inside a container that lacks it (image mode).
@@ -230,6 +230,11 @@ smoke_cpu() {
         | sed -E '/^(torch|torchvision)==/ s/\+cu[0-9]+//' \
         | uv --directory "$project" pip install --torch-backend cpu --no-cache-dir --no-deps --requirement -
 
+    if [[ "$domain" == "vlm-judge" ]]; then
+        uv pip install --python "${venv}/bin/python" --no-deps \
+            "$REPO_ROOT/data-management/dataset-io" "$REPO_ROOT/evaluation/vlm_judge"
+    fi
+
     run_probe "${venv}/bin/python"
 }
 
@@ -289,6 +294,10 @@ smoke_image() {
 run_probe() {
     local python_exec="$1"
     info "Probe: ${python_exec} ${probe[*]}"
+    if [[ "$domain" == "vlm-judge" ]]; then
+        "$python_exec" -I "${probe[@]}"
+        return
+    fi
     PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}" "$python_exec" "${probe[@]}"
 }
 

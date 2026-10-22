@@ -38,6 +38,23 @@ def test_given_invalid_caller_mode_when_starting_frontend_then_fails_without_pri
     assert "invalid-mode-private-value" not in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize(
+    "project_path",
+    [
+        "data-management/curation",
+        "data-management/dataset-io",
+        "data-management/viewer/backend",
+        "evaluation/vlm_judge",
+    ],
+)
+def test_given_product_package_when_selecting_resolution_then_root_is_the_explicit_owner(project_path: str) -> None:
+    repository = Path(__file__).resolve().parents[4]
+    manifest = tomllib.loads((repository / "pyproject.toml").read_text())
+
+    assert project_path in manifest["tool"]["uv"].get("workspace", {}).get("members", [])
+    assert (repository / "uv.lock").is_file()
+
+
 @pytest.fixture(scope="module")
 def first_party_wheels(tmp_path_factory: pytest.TempPathFactory) -> Path:
     repository = Path(__file__).resolve().parents[4]
@@ -146,13 +163,13 @@ def test_given_first_party_project_when_reading_metadata_then_license_and_reposi
 @pytest.mark.parametrize(
     ("project_path", "package_names"),
     [
-        (".", ("physical-ai-curation", "physical-ai-dataset-io")),
+        (".", ("physical-ai-curation", "physical-ai-dataset-io", "physical-ai-vlm-judge")),
         ("data-management/curation", ("physical-ai-dataset-io",)),
         (
             "data-management/viewer/backend",
             ("physical-ai-curation", "physical-ai-dataset-io", "physical-ai-vlm-judge"),
         ),
-        ("evaluation", ("physical-ai-dataset-io",)),
+        ("evaluation", ()),
         ("evaluation/vlm_judge", ("physical-ai-dataset-io",)),
     ],
 )
@@ -167,14 +184,16 @@ def test_given_first_party_dependencies_when_resolving_then_sources_remain_local
     }
     project = repository / project_path
     manifest = tomllib.loads((project / "pyproject.toml").read_text())
-    sources = manifest["tool"]["uv"]["sources"]
+    root = tomllib.loads((repository / "pyproject.toml").read_text())
+    sources = root["tool"]["uv"]["sources"] | manifest.get("tool", {}).get("uv", {}).get("sources", {})
+    lock = tomllib.loads((repository / "uv.lock").read_text())
+    packages = {package["name"]: package for package in lock["package"]}
+    if project_path == "evaluation":
+        assert not locations.keys() & manifest["tool"]["uv"]["sources"].keys()
+        assert not any(dependency.split("==")[0] in locations for dependency in manifest["project"]["dependencies"])
     for name in package_names:
-        assert (project / sources[name]["path"]).resolve() == locations[name]
-    if (project / "uv.lock").exists():
-        lock = tomllib.loads((project / "uv.lock").read_text())
-        packages = {package["name"]: package for package in lock["package"]}
-        for name in package_names:
-            assert (project / packages[name]["source"]["editable"]).resolve() == locations[name]
+        assert sources[name] == {"workspace": True}
+        assert (repository / packages[name]["source"]["editable"]).resolve() == locations[name]
 
 
 @pytest.mark.parametrize("profile", ["dataset-io", "curation", "vlm-judge"])
@@ -298,12 +317,15 @@ def test_dependency_installation_is_isolated_from_runtime_layers() -> None:
     base, stages = dockerfile.split("FROM base AS build\n", maxsplit=1)
     build, runtime = stages.split("FROM base AS runtime\n", maxsplit=1)
 
-    install = "uv sync --frozen --no-dev --no-editable --inexact ${extras}"
+    install = "uv sync --project /app --frozen --no-default-groups --no-editable ${selection} ${extras}"
     assert install in build
+    assert build.count("uv sync ") == 1
+    assert "--inexact" not in build
     assert 'ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"' in build
     assert 'ARG UV_DEFAULT_INDEX="https://pypi.org/simple"' in build
     assert 'ARG JUDGE_EXTRAS=""' in build
-    assert "uv sync --project /app/evaluation/vlm_judge" in build
+    assert 'selection="--package lerobot-annotation-api"' in build
+    assert 'selection="--all-packages"' in build
     assert "uv sync" not in base
     assert "uv sync" not in runtime
     assert "COPY --from=build --chown=appuser:appuser /app/.venv /app/.venv" in runtime
@@ -368,17 +390,19 @@ assert not any(name.startswith(('src.api.storage', 'torch', 'transformers', 'eva
     assert result.returncode == 0, result.stderr
 
 
-def test_judge_profiles_install_from_their_own_lock_without_checkout_imports() -> None:
+def test_judge_profiles_install_from_root_lock_without_checkout_imports() -> None:
     backend = Path(__file__).resolve().parents[1]
     dockerfile = (backend / "Dockerfile").read_text()
     compose = (backend.parent / "docker-compose.yml").read_text()
     assert "WORKDIR /app/data-management/viewer/backend" in dockerfile
     assert "UV_PROJECT_ENVIRONMENT=/app/.venv" in dockerfile
+    assert "COPY pyproject.toml uv.lock /app/" in dockerfile
     assert "COPY evaluation/vlm_judge/ /app/evaluation/vlm_judge/" in dockerfile
     assert "COPY data-management/curation/ /app/data-management/curation/" in dockerfile
     assert "COPY data-management/dataset-io/ /app/data-management/dataset-io/" in dockerfile
     assert 'ARG JUDGE_EXTRAS=""' in dockerfile
-    assert "uv sync --project /app/evaluation/vlm_judge --frozen --no-dev --no-editable" in dockerfile
+    assert "uv sync --project /app --frozen --no-default-groups --no-editable" in dockerfile
+    assert "backend/uv.lock" not in dockerfile
     assert "COPY data-management/viewer/backend/src/ ./src/" in dockerfile
     assert "PYTHONPATH" not in dockerfile
     assert "context: ../.." in compose.split("  frontend:")[0]
@@ -391,6 +415,9 @@ def test_build_upload_is_allowlisted_and_compose_keeps_jobs_durable() -> None:
     assert ignore.exists()
     patterns = ignore.read_text().splitlines()
     assert patterns[0] == "**"
+    assert "!pyproject.toml" in patterns
+    assert "!uv.lock" in patterns
+    assert not any(line.endswith("/uv.lock") for line in patterns)
     assert "!evaluation/vlm_judge/*.py" in patterns
     assert "!data-management/curation/pyproject.toml" in patterns
     assert "!data-management/curation/physical_ai_curation/*.py" in patterns
@@ -407,6 +434,9 @@ def test_build_upload_is_allowlisted_and_compose_keeps_jobs_durable() -> None:
     assert '"$SRC_DIR/backend/"' not in deploy
     assert '--build-arg "JUDGE_EXTRAS=${judge_extras}"' in deploy
     assert 'cp "$backend_dockerfile" "$backend_context/data-management/viewer/backend/Dockerfile"' in deploy
+    assert 'cp "$REPO_ROOT/pyproject.toml" "$REPO_ROOT/uv.lock" "$backend_context/"' in deploy
+    assert "-cf - pyproject.toml logging.json src" in deploy
+    assert '"$REPO_ROOT/evaluation/vlm_judge/uv.lock"' not in deploy
     assert (
         'cp "$REPO_ROOT/data-management/curation/pyproject.toml" "$backend_context/data-management/curation/"' in deploy
     )
@@ -1205,6 +1235,10 @@ def test_browser_gate_cannot_reuse_live_services_or_resolve_dependencies() -> No
     assert "--with" not in config
     assert "reuseExistingServer: !process.env.CI" not in config
     assert "--no-sync --frozen" in config
+    assert "uv run --project ../../.. --all-packages --no-sync --frozen" in config
+    assert "UV_PROJECT_ENVIRONMENT:" in config
+    assert "process.env.UV_PROJECT_ENVIRONMENT ??" in config
+    assert "PYTHONPATH:" not in config
     assert "mkdtempSync" in config
     assert "STORAGE_BACKEND: 'local'" in config
     assert "--port 18000" in config
@@ -1251,7 +1285,7 @@ def test_given_no_curation_when_importing_evaluator_then_echo_scoring_is_indepen
             "dev", []
         )
         assert not any(dependency.startswith("physical-ai-curation") for dependency in dependencies), relative
-        assert "physical-ai-curation" not in manifest["tool"]["uv"].get("sources", {}), relative
+        assert "physical-ai-curation" not in manifest.get("tool", {}).get("uv", {}).get("sources", {}), relative
     root = Path(__file__).resolve().parents[4]
     shutil.copytree(
         root / "evaluation" / "vlm_judge",
@@ -1308,7 +1342,8 @@ def test_given_no_evaluator_when_applying_saved_evidence_then_replay_and_withdra
 
     shutil.copytree(Path(physical_ai_curation.__file__).parent, tmp_path / "physical_ai_curation")
     shutil.copyfile(
-        Path(physical_ai_curation.__file__).parents[1] / "tests/test_job_cli.py", tmp_path / "test_job_cli.py"
+        Path(__file__).resolve().parents[4] / "data-management/curation/tests/test_job_cli.py",
+        tmp_path / "test_job_cli.py",
     )
     shutil.copytree(
         Path(__file__).resolve().parents[4] / "data-management/dataset-io/physical_ai_dataset_io",

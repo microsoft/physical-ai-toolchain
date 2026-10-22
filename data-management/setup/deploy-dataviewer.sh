@@ -806,12 +806,13 @@ if [[ "$skip_build" == "false" ]]; then
     mkdir -p "$backend_context/data-management/viewer/backend" "$backend_context/evaluation/vlm_judge" \
       "$backend_context/data-management/curation/physical_ai_curation/adapters" \
       "$backend_context/data-management/dataset-io/physical_ai_dataset_io"
+    cp "$REPO_ROOT/pyproject.toml" "$REPO_ROOT/uv.lock" "$backend_context/"
     tar -C "$SRC_DIR/backend" --exclude='__pycache__' --exclude='*.pyc' --exclude='.env*' \
-      -cf - pyproject.toml uv.lock logging.json src \
+      -cf - pyproject.toml logging.json src \
       | tar -C "$backend_context/data-management/viewer/backend" -xf -
     cp "$backend_dockerfile" "$backend_context/data-management/viewer/backend/Dockerfile"
     cp "$REPO_ROOT/evaluation/vlm_judge/"*.py \
-      "$REPO_ROOT/evaluation/vlm_judge/pyproject.toml" "$REPO_ROOT/evaluation/vlm_judge/uv.lock" \
+      "$REPO_ROOT/evaluation/vlm_judge/pyproject.toml" \
       "$backend_context/evaluation/vlm_judge/"
     cp "$REPO_ROOT/data-management/curation/pyproject.toml" "$backend_context/data-management/curation/"
     cp "$REPO_ROOT/data-management/curation/physical_ai_curation/"*.py \

@@ -161,6 +161,11 @@
       "^scripts/security/(discover-base-images|image-slug)\\.sh$",
       "^scripts/security/container-scan-lanes\\.json$"
     ],
+    "product": [
+      "^(pyproject\\.toml|uv\\.lock)$",
+      "^data-management/(curation|dataset-io|viewer/backend)/pyproject\\.toml$",
+      "^evaluation/vlm_judge/pyproject\\.toml$"
+    ],
     "viewer": [
       "^data-management/viewer/(pyproject\\.toml|uv\\.lock|package(-lock)?\\.json|docker-compose[^/]*|Dockerfile[^/]*)$"
     ],
@@ -285,7 +290,8 @@
         "^data-management/viewer/backend/",
         "^data-management/(curation|dataset-io)/",
         "^data-management/viewer/specifications/language-tag-corpus\\.json$",
-        "^evaluation/vlm_judge/"
+        "^evaluation/vlm_judge/",
+        "^evaluation/tests/(vlm_judge/|conftest\\.py$)"
       ],
       "groups": [
         "python",
@@ -345,6 +351,7 @@
     "containers": {
       "patterns": [],
       "groups": [
+        "product",
         "images",
         "container-scan"
       ]
@@ -1362,10 +1369,10 @@
           ],
           "bindings": {
             "install": {
-              "run-sha256": "bdad651685dd88187b0bfcb38ae85755c6e45544c99a4e8eabef48dbb20a4a68"
+              "run-sha256": "b6d97cb13a4f408615d82df3f0d09c83a640ae5c1efbeda70ee0c908bff15d4b"
             },
             "test": {
-              "run-sha256": "78b7f3e8cfd2a01519f930c8f8c03d4336cae0a1dfddb377c607c1060621fc2c"
+              "run-sha256": "bf6fb1ff709ed203b824fb28b9eb551c474731aa34480227a5c3126e74dccfab"
             }
           }
         }
@@ -1558,10 +1565,10 @@
           ],
           "bindings": {
             "install": {
-              "run-sha256": "bdad651685dd88187b0bfcb38ae85755c6e45544c99a4e8eabef48dbb20a4a68"
+              "run-sha256": "b6d97cb13a4f408615d82df3f0d09c83a640ae5c1efbeda70ee0c908bff15d4b"
             },
             "test": {
-              "run-sha256": "d19dbf6fc6753ed265ec47dd971f2d75aaeb674706824616faeed6d114a82abb"
+              "run-sha256": "3bb501818546f384f41753d57065eb624ec4b8351a7d5eb50b5367bd54c2c7dd"
             }
           }
         }
@@ -1576,11 +1583,16 @@
             "system-dependencies",
             "install",
             "test",
-            "coverage_gate"
+            "coverage_gate",
+            "judge_unit"
           ],
           "reports": [
             {
               "path": "logs/pytest-dataviewer-results.xml",
+              "kind": "junit"
+            },
+            {
+              "path": "logs/pytest-vlm-judge-results.xml",
               "kind": "junit"
             }
           ],
@@ -1592,13 +1604,16 @@
               "run-sha256": "4933679476b25f8fa37db97f0f9cd8428a4dbcc221ec84c021d084d5765fd4b4"
             },
             "install": {
-              "run-sha256": "78d87e8b02e41539f437b30881d3c27a2026907b9b42786e0056f68e46f34605"
+              "run-sha256": "7f2a52cd7b34123ac5f7dac9ae2d70546a3193b9ab7c0f00684f6f6ea5f1a2cb"
             },
             "test": {
-              "run-sha256": "e005f6a1f725ef8a020c2eb13d0a95ae1a629a477d07e7834d43acaed332b874"
+              "run-sha256": "3e34d539de1f384e58b36e0a15d7e7716962b8acafc4c408014d518ea844353d"
             },
             "coverage_gate": {
-              "run-sha256": "e0752e70f9468776c41cd5047e953f5b276750391f33b4de01dc5f93543642d4"
+              "run-sha256": "a3bdc15b1babee2b05fe1d4dcb92c200908adf7dc742648fc7c3175d2e93e79c"
+            },
+            "judge_unit": {
+              "run-sha256": "fb9ad8b81e9fe71d8b4d8b964f73246f4e5dc2aef6cb0e808d3a05e991497769"
             }
           }
         }
@@ -1628,10 +1643,10 @@
               "run-sha256": "9d4f30d43fafc18412d33ffd243a0aeb128b97a1d5924131a4f174c688363d64"
             },
             "test": {
-              "run-sha256": "b9339d723e105d6fac9f68f7ff5401fdbb85b6f9328c4d17412e83cbeb96b475"
+              "run-sha256": "eec1901b4abeaf2a5af084467c4cf464c11c541ade72f1ad0070a0e4803820ce"
             },
             "coverage_gate": {
-              "run-sha256": "0f3a6f4d838e0e75f93a561d7a69021eb1d15179f53816f6bb8c9ad3c3d7ec45"
+              "run-sha256": "750f45911218f05e54e552fff43430d37e7de0a78bb160a1a9d0df27640e1a76"
             }
           }
         }

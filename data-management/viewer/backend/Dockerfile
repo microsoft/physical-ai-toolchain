@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # uv binary from its official image, pinned by digest for OSSF Scorecard.
-COPY --from=ghcr.io/astral-sh/uv:0.10.9@sha256:10902f58a1606787602f303954cea099626a4adb02acbac4c69920fe9d278f82 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.20@sha256:100047e74f30778ab704942321a09750d6158739573ff58bf3924085cc6cd2d8 /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -18,7 +18,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 FROM base AS build
 
-COPY data-management/viewer/backend/pyproject.toml data-management/viewer/backend/uv.lock ./
+COPY pyproject.toml uv.lock /app/
+COPY data-management/viewer/backend/pyproject.toml ./
 COPY data-management/viewer/backend/src/ ./src/
 COPY evaluation/vlm_judge/ /app/evaluation/vlm_judge/
 COPY data-management/curation/ /app/data-management/curation/
@@ -31,18 +32,21 @@ ARG BACKEND_EXTRAS="azure,analysis,export,auth,yolo"
 ARG UV_DEFAULT_INDEX="https://pypi.org/simple"
 ARG JUDGE_EXTRAS=""
 # Keep installation caches out of the runtime image.
-RUN set -eu; extras=""; \
+RUN set -eu; extras=""; selection="--package lerobot-annotation-api"; \
     for extra in $(echo "${JUDGE_EXTRAS}" | tr ',' ' '); do \
         case "${extra}" in openai|qwen3-vl) ;; *) echo "Unsupported JUDGE_EXTRAS profile" >&2; exit 1 ;; esac; \
+        selection="--all-packages"; \
         extras="${extras} --extra ${extra}"; \
     done; \
-    uv sync --project /app/evaluation/vlm_judge --frozen --no-dev --no-editable ${extras}; \
-    extras=""; \
     for extra in $(echo "${BACKEND_EXTRAS}" | tr ',' ' '); do \
-        case "${extra}" in vlm-judge) echo "Select the judge runtime with JUDGE_EXTRAS" >&2; exit 1 ;; esac; \
+        case "${extra}" in \
+            azure|analysis|export|auth|yolo) ;; \
+            vlm-judge) echo "Select the judge runtime with JUDGE_EXTRAS" >&2; exit 1 ;; \
+            *) echo "Unsupported BACKEND_EXTRAS profile" >&2; exit 1 ;; \
+        esac; \
         extras="${extras} --extra ${extra}"; \
     done; \
-    uv sync --frozen --no-dev --no-editable --inexact ${extras}; \
+    uv sync --project /app --frozen --no-default-groups --no-editable ${selection} ${extras}; \
     uv pip check --python /app/.venv/bin/python
 
 FROM base AS runtime

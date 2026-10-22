@@ -18,12 +18,28 @@ BeforeAll {
     New-Item -ItemType Directory -Path $script:ScratchRoot -Force | Out-Null
 
     $script:Stubs = @{
-        'pip' = 'exit 0'
+        'pip' = 'exit 95'
         'uv'  = @'
+if [[ "$1" == "--version" ]]; then
+    printf 'uv %s\n' "${FAKE_UV_VERSION:-0.12.20}"
+    exit 0
+fi
 if [[ "$1" == "sync" ]]; then
-  [[ " $* " == *" --frozen "* && " $* " == *" --no-install-project "* && " $* " == *"/evaluation/vlm_judge"* ]] || exit 91
+    [[ " $* " == *" --frozen "* && " $* " == *" --no-default-groups "* && " $* " == *" --no-editable "* ]] || exit 91
+    [[ " $* " == *" --package physical-ai-vlm-judge "* && " $* " == *" --project "*"/payload "* ]] || exit 92
+    [[ " $* " != *" --no-config "* && " $* " != *" --no-install-project "* ]] || exit 93
 fi
 exit 0
+'@
+                'curl' = @'
+while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "-o" ]]; then
+        printf 'invalid release archive\n' > "$2"
+        exit 0
+    fi
+    shift
+done
+exit 94
 '@
         # The venv interpreter: the judge CLIs write verdicts, and the inline verdict check runs for real.
         'python' = @'
@@ -56,7 +72,7 @@ exit "${FAKE_JUDGE_EXIT:-0}"
         $inputRoot = Join-Path $workspace 'osmo-input'
         $judgeInput = Join-Path $workspace 'judge-input'
         New-Item -ItemType Directory -Path (Join-Path $source 'evaluation/vlm_judge'), $inputRoot, $judgeInput -Force | Out-Null
-        Set-Content -Path (Join-Path $source 'evaluation/vlm_judge/uv.lock') -Value 'version = 1'
+        Set-Content -Path (Join-Path $source 'uv.lock') -Value 'version = 1'
         Compress-Archive -Path (Join-Path $source '*') -DestinationPath (Join-Path $inputRoot 'payload.zip')
         if ($LeRobotInput) {
             New-Item -ItemType Directory -Path (Join-Path $judgeInput 'meta') -Force | Out-Null
@@ -84,6 +100,15 @@ AfterAll {
 }
 
 Describe 'osmo-judge-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
+    It 'rejects an unverified bootstrap archive before installing or judging' {
+        $result = Invoke-JudgeEntry -LeRobotInput -EnvVars @{ FAKE_UV_VERSION = '0.7.12' }
+
+        $result.ExitCode | Should -Not -Be 0
+        $result.StdErr | Should -Match 'checksum did NOT match|FAILED'
+        @($result.Calls | Where-Object { $_ -match '^uv (python|venv|sync) ' }).Count | Should -Be 0
+        @($result.Calls | Where-Object { $_ -match '^python -m ' }).Count | Should -Be 0
+    }
+
     It 'judges a LeRobot dataset with the pinned Qwen3-VL model and reports the verdicts' {
         $result = Invoke-JudgeEntry -LeRobotInput -EnvVars @{
             JUDGE_MODEL_REVISION = 'ebb281ec70b05090aa6165b016eac8ec08e71b17'

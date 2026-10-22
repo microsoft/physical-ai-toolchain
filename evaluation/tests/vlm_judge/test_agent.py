@@ -9,8 +9,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from vlm_judge.agent import AgentConfig, JudgeAgent
-from vlm_judge.backend import GenerationConfig, JudgeBackend
+from evaluation.vlm_judge.agent import AgentConfig, JudgeAgent
+from evaluation.vlm_judge.backend import GenerationConfig, JudgeBackend
 
 if TYPE_CHECKING:
     from PIL.Image import Image

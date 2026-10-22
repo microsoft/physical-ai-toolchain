@@ -36,8 +36,22 @@ case "${JUDGE_BACKEND}" in
   *) echo "ERROR: unknown JUDGE_BACKEND ${JUDGE_BACKEND} (use qwen3-vl, openai-compat, or echo)" >&2; exit 1 ;;
 esac
 
-# The judge needs Python 3.12; uv downloads it, and the locked wheels carry their own CUDA libraries.
-pip install --quiet --break-system-packages uv==0.7.12
+UV_VERSION=0.12.20
+if ! command -v uv >/dev/null 2>&1 || [[ "$(uv --version)" != "uv ${UV_VERSION}" ]]; then
+  case "$(uname -m)" in
+    x86_64) uv_target=x86_64-unknown-linux-gnu; uv_sha256=6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f ;;
+    aarch64|arm64) uv_target=aarch64-unknown-linux-gnu; uv_sha256=8a7aad7bc76a2fae5151566ff3e43eacce0b2a113d5e4de3e4afe3e58fa2441e ;;
+    *) echo "ERROR: unsupported uv bootstrap architecture" >&2; exit 1 ;;
+  esac
+  uv_install="$(mktemp -d)"
+  trap 'rm -rf -- "${uv_install}"' EXIT
+  curl --fail --silent --show-error --location \
+    "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${uv_target}.tar.gz" -o "${uv_install}/uv.tar.gz"
+  printf '%s  %s\n' "${uv_sha256}" "${uv_install}/uv.tar.gz" | sha256sum -c -
+  tar -xzf "${uv_install}/uv.tar.gz" -C "${uv_install}"
+  export PATH="${uv_install}/uv-${uv_target}:${PATH}"
+fi
+[[ "$(uv --version)" == "uv ${UV_VERSION}" ]] || { echo "ERROR: incorrect uv bootstrap version" >&2; exit 1; }
 uv python install 3.12
 uv venv --python 3.12 /opt/judge-venv
 # shellcheck disable=SC1091
@@ -51,14 +65,14 @@ if [[ -z "${ARCHIVE_PATH}" || ! -s "${ARCHIVE_PATH}" ]]; then
   exit 1
 fi
 python3 -m zipfile -e "${ARCHIVE_PATH}" "${PAYLOAD_ROOT}"
-export PYTHONPATH="${PAYLOAD_ROOT}:${PYTHONPATH:-}"
 
-JUDGE_PROJECT="${PAYLOAD_ROOT}/evaluation/vlm_judge"
-if [[ ! -f "${JUDGE_PROJECT}/uv.lock" ]]; then
-  echo "ERROR: judge lockfile not found at ${JUDGE_PROJECT}/uv.lock" >&2
+if [[ ! -f "${PAYLOAD_ROOT}/uv.lock" ]]; then
+  echo "ERROR: root lockfile not found at ${PAYLOAD_ROOT}/uv.lock" >&2
   exit 1
 fi
-uv sync --active --frozen --no-config --no-install-project --project "${JUDGE_PROJECT}" "${judge_extras[@]}"
+uv sync --active --frozen --no-default-groups --no-editable \
+  --project "${PAYLOAD_ROOT}" --package physical-ai-vlm-judge "${judge_extras[@]}"
+uv pip check
 
 mkdir -p "${OUTPUT_DIR}"
 JUDGMENTS="${OUTPUT_DIR}/judgments.jsonl"

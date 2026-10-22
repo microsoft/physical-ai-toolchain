@@ -147,7 +147,12 @@ def test_vlm_setup_preserves_existing_optional_dependencies(launcher: Path, monk
     ]
     sync_calls = [args for args in calls if args and args[0] == "sync"]
     assert len(sync_calls) == 1
-    assert "--inexact" in sync_calls[0]
+    assert "--inexact" not in sync_calls[0]
+    assert "--no-default-groups" in sync_calls[0]
+    assert "--all-packages" in sync_calls[0]
+    assert _option_value(sync_calls[0], "--project") == str(launcher.parents[2])
+    for extra in ("analysis", "export", "azure", "auth"):
+        assert ["--extra", extra] in [sync_calls[0][index : index + 2] for index in range(len(sync_calls[0]) - 1)]
 
 
 def _option_value(args: list[str], option: str) -> str | None:
@@ -168,14 +173,18 @@ def test_judge_runtime_uses_frozen_evaluator_profile(
     assert result.returncode == (dependency_status or 23), result.stdout + result.stderr
     assert ("Backend child invoked" in result.stdout) is (dependency_status == 0)
     calls = [shlex.split(line) for line in (launcher.parent / "backend" / "uv-calls.txt").read_text().splitlines()]
-    assert len(calls) == 3
-    assert all(args[0] == "sync" and "--frozen" in args and "--inexact" in args for args in calls[:2])
-    assert _option_value(calls[0], "--extra") == extra
-    assert _option_value(calls[0], "--project") == str(launcher.parents[2] / "evaluation" / "vlm_judge")
+    assert len(calls) == 2
+    assert calls[0][0] == "sync"
+    assert "--frozen" in calls[0]
+    assert "--inexact" not in calls[0]
+    assert "--no-default-groups" in calls[0]
+    assert "--no-editable" in calls[0]
+    assert "--all-packages" in calls[0]
+    assert ["--extra", extra] in [calls[0][index : index + 2] for index in range(len(calls[0]) - 1)]
+    assert _option_value(calls[0], "--project") == str(launcher.parents[2])
     assert _option_value(calls[0], "--python") == "3.12"
-    assert "vlm-judge" not in calls[1]
-    assert "--group" in calls[1]
-    assert calls[2] == ["pip", "check", "--python", str(launcher.parent / "backend/.venv/bin/python")]
+    assert "--group" not in calls[0]
+    assert calls[1] == ["pip", "check", "--python", str(launcher.parent / "backend/.venv/bin/python")]
 
 
 @pytest.mark.parametrize(("log_level", "expected_level"), [(None, "info"), ("debug", "debug")])
@@ -197,6 +206,8 @@ def test_backend_runs_on_loopback_with_logging_config(
     else:
         args = shlex.split((launcher.parent / "backend" / "uv-calls.txt").read_text(encoding="utf-8"))
         assert args[:5] == ["run", "--no-sync", "--frozen", "--directory", "backend"]
+        assert _option_value(args, "--project") == str(launcher.parents[2])
+        assert _option_value(args, "--package") == "lerobot-annotation-api"
         args = args[args.index("uvicorn") + 1 :]
     assert args[0] == "src.api.main:app"
     assert _option_value(args, "--log-config") == "logging.json"

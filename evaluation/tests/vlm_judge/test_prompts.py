@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from vlm_judge.prompts import (
+
+from evaluation.vlm_judge.prompts import (
     FAILURE_MODES,
     parse_failure_response,
     parse_milestone_response,

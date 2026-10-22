@@ -88,6 +88,36 @@ test('skill packages: CLI reports invalid repositories', t => {
   assert.match(result.stderr, /skills directory does not exist/);
 });
 
+test('product workspace: judge tests and coverage remain required in the backend owner', () => {
+  const steps = graph['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer'].steps;
+  const install = steps.find(step => step.id === 'install').run;
+  assert.match(install, /--project \.\.\/\.\.\/\.\. --all-packages --frozen/);
+  for (const extra of ['analysis', 'hdf5', 'export', 'auth', 'azure', 'api', 'openai', 'qwen3-vl']) {
+    assert.ok(install.includes(`--extra ${extra}`));
+  }
+  assert.equal(install.includes('--all-groups'), false);
+  assert.equal(install.includes('azureml-tracking'), false);
+  const judge = steps.find(step => step.id === 'judge_unit').run;
+  assert.match(judge, /--no-sync --frozen pytest/);
+  assert.ok(judge.includes('evaluation/vlm_judge/pyproject.toml'));
+  assert.ok(judge.includes('evaluation/tests/vlm_judge'));
+  assert.ok(judge.includes('--cov-fail-under=35'));
+  const owner = contract.execution['dataviewer-backend-pytests'].jobs['pytest-dataviewer'];
+  assert.ok(owner['required-steps'].includes('judge_unit'));
+  assert.ok(owner.reports.some(report => report.path === 'logs/pytest-vlm-judge-results.xml'));
+  const gates = steps.find(step => step.id === 'coverage_gate').run;
+  assert.ok(gates.includes('--fail-under=90'));
+  assert.ok(gates.includes('--fail-under=70'));
+});
+
+test('product workspace: independent evaluation keeps its own gate without judge coverage', () => {
+  const steps = graph['.github/workflows/evaluation-pytests.yml'].jobs.pytest.steps;
+  assert.equal(steps.find(step => step.id === 'install').run, 'uv sync --frozen --only-group dev');
+  assert.equal(steps.some(step => step.run?.includes('vlm_judge')), false);
+  assert.equal(steps.some(step => step.with?.flags === 'pytest-vlm-judge'), false);
+  assert.ok(steps.find(step => step.id === 'coverage_gate').run.includes('--fail-under=80'));
+});
+
 for (const owner of [prPath, mainPath]) {
   for (const jobId of ['accessibility-evidence', 'docusaurus-tests']) {
     test(`reusable permissions: ${owner}:${jobId} grants coverage OIDC through the entire call chain`, () => {
@@ -507,8 +537,8 @@ test('range resolver CLI: writes verified outputs and fails on infrastructure er
 });
 
 const selectionCases = [
-  ['root uv.lock selects every Python consumer', 'uv.lock', pythonConsumers],
-  ['root pyproject selects every Python consumer', 'pyproject.toml', pythonConsumers],
+  ['root uv.lock selects every Python consumer', 'uv.lock', [...pythonConsumers, 'containers']],
+  ['root pyproject selects every Python consumer', 'pyproject.toml', [...pythonConsumers, 'containers']],
   ['root conftest selects every Python consumer', 'tests/conftest.py', pythonConsumers],
   ['shared fixtures select every Python consumer', 'tests/fixtures/episodes/sample.json', pythonConsumers],
   ['docs source outside the site selects Docusaurus', 'docs/training/overview.md', ['docusaurus']],
@@ -519,15 +549,17 @@ const selectionCases = [
   ['shared shell defaults conservatively select every consumer', 'scripts/lib/common.sh', allSelectors],
   ['shared image scripts also select their own tests', 'shared/ci/smoke-image.sh', [...imageConsumers, 'shared_ci']],
   ['VLM judge selects evaluation, the viewer backend, and accessibility', 'evaluation/vlm_judge/judge.py', ['evaluation', 'dv_backend', 'accessibility']],
+  ['retained judge tests select their product owner', 'evaluation/tests/vlm_judge/test_run.py', ['evaluation', 'dv_backend', 'accessibility']],
+  ['independent evaluation source does not select the product owner', 'evaluation/sil/policy_evaluation.py', ['evaluation', 'accessibility']],
   ...['physical_ai_curation/jobs.py', 'tests/test_jobs.py', 'pyproject.toml', 'uv.lock'].map(path => [
     `curation package ${path} selects backend, fuzz, and accessibility`,
     `data-management/curation/${path}`,
-    ['dv_backend', 'fuzz', 'accessibility'],
+    ['dv_backend', 'fuzz', 'accessibility', ...(path === 'pyproject.toml' ? ['containers'] : [])],
   ]),
   ...['physical_ai_dataset_io/lerobot.py', 'tests/test_lerobot.py', 'pyproject.toml', 'uv.lock'].map(path => [
     `dataset-I/O package ${path} selects evaluator, backend, fuzz, and accessibility`,
     `data-management/dataset-io/${path}`,
-    ['evaluation', 'dv_backend', 'fuzz', 'accessibility'],
+    ['evaluation', 'dv_backend', 'fuzz', 'accessibility', ...(path === 'pyproject.toml' ? ['containers'] : [])],
   ]),
   ['data-pipeline config selects its Python and accessibility tests', 'data-pipeline/pyproject.toml', ['data_pipeline', 'accessibility']],
   ['Terraform provider locks retain unconditional validation and accessibility', 'infrastructure/terraform/.terraform.lock.hcl', ['accessibility']],
@@ -551,6 +583,20 @@ const selectionCases = [
 
 for (const [name, path, expected] of selectionCases) {
   test(`selector: ${name}`, () => assertSelection(selectChecks([path], contract), expected));
+}
+
+for (const path of [
+  'pyproject.toml', 'uv.lock',
+  'data-management/curation/pyproject.toml',
+  'data-management/dataset-io/pyproject.toml',
+  'data-management/viewer/backend/pyproject.toml',
+  'evaluation/vlm_judge/pyproject.toml',
+]) {
+  test(`selector: product dependency ${path} requires container validation`, () => {
+    const selected = selectChecks([path], contract);
+    assert.equal(selected.containers, true, 'Product dependency changes must exercise shipped containers');
+    assert.equal(selected.dv_backend, true, 'Product dependency changes must exercise backend consumers');
+  });
 }
 
 test('selector: full mode selects every consumer even without changed paths', () => {

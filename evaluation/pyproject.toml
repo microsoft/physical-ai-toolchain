@@ -5,7 +5,6 @@ description = "Evaluation workflow runtime dependencies"
 requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
-    "physical-ai-dataset-io==0.1.0",
     # Held below 2.3 because lerobot==0.6.1 declares numpy<2.3.
     "numpy==2.2.6",
     "azure-core==1.41.0",
@@ -72,7 +71,6 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.uv.sources]
-physical-ai-dataset-io = { path = "../data-management/dataset-io", editable = true }
 torch = [
     { index = "pytorch-cu130", marker = "platform_machine == 'x86_64' or platform_machine == 'AMD64'" },
     { index = "pytorch-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" },
@@ -106,7 +104,8 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "../data-management/dataset-io"]
+pythonpath = ["."]
+norecursedirs = ["vlm_judge"]
 addopts = [
     "-ra",
     "--strict-markers",

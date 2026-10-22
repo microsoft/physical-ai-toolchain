@@ -2569,18 +2569,6 @@ wheels = [
 ]
 
 [[package]]
-name = "physical-ai-dataset-io"
-version = "0.1.0"
-source = { editable = "../data-management/dataset-io" }
-
-[package.metadata]
-requires-dist = [
-    { name = "pandas", marker = "extra == 'parquet'", specifier = "==3.0.5" },
-    { name = "pyarrow", marker = "extra == 'parquet'", specifier = "==25.0.1" },
-]
-provides-extras = ["parquet"]
-
-[[package]]
 name = "physical-ai-evaluation"
 version = "0.1.0"
 source = { virtual = "." }
@@ -2600,7 +2588,6 @@ dependencies = [
     { name = "onnxruntime-gpu" },
     { name = "onnxscript" },
     { name = "packaging" },
-    { name = "physical-ai-dataset-io" },
     { name = "psutil" },
     { name = "pynvml" },
     { name = "pyperclip" },
@@ -2646,7 +2633,6 @@ requires-dist = [
     { name = "onnxruntime-gpu", specifier = "==1.30.0" },
     { name = "onnxscript", specifier = "==0.7.2" },
     { name = "packaging", specifier = "==25.0" },
-    { name = "physical-ai-dataset-io", editable = "../data-management/dataset-io" },
     { name = "psutil", specifier = "==7.2.2" },
     { name = "pynvml", specifier = "==13.0.1" },
     { name = "pyperclip", specifier = "==1.11.0" },
