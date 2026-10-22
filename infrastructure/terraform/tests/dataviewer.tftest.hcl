@@ -96,8 +96,8 @@ run "dataviewer_enabled" {
   }
 
   assert {
-    condition     = length(keys(output.dataviewer)) == 5 && alltrue([for key in ["environment", "backend", "frontend", "identity", "entra_id"] : contains(keys(output.dataviewer), key)])
-    error_message = "dataviewer output should expose environment, backend, frontend, identity, and entra_id"
+    condition     = length(keys(output.dataviewer)) == 6 && alltrue([for key in ["environment", "backend", "frontend", "identity", "entra_id", "caller_auth"] : contains(keys(output.dataviewer), key)])
+    error_message = "dataviewer output should expose environment, backend, frontend, identity, entra_id and caller_auth"
   }
 
   assert {
@@ -116,7 +116,7 @@ run "dataviewer_enabled" {
   }
 
   assert {
-    condition     = output.dataviewer.entra_id == null
+    condition     = output.dataviewer.entra_id == null && output.dataviewer.caller_auth == null
     error_message = "dataviewer entra_id should be null when auth is not deployed"
   }
 }
@@ -153,5 +153,10 @@ run "dataviewer_auth_enabled" {
   assert {
     condition     = output.dataviewer.entra_id.client_id == "00000000-0000-0000-0000-000000000021"
     error_message = "dataviewer entra_id should expose the app registration client ID when dataviewer_config.should_deploy_auth is true"
+  }
+
+  assert {
+    condition     = output.dataviewer.caller_auth.api_client_id == "00000000-0000-0000-0000-000000000021" && output.dataviewer.caller_auth.mode == "managed_identity"
+    error_message = "Root caller authentication output must preserve the hosted API contract"
   }
 }

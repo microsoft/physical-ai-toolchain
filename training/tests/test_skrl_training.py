@@ -1730,6 +1730,7 @@ class TestRunHydraTraining:
             "_run_training_with_mlflow",
             side_effect=SystemExit(0),
         )
+        prepare_shutdown = mocker.patch.object(_MOD, "prepare_for_shutdown")
         logger_error = mocker.patch.object(_MOD._LOGGER, "error")
         cli = _make_cli(seed=1)
         cli.agent = None
@@ -1743,6 +1744,7 @@ class TestRunHydraTraining:
         )
 
         env.close.assert_called_once()
+        prepare_shutdown.assert_called_once_with()
         logger_error.assert_not_called()
 
 

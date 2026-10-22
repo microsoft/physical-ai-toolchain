@@ -2,7 +2,7 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-10-19
+ms.date: 2026-10-21
 ms.topic: overview
 ---
 
@@ -448,7 +448,7 @@ The shim reads these variables ([`evaluation/vlm_judge/openai_shim.py`](../../ev
 
 ## 🔒 Authentication with Entra ID
 
-Azure Container Apps deployments use Easy Auth on the public frontend. Easy Auth authenticates the browser and injects `X-MS-CLIENT-PRINCIPAL`; the frontend nginx proxy forwards that principal with a Terraform-managed `X-Dataviewer-Proxy-Key`. The backend accepts the principal only when the proxy credential matches, preventing a direct caller from establishing identity by forging the platform header.
+Azure Container Apps deployments use Easy Auth on the public frontend. Nginx forwards `X-MS-CLIENT-PRINCIPAL` with one server-only `X-Dataviewer-Caller-Token`, acquired through a loopback helper using a dedicated frontend managed identity. The backend verifies the workload token and caller ACL before accepting the user principal. Caller, user and storage identities remain separate.
 
 The frontend-to-backend proxy preserves native browser requests for images and video, including `HEAD` and HTTP Range requests. The browser does not acquire or attach a separate API token in this deployment mode.
 
@@ -468,24 +468,27 @@ The [Terraform module](../../infrastructure/terraform/modules/dataviewer/variabl
 
 ### Azure Container Apps Configuration
 
-Terraform creates one random proxy credential and installs it under the stable `dataviewer-proxy-key` secret name on both Container Apps. The backend bootstrap revision receives the secret reference and enforces proof validation. The public frontend bootstrap revision does not receive the reference; `deploy-dataviewer.sh` adds it only after verifying Easy Auth. The credential is not exposed as a Terraform output.
+Terraform creates a frontend-only caller identity, declares v2 app-token claims and starts nginx in `pending` mode. The helper runs from the compatible backend image at `127.0.0.1:8090`, requests `api://<api-client-id>/.default` with explicit identity selection, and returns proof only through an internal response header. The shared registry/storage identity is not an authorized caller. No browser token endpoint or default-credential fallback is added.
 
 ```env
 DATAVIEWER_AUTH_DISABLED=false
 DATAVIEWER_AUTH_PROVIDER=easy_auth
-DATAVIEWER_PROXY_KEY=<shared-random-proxy-key>
 DATAVIEWER_AZURE_TENANT_ID=<your-tenant-id>
-DATAVIEWER_AZURE_CLIENT_ID=<your-client-id>
+DATAVIEWER_AZURE_CLIENT_ID=<api-application-client-id>
+DATAVIEWER_CALLER_OBJECT_ID=<frontend-identity-principal-id>
+DATAVIEWER_CALLER_CLIENT_ID=<frontend-identity-client-id>
 DATAVIEWER_SECURE_COOKIES=true
 ```
 
-Do not put the proxy credential in source, command output, Terraform outputs, or deployment logs. [Container Apps secret updates](https://learn.microsoft.com/azure/container-apps/manage-secrets) do not create revisions or update values already loaded by running revisions.
+These are backend settings; the helper receives only the API UUID and caller client UUID. The deployment script selects frontend `DATAVIEWER_CALLER_MODE=managed_identity` only after verifying Easy Auth and anonymous denial. `pending` denies protected forwarding; `off` is for non-hosted application-auth modes. Empty/unknown modes fail startup, and helper failure never downgrades active mode.
 
-Rotate the Terraform-owned password on both apps first, then close frontend ingress, restart both active revisions, verify proof enforcement and anonymous denial, and reopen ingress. Keep ingress closed after any partial restart or failed verification. The [deployment specification](../specifications/viewer-deployment.specification.md#credential-rotation) defines the complete sequence.
+The Easy Auth login secret remains required. Old Terraform proxy-secret objects are inert migration remnants retained for older revisions, not a fallback or rotation procedure for MI. Remove active `DATAVIEWER_PROXY_KEY`; a nonempty value fails frontend startup. Never log tokens or live principals. The [deployment specification](../specifications/viewer-deployment.specification.md#authentication) defines token claims, principal budgets, cache/propagation limits and trust assumptions.
+
+Only exact GET/HEAD `/health` is exempt at the hosted backend; docs, CSRF bootstrap, OPTIONS and unknown routes require caller and user authentication. Frontend static liveness is independent of Entra. Active `/health` privately checks usable helper proof and backend storage health; pending health is not security acceptance. Duplicate proof/principal headers, ambiguous subjects and over-budget claims are denied. Existing normalized user scopes and nonempty roles remain unchanged.
 
 ### Other Authentication Modes
 
-The same images support API key, Auth0, and direct Entra JWT deployments. When `DATAVIEWER_PROXY_KEY` is absent, nginx removes any inbound proxy-proof header and preserves the browser's `Authorization` header. Direct Entra JWT deployments can configure the optional MSAL frontend at build time:
+The same images support API key, Auth0, and direct Entra JWT deployments. With `DATAVIEWER_CALLER_MODE=off` (the unset default), nginx strips inbound proof, preserves the browser's `Authorization` header and never calls the helper. Storage mode or running on an Azure host does not select caller proof. Direct Entra JWT deployments can configure the optional MSAL frontend at build time:
 
 ```env
 VITE_AZURE_CLIENT_ID=<your-client-id>
@@ -514,6 +517,8 @@ docker compose up --build
 This example uses direct Entra JWT validation. Easy Auth is a Container Apps platform feature and is not provided by Docker Compose.
 
 Supply the backend provider, tenant and client variables through container deployment environment settings as well; the Compose file forwards only the auth-disabled switch. Verify the effective environment with `docker compose config` before enabling authentication.
+
+Default local-storage Compose and Compose on an Azure host with Blob retain their existing non-hosted application-auth mode. Neither needs a caller helper. Configure Blob credentials independently; do not substitute the frontend caller identity for storage credentials. Actual Azure-host Blob acceptance is separate from local configuration or mocked-storage tests; this change does not add hosted Easy Auth to Compose.
 
 ### Redirect Bridge and Deployment
 
@@ -548,24 +553,27 @@ Cached access tokens and successful refresh-token exchanges can bypass the ifram
 
 ### Auth Environment Variable Reference
 
-| Variable                     | Location              | Description                                                           |
-|------------------------------|-----------------------|-----------------------------------------------------------------------|
-| `DATAVIEWER_AUTH_DISABLED`   | Backend               | Set to `false` to enable auth (`true` disables all checks)            |
-| `DATAVIEWER_AUTH_PROVIDER`   | Backend               | Auth provider: `apikey`, `azure_ad`, `auth0`, or `easy_auth`          |
-| `DATAVIEWER_PROXY_KEY`       | Frontend and backend  | Shared secret binding Easy Auth principal forwarding to trusted nginx |
-| `DATAVIEWER_AZURE_TENANT_ID` | Backend               | Entra ID tenant ID                                                    |
-| `DATAVIEWER_AZURE_CLIENT_ID` | Backend               | App registration client ID                                            |
-| `DATAVIEWER_SECURE_COOKIES`  | Backend               | Set to `true` for HTTPS deployments                                   |
-| `VITE_AZURE_CLIENT_ID`       | Frontend (build-time) | Enables the optional direct Entra JWT flow when set                   |
-| `VITE_AZURE_TENANT_ID`       | Frontend (build-time) | Tenant used by the optional MSAL authority                            |
+| Variable                      | Location              | Description                                                       |
+|-------------------------------|-----------------------|-------------------------------------------------------------------|
+| `DATAVIEWER_AUTH_DISABLED`    | Backend               | Set to `false` to enable auth (`true` disables all checks)        |
+| `DATAVIEWER_AUTH_PROVIDER`    | Backend               | Auth provider: `apikey`, `azure_ad`, `auth0`, or `easy_auth`      |
+| `DATAVIEWER_CALLER_MODE`      | Frontend              | `off`, `pending` or `managed_identity`; unrelated to storage mode |
+| `DATAVIEWER_CALLER_OBJECT_ID` | Backend               | Exact frontend caller principal UUID                              |
+| `DATAVIEWER_CALLER_CLIENT_ID` | Backend and helper    | Exact frontend caller client UUID                                 |
+| `DATAVIEWER_AZURE_TENANT_ID`  | Backend               | Entra ID tenant ID                                                |
+| `DATAVIEWER_AZURE_CLIENT_ID`  | Backend and helper    | API app registration client UUID                                  |
+| `DATAVIEWER_SECURE_COOKIES`   | Backend               | Set to `true` for HTTPS deployments                               |
+| `VITE_AZURE_CLIENT_ID`        | Frontend (build-time) | Enables the optional direct Entra JWT flow when set               |
+| `VITE_AZURE_TENANT_ID`        | Frontend (build-time) | Tenant used by the optional MSAL authority                        |
 
 ### Token Flow
 
 ```text
 Browser → frontend Easy Auth → authenticated cookie session
 Browser → frontend nginx → native /api, image, and video requests
-Easy Auth principal + proxy credential → FastAPI identity validation
-FastAPI → Azure Storage → managed identity
+nginx → private loopback helper → frontend identity app token
+Easy Auth principal + caller token → FastAPI caller ACL, then user identity
+FastAPI → Azure Storage → separate shared storage identity
 ```
 
 The backend accesses Azure Storage using managed identity, not the user's token. User authentication and storage authentication are independent.
@@ -574,30 +582,29 @@ The backend accesses Azure Storage using managed identity, not the user's token.
 
 Run `data-management/setup/deploy-dataviewer.sh` interactively. For authenticated deployments, the script:
 
-1. Verifies both Container Apps already contain the Terraform-owned `dataviewer-proxy-key` secret and the frontend contains the Terraform-owned Easy Auth client credential.
-2. Captures the current images, authentication settings, and secret references and classifies whether they form a secure recovery pair.
-3. Deploys the backend in `easy_auth` mode with its proxy-key secret reference.
-4. Verifies frontend Easy Auth uses the Terraform-owned credential and denies an anonymous forged-principal probe.
-5. Deploys the frontend with its proxy-key secret reference.
-6. Repeats the negative probe, then requires one terminal browser and media verification gate before reporting success.
+1. Validates the typed Terraform caller output, identities, callback, login secret, issuance policy and selected image digests. Captures only ready, compatible MI revisions as recovery candidates.
+2. Closes ingress, verifies Easy Auth, and installs pending nginx plus its isolated helper.
+3. Deploys and verifies the complete token-only backend configuration, then checks frontend anonymous denial before activating MI forwarding.
+4. Rechecks the exact returned revisions and auth state, then requires a browser/media gate within 15 minutes. Rejection, EOF or timeout triggers recovery.
 
-`--skip-backend` requires an existing backend already using `easy_auth` and `dataviewer-proxy-key`. `--skip-frontend` requires enabled frontend Easy Auth and an existing proxy-key reference. A failed rollout restores only a previously verified secure pair while Easy Auth remains enabled. If no secure pair exists or any restore step fails, the script disables frontend ingress and verifies the deny state. Terraform retains ownership of both credentials throughout deployment and recovery.
+`--skip-backend` and `--skip-frontend` require an already verified MI pair. Frontend-only rollout reuses its separately pinned helper image without building or mutating the skipped backend. Recovery never restores shared-proof/header-only snapshots or disables Easy Auth. Both safe restores are attempted; absent eligibility or any restore failure closes and verifies ingress. See the [complete rollout and recovery contract](../specifications/viewer-deployment.specification.md#authenticated-rollout).
 
 ### Authentication Smoke Test
 
 Open the deployed frontend in a private browser window and sign in through Easy Auth.
 
-| Probe                                                      | Expected result                        |
-|------------------------------------------------------------|----------------------------------------|
-| `/api/auth/context` through the frontend                   | HTTP 200 with `auth_mode=easy_auth`    |
-| Image and frame requests                                   | Render without a browser bearer header |
-| Video `HEAD` request                                       | Successful native response             |
-| Video Range request                                        | HTTP 206 with the requested byte range |
-| Direct backend request with only a forged principal header | HTTP 401                               |
-| Direct backend request with a missing or wrong proxy key   | HTTP 401                               |
-| Credentialed cross-origin API request                      | Rejected                               |
+| Probe                                                                       | Expected result                        |
+|-----------------------------------------------------------------------------|----------------------------------------|
+| `/api/auth/context` through the frontend                                    | HTTP 200 with `auth_mode=easy_auth`    |
+| Image and frame requests                                                    | Render without a browser bearer header |
+| Video `HEAD` request                                                        | Successful native response             |
+| Video Range request                                                         | HTTP 206 with the requested byte range |
+| Direct backend request with only a forged principal header                  | HTTP 401                               |
+| Direct backend request with missing, invalid or wrong-audience caller proof | HTTP 401                               |
+| Valid app token from an unauthorized workload, including shared identity    | HTTP 403                               |
+| Credentialed cross-origin API request                                       | Rejected                               |
 
-The backend Container App remains internal-only. Inspect deployment output and application logs after the smoke test to confirm they contain neither the proxy credential nor decoded principal payloads.
+The backend Container App remains internal-only. Check that logs contain no tokens or principals without recording their values. Local signed-token/nginx and fake-CLI checks are not hosted release evidence. Actual Azure issuance, shared-loopback/probe reachability, two signed-in users, CSRF writes, native media refresh, network denial, rollout recovery and Azure-host Blob Compose require a separately authorized disposable environment and VPN; these hosted checks remain outstanding.
 
 ## 🚀 Running the Application
 

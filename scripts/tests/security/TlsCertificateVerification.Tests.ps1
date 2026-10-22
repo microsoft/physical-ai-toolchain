@@ -81,6 +81,11 @@ BeforeAll {
             '--env', "NGINX_BACKEND_HOST=$BackendHost",
             '--env', 'NGINX_BACKEND_SCHEME=https',
             '--env', 'NGINX_RESOLVER=127.0.0.11',
+            '--entrypoint', '/bin/sh',
+            '--volume', (
+                "$(Join-Path $script:RepoRoot 'data-management/viewer/frontend/start-nginx.sh')" +
+                ':/usr/local/bin/start-nginx.sh:ro'
+            ),
             '--volume', (
                 "$(Join-Path $script:RepoRoot 'data-management/viewer/frontend/nginx.conf.template')" +
                 ':/etc/nginx/templates/default.conf.template:ro'
@@ -92,7 +97,7 @@ BeforeAll {
                 "${FixtureDirectory}/server.crt:/etc/ssl/certs/ca-certificates.crt:ro"
             )
         }
-        $arguments += $script:NginxImage
+        $arguments += @($script:NginxImage, '/usr/local/bin/start-nginx.sh')
 
         Invoke-Docker -Arguments $arguments | Out-Null
 
@@ -276,5 +281,65 @@ server.listen(443, '0.0.0.0')
             }
             & docker network rm $network 2>$null | Out-Null
         }
+    }
+}
+
+Describe 'Data Viewer caller authentication gate' -Tag 'Unit' {
+    BeforeAll {
+        $script:StartScript = Get-Content -Raw (
+            Join-Path $script:RepoRoot 'data-management/viewer/frontend/start-nginx.sh'
+        )
+        $script:FrontendDirectory = Join-Path $script:RepoRoot 'data-management/viewer/frontend'
+    }
+
+    It 'rejects nonempty legacy proxy keys without reflecting their value' {
+        $script:StartScript | Should -Match 'case "\$\{DATAVIEWER_PROXY_KEY-\}"'
+    }
+
+    It 'preserves real caller transport and fails closed before protected upstream work' {
+        $fixture = Join-Path $PSScriptRoot 'fixtures/caller-proxy-fixture.mjs'
+        $output = & node $fixture run $script:RepoRoot 2>&1
+        $LASTEXITCODE | Should -Be 0 -Because ($output -join "`n")
+        ($output -join "`n") | Should -Match 'caller transport: \d+ assertions passed'
+    }
+
+    It 'renders caller includes for each mode' {
+        $script:StartScript | Should -Match 'caller-api\.inc'
+        $script:StartScript | Should -Match 'caller-health\.inc'
+        $script:StartScript | Should -Match 'mode="\$\{DATAVIEWER_CALLER_MODE-off\}"'
+    }
+
+    It 'keeps internal caller proof locations unreachable from clients' {
+        $script:NginxConfig | Should -Match 'location = /_caller_proof'
+        $script:NginxConfig | Should -Match 'location = /_caller_ready'
+        $script:NginxConfig | Should -Match 'proxy_hide_header X-Dataviewer-Caller-Token;'
+    }
+
+    It 'rejects encoded or trailing-slash variants of /health' {
+        $script:NginxConfig | Should -Match 'limit_except GET HEAD'
+        $script:NginxConfig | Should -Match 'if \(\$request_uri !~ "\^/health'
+    }
+
+    It 'renders a valid NGINX configuration in <Mode> mode' -ForEach @(
+        @{ Mode = 'off' }
+        @{ Mode = 'pending' }
+        @{ Mode = 'managed_identity' }
+    ) {
+        $envArgs = @(
+            '--env', 'NGINX_BACKEND_HOST=tls-valid',
+            '--env', 'NGINX_BACKEND_SCHEME=https',
+            '--env', 'NGINX_RESOLVER=127.0.0.11'
+        )
+        if ($Mode -ne 'off') {
+            $envArgs += @('--env', "DATAVIEWER_CALLER_MODE=$Mode")
+        }
+        $startVolume = "$(Join-Path $script:FrontendDirectory 'start-nginx.sh'):/s.sh:ro"
+        $templateVolume = "$(Join-Path $script:FrontendDirectory 'nginx.conf.template'):/etc/nginx/templates/default.conf.template:ro"
+        $output = Invoke-Docker -Arguments (
+            @('run', '--rm', '--entrypoint', '/bin/sh', '--volume', $startVolume, '--volume', $templateVolume) +
+            $envArgs +
+            @($script:NginxImage, '/s.sh', '-t')
+        )
+        ($output -join "`n") | Should -Match 'test is successful'
     }
 }

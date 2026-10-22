@@ -81,7 +81,6 @@ done
 require_tools az terraform jq curl base64
 [[ "$local_build" == "true" && "$skip_build" == "false" ]] && require_tools docker
 
-proxy_secret_name="dataviewer-proxy-key"
 easy_auth_secret_name="microsoft-provider-authentication-secret"
 
 wait_for_ready_revision() {
@@ -123,32 +122,6 @@ update_app_and_wait() {
   printf '%s\n' "$revision"
 }
 
-verify_app_rollout() {
-  local app="$1"
-  local revision="$2"
-  local image="$3"
-  local proxy_secret_ref="$4"
-  local app_state
-
-  app_state=$(az containerapp show \
-    --name "$app" \
-    --resource-group "$rg" \
-    --output json) || return 1
-  jq -e \
-    --arg revision "$revision" \
-    --arg image "$image" \
-    --arg proxy_secret_ref "$proxy_secret_ref" \
-    '
-      .properties.latestRevisionName == $revision
-      and .properties.latestReadyRevisionName == $revision
-      and .properties.template.containers[0].image == $image
-      and (
-        ([.properties.template.containers[0].env[]? | select(.name == "DATAVIEWER_PROXY_KEY")][0].secretRef // "")
-        == $proxy_secret_ref
-      )
-    ' <<<"$app_state" >/dev/null
-}
-
 verify_backend_auth_enforced() {
   local app_state
 
@@ -157,14 +130,23 @@ verify_backend_auth_enforced() {
     --resource-group "$rg" \
     --output json) || return 1
   jq -e \
-    --arg proxy_secret_name "$proxy_secret_name" \
+    --argjson caller "${caller_auth:-null}" \
     '
-      ([.properties.template.containers[0].env[]? | select(.name == "DATAVIEWER_AUTH_PROVIDER")][0].value // "")
-        == "easy_auth"
-      and ([.properties.template.containers[0].env[]? | select(.name == "DATAVIEWER_AUTH_DISABLED")][0].value // "")
-        == "false"
-      and ([.properties.template.containers[0].env[]? | select(.name == "DATAVIEWER_PROXY_KEY")][0].secretRef // "")
-        == $proxy_secret_name
+      [.properties.template.containers[]? | select(.name == "backend")] as $containers
+      | ($containers[0].env // []) as $settings
+      | ($settings | map({key: .name, value: .value}) | from_entries) as $env
+      | ($containers | length) == 1
+      and ($caller | type == "object")
+      and ([$caller.tenant_id, $caller.api_client_id, $caller.caller_object_id, $caller.caller_client_id]
+        | all(.[]; type == "string" and length > 0))
+      and ([$settings[].name] | length == (unique | length))
+      and ([$settings[] | select(.name == "DATAVIEWER_PROXY_KEY")] | length == 0)
+      and $env.DATAVIEWER_AUTH_PROVIDER == "easy_auth"
+      and $env.DATAVIEWER_AUTH_DISABLED == "false"
+      and $env.DATAVIEWER_AZURE_TENANT_ID == $caller.tenant_id
+      and $env.DATAVIEWER_AZURE_CLIENT_ID == $caller.api_client_id
+      and $env.DATAVIEWER_CALLER_OBJECT_ID == $caller.caller_object_id
+      and $env.DATAVIEWER_CALLER_CLIENT_ID == $caller.caller_client_id
     ' <<<"$app_state" >/dev/null
 }
 
@@ -180,6 +162,152 @@ verify_frontend_auth_enforced() {
       .platform.enabled == true
       and .globalValidation.unauthenticatedClientAction == "RedirectToLoginPage"
     ' <<<"$auth_state" >/dev/null
+}
+
+validate_caller_contract() {
+  jq -e '
+    def uuid: type == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+    type == "object" and length == 6 and .mode == "managed_identity"
+    and ([.tenant_id, .api_client_id, .caller_object_id, .caller_client_id] | all(.[]; uuid))
+    and (.caller_identity_id | type == "string" and test("^/subscriptions/[0-9a-f-]+/resourceGroups/[^/]+/providers/Microsoft.ManagedIdentity/userAssignedIdentities/[^/]+$"; "i"))
+  ' <<<"$1" >/dev/null
+}
+
+verify_snapshot_ready() {
+  jq -e '
+    .properties.latestRevisionName as $revision
+    | ($revision | type == "string" and length > 0)
+    and .properties.latestReadyRevisionName == $revision
+    and all(.properties.template.containers[].image;
+      type == "string" and test("@sha256:[0-9a-f]{64}$"))
+  ' <<<"$1" >/dev/null
+}
+
+pin_registry_image() {
+  local image="$1" relative digest repository
+
+  [[ "$image" == "$acr_login_server/"* ]] || return 1
+  relative="${image#"$acr_login_server/"}"
+  digest=$(az acr repository show --name "$acr_name" --image "$relative" --query digest -o tsv) || return 1
+  [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  repository="${relative%%@*}"
+  repository="${repository%%:*}"
+  printf '%s/%s@%s\n' "$acr_login_server" "$repository" "$digest"
+}
+
+build_app_manifest() {
+  local state="$1" role="$2" image="$3" mode="$4" helper_image="$5"
+
+  jq -e \
+    --arg role "$role" --arg image "$image" --arg mode "$mode" \
+    --arg helper_image "$helper_image" --arg identity "$identity_id" \
+    --arg storage_client_id "$storage_client_id" \
+    --arg backend_host "$backend_fqdn" --argjson caller "${caller_auth:-null}" '
+    def setting($name; $value): {name: $name, value: $value};
+    def probe($type; $path; $timeout; $port): {
+      type: $type, httpGet: {path: $path, port: $port, scheme: "HTTP"},
+      timeoutSeconds: $timeout, periodSeconds: 30, failureThreshold: 3
+    };
+    [.properties.template.containers[] | select(.name == $role)] as $selected
+    | if ($selected | length) != 1 then error("Expected one named application container") else . end
+    | if any($selected[0].env[]?;
+        (.name | test("(^|_)(API_KEY|PASSWORD|ACCESS_TOKEN|CLIENT_SECRET|CONNECTION_STRING)$"))
+        and ((.value // "") | length > 0))
+      then error("Credential settings must use Container App secret references") else . end
+    | .properties.template.containers = [
+        ($selected[0]
+          | .image = $image
+          | .env = [(.env // [])[] | select(
+              (.name | startswith("DATAVIEWER_CALLER_") | not)
+              and (.name != "DATAVIEWER_PROXY_KEY")
+              and (.name != "DATAVIEWER_AZURE_TENANT_ID")
+              and (.name != "DATAVIEWER_AZURE_CLIENT_ID")
+              and (.name != "DATAVIEWER_AUTH_DISABLED")
+              and (.name != "DATAVIEWER_AUTH_PROVIDER")
+              and (.name != "HMI_STORAGE_BACKEND")
+            )]
+          | if $role == "backend" then
+                .env = [.env[] | select(.name != "STORAGE_BACKEND" and .name != "AZURE_CLIENT_ID")]
+                + [setting("STORAGE_BACKEND"; "azure"), setting("AZURE_CLIENT_ID"; $storage_client_id),
+                  setting("DATAVIEWER_AUTH_DISABLED"; if $mode == "off" then "true" else "false" end)]
+              + (if $mode == "off" then [] else [
+                  setting("DATAVIEWER_AUTH_PROVIDER"; "easy_auth"),
+                  setting("DATAVIEWER_AZURE_TENANT_ID"; $caller.tenant_id),
+                  setting("DATAVIEWER_AZURE_CLIENT_ID"; $caller.api_client_id),
+                  setting("DATAVIEWER_CALLER_OBJECT_ID"; $caller.caller_object_id),
+                  setting("DATAVIEWER_CALLER_CLIENT_ID"; $caller.caller_client_id)
+                ] end)
+              | .command = ["sh", "-c", "exec uvicorn src.api.main:app --log-config logging.json --log-level \"${LOG_LEVEL:-info}\" --host 0.0.0.0 --port 8000"]
+              | .args = []
+              | .probes = [probe("Liveness"; "/health"; 2; 8000), probe("Readiness"; "/health"; 10; 8000)]
+            else
+              .env = [.env[] | select(.name != "NGINX_BACKEND_HOST" and .name != "NGINX_BACKEND_SCHEME")]
+                + [setting("DATAVIEWER_CALLER_MODE"; $mode), setting("NGINX_BACKEND_HOST"; $backend_host), setting("NGINX_BACKEND_SCHEME"; "https")]
+              | .command = ["/bin/sh", "/usr/local/bin/start-nginx.sh"]
+              | .args = []
+              | .probes = [probe("Liveness"; "/"; 2; 8080), probe("Readiness"; "/health"; 10; 8080)]
+            end
+        )
+      ] + (if $role == "frontend" and $mode != "off" then [{
+        name: "caller-helper", image: $helper_image,
+        command: ["python", "-m", "src.caller_auth_helper"], args: [],
+        resources: {cpu: 0.25, memory: "0.5Gi"}, probes: [], volumeMounts: [],
+        env: [setting("DATAVIEWER_AZURE_CLIENT_ID"; $caller.api_client_id), setting("DATAVIEWER_CALLER_CLIENT_ID"; $caller.caller_client_id)]
+      }] else [] end)
+    | .identity = {type: "UserAssigned", userAssignedIdentities: (
+        {($identity): {}} + (if $role == "frontend" and $mode != "off" then {($caller.caller_identity_id): {}} else {} end)
+      )}
+    | del(.id, .systemData, .properties.provisioningState, .properties.runningStatus,
+        .properties.latestRevisionName, .properties.latestReadyRevisionName,
+        .properties.latestRevisionFqdn, .properties.outboundIpAddresses,
+        .properties.eventStreamEndpoint, .properties.configuration.secrets)
+  ' <<<"$state"
+}
+
+verify_manifest_rollout() {
+  local app="$1" revision="$2" manifest="$3" actual
+
+  actual=$(az containerapp show --name "$app" --resource-group "$rg" --output json) || return 1
+  jq -e --arg revision "$revision" --argjson desired "$manifest" '
+    def env: (.env // [] | map({name, value: (.value // null), secretRef: (.secretRef // null)}) | sort_by(.name));
+    def probes: (.probes // [] | map({
+      type, timeoutSeconds, periodSeconds, failureThreshold,
+      httpGet: (if .httpGet then {
+        path: .httpGet.path, port: .httpGet.port, scheme: (.httpGet.scheme // "HTTP"),
+        host: (.httpGet.host // null), httpHeaders: (.httpGet.httpHeaders // [])
+      } else null end)
+    }) | sort_by(.type));
+    . as $actual
+    | .properties.latestRevisionName == $revision and .properties.latestReadyRevisionName == $revision
+    and ((.identity.userAssignedIdentities | keys | map(ascii_downcase) | sort)
+      == ($desired.identity.userAssignedIdentities | keys | map(ascii_downcase) | sort))
+    and (.properties.template.containers | length) == ($desired.properties.template.containers | length)
+    and all($desired.properties.template.containers[];
+      . as $expected
+      | [$actual.properties.template.containers[] | select(.name == $expected.name)] as $containers
+      | ($containers | length) == 1
+      and ($containers[0] | .image == $expected.image
+        and (.command // []) == ($expected.command // [])
+        and (.args // []) == ($expected.args // [])
+        and (.volumeMounts // []) == ($expected.volumeMounts // [])
+        and .resources.cpu == $expected.resources.cpu and .resources.memory == $expected.resources.memory
+        and env == ($expected | env) and probes == ($expected | probes)))
+  ' <<<"$actual" >/dev/null
+}
+
+apply_app_manifest() {
+  local app="$1" manifest="$2" manifest_file revision status=0
+
+  manifest_file=$(mktemp) || return 1
+  chmod 600 "$manifest_file" || { rm -f -- "$manifest_file"; return 1; }
+  printf '%s\n' "$manifest" >"$manifest_file"
+  revision=$(update_app_and_wait "$app" --yaml "$manifest_file") || status=1
+  rm -f -- "$manifest_file"
+  if [[ "$status" != "0" ]]; then
+    return 1
+  fi
+  verify_manifest_rollout "$app" "$revision" "$manifest" || return 1
+  printf '%s\n' "$revision"
 }
 
 verify_anonymous_request_denied() {
@@ -251,7 +379,7 @@ ensure_frontend_ingress() {
 operator_auth_gate() {
   local confirmation
 
-  info "Authentication gate: proxy-bound Easy Auth rollout"
+  info "Authentication gate: managed-identity caller and Easy Auth rollout"
   info "Open $frontend_url in a private browser window and sign in."
   info "Confirm /api/auth/context returns HTTP 200 with auth_mode=easy_auth."
   info "Confirm image and frame loads plus video playback, HEAD, and Range requests work without a browser Authorization header."
@@ -263,69 +391,11 @@ operator_auth_gate() {
 }
 
 restore_app_rollout() {
-  local app="$1"
-  local image="$2"
-  local proxy_secret_ref="$3"
-  shift 3
-  local -a update_args env_args=("$@")
-
-  update_args=(
-    --image "$image"
-  )
-  if [[ -n "$proxy_secret_ref" ]]; then
-    env_args+=("DATAVIEWER_PROXY_KEY=secretref:${proxy_secret_ref}")
-  else
-    update_args+=(--remove-env-vars DATAVIEWER_PROXY_KEY)
-  fi
-  if [[ "${#env_args[@]}" -gt 0 ]]; then
-    update_args+=(--set-env-vars "${env_args[@]}")
-  fi
-  local revision
-  revision=$(update_app_and_wait "$app" "${update_args[@]}") || return 1
-  verify_app_rollout "$app" "$revision" "$image" "$proxy_secret_ref"
+  apply_app_manifest "$1" "$2" >/dev/null
 }
 
 rollback_backend() {
-  local -a update_args backend_env remove_env
-  local revision
-
-  backend_env=("DATAVIEWER_AUTH_DISABLED=${old_auth_disabled}")
-  remove_env=()
-
-  if [[ -n "$old_provider" ]]; then
-    backend_env+=("DATAVIEWER_AUTH_PROVIDER=${old_provider}")
-  else
-    remove_env+=(DATAVIEWER_AUTH_PROVIDER)
-  fi
-  if [[ -n "$old_tenant_id" ]]; then
-    backend_env+=("DATAVIEWER_AZURE_TENANT_ID=${old_tenant_id}")
-  else
-    remove_env+=(DATAVIEWER_AZURE_TENANT_ID)
-  fi
-  if [[ -n "$old_client_id" ]]; then
-    backend_env+=("DATAVIEWER_AZURE_CLIENT_ID=${old_client_id}")
-  else
-    remove_env+=(DATAVIEWER_AZURE_CLIENT_ID)
-  fi
-  if [[ -n "$old_backend_proxy_secret_ref" ]]; then
-    backend_env+=("DATAVIEWER_PROXY_KEY=secretref:${old_backend_proxy_secret_ref}")
-  else
-    remove_env+=(DATAVIEWER_PROXY_KEY)
-  fi
-
-  update_args=(
-    --image "$old_backend_image"
-    --set-env-vars "${backend_env[@]}"
-  )
-  if [[ "${#remove_env[@]}" -gt 0 ]]; then
-    update_args+=(--remove-env-vars "${remove_env[@]}")
-  fi
-  revision=$(update_app_and_wait "$backend_app" "${update_args[@]}") || return 1
-  verify_app_rollout \
-    "$backend_app" \
-    "$revision" \
-    "$old_backend_image" \
-    "$old_backend_proxy_secret_ref" || return 1
+  restore_app_rollout "$backend_app" "$old_backend_manifest" || return 1
   verify_backend_auth_enforced
 }
 
@@ -343,15 +413,80 @@ recover_authenticated_rollout() {
   if [[ "$skip_frontend" == "false" ]]; then
     restore_app_rollout \
       "$frontend_app" \
-      "$old_frontend_image" \
-      "$old_frontend_proxy_secret_ref" || recovery_failed=true
+      "$old_frontend_pending_manifest" || recovery_failed=true
     verify_frontend_auth_enforced || recovery_failed=true
     verify_anonymous_request_denied || recovery_failed=true
   fi
 
+  if [[ "$recovery_failed" == "false" && "$skip_frontend" == "false" ]]; then
+    verify_backend_auth_enforced || recovery_failed=true
+    if [[ "$recovery_failed" == "false" ]]; then
+      restore_app_rollout "$frontend_app" "$old_frontend_manifest" || recovery_failed=true
+      verify_frontend_auth_enforced || recovery_failed=true
+      verify_anonymous_request_denied || recovery_failed=true
+    fi
+  fi
+
   if [[ "$recovery_failed" == "true" ]]; then
     close_frontend_ingress || return 1
+    return 1
   fi
+}
+
+configure_frontend_auth() {
+  az containerapp auth microsoft update \
+    --name "$frontend_app" --resource-group "$rg" \
+    --client-id "$entra_client_id" --client-secret-name "$easy_auth_secret_name" \
+    --issuer "https://login.microsoftonline.com/${entra_tenant_id}/v2.0" \
+    --yes --output none || return 1
+  az containerapp auth update \
+    --name "$frontend_app" --resource-group "$rg" --enabled true \
+    --unauthenticated-client-action RedirectToLoginPage \
+    --redirect-provider azureactivedirectory --output none || return 1
+  verify_frontend_auth_enforced
+}
+
+verify_frontend_runtime() {
+  jq -e --argjson caller "$caller_auth" --arg helper_image "$2" '
+    [.properties.template.containers[]? | select(.name == "frontend")] as $frontends
+    | [.properties.template.containers[]? | select(.name == "caller-helper")] as $helpers
+    | ($frontends | length) == 1 and ($helpers | length) == 1
+    and (.properties.template.containers | length) == 2
+    and (.identity.userAssignedIdentities | with_entries(.key |= ascii_downcase) | has($caller.caller_identity_id | ascii_downcase))
+    and ([$frontends[0].env[]? | select(.name == "DATAVIEWER_CALLER_MODE") | .value] == ["managed_identity"])
+    and ([.properties.template.containers[].env[]? | select(.name == "DATAVIEWER_PROXY_KEY")] | length == 0)
+    and $helpers[0].image == $helper_image
+    and $helpers[0].command == ["python", "-m", "src.caller_auth_helper"]
+    and (($helpers[0].probes // []) | length == 0)
+    and (($helpers[0].volumeMounts // []) | length == 0)
+    and ($helpers[0].env | length == 2)
+    and ([$helpers[0].env[] | select(.name == "DATAVIEWER_AZURE_CLIENT_ID") | .value] == [$caller.api_client_id])
+    and ([$helpers[0].env[] | select(.name == "DATAVIEWER_CALLER_CLIENT_ID") | .value] == [$caller.caller_client_id])
+  ' <<<"$1" >/dev/null
+}
+
+deploy_authenticated_pair() {
+  if [[ "$skip_frontend" == "false" ]]; then
+    close_frontend_ingress || return 1
+    configure_frontend_auth || return 1
+  fi
+
+  if [[ "$skip_backend" == "false" ]]; then
+    apply_app_manifest "$backend_app" "$backend_manifest" >/dev/null || return 1
+  fi
+  verify_backend_auth_enforced || return 1
+
+  if [[ "$skip_frontend" == "false" ]]; then
+    apply_app_manifest "$frontend_app" "$frontend_pending_manifest" >/dev/null || return 1
+    verify_frontend_auth_enforced || return 1
+    ensure_frontend_ingress || return 1
+    verify_frontend_auth_enforced || return 1
+    verify_anonymous_request_denied || return 1
+    apply_app_manifest "$frontend_app" "$frontend_manifest" >/dev/null || return 1
+  fi
+  verify_frontend_auth_enforced || return 1
+  verify_anonymous_request_denied || return 1
+  operator_auth_gate
 }
 
 rollback_failed() {
@@ -421,14 +556,24 @@ fi
 backend_app=$(tf_require "$tf_output" "dataviewer.value.backend.name" "Backend container app name")
 frontend_app=$(tf_require "$tf_output" "dataviewer.value.frontend.name" "Frontend container app name")
 identity_id=$(tf_require "$tf_output" "dataviewer.value.identity.id" "Managed identity resource ID")
+storage_client_id=$(tf_require "$tf_output" "dataviewer.value.identity.client_id" "Storage identity client ID")
 frontend_url=$(tf_get "$tf_output" "dataviewer.value.frontend.url" "")
 
 # Entra ID auth configuration (empty when should_deploy_auth=false)
 entra_client_id=$(tf_get "$tf_output" "dataviewer.value.entra_id.client_id" "")
 entra_tenant_id=$(tf_get "$tf_output" "dataviewer.value.entra_id.tenant_id" "")
+caller_auth=$(tf_get "$tf_output" "dataviewer.value.caller_auth" "null")
+backend_fqdn=$(tf_get "$tf_output" "dataviewer.value.backend.fqdn" "")
 auth_enabled=false
 if [[ -n "$entra_client_id" && "$entra_client_id" != "null" ]]; then
   auth_enabled=true
+  validate_caller_contract "$caller_auth" || fatal "Apply the managed-identity caller Terraform contract before deployment."
+  if [[ "$(jq -r '.api_client_id' <<<"$caller_auth")" != "$entra_client_id" ||
+    "$(jq -r '.tenant_id' <<<"$caller_auth")" != "$entra_tenant_id" ]]; then
+    fatal "Caller and Easy Auth tenant/API contracts must match."
+  fi
+else
+  caller_auth=null
 fi
 
 backend_image="${acr_login_server}/${DATAVIEWER_BACKEND_IMAGE}:${image_tag}"
@@ -494,6 +639,11 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+if [[ "$skip_backend" == "true" && "$skip_frontend" == "true" ]]; then
+  info "No application selected; exiting without changes."
+  exit 0
+fi
+
 if [[ "$skip_build" == "false" && "$local_build" == "false" && ${#buildkit_images[@]} -gt 0 ]]; then
   fatal "ACR quick builds can't build the ${buildkit_images[*]} Dockerfile (BuildKit syntax). Rerun with --local-build, or skip that image."
 fi
@@ -502,71 +652,31 @@ fi
 # Capture Rollback State and Validate Authentication Rollout
 #------------------------------------------------------------------------------
 
-old_backend_image=""
-old_frontend_image=""
-old_provider=""
-old_auth_disabled="false"
-old_tenant_id=""
-old_client_id=""
-old_backend_proxy_secret_ref=""
-old_frontend_proxy_secret_ref=""
 old_rollout_secure=false
+old_backend_manifest=""
+old_frontend_pending_manifest=""
+old_frontend_manifest=""
+backend_manifest=""
+frontend_pending_manifest=""
+frontend_manifest=""
+helper_image="$backend_image"
 
 if [[ "$skip_update" == "false" ]]; then
-  old_backend_image=$(az containerapp show \
-    --name "$backend_app" \
-    --resource-group "$rg" \
-    --query properties.template.containers[0].image -o tsv)
-  old_frontend_image=$(az containerapp show \
-    --name "$frontend_app" \
-    --resource-group "$rg" \
-    --query properties.template.containers[0].image -o tsv)
-  old_provider=$(az containerapp show \
-    --name "$backend_app" \
-    --resource-group "$rg" \
-    --query "properties.template.containers[0].env[?name=='DATAVIEWER_AUTH_PROVIDER'] | [0].value" -o tsv)
-  old_auth_disabled=$(az containerapp show \
-    --name "$backend_app" \
-    --resource-group "$rg" \
-    --query "properties.template.containers[0].env[?name=='DATAVIEWER_AUTH_DISABLED'] | [0].value" -o tsv)
-  old_auth_disabled="${old_auth_disabled:-false}"
-  old_tenant_id=$(az containerapp show \
-    --name "$backend_app" \
-    --resource-group "$rg" \
-    --query "properties.template.containers[0].env[?name=='DATAVIEWER_AZURE_TENANT_ID'] | [0].value" -o tsv)
-  old_client_id=$(az containerapp show \
-    --name "$backend_app" \
-    --resource-group "$rg" \
-    --query "properties.template.containers[0].env[?name=='DATAVIEWER_AZURE_CLIENT_ID'] | [0].value" -o tsv)
-  old_backend_proxy_secret_ref=$(az containerapp show \
-    --name "$backend_app" \
-    --resource-group "$rg" \
-    --query "properties.template.containers[0].env[?name=='DATAVIEWER_PROXY_KEY'] | [0].secretRef" -o tsv)
-  old_frontend_proxy_secret_ref=$(az containerapp show \
-    --name "$frontend_app" \
-    --resource-group "$rg" \
-    --query "properties.template.containers[0].env[?name=='DATAVIEWER_PROXY_KEY'] | [0].secretRef" -o tsv)
+  backend_state=$(az containerapp show --name "$backend_app" --resource-group "$rg" --output json)
+  frontend_state=$(az containerapp show --name "$frontend_app" --resource-group "$rg" --output json)
+  old_backend_image=$(jq -er '.properties.template.containers | map(select(.name == "backend")) | if length == 1 then .[0].image else error("Expected one backend") end' <<<"$backend_state")
+  old_frontend_image=$(jq -er '.properties.template.containers | map(select(.name == "frontend")) | if length == 1 then .[0].image else error("Expected one frontend") end' <<<"$frontend_state")
+  old_helper_image=$(jq -r '.properties.template.containers | map(select(.name == "caller-helper")) | if length == 1 then .[0].image else "" end' <<<"$frontend_state")
 
   if [[ "$auth_enabled" == "true" ]]; then
     if [[ ! -t 0 || ! -t 1 ]]; then
       fatal "Authenticated rollout requires an interactive terminal for the final browser validation gate."
     fi
 
-    backend_secret=$(az containerapp secret list \
-      --name "$backend_app" \
-      --resource-group "$rg" \
-      --query "[?name=='${proxy_secret_name}'] | [0].name" -o tsv)
-    frontend_secret=$(az containerapp secret list \
-      --name "$frontend_app" \
-      --resource-group "$rg" \
-      --query "[?name=='${proxy_secret_name}'] | [0].name" -o tsv)
     frontend_easy_auth_secret=$(az containerapp secret list \
       --name "$frontend_app" \
       --resource-group "$rg" \
       --query "[?name=='${easy_auth_secret_name}'] | [0].name" -o tsv)
-    if [[ "$backend_secret" != "$proxy_secret_name" || "$frontend_secret" != "$proxy_secret_name" ]]; then
-      fatal "Terraform-managed secret '${proxy_secret_name}' must exist on both Container Apps before deployment."
-    fi
     if [[ "$frontend_easy_auth_secret" != "$easy_auth_secret_name" ]]; then
       fatal "Terraform-managed secret '${easy_auth_secret_name}' must exist on the frontend Container App before deployment."
     fi
@@ -593,53 +703,41 @@ if [[ "$skip_update" == "false" ]]; then
       fatal "The Easy Auth Web redirect URI ${web_redirect} is missing. Apply Terraform before deployment."
     fi
 
-    easy_auth_enabled=$(az containerapp auth show \
-      --name "$frontend_app" \
-      --resource-group "$rg" \
-      --query platform.enabled -o tsv)
+    assignment_required=$(az ad sp show --id "$entra_client_id" --query appRoleAssignmentRequired -o tsv)
+    [[ "$assignment_required" == "false" ]] || fatal "Assignment-required issuance needs an approved Application-role design."
+    caller_identity_id=$(jq -r '.caller_identity_id' <<<"$caller_auth")
+    jq -e --arg identity "$identity_id" --arg caller "$caller_identity_id" \
+      '.identity.userAssignedIdentities | with_entries(.key |= ascii_downcase) | has($identity | ascii_downcase) and (has($caller | ascii_downcase) | not)' \
+      <<<"$backend_state" >/dev/null || fatal "Backend identity attachment differs from the storage-only contract."
+    jq -e --arg identity "$identity_id" --arg caller "$caller_identity_id" \
+      '.identity.userAssignedIdentities | with_entries(.key |= ascii_downcase) | has($identity | ascii_downcase) and has($caller | ascii_downcase)' \
+      <<<"$frontend_state" >/dev/null || fatal "Apply the frontend caller identity attachment before deployment."
 
-    if [[ "$easy_auth_enabled" == "true" &&
-      "$old_provider" == "easy_auth" &&
-      "$old_auth_disabled" == "false" &&
-      "$old_backend_proxy_secret_ref" == "$proxy_secret_name" &&
-      "$old_frontend_proxy_secret_ref" == "$proxy_secret_name" ]]; then
+    if verify_snapshot_ready "$backend_state" && verify_snapshot_ready "$frontend_state" &&
+      verify_backend_auth_enforced && verify_frontend_runtime "$frontend_state" "$old_helper_image" &&
+      verify_frontend_auth_enforced && verify_anonymous_request_denied; then
       old_rollout_secure=true
+      old_backend_manifest=$(build_app_manifest "$backend_state" backend "$old_backend_image" managed_identity "$old_backend_image")
+      old_frontend_pending_manifest=$(build_app_manifest "$frontend_state" frontend "$old_frontend_image" pending "$old_helper_image")
+      old_frontend_manifest=$(build_app_manifest "$frontend_state" frontend "$old_frontend_image" managed_identity "$old_helper_image")
     fi
 
-    if [[ "$skip_backend" == "true" && ( "$old_provider" != "easy_auth" || "$old_backend_proxy_secret_ref" != "$proxy_secret_name" ) ]]; then
-      fatal "--skip-backend requires an existing easy_auth backend that references secret '${proxy_secret_name}'."
+    if [[ ( "$skip_backend" == "true" || "$skip_frontend" == "true" ) && "$old_rollout_secure" != "true" ]]; then
+      fatal "Partial hosted updates require an already verified managed-identity pair; use a full migration first."
     fi
-    if [[ "$skip_frontend" == "true" && ( "$easy_auth_enabled" != "true" || "$old_frontend_proxy_secret_ref" != "$proxy_secret_name" ) ]]; then
-      fatal "--skip-frontend requires enabled Easy Auth and an existing frontend reference to secret '${proxy_secret_name}'."
+    if [[ "$skip_backend" == "true" ]]; then
+      [[ "$old_helper_image" == *@sha256:* ]] || fatal "Frontend-only updates require a verified digest-pinned helper image."
+      helper_image="$old_helper_image"
     fi
-  fi
-fi
-
-#------------------------------------------------------------------------------
-# Configure ACR Registry
-#------------------------------------------------------------------------------
-
-if [[ "$skip_update" == "false" ]]; then
-  section "Configuring ACR Registry"
-
-  if [[ "$skip_backend" == "false" ]]; then
-    info "Ensuring ACR registry on $backend_app..."
-    az containerapp registry set \
-      --name "$backend_app" \
-      --resource-group "$rg" \
-      --server "$acr_login_server" \
-      --identity "$identity_id" \
-      --output none
-  fi
-
-  if [[ "$skip_frontend" == "false" ]]; then
-    info "Ensuring ACR registry on $frontend_app..."
-    az containerapp registry set \
-      --name "$frontend_app" \
-      --resource-group "$rg" \
-      --server "$acr_login_server" \
-      --identity "$identity_id" \
-      --output none
+  else
+    if [[ "$skip_backend" == "true" ]]; then
+      jq -e '[.properties.template.containers[] | select(.name == "backend") | .env[]? | select(.name == "DATAVIEWER_AUTH_DISABLED") | .value] == ["true"]' \
+        <<<"$backend_state" >/dev/null || fatal "Skipped backend is incompatible with non-hosted mode."
+    fi
+    if [[ "$skip_frontend" == "true" ]]; then
+      jq -e '[.properties.template.containers[] | select(.name == "frontend") | .env[]? | select(.name == "DATAVIEWER_CALLER_MODE") | .value] == ["off"]' \
+        <<<"$frontend_state" >/dev/null || fatal "Skipped frontend is incompatible with non-hosted mode."
+    fi
   fi
 fi
 
@@ -724,98 +822,45 @@ fi
 # Configure Authentication and Update Container Apps
 #------------------------------------------------------------------------------
 
-if [[ "$skip_update" == "false" && "$auth_enabled" == "true" ]]; then
+if [[ "$skip_update" == "false" ]]; then
+  runtime_mode=off
+  [[ "$auth_enabled" == "true" ]] && runtime_mode=managed_identity
   if [[ "$skip_backend" == "false" ]]; then
-    backend_revision=""
-    section "Updating Backend Container App"
-    info "Deploying $backend_image with proxy-bound Easy Auth..."
-    if ! backend_revision=$(update_app_and_wait "$backend_app" \
-      --image "$backend_image" \
-      --set-env-vars \
-        "$backend_storage_env" \
-        "DATAVIEWER_AUTH_PROVIDER=easy_auth" \
-        "DATAVIEWER_AUTH_DISABLED=false" \
-        "DATAVIEWER_PROXY_KEY=secretref:${proxy_secret_name}" \
-      --remove-env-vars \
-        "$legacy_backend_storage_env" \
-        DATAVIEWER_AZURE_TENANT_ID \
-        DATAVIEWER_AZURE_CLIENT_ID) ||
-      ! verify_app_rollout "$backend_app" "$backend_revision" "$backend_image" "$proxy_secret_name" ||
-      ! verify_backend_auth_enforced; then
-      recover_authenticated_rollout || rollback_failed
-      fatal "Backend deployment failed; a verified secure pair was restored or frontend ingress was closed."
-    fi
+    backend_image=$(pin_registry_image "$backend_image") || fatal "Selected backend image is unavailable from the configured registry."
+    helper_image="$backend_image"
+    backend_manifest=$(build_app_manifest "$backend_state" backend "$backend_image" "$runtime_mode" "$helper_image")
   fi
-
   if [[ "$skip_frontend" == "false" ]]; then
-    section "Configuring Easy Auth on Frontend"
-    if ! az containerapp auth microsoft update \
-      --name "$frontend_app" \
-      --resource-group "$rg" \
-      --client-id "$entra_client_id" \
-      --client-secret-name "$easy_auth_secret_name" \
-      --issuer "https://login.microsoftonline.com/${entra_tenant_id}/v2.0" \
-      --yes \
-      --output none ||
-      ! az containerapp auth update \
-        --name "$frontend_app" \
-        --resource-group "$rg" \
-        --enabled true \
-        --unauthenticated-client-action RedirectToLoginPage \
-        --redirect-provider azureactivedirectory \
-        --output none ||
-      ! verify_frontend_auth_enforced ||
-      ! ensure_frontend_ingress ||
-      ! verify_anonymous_request_denied; then
-      recover_authenticated_rollout || rollback_failed
-      fatal "Frontend Easy Auth configuration failed; a verified secure pair was restored or frontend ingress was closed."
+    frontend_image=$(pin_registry_image "$frontend_image") || fatal "Selected frontend image is unavailable from the configured registry."
+    if [[ "$auth_enabled" == "true" ]]; then
+      helper_image=$(pin_registry_image "$helper_image") || fatal "Compatible caller helper image is unavailable."
+      frontend_pending_manifest=$(build_app_manifest "$frontend_state" frontend "$frontend_image" pending "$helper_image")
     fi
-
-    frontend_revision=""
-    section "Updating Frontend Container App"
-    info "Deploying $frontend_image with the proxy credential reference..."
-    if ! frontend_revision=$(update_app_and_wait "$frontend_app" \
-      --image "$frontend_image" \
-      --set-env-vars "DATAVIEWER_PROXY_KEY=secretref:${proxy_secret_name}") ||
-      ! verify_app_rollout "$frontend_app" "$frontend_revision" "$frontend_image" "$proxy_secret_name" ||
-      ! verify_frontend_auth_enforced ||
-      ! verify_anonymous_request_denied; then
-      recover_authenticated_rollout || rollback_failed
-      fatal "Frontend deployment failed; a verified secure pair was restored or frontend ingress was closed."
-    fi
+    frontend_manifest=$(build_app_manifest "$frontend_state" frontend "$frontend_image" "$runtime_mode" "$helper_image")
   fi
+  if [[ "$skip_backend" == "false" ]]; then
+    az containerapp registry set --name "$backend_app" --resource-group "$rg" \
+      --server "$acr_login_server" --identity "$identity_id" --output none
+  fi
+  if [[ "$skip_frontend" == "false" ]]; then
+    az containerapp registry set --name "$frontend_app" --resource-group "$rg" \
+      --server "$acr_login_server" --identity "$identity_id" --output none
+  fi
+fi
 
-  if ! operator_auth_gate; then
+if [[ "$skip_update" == "false" && "$auth_enabled" == "true" ]]; then
+  if ! deploy_authenticated_pair; then
     recover_authenticated_rollout || rollback_failed
-    fatal "Authentication validation failed; a verified secure pair was restored or frontend ingress was closed."
+    fatal "Managed-identity rollout failed; a verified MI pair was restored or frontend ingress was closed."
   fi
 
 elif [[ "$skip_update" == "false" ]]; then
   if [[ "$skip_backend" == "false" ]]; then
-    backend_revision=""
-    section "Updating Backend Container App"
-    backend_revision=$(update_app_and_wait "$backend_app" \
-      --image "$backend_image" \
-      --set-env-vars \
-        "$backend_storage_env" \
-        "DATAVIEWER_AUTH_DISABLED=true" \
-      --remove-env-vars \
-        "$legacy_backend_storage_env" \
-        DATAVIEWER_AUTH_PROVIDER \
-        DATAVIEWER_AZURE_TENANT_ID \
-        DATAVIEWER_AZURE_CLIENT_ID \
-        DATAVIEWER_PROXY_KEY)
-    verify_app_rollout "$backend_app" "$backend_revision" "$backend_image" ""
+    apply_app_manifest "$backend_app" "$backend_manifest" >/dev/null
   fi
 
   if [[ "$skip_frontend" == "false" ]]; then
-    frontend_revision=""
-    section "Updating Frontend Container App"
-    frontend_revision=$(update_app_and_wait "$frontend_app" \
-      --image "$frontend_image" \
-      --remove-env-vars DATAVIEWER_PROXY_KEY)
-    verify_app_rollout "$frontend_app" "$frontend_revision" "$frontend_image" ""
-
+    apply_app_manifest "$frontend_app" "$frontend_manifest" >/dev/null
     info "Allowing anonymous access on $frontend_app..."
     az containerapp auth update \
       --name "$frontend_app" \
