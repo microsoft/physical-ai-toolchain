@@ -52,6 +52,7 @@ testpaths = [
     "training/tests",
     "data-management/tools/tests",
     "fleet-deployment/inference/tests",
+    "gpu-offload/examples/ur10e-single/tests",
     "shared/ci/tests",
 ]
 pythonpath = [".", "data-management/tools"]

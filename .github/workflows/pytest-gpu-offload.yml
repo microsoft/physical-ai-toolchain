@@ -45,3 +45,33 @@ jobs:
       - name: Run pytest
         working-directory: ${{ matrix.path }}
         run: uv run --frozen pytest -o addopts="" tests -v
+
+  pytest-gpu-offload-ur10e-single:
+    name: Pytest GPU Offload (ur10e-single)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          version: '0.12.20'
+          checksum: '6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f'
+
+      # The example has no environment of its own. The root dev group provides torch,
+      # and the tests finalize candidates with the training pipeline's code.
+      - name: Install dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Run pytest
+        run: uv run --frozen pytest -o addopts="" gpu-offload/examples/ur10e-single/tests -v

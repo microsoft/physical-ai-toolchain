@@ -67,7 +67,11 @@ _VAL_PATTERN = re.compile(r"val[_/]loss[:\s]+([\d.]+)")
 _CUDA_PEAK_PATTERN = re.compile(
     r"\[CUDA-PEAK\]\s+allocated_bytes=(\d+)\s+reserved_bytes=(\d+)\s+duration_seconds=([\d.]+)"
 )
-_PRETRAINED_LOAD_FAILURE = "Returning model without loading pretrained weights"
+# LeRobot PI loaders print one of these and return a randomly initialized policy instead of raising.
+_PRETRAINED_LOAD_FAILURES = (
+    "Returning model without loading pretrained weights",
+    "Warning: Could not load state dict:",
+)
 
 CHECKPOINT_CHECK_INTERVAL = 60
 SYSTEM_METRICS_INTERVAL = 30
@@ -181,7 +185,8 @@ def _run_lerobot_direct(args: list[str]) -> int:
     """Run LeRobot in-process and emit CUDA peaks owned by this process."""
     import torch
 
-    from lerobot.scripts.lerobot_train import main as lerobot_train_main
+    from lerobot.scripts import lerobot_train
+    from training.vla.scripts.pretrained_load import require_complete_pretrained_load
 
     has_cuda = torch.cuda.is_available()
     if has_cuda:
@@ -189,7 +194,8 @@ def _run_lerobot_direct(args: list[str]) -> int:
     started_at = time.perf_counter()
     try:
         sys.argv = ["lerobot-train", *args]
-        result = lerobot_train_main()
+        with require_complete_pretrained_load(lerobot_train):
+            result = lerobot_train.main()
         return result if isinstance(result, int) else EXIT_SUCCESS
     finally:
         if has_cuda:
@@ -491,7 +497,7 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
             print(line, end="", flush=True)
             current_time = time.time()
 
-            if not pretrained_load_failed and _PRETRAINED_LOAD_FAILURE in line:
+            if not pretrained_load_failed and any(marker in line for marker in _PRETRAINED_LOAD_FAILURES):
                 pretrained_load_failed = True
                 print("[MLflow] Pretrained policy load failed; terminating training subprocess group", flush=True)
                 with contextlib.suppress(ProcessLookupError):

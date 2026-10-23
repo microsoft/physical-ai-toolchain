@@ -93,6 +93,9 @@ class OffloadSession:
             policy_class=self.info["policy_class"],
             cuda_available=self.info["cuda_available"],
             cuda_device_name=self.info["cuda_device_name"],
+            candidate_manifest_sha256=self.info["candidate_manifest_sha256"],
+            training_fingerprint=self.info["training_fingerprint"],
+            evidence_job=self.info["evidence_job"],
             load_seconds=round(time.perf_counter() - started, 2),
         )
 
@@ -496,11 +499,18 @@ def main() -> int:
         logger.error("No checkpoint at %s; the model volume is missing or empty", checkpoint)
         return 1
 
-    session = OffloadSession(
-        checkpoint_path=str(checkpoint),
-        device=args.device,
-        rename_map=rename_map,
-    )
+    try:
+        session = OffloadSession(
+            checkpoint_path=str(checkpoint),
+            device=args.device,
+            rename_map=rename_map,
+        )
+    except Exception as error:
+        # Every mode connects to the robot only after the session exists, so a checkpoint
+        # that fails verification or loading never moves the arm.
+        logger.error("Loading the checkpoint on the GPU stage failed; not connecting to the robot: %s", error)
+        emit("load_failed", checkpoint=str(checkpoint), error=str(error))
+        return 1
 
     if args.mode == "self-check":
         return _run_self_check(session, args)

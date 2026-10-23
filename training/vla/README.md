@@ -130,7 +130,9 @@ contract. Arc pipeline children consume the selected trial's concrete,
 run-scoped datastore folders because cross-job `azureml://jobs/...` inputs do
 not materialize on this compute target. Training regenerates the dataset
 manifest and rejects calibration evidence that does not match the current
-dataset, model, code, and runtime.
+dataset, model, code, and runtime. The workload's code identity is a SHA-256
+fingerprint of the source and configuration files in the uploaded `training/`
+directory; `code_revision` records the declared Git commit.
 
 The pipeline requires a full Git commit. The checked-in entrypoint downloads the
 snapshot after installing the locked runtime, validates `config.json` and the
@@ -159,8 +161,9 @@ deployment gating, and model registration remain separate lifecycle concerns.
 The Azure ML VLA E2E test registers a synthetic LeRobot dataset, runs the
 calibration sweep with SmolVLA, binds the selected trial to a two-step training
 pipeline, and checks that the training record uses the recommended micro-batch.
-SmolVLA does not need a Hugging Face token. Calibration and training check out
-the current `HEAD` commit, so push it before running the test:
+SmolVLA does not need a Hugging Face token. Calibration and training upload the
+local `training/` directory, so the test requires a clean `training/` tree and
+records the current `HEAD` as the declared code revision:
 
 ```bash
 uv run pytest -o addopts='' -vv -s -m e2e tests/e2e/test_e2e_aml_vla_training.py

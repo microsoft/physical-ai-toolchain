@@ -65,16 +65,16 @@ moves toward that limit.
 
 ## 📋 Prerequisites
 
-| Requirement         | Detail                                                                                                                |
-|---------------------|-----------------------------------------------------------------------------------------------------------------------|
-| GPU node            | 16 GB VRAM or more, with the NVIDIA device plugin advertising `nvidia.com/gpu`                                        |
-| Cluster runtime     | `k3s` on the GPU host: the checkpoint and the registry are host-local, which a `kind` node container cannot reach     |
-| `gpu-offload` chart | Installed cluster-wide (`mise run d-offload-43-install-controller`)                                                   |
-| Host registry       | Running and registered as a k3s mirror (`mise run b-host-20-registry`)                                                |
-| `ur10e-single`      | Checked out beside this repository, or `UR10E_SOURCE_PATH` set to it                                                  |
-| Trained checkpoint  | A pi05 checkpoint directory on the node holding `config.json`, `model.safetensors`, and the saved processor pipelines |
-| HuggingFace cache   | The gated `google/paligemma-3b-pt-224` tokenizer cached on the node; the pods run with `HF_HUB_OFFLINE=1`             |
-| UR10e               | Only for `headless` and `record` modes; `self-check` mode needs no robot                                              |
+| Requirement         | Detail                                                                                                                       |
+|---------------------|------------------------------------------------------------------------------------------------------------------------------|
+| GPU node            | 16 GB VRAM or more, with the NVIDIA device plugin advertising `nvidia.com/gpu`                                               |
+| Cluster runtime     | `k3s` on the GPU host: the checkpoint and the registry are host-local, which a `kind` node container cannot reach            |
+| `gpu-offload` chart | Installed cluster-wide (`mise run d-offload-43-install-controller`)                                                          |
+| Host registry       | Running and registered as a k3s mirror (`mise run b-host-20-registry`)                                                       |
+| `ur10e-single`      | Checked out beside this repository, or `UR10E_SOURCE_PATH` set to it                                                         |
+| Training candidate  | A pi05 candidate from the VLA training pipeline on the node, with its `candidate-manifest.json` copied in beside the weights |
+| HuggingFace cache   | The gated `google/paligemma-3b-pt-224` tokenizer cached on the node; the pods run with `HF_HUB_OFFLINE=1`                    |
+| UR10e               | Only for `headless` and `record` modes; `self-check` mode needs no robot                                                     |
 
 > [!NOTE]
 > The server stage requests a whole GPU. On a single-GPU node it cannot start while
@@ -84,14 +84,30 @@ moves toward that limit.
 
 ## 🚀 Run
 
-1. Point the tasks at the checkpoint and the tokenizer cache:
+1. Stage a pi05 candidate from the VLA training pipeline on the GPU node, then point the
+   tasks at it and at the tokenizer cache. `az ml job download` writes each output to
+   `<download-path>/named-outputs/<output-name>/`, so the commands below put the candidate
+   in `~/pi05-ur10e/named-outputs/candidate/` and its manifest in
+   `~/pi05-ur10e/named-outputs/candidate_manifest/candidate-manifest.json`. Copy the
+   manifest into the candidate directory and keep nothing else there: the GPU stage
+   refuses a directory whose files differ from the manifest.
 
    ```bash
+   az ml job download --name "$AZUREML_JOB_NAME" --output-name candidate \
+     --resource-group "$AZURE_RESOURCE_GROUP" --workspace-name "$AZUREML_WORKSPACE_NAME" \
+     --download-path ~/pi05-ur10e
+   az ml job download --name "$AZUREML_JOB_NAME" --output-name candidate_manifest \
+     --resource-group "$AZURE_RESOURCE_GROUP" --workspace-name "$AZUREML_WORKSPACE_NAME" \
+     --download-path ~/pi05-ur10e
+   cp ~/pi05-ur10e/named-outputs/candidate_manifest/candidate-manifest.json \
+     ~/pi05-ur10e/named-outputs/candidate/
    cd gpu-offload
    mise run a-env-init
    ```
 
-   Then set `UR10E_MODEL_HOST_PATH` and `UR10E_HF_CACHE_HOST_PATH` in `.env`.
+   Then set `UR10E_MODEL_HOST_PATH` in `.env` to the absolute path of the candidate
+   directory, such as `/home/<user>/pi05-ur10e/named-outputs/candidate`, not to
+   `~/pi05-ur10e` itself, and set `UR10E_HF_CACHE_HOST_PATH`.
 
 2. Start the host registry once per machine:
 
@@ -139,7 +155,7 @@ moves toward that limit.
 | `policy.fps`                | `10`                                                         | Training control frequency; the action chunk replays at this rate                   |
 | `policy.nActionSteps`       | `50`                                                         | Actions consumed per predicted chunk                                                |
 | `robot.configPath`          | `/workspace/script/ur10e_config_demo.json`                   | Robot and camera configuration carried in the image                                 |
-| `model.hostPath`            | none                                                         | Checkpoint directory on the node; required                                          |
+| `model.hostPath`            | none                                                         | Candidate directory on the node, including `candidate-manifest.json`; required      |
 | `huggingFaceCache.hostPath` | none                                                         | Tokenizer cache on the node; required                                               |
 | `image.registry`            | `localhost:5000`                                             | Host-local registry the cluster mirrors                                             |
 | `robot.logEvery`            | `50`                                                         | Emit one `action` event every N steps                                               |
@@ -181,6 +197,39 @@ remote proxy would turn each read into a round trip. Robot and camera I/O are un
 > autotuning on the first inference. `PolicyRunner` overrides it to `false` so the first
 > control cycle is predictable.
 
+## 🔒 Checkpoint Verification
+
+`PolicyRunner.load` runs two checks on the GPU stage before any mode reaches the robot:
+
+1. Every file in the checkpoint directory must match `candidate-manifest.json`, the
+   lineage record the VLA training pipeline writes when it finalizes a pi05 candidate.
+   A missing, added, changed, or truncated file is rejected before any weights are read.
+2. The policy must complete a strict weight load. LeRobot's pi05 loader prints a warning
+   and returns a randomly initialized policy when loading fails; the stage refuses that
+   policy instead of serving it.
+
+A refused checkpoint emits a `load_failed` event and the container exits with status 1,
+so `headless` and `record` never connect to the UR10e. The `loaded` event reports the
+candidate's `candidate_manifest_sha256`, `training_fingerprint`, and `evidence_job`, and
+`g-ur10e-51-check-inference` requires the digest. Checkpoints that predate the training
+pipeline have no manifest and do not load.
+
+> [!NOTE]
+> The manifest detects corruption and mix-ups. It is not a signature: anyone who can
+> rewrite the checkpoint directory can also rewrite the manifest.
+
+### LeRobot Versions
+
+The VLA training pipeline trains with LeRobot 0.6.1, and the workload environment uses
+LeRobot 0.4.4, which can't parse a 0.6.1 pi05 configuration. The stage refuses every
+pipeline candidate until the `ur10e-single` lock moves to LeRobot 0.6.1.
+
+On 0.6.1, `self-check` runs, but `headless` and `record` still use 0.4.4 APIs and stop
+before they connect to the UR10e. LeRobot 0.6 moved `build_dataset_frame` and
+`hw_to_dataset_features` from `lerobot.datasets.utils` to `lerobot.utils.feature_utils`,
+and `lerobot-record` no longer runs a policy, because 0.6 moved policy deployment to
+`lerobot-rollout`. Until both modes are ported, no checkpoint can drive the arm.
+
 ## 📦 Caching
 
 Nothing in the deployment path pulls from the internet at run time.
@@ -208,26 +257,31 @@ the same way, so `UR10E_CHECKPOINT_PATH` and `HF_HOME` resolve identically on bo
 
 ## 📦 Files
 
-| Path                           | Content                                                            |
-|--------------------------------|--------------------------------------------------------------------|
-| `ur10e_offload.py`             | Offload seam; the class whose methods run on the GPU stage         |
-| `run_ur10e.py`                 | Control-loop entrypoint for all three modes                        |
-| `remote.yaml`                  | Offload spec, mirrored into the ConfigMap the chart renders        |
-| `Containerfile`                | Workload image with the remoter SDK and `sitecustomize` layered in |
-| `templates/manifests.yaml.tpl` | ServiceAccount, RBAC, volumes, ConfigMap, and control Deployment   |
-| `scripts/run-headless-host.sh` | Runs `headless` mode on the host against the ur10e-single venv     |
-| `scripts/demo.sh`              | Deploys, drives the arm, and follows the run until it homes        |
+| Path                           | Content                                                                    |
+|--------------------------------|----------------------------------------------------------------------------|
+| `ur10e_offload.py`             | Offload seam; the class whose methods run on the GPU stage                 |
+| `run_ur10e.py`                 | Control-loop entrypoint for all three modes                                |
+| `tests/test_ur10e_offload.py`  | Checkpoint verification and refusal tests, run in the root dev environment |
+| `remote.yaml`                  | Offload spec, mirrored into the ConfigMap the chart renders                |
+| `Containerfile`                | Workload image with the remoter SDK and `sitecustomize` layered in         |
+| `templates/manifests.yaml.tpl` | ServiceAccount, RBAC, volumes, ConfigMap, and control Deployment           |
+| `scripts/run-headless-host.sh` | Runs `headless` mode on the host against the ur10e-single venv             |
+| `scripts/demo.sh`              | Deploys, drives the arm, and follows the run until it homes                |
 
 ## 🔍 Troubleshooting
 
-| Symptom                                                     | Cause                                                                                                                            |
-|-------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|
-| Server pod stays `Pending` on `Insufficient nvidia.com/gpu` | Another example still owns the device; uninstall its release rather than scaling it down                                         |
-| `ImagePullBackOff` on `localhost:5000/...`                  | The registry is not running, or k3s was not restarted after the mirror was written                                               |
-| `unsupported type ...; register an explicit adapter`        | A NumPy array or other unsupported value reached the wire; convert it before the call                                            |
-| No `loaded` event after several minutes                     | The checkpoint volume is empty, or the tokenizer is missing from the node HuggingFace cache                                      |
-| `CodecLimitsError` on `get_action`                          | The observation exceeds the 8 MiB encoded ceiling; reduce camera count or resolution                                             |
-| `KeyError: 'DISPLAY'` at import                             | Something imported the ur10e-single teleoperator; only `headless` mode stubs `pyautogui`                                         |
-| The arm never moves in `headless` mode                      | `UR10E.active` is still false; homing must complete before servoJ is unlocked                                                    |
-| The action is identical on every step                       | `singleinstance: true` was set on `get_action`; it memoizes the first result and never re-runs the call                          |
-| The client hangs in `load()` and the stage sends no result  | A terminating client claimed the single-instance slot; scale the client to zero and wait for deletion before replacing the stage |
+| Symptom                                                       | Cause                                                                                                                            |
+|---------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| Server pod stays `Pending` on `Insufficient nvidia.com/gpu`   | Another example still owns the device; uninstall its release rather than scaling it down                                         |
+| `ImagePullBackOff` on `localhost:5000/...`                    | The registry is not running, or k3s was not restarted after the mirror was written                                               |
+| `unsupported type ...; register an explicit adapter`          | A NumPy array or other unsupported value reached the wire; convert it before the call                                            |
+| No `loaded` event after several minutes                       | The checkpoint volume is empty, or the tokenizer is missing from the node HuggingFace cache                                      |
+| `load_failed` reports `No candidate-manifest.json`            | The checkpoint did not come from the VLA training pipeline, or its manifest was not copied in                                    |
+| `load_failed` reports `does not match its candidate manifest` | A file was added, removed, or changed after training; redeploy the candidate and its manifest unchanged                          |
+| `load_failed` reports that the weights did not load           | The weights do not fit the pi05 model in this image, for example after a LeRobot version change                                  |
+| `load_failed` reports `are not valid for PI05Config`          | The image's LeRobot 0.4.4 can't parse a 0.6.1 pipeline candidate; move the `ur10e-single` lock to 0.6.1                          |
+| `CodecLimitsError` on `get_action`                            | The observation exceeds the 8 MiB encoded ceiling; reduce camera count or resolution                                             |
+| `KeyError: 'DISPLAY'` at import                               | Something imported the ur10e-single teleoperator; only `headless` mode stubs `pyautogui`                                         |
+| The arm never moves in `headless` mode                        | `UR10E.active` is still false; homing must complete before servoJ is unlocked                                                    |
+| The action is identical on every step                         | `singleinstance: true` was set on `get_action`; it memoizes the first result and never re-runs the call                          |
+| The client hangs in `load()` and the stage sends no result    | A terminating client claimed the single-instance slot; scale the client to zero and wait for deletion before replacing the stage |

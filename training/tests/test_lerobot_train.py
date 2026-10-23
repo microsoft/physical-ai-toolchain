@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 from types import ModuleType, SimpleNamespace
@@ -374,6 +375,33 @@ class TestRunTraining:
         captured[_MOD.signal.SIGTERM](15, None)
         assert killpg_calls and killpg_calls[0] == (proc_holder[0].pid, _MOD.signal.SIGTERM)
 
+    @pytest.mark.parametrize(
+        "diagnostic",
+        [
+            "Returning model without loading pretrained weights\n",
+            "Warning: Could not load state dict: Error(s) in loading state_dict for PI05Policy\n",
+        ],
+        ids=["load-skipped", "state-dict-error"],
+    )
+    def test_pretrained_load_diagnostic_stops_training(
+        self, diagnostic, monkeypatch, fake_mlflow, fake_checkpoints, tmp_path
+    ):
+        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+        monkeypatch.setenv("SYSTEM_METRICS", "false")
+        killpg_calls: list[tuple[int, int]] = []
+
+        _FakePopen.lines = [
+            diagnostic,
+            "step:1 smpl:1 ep:1 epch:0.01 loss:1.0 grdn:1.0 lr:1.0e-05 updt_s:0.1 data_s:0.1\n",
+        ]
+        monkeypatch.setattr(_MOD.subprocess, "Popen", _FakePopen)
+        monkeypatch.setattr(_MOD.signal, "signal", lambda *a, **k: None)
+        monkeypatch.setattr(_MOD.os, "killpg", lambda pid, sig: killpg_calls.append((pid, sig)))
+
+        assert _MOD.run_training(["lerobot-train"]) == _MOD.EXIT_FAILURE
+        assert killpg_calls == [(12345, _MOD.signal.SIGTERM)]
+        fake_mlflow.set_tag.assert_called_with("training_status", "failed")
+
     def test_blob_urls_set_lineage_tags(self, monkeypatch, fake_mlflow, fake_checkpoints, tmp_path):
         monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
         monkeypatch.setenv("SYSTEM_METRICS", "false")
@@ -395,6 +423,60 @@ class TestRunTraining:
         assert _MOD.run_training(["lerobot-train"], source="osmo-azure-blob-training") == 0
         tags = fake_mlflow.set_tags.call_args.args[0]
         assert tags["dataset.source"] == "azure-blob"
+
+
+@pytest.fixture
+def fake_lerobot_train(monkeypatch):
+    lerobot_train = ModuleType("lerobot.scripts.lerobot_train")
+    scripts = ModuleType("lerobot.scripts")
+    scripts.lerobot_train = lerobot_train
+    lerobot = ModuleType("lerobot")
+    lerobot.scripts = scripts
+    monkeypatch.setitem(sys.modules, "lerobot", lerobot)
+    monkeypatch.setitem(sys.modules, "lerobot.scripts", scripts)
+    monkeypatch.setitem(sys.modules, "lerobot.scripts.lerobot_train", lerobot_train)
+    monkeypatch.setattr(sys, "argv", ["train.py"])
+    return lerobot_train
+
+
+class TestRunLerobotDirect:
+    def test_runs_lerobot_inside_pretrained_load_guard(self, monkeypatch, fake_lerobot_train):
+        from training.vla.scripts import pretrained_load
+
+        events: list[tuple[str, object]] = []
+
+        @contextlib.contextmanager
+        def recording_guard(module):
+            events.append(("enter", module))
+            yield
+            events.append(("exit", module))
+
+        fake_lerobot_train.main = lambda: events.append(("main", list(sys.argv)))
+        monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)))
+        monkeypatch.setattr(pretrained_load, "require_complete_pretrained_load", recording_guard)
+
+        assert _MOD._run_lerobot_direct(["--policy.path=/models/pi05"]) == _MOD.EXIT_SUCCESS
+        assert events == [
+            ("enter", fake_lerobot_train),
+            ("main", ["lerobot-train", "--policy.path=/models/pi05"]),
+            ("exit", fake_lerobot_train),
+        ]
+
+    def test_rejects_policy_returned_without_pretrained_weights(self, fake_lerobot_train):
+        torch = pytest.importorskip("torch")
+        from training.vla.scripts.pretrained_load import PretrainedLoadError
+
+        def make_policy(cfg, **kwargs):
+            return torch.nn.Linear(2, 2)
+
+        fake_lerobot_train.make_policy = make_policy
+        fake_lerobot_train.main = lambda: fake_lerobot_train.make_policy(
+            cfg=SimpleNamespace(pretrained_path="/models/pi05"), ds_meta=None
+        )
+
+        with pytest.raises(PretrainedLoadError, match="without loading pretrained weights"):
+            _MOD._run_lerobot_direct(["--policy.path=/models/pi05"])
+        assert fake_lerobot_train.make_policy is make_policy
 
 
 class TestMain:
