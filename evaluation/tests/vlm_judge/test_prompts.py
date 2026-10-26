@@ -151,7 +151,7 @@ class TestPromptRendering:
 
         assert scores is not None
         assert scores[0] == 0
-        assert "gvl-process-v2" in PROMPT_VERSION
+        assert "gvl-process-v3" in PROMPT_VERSION
 
     def test_outcome_prompt_includes_instruction(self) -> None:
         text = render_outcome_prompt(instruction="Pick up cube", n_frames=5)

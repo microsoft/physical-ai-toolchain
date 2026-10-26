@@ -6,14 +6,21 @@ controller logic without GPUs or network.
 
 from __future__ import annotations
 
+import json
+import random
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+import pytest
+
 from evaluation.vlm_judge.agent import AgentConfig, JudgeAgent
 from evaluation.vlm_judge.backend import GenerationConfig, JudgeBackend
+from evaluation.vlm_judge.judge import _run_process
+from evaluation.vlm_judge.prompts import shuffle_with_anchor
 
 if TYPE_CHECKING:
     from PIL.Image import Image
+    from pytest_mock import MockerFixture
 
 
 class ScriptedBackend(JudgeBackend):
@@ -155,3 +162,69 @@ class TestJudgeAgent:
         agent = JudgeAgent(backend, config=AgentConfig(n_outcome_samples=3))
         with pytest.raises(ValueError, match="process result"):
             agent.judge(episode_id="ep3", instruction="pick", frames=_make_frames(6))
+
+
+class TestProcessFormatRepair:
+    @pytest.mark.parametrize("method", ["gvl", "chronological"])
+    def test_given_short_response_when_repairing_then_reuses_frame_order_and_strict_scores(
+        self, method: str, mocker: MockerFixture
+    ) -> None:
+        backend = ScriptedBackend()
+        backend.queue("TASK INSTRUCTION", "[0, 23, 36, 0, 18, 55, 45, 82, 12, 64, 100]")
+        scores = list(range(12))
+        backend.queue("TASK INSTRUCTION", json.dumps(scores))
+        generate = mocker.spy(backend, "generate")
+        frames = _make_frames(12)
+
+        result = _run_process(backend=backend, instruction="pick", frames=frames, rng=random.Random(0), method=method)
+
+        assert generate.call_count == 2
+        first, repair = [call.kwargs for call in generate.call_args_list]
+        assert all(before is after for before, after in zip(first["images"], repair["images"], strict=True))
+        assert first["config"] == repair["config"]
+        assert "exactly 12 integers" in repair["user_prompt"]
+        assert "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12" in repair["user_prompt"]
+        order = shuffle_with_anchor(12, rng=random.Random(0)) if method == "gvl" else list(range(12))
+        assert result["progress_per_frame"] == [scores[order.index(index)] for index in range(12)]
+
+    @pytest.mark.parametrize("method", ["gvl", "chronological"])
+    def test_given_valid_response_when_scoring_then_does_not_retry(self, method: str) -> None:
+        backend = ScriptedBackend()
+        backend.queue("TASK INSTRUCTION", "[0, 30, 60, 100]")
+
+        _run_process(backend=backend, instruction="pick", frames=_make_frames(4), rng=random.Random(0), method=method)
+
+        assert len(backend.calls) == 1
+
+    @pytest.mark.parametrize("method", ["gvl", "chronological"])
+    @pytest.mark.parametrize(
+        "invalid", ["[0, 20, 100]", "[0, 20, 50, 100, 100]", "[0, 20.0, 50, 100]", "[0, 20, 50, 101]"]
+    )
+    def test_given_invalid_repair_when_scoring_then_fails_after_two_attempts(
+        self, method: str, invalid: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        backend = ScriptedBackend()
+        backend.queue("TASK INSTRUCTION", invalid)
+        backend.queue("TASK INSTRUCTION", invalid)
+        backend.queue("TASK INSTRUCTION", "[0, 30, 60, 100]")
+
+        with pytest.raises(ValueError, match="Invalid judge process result"):
+            _run_process(
+                backend=backend, instruction="pick", frames=_make_frames(4), rng=random.Random(0), method=method
+            )
+
+        assert len(backend.calls) == 2
+        assert "retry" in caplog.text.lower()
+        assert invalid not in caplog.text
+
+    @pytest.mark.parametrize("method", ["gvl", "chronological"])
+    def test_given_backend_exception_when_scoring_then_does_not_retry(self, method: str, mocker: MockerFixture) -> None:
+        backend = ScriptedBackend()
+        generate = mocker.patch.object(backend, "generate", side_effect=RuntimeError("provider unavailable"))
+
+        with pytest.raises(RuntimeError, match="provider unavailable"):
+            _run_process(
+                backend=backend, instruction="pick", frames=_make_frames(4), rng=random.Random(0), method=method
+            )
+
+        assert generate.call_count == 1

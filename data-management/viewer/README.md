@@ -2,7 +2,7 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-10-21
+ms.date: 2026-10-26
 ms.topic: overview
 ---
 
@@ -34,17 +34,26 @@ The backend container image installs `ffmpeg`. When you run the backend outside 
 
 ### Backend Setup
 
-```bash
-cd backend
+Run installation commands from the repository root. The backend is a member of the
+root Python workspace; [uv.lock](../../uv.lock) is authoritative, not a backend lock.
 
-# Install locked dependencies (include 'azure' extra for blob storage support)
-uv sync --frozen --python 3.12 --group dev --extra export --extra azure
+```bash
+export UV_PROJECT_ENVIRONMENT="$PWD/data-management/viewer/backend/.venv"
+uv sync --frozen --python 3.12 --all-packages --group dev \
+  --extra analysis --extra export --extra azure --extra auth --extra openai
 ```
+
+This development profile includes viewer, curation and judge tests. For runtime-only
+restores, select `--package lerobot-annotation-api --no-default-groups --no-editable`
+instead of `--all-packages --group dev` and choose the needed backend extras.
+The `vlm-judge` extra includes local Qwen dependencies; `openai` selects the judge's
+hosted client in the all-packages profile. Dependencies do not enable the judge or
+attach a GPU. Do not select the root `azureml-tracking` group with the backend's
+`azure` extra; see [profile boundaries](../../CONTRIBUTING.md#python-workspace-and-profiles).
 
 ### Frontend Setup
 
 ```bash
-cd ../..
 npm ci
 ```
 
@@ -147,7 +156,7 @@ annotation or training.
 
 ## ⚙️ Configuration
 
-Copy the backend and frontend templates, then set values for your environment:
+From `data-management/viewer`, copy the backend and frontend templates, then set values for your environment:
 
 ```bash
 cp backend/.env.example backend/.env
@@ -855,6 +864,14 @@ docker compose up --build
 ```
 
 Local storage requires write access to `DATAVIEWER_HOST_DATA_DIR` because annotations and labels are persisted atomically under each dataset directory. The backend validates create, flush, replace, and delete operations during startup and exits with the effective UID and GID when the mount is not writable.
+
+The backend image defaults `MALLOC_ARENA_MAX=1` before Python starts to reduce
+free glibc heap retention during repeated video decoding. Override it through
+the container environment, for example `docker compose run --rm -e MALLOC_ARENA_MAX=4 backend`.
+An explicit empty value is also preserved; other glibc tuning settings are not modified.
+The local npm launcher does not set this default; on Linux/glibc, export
+`MALLOC_ARENA_MAX=1` before starting it to opt in. Revalidate latency and memory
+when changing allocator settings or concurrency.
 
 | Environment                                           | Runtime identity                                                                             |
 |-------------------------------------------------------|----------------------------------------------------------------------------------------------|

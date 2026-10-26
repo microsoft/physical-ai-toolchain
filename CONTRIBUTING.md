@@ -2,7 +2,7 @@
 title: Contributing
 description: How to contribute to the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-01
+ms.date: 2026-10-26
 ms.topic: how-to
 keywords:
   - contributing
@@ -70,6 +70,41 @@ Run the setup script to configure your local development environment:
 ```
 
 This installs npm dependencies for linting, spell checking, and link validation. See the [Prerequisites](docs/contributing/prerequisites.md) guide for required tools and version requirements.
+
+### Python Workspace and Profiles
+
+The root [pyproject.toml](pyproject.toml) is a non-package uv workspace. Its [uv.lock](uv.lock) owns dependency resolution for four installable packages:
+
+| Package                  | Member directory                                                  |
+|--------------------------|-------------------------------------------------------------------|
+| `physical-ai-curation`   | [data-management/curation](data-management/curation/)             |
+| `physical-ai-dataset-io` | [data-management/dataset-io](data-management/dataset-io/)         |
+| `lerobot-annotation-api` | [data-management/viewer/backend](data-management/viewer/backend/) |
+| `physical-ai-vlm-judge`  | [evaluation/vlm_judge](evaluation/vlm_judge/)                     |
+
+Do not recreate member lockfiles. The parent [evaluation project](evaluation/pyproject.toml) retains its own lock for SIL, HiL and metrics; training and other nonmember projects retain their own dependency ownership. Workspace membership does not merge package APIs or move inference into a separate service.
+
+Run the following from the repository root. Use separate environments for tooling and product profiles so switching profiles does not remove another workflow's dependencies:
+
+```bash
+# Root development tooling, including Azure ML tracking
+UV_PROJECT_ENVIRONMENT=.venvs/tooling/.venv uv sync --frozen --group azureml-tracking
+
+# Local viewer without root development tooling
+UV_PROJECT_ENVIRONMENT=.venvs/viewer/.venv uv sync --frozen --no-dev --package lerobot-annotation-api
+
+# Blob-backed viewer; do not select azureml-tracking in this environment
+UV_PROJECT_ENVIRONMENT=.venvs/viewer-azure/.venv uv sync --frozen --no-dev --package lerobot-annotation-api --extra azure
+
+# Installed local-model judge, without editable source or development dependencies
+UV_PROJECT_ENVIRONMENT=.venvs/judge/.venv uv sync --frozen --no-dev --no-editable --package physical-ai-vlm-judge --extra qwen3-vl
+```
+
+`azureml-tracking` is an explicitly selected root dependency group, not a viewer extra. Its Azure Blob SDK constraint conflicts with the viewer's `azure` extra; uv rejects selecting both. Do not use `--all-groups` or downgrade either profile to bypass that boundary. For a restored environment, keep the same `UV_PROJECT_ENVIRONMENT` and use `uv run --no-sync` to avoid changing its selected packages.
+
+Use [viewer commands](data-management/viewer/README.md) and [judge commands](evaluation/vlm_judge/README.md) for application entrypoints. Nonmember evaluation commands use `uv --directory evaluation`, not a root workspace package selector.
+
+Generate dependency updates against canonical public registries, regenerate the owning lock, and run `npm run lint:uvlock` and `npm run lint:public-dependency-feeds`. Root Dependabot uv updates cover these members; a passing local lock check does not establish hosted updater behavior.
 
 ## Cleanup and Uninstall
 
@@ -153,6 +188,21 @@ npm run test:tf        # Terraform module tests (no Azure credentials required)
 ```
 
 For Terraform and shell script validation, see the [Prerequisites](docs/contributing/prerequisites.md#build-and-validation-requirements) guide.
+
+### Python Runtime Pre-PR Evidence
+
+For dependency, native-runtime or installation-profile changes, retain reproducible evidence for each affected runtime. An unavailable required target is blocked, not passed by a CPU test.
+
+| Check                | Required evidence                                                                                                                                      |
+|----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Dependency ownership | Full lock consistency and public-feed checks; native Dependabot version/security trials when updater behavior changes                                  |
+| Test ownership       | Root suites, viewer/curation suites, judge tests under their owned configuration, and independent SIL/HiL/metrics suites with unchanged coverage gates |
+| Installation         | Fresh frozen selected profiles, installed distribution origins, compatibility checks, and container/HTTP smoke results                                 |
+| GPU execution        | Target architecture, driver/native-library versions, immutable model and image identities, actual decode/scoring and supported YOLO coexistence        |
+| Stateful workflows   | Local and Blob persistence/read-back, conditional application, cancellation/restart/late-result fencing and repeat-job resource measurements           |
+| Comparison           | Selected/executed/skipped counts, exact commands, lock/revision hashes, baseline budgets and unresolved prerequisites                                  |
+
+Keep CPU smoke, mocked protocol tests, real GPU inference and live storage/provider results separate. Record deployment identifiers and credentials outside tracked documentation. A dependency, image or profile change requires rerunning affected acceptance checks; existing results for another environment do not establish compatibility.
 
 ### Warning Policy
 
@@ -400,11 +450,15 @@ uv run pytest fleet-deployment/inference/tests -v
 # Shared CI scripts (shared/ci/tests)
 uv run pytest shared/ci/tests -v
 
-# Dataviewer backend (data-management/viewer/backend, run from that dir)
-cd data-management/viewer/backend && uv run pytest -v
+# Dataviewer backend and curation (from the repository root)
+npm --prefix data-management/viewer run test:backend -- -v
 
-# Evaluation (evaluation/, run from that dir)
-cd evaluation && uv run pytest -v
+# Judge (restore the product-test profile described in the judge README first)
+UV_PROJECT_ENVIRONMENT=.venvs/product-tests/.venv uv run --no-sync pytest \
+  -c evaluation/vlm_judge/pyproject.toml evaluation/tests/vlm_judge -v
+
+# Independent SIL/HiL/metrics (uses evaluation's own environment and lock)
+uv --directory evaluation run --frozen pytest -v
 
 # GPU offload controller (gpu-offload/controller, run from that dir; own uv.lock)
 cd gpu-offload/controller && uv sync --extra test && uv run pytest -o addopts="" tests -v

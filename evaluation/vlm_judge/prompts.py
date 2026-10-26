@@ -16,7 +16,7 @@ import json
 import random
 import re
 
-PROMPT_VERSION = "outcome-mcq-v1+gvl-process-v2+milestones-v1+failuremode-v1"
+PROMPT_VERSION = "outcome-mcq-v1+gvl-process-v3+milestones-v1+failuremode-v1"
 
 
 # -------------------------------------------------------------------------
@@ -135,6 +135,19 @@ Output ONLY a single JSON array of {n_frames} integers and nothing else. Example
 def render_chronological_process_prompt(*, instruction: str, n_frames: int) -> str:
     return CHRONOLOGICAL_PROCESS_USER_TEMPLATE.format(
         instruction=instruction, n_frames=n_frames, example=_process_example(n_frames)
+    )
+
+
+def render_process_repair_prompt(*, original_prompt: str, n_frames: int) -> str:
+    """Request one complete replacement response without repeating untrusted model text."""
+    positions = ", ".join(str(index) for index in range(1, n_frames + 1))
+    return (
+        f"{original_prompt}\nThe previous response did not satisfy the required format. "
+        f"Re-evaluate every displayed frame and return exactly {n_frames} integers in a single JSON array. "
+        f"Required frame positions, in the unchanged display order: {positions}. "
+        "Include the first frame; do not omit or combine frames, even when their progress is identical. "
+        "Every value must be an integer from 0 to 100. Count the entries before responding. "
+        "Output the complete replacement array only, with no explanation."
     )
 
 

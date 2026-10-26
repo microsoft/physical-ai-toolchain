@@ -334,6 +334,8 @@ def test_dependency_installation_is_isolated_from_runtime_layers() -> None:
     assert "/root/.cache" not in runtime
     assert "COPY --chown=appuser:appuser data-management/viewer/backend/logging.json ./" in runtime
     assert "USER appuser" in runtime
+    assert "MALLOC_ARENA_MAX=1" in runtime
+    assert "MALLOC_ARENA_MAX" not in base + build
 
 
 def test_given_installed_helper_when_imported_then_api_storage_and_models_remain_unloaded(tmp_path: Path) -> None:

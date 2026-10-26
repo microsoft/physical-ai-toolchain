@@ -8,7 +8,7 @@
 
 BeforeDiscovery {
     $script:ToolsPresent = [bool](Get-Command bash -ErrorAction SilentlyContinue) -and
-        [bool](Get-Command python3 -ErrorAction SilentlyContinue)
+    [bool](Get-Command python3 -ErrorAction SilentlyContinue)
 }
 
 BeforeAll {
@@ -18,8 +18,10 @@ BeforeAll {
     New-Item -ItemType Directory -Path $script:ScratchRoot -Force | Out-Null
 
     $script:Stubs = @{
-        'pip' = 'exit 95'
-        'uv'  = @'
+        'pip'     = 'exit 95'
+        'getconf' = '[[ "${FAKE_LIBC:-glibc}" == "glibc" ]] || exit 1; printf "glibc 2.39\n"'
+        'uname'   = 'if [[ "$1" == "-s" ]]; then printf "%s\n" "${FAKE_OS:-Linux}"; else printf "x86_64\n"; fi'
+        'uv'      = @'
 if [[ "$1" == "--version" ]]; then
     printf 'uv %s\n' "${FAKE_UV_VERSION:-0.12.20}"
     exit 0
@@ -31,7 +33,7 @@ if [[ "$1" == "sync" ]]; then
 fi
 exit 0
 '@
-                'curl' = @'
+        'curl'    = @'
 while [[ $# -gt 0 ]]; do
     if [[ "$1" == "-o" ]]; then
         printf 'invalid release archive\n' > "$2"
@@ -42,7 +44,8 @@ done
 exit 94
 '@
         # The venv interpreter: the judge CLIs write verdicts, and the inline verdict check runs for real.
-        'python' = @'
+        'python'  = @'
+    printf 'ARENA_MAX=<%s> TUNABLES=<%s>\n' "${MALLOC_ARENA_MAX-unset}" "${GLIBC_TUNABLES-unset}"
 if [[ "$1" == "-" ]]; then
   exec python3 "$@"
 fi
@@ -80,7 +83,7 @@ exit "${FAKE_JUDGE_EXIT:-0}"
         }
         $bashEnv = Join-Path $workspace '.bash_env'
         @('source() {', '  [[ "$1" == "/opt/judge-venv/bin/activate" ]] && return 0', '  builtin source "$@"', '}') |
-            Set-Content -Path $bashEnv
+        Set-Content -Path $bashEnv
 
         $env = @{
             BASH_ENV        = $bashEnv
@@ -100,6 +103,38 @@ AfterAll {
 }
 
 Describe 'osmo-judge-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
+    Context 'allocator startup environment' {
+        BeforeEach {
+            $script:PreviousArenaMax = [Environment]::GetEnvironmentVariable('MALLOC_ARENA_MAX')
+            Remove-Item Env:MALLOC_ARENA_MAX -ErrorAction SilentlyContinue
+        }
+
+        AfterEach {
+            if ($null -eq $script:PreviousArenaMax) {
+                Remove-Item Env:MALLOC_ARENA_MAX -ErrorAction SilentlyContinue
+            }
+            else {
+                [Environment]::SetEnvironmentVariable('MALLOC_ARENA_MAX', $script:PreviousArenaMax)
+            }
+        }
+
+        It 'passes the expected allocator environment for <Case>' -ForEach @(
+            @{ Case = 'glibc default'; Settings = @{}; Expected = '1' }
+            @{ Case = 'explicit override'; Settings = @{ MALLOC_ARENA_MAX = '4' }; Expected = '4' }
+            @{ Case = 'empty override'; Settings = @{ MALLOC_ARENA_MAX = '' }; Expected = '' }
+            @{ Case = 'non-glibc'; Settings = @{ FAKE_LIBC = 'musl' }; Expected = 'unset' }
+            @{ Case = 'non-Linux'; Settings = @{ FAKE_OS = 'Darwin' }; Expected = 'unset' }
+        ) {
+            $settings = $Settings.Clone()
+            $settings.GLIBC_TUNABLES = 'glibc.malloc.trim_threshold=131072'
+
+            $result = Invoke-JudgeEntry -LeRobotInput -EnvVars $settings
+
+            $result.ExitCode | Should -Be 0 -Because $result.StdErr
+            $result.StdOut | Should -Match ([regex]::Escape("ARENA_MAX=<$Expected> TUNABLES=<glibc.malloc.trim_threshold=131072>"))
+        }
+    }
+
     It 'rejects an unverified bootstrap archive before installing or judging' {
         $result = Invoke-JudgeEntry -LeRobotInput -EnvVars @{ FAKE_UV_VERSION = '0.7.12' }
 
@@ -130,7 +165,7 @@ Describe 'osmo-judge-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
         $result.ExitCode | Should -Be 0 -Because $result.StdErr
         ($result.Calls | Where-Object { $_ -match '^uv sync ' }) | Should -Not -Match '--extra'
         ($result.Calls | Where-Object { $_ -match '^python -m evaluation\.vlm_judge\.policy_eval ' }) |
-            Should -Match '--rollout-root \S+/judge-input --instruction=Keep the pole upright --output '
+        Should -Match '--rollout-root \S+/judge-input --instruction=Keep the pole upright --output '
     }
 
     It 'passes an instruction with quotes and a backslash to the judge unchanged' {
@@ -139,7 +174,7 @@ Describe 'osmo-judge-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
 
         $result.ExitCode | Should -Be 0 -Because $result.StdErr
         ($result.Calls | Where-Object { $_ -match '^python -m evaluation\.vlm_judge\.policy_eval ' }) |
-            Should -Match ([regex]::Escape("--instruction=$text --output "))
+        Should -Match ([regex]::Escape("--instruction=$text --output "))
     }
 
     It 'passes a one-word instruction that starts with a dash to the <Branch> judge as the option''s value' -ForEach @(
@@ -153,7 +188,7 @@ Describe 'osmo-judge-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
 
         $result.ExitCode | Should -Be 0 -Because $result.StdErr
         ($result.Calls | Where-Object { $_ -match "^python -m evaluation\.vlm_judge\.$Cli " }) |
-            Should -Match ' --instruction=--stop( |$)'
+        Should -Match ' --instruction=--stop( |$)'
     }
 
     It 'stops before installing when rollout videos have no instruction' {

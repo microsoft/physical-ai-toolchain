@@ -74,6 +74,10 @@ uv sync --active --frozen --no-default-groups --no-editable \
   --project "${PAYLOAD_ROOT}" --package physical-ai-vlm-judge "${judge_extras[@]}"
 uv pip check
 
+if [[ "$(uname -s)" == "Linux" ]] && getconf GNU_LIBC_VERSION >/dev/null 2>&1; then
+  export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX-1}"
+fi
+
 mkdir -p "${OUTPUT_DIR}"
 JUDGMENTS="${OUTPUT_DIR}/judgments.jsonl"
 # The judge writes under a partial name; only a complete, checked batch is promoted to judgments.jsonl, so a
