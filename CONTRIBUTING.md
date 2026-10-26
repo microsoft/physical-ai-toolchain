@@ -189,21 +189,6 @@ npm run test:tf        # Terraform module tests (no Azure credentials required)
 
 For Terraform and shell script validation, see the [Prerequisites](docs/contributing/prerequisites.md#build-and-validation-requirements) guide.
 
-### Python Runtime Pre-PR Evidence
-
-For dependency, native-runtime or installation-profile changes, retain reproducible evidence for each affected runtime. An unavailable required target is blocked, not passed by a CPU test.
-
-| Check                | Required evidence                                                                                                                                      |
-|----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Dependency ownership | Full lock consistency and public-feed checks; native Dependabot version/security trials when updater behavior changes                                  |
-| Test ownership       | Root suites, viewer/curation suites, judge tests under their owned configuration, and independent SIL/HiL/metrics suites with unchanged coverage gates |
-| Installation         | Fresh frozen selected profiles, installed distribution origins, compatibility checks, and container/HTTP smoke results                                 |
-| GPU execution        | Target architecture, driver/native-library versions, immutable model and image identities, actual decode/scoring and supported YOLO coexistence        |
-| Stateful workflows   | Local and Blob persistence/read-back, conditional application, cancellation/restart/late-result fencing and repeat-job resource measurements           |
-| Comparison           | Selected/executed/skipped counts, exact commands, lock/revision hashes, baseline budgets and unresolved prerequisites                                  |
-
-Keep CPU smoke, mocked protocol tests, real GPU inference and live storage/provider results separate. Record deployment identifiers and credentials outside tracked documentation. A dependency, image or profile change requires rerunning affected acceptance checks; existing results for another environment do not establish compatibility.
-
 ### Warning Policy
 
 Required CI lint checks enforce warnings-as-errors. Advisory security scans are reported separately; the current PR workflow determines which checks block merging.
