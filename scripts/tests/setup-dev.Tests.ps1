@@ -38,7 +38,7 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
         }
 
         function uv {
-            'uv 0.11.21'
+            'uv 0.12.8'
         }
 
         if ($null -eq (Get-Command chmod -ErrorAction SilentlyContinue)) {
@@ -70,7 +70,7 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
 
         {
             Install-Uv `
-                -Version '0.11.21' `
+                -Version '0.12.8' `
                 -ExpectedHash ('a' * 64) `
                 -IsWindowsPlatform $false
         } | Should -Throw 'hash mismatch'
@@ -88,14 +88,14 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
             [pscustomobject]@{ Path = $path }
         }
         Install-Uv `
-            -Version '0.11.21' `
+            -Version '0.12.8' `
             -ExpectedHash ('a' * 64) `
             -IsWindowsPlatform $false
 
         Test-Path -LiteralPath $marker | Should -BeTrue
         Test-Path -LiteralPath $script:InstallerDirectory | Should -BeFalse
         Should -Invoke Invoke-VerifiedDownload -Exactly 1 -ParameterFilter {
-            $Url -eq 'https://astral.sh/uv/0.11.21/install.ps1' -and
+            $Url -eq 'https://astral.sh/uv/0.12.8/install.ps1' -and
             $ExpectedHash -eq ('a' * 64)
         }
     }
@@ -116,7 +116,7 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
             $Name -eq 'uv'
         }
         Install-Uv `
-            -Version '0.11.21' `
+            -Version '0.12.8' `
             -ExpectedHash ('a' * 64) `
             -IsWindowsPlatform $true
 
@@ -133,7 +133,7 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
 
         {
             Install-Uv `
-                -Version '0.11.21' `
+                -Version '0.12.8' `
                 -ExpectedHash ('a' * 64) `
                 -IsWindowsPlatform $true
         } | Should -Throw 'USERPROFILE is required to locate the Windows uv installation'
@@ -155,7 +155,7 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
         }
 
         Install-Uv `
-            -Version '0.11.21' `
+            -Version '0.12.8' `
             -ExpectedHash ('a' * 64) `
             -IsWindowsPlatform $false
 
@@ -178,7 +178,7 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
         }
 
         Install-Uv `
-            -Version '0.11.21' `
+            -Version '0.12.8' `
             -ExpectedHash ('a' * 64) `
             -IsWindowsPlatform $false
 
@@ -195,7 +195,7 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
 
         {
             Install-Uv `
-                -Version '0.11.21' `
+                -Version '0.12.8' `
                 -ExpectedHash ('a' * 64) `
                 -IsWindowsPlatform $false
         } | Should -Throw 'Failed to restrict uv installer directory permissions'
@@ -213,10 +213,10 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
 
         {
             Install-Uv `
-                -Version '0.11.21' `
+                -Version '0.12.8' `
                 -ExpectedHash ('a' * 64) `
                 -IsWindowsPlatform $false
-        } | Should -Throw 'Failed to install uv v0.11.21'
+        } | Should -Throw 'Failed to install uv v0.12.8'
 
         Test-Path -LiteralPath $script:InstallerDirectory | Should -BeFalse
     }
@@ -237,10 +237,10 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
 
         {
             Install-Uv `
-                -Version '0.11.21' `
+                -Version '0.12.8' `
                 -ExpectedHash ('a' * 64) `
                 -IsWindowsPlatform $false
-        } | Should -Throw 'Failed to install uv v0.11.21'
+        } | Should -Throw 'Failed to install uv v0.12.8'
 
         Test-Path -LiteralPath $script:InstallerDirectory | Should -BeFalse
     }
@@ -256,10 +256,10 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
 
         {
             Install-Uv `
-                -Version '0.11.21' `
+                -Version '0.12.8' `
                 -ExpectedHash ('a' * 64) `
                 -IsWindowsPlatform $false
-        } | Should -Throw 'Failed to install uv v0.11.21'
+        } | Should -Throw 'Failed to install uv v0.12.8'
     }
 }
 
