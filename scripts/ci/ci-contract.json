@@ -956,7 +956,7 @@
               "run-sha256": "7f574a2648a7564a50c3574df7f8881b491ceb0743f1f60381ea6e408430e768"
             },
             "install-yaml": {
-              "run-sha256": "4486f16cb7d077c934b3aa1925f62eb753bd4308004a3b5faaf547d3bb26a0b2"
+              "run-sha256": "ed16564a36565fbfc023871e47ff6b1cdff4aee4a4cdb177f73e011bfc81a597"
             },
             "pester": {
               "run-sha256": "09b72073fe7f62e44c98810c95d789892a757decb244790ab2b8452cf3df67c4",
