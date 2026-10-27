@@ -72,6 +72,8 @@ test('Pester provisions uv and Python for lock consistency integration tests', (
   assert.equal(setup.with.version, '0.12.20');
   assert.equal(setup.with['python-version'], '3.12');
   assert.ok(steps.indexOf(setup) < steps.findIndex(step => step.id === 'pester'));
+  assert.ok(steps.slice(steps.indexOf(setup) + 1, steps.findIndex(step => step.id === 'pester'))
+    .some(step => step.run === 'uv python install (Get-Content .python-version -Raw).Trim()'));
 });
 
 test('skill packages: repository packages satisfy the contract', () => {

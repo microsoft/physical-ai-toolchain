@@ -73,6 +73,9 @@ jobs:
           checksum: '6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f'
           python-version: '3.12'
 
+      - name: Install Python
+        run: uv python install (Get-Content .python-version -Raw).Trim()
+
       - name: Create logs directory
         run: New-Item -ItemType Directory -Force -Path logs | Out-Null
 
