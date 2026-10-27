@@ -23,7 +23,7 @@ const focusableSelector = [
 ].join(', ')
 
 const headerExpectations: FocusExpectation[] = [
-  { scope: 'header', role: 'button', name: 'Dataset', description: 'Dataset' },
+  { scope: 'header', role: 'button', name: /^Dataset: /, description: 'Dataset' },
   { scope: 'header', role: 'button', name: 'Toggle Diagnostics', description: 'Diagnostics' },
   { scope: 'header', role: 'link', name: 'Help', description: 'Help' },
   { scope: 'header', role: 'link', name: 'Report problem', description: 'Report problem' },
