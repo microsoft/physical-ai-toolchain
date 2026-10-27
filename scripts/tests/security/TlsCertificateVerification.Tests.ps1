@@ -46,8 +46,28 @@ BeforeAll {
     function Invoke-Docker {
         param(
             [Parameter(Mandatory)]
-            [string[]] $Arguments
+            [string[]] $Arguments,
+
+            [ValidateRange(0, 3600)]
+            [int] $TimeoutSeconds = 0
         )
+
+        if ($TimeoutSeconds -gt 0) {
+            $Process = Start-Process -FilePath 'docker' -ArgumentList $Arguments -NoNewWindow -PassThru
+            try {
+                if (-not $Process.WaitForExit($TimeoutSeconds * 1000)) {
+                    $Process.Kill($true)
+                    throw "docker $($Arguments -join ' ') timed out after $TimeoutSeconds seconds"
+                }
+                if ($Process.ExitCode -ne 0) {
+                    throw "docker $($Arguments -join ' ') failed with exit code $($Process.ExitCode)"
+                }
+                return
+            }
+            finally {
+                $Process.Dispose()
+            }
+        }
 
         $output = & docker @Arguments 2>&1
         if ($LASTEXITCODE -ne 0) {
@@ -67,13 +87,13 @@ BeforeAll {
             return
         }
         catch {
-            for ($attempt = 1; $attempt -le 3; $attempt++) {
+            for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
                 try {
-                    Invoke-Docker -Arguments @('pull', $Image) | Out-Null
+                    Invoke-Docker -Arguments @('pull', $Image) -TimeoutSeconds 120 | Out-Null
                     return
                 }
                 catch {
-                    if ($attempt -eq 3) {
+                    if ($Attempt -eq 3) {
                         throw
                     }
                 }
@@ -134,6 +154,64 @@ BeforeAll {
     }
 }
 
+Describe 'Bounded Docker commands' -Tag 'Unit' {
+    BeforeEach {
+        $script:DockerProcess = [pscustomobject]@{
+            ExitCode         = 0
+            TimedOut         = $false
+            Killed           = $false
+            Disposed         = $false
+            WaitMilliseconds = 0
+        }
+        $script:DockerProcess | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {
+            param([int] $Milliseconds)
+            $this.WaitMilliseconds = $Milliseconds
+            return -not $this.TimedOut
+        }
+        $script:DockerProcess | Add-Member -MemberType ScriptMethod -Name Kill -Value {
+            param([bool] $EntireProcessTree)
+            $this.Killed = $EntireProcessTree
+        }
+        $script:DockerProcess | Add-Member -MemberType ScriptMethod -Name Dispose -Value {
+            $this.Disposed = $true
+        }
+        Mock Start-Process { return $script:DockerProcess }
+    }
+
+    It 'waits only for the configured deadline and disposes a successful process' {
+        Invoke-Docker -Arguments @('pull', $script:NginxImage) -TimeoutSeconds 120
+
+        $script:DockerProcess.WaitMilliseconds | Should -Be 120000
+        $script:DockerProcess.Killed | Should -BeFalse
+        $script:DockerProcess.Disposed | Should -BeTrue
+        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
+            $FilePath -eq 'docker' -and $ArgumentList[0] -eq 'pull' -and
+            $ArgumentList[1] -eq $script:NginxImage -and $NoNewWindow -and $PassThru
+        }
+    }
+
+    It 'kills the process tree and disposes the client when the deadline expires' {
+        $script:DockerProcess.TimedOut = $true
+
+        { Invoke-Docker -Arguments @('pull', $script:NginxImage) -TimeoutSeconds 120 } |
+        Should -Throw '*timed out after 120 seconds*'
+
+        $script:DockerProcess.WaitMilliseconds | Should -Be 120000
+        $script:DockerProcess.Killed | Should -BeTrue
+        $script:DockerProcess.Disposed | Should -BeTrue
+    }
+
+    It 'reports nonzero exit codes without killing a completed process' {
+        $script:DockerProcess.ExitCode = 1
+
+        { Invoke-Docker -Arguments @('pull', $script:NginxImage) -TimeoutSeconds 120 } |
+        Should -Throw '*failed with exit code 1*'
+
+        $script:DockerProcess.Killed | Should -BeFalse
+        $script:DockerProcess.Disposed | Should -BeTrue
+    }
+}
+
 Describe 'TLS fixture image preparation' -Tag 'Unit' {
     It 'reuses a cached pinned image without pulling' {
         Mock Invoke-Docker {}
@@ -160,7 +238,7 @@ Describe 'TLS fixture image preparation' -Tag 'Unit' {
         Initialize-DockerImage -Image $script:NginxImage
 
         Should -Invoke Invoke-Docker -Times 2 -Exactly -ParameterFilter {
-            $Arguments[0] -eq 'pull' -and $Arguments[1] -eq $script:NginxImage
+            $Arguments[0] -eq 'pull' -and $Arguments[1] -eq $script:NginxImage -and $TimeoutSeconds -eq 120
         }
     }
 
@@ -171,7 +249,20 @@ Describe 'TLS fixture image preparation' -Tag 'Unit' {
         { Initialize-DockerImage -Image $script:NginxImage } | Should -Throw '*502 Bad Gateway*'
 
         Should -Invoke Invoke-Docker -Times 3 -Exactly -ParameterFilter {
-            $Arguments[0] -eq 'pull' -and $Arguments[1] -eq $script:NginxImage
+            $Arguments[0] -eq 'pull' -and $Arguments[1] -eq $script:NginxImage -and $TimeoutSeconds -eq 120
+        }
+    }
+
+    It 'fails after three timed-out pulls' {
+        Mock Invoke-Docker { throw 'Image not cached' } -ParameterFilter { $Arguments[0] -eq 'image' }
+        Mock Invoke-Docker { throw 'docker pull timed out after 120 seconds' } -ParameterFilter {
+            $Arguments[0] -eq 'pull'
+        }
+
+        { Initialize-DockerImage -Image $script:NginxImage } | Should -Throw '*timed out after 120 seconds*'
+
+        Should -Invoke Invoke-Docker -Times 3 -Exactly -ParameterFilter {
+            $Arguments[0] -eq 'pull' -and $Arguments[1] -eq $script:NginxImage -and $TimeoutSeconds -eq 120
         }
     }
 }
@@ -222,8 +313,8 @@ Describe 'Production TLS certificate verification' -Tag 'Unit' {
     It 'rejects invalid certificates before production clients send authenticated requests' -Skip:(
         -not (Get-Command docker -ErrorAction SilentlyContinue)
     ) {
-        foreach ($image in @($script:NodeImage, $script:NginxImage, $script:PythonImage)) {
-            Initialize-DockerImage -Image $image
+        foreach ($Image in @($script:NodeImage, $script:NginxImage, $script:PythonImage)) {
+            Initialize-DockerImage -Image $Image
         }
 
         $fixtureDirectory = Join-Path $TestDrive 'tls-fixture'
