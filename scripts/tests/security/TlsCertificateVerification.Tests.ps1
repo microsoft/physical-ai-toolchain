@@ -56,6 +56,31 @@ BeforeAll {
         return $output
     }
 
+    function Initialize-DockerImage {
+        param(
+            [Parameter(Mandatory)]
+            [string] $Image
+        )
+
+        try {
+            Invoke-Docker -Arguments @('image', 'inspect', $Image) | Out-Null
+            return
+        }
+        catch {
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+                try {
+                    Invoke-Docker -Arguments @('pull', $Image) | Out-Null
+                    return
+                }
+                catch {
+                    if ($attempt -eq 3) {
+                        throw
+                    }
+                }
+            }
+        }
+    }
+
     function Invoke-NginxFixture {
         param(
             [Parameter(Mandatory)]
@@ -75,7 +100,7 @@ BeforeAll {
         )
 
         $arguments = @(
-            'run', '--detach', '--name', $Name,
+            'run', '--pull', 'never', '--detach', '--name', $Name,
             '--network', $Network,
             '--publish', '127.0.0.1::8080',
             '--env', "NGINX_BACKEND_HOST=$BackendHost",
@@ -106,6 +131,48 @@ BeforeAll {
         } while ([DateTime]::UtcNow -lt $deadline)
 
         throw 'Timed out waiting for the NGINX fixture port'
+    }
+}
+
+Describe 'TLS fixture image preparation' -Tag 'Unit' {
+    It 'reuses a cached pinned image without pulling' {
+        Mock Invoke-Docker {}
+
+        Initialize-DockerImage -Image $script:NginxImage
+
+        Should -Invoke Invoke-Docker -Times 1 -Exactly -ParameterFilter {
+            $Arguments[0] -eq 'image' -and $Arguments[1] -eq 'inspect' -and
+            $Arguments[2] -eq $script:NginxImage
+        }
+        Should -Invoke Invoke-Docker -Times 0 -Exactly -ParameterFilter { $Arguments[0] -eq 'pull' }
+    }
+
+    It 'retries a transient pull failure using the same pinned image' {
+        $script:PullAttempts = 0
+        Mock Invoke-Docker { throw 'Image not cached' } -ParameterFilter { $Arguments[0] -eq 'image' }
+        Mock Invoke-Docker {
+            $script:PullAttempts++
+            if ($script:PullAttempts -eq 1) {
+                throw '502 Bad Gateway'
+            }
+        } -ParameterFilter { $Arguments[0] -eq 'pull' }
+
+        Initialize-DockerImage -Image $script:NginxImage
+
+        Should -Invoke Invoke-Docker -Times 2 -Exactly -ParameterFilter {
+            $Arguments[0] -eq 'pull' -and $Arguments[1] -eq $script:NginxImage
+        }
+    }
+
+    It 'fails after three unsuccessful pulls' {
+        Mock Invoke-Docker { throw 'Image not cached' } -ParameterFilter { $Arguments[0] -eq 'image' }
+        Mock Invoke-Docker { throw '502 Bad Gateway' } -ParameterFilter { $Arguments[0] -eq 'pull' }
+
+        { Initialize-DockerImage -Image $script:NginxImage } | Should -Throw '*502 Bad Gateway*'
+
+        Should -Invoke Invoke-Docker -Times 3 -Exactly -ParameterFilter {
+            $Arguments[0] -eq 'pull' -and $Arguments[1] -eq $script:NginxImage
+        }
     }
 }
 
@@ -155,6 +222,10 @@ Describe 'Production TLS certificate verification' -Tag 'Unit' {
     It 'rejects invalid certificates before production clients send authenticated requests' -Skip:(
         -not (Get-Command docker -ErrorAction SilentlyContinue)
     ) {
+        foreach ($image in @($script:NodeImage, $script:NginxImage, $script:PythonImage)) {
+            Initialize-DockerImage -Image $image
+        }
+
         $fixtureDirectory = Join-Path $TestDrive 'tls-fixture'
         $certificatePath = Join-Path $fixtureDirectory 'server.crt'
         $keyPath = Join-Path $fixtureDirectory 'server.key'
@@ -202,7 +273,7 @@ server.listen(443, '0.0.0.0')
         try {
             Invoke-Docker -Arguments @('network', 'create', $network) | Out-Null
             Invoke-Docker -Arguments @(
-                'run', '--detach', '--name', $serverContainer,
+                'run', '--pull', 'never', '--detach', '--name', $serverContainer,
                 '--network', $network,
                 '--network-alias', 'tls-valid',
                 '--network-alias', 'tls-wrong',
@@ -235,7 +306,7 @@ server.listen(443, '0.0.0.0')
             $LASTEXITCODE | Should -Not -Be 0
             Test-Path -LiteralPath $requestPath | Should -BeFalse
 
-            & docker run --rm --network $network `
+            & docker run --pull never --rm --network $network `
                 --env REDIS_HOST=tls-valid `
                 --env REDIS_PORT=443 `
                 --env REDIS_PASSWORD=test-secret `
@@ -245,7 +316,7 @@ server.listen(443, '0.0.0.0')
             $LASTEXITCODE | Should -Not -Be 0
             Test-Path -LiteralPath $requestPath | Should -BeFalse
 
-            & docker run --rm --network $network `
+            & docker run --pull never --rm --network $network `
                 --volume "${fixtureDirectory}:/fixture:ro" `
                 --env SSL_CERT_FILE=/fixture/server.crt `
                 --env REDIS_HOST=tls-wrong `
@@ -257,7 +328,7 @@ server.listen(443, '0.0.0.0')
             $LASTEXITCODE | Should -Not -Be 0
             Test-Path -LiteralPath $requestPath | Should -BeFalse
 
-            & docker run --rm --network $network `
+            & docker run --pull never --rm --network $network `
                 --volume "${fixtureDirectory}:/fixture:ro" `
                 --env SSL_CERT_FILE=/fixture/server.crt `
                 --env REDIS_HOST=tls-valid `
