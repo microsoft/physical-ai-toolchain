@@ -49,6 +49,31 @@ const publicFeedsReport = 'logs/public-dependency-feeds-results.json';
 const summaryId = 'pr-validation-summary';
 const unknownSha = '0'.repeat(40);
 
+test('product workspace: fuzz installs the backend and reuses the frozen environment', () => {
+  const steps = graph['.github/workflows/fuzz-regression-tests.yml'].jobs['fuzz-regression'].steps;
+  assert.match(steps.find(step => step.name === 'Install dependencies').run, /--all-packages --frozen --group dev/);
+  assert.match(steps.find(step => step.id === 'test').run, /uv run --all-packages --no-sync --frozen pytest/);
+});
+
+test('product workspace: accessibility restores the same environment used by Playwright', () => {
+  const job = graph['.github/workflows/accessibility-evidence.yml'].jobs['product-evidence'];
+  assert.equal(job.env.UV_PROJECT_ENVIRONMENT, '${{ github.workspace }}/data-management/viewer/backend/.venv');
+  const install = job.steps.find(step => step.name === 'Install Dataviewer API dependencies').run;
+  assert.match(install, /uv sync --project \. --all-packages --frozen --group dev/);
+  for (const extra of ['analysis', 'hdf5', 'export', 'auth', 'azure', 'api', 'openai']) {
+    assert.ok(install.includes(`--extra ${extra}`));
+  }
+});
+
+test('Pester provisions uv and Python for lock consistency integration tests', () => {
+  const steps = graph['.github/workflows/pester-tests.yml'].jobs.pester.steps;
+  const setup = steps.find(step => step.name === 'Setup uv');
+  assert.ok(setup);
+  assert.equal(setup.with.version, '0.12.20');
+  assert.equal(setup.with['python-version'], '3.12');
+  assert.ok(steps.indexOf(setup) < steps.findIndex(step => step.id === 'pester'));
+});
+
 test('skill packages: repository packages satisfy the contract', () => {
   assert.deepEqual(validateSkillPackages(root), []);
 });

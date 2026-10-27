@@ -285,7 +285,7 @@ smoke_image() {
         # Preserve the container's matched Torch/CUDA stack, as in production.
         uv export --frozen --no-hashes --no-emit-project --project "$project" \
             | grep -Ev "$isaac_provided_re" \
-            | uv pip install "${install_args[@]}"
+            | uv pip install --no-config "${install_args[@]}"
     fi
 
     run_probe "$python_exec"

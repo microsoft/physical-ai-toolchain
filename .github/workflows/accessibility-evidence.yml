@@ -221,6 +221,8 @@ jobs:
     if: ${{ inputs.run-product-evidence == true || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/data-management/viewer/backend/.venv
     permissions:
       contents: read
     steps:
@@ -241,8 +243,9 @@ jobs:
 
       - name: Install Dataviewer API dependencies
         run: >-
-          uv sync --project data-management/viewer/backend --frozen --group dev
+          uv sync --project . --all-packages --frozen --group dev
           --extra analysis --extra hdf5 --extra export --extra auth --extra azure
+          --extra api --extra openai
 
       - name: Run deterministic product evidence
         id: product-evidence

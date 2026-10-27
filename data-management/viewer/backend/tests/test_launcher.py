@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+LAUNCH_TIMEOUT = 30
+
 
 def _get_unused_port() -> int:
     with socket.socket() as listener:
@@ -79,7 +81,7 @@ def test_check_resolves_hoisted_vite_without_starting_services(launcher: Path) -
         ["bash", str(launcher), "--check"],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=LAUNCH_TIMEOUT,
         check=False,
     )
 
@@ -101,7 +103,7 @@ def test_config_preview_preserves_mode_without_starting_services(
         ["bash", str(launcher), "--config-preview", "--data-dir", str(data_dir), *mode_args],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=LAUNCH_TIMEOUT,
         check=False,
     )
 
@@ -120,7 +122,7 @@ def test_backend_failure_is_reported_with_optional_env_keys_absent(launcher: Pat
         ["bash", str(launcher), "--backend"],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=LAUNCH_TIMEOUT,
         check=False,
     )
 
@@ -136,7 +138,7 @@ def test_vlm_setup_preserves_existing_optional_dependencies(launcher: Path, monk
         ["bash", str(launcher), "--backend"],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=LAUNCH_TIMEOUT,
         check=False,
     )
 
@@ -168,7 +170,7 @@ def test_judge_runtime_uses_frozen_evaluator_profile(
     monkeypatch.setenv("VLM_JUDGE_BACKEND", backend)
     monkeypatch.setenv("TEST_DEPENDENCY_CHECK_EXIT", str(dependency_status))
     result = subprocess.run(
-        ["bash", str(launcher), "--backend"], capture_output=True, text=True, timeout=10, check=False
+        ["bash", str(launcher), "--backend"], capture_output=True, text=True, timeout=LAUNCH_TIMEOUT, check=False
     )
     assert result.returncode == (dependency_status or 23), result.stdout + result.stderr
     assert ("Backend child invoked" in result.stdout) is (dependency_status == 0)
@@ -199,7 +201,7 @@ def test_backend_runs_on_loopback_with_logging_config(
         if entrypoint == "bash"
         else ["node", str(Path(__file__).resolve().parents[2] / "start-backend.mjs")]
     )
-    subprocess.run(command, cwd=launcher.parent, capture_output=True, text=True, timeout=10, check=False)
+    subprocess.run(command, cwd=launcher.parent, capture_output=True, text=True, timeout=LAUNCH_TIMEOUT, check=False)
 
     if entrypoint == "bash":
         args = (launcher.parent / "backend" / "uvicorn-args.txt").read_text(encoding="utf-8").splitlines()

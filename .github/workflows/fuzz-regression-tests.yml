@@ -72,11 +72,11 @@ jobs:
           checksum: '6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f'
 
       - name: Install dependencies
-        run: uv sync --frozen --group dev
+        run: uv sync --all-packages --frozen --group dev
 
       - name: Run fuzz regression tests
         id: test
-        run: uv run --frozen pytest -o addopts="" tests/fuzz_harness.py -v --junitxml=logs/pytest-fuzz-results.xml --cov=tests --cov=data-management/viewer/backend/src --cov=training --cov-report=xml:logs/coverage-fuzz.xml --cov-report=term-missing
+        run: uv run --all-packages --no-sync --frozen pytest -o addopts="" tests/fuzz_harness.py -v --junitxml=logs/pytest-fuzz-results.xml --cov=tests --cov=data-management/viewer/backend/src --cov=training --cov-report=xml:logs/coverage-fuzz.xml --cov-report=term-missing
 
       - name: Upload coverage.xml artifact
         if: ${{ inputs.code-coverage && always() }}
