@@ -3,7 +3,7 @@ sidebar_position: 5
 title: Pull Request Process
 description: PR workflow, reviewer assignment, review cycles, approval criteria, and update process
 author: Microsoft Robotics-AI Team
-ms.date: 2026-10-05
+ms.date: 2026-10-28
 ms.topic: how-to
 keywords:
   - pull request
@@ -41,9 +41,30 @@ work.
 
 ### Activation and rollback
 
-Activate the hosted queue only after merge-group-compatible workflow code is on
-`main` and the queue-reachable OIDC consumers have approved provider policies.
-Capture the ruleset before changing it and prepare the rollback payload first.
+The documentation-only PR revising the
+[merge-queue OIDC policy](../security/workflow-permissions.md#-merge-queue-trust-boundary)
+must receive required approval and merge to `main` before activation under the
+revised requirements. That policy replaces blanket provider-administrator
+evidence only for the existing Codecov integration; it does not waive known
+provider restrictions or establish live compatibility. Other OIDC consumers
+retain the provider-evidence requirements in that policy.
+
+After the policy PR merges, complete these checks before changing hosted settings:
+
+1. Verify current `main` still has the expected reusable workflow graph,
+  `merge_group: checks_requested` trigger, tested-`github.sha` checkout,
+  immutable range verification, and fail-safe full selection. Run relevant CI
+  contracts if needed to resolve drift.
+2. Refresh the queue-reachable OIDC inventory and confirm the existing Codecov
+  actions, `use_oidc`, permissions, coverage gates, publication requirements,
+  and execution evidence remain unchanged.
+3. Read back the live ruleset and required checks. Keep `pr-validation-summary`
+  as the required context and preserve review, code-owner, thread-resolution,
+  deletion, force-push, and code-quality protections. Review-policy and CodeQL
+  baseline changes remain separate work.
+4. Capture the pre-change ruleset, inspect the export, and prepare supported
+  update and rollback payloads. Verify that rollback restores the original
+  settings, including strict required status check updates.
 
 Use this initial queue configuration:
 
@@ -58,14 +79,35 @@ Use this initial queue configuration:
 | Merge method                         | Squash     |
 | Strict required status check updates | Disabled   |
 
-Prove activation with an existing eligible pull request or a real low-risk
-documentation or maintenance correction. Do not create temporary marker files
-or no-op commits. Record the merge-group SHA and Actions run before confirming
-the squash merge.
+Apply the bounded queue update, then compare the ruleset read-back against the
+snapshot to confirm that unrelated protections have not changed. Activation is
+provisional until the live test succeeds.
 
-If validation stalls or the required check does not report, restore the
-pre-change ruleset. Keep the tracking issue open with diagnostics; do not
-increase concurrency or group size until the serial configuration succeeds.
+Use a later eligible real pull request or genuine low-risk documentation or
+maintenance correction for the controlled queue test, after the policy PR has
+merged and rollback is ready. Do not create temporary marker files or no-op
+commits. Record the following evidence in the
+[rollout issue](https://github.com/microsoft/physical-ai-toolchain/issues/1853):
+
+| Evidence                          | Required result                                                                                                                                                                       |
+|-----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Candidate identity                | Merge-group SHA and linked Actions run match the queued candidate                                                                                                                     |
+| Codecov authentication and upload | Non-secret action logs show OIDC token acquisition and upload acceptance associated with that SHA, not only a green job                                                               |
+| Validation                        | Selected tests, local coverage gates, strict publication checks, and current-attempt execution receipts succeed; `pr-validation-summary` succeeds on the candidate SHA before timeout |
+| Completion                        | Record the squash merge and distinguish upload acceptance from final Codecov report processing                                                                                        |
+
+Choose representative real changes that exercise relevant strict publication
+paths. Record unexercised path-gated upload jobs rather than claiming universal
+compatibility from one low-risk run. Never record raw OIDC tokens or credentials.
+The documentation PR alone does not complete the rollout issue.
+
+Restore the pre-change ruleset on authentication or upload incompatibility,
+incorrect candidate association, failed required validation, a missing required
+check, or timeout. Keep the rollout issue open with non-secret diagnostics and
+investigate the specific failure or provider restriction. Do not weaken gates,
+expand permissions, substitute a long-lived token, or increase concurrency or
+group size to work around failure. Tune queue settings only after the serial
+configuration succeeds.
 
 ## Review Process
 
