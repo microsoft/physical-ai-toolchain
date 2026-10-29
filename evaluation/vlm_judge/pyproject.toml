@@ -10,7 +10,7 @@ dependencies = [
     "pandas==3.0.5",
     "Pillow==13.0.0",
     "pyarrow==25.0.1",
-    "pydantic==2.13.5",
+    "pydantic==2.14.1",
 ]
 
 [project.urls]
@@ -18,7 +18,7 @@ Repository = "https://github.com/microsoft/physical-ai-toolchain"
 
 [project.optional-dependencies]
 api = [
-    "fastapi==0.142.2",
+    "fastapi==0.156.8",
     "uvicorn[standard]==0.54.0",
 ]
 openai = [
@@ -31,7 +31,7 @@ qwen3-vl = [
     "hf-xet==1.6.0",
     "torch==2.14.1",
     "torchvision==0.29.1",
-    "transformers==5.19.0",
+    "transformers==5.20.2",
 ]
 
 [build-system]

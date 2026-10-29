@@ -20,7 +20,7 @@ packages = ["training/rl"]
 dev = [
     "physical-ai-curation==0.1.0",
     "physical-ai-dataset-io==0.1.0",
-    "hypothesis==6.170.2",
+    "hypothesis==6.170.5",
     "numpy==2.5.4",
     "ruff==0.17.1",
     "pyarrow==25.0.1",
@@ -29,7 +29,7 @@ dev = [
     "pytest==9.1.1",
     "pytest-mock==3.17.0",
     "pytest-cov==7.1.0",
-    "pydantic==2.13.5",
+    "pydantic==2.14.1",
     "ipykernel==7.4.0",
     "ipywidgets==8.1.9",
     "jsonschema[format]==4.26.0",
