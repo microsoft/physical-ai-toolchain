@@ -10,7 +10,7 @@ dependencies = ["pydantic==2.14.1", "physical-ai-dataset-io==0.1.0"]
 Repository = "https://github.com/microsoft/physical-ai-toolchain"
 
 [project.optional-dependencies]
-api = ["fastapi==0.156.8", "uvicorn[standard]==0.54.0"]
+api = ["fastapi==0.159.1", "uvicorn[standard]==0.54.0"]
 parquet = ["physical-ai-dataset-io[parquet]==0.1.0"]
 
 [tool.uv.sources]
