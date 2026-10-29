@@ -25,6 +25,7 @@ from tests.conftest import (
     encode_bytes,
     encode_principal,
     make_asgi_request,
+    set_hosted_environment,
 )
 
 
@@ -184,6 +185,56 @@ def _largest_padding_within(caller: HostedCaller, limit: int) -> int:
 
 
 class TestPrincipalBounds:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "setting",
+        [
+            "DATAVIEWER_MAX_CALLER_TOKEN_BYTES",
+            "DATAVIEWER_MAX_PRINCIPAL_ENCODED_BYTES",
+            "DATAVIEWER_MAX_PRINCIPAL_DECODED_BYTES",
+            "DATAVIEWER_MAX_PRINCIPAL_CLAIMS",
+            "DATAVIEWER_MAX_PRINCIPAL_VALUE_BYTES",
+        ],
+    )
+    async def test_given_environment_limit_when_authenticating_then_enforces_override(
+        self, setting: str, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+    ) -> None:
+        monkeypatch.setenv(setting, "1")
+        caller = request.getfixturevalue("hosted_caller")
+        auth_request = make_asgi_request("POST", "/api/x", headers=caller.request_headers())
+
+        if setting == "DATAVIEWER_MAX_CALLER_TOKEN_BYTES":
+            with pytest.raises(HTTPException) as exc_info:
+                await caller.provider.authenticate(auth_request)
+            assert exc_info.value.status_code == 401
+        else:
+            assert await caller.provider.authenticate(auth_request) is None
+
+    @pytest.mark.parametrize(
+        "setting",
+        [
+            "DATAVIEWER_MAX_CALLER_TOKEN_BYTES",
+            "DATAVIEWER_MAX_PRINCIPAL_ENCODED_BYTES",
+            "DATAVIEWER_MAX_PRINCIPAL_DECODED_BYTES",
+            "DATAVIEWER_MAX_PRINCIPAL_CLAIMS",
+            "DATAVIEWER_MAX_PRINCIPAL_VALUE_BYTES",
+            "DATAVIEWER_AUTH_JWKS_CACHE_SECONDS",
+            "DATAVIEWER_AUTH_JWKS_TIMEOUT_SECONDS",
+            "DATAVIEWER_AUTH_CALLER_TIMEOUT_SECONDS",
+        ],
+    )
+    @pytest.mark.parametrize("value", ["", "0", "-1", "1.5", "not-an-integer"])
+    def test_given_invalid_environment_limit_when_starting_hosted_auth_then_rejects_configuration(
+        self, setting: str, value: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.api.auth import validate_hosted_auth_configuration
+
+        set_hosted_environment(monkeypatch)
+        monkeypatch.setenv(setting, value)
+
+        with pytest.raises(ValueError, match=f"{setting} must be a positive integer"):
+            validate_hosted_auth_configuration()
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize(("size", "accepted"), [(6144, True), (6145, False)], ids=["at-limit", "over-limit"])
     async def test_principal_size_limit(self, hosted_caller: HostedCaller, size: int, accepted: bool) -> None:

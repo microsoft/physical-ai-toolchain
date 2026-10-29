@@ -188,12 +188,18 @@ class JwtProvider(AuthProvider):
 
 
 CALLER_TOKEN_HEADER = "X-Dataviewer-Caller-Token"
-MAX_CALLER_TOKEN_BYTES = 8192
-MAX_PRINCIPAL_ENCODED_BYTES = 8192
-MAX_PRINCIPAL_DECODED_BYTES = 6144
-MAX_PRINCIPAL_CLAIMS = 64
-MAX_PRINCIPAL_VALUE_BYTES = 2048
 _SUBJECT_CLAIMS = {"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", "sub"}
+
+
+def _positive_auth_setting(name: str, default: int) -> int:
+    """Read a bounded-auth setting after .env loading; reject invalid configuration."""
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        raise ValueError(f"{name} must be a positive integer") from None
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
 
 
 def _single_header(request: Request, name: str, limit: int) -> str | None:
@@ -226,11 +232,13 @@ class CallerVerifier:
         self._object_id = object_id
         self._client_id = client_id
         self._issuer = f"https://login.microsoftonline.com/{tenant_id}/v2.0"
+        self._max_token_bytes = _positive_auth_setting("DATAVIEWER_MAX_CALLER_TOKEN_BYTES", 8192)
+        self._auth_timeout = _positive_auth_setting("DATAVIEWER_AUTH_CALLER_TIMEOUT_SECONDS", 6)
         self._jwks_client = jwt.PyJWKClient(
             f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys",
             cache_keys=False,
-            lifespan=300,
-            timeout=5,
+            lifespan=_positive_auth_setting("DATAVIEWER_AUTH_JWKS_CACHE_SECONDS", 300),
+            timeout=_positive_auth_setting("DATAVIEWER_AUTH_JWKS_TIMEOUT_SECONDS", 5),
         )
         self._lock = asyncio.Lock()
 
@@ -253,7 +261,7 @@ class CallerVerifier:
     async def authorize(self, request: Request) -> None:
         import jwt
 
-        token = _single_header(request, CALLER_TOKEN_HEADER, MAX_CALLER_TOKEN_BYTES)
+        token = _single_header(request, CALLER_TOKEN_HEADER, self._max_token_bytes)
         invalid = HTTPException(
             status_code=401,
             detail="Caller authentication required",
@@ -262,7 +270,7 @@ class CallerVerifier:
         if token is None:
             raise invalid
         try:
-            async with asyncio.timeout(6):
+            async with asyncio.timeout(self._auth_timeout):
                 async with self._lock:
                     claims = await asyncio.to_thread(self._decode, token)
             if (
@@ -290,15 +298,19 @@ class EasyAuthProvider(AuthProvider):
 
     def __init__(self, verifier: CallerVerifier) -> None:
         self.verifier = verifier
+        self._max_encoded_bytes = _positive_auth_setting("DATAVIEWER_MAX_PRINCIPAL_ENCODED_BYTES", 8192)
+        self._max_decoded_bytes = _positive_auth_setting("DATAVIEWER_MAX_PRINCIPAL_DECODED_BYTES", 6144)
+        self._max_claims = _positive_auth_setting("DATAVIEWER_MAX_PRINCIPAL_CLAIMS", 64)
+        self._max_value_bytes = _positive_auth_setting("DATAVIEWER_MAX_PRINCIPAL_VALUE_BYTES", 2048)
 
     async def authenticate(self, request: Request) -> dict[str, Any] | None:
         await self.verifier.authorize(request)
-        principal = _single_header(request, "X-MS-CLIENT-PRINCIPAL", MAX_PRINCIPAL_ENCODED_BYTES)
+        principal = _single_header(request, "X-MS-CLIENT-PRINCIPAL", self._max_encoded_bytes)
         if principal is None:
             return None
         try:
             decoded = base64.b64decode(principal, validate=True)
-            if len(decoded) > MAX_PRINCIPAL_DECODED_BYTES:
+            if len(decoded) > self._max_decoded_bytes:
                 return None
             claims_json = json.loads(decoded)
         except (ValueError, UnicodeDecodeError, RecursionError):
@@ -306,7 +318,7 @@ class EasyAuthProvider(AuthProvider):
         if not isinstance(claims_json, dict):
             return None
         claims = claims_json.get("claims")
-        if not isinstance(claims, list) or len(claims) > MAX_PRINCIPAL_CLAIMS:
+        if not isinstance(claims, list) or len(claims) > self._max_claims:
             return None
         subjects = []
         name = ""
@@ -323,7 +335,7 @@ class EasyAuthProvider(AuthProvider):
                 value_bytes = val.encode("utf-8")
             except UnicodeEncodeError:
                 return None
-            if not typ or len(type_bytes) > 256 or len(value_bytes) > MAX_PRINCIPAL_VALUE_BYTES:
+            if not typ or len(type_bytes) > 256 or len(value_bytes) > self._max_value_bytes:
                 return None
             if typ in _SUBJECT_CLAIMS:
                 subjects.append(val)

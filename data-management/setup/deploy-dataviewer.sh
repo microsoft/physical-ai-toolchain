@@ -197,66 +197,80 @@ pin_registry_image() {
 
 build_app_manifest() {
   local state="$1" role="$2" image="$3" mode="$4" helper_image="$5"
+  local container settings probes identities containers auth_disabled=false
 
-  jq -e \
-    --arg role "$role" --arg image "$image" --arg mode "$mode" \
-    --arg helper_image "$helper_image" --arg identity "$identity_id" \
-    --arg storage_client_id "$storage_client_id" \
-    --arg backend_host "$backend_fqdn" --argjson caller "${caller_auth:-null}" '
-    def setting($name; $value): {name: $name, value: $value};
-    def probe($type; $path; $timeout; $port): {
-      type: $type, httpGet: {path: $path, port: $port, scheme: "HTTP"},
-      timeoutSeconds: $timeout, periodSeconds: 30, failureThreshold: 3
-    };
-    [.properties.template.containers[] | select(.name == $role)] as $selected
-    | if ($selected | length) != 1 then error("Expected one named application container") else . end
-    | if any($selected[0].env[]?;
-        (.name | test("(^|_)(API_KEY|PASSWORD|ACCESS_TOKEN|CLIENT_SECRET|CONNECTION_STRING)$"))
-        and ((.value // "") | length > 0))
-      then error("Credential settings must use Container App secret references") else . end
-    | .properties.template.containers = [
-        ($selected[0]
-          | .image = $image
-          | .env = [(.env // [])[] | select(
-              (.name | startswith("DATAVIEWER_CALLER_") | not)
-              and (.name != "DATAVIEWER_PROXY_KEY")
-              and (.name != "DATAVIEWER_AZURE_TENANT_ID")
-              and (.name != "DATAVIEWER_AZURE_CLIENT_ID")
-              and (.name != "DATAVIEWER_AUTH_DISABLED")
-              and (.name != "DATAVIEWER_AUTH_PROVIDER")
-              and (.name != "HMI_STORAGE_BACKEND")
-            )]
-          | if $role == "backend" then
-                .env = [.env[] | select(.name != "STORAGE_BACKEND" and .name != "AZURE_CLIENT_ID")]
-                + [setting("STORAGE_BACKEND"; "azure"), setting("AZURE_CLIENT_ID"; $storage_client_id),
-                  setting("DATAVIEWER_AUTH_DISABLED"; if $mode == "off" then "true" else "false" end)]
-              + (if $mode == "off" then [] else [
-                  setting("DATAVIEWER_AUTH_PROVIDER"; "easy_auth"),
-                  setting("DATAVIEWER_AZURE_TENANT_ID"; $caller.tenant_id),
-                  setting("DATAVIEWER_AZURE_CLIENT_ID"; $caller.api_client_id),
-                  setting("DATAVIEWER_CALLER_OBJECT_ID"; $caller.caller_object_id),
-                  setting("DATAVIEWER_CALLER_CLIENT_ID"; $caller.caller_client_id)
-                ] end)
-              | .command = ["sh", "-c", "exec uvicorn src.api.main:app --log-config logging.json --log-level \"${LOG_LEVEL:-info}\" --host 0.0.0.0 --port 8000"]
-              | .args = []
-              | .probes = [probe("Liveness"; "/health"; 2; 8000), probe("Readiness"; "/health"; 10; 8000)]
-            else
-              .env = [.env[] | select(.name != "NGINX_BACKEND_HOST" and .name != "NGINX_BACKEND_SCHEME")]
-                + [setting("DATAVIEWER_CALLER_MODE"; $mode), setting("NGINX_BACKEND_HOST"; $backend_host), setting("NGINX_BACKEND_SCHEME"; "https")]
-              | .command = ["/bin/sh", "/usr/local/bin/start-nginx.sh"]
-              | .args = []
-              | .probes = [probe("Liveness"; "/"; 2; 8080), probe("Readiness"; "/health"; 10; 8080)]
-            end
-        )
-      ] + (if $role == "frontend" and $mode != "off" then [{
-        name: "caller-helper", image: $helper_image,
+  container=$(jq -ce --arg role "$role" '
+    [.properties.template.containers[] | select(.name == $role)]
+    | if length == 1 then .[0] else error("Expected one named application container") end
+  ' <<<"$state") || return 1
+  if jq -e 'any(.env[]?;
+    (.name | test("(^|_)(API_KEY|PASSWORD|ACCESS_TOKEN|CLIENT_SECRET|CONNECTION_STRING)$"))
+    and ((.value // "") | length > 0))' <<<"$container" >/dev/null; then
+    error "Credential settings must use Container App secret references"
+    return 1
+  fi
+  settings=$(jq -ce '[.env[]? | select(
+    (.name | startswith("DATAVIEWER_CALLER_") | not)
+    and (.name | IN("DATAVIEWER_PROXY_KEY", "DATAVIEWER_AZURE_TENANT_ID",
+      "DATAVIEWER_AZURE_CLIENT_ID", "DATAVIEWER_AUTH_DISABLED",
+      "DATAVIEWER_AUTH_PROVIDER", "HMI_STORAGE_BACKEND") | not)
+  )]' <<<"$container") || return 1
+  identities=$(jq -cn --arg identity "$identity_id" '{($identity): {}}') || return 1
+
+  case "$role" in
+    backend)
+      [[ "$mode" == "off" ]] && auth_disabled=true
+      settings=$(jq -ce --arg client_id "$storage_client_id" --arg disabled "$auth_disabled" '
+        map(select(.name != "STORAGE_BACKEND" and .name != "AZURE_CLIENT_ID"))
+        + [{name: "STORAGE_BACKEND", value: "azure"},
+           {name: "AZURE_CLIENT_ID", value: $client_id},
+           {name: "DATAVIEWER_AUTH_DISABLED", value: $disabled}]
+      ' <<<"$settings") || return 1
+      if [[ "$mode" != "off" ]]; then
+        settings=$(jq -ce --argjson caller "${caller_auth:-null}" '. + [
+          {name: "DATAVIEWER_AUTH_PROVIDER", value: "easy_auth"},
+          {name: "DATAVIEWER_AZURE_TENANT_ID", value: $caller.tenant_id},
+          {name: "DATAVIEWER_AZURE_CLIENT_ID", value: $caller.api_client_id},
+          {name: "DATAVIEWER_CALLER_OBJECT_ID", value: $caller.caller_object_id},
+          {name: "DATAVIEWER_CALLER_CLIENT_ID", value: $caller.caller_client_id}
+        ]' <<<"$settings") || return 1
+      fi
+      probes=$(build_app_probes /health 8000) || return 1
+      container=$(jq -ce '.command = ["sh", "-c",
+        "exec uvicorn src.api.main:app --log-config logging.json --log-level \"${LOG_LEVEL:-info}\" --host 0.0.0.0 --port 8000"]
+      ' <<<"$container") || return 1
+      ;;
+    frontend)
+      settings=$(jq -ce --arg mode "$mode" --arg host "$backend_fqdn" '
+        map(select(.name != "NGINX_BACKEND_HOST" and .name != "NGINX_BACKEND_SCHEME"))
+        + [{name: "DATAVIEWER_CALLER_MODE", value: $mode},
+           {name: "NGINX_BACKEND_HOST", value: $host},
+           {name: "NGINX_BACKEND_SCHEME", value: "https"}]
+      ' <<<"$settings") || return 1
+      probes=$(build_app_probes / 8080) || return 1
+      container=$(jq -ce '.command = ["/bin/sh", "/usr/local/bin/start-nginx.sh"]' \
+        <<<"$container") || return 1
+      ;;
+    *) error "Unknown application container role: $role"; return 1 ;;
+  esac
+
+  containers=$(jq -ce --arg image "$image" --argjson settings "$settings" --argjson probes "$probes" '
+    [.image = $image | .env = $settings | .args = [] | .probes = $probes]
+  ' <<<"$container") || return 1
+  if [[ "$role" == "frontend" && "$mode" != "off" ]]; then
+    containers=$(jq -ce --arg image "$helper_image" --argjson caller "${caller_auth:-null}" '. + [{
+        name: "caller-helper", image: $image,
         command: ["python", "-m", "src.caller_auth_helper"], args: [],
         resources: {cpu: 0.25, memory: "0.5Gi"}, probes: [], volumeMounts: [],
-        env: [setting("DATAVIEWER_AZURE_CLIENT_ID"; $caller.api_client_id), setting("DATAVIEWER_CALLER_CLIENT_ID"; $caller.caller_client_id)]
-      }] else [] end)
-    | .identity = {type: "UserAssigned", userAssignedIdentities: (
-        {($identity): {}} + (if $role == "frontend" and $mode != "off" then {($caller.caller_identity_id): {}} else {} end)
-      )}
+        env: [{name: "DATAVIEWER_AZURE_CLIENT_ID", value: $caller.api_client_id},
+              {name: "DATAVIEWER_CALLER_CLIENT_ID", value: $caller.caller_client_id}]
+    }]' <<<"$containers") || return 1
+    identities=$(jq -ce --argjson caller "${caller_auth:-null}" \
+      '. + {($caller.caller_identity_id): {}}' <<<"$identities") || return 1
+  fi
+  jq -e --argjson containers "$containers" --argjson identities "$identities" '
+    .properties.template.containers = $containers
+    | .identity = {type: "UserAssigned", userAssignedIdentities: $identities}
     | del(.id, .systemData, .properties.provisioningState, .properties.runningStatus,
         .properties.latestRevisionName, .properties.latestReadyRevisionName,
         .properties.latestRevisionFqdn, .properties.outboundIpAddresses,
@@ -264,35 +278,68 @@ build_app_manifest() {
   ' <<<"$state"
 }
 
-verify_manifest_rollout() {
-  local app="$1" revision="$2" manifest="$3" actual
+build_app_probes() {
+  jq -cn --arg path "$1" --argjson port "$2" '[
+    {type: "Liveness", path: $path, timeout: 2},
+    {type: "Readiness", path: "/health", timeout: 10}
+  ] | map({type, httpGet: {path, port: $port, scheme: "HTTP"},
+    timeoutSeconds: .timeout, periodSeconds: 30, failureThreshold: 3})'
+}
 
-  actual=$(az containerapp show --name "$app" --resource-group "$rg" --output json) || return 1
-  jq -e --arg revision "$revision" --argjson desired "$manifest" '
-    def env: (.env // [] | map({name, value: (.value // null), secretRef: (.secretRef // null)}) | sort_by(.name));
-    def probes: (.probes // [] | map({
-      type, timeoutSeconds, periodSeconds, failureThreshold,
+normalize_rollout_container() {
+  jq -cS '{image, command: (.command // []), args: (.args // []),
+    volumeMounts: (.volumeMounts // []), resources: {cpu: .resources.cpu, memory: .resources.memory},
+    env: (.env // [] | map({name, value: (.value // null), secretRef: (.secretRef // null)}) | sort_by(.name)),
+    probes: (.probes // [] | map({type, timeoutSeconds, periodSeconds, failureThreshold,
       httpGet: (if .httpGet then {
         path: .httpGet.path, port: .httpGet.port, scheme: (.httpGet.scheme // "HTTP"),
         host: (.httpGet.host // null), httpHeaders: (.httpGet.httpHeaders // [])
-      } else null end)
-    }) | sort_by(.type));
-    . as $actual
-    | .properties.latestRevisionName == $revision and .properties.latestReadyRevisionName == $revision
-    and ((.identity.userAssignedIdentities | keys | map(ascii_downcase) | sort)
-      == ($desired.identity.userAssignedIdentities | keys | map(ascii_downcase) | sort))
-    and (.properties.template.containers | length) == ($desired.properties.template.containers | length)
-    and all($desired.properties.template.containers[];
-      . as $expected
-      | [$actual.properties.template.containers[] | select(.name == $expected.name)] as $containers
-      | ($containers | length) == 1
-      and ($containers[0] | .image == $expected.image
-        and (.command // []) == ($expected.command // [])
-        and (.args // []) == ($expected.args // [])
-        and (.volumeMounts // []) == ($expected.volumeMounts // [])
-        and .resources.cpu == $expected.resources.cpu and .resources.memory == $expected.resources.memory
-        and env == ($expected | env) and probes == ($expected | probes)))
-  ' <<<"$actual" >/dev/null
+      } else null end)}) | sort_by(.type))
+  }' <<<"$1"
+}
+
+verify_manifest_rollout() {
+  local app="$1" revision="$2" manifest="$3" actual
+  local actual_identities expected_identities actual_count expected_count
+  local name expected container expected_normalized actual_normalized
+
+  actual=$(az containerapp show --name "$app" --resource-group "$rg" --output json) || return 1
+  if ! jq -e --arg revision "$revision" '
+    .properties.latestRevisionName == $revision and .properties.latestReadyRevisionName == $revision
+  ' <<<"$actual" >/dev/null; then
+    error "Revision is not ready for $app"
+    return 1
+  fi
+  actual_identities=$(jq -c '.identity.userAssignedIdentities | keys | map(ascii_downcase) | sort' \
+    <<<"$actual") || return 1
+  expected_identities=$(jq -c '.identity.userAssignedIdentities | keys | map(ascii_downcase) | sort' \
+    <<<"$manifest") || return 1
+  if [[ "$actual_identities" != "$expected_identities" ]]; then
+    error "Managed identities do not match the manifest for $app"
+    return 1
+  fi
+  actual_count=$(jq '.properties.template.containers | length' <<<"$actual") || return 1
+  expected_count=$(jq '.properties.template.containers | length' <<<"$manifest") || return 1
+  if [[ "$actual_count" != "$expected_count" ]]; then
+    error "Container count does not match the manifest for $app"
+    return 1
+  fi
+  local index
+  for ((index = 0; index < expected_count; index++)); do
+    expected=$(jq -ce --argjson index "$index" '.properties.template.containers[$index]' \
+      <<<"$manifest") || return 1
+    name=$(jq -er '.name' <<<"$expected") || return 1
+    container=$(jq -ce --arg name "$name" '
+      [.properties.template.containers[] | select(.name == $name)]
+      | if length == 1 then .[0] else error("Expected one matching rollout container") end
+    ' <<<"$actual") || return 1
+    expected_normalized=$(normalize_rollout_container "$expected") || return 1
+    actual_normalized=$(normalize_rollout_container "$container") || return 1
+    if [[ "$actual_normalized" != "$expected_normalized" ]]; then
+      error "Container settings do not match the manifest for $app ($name)"
+      return 1
+    fi
+  done
 }
 
 apply_app_manifest() {

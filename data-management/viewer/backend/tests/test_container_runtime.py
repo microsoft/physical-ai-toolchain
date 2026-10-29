@@ -595,7 +595,13 @@ if operator_auth_gate; then exit 92; else recover_authenticated_rollout; fi
 
 @pytest.mark.parametrize(
     ("role", "mode"),
-    [("frontend", "pending"), ("frontend", "managed_identity"), ("frontend", "off"), ("backend", "managed_identity")],
+    [
+        ("frontend", "pending"),
+        ("frontend", "managed_identity"),
+        ("frontend", "off"),
+        ("backend", "managed_identity"),
+        ("backend", "off"),
+    ],
 )
 def test_given_runtime_snapshot_when_building_manifest_then_reconciles_named_containers(
     tmp_path: Path,
@@ -669,7 +675,12 @@ build_app_manifest '{json.dumps(snapshot)}' {role} new-image {mode} helper-image
             assert helper["probes"] == []
     else:
         assert set(containers) == {"backend"}
-        assert settings["DATAVIEWER_CALLER_OBJECT_ID"] == caller["caller_object_id"]
+        assert settings["DATAVIEWER_AUTH_DISABLED"] == ("true" if mode == "off" else "false")
+        if mode == "off":
+            assert "DATAVIEWER_CALLER_OBJECT_ID" not in settings
+            assert "DATAVIEWER_AUTH_PROVIDER" not in settings
+        else:
+            assert settings["DATAVIEWER_CALLER_OBJECT_ID"] == caller["caller_object_id"]
         assert settings["STORAGE_BACKEND"] == "azure"
         assert settings["AZURE_CLIENT_ID"] == "00000000-0000-0000-0000-000000000005"
 
@@ -1061,6 +1072,75 @@ def test_given_staged_rollout_failure_when_recovering_then_only_mi_restore_or_cl
 def test_given_platform_probe_defaults_when_verifying_rollout_then_semantic_manifest_matches(tmp_path: Path) -> None:
     status, _ = _run_deployment_cli_fixture(tmp_path, ["--skip-build"], "probe-defaults")
     assert status == 0
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    [
+        "none",
+        "revision",
+        "identity",
+        "missing",
+        "duplicate",
+        "image",
+        "command",
+        "args",
+        "env",
+        "probes",
+        "resources",
+        "volumeMounts",
+    ],
+)
+def test_given_rollout_state_when_verifying_manifest_then_rejects_each_mismatch(tmp_path: Path, mismatch: str) -> None:
+    manifest = {
+        "identity": {"userAssignedIdentities": {"storage-identity": {}}},
+        "properties": {
+            "latestRevisionName": "test-revision",
+            "latestReadyRevisionName": "test-revision",
+            "template": {
+                "containers": [
+                    {
+                        "name": "backend",
+                        "image": "test-image",
+                        "resources": {"cpu": 0.25, "memory": "0.5Gi"},
+                    }
+                ]
+            },
+        },
+    }
+    actual = json.loads(json.dumps(manifest))
+    containers = actual["properties"]["template"]["containers"]
+    if mismatch == "revision":
+        actual["properties"]["latestReadyRevisionName"] = "old-revision"
+    elif mismatch == "identity":
+        actual["identity"]["userAssignedIdentities"] = {"other-identity": {}}
+    elif mismatch == "missing":
+        containers[0]["name"] = "unrelated"
+    elif mismatch == "duplicate":
+        containers.append(containers[0])
+    elif mismatch != "none":
+        containers[0][mismatch] = {
+            "image": "other-image",
+            "command": ["other-command"],
+            "args": ["other-argument"],
+            "env": [{"name": "OTHER_SETTING", "value": "other-value"}],
+            "probes": [{"type": "Liveness", "httpGet": {"path": "/other", "port": 8000}}],
+            "resources": {"cpu": 0.5, "memory": "1Gi"},
+            "volumeMounts": [{"volumeName": "other-volume", "mountPath": "/other"}],
+        }[mismatch]
+    trace = _run_deployment_fault_harness(
+        tmp_path,
+        f"""
+rg=test-rg
+az() {{ printf '%s' '{json.dumps(actual)}'; }}
+if verify_manifest_rollout backend test-revision '{json.dumps(manifest)}'; then
+  echo accepted >>"$TRACE"
+else
+  echo denied >>"$TRACE"
+fi
+""",
+    )
+    assert trace == (["accepted"] if mismatch == "none" else ["denied"])
 
 
 def test_given_legacy_snapshot_when_rollout_fails_then_no_legacy_restore_is_attempted(tmp_path: Path) -> None:
