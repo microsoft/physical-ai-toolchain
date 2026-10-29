@@ -107,7 +107,7 @@ jobs:
         run: npm ci
 
       - name: Presync root Python dev group
-        run: uv sync --frozen --group dev
+        run: uv sync --frozen --group dev --group azureml-tracking
 
       - name: Presync dataviewer backend Python (dev + analysis + hdf5 + export + auth)
         working-directory: data-management/viewer/backend

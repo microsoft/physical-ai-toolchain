@@ -66,12 +66,12 @@ jobs:
 
       - name: Install dependencies
         id: install
-        run: uv sync --frozen --group dev
+        run: uv sync --frozen --group dev --group azureml-tracking
 
       - name: Run pytest
         id: test
         run: >-
-          uv run --frozen pytest -o addopts="" training/tests -v
+          uv run --no-sync --frozen pytest -o addopts="" training/tests -v
           --junitxml=logs/pytest-training-results.xml
           --cov=training
           --cov-report=term-missing

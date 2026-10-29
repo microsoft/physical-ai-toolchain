@@ -16,7 +16,7 @@ from pytest_mock import MockerFixture
 class TestAccessibilityDocumentationApps:
     def test_openai_echo_app_exposes_safe_documentation_and_completion(self) -> None:
         # Arrange
-        from vlm_judge.openai_shim import build_echo_app
+        from evaluation.vlm_judge.openai_shim import build_echo_app
 
         # Act
         with TestClient(build_echo_app()) as documentation_client:
@@ -35,7 +35,7 @@ class TestAccessibilityDocumentationApps:
 
 
 def test_given_echo_shim_when_querying_health_and_models_then_lists_the_served_model() -> None:
-    from vlm_judge.openai_shim import build_echo_app
+    from evaluation.vlm_judge.openai_shim import build_echo_app
 
     with TestClient(build_echo_app()) as client:
         health = client.get("/health")
@@ -78,7 +78,7 @@ def test_given_echo_shim_when_querying_health_and_models_then_lists_the_served_m
 def test_given_unsupported_shim_request_when_completing_then_rejects_request(
     body: dict[str, object], status: int, detail: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from vlm_judge import openai_shim
+    from evaluation.vlm_judge import openai_shim
 
     monkeypatch.setattr(openai_shim, "_ALLOW_REMOTE_IMAGES", False)
     with TestClient(openai_shim.build_echo_app()) as client:
@@ -90,7 +90,7 @@ def test_given_unsupported_shim_request_when_completing_then_rejects_request(
 
 
 def test_given_multimodal_history_when_completing_then_decodes_frames_and_returns_echo_progress() -> None:
-    from vlm_judge.openai_shim import build_echo_app
+    from evaluation.vlm_judge.openai_shim import build_echo_app
 
     buffer = io.BytesIO()
     Image.new("RGBA", (10, 12), "red").save(buffer, "PNG")
@@ -119,7 +119,7 @@ def test_given_multimodal_history_when_completing_then_decodes_frames_and_return
 def test_given_shim_launch_arguments_when_starting_then_forwards_model_and_server_configuration(
     monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture
 ) -> None:
-    from vlm_judge import openai_shim
+    from evaluation.vlm_judge import openai_shim
 
     uvicorn = ModuleType("uvicorn")
     serve = mocker.Mock()

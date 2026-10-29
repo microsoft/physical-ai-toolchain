@@ -148,23 +148,6 @@ app = FastAPI(
     openapi_tags=[
         {"name": "auth", "description": "Authentication utilities"},
     ],
-    # OpenAPI security scheme definitions
-    components={
-        "securitySchemes": {
-            "ApiKeyAuth": {
-                "type": "apiKey",
-                "in": "header",
-                "name": "X-API-Key",
-                "description": "API key authentication (DATAVIEWER_AUTH_PROVIDER=apikey)",
-            },
-            "BearerAuth": {
-                "type": "http",
-                "scheme": "bearer",
-                "bearerFormat": "JWT",
-                "description": "Bearer JWT authentication (azure_ad / auth0 providers)",
-            },
-        }
-    },
 )
 install_responsive_swagger_ui(app)
 

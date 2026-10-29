@@ -607,11 +607,11 @@ jobs:
             training/il/lerobot/uv.lock
             workflows/osmo/pyproject.toml
             workflows/osmo/uv.lock
-            data-management/viewer/pyproject.toml
-            data-management/viewer/uv.lock
+            data-management/curation/pyproject.toml
+            data-management/dataset-io/pyproject.toml
+            evaluation/vlm_judge/pyproject.toml
             data-management/viewer/package.json
             data-management/viewer/backend/pyproject.toml
-            data-management/viewer/backend/uv.lock
             data-management/viewer/frontend/package.json
             docs/docusaurus/package.json
             docs/docusaurus/package-lock.json

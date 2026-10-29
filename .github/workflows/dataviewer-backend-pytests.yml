@@ -72,23 +72,29 @@ jobs:
 
       - name: Install dependencies
         id: install
-        run: uv sync --frozen --group dev --extra analysis --extra hdf5 --extra export --extra auth --extra azure
+        run: uv sync --project ../../.. --all-packages --frozen --group dev --extra analysis --extra hdf5 --extra export --extra auth --extra azure --extra api --extra openai --extra qwen3-vl
 
       - name: Run pytest with coverage
         id: test
         run: >-
-          uv run --no-sync pytest -v
+          uv run --project ../../.. --all-packages --no-sync --frozen pytest -v
           --junitxml=../../../logs/pytest-dataviewer-results.xml
-          --cov=src --cov=../../../evaluation/vlm_judge
+          --cov=src --cov=evaluation.vlm_judge
           --cov-report= --cov-fail-under=0
 
       - name: Generate scoped coverage reports and enforce gates
         id: coverage_gate
         run: |
-          uv run --no-sync coverage xml --include='*/backend/src/*' --fail-under=0 -o ../../../logs/coverage-dataviewer.xml
-          uv run --no-sync coverage xml --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' --fail-under=0 -o ../../../logs/coverage-vlm-judge-backend.xml
-          uv run --no-sync coverage report --include='*/backend/src/*' --fail-under=90
-          uv run --no-sync coverage report --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' --fail-under=70
+          uv run --project ../../.. --all-packages --no-sync coverage xml --include='*/backend/src/*' --fail-under=0 -o ../../../logs/coverage-dataviewer.xml
+          uv run --project ../../.. --all-packages --no-sync coverage xml --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' --fail-under=0 -o ../../../logs/coverage-vlm-judge-backend.xml
+          uv run --project ../../.. --all-packages --no-sync coverage report --include='*/backend/src/*' --fail-under=90
+          uv run --project ../../.. --all-packages --no-sync coverage report --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' --fail-under=70
+
+      - name: Run product-owned judge unit tests
+        id: judge_unit
+        run: |
+          uv run --project ../../.. --all-packages --no-sync --frozen pytest -v -c ../../../evaluation/vlm_judge/pyproject.toml ../../../evaluation/tests/vlm_judge --junitxml=../../../logs/pytest-vlm-judge-results.xml --cov-report=xml:../../../logs/coverage-vlm-judge.xml --cov-fail-under=35
+          test -s ../../../logs/coverage-vlm-judge.xml
 
       - name: Validate coverage report
         id: coverage_report
@@ -96,6 +102,7 @@ jobs:
         run: |
           test -s ../../../logs/coverage-dataviewer.xml
           test -s ../../../logs/coverage-vlm-judge-backend.xml
+          test -s ../../../logs/coverage-vlm-judge.xml
 
       - name: Upload coverage.xml artifact
         id: coverage_upload
@@ -107,6 +114,7 @@ jobs:
           path: |
             logs/coverage-dataviewer.xml
             logs/coverage-vlm-judge-backend.xml
+            logs/coverage-vlm-judge.xml
           retention-days: 30
 
       - name: Upload coverage to Codecov
@@ -133,6 +141,17 @@ jobs:
           flags: pytest-vlm-judge
           name: pytest-vlm-judge-backend-coverage
 
+      - name: Upload judge unit coverage to Codecov
+        if: ${{ inputs.code-coverage && always() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: logs/coverage-vlm-judge.xml
+          disable_search: true
+          use_oidc: true
+          fail_ci_if_error: false
+          flags: pytest-vlm-judge
+          name: pytest-vlm-judge-unit-coverage
+
       - name: Publish execution evidence
         id: outcome
         if: always()
@@ -140,5 +159,5 @@ jobs:
         with:
           workflow: dataviewer-backend-pytests
           steps-json: ${{ toJSON(steps) }}
-          required-steps: '["system-dependencies","install","test","coverage_gate"]'
-          reports: '[{"path":"logs/pytest-dataviewer-results.xml","kind":"junit"}]'
+          required-steps: '["system-dependencies","install","test","coverage_gate","judge_unit"]'
+          reports: '[{"path":"logs/pytest-dataviewer-results.xml","kind":"junit"},{"path":"logs/pytest-vlm-judge-results.xml","kind":"junit"}]'

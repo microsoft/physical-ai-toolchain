@@ -7,18 +7,18 @@ license = "MIT"
 dependencies = [
     "physical-ai-curation==0.1.0",
     "physical-ai-dataset-io==0.1.0",
-    "fastapi==0.142.2",
+    "fastapi==0.156.8",
     "uvicorn[standard]==0.54.0",
-    "pydantic==2.13.5",
+    "pydantic==2.14.1",
     "python-multipart==0.0.32",
     "python-dotenv==1.2.4",
     "slowapi==0.1.10",
     "aiofiles==25.1.0",
-    "numpy==2.5.3",
+    "numpy==2.5.4",
     "pyarrow==25.0.1",
-    "Pillow==12.3.0",
+    "Pillow==13.0.0",
     "av==18.1.0",
-    "cachetools==7.2.1",
+    "cachetools==7.2.4",
 ]
 
 [project.urls]
@@ -26,7 +26,7 @@ Repository = "https://github.com/microsoft/physical-ai-toolchain"
 
 [project.optional-dependencies]
 azure = [
-    "aiohttp==3.14.4",
+    "aiohttp==3.14.5",
     "azure-storage-blob==12.31.0",
     "azure-identity==1.26.0",
 ]
@@ -48,25 +48,22 @@ export = [
     "h5py==3.16.0",
 ]
 yolo = [
-    "ultralytics==8.4.174",
+    "ultralytics==8.4.183",
 ]
 vlm-judge = [
-    "physical-ai-vlm-judge==0.1.0",
-    "accelerate==1.15.0",
-    "torch==2.14.1",
-    "transformers==5.19.0",
+    "physical-ai-vlm-judge[qwen3-vl]==0.1.0",
 ]
 
 [dependency-groups]
 dev = [
     "physical-ai-vlm-judge[openai]==0.1.0",
-    "ruff==0.16.10",
+    "ruff==0.17.1",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
     "httpx==0.28.1",
-    "hypothesis==6.168.5",
-    "schemathesis==4.29.4",
+    "hypothesis==6.170.5",
+    "schemathesis==4.32.2",
 ]
 
 [build-system]
@@ -93,22 +90,10 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["backend"]
 
-[tool.uv]
-constraint-dependencies = [
-    # cryptography: transitive via azure-identity/msal; 48.0.1 is the security
-    # floor for GHSA-537c-gmf6-5ccf.
-    "cryptography==50.0.1",
-    # starlette: transitive via fastapi; 1.6.0 includes fixes for
-    # GHSA-wqp7-x3pw-xc5r (SSRF), GHSA-82w8-qh3p-5jfq (form DoS), and
-    # GHSA-x746-7m8f-x49c.
-    "starlette==1.6.0",
-    "pygments==2.21.0",
-]
-
 [tool.uv.sources]
-physical-ai-curation = { path = "../../curation", editable = true }
-physical-ai-dataset-io = { path = "../../dataset-io", editable = true }
-physical-ai-vlm-judge = { path = "../../../evaluation/vlm_judge", editable = true }
+physical-ai-curation = { workspace = true }
+physical-ai-dataset-io = { workspace = true }
+physical-ai-vlm-judge = { workspace = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
