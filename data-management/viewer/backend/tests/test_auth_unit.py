@@ -121,6 +121,36 @@ class TestEasyAuthProvider:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
+        "payload",
+        [
+            [],
+            {"claims": [None]},
+            {"claims": [{"typ": 1, "val": "user-1"}]},
+            {"claims": [{"typ": NAMEID_CLAIM, "val": 1}]},
+            {"claims": [{"typ": "", "val": "user-1"}]},
+            {"claims": [{"typ": "\ud800", "val": "user-1"}]},
+            {"claims": [{"typ": NAMEID_CLAIM, "val": "\ud800"}]},
+        ],
+        ids=[
+            "non-object",
+            "non-object-claim",
+            "non-string-type",
+            "non-string-value",
+            "empty-type",
+            "invalid-type-unicode",
+            "invalid-value-unicode",
+        ],
+    )
+    async def test_given_malformed_principal_when_authenticated_then_denies_without_error(
+        self, hosted_caller: HostedCaller, payload: object
+    ) -> None:
+        principal = encode_bytes(json.dumps(payload).encode("utf-8"))
+        request = make_asgi_request("POST", "/api/x", headers=hosted_caller.request_headers(principal=principal))
+
+        assert await hosted_caller.provider.authenticate(request) is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
         "principal",
         [
             {},

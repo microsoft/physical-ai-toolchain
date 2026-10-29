@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 import time
 from collections.abc import AsyncIterator
@@ -16,7 +17,7 @@ import httpx
 import pytest
 from azure.core.credentials import AccessToken
 
-from src.caller_auth_helper import create_app
+from src.caller_auth_helper import create_app, main
 
 CLIENT_ID = "11111111-1111-4111-8111-111111111111"
 API_ID = "22222222-2222-4222-8222-222222222222"
@@ -126,7 +127,7 @@ async def test_given_acquisition_timeout_when_requested_then_bounded_denial_and_
 
 
 @pytest.mark.parametrize("setting", ["DATAVIEWER_CALLER_CLIENT_ID", "DATAVIEWER_AZURE_CLIENT_ID"])
-@pytest.mark.parametrize("value", ["", "not-an-identity", "../resource"])
+@pytest.mark.parametrize("value", ["", "not-an-identity", "../resource", CLIENT_ID.replace("-", "")])
 def test_given_invalid_configuration_when_created_then_startup_is_rejected(
     monkeypatch: pytest.MonkeyPatch, setting: str, value: str
 ) -> None:
@@ -135,6 +136,26 @@ def test_given_invalid_configuration_when_created_then_startup_is_rejected(
     monkeypatch.setenv(setting, value)
     with pytest.raises(ValueError, match="caller helper configuration"):
         create_app()
+
+
+def test_given_helper_entrypoint_when_started_then_binds_only_loopback_without_access_logs(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("DATAVIEWER_CALLER_CLIENT_ID", CLIENT_ID)
+    monkeypatch.setenv("DATAVIEWER_AZURE_CLIENT_ID", API_ID)
+    calls = []
+    monkeypatch.setattr("uvicorn.run", lambda app, **settings: calls.append((app, settings)))
+
+    with caplog.at_level(logging.WARNING, logger="azure"), caplog.at_level(logging.WARNING, logger="msal"):
+        main()
+
+        assert logging.getLogger("azure").level == logging.CRITICAL
+        assert logging.getLogger("msal").level == logging.CRITICAL
+
+    assert len(calls) == 1
+    app, settings = calls[0]
+    assert app.docs_url is None and app.redoc_url is None and app.openapi_url is None
+    assert settings == {"host": "127.0.0.1", "port": 8090, "access_log": False, "log_level": "warning"}
 
 
 async def test_given_request_body_or_browser_headers_when_fetching_proof_then_not_reflected(
