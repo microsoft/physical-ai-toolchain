@@ -2,7 +2,7 @@
 title: T3 Production Single-Site Deployment
 description: Run declarative single-site deployment and progressive Ubuntu HiL validation without Azure Arc.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-17
+ms.date: 2026-10-27
 ms.topic: overview
 ---
 
