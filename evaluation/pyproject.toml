@@ -21,7 +21,7 @@ dependencies = [
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
-    "onnx==1.23.0",
+    "onnx==1.23.2",
     "onnxscript==0.7.2",
     "onnxruntime-gpu==1.30.0",
     "toml==0.10.2",

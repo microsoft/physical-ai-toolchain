@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux'",
@@ -1784,7 +1784,7 @@ wheels = [
 
 [[package]]
 name = "onnx"
-version = "1.23.0"
+version = "1.23.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ml-dtypes", version = "0.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
@@ -1793,13 +1793,13 @@ dependencies = [
     { name = "protobuf" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/29/3a/b73bfb8f506a7b5be43eebf71dbdd351c4116f8100e1103a91bfcbcd3502/onnx-1.23.0.tar.gz", hash = "sha256:3f4b7323ea3397c63aa6ff5d43abe16013ffefc0a96cb8a0be6527ff1e1add40", size = 6022619, upload-time = "2026-09-18T19:30:37.511Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3f/62/bc2dfadb63ecf04cb2d65a6b17751863039d36c65de51d6a3128ab35f1e7/onnx-1.23.2.tar.gz", hash = "sha256:008cb0467b2bbee41448acc7da8b6f4e704624cb0d327a2d5adafc7ce19bc5b8", size = 6023090, upload-time = "2026-10-06T04:25:58.681Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c6/ff/a7d3fe41debd5b8947182a632b4e001bd3a7a103212e58ef6ca0c3daab91/onnx-1.23.0-cp312-abi3-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:95b77466b4f6bc7c2c63d6004b8db7d963fb17bf24aff13007752e9d2ebf9390", size = 8640232, upload-time = "2026-09-18T19:30:10.058Z" },
-    { url = "https://files.pythonhosted.org/packages/09/86/63cdd5740f566fd9de2cadc106529adee0566f2fcafe69a65767eedc1681/onnx-1.23.0-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f336004196a22fbdc16c62e7f26f20635af1826db6147c80ff3b4b8d428fc7ef", size = 8881347, upload-time = "2026-09-18T19:30:12.792Z" },
-    { url = "https://files.pythonhosted.org/packages/cd/24/7844929ef08aee3f9cb857d5ce34bb60d44496c9cc5c66cdfd8255917283/onnx-1.23.0-cp312-abi3-pyemscripten_2026_0_wasm32.whl", hash = "sha256:05ad734997f09fcc9633fc2e3715033239792fc9f12aec6ec0c48e32b214e47e", size = 7314556, upload-time = "2026-09-18T19:30:15.456Z" },
-    { url = "https://files.pythonhosted.org/packages/64/23/40a365a39f7f3148196e98f496b31b5588414b7898fe65f8343b402a6d1a/onnx-1.23.0-cp314-cp314t-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:5741b60e189b5c8977beb8ec870c47bf8d2d938add5d5f11467facf6904de4cd", size = 8647161, upload-time = "2026-09-18T19:30:27.619Z" },
-    { url = "https://files.pythonhosted.org/packages/86/dd/03c1b211b935cf6bf3f96f0d18a0ea62a3ac522212af4277ac47fba02c47/onnx-1.23.0-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d6951c2ed343eb9dbc2b644507f9ed8d34c23558bae839b3726b5b8109d3ff8b", size = 8886389, upload-time = "2026-09-18T19:30:30.226Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/50/2e156ef2cae1c9f4ff01a41dffa43fc1eb7b969755055436bf6df1805d54/onnx-1.23.2-cp312-abi3-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:a203efdbaabbbe8f25e854e2b2921382d6fcf4c67895656f939044b0632974e8", size = 8640515, upload-time = "2026-10-06T04:25:36.727Z" },
+    { url = "https://files.pythonhosted.org/packages/87/56/21509a657f9a73ab0ca307d325043f49ca6c4ff6bf79edeb9e159190d44d/onnx-1.23.2-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7abf381d278f31ac62487fddedc9dd42da842dce94d5d43536836ee3efdf4a2b", size = 8881633, upload-time = "2026-10-06T04:25:38.868Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/ef/0a69093ffa0b999747b373c75d07182a812722a0e595d21f763a8d406260/onnx-1.23.2-cp312-abi3-pyemscripten_2026_0_wasm32.whl", hash = "sha256:e79e35e152d3095c6910ae81013bbc68679e32bfc0ca76f840968d4b6fdfb864", size = 7314844, upload-time = "2026-10-06T04:25:41.088Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/38/cbc9c5a72dbbc9d20f17e6855c643a2105053f756784cb167f69915c486d/onnx-1.23.2-cp314-cp314t-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:32fd9c92244c2aea2b2c9e0e7b18fedcf6000434124ab6fc8796e22baa602d30", size = 8647447, upload-time = "2026-10-06T04:25:50.901Z" },
+    { url = "https://files.pythonhosted.org/packages/2f/24/36c505c2f8079186ac7c2d858a7fda3c5591418ae92d134e2bf56f6eee1f/onnx-1.23.2-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:77674dc4fda2bde9a13aee67fb9ff658080159eb516d3a5b3fb2418d44dc70be", size = 8886676, upload-time = "2026-10-06T04:25:52.852Z" },
 ]
 
 [[package]]
@@ -2642,7 +2642,7 @@ requires-dist = [
     { name = "matplotlib", specifier = "==3.11.2" },
     { name = "mlflow-skinny", specifier = "==3.16.1" },
     { name = "numpy", specifier = "==2.2.6" },
-    { name = "onnx", specifier = "==1.23.0" },
+    { name = "onnx", specifier = "==1.23.2" },
     { name = "onnxruntime-gpu", specifier = "==1.30.0" },
     { name = "onnxscript", specifier = "==0.7.2" },
     { name = "packaging", specifier = "==25.0" },
