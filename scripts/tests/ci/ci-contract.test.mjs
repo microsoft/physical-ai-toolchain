@@ -1328,6 +1328,24 @@ for (const [name, mutate, diagnostic] of graphMutations) {
   });
 }
 
+for (const [workflow, job, minutes, valid] of [
+  ['dataviewer-backend-pytests', 'pytest-dataviewer', 40, true],
+  ['dataviewer-backend-pytests', 'pytest-dataviewer', 41, false],
+  ['fuzz-regression-tests', 'fuzz-regression', 20, true],
+  ['fuzz-regression-tests', 'fuzz-regression', 21, false],
+]) {
+  test(`execution budget: ${workflow} ${minutes} minutes is ${valid ? 'allowed' : 'rejected'}`, () => {
+    const candidate = structuredClone(graph);
+    candidate[`.github/workflows/${workflow}.yml`].jobs[job]['timeout-minutes'] = minutes;
+    const errors = validateWorkflows(candidate, contract);
+    if (valid) {
+      assert.deepEqual(errors, []);
+    } else {
+      assert.ok(errors.includes(`${workflow}:${job}: timeout must be within the execution budget`));
+    }
+  });
+}
+
 const executionMutations = [
   ['missing reusable output', ({ workflow }) => { delete workflow.on.workflow_call.outputs['work-status']; }, 'broken reusable output work-status'],
   ['constant reusable output', ({ workflow }) => { workflow.on.workflow_call.outputs['expected-count'].value = '1'; }, 'broken reusable output expected-count'],

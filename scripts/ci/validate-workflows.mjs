@@ -68,6 +68,7 @@ function requiredStepStatusJson(requiredSteps) {
 }
 function timeoutLimit(workflow, job) {
   if (/aggregate|summary|discover|outcome/.test(job)) return 10;
+  if (workflow === 'dataviewer-backend-pytests' && job === 'pytest-dataviewer') return 40;
   if (workflow === 'accessibility-evidence' && ['evidence', 'product-evidence'].includes(job)) return 20;
   if (workflow === 'gpu-offload-kind-smoke' || /pytest|pytests|frontend-tests|pester-tests|go-tests|fuzz-regression|terraform/.test(workflow)) return 20;
   if (workflow === 'docusaurus-tests') return job === 'docusaurus' ? 90 : 15;

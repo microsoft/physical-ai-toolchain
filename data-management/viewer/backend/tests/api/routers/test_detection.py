@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.models.datasources import EpisodeData, EpisodeMeta
+from src.api.models.datasources import DatasetInfo, EpisodeData, EpisodeMeta
 from src.api.models.detection import EpisodeDetectionSummary
 
 
@@ -22,6 +22,9 @@ def override_services():
     from src.api.services.detection_service import get_detection_service
 
     dataset_service = MagicMock()
+    dataset_service.get_dataset = AsyncMock(
+        return_value=DatasetInfo(id="ds-1", name="Synthetic dataset", total_episodes=1, fps=30.0, features={}, tasks=[])
+    )
     dataset_service.get_episode = AsyncMock(return_value=None)
     dataset_service.get_frame_image = AsyncMock(return_value=b"jpeg-bytes")
 

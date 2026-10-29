@@ -82,9 +82,15 @@ npm run dataviewer:dev
 
 ## 📊 AI Analysis
 
-The [AI-analysis endpoints](backend/src/api/routes/ai_analysis.py) require nonempty, rectangular position and force matrices containing only finite numbers. Invalid matrices return HTTP 400. `POST /api/ai/cluster` requires at least two trajectories; an explicit `num_clusters` must be between 2 and 20 and cannot exceed the number of trajectories.
+The [AI-analysis endpoints](backend/src/api/routes/ai_analysis.py) require nonempty, rectangular position and force matrices containing only finite numbers. Timestamps and optional force and gripper arrays must match the position count. Invalid matrix shapes or mismatched lengths return HTTP 400; boolean and string coordinates return HTTP 422.
+
+Trajectory analysis, anomaly detection, and annotation suggestions require at least three positions. `POST /api/ai/cluster` requires at least two trajectories; an explicit `num_clusters` must be between 2 and 20 and cannot exceed the number of trajectories.
 
 The [clustering service](backend/src/api/services/clustering.py) applies a shared scale to extreme coordinate magnitudes before extracting features when squared statistics or path lengths risk overflowing float64. Ordinary coordinate magnitudes retain their original feature calculation.
+
+The [trajectory analyzer](backend/src/api/services/trajectory_analysis.py) uses vectorized float64 norms for ordinary trajectories and scales norms and ratios to keep metrics finite. Unsafe arithmetic falls back to Decimal before calculating the bounded scores.
+
+The [anomaly detector](backend/src/api/services/anomaly_detection.py) uses shared overflow-safe derivatives and norms, with centered, scaled statistics when ordinary float64 calculations are unsafe. Absolute standard-deviation and stop thresholds remain in the original units. Severe anomalies contribute to annotation suggestions regardless of whether the calculation requires the wider-exponent fallback.
 
 ## 📄 Accepted Dataset Contract
 
@@ -731,6 +737,8 @@ Supported fields include object, pickup location, grasp outcome, place outcome, 
 
 ### Exporting edited episodes
 
+Export-preview CSV parameters accept signed ASCII decimal integers, surrounding ASCII whitespace, and empty comma-separated elements when at least one integer is present. CR/LF characters are stripped before parsing; underscores and non-ASCII digits return HTTP 400. Streaming exports return `text/event-stream`; pre-stream errors use JSON.
+
 **Export** writes the current episode with its edits applied: removed and inserted frames, crop and resize, trajectory adjustments and subtasks. The source dataset is never modified, and the output path must be under the Dataviewer data directory. A relative output path is resolved against that directory, so the default, `<dataset>-export`, appears in the dataset list as a new dataset beside its source.
 
 | Source format | Export output                                                                                            |
@@ -947,19 +955,49 @@ For model-free echo execution, set `--build-arg BACKEND_EXTRAS=azure,analysis,ex
 
 ### Backend Development
 
+Run these commands from `data-management/viewer/`. The npm scripts use the frozen backend environment and include the analysis, export, and authentication dependencies for tests.
+
 ```bash
-cd backend
-source .venv/bin/activate
-
-# Run tests
-pytest
-
-# Lint
-ruff check src/
-
-# Lint with auto-fix
-ruff check src/ --fix
+npm run test:backend -- tests/test_api_fuzzing.py -q
+npm run validate:backend
+npm run lint:backend -- --fix
 ```
+
+The [OpenAPI contract suite](backend/tests/test_api_fuzzing.py) runs every default Schemathesis check against the default and VLM-enabled APIs, with deterministic positive and negative generation and `max_examples=200`. Each generated case has isolated storage and rate-limit state.
+
+The [backend CI job](../../.github/workflows/dataviewer-backend-pytests.yml) has a 40-minute budget for dependency setup, the complete test suite with coverage, and evidence publication.
+
+Positive-case preparation aligns dependent arrays, establishes subtask identities and adoption references, orders edit ranges, supplies revision preconditions, and serializes integer-valued path/query numbers as integer text without changing their values. It leaves negative cases and check-generated probes unchanged. Keep expressible constraints in OpenAPI rather than adding check exclusions.
+
+Video Range uses a dependent `http-byte-range` generation strategy to produce ordered endpoints without rewriting requests. The schema constrains header syntax; direct regressions submit malformed and reversed ranges unchanged.
+
+The VLM-enabled configuration includes the shared judge-job routes. Resource regressions submit jobs, execute the echo worker, and verify completed results and cache reuse through the job-status API. Each test restores both routes and lifespan state; each generated case has an independent job manager.
+
+Saved-edit routes document source-generation conflicts as HTTP 409, including the current source identity when a stored descriptor is stale. Invalid edit context returns HTTP 422; source or storage unavailability returns HTTP 503 or 500.
+
+Deleting a built-in label returns HTTP 409 without changing labels or their revision. Revision preconditions still apply, and contract tests preserve the submitted label unchanged.
+
+Video routes validate Range input before selecting local files or Blob storage. Malformed headers and unsupported units return JSON HTTP 400; HEAD responses omit the body. Bounded and open-ended single-byte ranges preserve partial delivery, and resource-unsatisfiable ranges return HTTP 416 with `Content-Range`. Suffix and multipart ranges are not supported.
+
+Body schemas describe accepted input before normalization. Language tags allow surrounding whitespace within the 35-character input limit. Analysis import fields allow CR/LF sanitization and surrounding whitespace within the 64-character input limit. Detection labels allow surrounding whitespace, ignore blank values, and apply the 100-character limit after trimming. Contract regressions exercise these inputs and invalid near misses against real dataset and revision prerequisites.
+
+Judge process methods accept `gvl`, `chronological`, or `null`, with CR/LF characters removed from strings before method selection. Other whitespace and unsupported methods are rejected.
+
+The suite also requires successful operations against synthetic LeRobot data: dataset and episode reads, annotations, labels, media, exports, and the optional echo judge. It needs neither cloud credentials nor downloaded models. Detection replaces only the inference service; route validation and response checking remain live.
+
+Direct regressions cover invalid inputs, revision failures, and complete HTTP 405 `Allow` headers. Joint-config indices and analysis-record integer fields accept JSON integers, including integer-valued numbers such as `1.0`, but reject booleans, numeric strings, and fractions. Analysis-record numeric and boolean fields enforce their respective JSON types; optional fields still accept `null`.
+
+Detection frame indices, cluster counts, and export integer fields also accept integer-valued JSON numbers without coercing strings or booleans. Detection confidence and export numeric values require JSON numbers; export flags require JSON booleans.
+
+Annotation scores, percentages, and frame indices follow the same JSON-integer rules, including nested quality metrics, anomalies, and saved detections. Annotation numeric values require JSON numbers; annotation flags, analysis-import `overwrite`, and judge `force` require JSON booleans. Episode annotation timestamps require datetime strings, not numeric epochs. Schema-invalid scalar inputs return HTTP 422 before annotation writes, label replacement, or judge execution.
+
+Annotation instructions and saved detection labels must contain at least one character other than CR/LF. Empty or CR/LF-only text returns HTTP 422 before writing; other whitespace remains supported. CR/LF removal preserves meaningful text, with raw input limits of 1,000 characters for instructions and 100 for saved detection labels.
+
+Export edit-map keys use ASCII decimal strings with an optional leading minus; channel-map keys use ASCII digits only. Leading zeros remain supported. Plus signs, decimal points, whitespace, underscores, and non-ASCII digits in these keys return HTTP 422. These checks also apply to nested export operations and streaming exports, before output is created.
+
+Integer path and query parameters use integer text, such as `0` or `+1`. Decimal-form values such as `+0.0` return HTTP 422; this does not change integer-valued JSON numbers in request bodies.
+
+Numerical regressions also verify anomaly frame ranges, severity, and annotation ratings for extreme finite inputs. A schema-valid response alone does not establish numerical correctness.
 
 ### Frontend Development
 

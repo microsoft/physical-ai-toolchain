@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from src.api.services import trajectory_analysis, trajectory_numerics
 from src.api.services.anomaly_detection import AnomalyDetector
 from src.api.services.trajectory_analysis import TrajectoryAnalyzer
 
@@ -14,6 +15,223 @@ def smooth_trajectory() -> tuple[np.ndarray, np.ndarray]:
     timestamps = np.linspace(0.0, 1.0, 11)
     positions = np.column_stack((timestamps, timestamps * 2.0, timestamps * 3.0))
     return positions, timestamps
+
+
+SMOOTHNESS_MODES = ("log-scaled", "radian-based")
+DECIMAL_HELPERS = ("decimal_array", "decimal_row_norms")
+
+
+def _hesitation_reversal_case() -> tuple[np.ndarray, np.ndarray]:
+    timestamps = np.arange(120, dtype=np.float64) / 30.0
+    positions = np.column_stack(
+        [
+            40.0 * np.sin(2.0 * np.pi * 0.8 * timestamps),
+            120.0 + 10.0 * np.cos(2.0 * np.pi * 0.5 * timestamps),
+        ]
+    )
+    positions[30:50] = positions[30]
+    positions[80:86] = positions[80]
+    return positions, timestamps
+
+
+def _threshold_boundary_case() -> tuple[np.ndarray, np.ndarray]:
+    steps = np.concatenate(
+        [np.full(6, 0.0105), np.full(6, 0.0095), np.full(6, 0.0105), np.full(6, 0.0095), np.full(5, 0.0105)]
+    )
+    base = np.concatenate([[0.0], np.cumsum(steps)])
+    return np.column_stack([base, 0.3 * base]), np.arange(base.size, dtype=np.float64)
+
+
+def _zero_motion_case() -> tuple[np.ndarray, np.ndarray]:
+    return np.full((50, 3), 7.5), np.linspace(0.0, 1.0, 50)
+
+
+def _large_offset_case() -> tuple[np.ndarray, np.ndarray]:
+    timestamps = np.linspace(0.0, 2.0, 60)
+    return np.column_stack([np.full(60, 1e200), 2.0 * np.sin(np.pi * timestamps)]), timestamps
+
+
+def _degree_scale_case() -> tuple[np.ndarray, np.ndarray]:
+    timestamps = np.linspace(0.0, 0.25, 8)
+    steps = np.arange(8, dtype=np.float64)
+    return np.column_stack([steps**3, (steps**3) * 0.5]), timestamps
+
+
+def _path_length_overflow_case() -> tuple[np.ndarray, np.ndarray]:
+    positions = np.array([[8e307 * (index % 3 - 1)] for index in range(12)])
+    return positions, np.arange(12, dtype=np.float64)
+
+
+def _jerk_overflow_case() -> tuple[np.ndarray, np.ndarray]:
+    steps = np.array([1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 1.0, -1.0, 2.0, -2.0, 3.0])
+    positions = np.concatenate([[0.0], np.cumsum(steps)])[:, None]
+    return positions, np.arange(positions.shape[0], dtype=np.float64) * 1e-300
+
+
+ORDINARY_CASES = {
+    "hesitation_and_reversal": _hesitation_reversal_case,
+    "threshold_boundary": _threshold_boundary_case,
+    "zero_motion": _zero_motion_case,
+    "large_offset": _large_offset_case,
+    "degree_scale": _degree_scale_case,
+}
+UNSAFE_CASES = {
+    "path_length_overflow": _path_length_overflow_case,
+    "jerk_overflow": _jerk_overflow_case,
+}
+
+
+@pytest.fixture
+def decimal_helper_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record array-wide Decimal helper calls while delegating to the real helpers."""
+    calls: list[str] = []
+    for module in (trajectory_numerics, trajectory_analysis):
+        for name in DECIMAL_HELPERS:
+            original = getattr(module, name, None)
+            if original is None:
+                continue
+
+            def spy(*args, _name=name, _original=original, **kwargs):
+                calls.append(_name)
+                return _original(*args, **kwargs)
+
+            monkeypatch.setattr(module, name, spy)
+    return calls
+
+
+def _assert_metrics_match(metrics, expected: dict) -> None:
+    for name, value in expected.items():
+        actual = getattr(metrics, name)
+        if isinstance(value, float):
+            assert actual == pytest.approx(value, rel=1e-9, abs=1e-12), name
+        else:
+            assert actual == value, name
+
+
+ORDINARY_EXPECTED: dict[tuple[str, str], dict] = {
+    ("hesitation_and_reversal", "log-scaled"): {
+        "smoothness": 3.017358753977871e-06,
+        "normalized_smoothness": 0.15336545811768496,
+        "efficiency": 0.06918700939039778,
+        "jitter": 0.16918911090573277,
+        "hesitation_count": 2,
+        "correction_count": 3,
+        "overall_score": 2,
+        "flags": ["jittery"],
+    },
+    ("hesitation_and_reversal", "radian-based"): {
+        "smoothness": 3.017358753977871e-06,
+        "normalized_smoothness": 0.000172852560355135,
+        "efficiency": 0.06918700939039778,
+        "jitter": 0.16918911090573277,
+        "hesitation_count": 2,
+        "correction_count": 3,
+        "overall_score": 2,
+        "flags": ["jittery"],
+    },
+    ("threshold_boundary", "log-scaled"): {
+        "smoothness": 0.9995983138317271,
+        "normalized_smoothness": 0.9998255453069337,
+        "efficiency": 1.0,
+        "jitter": 0.0,
+        "hesitation_count": 2,
+        "correction_count": 0,
+        "overall_score": 5,
+        "flags": [],
+    },
+    ("threshold_boundary", "radian-based"): {
+        "smoothness": 0.9995983138317271,
+        "normalized_smoothness": 0.9999929864857422,
+        "efficiency": 1.0,
+        "jitter": 0.0,
+        "hesitation_count": 2,
+        "correction_count": 0,
+        "overall_score": 5,
+        "flags": [],
+    },
+    ("zero_motion", "log-scaled"): {
+        "smoothness": 1.0,
+        "normalized_smoothness": 1.0,
+        "efficiency": 1.0,
+        "jitter": 0.0,
+        "hesitation_count": 1,
+        "correction_count": 0,
+        "overall_score": 5,
+        "flags": [],
+    },
+    ("zero_motion", "radian-based"): {
+        "smoothness": 1.0,
+        "normalized_smoothness": 1.0,
+        "efficiency": 1.0,
+        "jitter": 0.0,
+        "hesitation_count": 1,
+        "correction_count": 0,
+        "overall_score": 5,
+        "flags": [],
+    },
+    ("large_offset", "log-scaled"): {
+        "smoothness": 0.03182946423406638,
+        "normalized_smoothness": 0.40045320546184304,
+        "efficiency": 6.125404771051978e-17,
+        "jitter": 1.0057799788080455e-05,
+        "hesitation_count": 0,
+        "correction_count": 2,
+        "overall_score": 2,
+        "flags": ["jittery"],
+    },
+    ("large_offset", "radian-based"): {
+        "smoothness": 0.03182946423406638,
+        "normalized_smoothness": 0.6532172189665783,
+        "efficiency": 6.125404771051978e-17,
+        "jitter": 1.0057799788080455e-05,
+        "hesitation_count": 0,
+        "correction_count": 2,
+        "overall_score": 2,
+        "flags": ["jittery"],
+    },
+    ("degree_scale", "log-scaled"): {
+        "smoothness": 9.603520685038452e-06,
+        "normalized_smoothness": 0.16618004927657404,
+        "efficiency": 1.0,
+        "jitter": 0.0,
+        "hesitation_count": 0,
+        "correction_count": 0,
+        "overall_score": 4,
+        "flags": ["jittery"],
+    },
+    ("degree_scale", "radian-based"): {
+        "smoothness": 9.603520685038452e-06,
+        "normalized_smoothness": 0.0005499438833324047,
+        "efficiency": 1.0,
+        "jitter": 0.0,
+        "hesitation_count": 0,
+        "correction_count": 0,
+        "overall_score": 4,
+        "flags": ["jittery"],
+    },
+}
+UNSAFE_EXPECTED: dict[str, dict] = {
+    "path_length_overflow": {
+        "smoothness": 2.94627825494395e-309,
+        "normalized_smoothness": 0.003230697036604073,
+        "efficiency": 0.14285714285714285,
+        "jitter": 0.0,
+        "hesitation_count": 0,
+        "correction_count": 6,
+        "overall_score": 2,
+        "flags": ["jittery", "excessive_corrections"],
+    },
+    "jerk_overflow": {
+        "smoothness": 0.0,
+        "normalized_smoothness": 0.0011087707790106976,
+        "efficiency": 0.14285714285714285,
+        "jitter": 0.07709214919581286,
+        "hesitation_count": 0,
+        "correction_count": 10,
+        "overall_score": 2,
+        "flags": ["jittery", "excessive_corrections"],
+    },
+}
 
 
 class TestTrajectoryAnalyzer:
@@ -56,6 +274,27 @@ class TestTrajectoryAnalyzer:
     def test_invalid_smoothness_mode_raises_value_error(self):
         with pytest.raises(ValueError, match="smoothness_mode must be one of"):
             TrajectoryAnalyzer(smoothness_mode="invalid")
+
+    @pytest.mark.parametrize("smoothness_mode", SMOOTHNESS_MODES)
+    @pytest.mark.parametrize("case", list(ORDINARY_CASES))
+    def test_ordinary_float_trajectories_skip_decimal_work(self, case, smoothness_mode, decimal_helper_calls):
+        positions, timestamps = ORDINARY_CASES[case]()
+
+        metrics = TrajectoryAnalyzer(smoothness_mode=smoothness_mode).analyze(positions, timestamps)
+
+        assert decimal_helper_calls == []
+        _assert_metrics_match(metrics, ORDINARY_EXPECTED[(case, smoothness_mode)])
+
+    @pytest.mark.parametrize("case", list(UNSAFE_CASES))
+    def test_unsafe_float_trajectories_keep_decimal_fallback(self, case, decimal_helper_calls):
+        positions, timestamps = UNSAFE_CASES[case]()
+
+        metrics = TrajectoryAnalyzer().analyze(positions, timestamps)
+
+        assert decimal_helper_calls
+        for bounded in (metrics.smoothness, metrics.normalized_smoothness, metrics.efficiency, metrics.jitter):
+            assert 0.0 <= bounded <= 1.0
+        _assert_metrics_match(metrics, UNSAFE_EXPECTED[case])
 
 
 class TestAnomalyDetector:

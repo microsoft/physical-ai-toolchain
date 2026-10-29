@@ -12,16 +12,21 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Request, Response
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.routing import iter_route_contexts
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.routing import Match
 
 from .auth import MediaSession, PrincipalContext, issue_media_session, require_auth, require_principal_context
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token, require_csrf_token
 from .middleware import ContentSizeLimitMiddleware, EpisodeCompressionMiddleware, SecurityHeadersMiddleware
+from .models.errors import error_responses
 from .rate_limiter import limiter
 from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, vlm_judge
 from .routes import ai_analysis
@@ -136,6 +141,7 @@ app = FastAPI(
     version="0.1.0",
     docs_url=None,
     lifespan=lifespan,
+    responses=error_responses(413),
     openapi_tags=[
         {"name": "auth", "description": "Authentication utilities"},
     ],
@@ -161,6 +167,25 @@ install_responsive_swagger_ui(app)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def api_http_exception_handler(request: Request, exc: StarletteHTTPException) -> Response:
+    """Describe all matching routes when a method is not supported."""
+    if exc.status_code == 405:
+        methods = {
+            method
+            for route in iter_route_contexts(request.app.routes)
+            if route.matches(request.scope)[0] != Match.NONE
+            for method in route.methods or ()
+        }
+        if methods:
+            exc = StarletteHTTPException(
+                status_code=405,
+                detail=exc.detail,
+                headers={**(exc.headers or {}), "Allow": ", ".join(sorted(methods))},
+            )
+    return await http_exception_handler(request, exc)
 
 
 @app.exception_handler(RevisionConflictError)
@@ -216,24 +241,25 @@ app.add_middleware(
 
 # All /api/* routes require authentication (health and csrf-token are on app directly)
 api_auth = [Depends(require_auth)]
-app.include_router(export.router, prefix="/api/datasets", tags=["export"], dependencies=api_auth)
-app.include_router(detection.router, prefix="/api/datasets", tags=["detection"], dependencies=api_auth)
-app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"], dependencies=api_auth)
-app.include_router(annotations.router, prefix="/api", tags=["annotations"], dependencies=api_auth)
-app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"], dependencies=api_auth)
-app.include_router(ai_analysis.router, prefix="/api", tags=["ai"], dependencies=api_auth)
-app.include_router(labels.router, prefix="/api/datasets", tags=["labels"], dependencies=api_auth)
-app.include_router(joint_config.router, prefix="/api/datasets", tags=["joint-config"], dependencies=api_auth)
-app.include_router(joint_config.defaults_router, prefix="/api", tags=["joint-config"], dependencies=api_auth)
+api_router = APIRouter(dependencies=api_auth, responses=error_responses(401, 403))
+api_router.include_router(export.router, prefix="/api/datasets", tags=["export"])
+api_router.include_router(detection.router, prefix="/api/datasets", tags=["detection"])
+api_router.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"])
+api_router.include_router(annotations.router, prefix="/api", tags=["annotations"])
+api_router.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
+api_router.include_router(ai_analysis.router, prefix="/api", tags=["ai"])
+api_router.include_router(labels.router, prefix="/api/datasets", tags=["labels"])
+api_router.include_router(joint_config.router, prefix="/api/datasets", tags=["joint-config"])
+api_router.include_router(joint_config.defaults_router, prefix="/api", tags=["joint-config"])
 if _config.vlm_judge_enabled:
     if _job_router is not None:
-        app.include_router(_job_router, prefix="/api/judge", dependencies=api_auth)
-    app.include_router(
+        api_router.include_router(_job_router, prefix="/api/judge")
+    api_router.include_router(
         vlm_judge.router,
         prefix="/api/datasets",
         tags=["vlm-judge"],
-        dependencies=api_auth,
     )
+app.include_router(api_router)
 
 
 @app.get("/health")
@@ -289,7 +315,7 @@ async def get_csrf_token() -> JSONResponse:
     return response
 
 
-@app.get("/api/auth/context", response_model=PrincipalContext, tags=["auth"])
+@app.get("/api/auth/context", response_model=PrincipalContext, tags=["auth"], responses=error_responses(401, 403))
 async def get_auth_context(
     principal: PrincipalContext = Depends(require_principal_context),
 ) -> PrincipalContext:
@@ -301,6 +327,7 @@ async def get_auth_context(
     "/api/auth/media-session",
     response_model=MediaSession,
     tags=["auth"],
+    responses=error_responses(400, 401, 403),
     dependencies=[Depends(require_csrf_token)],
 )
 async def create_media_session(

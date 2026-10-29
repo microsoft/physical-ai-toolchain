@@ -19,11 +19,12 @@ import logging
 import re
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from fastapi import Path as PathParam
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from ..auth import PrincipalContext, require_principal_context
 from ..services.annotation_service import AnnotationService, get_annotation_service
@@ -35,21 +36,36 @@ if TYPE_CHECKING:
 
 from ..config import AppConfig, get_app_config
 from ..csrf import require_csrf_token
+from ..models.errors import ErrorResponse, ValidationErrorResponse, error_responses
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..services.vlm_judge_service import get_judge_jobs, get_vlm_judge_service, prepare_job_configuration
 from ..validation import (
+    CAMERA_NAME_INPUT_PATTERN,
+    DATASET_ID_INPUT_PATTERN,
     SAFE_CAMERA_NAME_PATTERN,
     SAFE_DATASET_ID_PATTERN,
     SanitizedModel,
     path_int_param,
-    path_string_param,
     sanitize_user_string,
     validate_path_containment,
+    validate_safe_string,
 )
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(responses=error_responses(400, 404, 409, 503))
+
+
+def _judge_dataset_id(
+    dataset_id: str = PathParam(
+        ...,
+        json_schema_extra={
+            "pattern": DATASET_ID_INPUT_PATTERN,
+            "not": {"pattern": r"-[\r\n]*-[\r\n]*(?:$|-[\r\n]*-|\.[\r\n]*(?:\.[\r\n]*)?(?:-[\r\n]*-|$))"},
+        },
+    ),
+) -> str:
+    return validate_safe_string(dataset_id, pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")
 
 
 def _job_actor(principal: PrincipalContext = Depends(require_principal_context)) -> str:
@@ -60,12 +76,16 @@ def build_optional_job_router() -> APIRouter:
     """Build curation routes independently of the optional evaluator runtime."""
     from physical_ai_curation.api import build_job_router
 
-    return build_job_router(
-        get_judge_jobs,
-        actor_dependency=_job_actor,
-        prepare_config=prepare_job_configuration,
-        mutation_dependencies=[Depends(require_csrf_token)],
+    router = APIRouter(responses=error_responses(400, 404, 409, 503))
+    router.include_router(
+        build_job_router(
+            get_judge_jobs,
+            actor_dependency=_job_actor,
+            prepare_config=prepare_job_configuration,
+            mutation_dependencies=[Depends(require_csrf_token)],
+        )
     )
+    return router
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +94,9 @@ def build_optional_job_router() -> APIRouter:
 
 
 PROCESS_METHODS = ("gvl", "chronological")
+_PROCESS_METHOD_ALTERNATIVES = "|".join(
+    r"[\r\n]*".join(re.escape(character) for character in method) for method in PROCESS_METHODS
+)
 _VIEW_NAME_RE = re.compile(SAFE_CAMERA_NAME_PATTERN)
 
 
@@ -86,19 +109,21 @@ class JudgeRequest(SanitizedModel):
 
     instruction: str | None = Field(
         default=None,
-        description="Override the dataset-supplied instruction",
+        description="Use the saved instruction. Request-body instruction overrides are not supported.",
         max_length=1024,
+        json_schema_extra={"type": "null"},
     )
-    views: list[str] | None = Field(
+    views: list[Annotated[str, Field(json_schema_extra={"pattern": CAMERA_NAME_INPUT_PATTERN})]] | None = Field(
         default=None,
         description="Subset of view names to evaluate (default: all video features)",
         max_length=16,
     )
     process_method: str | None = Field(
         default=None,
-        description="Process-reward scoring technique: 'gvl' or 'chronological'",
+        description="Process-reward scoring technique: 'gvl' or 'chronological'. CR/LF characters are removed.",
+        json_schema_extra={"pattern": rf"^[\r\n]*(?:{_PROCESS_METHOD_ALTERNATIVES})[\r\n]*$(?![\s\S])"},
     )
-    force: bool = Field(default=False, description="Bypass the cache and re-run")
+    force: StrictBool = Field(default=False, description="Bypass the cache and re-run")
 
     @field_validator("views")
     @classmethod
@@ -155,7 +180,7 @@ class JudgeResponse(BaseModel):
 
 @router.get("/{dataset_id}/episodes/{episode_idx}/judge/snapshot", response_model=SavedInputSnapshot)
 async def get_saved_input_snapshot(
-    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    dataset_id: str = Depends(_judge_dataset_id),
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0)),
     annotation_author_id: str | None = None,
     principal: PrincipalContext = Depends(require_principal_context),
@@ -173,7 +198,7 @@ async def get_saved_input_snapshot(
     response_model=JudgeStatus,
 )
 async def get_episode_judgment(
-    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    dataset_id: str = Depends(_judge_dataset_id),
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0)),
     service: DatasetService = Depends(get_dataset_service),
     config: AppConfig = Depends(get_app_config),
@@ -229,6 +254,7 @@ async def get_episode_judgment(
 @router.post(
     "/{dataset_id}/episodes/{episode_idx}/judge",
     status_code=202,
+    responses={**error_responses(502), 422: {"model": ErrorResponse | ValidationErrorResponse}},
     dependencies=[Depends(require_csrf_token)],
 )
 async def run_episode_judgment(
@@ -236,7 +262,7 @@ async def run_episode_judgment(
     request: Request,
     response: Response,
     idempotency_key: str | None = Header(default=None, min_length=1, max_length=200),
-    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    dataset_id: str = Depends(_judge_dataset_id),
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0)),
     service: DatasetService = Depends(get_dataset_service),
     config: AppConfig = Depends(get_app_config),

@@ -1,3 +1,4 @@
+# cspell:ignore ntial CCESS
 """Integration and unit tests for label API endpoints."""
 
 from __future__ import annotations
@@ -8,6 +9,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call
+from urllib.parse import quote
 
 import pytest
 from fastapi import HTTPException
@@ -553,15 +555,33 @@ def test_delete_label_option_removes_assignments(client: TestClient, dataset_ser
     }
 
 
-def test_delete_default_label_option_rejected(client: TestClient) -> None:
+@pytest.mark.parametrize("label", ["success", " FAILURE ", "par\r\ntial", "SU\rCCESS"])
+@pytest.mark.parametrize(("precondition", "status"), [("valid", 409), ("missing", 428), ("stale", 412)])
+def test_delete_default_label_option_rejected(
+    client: TestClient, dataset_service: MagicMock, label: str, precondition: str, status: int
+) -> None:
     """Built-in labels should not be deletable."""
-    response = client.delete(
-        "/api/datasets/test-dataset/labels/options/success",
+    assigned = client.put(
+        "/api/datasets/test-dataset/episodes/1/labels",
+        json={"labels": ["SUCCESS", "FAILURE", "PARTIAL", "REVIEW"]},
         headers=_revision_headers(client, "test-dataset"),
     )
+    assert assigned.status_code == 200
+    before = client.get("/api/datasets/test-dataset/labels")
+    headers = {"If-Match": before.headers["ETag"]} if precondition == "valid" else {}
+    if precondition == "stale":
+        headers = {"If-Match": '"stale"'}
+    response = client.delete(
+        f"/api/datasets/test-dataset/labels/options/{quote(label, safe='')}",
+        headers=headers,
+    )
 
-    assert response.status_code == 400
-    assert response.json() == {"detail": "Built-in labels cannot be deleted"}
+    assert response.status_code == status
+    if precondition == "valid":
+        assert response.json() == {"detail": "Built-in labels cannot be deleted"}
+    after = client.get("/api/datasets/test-dataset/labels")
+    assert after.json() == before.json()
+    assert after.headers["ETag"] == before.headers["ETag"]
 
 
 def test_delete_label_option_rejects_empty(client: TestClient) -> None:
