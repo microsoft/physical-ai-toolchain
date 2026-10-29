@@ -19,7 +19,15 @@ from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from .auth import MediaSession, PrincipalContext, issue_media_session, require_auth, require_principal_context
+from .auth import (
+    HostedAuthMiddleware,
+    MediaSession,
+    PrincipalContext,
+    issue_media_session,
+    require_auth,
+    require_principal_context,
+    validate_hosted_auth_configuration,
+)
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token, require_csrf_token
 from .middleware import ContentSizeLimitMiddleware, EpisodeCompressionMiddleware, SecurityHeadersMiddleware
 from .rate_limiter import limiter
@@ -100,6 +108,7 @@ def _validate_local_storage_writable(data_path: str) -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Validate local storage and clean up blob sync directories."""
+    validate_hosted_auth_configuration()
     if _config.storage_backend == "local":
         await asyncio.to_thread(_validate_local_storage_writable, _config.data_path)
 
@@ -199,8 +208,6 @@ async def validation_exception_handler(request, exc: RequestValidationError) -> 
 
 
 # Middleware stack (last added = outermost = first to execute)
-# Order: SecurityHeaders → ContentSizeLimit → CORS → FastAPI App
-app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(EpisodeCompressionMiddleware, minimum_size=1024, compresslevel=1)
 app.add_middleware(
     ContentSizeLimitMiddleware,
@@ -213,6 +220,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-API-Key", "X-Request-ID"],
 )
+app.add_middleware(HostedAuthMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # All /api/* routes require authentication (health and csrf-token are on app directly)
 api_auth = [Depends(require_auth)]
