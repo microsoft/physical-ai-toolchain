@@ -77,8 +77,22 @@ jobs:
 
       - name: Install PowerShell-Yaml
         id: install-yaml
+        timeout-minutes: 3
         run: |
-          Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Force -SkipPublisherCheck -Scope CurrentUser
+          for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
+            try {
+              Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Repository PSGallery -Force -SkipPublisherCheck -Scope CurrentUser -ErrorAction Stop
+              Import-Module powershell-yaml -RequiredVersion 0.4.12 -ErrorAction Stop
+              break
+            }
+            catch {
+              if ($Attempt -eq 3) {
+                throw
+              }
+              Write-Warning "PowerShell-Yaml installation attempt $Attempt failed: $($_.Exception.Message)"
+              Start-Sleep -Seconds 5
+            }
+          }
 
       - name: Get changed files
         id: changed-files

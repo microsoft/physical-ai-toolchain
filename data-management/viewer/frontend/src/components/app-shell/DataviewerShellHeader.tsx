@@ -69,7 +69,7 @@ function DatasetSelector({
           id="dataset-selector"
           type="button"
           variant="outline"
-          aria-label="Dataset"
+          aria-label={`Dataset: ${selectedDataset?.id || 'Select a dataset'}`}
           aria-expanded={isOpen}
           className="w-72 justify-between font-normal"
         >
@@ -193,7 +193,7 @@ export function DataviewerShellHeader({
             <Button
               id="dataset-selector"
               variant="outline"
-              aria-label="Dataset"
+              aria-label={`Dataset: ${datasetId || 'Select a dataset'}`}
               aria-expanded={catalogOpen}
               aria-controls="dataset-catalog"
               className="max-w-72 truncate"

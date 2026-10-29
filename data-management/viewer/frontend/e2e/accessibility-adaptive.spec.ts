@@ -107,7 +107,7 @@ test('V19 preserves loaded and transient content under adaptive rendering', asyn
       1,
     )
     await assertNoLayoutLoss(page, testInfo, `text-resize-${scale * 100}`)
-    const datasetButton = page.getByRole('button', { name: 'Dataset', exact: true })
+    const datasetButton = page.getByRole('button', { name: /^Dataset: / })
     await datasetButton.click()
     await expect(page.getByPlaceholder('Filter datasets')).toBeVisible()
     await page.keyboard.press('Escape')
@@ -131,7 +131,7 @@ test('V19 preserves loaded and transient content under adaptive rendering', asyn
   await expect(page.getByRole('heading', { name: 'Episode 0' })).toBeVisible()
   await page.setViewportSize({ width: 320, height: 720 })
   await assertNoLayoutLoss(page, testInfo, 'reflow-loaded')
-  await page.getByRole('button', { name: 'Dataset', exact: true }).click()
+  await page.getByRole('button', { name: /^Dataset: / }).click()
   await assertNoLayoutLoss(page, testInfo, 'reflow-dataset-open')
   await page.keyboard.press('Escape')
   const exportButton = page.getByRole('button', { name: 'Export', exact: true })
@@ -210,7 +210,7 @@ test('V02 V03 V05 and V19 primary focus stops stay visible and unobscured', asyn
 }, testInfo) => {
   const errors = await openViewer(page, testInfo)
   const stops = [
-    page.getByRole('button', { name: 'Dataset', exact: true }),
+    page.getByRole('button', { name: /^Dataset: / }),
     page.getByRole('button', { name: 'Toggle Diagnostics' }),
     page.getByRole('link', { name: 'Help' }),
     page.getByRole('link', { name: 'Report problem' }),
@@ -233,7 +233,7 @@ test('V02 V03 V05 and V19 primary focus stops stay visible and unobscured', asyn
   ]
   for (const stop of diagnosticsStops) findings.push(await focusFinding(stop))
 
-  await page.getByRole('button', { name: 'Dataset', exact: true }).click()
+  await page.getByRole('button', { name: /^Dataset: / }).click()
   findings.push(await focusFinding(page.getByRole('combobox', { name: 'Filter datasets' })))
   await page.keyboard.press('Escape')
 

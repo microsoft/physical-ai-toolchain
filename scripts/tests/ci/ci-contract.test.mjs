@@ -1971,6 +1971,60 @@ for (const [name, mutate, diagnostic] of [
   });
 }
 
+for (const scenario of ['success', 'transient', 'exhausted', 'import-failure']) {
+  test(`Pester YAML setup: ${scenario} preserves bounded retries and pinned public installation`, () => {
+    const step = graph['.github/workflows/pester-tests.yml'].jobs.pester.steps.find(item => item.id === 'install-yaml');
+    assert.equal(step['timeout-minutes'], 3);
+    const script = `
+      $ErrorActionPreference = 'Stop'
+      $WarningPreference = 'SilentlyContinue'
+      $script:Attempts = 0
+      $script:Imports = 0
+      $script:Delays = 0
+      function Install-Module {
+        param($Name, $RequiredVersion, $Repository, [switch]$Force, [switch]$SkipPublisherCheck, $Scope, $ErrorAction)
+        if ($Name -ne 'powershell-yaml' -or $RequiredVersion -ne '0.4.12' -or
+            $Repository -ne 'PSGallery' -or $Scope -ne 'CurrentUser' -or $ErrorAction -ne 'Stop') {
+          throw 'Unexpected installation parameters'
+        }
+        $script:Attempts++
+        if ('${scenario}' -eq 'exhausted' -or ('${scenario}' -eq 'transient' -and $script:Attempts -lt 3)) {
+          throw 'Package failed to download'
+        }
+      }
+      function Import-Module {
+        param($Name, $RequiredVersion, $ErrorAction)
+        if ($Name -ne 'powershell-yaml' -or $RequiredVersion -ne '0.4.12' -or $ErrorAction -ne 'Stop') {
+          throw 'Unexpected import parameters'
+        }
+        $script:Imports++
+        if ('${scenario}' -eq 'import-failure') { throw 'Module import failed' }
+      }
+      function Start-Sleep {
+        param($Seconds)
+        if ($Seconds -ne 5) { throw 'Unexpected retry delay' }
+        $script:Delays++
+      }
+      $Failure = $null
+      try { & { ${step.run} } } catch { $Failure = $_.Exception.Message }
+      @{ Attempts = $script:Attempts; Imports = $script:Imports; Delays = $script:Delays; Failure = $Failure } |
+        ConvertTo-Json -Compress
+    `;
+    const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      cwd: root, encoding: 'utf8', timeout: 15_000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      Attempts: scenario === 'success' ? 1 : 3,
+      Imports: scenario === 'exhausted' ? 0 : scenario === 'import-failure' ? 3 : 1,
+      Delays: scenario === 'success' ? 0 : 2,
+      Failure: scenario === 'exhausted' ? 'Package failed to download' :
+        scenario === 'import-failure' ? 'Module import failed' : null,
+    });
+  });
+}
+
 test('frontmatter workflow: booleans bind to the actual script parameters without replacing scan paths', t => {
   const workspace = temporaryDirectory(t);
   const step = graph['.github/workflows/frontmatter-validation.yml'].jobs['frontmatter-validation'].steps

@@ -46,14 +46,59 @@ BeforeAll {
     function Invoke-Docker {
         param(
             [Parameter(Mandatory)]
-            [string[]] $Arguments
+            [string[]] $Arguments,
+
+            [ValidateRange(0, 3600)]
+            [int] $TimeoutSeconds = 0
         )
+
+        if ($TimeoutSeconds -gt 0) {
+            $Process = Start-Process -FilePath 'docker' -ArgumentList $Arguments -NoNewWindow -PassThru
+            try {
+                if (-not $Process.WaitForExit($TimeoutSeconds * 1000)) {
+                    $Process.Kill($true)
+                    throw "docker $($Arguments -join ' ') timed out after $TimeoutSeconds seconds"
+                }
+                if ($Process.ExitCode -ne 0) {
+                    throw "docker $($Arguments -join ' ') failed with exit code $($Process.ExitCode)"
+                }
+                return
+            }
+            finally {
+                $Process.Dispose()
+            }
+        }
 
         $output = & docker @Arguments 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw "docker $($Arguments -join ' ') failed: $($output -join "`n")"
         }
         return $output
+    }
+
+    function Initialize-DockerImage {
+        param(
+            [Parameter(Mandatory)]
+            [string] $Image
+        )
+
+        try {
+            Invoke-Docker -Arguments @('image', 'inspect', $Image) | Out-Null
+            return
+        }
+        catch {
+            for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
+                try {
+                    Invoke-Docker -Arguments @('pull', $Image) -TimeoutSeconds 120 | Out-Null
+                    return
+                }
+                catch {
+                    if ($Attempt -eq 3) {
+                        throw
+                    }
+                }
+            }
+        }
     }
 
     function Invoke-NginxFixture {
@@ -75,7 +120,7 @@ BeforeAll {
         )
 
         $arguments = @(
-            'run', '--detach', '--name', $Name,
+            'run', '--pull', 'never', '--detach', '--name', $Name,
             '--network', $Network,
             '--publish', '127.0.0.1::8080',
             '--env', "NGINX_BACKEND_HOST=$BackendHost",
@@ -111,6 +156,119 @@ BeforeAll {
         } while ([DateTime]::UtcNow -lt $deadline)
 
         throw 'Timed out waiting for the NGINX fixture port'
+    }
+}
+
+Describe 'Bounded Docker commands' -Tag 'Unit' {
+    BeforeEach {
+        $script:DockerProcess = [pscustomobject]@{
+            ExitCode         = 0
+            TimedOut         = $false
+            Killed           = $false
+            Disposed         = $false
+            WaitMilliseconds = 0
+        }
+        $script:DockerProcess | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {
+            param([int] $Milliseconds)
+            $this.WaitMilliseconds = $Milliseconds
+            return -not $this.TimedOut
+        }
+        $script:DockerProcess | Add-Member -MemberType ScriptMethod -Name Kill -Value {
+            param([bool] $EntireProcessTree)
+            $this.Killed = $EntireProcessTree
+        }
+        $script:DockerProcess | Add-Member -MemberType ScriptMethod -Name Dispose -Value {
+            $this.Disposed = $true
+        }
+        Mock Start-Process { return $script:DockerProcess }
+    }
+
+    It 'waits only for the configured deadline and disposes a successful process' {
+        Invoke-Docker -Arguments @('pull', $script:NginxImage) -TimeoutSeconds 120
+
+        $script:DockerProcess.WaitMilliseconds | Should -Be 120000
+        $script:DockerProcess.Killed | Should -BeFalse
+        $script:DockerProcess.Disposed | Should -BeTrue
+        Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
+            $FilePath -eq 'docker' -and $ArgumentList[0] -eq 'pull' -and
+            $ArgumentList[1] -eq $script:NginxImage -and $NoNewWindow -and $PassThru
+        }
+    }
+
+    It 'kills the process tree and disposes the client when the deadline expires' {
+        $script:DockerProcess.TimedOut = $true
+
+        { Invoke-Docker -Arguments @('pull', $script:NginxImage) -TimeoutSeconds 120 } |
+        Should -Throw '*timed out after 120 seconds*'
+
+        $script:DockerProcess.WaitMilliseconds | Should -Be 120000
+        $script:DockerProcess.Killed | Should -BeTrue
+        $script:DockerProcess.Disposed | Should -BeTrue
+    }
+
+    It 'reports nonzero exit codes without killing a completed process' {
+        $script:DockerProcess.ExitCode = 1
+
+        { Invoke-Docker -Arguments @('pull', $script:NginxImage) -TimeoutSeconds 120 } |
+        Should -Throw '*failed with exit code 1*'
+
+        $script:DockerProcess.Killed | Should -BeFalse
+        $script:DockerProcess.Disposed | Should -BeTrue
+    }
+}
+
+Describe 'TLS fixture image preparation' -Tag 'Unit' {
+    It 'reuses a cached pinned image without pulling' {
+        Mock Invoke-Docker {}
+
+        Initialize-DockerImage -Image $script:NginxImage
+
+        Should -Invoke Invoke-Docker -Times 1 -Exactly -ParameterFilter {
+            $Arguments[0] -eq 'image' -and $Arguments[1] -eq 'inspect' -and
+            $Arguments[2] -eq $script:NginxImage
+        }
+        Should -Invoke Invoke-Docker -Times 0 -Exactly -ParameterFilter { $Arguments[0] -eq 'pull' }
+    }
+
+    It 'retries a transient pull failure using the same pinned image' {
+        $script:PullAttempts = 0
+        Mock Invoke-Docker { throw 'Image not cached' } -ParameterFilter { $Arguments[0] -eq 'image' }
+        Mock Invoke-Docker {
+            $script:PullAttempts++
+            if ($script:PullAttempts -eq 1) {
+                throw '502 Bad Gateway'
+            }
+        } -ParameterFilter { $Arguments[0] -eq 'pull' }
+
+        Initialize-DockerImage -Image $script:NginxImage
+
+        Should -Invoke Invoke-Docker -Times 2 -Exactly -ParameterFilter {
+            $Arguments[0] -eq 'pull' -and $Arguments[1] -eq $script:NginxImage -and $TimeoutSeconds -eq 120
+        }
+    }
+
+    It 'fails after three unsuccessful pulls' {
+        Mock Invoke-Docker { throw 'Image not cached' } -ParameterFilter { $Arguments[0] -eq 'image' }
+        Mock Invoke-Docker { throw '502 Bad Gateway' } -ParameterFilter { $Arguments[0] -eq 'pull' }
+
+        { Initialize-DockerImage -Image $script:NginxImage } | Should -Throw '*502 Bad Gateway*'
+
+        Should -Invoke Invoke-Docker -Times 3 -Exactly -ParameterFilter {
+            $Arguments[0] -eq 'pull' -and $Arguments[1] -eq $script:NginxImage -and $TimeoutSeconds -eq 120
+        }
+    }
+
+    It 'fails after three timed-out pulls' {
+        Mock Invoke-Docker { throw 'Image not cached' } -ParameterFilter { $Arguments[0] -eq 'image' }
+        Mock Invoke-Docker { throw 'docker pull timed out after 120 seconds' } -ParameterFilter {
+            $Arguments[0] -eq 'pull'
+        }
+
+        { Initialize-DockerImage -Image $script:NginxImage } | Should -Throw '*timed out after 120 seconds*'
+
+        Should -Invoke Invoke-Docker -Times 3 -Exactly -ParameterFilter {
+            $Arguments[0] -eq 'pull' -and $Arguments[1] -eq $script:NginxImage -and $TimeoutSeconds -eq 120
+        }
     }
 }
 
@@ -160,6 +318,10 @@ Describe 'Production TLS certificate verification' -Tag 'Unit' {
     It 'rejects invalid certificates before production clients send authenticated requests' -Skip:(
         -not (Get-Command docker -ErrorAction SilentlyContinue)
     ) {
+        foreach ($Image in @($script:NodeImage, $script:NginxImage, $script:PythonImage)) {
+            Initialize-DockerImage -Image $Image
+        }
+
         $fixtureDirectory = Join-Path $TestDrive 'tls-fixture'
         $certificatePath = Join-Path $fixtureDirectory 'server.crt'
         $keyPath = Join-Path $fixtureDirectory 'server.key'
@@ -207,7 +369,7 @@ server.listen(443, '0.0.0.0')
         try {
             Invoke-Docker -Arguments @('network', 'create', $network) | Out-Null
             Invoke-Docker -Arguments @(
-                'run', '--detach', '--name', $serverContainer,
+                'run', '--pull', 'never', '--detach', '--name', $serverContainer,
                 '--network', $network,
                 '--network-alias', 'tls-valid',
                 '--network-alias', 'tls-wrong',
@@ -240,7 +402,7 @@ server.listen(443, '0.0.0.0')
             $LASTEXITCODE | Should -Not -Be 0
             Test-Path -LiteralPath $requestPath | Should -BeFalse
 
-            & docker run --rm --network $network `
+            & docker run --pull never --rm --network $network `
                 --env REDIS_HOST=tls-valid `
                 --env REDIS_PORT=443 `
                 --env REDIS_PASSWORD=test-secret `
@@ -250,7 +412,7 @@ server.listen(443, '0.0.0.0')
             $LASTEXITCODE | Should -Not -Be 0
             Test-Path -LiteralPath $requestPath | Should -BeFalse
 
-            & docker run --rm --network $network `
+            & docker run --pull never --rm --network $network `
                 --volume "${fixtureDirectory}:/fixture:ro" `
                 --env SSL_CERT_FILE=/fixture/server.crt `
                 --env REDIS_HOST=tls-wrong `
@@ -262,7 +424,7 @@ server.listen(443, '0.0.0.0')
             $LASTEXITCODE | Should -Not -Be 0
             Test-Path -LiteralPath $requestPath | Should -BeFalse
 
-            & docker run --rm --network $network `
+            & docker run --pull never --rm --network $network `
                 --volume "${fixtureDirectory}:/fixture:ro" `
                 --env SSL_CERT_FILE=/fixture/server.crt `
                 --env REDIS_HOST=tls-valid `

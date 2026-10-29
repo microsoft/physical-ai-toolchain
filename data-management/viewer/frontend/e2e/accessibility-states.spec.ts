@@ -961,7 +961,7 @@ test('J04 completes a representative local Viewer process', async ({ page }, tes
   const errors = await openViewer(page, testInfo)
   const transitions: string[] = []
 
-  const datasetButton = page.getByRole('button', { name: 'Dataset', exact: true })
+  const datasetButton = page.getByRole('button', { name: /^Dataset: / })
   await datasetButton.focus()
   await datasetButton.press('Enter')
   const filter = page.getByPlaceholder('Filter datasets')
