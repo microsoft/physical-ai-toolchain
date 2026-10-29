@@ -10,7 +10,7 @@ requires-python = ">=3.12"
 #   cd workflows/azureml/scripts
 #   uv lock
 dependencies = [
-    "azure-ai-ml==1.35.1",
+    "azure-ai-ml==1.35.2",
     "azure-identity==1.26.0",
 ]
 
