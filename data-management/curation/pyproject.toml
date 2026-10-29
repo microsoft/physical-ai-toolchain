@@ -4,13 +4,13 @@ version = "0.1.0"
 description = "Data-management curation models, saved inputs, and conditional storage"
 requires-python = ">=3.12"
 license = "MIT"
-dependencies = ["pydantic==2.13.5", "physical-ai-dataset-io==0.1.0"]
+dependencies = ["pydantic==2.14.1", "physical-ai-dataset-io==0.1.0"]
 
 [project.urls]
 Repository = "https://github.com/microsoft/physical-ai-toolchain"
 
 [project.optional-dependencies]
-api = ["fastapi==0.142.2", "uvicorn[standard]==0.54.0"]
+api = ["fastapi==0.146.0", "uvicorn[standard]==0.54.0"]
 parquet = ["physical-ai-dataset-io[parquet]==0.1.0"]
 
 [tool.uv.sources]
