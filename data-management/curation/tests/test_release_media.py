@@ -33,6 +33,13 @@ from physical_ai_curation.release.media import (
     resolve_route,
 )
 from physical_ai_curation.release.models import PreviewAction, SourceObject, VersionIdentity
+from physical_ai_curation.release.statistics import (
+    MOMENT_KEYS,
+    QUANTILE_KEYS,
+    aggregate_feature_statistics,
+    numeric_feature_statistics,
+    validate_feature_statistics,
+)
 from physical_ai_curation.release.store import LocalReleaseStore
 from pydantic import ValidationError
 
@@ -129,6 +136,214 @@ def test_partial_shared_object_requires_necessary_transcode() -> None:
     assert obj.tool == "pyav-h264@1.0.0"
     assert obj.estimated_output_bytes == 500
     assert obj.estimated_scratch_bytes == 1500
+
+
+def test_missing_subset_statistics_blocks_an_otherwise_copy_only_preview() -> None:
+    plan = plan_release_objects(_request(statistics_requirements=("observation.images.front",)))
+
+    assert not plan.submittable
+    assert plan.blocking == ("statistics required: observation.images.front",)
+    assert plan.objects[0].action == "copy"
+
+
+def test_statistics_requirements_invalidate_preview_confirmation() -> None:
+    ready = plan_release_objects(_request())
+    missing = plan_release_objects(_request(statistics_requirements=("observation.state",)))
+
+    assert ready.digest != missing.digest
+
+
+def test_processing_confirmation_rejects_missing_or_stale_preview() -> None:
+    from physical_ai_curation.release.media import validate_processing_confirmation
+
+    request = _partial_request()
+    preview = plan_release_objects(request)
+    changed = plan_release_objects(replace(request, tool_settings_json='{"crf":18}'))
+
+    for confirmation in (None, changed.digest):
+        with pytest.raises(ReleasePlanError, match="confirmation"):
+            validate_processing_confirmation(preview, confirmed_digest=confirmation)
+    validate_processing_confirmation(preview, confirmed_digest=preview.digest)
+
+
+def test_processing_confirmation_cannot_override_missing_statistics() -> None:
+    from physical_ai_curation.release.media import validate_processing_confirmation
+
+    plan = plan_release_objects(_partial_request(statistics_requirements=("observation.images.front",)))
+
+    with pytest.raises(ReleasePlanError, match="blocked"):
+        validate_processing_confirmation(plan, confirmed_digest=plan.digest)
+
+
+def test_generated_episode_metadata_refuses_missing_video_summaries() -> None:
+    import pyarrow as pa
+    from physical_ai_curation.release.tables import NativeVideoReference, generate_episode_metadata
+
+    table = pa.table({"episode_index": [0], "index": [0], "task_index": [0]})
+
+    with pytest.raises(ReleasePlanError, match="statistics required"):
+        generate_episode_metadata(
+            table,
+            {"observation.images.front": {"dtype": "video"}},
+            output_episode_index=0,
+            output_from_index=0,
+            fps=10,
+            task_names=["pick"],
+            video_references={"observation.images.front": NativeVideoReference(VIDEO, 0.0, 0.1)},
+            preserved_statistics={},
+        )
+
+
+def test_constant_fraction_statistics_allow_float_roundoff() -> None:
+    summary = numeric_feature_statistics([0.1] * 1000)
+
+    assert summary["mean"] == pytest.approx([0.1])
+    assert summary["std"][0] < 1e-15
+
+
+def test_statistics_aggregation_rejects_nonfinite_output() -> None:
+    positive = {"min": [1e300], "max": [1e300], "mean": [1e300], "std": [0.0], "count": [1]}
+    negative = {"min": [-1e300], "max": [-1e300], "mean": [-1e300], "std": [0.0], "count": [1]}
+
+    with pytest.raises(ReleasePlanError, match="finite"):
+        aggregate_feature_statistics([positive, negative], expected_counts=[1, 1])
+
+
+@pytest.mark.parametrize("damage", [None, "incomplete", "moments", "features"])
+def test_full_dataset_metadata_preserves_valid_source_quantiles(damage: str | None) -> None:
+    from physical_ai_curation.release.tables import assemble_native_metadata
+
+    features = {"observation.state": {"dtype": "float32", "shape": [1]}}
+    source_statistics = numeric_feature_statistics([0.0, 0.0, 0.5, 1.0])
+    rows = []
+    offset = 0
+    for index, values in enumerate(([0.0, 0.0, 0.5], [1.0])):
+        summary = numeric_feature_statistics(values)
+        row = {
+            "episode_index": index,
+            "length": len(values),
+            "dataset_from_index": offset,
+            "dataset_to_index": offset + len(values),
+        }
+        row.update({f"stats/observation.state/{key}": value for key, value in summary.items()})
+        rows.append(row)
+        offset += len(values)
+
+    info = {"codebase_version": "v3.0", "features": features, "total_episodes": 2, "total_frames": 4}
+    preserved = {"observation.state": source_statistics}
+    if damage is not None:
+        if damage == "incomplete":
+            info["total_frames"] = 5
+        elif damage == "moments":
+            source_statistics["mean"] = [1.0]
+        else:
+            preserved.clear()
+        with pytest.raises(ReleasePlanError, match=r"complete|differ|cover"):
+            assemble_native_metadata(info, rows, task_count=1, preserved_dataset_statistics=preserved)
+        return
+    result = assemble_native_metadata(
+        info,
+        rows,
+        task_count=1,
+        preserved_dataset_statistics=preserved,
+    )
+
+    assert result.statistics["observation.state"] == source_statistics
+    assert result.statistics_approximation is None
+    assert result.statistics_algorithm == "validated-full-source-statistics-v1"
+
+
+def test_aggregate_metadata_rejects_missing_declared_feature_statistics() -> None:
+    from physical_ai_curation.release.tables import assemble_native_metadata
+
+    summary = numeric_feature_statistics([1.0, 2.0])
+    row = {"episode_index": 0, "length": 2, "dataset_from_index": 0, "dataset_to_index": 2}
+    row.update({f"stats/observation.state/{key}": value for key, value in summary.items()})
+    info = {
+        "codebase_version": "v3.0",
+        "features": {"observation.state": {"dtype": "float32"}, "action": {"dtype": "float32"}},
+    }
+
+    with pytest.raises(ReleasePlanError, match="statistics required"):
+        assemble_native_metadata(info, [row], task_count=1)
+
+
+def test_native_episode_table_rebuilds_indices_without_changing_recorded_values() -> None:
+    import pyarrow as pa
+    from physical_ai_curation.release.tables import generate_episode_table
+
+    source = pa.table(
+        {
+            "observation.state": pa.array([[7.0, float(frame)] for frame in range(4)], type=pa.list_(pa.float32(), 2)),
+            "instruction": ["first", "removed", "interior", "last"],
+            "episode_index": pa.array([7] * 4, type=pa.int64()),
+            "frame_index": pa.array(range(4), type=pa.int64()),
+            "index": pa.array(range(30, 34), type=pa.int64()),
+            "timestamp": pa.array([frame / 10 for frame in range(4)], type=pa.float32()),
+            "task_index": pa.array([0] * 4, type=pa.int64()),
+        }
+    )
+    episode = SubsetEpisodeInput("episode-7", 7, 4, 10.0, frozenset({1}))
+
+    table = generate_episode_table(source, episode, output_episode_index=2, output_from_index=8)
+
+    assert table.schema == source.schema
+    assert table.column("observation.state").to_pylist() == [[7.0, 0.0], [7.0, 2.0], [7.0, 3.0]]
+    assert table.column("instruction").to_pylist() == ["first", "interior", "last"]
+    assert table.column("episode_index").to_pylist() == [2, 2, 2]
+    assert table.column("frame_index").to_pylist() == [0, 1, 2]
+    assert table.column("index").to_pylist() == [8, 9, 10]
+    assert table.column("timestamp").to_pylist() == pytest.approx([0.0, 0.1, 0.2])
+
+
+def test_native_task_table_has_named_task_index() -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from physical_ai_curation.release.tables import generate_task_table
+
+    source = pa.table({"task_index": [0, 1], "task": ["pick the part", "place the part"]})
+
+    tasks = generate_task_table(source)
+    buffer = pa.BufferOutputStream()
+    pq.write_table(tasks, buffer)
+    reloaded = pq.read_table(pa.BufferReader(buffer.getvalue())).to_pandas()
+
+    assert reloaded.index.name == "task"
+    assert reloaded.index.tolist() == ["pick the part", "place the part"]
+    assert reloaded["task_index"].tolist() == [0, 1]
+
+
+def test_native_persistent_language_retimes_collapsed_changes_and_keeps_frame_events() -> None:
+    import pyarrow as pa
+    from physical_ai_curation.release.tables import generate_episode_table
+
+    persistent = [
+        {"role": "user", "style": "subtask", "content": content, "timestamp": timestamp}
+        for content, timestamp in (("initial", 0.0), ("older", 0.1), ("newer", 0.2))
+    ]
+    source = pa.table(
+        {
+            "episode_index": [7] * 4,
+            "frame_index": list(range(4)),
+            "index": list(range(30, 34)),
+            "timestamp": [frame / 10 for frame in range(4)],
+            "task_index": [0] * 4,
+            "language_persistent": [persistent] * 4,
+            "language_events": [["start"], ["removed"], ["kept"], []],
+        }
+    )
+
+    output = generate_episode_table(
+        source,
+        SubsetEpisodeInput("episode-7", 7, 4, 10.0, frozenset({1})),
+        output_episode_index=0,
+        output_from_index=0,
+    )
+
+    rows = output["language_persistent"].to_pylist()
+    assert all([row["content"] for row in frame] == ["initial", "newer"] for frame in rows)
+    assert all([row["timestamp"] for row in frame] == pytest.approx([0.0, 0.1]) for frame in rows)
+    assert output["language_events"].to_pylist() == [["start"], ["kept"], []]
 
 
 def test_non_media_objects_and_metadata_dependencies_bind_source_conditions() -> None:
@@ -738,3 +953,299 @@ def test_subset_timeline_refuses_known_memory_shortage() -> None:
 def test_subset_timeline_rejects_invalid_original_episode_index() -> None:
     with pytest.raises(ReleasePlanError, match="episode index"):
         build_subset_timeline((SubsetEpisodeInput("ep-0", -1, 2, 10.0),))
+
+
+def _episode_summary() -> dict[str, object]:
+    return numeric_feature_statistics([[1.0], [2.0], [3.0], [4.0]])
+
+
+def test_known_numeric_columns_match_population_statistics() -> None:
+    result = numeric_feature_statistics([[1.0, 10.0], [3.0, 20.0], [5.0, 60.0]])
+    assert result["count"] == [3]
+    assert result["min"] == [1.0, 10.0]
+    assert result["max"] == [5.0, 60.0]
+    assert result["mean"] == pytest.approx([3.0, 30.0])
+    assert result["std"] == pytest.approx([(8 / 3) ** 0.5, (1400 / 3) ** 0.5])
+    assert result["q50"] == pytest.approx([3.0, 20.0])
+    assert numeric_feature_statistics([2.0, 4.0])["mean"] == [3.0]
+
+
+def test_image_summaries_keep_native_channel_shape() -> None:
+    result = numeric_feature_statistics([[[[0.0]], [[1.0]], [[2.0]]], [[[2.0]], [[3.0]], [[4.0]]]])
+    assert result["mean"] == [[[1.0]], [[2.0]], [[3.0]]]
+    assert result["std"] == [[[1.0]], [[1.0]], [[1.0]]]
+    validate_feature_statistics(result, expected_count=2)
+    with pytest.raises(ReleasePlanError, match="feature shape"):
+        numeric_feature_statistics([[[[0.0], [1.0]]], [[[2.0], [3.0]]]])
+
+
+def test_video_sample_count_is_explicit_and_never_equated_with_frames() -> None:
+    frame = [[[0.0]], [[1.0]], [[2.0]]]
+    result = numeric_feature_statistics([frame, frame, frame, frame])
+    assert result["count"] == [4]
+    assert result["mean"] == [[[0.0]], [[1.0]], [[2.0]]]
+    validate_feature_statistics(result, expected_count=4)
+    with pytest.raises(ReleasePlanError, match="does not match"):
+        validate_feature_statistics(result, expected_count=120)
+
+
+def test_unequal_episode_counts_pool_mean_and_population_variance() -> None:
+    first = numeric_feature_statistics([[0.0], [2.0]])
+    second = numeric_feature_statistics([[4.0]])
+    result = aggregate_feature_statistics([first, second], expected_counts=[2, 1])
+    assert result.values["count"] == [3]
+    assert result.values["mean"] == pytest.approx([2.0])
+    assert result.values["std"] == pytest.approx([(8 / 3) ** 0.5])
+    assert result.values["min"] == pytest.approx([0.0])
+    assert result.values["max"] == pytest.approx([4.0])
+
+
+def test_single_summary_preserves_its_values() -> None:
+    summary = _episode_summary()
+    result = aggregate_feature_statistics([summary], expected_counts=[4])
+    for key in (*MOMENT_KEYS[:-1], *QUANTILE_KEYS):
+        assert result.values[key] == pytest.approx(summary[key])
+    assert result.values["count"] == [4]
+
+
+def test_quantiles_are_labelled_approximate_and_never_fabricated() -> None:
+    summary = _episode_summary()
+    labelled = aggregate_feature_statistics([summary, summary], expected_counts=[4, 4])
+    assert labelled.approximation is not None
+    moments_only = {key: summary[key] for key in MOMENT_KEYS}
+    result = aggregate_feature_statistics([moments_only, moments_only], expected_counts=[4, 4])
+    assert result.approximation is None
+    assert not set(QUANTILE_KEYS) & set(result.values)
+
+
+def test_episode_summaries_must_share_one_key_set() -> None:
+    summary = _episode_summary()
+    moments_only = {key: summary[key] for key in MOMENT_KEYS}
+    with pytest.raises(ReleasePlanError, match="share one statistic key set"):
+        aggregate_feature_statistics([summary, moments_only], expected_counts=[4, 4])
+
+
+def test_aggregation_rejects_count_and_structure_mismatches() -> None:
+    summary = _episode_summary()
+    with pytest.raises(ReleasePlanError, match="does not match"):
+        aggregate_feature_statistics([summary], expected_counts=[5])
+    with pytest.raises(ReleasePlanError, match="one count per summary"):
+        aggregate_feature_statistics([summary], expected_counts=[4, 4])
+    with pytest.raises(ReleasePlanError, match="at least one"):
+        aggregate_feature_statistics([], expected_counts=[])
+
+
+def test_ragged_non_numeric_and_nonfinite_feature_values_are_rejected() -> None:
+    with pytest.raises(ReleasePlanError, match="rectangular"):
+        numeric_feature_statistics([[1.0], [2.0, 3.0]])
+    with pytest.raises(ReleasePlanError, match="numeric"):
+        numeric_feature_statistics([["a"], ["b"]])
+    with pytest.raises(ReleasePlanError, match="finite"):
+        numeric_feature_statistics([[1.0], [float("inf")]])
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("count", [2.0], "integers"),
+        ("count", [True], "integers"),
+        ("count", [0], "positive integer"),
+        ("mean", [float("nan")], "must be finite"),
+        ("std", [-1.0], "std must be nonnegative"),
+        ("mean", [5.0], "must be ordered"),
+        ("q10", [3.0], "nondecreasing"),
+        ("min", "text", "must contain numbers"),
+        ("mean", [2.0, 3.0], "share one shape"),
+    ],
+)
+def test_malformed_episode_summaries_are_rejected(field: str, value: object, message: str) -> None:
+    summary = {**_episode_summary(), field: value}
+    with pytest.raises(ReleasePlanError, match=message):
+        validate_feature_statistics(summary, expected_count=4)
+
+
+def test_missing_or_partial_statistic_keys_are_rejected() -> None:
+    summary = _episode_summary()
+    without_std = {key: value for key, value in summary.items() if key != "std"}
+    partial_quantiles = {key: value for key, value in summary.items() if key != "q01"}
+    with pytest.raises(ReleasePlanError, match="statistic keys"):
+        validate_feature_statistics(without_std, expected_count=4)
+    with pytest.raises(ReleasePlanError, match="statistic keys"):
+        validate_feature_statistics(partial_quantiles, expected_count=4)
+
+
+def _solid_frames(values: list[int]) -> list:
+    np = pytest.importorskip("numpy")
+    return [np.full((16, 16, 3), value, dtype=np.uint8) for value in values]
+
+
+def _encode_source(frames: list, fps: int = 10) -> bytes:
+    av = pytest.importorskip("av")
+    np = pytest.importorskip("numpy")
+    from fractions import Fraction
+    from io import BytesIO
+
+    buffer = BytesIO()
+    with av.open(buffer, mode="w", format="mp4") as container:
+        stream = container.add_stream("libx264", rate=fps)
+        stream.width = int(frames[0].shape[1])
+        stream.height = int(frames[0].shape[0])
+        stream.pix_fmt = "yuv420p"
+        stream.options = {"crf": "10"}
+        for index, pixels in enumerate(frames):
+            frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(pixels), format="rgb24")
+            frame = frame.reformat(format="yuv420p")
+            frame.pts = index
+            frame.time_base = Fraction(1, fps)
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+    return buffer.getvalue()
+
+
+def _decoded_arrays(data: bytes) -> list:
+    av = pytest.importorskip("av")
+    from io import BytesIO
+
+    with av.open(BytesIO(data)) as container:
+        return [frame.reformat(format="rgb24").to_ndarray() for frame in container.decode(video=0)]
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (("ep-0", 0.0, 4, ()), "at least one"),
+        (("ep-0", 0.0, 4, (2, 1)), "increasing"),
+        (("ep-0", 0.0, 4, (4,)), "outside"),
+        (("ep-0", -0.1, 4, (0,)), "nonnegative"),
+        (("", 0.0, 4, (0,)), "non-empty"),
+        (("ep-0", 0.0, 4, [0]), "tuple"),
+    ],
+)
+def test_encoding_window_contracts_are_rejected(args: tuple, message: str) -> None:
+    from physical_ai_curation.release.encoding import EncodingWindow
+
+    with pytest.raises(ReleasePlanError, match=message):
+        EncodingWindow(*args)
+
+
+@pytest.mark.parametrize("fps", [0, -1.0, float("nan"), True])
+def test_invalid_fps_is_rejected_before_opening_media(fps: object) -> None:
+    from io import BytesIO
+
+    from physical_ai_curation.release.encoding import EncodingWindow, encode_windows
+
+    sink = BytesIO()
+    window = EncodingWindow("ep-0", 0.0, 2, (0,))
+    with pytest.raises(ReleasePlanError, match="fps"):
+        encode_windows(BytesIO(), sink, (window,), fps=fps)
+    assert sink.getvalue() == b""
+
+
+def test_empty_or_duplicate_selection_is_rejected_before_opening_media() -> None:
+    from io import BytesIO
+
+    from physical_ai_curation.release.encoding import EncodingWindow, encode_windows
+
+    sink = BytesIO()
+    duplicate = (EncodingWindow("ep-0", 0.0, 2, (0,)), EncodingWindow("ep-0", 0.2, 2, (0,)))
+    with pytest.raises(ReleasePlanError, match="unique"):
+        encode_windows(BytesIO(), sink, duplicate, fps=10)
+    with pytest.raises(ReleasePlanError, match="at least one"):
+        encode_windows(BytesIO(), sink, (), fps=10)
+    assert sink.getvalue() == b""
+
+
+def test_prefix_and_interior_frames_are_selected_and_read_back_contiguously() -> None:
+    from io import BytesIO
+
+    from physical_ai_curation.release.encoding import EncodingWindow, encode_windows
+
+    source = _encode_source(_solid_frames([10 + 20 * index for index in range(12)]))
+    source_means = [float(frame.mean()) for frame in _decoded_arrays(source)]
+    windows = (
+        EncodingWindow("ep-0", 0.3, 4, (0, 2, 3)),
+        EncodingWindow("ep-1", 0.8, 3, (0, 1, 2)),
+    )
+    sink = BytesIO()
+    result = encode_windows(BytesIO(source), sink, windows, fps=10)
+    readback = [float(frame.mean()) for frame in _decoded_arrays(sink.getvalue())]
+    expected = [source_means[index] for index in (3, 5, 6, 8, 9, 10)]
+
+    assert len(readback) == 6
+    assert readback == pytest.approx(expected, abs=5.0)
+    assert [(window.output_from_frame, window.output_to_frame) for window in result.windows] == [(0, 3), (3, 6)]
+    assert result.windows[1].output_from_s == pytest.approx(0.3)
+    assert result.windows[0].statistics["count"] == [3]
+    assert result.codec == "libx264"
+    assert result.pix_fmt == "yuv420p"
+    assert result.fps == 10.0
+
+
+def test_horizontal_flip_reverses_the_pixel_pattern() -> None:
+    from io import BytesIO
+
+    from physical_ai_curation.release.encoding import EncodeOptions, EncodingWindow, encode_windows
+
+    np = pytest.importorskip("numpy")
+    frame = np.zeros((16, 16, 3), dtype=np.uint8)
+    frame[:, :8] = 255
+    source = _encode_source([frame, frame])
+    sink = BytesIO()
+    encode_windows(
+        BytesIO(source),
+        sink,
+        (EncodingWindow("ep-0", 0.0, 2, (0,)),),
+        fps=10,
+        options=EncodeOptions(flip_horizontal=True),
+    )
+    flipped = _decoded_arrays(sink.getvalue())[0].mean(axis=2)
+
+    assert flipped[:, 8:].mean() > flipped[:, :8].mean() + 100
+
+
+def test_wrong_fps_and_short_media_are_refused() -> None:
+    from io import BytesIO
+
+    from physical_ai_curation.release.encoding import EncodingWindow, encode_windows
+    from physical_ai_curation.release.media import ReleaseExecutionError
+
+    source = _encode_source(_solid_frames([50] * 12))
+    with pytest.raises(ReleaseExecutionError, match="fps"):
+        encode_windows(BytesIO(source), BytesIO(), (EncodingWindow("ep-0", 0.0, 4, (0,)),), fps=20)
+    with pytest.raises(ReleaseExecutionError, match="source ended"):
+        encode_windows(BytesIO(source), BytesIO(), (EncodingWindow("ep-0", 0.0, 20, (0,)),), fps=10)
+
+
+def test_processing_memory_budget_is_checked_before_decoding() -> None:
+    from io import BytesIO
+
+    from physical_ai_curation.release.encoding import EncodingWindow, encode_windows
+
+    source = _encode_source(_solid_frames([50] * 4))
+    with pytest.raises(ReleasePlanError, match="memory"):
+        encode_windows(
+            BytesIO(source),
+            BytesIO(),
+            (EncodingWindow("ep-0", 0.0, 2, (0,)),),
+            fps=10,
+            limits=ReleaseMediaLimits(processing_memory_bytes=1),
+        )
+
+
+def test_encoding_module_imports_without_optional_media_packages() -> None:
+    code = textwrap.dedent(
+        """
+        import sys
+        for name in ("av", "numpy"):
+            sys.modules[name] = None
+        from physical_ai_curation.release.encoding import EncodeOptions, EncodingWindow
+        EncodingWindow("ep-0", 0.0, 2, (0,))
+        EncodeOptions()
+        print("ok")
+        """
+    )
+    completed = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "ok"

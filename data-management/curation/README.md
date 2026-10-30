@@ -76,9 +76,9 @@ for inference and model configuration.
 
 `physical_ai_curation.release` provides versioned contracts, saved-input freezing,
 object planning and independent package verification without a decoder, evaluator,
-Azure SDK or web framework. These are library foundations, not a complete release
-workflow. Release-specific encoding, publishers, durable release jobs, CLI/API
-commands and viewer controls are not yet available.
+Azure SDK or web framework. Optional table, statistics and encoding helpers add
+generation without a publication workflow. Publishers, durable release jobs,
+CLI/API commands and viewer controls remain open.
 
 Use `verify_candidate` from `physical_ai_curation.release.verification` to check
 canonical control files, inventoried bytes, frozen source/output references,
@@ -110,6 +110,53 @@ rejected. A successful object copy is not a release commit, durable capacity
 reservation or proof of native LeRobot readability. Use `iter_subset_frames` for
 streamed frame mappings; the materialized timeline helper admits its estimated
 memory cost before allocation.
+
+`release.tables` retains selected recorded columns, rebuilds native output
+coordinates, writes a named task index and produces episode/video references.
+Persistent language changes are retimed through shared dataset-I/O logic;
+events on removed frames are dropped. Table and statistics operations require
+NumPy, PyArrow and Pandas in the composing runtime, not the base installation.
+Missing mandatory media summaries are explicit errors. Count-weighted moments
+retain sample counts; aggregated quantiles are labelled approximate. Valid source
+summaries can be preserved for a full selection only when counts and independently
+generated moments agree. These checks do not prove that supplied source summaries
+are truthful or that saved transforms were applied.
+
+`release.composition.prepare_saved_generation` reads selected frozen saved values,
+validates their dataset/episode identity and composes frame removal plus saved
+`invert` and `grayscale` color filters. Grayscale additionally requires Pillow.
+Crop, resize, color adjustment, other filters, insertion, trajectory changes,
+subtask replacement and combined global/camera transforms are refused during
+preview. Unselected edits never enter the plan, and annotations do not replace
+recorded task identity. Encoder options and copied-camera summaries participate
+in the existing object planner's digest. Missing copied-camera summaries block
+preview without decoding video. Shared-object encoding follows frozen output
+episode order, not canonical source-ID order.
+
+`release.tables.generate_native_selection` combines this plan, condition-bound
+source tables/tasks and actual encoded-media results into native data/episode
+tables and statistics. It checks confirmation, output frame windows, video rates,
+geometry and codec descriptors. It neither opens storage nor publishes files.
+The caller must revalidate frozen source/saved identities, regenerate the plan
+and check confirmation before media effects; checking again during assembly does
+not replace that pre-dispatch check. The caller also retains frozen evidence and
+streamed frame mappings for later package assembly.
+
+`release.encoding.encode_windows` additionally requires PyAV. It reads explicit
+frame windows from a seekable binary stream and writes H.264 video with contiguous
+timestamps. Frame removal, per-window color filters and explicit low-level
+horizontal/vertical flips are supported. Flips are not current saved-edit fields.
+Short media,
+timestamp gaps, incompatible rates and insufficient estimated memory are errors.
+Video summaries describe bounded samples of transformed RGB frames before lossy
+encoding; their counts are sampled frames, not pixels or all episode frames.
+The caller supplies admitted source streams and a private output sink. The helper
+does not check storage revisions, own effects or publish a release.
+
+`validate_processing_confirmation` requires the current preview digest whenever
+processing needs confirmation. Missing statistics and capacity blockers cannot
+be overridden. The composer must first revalidate frozen inputs and regenerate
+the plan; this check is not authentication, fencing or durable job admission.
 
 ## 🔒 Storage and Security
 

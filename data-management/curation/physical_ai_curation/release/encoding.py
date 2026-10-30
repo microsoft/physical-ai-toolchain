@@ -11,6 +11,7 @@ import math
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
+from itertools import pairwise
 from typing import Any, BinaryIO
 
 from physical_ai_curation.release.errors import ReleaseVerificationError
@@ -38,6 +39,7 @@ class EncodingWindow:
     from_timestamp: float
     source_frame_count: int
     kept_frames: tuple[int, ...]
+    color_filter: str = "none"
 
     def __post_init__(self) -> None:
         if not isinstance(self.episode_id, str) or not self.episode_id:
@@ -52,8 +54,10 @@ class EncodingWindow:
             raise ReleasePlanError("window must keep at least one frame in a tuple")
         if any(type(index) is not int or not 0 <= index < self.source_frame_count for index in self.kept_frames):
             raise ReleasePlanError("kept frame index is outside the source window")
-        if any(later <= earlier for earlier, later in zip(self.kept_frames, self.kept_frames[1:])):
+        if any(later <= earlier for earlier, later in pairwise(self.kept_frames)):
             raise ReleasePlanError("kept frames must be strictly increasing")
+        if self.color_filter not in ("none", "invert", "grayscale"):
+            raise ReleasePlanError("unsupported window color filter")
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,7 +232,7 @@ def _sampling_recipe(settings: EncodeOptions) -> str:
     return (
         "per window: local output frames at indices 0, s, 2s, ... with s = ceil(kept / "
         f"{settings.max_samples_per_window}), at most {settings.max_samples_per_window} samples per window, "
-        "taken from post-flip RGB frames before encoding"
+        "taken from post-transform RGB frames before encoding"
     )
 
 
@@ -255,8 +259,14 @@ def _decoded_frames(session: _Session, window: EncodingWindow) -> Iterator[Any]:
     raise ReleaseExecutionError("source ended before the window's frame count")
 
 
-def _oriented_rgb(session: _Session, frame: Any) -> Any:
+def _oriented_rgb(session: _Session, frame: Any, color_filter: str) -> Any:
     pixels = frame.reformat(format="rgb24").to_ndarray()
+    if color_filter == "invert":
+        pixels = 255 - pixels
+    elif color_filter == "grayscale":
+        from PIL import Image, ImageOps
+
+        pixels = session.np.asarray(ImageOps.grayscale(Image.fromarray(pixels)).convert("RGB"))
     if session.settings.flip_vertical:
         pixels = pixels[::-1]
     if session.settings.flip_horizontal:
@@ -285,7 +295,7 @@ def _encode_window(session: _Session, window: EncodingWindow, first_frame: int) 
     for index, frame in enumerate(_decoded_frames(session, window)):
         if index not in kept:
             continue
-        pixels = _oriented_rgb(session, frame)
+        pixels = _oriented_rgb(session, frame, window.color_filter)
         if local % stride == 0:
             values = pixels.reshape(-1, _CHANNELS).astype(np.float64) / 255.0
             sums += values.sum(axis=0)

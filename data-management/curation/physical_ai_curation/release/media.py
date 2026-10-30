@@ -191,6 +191,7 @@ class ObjectPlanRequest:
     limits: ReleaseMediaLimits = field(default_factory=ReleaseMediaLimits)
     destination_available_bytes: int | None = None
     scratch_available_bytes: int | None = None
+    statistics_requirements: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -521,6 +522,7 @@ def _plan_digest(
         "schema_version": PLAN_SCHEMA_VERSION,
         "frozen_input_sha256": request.frozen_input_sha256,
         "selected_episode_ids": list(request.selected_episode_ids),
+        "statistics_requirements": sorted(set(request.statistics_requirements)),
         "route": route,
         "source_alias": request.source.alias,
         "source_objects": [sources[path].model_dump(mode="json") for path in sorted(sources)],
@@ -567,6 +569,9 @@ def plan_release_objects(request: ObjectPlanRequest) -> ReleaseObjectPlan:
         if available is not None and (type(available) is not int or available < 0):
             raise ReleasePlanError("available capacity must be a nonnegative integer")
     selected = _check_selection(request.selected_episode_ids)
+    for feature in request.statistics_requirements:
+        if not isinstance(feature, str) or not re.fullmatch(r"[A-Za-z0-9_.]+", feature):
+            raise ReleasePlanError("statistics requirements must name dataset features")
     sources = _source_identities(request.windows, request.source_objects)
     groups = _group_windows(request.windows, selected)
     objects: list[ObjectPlan] = []
@@ -583,6 +588,7 @@ def plan_release_objects(request: ObjectPlanRequest) -> ReleaseObjectPlan:
             raise ReleasePlanError("duplicate output destination")
         seen.add(obj.output_path)
     capacity, blocking, warnings = _capacity(objects, request)
+    blocking += tuple(f"statistics required: {feature}" for feature in sorted(set(request.statistics_requirements)))
     return ReleaseObjectPlan(
         route=route,
         source_alias=request.source.alias,
@@ -600,6 +606,19 @@ def plan_release_objects(request: ObjectPlanRequest) -> ReleaseObjectPlan:
 
 class ReleaseExecutionError(ReleaseVerificationError):
     """A planned object cannot be executed without violating its bound identity."""
+
+
+def validate_processing_confirmation(plan: ReleaseObjectPlan, *, confirmed_digest: str | None) -> None:
+    """Require the current processing preview identity before dispatch.
+
+    The composer must regenerate the plan from revalidated frozen inputs first.
+    This is an effects-confirmation check, not authentication or a durable claim.
+    """
+    if not plan.submittable:
+        raise ReleasePlanError("release plan is blocked; confirmation cannot override admission")
+    needs_confirmation = any(obj.confirmation_required for obj in plan.objects)
+    if (needs_confirmation or confirmed_digest is not None) and confirmed_digest != plan.digest:
+        raise ReleasePlanError("processing confirmation is missing or belongs to a stale preview")
 
 
 @dataclass(frozen=True, slots=True)
@@ -630,7 +649,8 @@ class SubsetTimeline:
     episode_lengths: tuple[int, ...]
 
 
-def _subset_lengths(episodes: Sequence[SubsetEpisodeInput]) -> tuple[int, ...]:
+def subset_episode_lengths(episodes: Sequence[SubsetEpisodeInput]) -> tuple[int, ...]:
+    """Validate subset descriptors and count retained frames without materializing a timeline."""
     _check_selection([episode.episode_id for episode in episodes])
     lengths = []
     for episode in episodes:
@@ -657,7 +677,7 @@ def _subset_lengths(episodes: Sequence[SubsetEpisodeInput]) -> tuple[int, ...]:
 
 def iter_subset_frames(episodes: Sequence[SubsetEpisodeInput]) -> Iterator[OutputFrame]:
     """Yield the validated frame derivation without retaining the whole selection."""
-    _subset_lengths(episodes)
+    subset_episode_lengths(episodes)
     for output_index, episode in enumerate(episodes):
         output_frame = 0
         for original_frame in range(episode.length):
@@ -680,7 +700,7 @@ def build_subset_timeline(
     Runtime producers use ``iter_subset_frames`` for streaming; supervised workers
     still enforce actual memory high-water independently of this estimate.
     """
-    lengths = _subset_lengths(episodes)
+    lengths = subset_episode_lengths(episodes)
     memory_budget = (limits or ReleaseMediaLimits()).processing_memory_bytes
     if sum(lengths) * 512 > memory_budget:
         raise ReleasePlanError("frame timeline exceeds its estimated processing memory budget")

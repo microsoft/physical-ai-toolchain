@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable, Iterator
+import math
+from bisect import bisect_left
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -59,6 +61,39 @@ class DatasetSpec:
     data_path: str
     video_path: str | None
     per_view_video_paths: dict[str, str]
+
+
+def remap_persistent_language_rows(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    source_to_output: Mapping[int, int],
+    source_timestamps: Sequence[float],
+    output_timestamps: Sequence[float],
+    timestamp_tolerance_s: float = 1e-4,
+) -> list[dict[str, Any]]:
+    """Retarget persistent language changes to their first retained output frame.
+
+    Removed starts advance to the next retained source frame. Changes of one
+    style, role and camera that collapse together retain the latest source time.
+    """
+    kept = sorted(source_to_output)
+    placed = {}
+    for row in rows:
+        source_time = float(row["timestamp"])
+        if not math.isfinite(source_time):
+            raise ValueError("persistent language timestamps must be finite")
+        frame = bisect_left(source_timestamps, source_time - timestamp_tolerance_s)
+        index = bisect_left(kept, frame)
+        if index == len(kept):
+            continue
+        key = (row.get("style"), row.get("role"), row.get("camera"), source_to_output[kept[index]])
+        current = placed.get(key)
+        if current is None or source_time > current[0]:
+            placed[key] = (source_time, [row])
+        elif source_time == current[0]:
+            current[1].append(row)
+    planned = [{**row, "timestamp": output_timestamps[key[-1]]} for key, (_, group) in placed.items() for row in group]
+    return sorted(planned, key=lambda row: (float(row["timestamp"]), row.get("style") or "", row.get("role") or ""))
 
 
 def load_dataset_spec(root: Path) -> DatasetSpec:
