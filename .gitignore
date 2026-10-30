@@ -22,6 +22,7 @@ mono_crash.*
 [Dd]ebug/
 [Dd]ebugPublic/
 [Rr]elease/
+!data-management/curation/physical_ai_curation/release/
 [Rr]eleases/
 x64/
 x86/

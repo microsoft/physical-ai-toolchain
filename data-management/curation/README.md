@@ -1,7 +1,7 @@
 ---
 title: Curation
-description: Saved-input selection, durable judge jobs, approvals and conditional result application.
-ms.date: 2026-10-16
+description: Saved-input curation, durable judge jobs and portable release verification.
+ms.date: 2026-10-30
 ms.topic: reference
 ---
 
@@ -71,6 +71,45 @@ There are no forwarding modules or old-command aliases. `evaluation.vlm_judge.ru
 now provides direct metadata-based inference only. Policy rollouts and the OpenAI
 shim remain in evaluation. See [evaluation/vlm_judge/README.md](../../evaluation/vlm_judge/README.md)
 for inference and model configuration.
+
+## 📦 Release Library Foundations
+
+`physical_ai_curation.release` provides versioned contracts, saved-input freezing,
+object planning and independent package verification without a decoder, evaluator,
+Azure SDK or web framework. These are library foundations, not a complete release
+workflow. Release-specific encoding, publishers, durable release jobs, CLI/API
+commands and viewer controls are not yet available.
+
+Use `verify_candidate` from `physical_ai_curation.release.verification` to check
+canonical control files, inventoried bytes, frozen source/output references,
+preview output paths and bounded frame-lineage records. It does not publish or
+discover a package. `verify_published` additionally requires matching receipt,
+report and completion-marker bindings. Both accept an independently obtained
+`expected_manifest_sha256`; without it, verification establishes internal
+consistency rather than protection against replacement of the whole package.
+Hashes do not authenticate a producer or prove recording dates, quality or the
+truth of provenance claims.
+
+Source freezing requires explicit saved selections. Local admission requires a
+finalized, quiescent source; observed changes invalidate its revision binding.
+It is not a universal point-in-time filesystem snapshot. Viewer local no-auth
+mode supplies `localuser` automatically; authenticated scope and CSRF remain
+authoritative without a separate release-role or grant policy.
+
+`plan_release_objects` classifies exact copies, generated metadata and necessary
+encoding for LeRobot v3 targets. It opens no media or storage. Local-to-local and
+same-account Blob-to-Blob are planned routes, not evidence that publishers exist.
+Capacity estimates remain advisory until durable admission and runtime limits
+are implemented. Call `load_media_limits` after application environment loading;
+its overrides are listed in the [backend environment example](../viewer/backend/.env.example).
+
+`execute_exact_copy` writes an independent, create-only local object through
+descriptor-bound reads and writes, checking the planned byte length and digest.
+Source and destination roots must be disjoint; symlinks and unsafe paths are
+rejected. A successful object copy is not a release commit, durable capacity
+reservation or proof of native LeRobot readability. Use `iter_subset_frames` for
+streamed frame mappings; the materialized timeline helper admits its estimated
+memory cost before allocation.
 
 ## 🔒 Storage and Security
 
