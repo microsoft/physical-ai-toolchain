@@ -175,12 +175,13 @@ BeforeAll {
                 try {
                     $response = Invoke-WebRequest -Uri "http://127.0.0.1:${port}/" `
                         -NoProxy -SkipHttpErrorCheck -TimeoutSec 2
-                    if ($response.StatusCode -eq 200) {
-                        return $port
-                    }
                 }
                 catch {
                     # A published port may precede the HTTP listener.
+                    $response = $null
+                }
+                if ($response -and $response.StatusCode -eq 200) {
+                    return $port
                 }
             }
             Start-Sleep -Milliseconds 100
