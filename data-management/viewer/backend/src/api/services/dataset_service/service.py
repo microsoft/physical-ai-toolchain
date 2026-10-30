@@ -515,6 +515,10 @@ class DatasetService:
         for item in directory.iterdir():
             if not item.is_dir() or item.name.startswith(".") or item.name == "_releases":
                 continue
+            from physical_ai_curation.release.publication import local_dataset_admitted
+
+            if not local_dataset_admitted(item):
+                continue
             current_parts = [*prefix_parts, item.name]
             handled = False
             for handler in self._handlers:
@@ -1309,6 +1313,10 @@ class DatasetService:
                     break
             if not found:
                 raise ValueError(f"Dataset directory not found: {dataset_id}")
+            from physical_ai_curation.release.publication import local_dataset_admitted
+
+            if not local_dataset_admitted(current):
+                raise ValueError("release requires verified marker-aware admission")
         return current
 
     async def get_frame_image(self, dataset_id: str, episode_idx: int, frame_idx: int, camera: str) -> bytes | None:

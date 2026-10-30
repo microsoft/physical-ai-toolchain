@@ -8,6 +8,7 @@ connections.
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 import tempfile
 from collections.abc import AsyncIterator
@@ -110,6 +111,28 @@ def _trajectory_point(frame: int = 0) -> TrajectoryPoint:
 
 
 class TestDatasetDiscovery:
+    async def test_given_recorded_named_release_without_marker_when_scanned_then_hidden(self, tmp_path: Path) -> None:
+        candidate = tmp_path / "plate-release"
+        candidate.mkdir()
+        ownership = tmp_path / "_releases"
+        ownership.mkdir()
+        (ownership / "plate-release.json").write_text(
+            json.dumps(
+                {"schema_version": "curated-release-ownership/v1", "package_id": "plate-release", "attempt_id": "a"}
+            )
+        )
+        service = DatasetService(base_path=str(tmp_path))
+        handler = _make_handler()
+        handler.can_handle.side_effect = lambda path: path == candidate
+        _install_handlers(service, handler)
+        discovered = set()
+
+        service._scan_directory(tmp_path, [], discovered)
+
+        assert discovered == set()
+        with pytest.raises(ValueError, match="release"):
+            service._get_dataset_path("plate-release")
+
     async def test_given_unpublished_reserved_tree_when_scan_then_not_a_legacy_dataset(self, tmp_path: Path) -> None:
         candidate = tmp_path / "_releases" / "pkg" / "attempt"
         candidate.mkdir(parents=True)

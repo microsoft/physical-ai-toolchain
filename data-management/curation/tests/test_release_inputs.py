@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -394,3 +395,208 @@ def test_given_blob_revision_changes_during_read_when_inventory_then_refused() -
 
     with pytest.raises(ReleaseInputError, match="changed"):
         BlobReleaseSource(Container(), prefix="source").inventory()
+
+
+def test_given_listing_without_integer_length_when_inventory_then_refused() -> None:
+    pytest.importorskip("azure.core")
+
+    class Container:
+        def list_blobs(self, **kwargs: object) -> list[SimpleNamespace]:
+            return [SimpleNamespace(name="source/data.bin", size="7", etag='"revision-1"', version_id=None)]
+
+    with pytest.raises(ReleaseInputError, match="lacks"):
+        BlobReleaseSource(Container(), prefix="source").inventory()
+
+
+class FakeDownload:
+    def __init__(self, store: FakeBlobStore, data: bytes) -> None:
+        self._store = store
+        self._data = data
+
+    def chunks(self) -> Iterator[bytes]:
+        from azure.core.exceptions import HttpResponseError
+
+        if self._store.fail_stream:
+            raise HttpResponseError("stream failed")
+        data = self._data
+        if self._store.serve_transform is not None:
+            data = self._store.serve_transform(data)
+        yield data
+
+
+class FakeBlob:
+    def __init__(self, store: FakeBlobStore, name: str, version_id: str | None) -> None:
+        self._store = store
+        self._name = name
+        self._version_id = version_id
+
+    def download_blob(
+        self, *, etag: str | None = None, match_condition: object = None, max_concurrency: int = 1
+    ) -> FakeDownload:
+        from azure.core.exceptions import ResourceModifiedError, ResourceNotFoundError
+
+        store = self._store
+        store.calls.append(
+            {"name": self._name, "version_id": self._version_id, "etag": etag, "match_condition": match_condition}
+        )
+        version = self._version_id or store.current.get(self._name)
+        if version is None or (self._name, version) not in store.versions:
+            raise ResourceNotFoundError("blob version not found")
+        data, current_etag = store.versions[(self._name, version)]
+        if etag is not None and etag != current_etag:
+            raise ResourceModifiedError("ETag condition failed")
+        return FakeDownload(store, data)
+
+
+class FakeBlobStore:
+    """In-memory container with optional versioning and ETag-conditioned downloads."""
+
+    def __init__(self, *, versioned: bool = True) -> None:
+        self.versioned = versioned
+        self.versions: dict[tuple[str, str], tuple[bytes, str]] = {}
+        self.current: dict[str, str] = {}
+        self.calls: list[dict[str, object]] = []
+        self.serve_transform: Callable[[bytes], bytes] | None = None
+        self.fail_stream = False
+        self._counter = 0
+
+    def put(self, name: str, data: bytes) -> str:
+        self._counter += 1
+        version = f"version-{self._counter}"
+        self.versions[(name, version)] = (data, f'"etag-{version}"')
+        self.current[name] = version
+        return version
+
+    def list_blobs(self, *, name_starts_with: str) -> list[SimpleNamespace]:
+        listing = []
+        for name, version in sorted(self.current.items()):
+            if not name.startswith(name_starts_with):
+                continue
+            data, etag = self.versions[(name, version)]
+            listing.append(
+                SimpleNamespace(
+                    name=name,
+                    size=len(data),
+                    etag=etag,
+                    version_id=version if self.versioned else None,
+                )
+            )
+        return listing
+
+    def get_blob_client(self, name: str, *, version_id: str | None = None) -> FakeBlob:
+        return FakeBlob(self, name, version_id)
+
+
+@pytest.fixture
+def blob_store() -> FakeBlobStore:
+    pytest.importorskip("azure.core")
+    return FakeBlobStore()
+
+
+def test_given_frozen_blob_when_binding_then_current_version_and_etag_returned(blob_store: FakeBlobStore) -> None:
+    version = blob_store.put("source/data.bin", b"0123456789")
+    source = BlobReleaseSource(blob_store, prefix="source")
+    frozen = source.inventory()[0]
+
+    binding = source.binding(frozen)
+
+    assert (binding.name, binding.version_id) == ("source/data.bin", version)
+    assert binding.etag == blob_store.versions[("source/data.bin", version)][1]
+
+
+def test_given_overwritten_blob_when_binding_then_refused_before_download(blob_store: FakeBlobStore) -> None:
+    blob_store.put("source/data.bin", b"0123456789")
+    source = BlobReleaseSource(blob_store, prefix="source")
+    frozen = source.inventory()[0]
+    blob_store.calls.clear()
+    blob_store.put("source/data.bin", b"abcdefghij")
+
+    with pytest.raises(ReleaseInputError, match="revision"):
+        source.binding(frozen)
+    assert blob_store.calls == []
+
+
+def test_given_missing_or_resized_blob_when_binding_then_refused(blob_store: FakeBlobStore) -> None:
+    blob_store.put("source/data.bin", b"0123456789")
+    source = BlobReleaseSource(blob_store, prefix="source")
+    frozen = source.inventory()[0]
+
+    with pytest.raises(ReleaseInputError, match="length"):
+        source.binding(frozen.model_copy(update={"length": 99}))
+    with pytest.raises(ReleaseInputError, match="missing"):
+        source.binding(frozen.model_copy(update={"path": "absent.bin"}))
+
+
+def test_given_pinned_blob_when_iter_bytes_then_rechunked_and_conditioned(blob_store: FakeBlobStore) -> None:
+    version = blob_store.put("source/data.bin", b"0123456789")
+    source = BlobReleaseSource(blob_store, prefix="source")
+    frozen = source.inventory()[0]
+    blob_store.calls.clear()
+
+    chunks = list(source.iter_bytes(frozen, chunk_size=4))
+
+    assert b"".join(chunks) == b"0123456789"
+    assert len(chunks) == 3
+    assert max(len(chunk) for chunk in chunks) <= 4
+    assert blob_store.calls[0]["version_id"] == version
+    assert blob_store.calls[0]["etag"] == blob_store.versions[("source/data.bin", version)][1]
+
+
+def test_given_same_length_content_change_when_iter_bytes_then_digest_mismatch_refused(
+    blob_store: FakeBlobStore,
+) -> None:
+    blob_store.put("source/data.bin", b"0123456789")
+    source = BlobReleaseSource(blob_store, prefix="source")
+    frozen = source.inventory()[0]
+    blob_store.serve_transform = lambda data: data[:-1] + b"X"
+
+    with pytest.raises(ReleaseInputError, match="content changed"):
+        list(source.iter_bytes(frozen, chunk_size=4))
+
+
+@pytest.mark.parametrize(
+    "transform",
+    [lambda data: data + b"extra", lambda data: data[:-2]],
+    ids=["growth", "truncation"],
+)
+def test_given_blob_length_differs_from_frozen_when_iter_bytes_then_refused(
+    blob_store: FakeBlobStore, transform: Callable[[bytes], bytes]
+) -> None:
+    blob_store.put("source/data.bin", b"0123456789")
+    source = BlobReleaseSource(blob_store, prefix="source")
+    frozen = source.inventory()[0]
+    blob_store.serve_transform = transform
+
+    with pytest.raises(ReleaseInputError, match="length"):
+        list(source.iter_bytes(frozen, chunk_size=4))
+
+
+def test_given_stream_failure_when_iter_bytes_then_mapped_to_release_input_error(blob_store: FakeBlobStore) -> None:
+    blob_store.put("source/data.bin", b"0123456789")
+    source = BlobReleaseSource(blob_store, prefix="source")
+    frozen = source.inventory()[0]
+    blob_store.fail_stream = True
+
+    with pytest.raises(ReleaseInputError, match="unavailable"):
+        list(source.iter_bytes(frozen))
+
+
+def test_given_unversioned_blob_overwritten_before_first_read_when_iter_bytes_then_refused() -> None:
+    store = FakeBlobStore(versioned=False)
+    store.put("source/data.bin", b"0123456789")
+    source = BlobReleaseSource(store, prefix="source")
+    frozen = source.inventory()[0]
+    stream = source.iter_bytes(frozen, chunk_size=4)
+    store.put("source/data.bin", b"abcdefghij")
+
+    with pytest.raises(ReleaseInputError, match="unavailable"):
+        next(stream)
+
+
+def test_given_non_positive_chunk_size_when_iter_bytes_then_refused(blob_store: FakeBlobStore) -> None:
+    blob_store.put("source/data.bin", b"0123456789")
+    source = BlobReleaseSource(blob_store, prefix="source")
+    frozen = source.inventory()[0]
+
+    with pytest.raises(ReleaseInputError, match="chunk_size"):
+        source.iter_bytes(frozen, chunk_size=0)

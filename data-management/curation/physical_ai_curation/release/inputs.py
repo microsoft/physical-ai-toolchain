@@ -10,9 +10,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
+from urllib.parse import urlsplit
 
 from physical_ai_curation.evidence import read_job_evidence
 from physical_ai_curation.models import ContributionLedger, MachineOrigin
@@ -32,6 +34,7 @@ from physical_ai_curation.release.models import (
 from physical_ai_curation.release.models import (
     SavedResource as FrozenSavedResource,
 )
+from physical_ai_curation.release.record_storage import BlobLocation
 from physical_ai_curation.release.store import CHUNK_BYTES, LocalReleaseStore
 from physical_ai_curation.saved_input import SavedInputReader, SavedResource
 
@@ -65,9 +68,10 @@ class LocalReleaseSource:
 
     admission: Literal["finalized_quiescent"] = "finalized_quiescent"
 
-    def __init__(self, root: Path, *, finalized: bool) -> None:
+    def __init__(self, root: Path, *, finalized: bool, on_verified: Callable[[int], None] | None = None) -> None:
         self.root = root
         self.finalized = finalized
+        self.on_verified = on_verified
 
     @staticmethod
     def _is_source(path: str) -> bool:
@@ -93,6 +97,8 @@ class LocalReleaseSource:
                 after = path.lstat()
                 if _stat_identity(before) != _stat_identity(after) or length != item.length:
                     raise ReleaseInputError("source changed while hashing content")
+                if self.on_verified is not None:
+                    self.on_verified(length)
                 objects.append(
                     SourceObject(
                         path=item.path,
@@ -118,6 +124,20 @@ class _BlobSourceEntry:
     version_id: str | None
 
 
+def _blob_revision(etag: str, version_id: str | None) -> str:
+    return sha256_hex(canonical_json_bytes({"etag": etag, "version_id": version_id}))
+
+
+@dataclass(frozen=True)
+class BlobSourceBinding:
+    """Current storage identity for one frozen source object, pinned to a version and ETag."""
+
+    source: SourceObject
+    name: str
+    etag: str
+    version_id: str | None
+
+
 class BlobReleaseSource:
     """Stream configured container/prefix bytes with revision conditions.
 
@@ -131,63 +151,130 @@ class BlobReleaseSource:
         self._client = container_client
         self._prefix = normalize_release_path(prefix.rstrip("/")) + "/" if prefix else ""
 
+    @property
+    def container_client(self) -> Any:
+        """Return the configured container client; callers must not use it to bypass revision checks."""
+        return self._client
+
+    @property
+    def location(self) -> BlobLocation:
+        """Return the secret-free account, container, and prefix identity of the configured source."""
+        address = urlsplit(str(self._client.url))
+        container = address.path.strip("/")
+        if (
+            address.scheme != "https"
+            or not address.netloc
+            or address.username is not None
+            or address.password is not None
+            or address.query
+            or address.fragment
+            or not container
+            or "/" in container
+        ):
+            raise ReleaseInputError("source container URL must be a query-free https container address")
+        try:
+            return BlobLocation(f"https://{address.netloc}", container, self._prefix)
+        except ValueError as exc:
+            raise ReleaseInputError("source container location is invalid") from exc
+
     def _entries(self) -> tuple[_BlobSourceEntry, ...]:
+        from azure.core.exceptions import AzureError
+
+        try:
+            listed = list(self._client.list_blobs(name_starts_with=self._prefix))
+        except AzureError as exc:
+            raise ReleaseInputError("source listing unavailable") from exc
         entries = []
-        for item in self._client.list_blobs(name_starts_with=self._prefix):
-            if not item.name.startswith(self._prefix):
+        for item in listed:
+            name = getattr(item, "name", None)
+            if not isinstance(name, str) or not name.startswith(self._prefix):
                 raise ReleaseInputError("source object is outside configured prefix")
-            path = normalize_release_path(item.name[len(self._prefix) :])
+            try:
+                path = normalize_release_path(name[len(self._prefix) :])
+            except ReleaseVerificationError as exc:
+                raise ReleaseInputError("source object path is unsafe") from exc
             if not LocalReleaseSource._is_source(path):
                 continue
-            if type(item.size) is not int or item.size < 0 or not isinstance(item.etag, str) or not item.etag:
+            size = getattr(item, "size", None)
+            etag = getattr(item, "etag", None)
+            version_id = getattr(item, "version_id", None)
+            if type(size) is not int or size < 0 or not isinstance(etag, str) or not etag:
                 raise ReleaseInputError("source listing lacks a length or expected revision")
-            entries.append(
-                _BlobSourceEntry(
-                    path=path,
-                    name=item.name,
-                    length=item.size,
-                    etag=item.etag,
-                    version_id=getattr(item, "version_id", None),
-                )
-            )
+            if version_id is not None and (not isinstance(version_id, str) or not version_id):
+                raise ReleaseInputError("source listing has invalid version metadata")
+            entries.append(_BlobSourceEntry(path=path, name=name, length=size, etag=etag, version_id=version_id))
         if not entries or len({entry.path for entry in entries}) != len(entries):
             raise ReleaseInputError("source inventory is empty or contains duplicate paths")
         return tuple(sorted(entries, key=lambda entry: entry.path))
 
-    def inventory(self) -> tuple[SourceObject, ...]:
+    def _download(self, name: str, etag: str, version_id: str | None, length: int, chunk_size: int) -> Iterator[bytes]:
+        """Yield the blob bytes in pieces of at most chunk_size, conditioned on etag and version."""
         from azure.core import MatchConditions
         from azure.core.exceptions import AzureError
 
         try:
-            before = self._entries()
-            objects = []
-            for entry in before:
-                blob = self._client.get_blob_client(entry.name, version_id=entry.version_id)
-                download = blob.download_blob(
-                    etag=entry.etag, match_condition=MatchConditions.IfNotModified, max_concurrency=1
-                )
-                digest = hashlib.sha256()
-                length = 0
-                for chunk in download.chunks():
-                    length += len(chunk)
-                    if length > entry.length:
-                        raise ReleaseInputError("source object length changed during read")
-                    digest.update(chunk)
-                if length != entry.length:
+            blob = self._client.get_blob_client(name, version_id=version_id)
+            download = blob.download_blob(etag=etag, match_condition=MatchConditions.IfNotModified, max_concurrency=1)
+            received = 0
+            for raw in download.chunks():
+                received += len(raw)
+                if received > length:
                     raise ReleaseInputError("source object length changed during read")
-                objects.append(
-                    SourceObject(
-                        path=entry.path,
-                        length=length,
-                        sha256=digest.hexdigest(),
-                        revision=sha256_hex(canonical_json_bytes({"etag": entry.etag, "version_id": entry.version_id})),
-                    )
-                )
-            if self._entries() != before:
-                raise ReleaseInputError("source object inventory changed during read")
-            return tuple(objects)
+                for start in range(0, len(raw), chunk_size):
+                    yield raw[start : start + chunk_size]
+            if received != length:
+                raise ReleaseInputError("source object length changed during read")
         except AzureError as exc:
             raise ReleaseInputError("source revision unavailable or changed during read") from exc
+
+    def inventory(self) -> tuple[SourceObject, ...]:
+        before = self._entries()
+        objects = []
+        for entry in before:
+            digest = hashlib.sha256()
+            for chunk in self._download(entry.name, entry.etag, entry.version_id, entry.length, CHUNK_BYTES):
+                digest.update(chunk)
+            objects.append(
+                SourceObject(
+                    path=entry.path,
+                    length=entry.length,
+                    sha256=digest.hexdigest(),
+                    revision=_blob_revision(entry.etag, entry.version_id),
+                )
+            )
+        if self._entries() != before:
+            raise ReleaseInputError("source object inventory changed during read")
+        return tuple(objects)
+
+    def binding(self, source: SourceObject) -> BlobSourceBinding:
+        """Return the current storage binding for source, refusing before any download."""
+        matches = [entry for entry in self._entries() if entry.path == source.path]
+        if len(matches) != 1:
+            raise ReleaseInputError("source object is missing from the current listing")
+        entry = matches[0]
+        if entry.length != source.length:
+            raise ReleaseInputError("source object length changed")
+        if _blob_revision(entry.etag, entry.version_id) != source.revision:
+            raise ReleaseInputError("source object revision changed")
+        return BlobSourceBinding(source=source, name=entry.name, etag=entry.etag, version_id=entry.version_id)
+
+    def iter_bytes(self, source: SourceObject, *, chunk_size: int = CHUNK_BYTES) -> Iterator[bytes]:
+        """Return a verified stream of source bytes in pieces of at most chunk_size.
+
+        The binding is resolved eagerly, so a stale source refuses before any download.
+        The digest is compared after the final chunk; consume the iterator fully before trusting the bytes.
+        """
+        if type(chunk_size) is not int or chunk_size <= 0:
+            raise ReleaseInputError("chunk_size must be a positive integer")
+        return self._verified_stream(self.binding(source), chunk_size)
+
+    def _verified_stream(self, binding: BlobSourceBinding, chunk_size: int) -> Iterator[bytes]:
+        digest = hashlib.sha256()
+        for chunk in self._download(binding.name, binding.etag, binding.version_id, binding.source.length, chunk_size):
+            digest.update(chunk)
+            yield chunk
+        if digest.hexdigest() != binding.source.sha256:
+            raise ReleaseInputError("source object content changed during read")
 
 
 @dataclass(frozen=True)

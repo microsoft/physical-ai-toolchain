@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -180,7 +180,15 @@ class LocalReleaseStore:
             for descriptor in reversed(descriptors):
                 os.close(descriptor)
 
-    def write_verified_object(self, path: str, chunks: Iterable[bytes], *, length: int, sha256: str) -> int:
+    def write_verified_object(
+        self,
+        path: str,
+        chunks: Iterable[bytes],
+        *,
+        length: int,
+        sha256: str,
+        on_created: Callable[[str, os.stat_result], None] | None = None,
+    ) -> int:
         """Create an independent regular object only after its complete stream verifies.
 
         All traversal, temporary writes and create-only publication use held directory
@@ -208,6 +216,8 @@ class LocalReleaseStore:
             digest = hashlib.sha256()
             total = 0
             with os.fdopen(descriptor, "wb") as output:
+                if on_created is not None:
+                    on_created(partial, os.fstat(output.fileno()))
                 for chunk in chunks:
                     if len(chunk) > CHUNK_BYTES:
                         raise ReleaseVerificationError("object stream chunk exceeds the bounded buffer")

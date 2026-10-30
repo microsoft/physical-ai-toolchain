@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from physical_ai_curation.release.canonical import normalize_release_path, sha256_hex
+from physical_ai_curation.release.canonical import canonical_json_bytes, normalize_release_path, sha256_hex
 from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.models import (
     CONTROL_PATHS,
@@ -25,7 +25,13 @@ from physical_ai_curation.release.models import (
     ReleaseResult,
     SourceObject,
 )
-from physical_ai_curation.release.publication import PublicationAttempt, PublicationControl
+from physical_ai_curation.release.publication import (
+    PublicationAttempt,
+    PublicationControl,
+    ownership_bytes,
+    ownership_path,
+    parse_ownership,
+)
 from physical_ai_curation.release.store import CHUNK_BYTES, ObjectStat
 from physical_ai_curation.release.verification import (
     CandidateVerification,
@@ -50,6 +56,12 @@ class CopyProgress:
 
     state: Literal["complete", "pending"]
     copy_id: str | None
+
+
+class _CopyPending(Exception):
+    def __init__(self, progress: CopyProgress) -> None:
+        super().__init__("copy is pending")
+        self.progress = progress
 
 
 def _azure_errors() -> Any:
@@ -205,8 +217,33 @@ class BlobPublisher:
         self.attempt = attempt
         self.control = control
         self.source_authorization = source_authorization
+        self.parent_prefix = prefix + "/" if prefix else ""
         self.root = f"{prefix}/{attempt.prefix}/" if prefix else f"{attempt.prefix}/"
         self.store = BlobReleaseStore(container, self.root)
+
+    def _claim_root(self) -> None:
+        path = self.parent_prefix + ownership_path(self.attempt.prefix)
+        blob = self.container.get_blob_client(path)
+        existing = _properties(blob)
+        content = ownership_bytes(self.attempt)
+        if existing is None:
+            if next(iter(self.container.list_blobs(name_starts_with=self.root)), None) is not None:
+                raise ReleaseVerificationError(
+                    "output collision: release dataset root already exists without ownership"
+                )
+            try:
+                blob.upload_blob(content, overwrite=False, length=len(content))
+                return
+            except _azure_errors().AzureError:
+                existing = _properties(blob)
+                if existing is None:
+                    raise ReleaseVerificationError("release ownership outcome is unresolved") from None
+        if existing.size != len(content):
+            raise ReleaseVerificationError("release root ownership conflict")
+        download = blob.download_blob(etag=existing.etag, match_condition=_match_conditions().IfNotModified)
+        observed = b"".join(_verified_stream(download.chunks(), len(content), sha256_hex(content)))
+        if observed != content:
+            raise ReleaseVerificationError("release root ownership conflict")
 
     def write(self, path: str, chunks: Iterable[bytes], *, length: int, sha256: str) -> None:
         """Create verified bytes once, or recover only a recorded and matching owned object."""
@@ -215,6 +252,7 @@ class BlobPublisher:
             raise ReleaseVerificationError("marker requires publication arbitration")
         operation = _operation_id(self.attempt, path, length, sha256)
         with self.control.effect(self.attempt, path, length, sha256) as replay:
+            self._claim_root()
             if self._marker_exists():
                 raise ReleaseVerificationError("published package is immutable")
             blob = self.container.get_blob_client(self.root + path)
@@ -227,30 +265,82 @@ class BlobPublisher:
                 return
             self._create(blob, path, _verified_stream(chunks, length, sha256), length, sha256, operation)
 
-    def copy(self, source_container: Any, source: SourceObject, source_etag: str) -> CopyProgress:
+    def copy(
+        self, source_container: Any, source: SourceObject, source_etag: str, *, source_path: str | None = None
+    ) -> CopyProgress:
         """Server-side copy conditioned on the source revision, then independently verified."""
         path = normalize_release_path(source.path)
         if path in CONTROL_PATHS:
             raise ReleaseVerificationError("control artifacts are not copied")
-        source_url = self._source_url(source_container, path)
-        source_properties = _properties(source_container.get_blob_client(path))
+        original = normalize_release_path(source_path) if source_path is not None else path
+        source_url = self._source_url(source_container, original)
+        source_properties = _properties(source_container.get_blob_client(original))
         if (
             source_properties is None
             or source_properties.etag != source_etag
             or source_properties.size != source.length
+            or sha256_hex(
+                canonical_json_bytes(
+                    {"etag": source_properties.etag, "version_id": getattr(source_properties, "version_id", None)}
+                )
+            )
+            != source.revision
         ):
             raise ReleaseVerificationError("source revision changed or is missing")
         operation = _operation_id(self.attempt, path, source.length, source.sha256, source_etag)
         metadata = self._destination_metadata(source_properties.metadata, source, operation)
-        with self.control.effect(self.attempt, path, source.length, source.sha256) as replay:
-            if self._marker_exists():
-                raise ReleaseVerificationError("published package is immutable")
-            blob = self.container.get_blob_client(self.root + path)
-            if _properties(blob) is None:
-                self._dispatch_copy(blob, source_url, metadata, source_etag)
-            elif not replay:
-                raise ReleaseVerificationError("output collision or ownership conflict")
-            return self._settle(blob, path, source, operation)
+        try:
+            with self.control.effect(self.attempt, path, source.length, source.sha256) as replay:
+                self._claim_root()
+                if self._marker_exists():
+                    raise ReleaseVerificationError("published package is immutable")
+                blob = self.container.get_blob_client(self.root + path)
+                if _properties(blob) is None:
+                    self._dispatch_copy(blob, source_url, metadata, source_etag)
+                elif not replay:
+                    raise ReleaseVerificationError("output collision or ownership conflict")
+                progress = self._settle(blob, path, source, operation)
+                if progress.state == "pending":
+                    raise _CopyPending(progress)
+                return progress
+        except _CopyPending as pending:
+            return pending.progress
+
+    def reconcile_copy(self, source: SourceObject, source_etag: str, *, cancel: bool = False) -> CopyProgress | None:
+        """Observe an exact journaled copy; durably record its ID before cancellation effects."""
+        path = normalize_release_path(source.path)
+        if path in CONTROL_PATHS or self._marker_exists():
+            raise ReleaseVerificationError("published or control objects are not reconciled as payload")
+        blob = self.container.get_blob_client(self.root + path)
+        properties = _properties(blob)
+        operation = _operation_id(self.attempt, path, source.length, source.sha256, source_etag)
+        if properties is not None and not _is_owned(properties.metadata, self.attempt, operation):
+            raise ReleaseVerificationError("output collision or ownership conflict")
+        copy_id = _copy_id(properties) if properties is not None else None
+        with self.control.reconciliation(
+            self.attempt,
+            path,
+            source.length,
+            source.sha256,
+            copy_id=copy_id,
+            cancel=cancel,
+        ) as observed:
+            if properties is None:
+                observed("absent")
+                return None
+            if cancel:
+                if _copy_status(properties) == "pending":
+                    try:
+                        blob.abort_copy(copy_id)
+                    except _azure_errors().HttpResponseError as error:
+                        if error.status_code != 409:
+                            raise
+                self._delete_owned_residue(blob, copy_id, operation)
+                observed("absent")
+                return None
+            progress = self._settle(blob, path, source, operation)
+            observed("complete" if progress.state == "complete" else "pending")
+            return progress
 
     def abort(self, path: str, copy_id: str) -> None:
         """Abort one owned pending copy by its recorded identifier, then remove owned residue."""
@@ -302,18 +392,26 @@ class BlobPublisher:
         return verify_published(self.store, expected_manifest_sha256)
 
     def discover(self) -> list[str]:
-        """Enumerate only verified markers beneath the configured reserved namespace."""
-        suffix = self.attempt.prefix + "/"
-        prefix = self.root[: -len(suffix)] + "_releases/"
+        """Discover named datasets through ownership records and verified publication markers."""
+        prefix = self.parent_prefix + "_releases/"
         admitted = []
         for item in self.container.list_blobs(name_starts_with=prefix):
-            if not item.name.endswith("/" + MARKER_PATH):
-                continue
-            root = item.name[: -len(MARKER_PATH)]
-            if len(root[len(prefix) :].strip("/").split("/")) != 2:
+            relative = item.name[len(prefix) :]
+            if not relative.endswith(".json") or "/" in relative or item.size > 4096:
                 continue
             try:
-                verify_published(BlobReleaseStore(self.container, root))
+                blob = self.container.get_blob_client(item.name)
+                content = b"".join(
+                    blob.download_blob(
+                        etag=item.etag,
+                        match_condition=_match_conditions().IfNotModified,
+                    ).chunks()
+                )
+                owner = parse_ownership(content, relative[:-5])
+                root = self.parent_prefix + owner.prefix + "/"
+                result = verify_published(BlobReleaseStore(self.container, root))
+                if result.identity.package_id != owner.package_id:
+                    continue
             except ReleaseVerificationError:
                 continue
             admitted.append(root)

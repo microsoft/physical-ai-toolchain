@@ -77,8 +77,9 @@ for inference and model configuration.
 `physical_ai_curation.release` provides versioned contracts, saved-input freezing,
 object planning and independent package verification without a decoder, evaluator,
 Azure SDK or web framework. Optional table, statistics and encoding helpers add
-generation without a publication workflow. Guarded publication adapters are
-available; durable release jobs, CLI/API commands and viewer controls remain open.
+generation without a publication workflow. Guarded publication and durable job
+primitives are available. The local coordinator composes native release generation;
+public CLI/API submission and viewer controls remain open.
 
 Use `verify_candidate` from `physical_ai_curation.release.verification` to check
 canonical control files, inventoried bytes, frozen source/output references,
@@ -99,8 +100,9 @@ authoritative without a separate release-role or grant policy.
 `plan_release_objects` classifies exact copies, generated metadata and necessary
 encoding for LeRobot v3 targets. It opens no media or storage. Local-to-local and
 same-account Blob-to-Blob are planned routes, not live target publication evidence.
-Capacity estimates remain advisory until durable admission and runtime limits
-are implemented. Call `load_media_limits` after application environment loading;
+Capacity estimates remain advisory; the job store separately admits durable
+reservations and supervised execution applies hard runtime bounds.
+Call `load_media_limits` after application environment loading;
 its overrides are listed in the [backend environment example](../viewer/backend/.env.example).
 
 `execute_exact_copy` writes an independent, create-only local object through
@@ -154,13 +156,27 @@ The caller supplies admitted source streams and a private output sink. The helpe
 does not check storage revisions, own effects or publish a release.
 
 `release.publication.LocalPublisher` writes independent, create-only objects under
-`_releases/<package>/<attempt>` beneath an explicitly supplied destination.
+the chosen dataset name beneath an explicitly supplied destination. The name
+defaults to the package ID; `PublicationAttempt.dataset_name` selects another
+name. Configure a parent subfolder to group releases, or use the normal `data_dir`
+or Azure dataset container. Attempt identity does not add another dataset level.
+An external `_releases/<dataset_name>.json` companion binds the named root to its
+package/attempt before payload writes; existing unowned roots are never adopted.
 Directory entries and completed object names are synchronized before completion.
 `prepare` independently verifies destination content and writes derived receipt
 and report artifacts. `publish` writes the canonical marker without a rename or
 promotion copy, then verifies the published package. Generic viewer catalogs
-exclude the reserved subtree. Publisher `discover` methods admit only verified
-marked roots; legacy datasets are not labelled verified releases.
+exclude operational metadata, not completed release datasets. Publisher and viewer
+discovery admit recorded names only after independent marker/content verification;
+direct reads apply the same check. Legacy datasets without an ownership record
+remain ordinary datasets and are not labelled verified releases. Blob admission
+uses the existing async storage client through a bounded streaming bridge, with
+no second credential client or whole-payload buffer. Configure its total deadline
+and byte budget after environment loading; the defaults are 30 seconds and 4 GiB.
+Larger releases may need higher configured bounds. A missing marker, changed
+payload, unavailable ownership probe or exhausted budget refuses admission rather
+than falling back to legacy discovery. Dataset video uploads do not mutate a
+recorded release.
 
 `release.azure_publication.BlobPublisher` uses injected synchronous Azure clients,
 create-only destination writes, source ETag conditions and independent streaming
@@ -181,6 +197,146 @@ authorization, copy limits or cancellation behavior.
 processing needs confirmation. Missing statistics and capacity blockers cannot
 be overridden. The composer must first revalidate frozen inputs and regenerate
 the plan; this check is not authentication, fencing or durable job admission.
+
+### Storage-Native Job State
+
+`release.jobs.ReleaseJobStore` persists release acceptance, scoped idempotency,
+fenced leases, reservations, effect intents and lifecycle events as versioned
+per-job JSON records. Local records live under `jobs/<job_id>.json` beneath the
+explicitly configured state folder. Choose a folder beneath `data_dir`, a separate
+folder or a subfolder of a selected directory. No database server or SQLite file
+is required. Each transition replaces one complete record atomically and syncs
+the file and directory while holding a filesystem lock.
+
+`release.record_storage.BlobRecordStorage` uses the selected container/prefix for
+the same job documents. It coordinates acceptance with a renewable Blob lease,
+conditional record writes and a pending-write checkpoint. A replacement owner
+finishes that checkpoint before admitting new work; a lost response does not
+permit a duplicate job. An Azure-backed job does not depend on a local database
+or local state cache. Indexes, idempotency bindings and reservations are rebuilt
+from persisted records when the service reopens the store. Initial deployment
+trades indexed lookup performance for self-contained, inspectable storage.
+
+`release.record_storage.BlobLocation` binds a remote payload destination to its
+canonical HTTPS account origin, container and prefix. Job acceptance does not
+resolve that destination as a local path or measure worker disk as Azure capacity.
+Blob payload reservations share an account-wide application ceiling, including
+retained output, across containers, prefixes and execution hosts using the same
+job authority. `CURATION_RELEASE_BLOB_RESERVATION_LIMIT_BYTES` defaults to 1 TiB;
+this is an admission policy limit, not measured Azure quota or free space. Use the
+same configured ceiling for workers sharing that authority. Local scratch still
+requires its own filesystem reservation and can fail independently of remote
+payload admission.
+
+Mutable operational records remain separate from immutable published package
+bytes, within configured storage. Local runtime proofs and scratch may use a
+configured worker folder. Missing proof from an unavailable execution host is an
+unresolved obligation, not evidence that the old writer stopped. There is no
+automatic migration from the earlier uncommitted database implementation.
+
+Pass settings from `ReleaseRuntimeSettings.from_environment(os.environ)` after
+environment loading. The [backend environment example](../viewer/backend/.env.example)
+documents lease, reserve, native memory, termination, liveness, contention and
+recovery overrides, plus bounded record sizes and scan counts. State storage must
+remain available across worker restarts. A supplied Blob adapter accepts the
+same validated limits explicitly; optional Azure imports remain lazy.
+
+### Supervised Execution
+
+Acceptance precedes `running`; `sealed` closes payload effects and journals exact
+receipt/report identities. `committing` records the irrevocable manifest-bound
+decision before the final marker, and `committed` records verified publication.
+The final local or Blob marker uses a separate commit-bound intent and registered guardian
+child; closing the payload ledger never grants a general late-write capability.
+Recovery checks the persisted guardian proof even when the controller lost its
+stop acknowledgment. It removes only registered inode-matching marker partials,
+verifies an existing marker before acknowledging it, and retains foreign residue.
+Pending marker effects or writers cannot advance the job to `committed`.
+Cancellation moves an uncommitted job to `cancelling`; stopped effects, cleanup
+and retained capacity are separate status fields. No clean cancellation is reported
+while an effect or private scratch charge is unresolved. A new worker cannot
+dispatch another path while an earlier intent remains unresolved.
+
+`release.coordinator.generation_request_bytes` supplies the exact durable request
+binding. `run_release_generation` revalidates frozen source/saved/context identities,
+checks that binding and the confirmed plan, then executes guarded local/local or
+same-account Blob/Blob output. Mixed routes, cross-account copies and overlapping
+source/output roots are refused. Blob source reads bind fresh raw ETag/version
+identity to the frozen revision, use conditional requests and verify streamed
+content. Unsupported version-specific copy URLs remain refused; query strings
+and credential-bearing source addresses are not accepted.
+Native metadata and table decoding/assembly run in capped guardian children;
+affected video spools run sequentially under the same boundary. Unchanged video
+copies never invoke an encoder or decoder. Local payload copies, server-side Blob
+copies, generated files and streamed lineage run in registered guardian children.
+Azure credentials are acquired within the child, not serialized in its protocol.
+Native scratch and output sinks reject
+growth before exceeding admitted bounds. Shared filesystems use one reservation;
+separate scratch filesystems receive independent durable charges.
+
+Private workspaces journal their creator's kernel identity and directory inode
+before receiving bytes. Normal cleanup requires current creator authority and
+stopped children; restart recovery additionally requires independent creator-exit
+evidence. Replaced directories, symlink residue, exhausted cleanup budgets and
+uncertain creation outcomes retain their charge. State and scratch roots are
+service-private directories, not shared writable output areas. Unknown destination
+residue is not deleted or reported as completed cleanup.
+
+Scoped status separates reserved scratch, observed current scratch and measured
+peak scratch. Idempotent completed-I/O observations record original-source and
+independent destination verification reads, unchanged-copy bytes and generated
+local output. These are not estimates or proof of unobserved partial effects.
+Blob composition additionally records completed storage-copy bytes, verified
+affected-media downloads and independently verified generated uploads. Local
+copies are not mislabeled as remote traffic. Uncertain transfers do not count as
+acknowledged observations.
+
+`SupervisedBlobPublisher.reconcile_copy(cancel=True)` requires durable cancellation
+and a journaled copy identity before starting a separate registered cleanup child.
+It rechecks ownership, aborts a pending copy and conditionally deletes only its
+unpublished residue, including completion during abort. Lost delete responses
+remain unresolved until independent absence and stopped-writer proof are observed.
+Ordinary writer registration remains refused after cancellation. This copy-level
+reconciliation does not complete whole-release cleanup, remove the ownership
+companion or release retained capacity.
+
+`SupervisedBlobPublisher.cleanup_cancelled()` checks the entire unpublished
+root against durable payload/control intents before deleting anything. Markers,
+unjournaled objects and foreign ownership prevent cleanup. Each registered child
+rechecks the companion, settles pending copies and deletes with current ETag
+conditions. A separate cleanup-only intent authorizes removal of the exact
+companion after the payload root is empty. Capacity is released only after stopped
+writer proof and independent absence checks for both root and companion.
+Lost payload or companion delete responses survive a job-store restart and require
+explicit retry. Cleanup uses the configured total budget for streaming preflight
+checks and supervised children; a blocked child is stopped and reaped. Failure
+exposes `cleanup_state=failed` and retains capacity, rather than reporting clean
+cancellation. Independent worker activation and the public API/CLI remain
+unavailable. Provider tests with real children do not establish live Azure behavior.
+
+The Linux supervisor requires pidfds and procfs. It persists process start/boot
+identity before releasing the child start gate, drains descendants after controller
+loss and emits stop proof only after reaping. Missing proof, a killed guardian or
+an unsupported host remains unresolved; a reused PID is not evidence of shutdown.
+`recover_runtimes` processes at most 128 registered runtimes per invocation within
+one configured total wait budget. Recheck status before replacement effects.
+
+Job pages contain at most 100 entries and expose only the requesting principal's
+scope. Lifecycle transitions and their event outbox share a transaction; JSONL
+export repairs only a partial final record and verifies existing cursors against
+the events embedded in job records. The export is reconstructible local
+application telemetry, not OTLP or job authority. There is no automatic job/event
+TTL or reservation expiry. Retain job records and relevant operational evidence
+until all active effects and output-retention obligations are reconciled;
+reads never prune them.
+
+`BlobPublisher.reconcile_copy` observes destination ownership, copy ID and actual
+content through a durable reconciliation guard. It records copy identity before
+abort/delete and handles completed copies or already-absent cleanup residue.
+Provider-fault tests are not live Azure proof. Local and same-account Blob
+generation composition is implemented. Public cleanup/recovery entry points,
+independent worker activation and complete transfer diagnostics remain unfinished;
+these primitives are not yet a public standalone worker or submission service.
 
 ## 🔒 Storage and Security
 

@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 from physical_ai_curation.release.azure_publication import BlobPublisher, BlobReleaseStore
-from physical_ai_curation.release.canonical import sha256_hex
+from physical_ai_curation.release.canonical import canonical_json_bytes, sha256_hex
 from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.models import MARKER_PATH, SourceObject
 from physical_ai_curation.release.publication import LocalPublisher, PublicationAttempt
@@ -79,6 +79,37 @@ def test_given_replay_when_write_then_only_matching_owned_bytes_reused(tmp_path:
 
     with pytest.raises(ReleaseVerificationError):
         publisher.write("data/item", (content,), length=len(content), sha256=sha256_hex(content))
+
+
+def test_given_chosen_dataset_name_when_written_then_layout_has_no_attempt_segment(tmp_path: Path) -> None:
+    publisher = LocalPublisher(tmp_path, PublicationAttempt("plate-release", "try-a"), OwnedControl())
+    publisher.write("data/item", (b"x",), length=1, sha256=sha256_hex(b"x"))
+
+    assert publisher.root == tmp_path / "plate-release"
+    assert (publisher.root / "data/item").read_bytes() == b"x"
+    assert (tmp_path / "_releases" / "plate-release.json").is_file()
+    assert not (publisher.root / "try-a").exists()
+
+
+def test_given_named_root_owned_when_other_attempt_writes_then_foreign_attempt_refused(tmp_path: Path) -> None:
+    first = LocalPublisher(tmp_path, PublicationAttempt("plate-release", "try-a"), OwnedControl())
+    first.write("data/first", (b"x",), length=1, sha256=sha256_hex(b"x"))
+    other = LocalPublisher(tmp_path, PublicationAttempt("plate-release", "try-b"), OwnedControl())
+
+    with pytest.raises(ReleaseVerificationError, match="ownership"):
+        other.write("data/second", (b"y",), length=1, sha256=sha256_hex(b"y"))
+    assert not (first.root / "data/second").exists()
+
+
+def test_given_existing_legacy_dataset_when_release_claimed_then_no_files_added(tmp_path: Path) -> None:
+    root = tmp_path / "plate-release"
+    root.mkdir()
+    (root / "original").write_bytes(b"keep")
+    publisher = LocalPublisher(tmp_path, PublicationAttempt("plate-release", "try-a"), OwnedControl())
+
+    with pytest.raises(ReleaseVerificationError, match="already exists"):
+        publisher.write("data/item", (b"x",), length=1, sha256=sha256_hex(b"x"))
+    assert [path.name for path in root.iterdir()] == ["original"]
 
 
 @pytest.mark.parametrize("package,attempt", [("../escape", "safe"), ("safe", "a/b"), ("safe", "..")])
@@ -239,8 +270,12 @@ class _FakeBlobClient:
         if etag is not None and etag != record.etag:
             raise _azure_errors().ResourceModifiedError("changed")
         del self.container.blobs[self.name]
+        self.container.fault("delete_blob", after=True)
 
     def abort_copy(self, copy_id: str, **kwargs: Any) -> None:
+        self.container.fault("abort_copy", after=False)
+        if self.container.complete_during_abort:
+            self.container.finish_copy(self.name)
         record = self._record()
         if record.copy is None or record.copy.status != "pending" or record.copy.id != copy_id:
             error = _azure_errors().HttpResponseError(message="NoPendingCopyOperation")
@@ -250,6 +285,7 @@ class _FakeBlobClient:
         record.copy = _FakeCopy("aborted", copy_id)
         record.etag = _new_etag()
         self.container.pending_data.pop(self.name, None)
+        self.container.fault("abort_copy", after=True)
 
 
 def _resolve(registry: dict[str, _FakeContainer], url: str) -> tuple[_FakeContainer, str]:
@@ -268,6 +304,7 @@ class _FakeContainer:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.faults: dict[str, tuple[bool, Exception]] = {}
         self.copy_outcome = "success"
+        self.complete_during_abort = False
         self.corrupt_copy = False
         self.pending_data: dict[str, bytes] = {}
         self.copy_count = 0
@@ -331,7 +368,26 @@ def _source(
 ) -> tuple[SourceObject, str]:
     source_container.put(PATH, data, metadata)
     etag = source_container.get_blob_client(PATH).get_blob_properties().etag
-    return SourceObject(path=PATH, revision="rev-1", length=len(data), sha256=sha256_hex(data)), etag
+    revision = sha256_hex(canonical_json_bytes({"etag": etag, "version_id": None}))
+    return SourceObject(path=PATH, revision=revision, length=len(data), sha256=sha256_hex(data)), etag
+
+
+@pytest.mark.parametrize("changed_field", ["etag", "version_id"])
+def test_given_frozen_blob_revision_mismatch_when_copy_then_no_effect_dispatched(
+    destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl, changed_field: str
+) -> None:
+    source, etag = _source(source_container)
+    identity = {"etag": etag, "version_id": None}
+    identity[changed_field] = "different-revision"
+    source = source.model_copy(update={"revision": sha256_hex(canonical_json_bytes(identity))})
+    publisher = _publisher(destination, control)
+
+    with pytest.raises(ReleaseVerificationError, match="revision"):
+        publisher.copy(source_container, source, etag)
+
+    assert control.intents == {}
+    assert destination.blobs == {}
+    assert destination.copy_count == 0
 
 
 def _name(publisher: BlobPublisher, path: str = PATH) -> str:
@@ -437,6 +493,60 @@ def test_given_failed_copy_when_copy_then_completion_refused(
         BlobReleaseStore(destination, publisher.root).list_objects()
 
 
+def test_given_durable_control_when_copy_pending_then_ledger_remains_unresolved(
+    tmp_path: Path, destination: _FakeContainer, source_container: _FakeContainer
+) -> None:
+    from physical_ai_curation.release.jobs import AuthorityError, JobRequest, ReleaseJobControl, ReleaseJobStore
+
+    ledger = ReleaseJobStore(tmp_path / "jobs")
+    accepted = ledger.accept(JobRequest("scope", "user", "key", ATTEMPT, tmp_path, b"frozen", 4096))
+    fence = ledger.claim(accepted.job_id, "worker")
+    control = ReleaseJobControl(ledger, accepted.job_id, fence)
+    publisher = BlobPublisher(destination, ATTEMPT, control)
+    source, etag = _source(source_container)
+    destination.copy_outcome = "pending"
+
+    assert publisher.copy(source_container, source, etag).state == "pending"
+    with pytest.raises(AuthorityError, match="unresolved"):
+        ledger.begin_effect(accepted.job_id, fence, ATTEMPT, PATH, source.length, source.sha256)
+
+
+@pytest.mark.parametrize("cancel,complete_during_abort", [(False, False), (True, False), (True, True)])
+def test_given_durable_pending_copy_when_reconciled_then_real_observation_settles_ledger(
+    tmp_path: Path,
+    destination: _FakeContainer,
+    source_container: _FakeContainer,
+    cancel: bool,
+    complete_during_abort: bool,
+) -> None:
+    from physical_ai_curation.release.jobs import JobRequest, ReleaseJobControl, ReleaseJobStore
+
+    ledger = ReleaseJobStore(tmp_path / "jobs")
+    accepted = ledger.accept(JobRequest("scope", "user", "key", ATTEMPT, tmp_path, b"frozen", 4096))
+    fence = ledger.claim(accepted.job_id, "worker")
+    publisher = BlobPublisher(destination, ATTEMPT, ReleaseJobControl(ledger, accepted.job_id, fence))
+    source, etag = _source(source_container)
+    destination.copy_outcome = "pending"
+    publisher.copy(source_container, source, etag)
+    reopened = ReleaseJobStore(ledger.root)
+    publisher = BlobPublisher(destination, ATTEMPT, ReleaseJobControl(reopened, accepted.job_id, fence))
+    if cancel:
+        reopened.request_cancel(accepted.job_id, scope="scope", principal="user")
+        destination.complete_during_abort = complete_during_abort
+    else:
+        destination.finish_copy(_name(publisher))
+    progress = publisher.reconcile_copy(source, etag, cancel=cancel)
+    assert destination.copy_count == 1
+    if cancel:
+        assert progress is None
+        assert _name(publisher) not in destination.blobs
+        reopened.confirm_stopped(accepted.job_id, fence)
+        assert reopened.settle_cancellation(accepted.job_id, fence, output_removed=True).state == "cancelled"
+    else:
+        assert progress.state == "complete"
+        assert reopened.begin_effect(accepted.job_id, fence, ATTEMPT, PATH, source.length, source.sha256)
+
+
 def test_given_unowned_destination_when_copy_then_collision_refused_and_bytes_kept(
     destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl, registry: dict
 ) -> None:
@@ -449,6 +559,35 @@ def test_given_unowned_destination_when_copy_then_collision_refused_and_bytes_ke
 
     assert destination.blobs[_name(publisher)].data == b"someone else"
     assert destination.copy_count == 0
+
+
+@pytest.mark.parametrize("operation", ["abort_copy", "delete_blob"])
+def test_given_lost_copy_cleanup_response_when_reopened_then_absence_reconciled_without_redispatch(
+    tmp_path: Path,
+    destination: _FakeContainer,
+    source_container: _FakeContainer,
+    operation: str,
+) -> None:
+    from physical_ai_curation.release.jobs import JobRequest, ReleaseJobControl, ReleaseJobStore
+
+    ledger = ReleaseJobStore(tmp_path / "jobs")
+    accepted = ledger.accept(JobRequest("scope", "user", "key", ATTEMPT, tmp_path, b"frozen", 4096))
+    fence = ledger.claim(accepted.job_id, "worker")
+    publisher = BlobPublisher(destination, ATTEMPT, ReleaseJobControl(ledger, accepted.job_id, fence))
+    source, etag = _source(source_container)
+    destination.copy_outcome = "pending"
+    publisher.copy(source_container, source, etag)
+    ledger.request_cancel(accepted.job_id, scope="scope", principal="user")
+    destination.inject(operation, _azure_errors().ServiceRequestError("lost cleanup response"), after=True)
+    with pytest.raises(_azure_errors().ServiceRequestError):
+        publisher.reconcile_copy(source, etag, cancel=True)
+    reopened = ReleaseJobStore(ledger.root)
+    assert reopened.get(accepted.job_id, scope="scope", principal="user").capacity_state == "reserved"
+    recovered = BlobPublisher(destination, ATTEMPT, ReleaseJobControl(reopened, accepted.job_id, fence))
+    assert recovered.reconcile_copy(source, etag, cancel=True) is None
+    reopened.confirm_stopped(accepted.job_id, fence)
+    assert reopened.settle_cancellation(accepted.job_id, fence, output_removed=True).state == "cancelled"
+    assert destination.copy_count == 1
 
 
 def test_given_changed_source_revision_when_copy_then_refused_before_effect(
@@ -537,7 +676,7 @@ def test_given_bearer_source_authorization_when_copy_then_synchronous_copy_reque
     publisher = _publisher(destination, control, source_authorization="Bearer token-value")
 
     publisher.copy(source_container, source, etag)
-    _, kwargs = destination.calls[0]
+    _, kwargs = next(call for call in destination.calls if call[0] == "start_copy_from_url")
 
     assert kwargs["requires_sync"] is True
     assert kwargs["source_authorization"] == "Bearer token-value"
