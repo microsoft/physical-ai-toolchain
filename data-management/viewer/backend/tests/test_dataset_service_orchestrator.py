@@ -17,7 +17,6 @@ from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
-
 from src.api.models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, TrajectoryPoint
 from src.api.services.dataset_service.service import DatasetService
 
@@ -111,6 +110,21 @@ def _trajectory_point(frame: int = 0) -> TrajectoryPoint:
 
 
 class TestDatasetDiscovery:
+    async def test_given_unpublished_reserved_tree_when_scan_then_not_a_legacy_dataset(self, tmp_path: Path) -> None:
+        candidate = tmp_path / "_releases" / "pkg" / "attempt"
+        candidate.mkdir(parents=True)
+        service = DatasetService(base_path=str(tmp_path))
+        handler = _make_handler()
+        handler.can_handle.side_effect = lambda path: path == candidate
+        _install_handlers(service, handler)
+        discovered = set()
+
+        service._scan_directory(tmp_path, [], discovered)
+
+        assert discovered == set()
+        with pytest.raises(ValueError, match="reserved"):
+            service._get_dataset_path("_releases--pkg--attempt")
+
     @pytest.mark.parametrize("failure", ["fallback", "missing", "container"])
     async def test_given_blob_manifest_missing_when_resolving_then_only_missing_objects_are_skipped(
         self,

@@ -513,7 +513,7 @@ class DatasetService:
         if len(prefix_parts) >= 5:
             return
         for item in directory.iterdir():
-            if not item.is_dir() or item.name.startswith("."):
+            if not item.is_dir() or item.name.startswith(".") or item.name == "_releases":
                 continue
             current_parts = [*prefix_parts, item.name]
             handled = False
@@ -1286,6 +1286,8 @@ class DatasetService:
         if self._blob_provider is not None:
             raise ValueError("Local dataset access is disabled in Azure mode")
         parts = dataset_id.split("--") if "--" in dataset_id else [dataset_id]
+        if "_releases" in parts:
+            raise ValueError("reserved releases require marker-aware admission")
         if len(parts) > 5:
             raise ValueError(f"Dataset nesting too deep (max 5 levels): {dataset_id}")
 

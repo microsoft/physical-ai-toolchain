@@ -43,6 +43,20 @@ def _make_directory_blob(name: str) -> MagicMock:
     return blob
 
 
+async def test_given_reserved_release_when_legacy_discovery_then_not_admitted(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = create_blob_dataset_provider()
+    container = MagicMock()
+    container.walk_blobs.side_effect = lambda **kwargs: _AsyncIter([_make_blob("_releases/")])
+    client = MagicMock()
+    client.get_container_client.return_value = container
+    monkeypatch.setattr(provider, "_get_client", AsyncMock(return_value=client))
+
+    assert await provider.scan_all_dataset_ids(strict=True) == {"lerobot": [], "hdf5": []}
+    assert await provider.dataset_exists("_releases--pkg--attempt") is False
+    with pytest.raises(ValueError, match="reserved"):
+        provider.get_blob_prefix("group--_releases--pkg--attempt")
+
+
 @pytest.mark.parametrize("case", ["metadata", "index", "columns", "location", "path", "bytes", "v3"])
 async def test_given_episode_sync_inputs_when_materializing_then_only_valid_shard_written(
     tmp_path: Path,

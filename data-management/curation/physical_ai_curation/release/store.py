@@ -105,6 +105,7 @@ class LocalReleaseStore:
                     if create:
                         with suppress(FileExistsError):
                             os.mkdir(segment, dir_fd=descriptor)
+                            os.fsync(descriptor)
                     child = _open_child_directory(descriptor, segment)
                 finally:
                     os.close(descriptor)
@@ -197,6 +198,7 @@ class LocalReleaseStore:
             for segment in segments[:-1]:
                 with suppress(FileExistsError):
                     os.mkdir(segment, dir_fd=descriptors[-1])
+                    os.fsync(descriptors[-1])
                 descriptors.append(_open_child_directory(descriptors[-1], segment))
             _, nofollow = _safe_flags()
             descriptor = os.open(

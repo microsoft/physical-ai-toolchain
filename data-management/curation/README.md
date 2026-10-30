@@ -77,8 +77,8 @@ for inference and model configuration.
 `physical_ai_curation.release` provides versioned contracts, saved-input freezing,
 object planning and independent package verification without a decoder, evaluator,
 Azure SDK or web framework. Optional table, statistics and encoding helpers add
-generation without a publication workflow. Publishers, durable release jobs,
-CLI/API commands and viewer controls remain open.
+generation without a publication workflow. Guarded publication adapters are
+available; durable release jobs, CLI/API commands and viewer controls remain open.
 
 Use `verify_candidate` from `physical_ai_curation.release.verification` to check
 canonical control files, inventoried bytes, frozen source/output references,
@@ -98,7 +98,7 @@ authoritative without a separate release-role or grant policy.
 
 `plan_release_objects` classifies exact copies, generated metadata and necessary
 encoding for LeRobot v3 targets. It opens no media or storage. Local-to-local and
-same-account Blob-to-Blob are planned routes, not evidence that publishers exist.
+same-account Blob-to-Blob are planned routes, not live target publication evidence.
 Capacity estimates remain advisory until durable admission and runtime limits
 are implemented. Call `load_media_limits` after application environment loading;
 its overrides are listed in the [backend environment example](../viewer/backend/.env.example).
@@ -152,6 +152,30 @@ Video summaries describe bounded samples of transformed RGB frames before lossy
 encoding; their counts are sampled frames, not pixels or all episode frames.
 The caller supplies admitted source streams and a private output sink. The helper
 does not check storage revisions, own effects or publish a release.
+
+`release.publication.LocalPublisher` writes independent, create-only objects under
+`_releases/<package>/<attempt>` beneath an explicitly supplied destination.
+Directory entries and completed object names are synchronized before completion.
+`prepare` independently verifies destination content and writes derived receipt
+and report artifacts. `publish` writes the canonical marker without a rename or
+promotion copy, then verifies the published package. Generic viewer catalogs
+exclude the reserved subtree. Publisher `discover` methods admit only verified
+marked roots; legacy datasets are not labelled verified releases.
+
+`release.azure_publication.BlobPublisher` uses injected synchronous Azure clients,
+create-only destination writes, source ETag conditions and independent streaming
+verification. Source URLs must be query-free and same-account. Source bearer
+authorization requests synchronous service copy; asynchronous reconciliation is
+separate and requires a service-authorized source. Pending or failed copies block
+verification. Abort cleanup binds the owned operation and copy ID and uses
+conditional deletion. SDK imports are lazy.
+
+Both publishers require `PublicationControl` to durably record and fence effects
+before dispatch, retain uncertain intents and serialize publication with
+cancellation. Publication requires an irrevocable commit decision and a closed
+ledger with stopped writers. The adapters are not standalone job runners or an
+unsupervised publication API. Provider tests do not establish live Azure
+authorization, copy limits or cancellation behavior.
 
 `validate_processing_confirmation` requires the current preview digest whenever
 processing needs confirmation. Missing statistics and capacity blockers cannot

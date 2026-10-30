@@ -103,6 +103,8 @@ class BlobDatasetProvider:
     @staticmethod
     def get_blob_prefix(dataset_id: str) -> str:
         """Convert a --separated dataset ID to a /-separated blob prefix."""
+        if "_releases" in dataset_id.replace("--", "/").split("/"):
+            raise ValueError("reserved releases require marker-aware admission")
         return dataset_id_to_blob_prefix(dataset_id)
 
     async def _get_client(self) -> BlobServiceClient:
@@ -189,6 +191,8 @@ class BlobDatasetProvider:
 
         async def _walk(prefix: str, depth: int) -> None:
             segments = prefix.rstrip("/").split("/") if prefix else []
+            if "_releases" in segments:
+                return
             if 1 <= len(segments) <= max_depth and await _has_info_json(prefix):
                 lerobot_ids.add("--".join(segments))
                 return
@@ -235,6 +239,8 @@ class BlobDatasetProvider:
 
     async def dataset_exists(self, dataset_id: str) -> bool:
         """Return True if the dataset has a meta/info.json blob."""
+        if "_releases" in dataset_id.replace("--", "/").split("/"):
+            return False
         blob_path = f"{self.get_blob_prefix(dataset_id)}/meta/info.json"
         try:
             client = await self._get_client()
@@ -485,7 +491,7 @@ class BlobDatasetProvider:
                     files = table.column(file_col).to_pylist()
                     froms = table.column(from_col).to_pylist()
                     tos = table.column(to_col).to_pylist()
-                    for ep, ck, fl, ft, tt in zip(episodes, chunks, files, froms, tos):
+                    for ep, ck, fl, ft, tt in zip(episodes, chunks, files, froms, tos, strict=True):
                         result.setdefault(int(ep), {})[camera] = (
                             int(ck),
                             int(fl),
