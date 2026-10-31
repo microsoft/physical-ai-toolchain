@@ -7,14 +7,14 @@ requires-python = "==3.12.*"
 dependencies = [
     "numpy==2.5.3",
     "azure-core==1.41.0",
-    "azure-identity==1.25.3",
-    "azure-ai-ml==1.35.0",
+    "azure-identity==1.26.0",
+    "azure-ai-ml==1.35.2",
     "azureml-mlflow==1.62.0.post6",
-    "azure-storage-blob==12.30.3",
-    "mlflow-skinny==3.16.1",
-    "gitpython==3.1.62",
+    "azure-storage-blob==12.31.0",
+    "mlflow-skinny==3.17.2",
+    "gitpython==3.2.1",
     "idna==3.20",
-    "jsonpickle==4.1.2",
+    "jsonpickle==4.1.4",
     "mako==1.4.3",
     "urllib3==2.8.0",
     # Preserve the container runtime's packaging compatibility.
@@ -22,13 +22,13 @@ dependencies = [
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
-    "cryptography==50.0.1",
+    "cryptography==50.0.2",
     "pyjwt==2.15.1",
     "rsl-rl-lib==5.5.1",
-    "skrl==2.1.0",
-    "tensordict==0.14.2",
+    "skrl==2.1.1",
+    "tensordict==0.15.2",
     # Isaac Lab evaluation replays the exported ONNX policy on the CPU execution provider.
-    "onnxruntime==1.30.0",
+    "onnxruntime==1.31.0",
     # marshmallow held at 3.x because azure-ai-ml==1.33.0 imports symbols that
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Mirror the IL pipeline; bump together with azure-ai-ml.
@@ -36,7 +36,7 @@ dependencies = [
     # starlette pulled transitively by mlflow-skinny. 1.6.0 includes fixes for
     # GHSA-wqp7-x3pw-xc5r (SSRF/NTLM via UNC StaticFiles), GHSA-x746-7m8f-x49c
     # (HTTPEndpoint getattr dispatch), and GHSA-82w8-qh3p-5jfq (form DoS).
-    "starlette==1.7.0",
+    "starlette==1.9.0",
 ]
 
 [build-system]
@@ -56,17 +56,17 @@ override-dependencies = [
     # mlflow-skinny: azureml-mlflow==1.62.0.post5 caps at <=3.13.0; 3.15.2 is
     # validated in production by the IL training pipeline against the same
     # AzureML tracking endpoint. Mirror the direct pin.
-    "mlflow-skinny==3.16.1",
+    "mlflow-skinny==3.17.2",
     # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps at <=12.27.1; we
     # need 12.30.1 for the download_blob retry-on-ServiceResponseError fix
     # (critical for long-running checkpoint uploads). Mirror the direct pin
     # and the IL pipeline.
-    "azure-storage-blob==12.30.3",
+    "azure-storage-blob==12.31.0",
     # cryptography: azureml-mlflow caps below 49.0.0; 48.0.1 is the security
     # floor for GHSA-537c-gmf6-5ccf. Mirror the direct pin.
-    "cryptography==50.0.1",
+    "cryptography==50.0.2",
     # starlette: mlflow-skinny pulls starlette transitively; upstream pin may
     # lag behind security fixes. Override to ensure patched version.
-    "starlette==1.7.0",
+    "starlette==1.9.0",
 ]
 package = false
