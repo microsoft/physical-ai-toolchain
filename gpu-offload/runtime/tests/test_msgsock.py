@@ -192,3 +192,48 @@ def test_replayed_authenticated_message_is_rejected_before_handler(monkeypatch) 
     assert handled == [b"authenticated RPC payload"]
     assert messenger.closecalled is True
     client_sock.close()
+
+def test_aes_gcm_evicts_oldest_when_replay_cache_full(monkeypatch) -> None:
+    """Sustained traffic must not hard-fail once the bounded cache fills (#1938)."""
+    key = secrets.token_bytes(32)
+    monkeypatch.setattr(
+        msgsock,
+        "_replay_window",
+        msgsock._ReplayWindow(max_age_seconds=msgsock._MAX_MESSAGE_AGE_SECONDS, max_entries=2),
+    )
+    # Freeze monotonic time so cleanup does not expire entries mid-test.
+    monkeypatch.setattr(msgsock.time, "monotonic", lambda: 1_000.0)
+
+    first = encryptMessage(b"one", key)
+    second = encryptMessage(b"two", key)
+    third = encryptMessage(b"three", key)
+
+    assert decryptMessage(first, key) == b"one"
+    assert decryptMessage(second, key) == b"two"
+    # Cache full: registering a third nonce evicts the oldest (first), then accepts.
+    assert decryptMessage(third, key) == b"three"
+    # Second is still in the window; first was evicted and can be accepted again.
+    assert decryptMessage(second, key) is None
+    assert decryptMessage(first, key) == b"one"
+    assert decryptMessage(third, key) is None
+
+
+def test_aes_gcm_skew_rejection_mentions_clock_sync(monkeypatch) -> None:
+    key = secrets.token_bytes(32)
+    messages: list[str] = []
+
+    def capture_error(msg: str, *args, **kwargs) -> None:
+        messages.append(msg % args if args else msg)
+
+    monkeypatch.setattr(msgsock.logger, "error", capture_error)
+    monkeypatch.setattr(
+        msgsock.time,
+        "time",
+        lambda: 1_000.0 + msgsock._MAX_FUTURE_SKEW_SECONDS + 0.001,
+    )
+    encrypted = encryptMessage(b"payload", key)
+    monkeypatch.setattr(msgsock.time, "time", lambda: 1_000.0)
+
+    assert decryptMessage(encrypted, key) is None
+    assert any("Sync peer clocks" in message for message in messages)
+

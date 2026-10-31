@@ -51,8 +51,15 @@ class _ReplayWindow:
             if nonce in self._seen:
                 return False
             if len(self._seen) >= self.max_entries:
-                logger.error("Authenticated replay cache is full; rejecting message")
-                return False
+                # Capacity is a memory bound, not a hard throughput ceiling. Drop the
+                # soonest-to-expire entries so sustained legitimate traffic can continue
+                # while recent nonces stay protected. Per-session sequencing belongs in #1693.
+                overflow = len(self._seen) - self.max_entries + 1
+                for seen_nonce, _expiry in sorted(self._seen.items(), key=lambda item: item[1])[:overflow]:
+                    del self._seen[seen_nonce]
+                logger.warning(
+                    f"Authenticated replay cache was full; evicted {overflow} oldest nonce(s)",
+                )
             self._seen[nonce] = now + self.max_age_seconds
             return True
 
@@ -127,11 +134,19 @@ def decryptMessage(msg: bytes, decryptkey: bytes) -> bytes | None:
         return None
 
     now_ms = int(time.time() * 1000)
-    if issued_at_ms < now_ms - (_MAX_MESSAGE_AGE_SECONDS * 1000):
-        logger.error("Encrypted message is stale")
+    age_ms = now_ms - issued_at_ms
+    if age_ms > (_MAX_MESSAGE_AGE_SECONDS * 1000):
+        logger.error(
+            f"Encrypted message is stale (age {age_ms / 1000.0:.1f}s; max {_MAX_MESSAGE_AGE_SECONDS}s). "
+            "Sync peer clocks (NTP).",
+        )
         return None
-    if issued_at_ms > now_ms + (_MAX_FUTURE_SKEW_SECONDS * 1000):
-        logger.error("Encrypted message timestamp is too far in the future")
+    if age_ms < -(_MAX_FUTURE_SKEW_SECONDS * 1000):
+        logger.error(
+            f"Encrypted message timestamp is too far in the future "
+            f"(skew {-age_ms / 1000.0:.1f}s; max {_MAX_FUTURE_SKEW_SECONDS}s). "
+            "Sync peer clocks (NTP).",
+        )
         return None
     if not _replay_window.register(nonce, time.monotonic()):
         logger.error("Encrypted message nonce was already received")
