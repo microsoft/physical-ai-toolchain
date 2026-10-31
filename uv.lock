@@ -1023,7 +1023,7 @@ wheels = [
 
 [[package]]
 name = "fastapi"
-version = "0.156.8"
+version = "0.159.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -1033,9 +1033,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6c/93/6e785df7ec0bdbfef9d7bf1044bc7bfabd6d22641d147e8326a1f2ba210b/fastapi-0.156.8.tar.gz", hash = "sha256:cee65bba7890cd85264b3b06c7fdf88e84ca3510d00d4018cdbc2ce629e1ff22", size = 504768, upload-time = "2026-10-21T08:45:18.817Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9a/40/a212bffb9809afb9a94b250f11e0c29fd8b2589ec92e4bedd1cc7adf9938/fastapi-0.159.1.tar.gz", hash = "sha256:b45b1ec57f3aa4d2f80f09bfbcf068b46764a2ee892e56753f35bb3d9d845ce2", size = 522004, upload-time = "2026-10-21T20:59:29.054Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/21/93/b87423a73fad5b3b1de4f14a680a2d2344c442d5a1f297a0eb413b7572a3/fastapi-0.156.8-py3-none-any.whl", hash = "sha256:d5f2e052a5f985fb0bbe1114527938c25fedbe198a8197faae71c3d38851b7c3", size = 147358, upload-time = "2026-10-21T08:45:17.278Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/35/b03b5df04a1a8ee400c9df4b1795af84370b2bb6f1cc4be57c0b79688d00/fastapi-0.159.1-py3-none-any.whl", hash = "sha256:49b94c29afec2fca1390e9c39be202c59755d5cda8e4f1148a133761e4313e7e", size = 149604, upload-time = "2026-10-21T20:59:27.58Z" },
 ]
 
 [[package]]
@@ -2047,7 +2047,7 @@ requires-dist = [
     { name = "azure-identity", marker = "extra == 'azure'", specifier = "==1.26.0" },
     { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = "==12.31.0" },
     { name = "cachetools", specifier = "==7.2.4" },
-    { name = "fastapi", specifier = "==0.156.8" },
+    { name = "fastapi", specifier = "==0.159.1" },
     { name = "h5py", marker = "extra == 'export'", specifier = "==3.16.0" },
     { name = "h5py", marker = "extra == 'hdf5'", specifier = "==3.16.0" },
     { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = "==1.33.0" },
@@ -3087,7 +3087,7 @@ parquet = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", marker = "extra == 'api'", specifier = "==0.156.8" },
+    { name = "fastapi", marker = "extra == 'api'", specifier = "==0.159.1" },
     { name = "physical-ai-dataset-io", editable = "data-management/dataset-io" },
     { name = "physical-ai-dataset-io", extras = ["parquet"], marker = "extra == 'parquet'", editable = "data-management/dataset-io" },
     { name = "pydantic", specifier = "==2.14.1" },
@@ -3213,7 +3213,7 @@ requires-dist = [
     { name = "accelerate", marker = "extra == 'qwen3-vl'", specifier = "==1.15.0" },
     { name = "av", specifier = "==18.1.0" },
     { name = "azure-identity", marker = "extra == 'openai'", specifier = "==1.26.0" },
-    { name = "fastapi", marker = "extra == 'api'", specifier = "==0.156.8" },
+    { name = "fastapi", marker = "extra == 'api'", specifier = "==0.159.1" },
     { name = "hf-xet", marker = "extra == 'qwen3-vl'", specifier = "==1.6.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = "==3.6.0" },
     { name = "pandas", specifier = "==3.0.5" },
