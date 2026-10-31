@@ -90,6 +90,9 @@ class ACTInferenceNode(Node):
 
         # Joint name → index mapping for reordering from /joint_states
         self._joint_name_to_idx: dict[str, int] = {j.value: i for i, j in enumerate(JOINT_ORDER)}
+        # Fail closed until a JointState naming every expected joint arrives (#1935).
+        self._joints_ready = False
+        self._pending_image: np.ndarray | None = None
 
         # Subscribers
         sensor_qos = QoSProfile(
@@ -136,23 +139,46 @@ class ACTInferenceNode(Node):
     # -- Subscriber callbacks ------------------------------------------------
 
     def _on_joint_state(self, msg: JointState) -> None:
-        """Reorder incoming joint state to match training feature order."""
+        """Reorder incoming joint state to match training feature order.
+
+        Incomplete messages (missing expected joint names) are ignored so missing
+        joints never silently read as 0 rad (#1935).
+        """
+        expected = set(self._joint_name_to_idx)
+        present = {name for name in msg.name if name in expected}
+        if present != expected:
+            missing = sorted(expected - present)
+            self._joints_ready = False
+            self.get_logger().warning(
+                f"Ignoring joint state missing expected joints: {missing}"
+            )
+            return
+
         positions = np.zeros(NUM_JOINTS, dtype=np.float32)
         for i, name in enumerate(msg.name):
-            if name in self._joint_name_to_idx:
-                positions[self._joint_name_to_idx[name]] = msg.position[i]
+            idx = self._joint_name_to_idx.get(name)
+            if idx is not None:
+                positions[idx] = msg.position[i]
 
+        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         if self._state.observation is None:
             self._state.observation = RobotObservation(
                 joint_positions=positions,
-                timestamp_s=msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                color_image=self._pending_image,
+                timestamp_s=stamp,
             )
+            self._pending_image = None
         else:
             self._state.observation.joint_positions = positions
-            self._state.observation.timestamp_s = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            self._state.observation.timestamp_s = stamp
+        self._joints_ready = True
 
     def _on_image(self, msg: Image) -> None:
-        """Convert ROS Image to numpy array, resize if necessary."""
+        """Convert ROS Image to numpy array, resize if necessary.
+
+        Does not invent zero joint positions when no joint state has arrived yet
+        (#1935); the frame is held until joints are ready.
+        """
         img = self._bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
 
         if img.shape[:2] != (IMAGE_HEIGHT, IMAGE_WIDTH):
@@ -161,19 +187,17 @@ class ACTInferenceNode(Node):
             img = cv2.resize(img, (IMAGE_WIDTH, IMAGE_HEIGHT))
 
         if self._state.observation is None:
-            self._state.observation = RobotObservation(
-                joint_positions=np.zeros(NUM_JOINTS, dtype=np.float32),
-                color_image=img,
-            )
-        else:
-            self._state.observation.color_image = img
+            self._pending_image = img
+            return
+
+        self._state.observation.color_image = img
 
     # -- Control loop --------------------------------------------------------
 
     def _control_tick(self) -> None:
         """Run one policy step and publish the command."""
         obs = self._state.observation
-        if obs is None or obs.color_image is None:
+        if obs is None or obs.color_image is None or not self._joints_ready:
             return
 
         cmd = self._runner.step(obs)
