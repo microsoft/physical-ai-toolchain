@@ -115,6 +115,10 @@ BeforeAll {
             [Parameter(Mandatory)]
             [string] $FixtureDirectory,
 
+            [Parameter(Mandatory)]
+            [AllowEmptyCollection()]
+            [System.Collections.Generic.List[string]] $Containers,
+
             [Parameter()]
             [switch] $TrustFixtureCertificate
         )
@@ -144,18 +148,114 @@ BeforeAll {
         }
         $arguments += @($script:NginxImage, '/usr/local/bin/start-nginx.sh')
 
+        $Containers.Add($Name)
         Invoke-Docker -Arguments $arguments | Out-Null
 
-        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        return Wait-NginxFixture -Name $Name
+    }
+
+    function Wait-NginxFixture {
+        param(
+            [Parameter(Mandatory)]
+            [string] $Name,
+
+            [ValidateRange(0, 60)]
+            [int] $TimeoutSeconds = 10
+        )
+
+        $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
         do {
-            $portOutput = & docker port $Name '8080/tcp' 2>$null
-            if ($LASTEXITCODE -eq 0 -and $portOutput) {
-                return ($portOutput -split ':')[-1]
+            $running = Invoke-Docker -Arguments @('inspect', '--format', '{{.State.Running}}', $Name)
+            if ($running -ne 'true') {
+                throw 'NGINX fixture exited before HTTP readiness'
+            }
+            $portOutput = Invoke-Docker -Arguments @('port', $Name, '8080/tcp')
+            if ($portOutput) {
+                $port = ($portOutput -split ':')[-1]
+                try {
+                    $response = Invoke-WebRequest -Uri "http://127.0.0.1:${port}/" `
+                        -NoProxy -SkipHttpErrorCheck -TimeoutSec 2
+                }
+                catch {
+                    # A published port may precede the HTTP listener.
+                    $response = $null
+                }
+                if ($response -and $response.StatusCode -eq 200) {
+                    return $port
+                }
             }
             Start-Sleep -Milliseconds 100
         } while ([DateTime]::UtcNow -lt $deadline)
 
-        throw 'Timed out waiting for the NGINX fixture port'
+        throw 'Timed out waiting for NGINX fixture HTTP readiness'
+    }
+
+    function Assert-NginxTlsRejection {
+        param(
+            [Parameter(Mandatory)]
+            [string] $Name,
+
+            [Parameter(Mandatory)]
+            [string] $Port,
+
+            [Parameter(Mandatory)]
+            [string] $RequestPath,
+
+            [Parameter(Mandatory)]
+            [string] $TlsError
+        )
+
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:${Port}/api/" `
+            -NoProxy -SkipHttpErrorCheck -TimeoutSec 5
+        $response.StatusCode | Should -Be 502
+        $logs = Invoke-Docker -Arguments @('logs', $Name)
+        (($logs -join "`n") -match $TlsError) | Should -BeTrue -Because 'NGINX must report the expected TLS verification failure'
+        Test-Path -LiteralPath $RequestPath | Should -BeFalse
+    }
+
+    function Get-TlsFixtureDiagnostics {
+        param(
+            [Parameter(Mandatory)]
+            [AllowEmptyCollection()]
+            [System.Collections.Generic.List[string]] $Containers
+        )
+
+        foreach ($container in $Containers) {
+            # Never dump inspect JSON, environment values, or raw request/startup logs.
+            try {
+                $state = Invoke-Docker -Arguments @(
+                    'inspect', '--format',
+                    'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}', $container
+                )
+            }
+            catch {
+                $state = ''
+            }
+            if ($state -match '^status=\w+ exit=\d+ oom=(true|false)$') {
+                "${container}: $state"
+            }
+            else {
+                "${container}: status unavailable"
+            }
+            try {
+                $logs = (Invoke-Docker -Arguments @('logs', '--tail', '50', $container)) -join "`n"
+            }
+            catch {
+                "${container}: logs unavailable"
+                continue
+            }
+            foreach ($indicator in @(
+                'start worker processes', 'emerg', 'Permission denied', 'not found',
+                'invalid', 'upstream SSL certificate verify error',
+                'upstream SSL certificate does not match', 'connect\(\) failed',
+                'self-signed certificate', 'certificate has expired', 'certificate is not yet valid',
+                'unable to get local issuer certificate'
+            )) {
+                if ($logs -match $indicator) {
+                    "${container}: log indicator: $indicator"
+                }
+            }
+        }
     }
 }
 
@@ -272,6 +372,133 @@ Describe 'TLS fixture image preparation' -Tag 'Unit' {
     }
 }
 
+Describe 'TLS fixture readiness and rejection guards' -Tag 'Unit' {
+    BeforeEach {
+        Mock Start-Sleep {}
+        Mock Invoke-Docker {
+            switch ($Arguments[0]) {
+                'inspect' { 'true' }
+                'port' { '127.0.0.1:12345' }
+                'logs' { 'upstream SSL certificate verify error: (18:self-signed certificate)' }
+            }
+        }
+        Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 200 } }
+    }
+
+    It 'requires a successful HTTP response from the published port' {
+        Wait-NginxFixture -Name 'fixture' -TimeoutSeconds 0 | Should -Be '12345'
+        Should -Invoke Invoke-WebRequest -Times 1 -Exactly -ParameterFilter {
+            $Uri -eq 'http://127.0.0.1:12345/' -and $NoProxy -and $TimeoutSec -eq 2
+        }
+    }
+
+    It 'rejects an exited proxy even when its port remains published' {
+        Mock Invoke-Docker { 'false' } -ParameterFilter { $Arguments[0] -eq 'inspect' }
+        { Wait-NginxFixture -Name 'fixture' -TimeoutSeconds 0 } | Should -Throw '*exited*'
+        Should -Invoke Invoke-WebRequest -Times 0
+    }
+
+    It 'rejects a published but unreachable proxy' {
+        Mock Invoke-WebRequest { throw 'Connection refused' }
+        { Wait-NginxFixture -Name 'fixture' -TimeoutSeconds 0 } | Should -Throw '*HTTP readiness*'
+    }
+
+    It 'rejects an HTTP error during readiness' {
+        Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 502 } }
+        { Wait-NginxFixture -Name 'fixture' -TimeoutSeconds 0 } | Should -Throw '*HTTP readiness*'
+    }
+
+    It 'registers the proxy for cleanup before readiness fails' {
+        $containers = [System.Collections.Generic.List[string]]::new()
+        Mock Wait-NginxFixture { throw 'HTTP readiness failed' }
+        {
+            Invoke-NginxFixture -Name 'fixture' -BackendHost 'tls-valid' -Network 'fixture-network' `
+                -FixtureDirectory $TestDrive -Containers $containers
+        } | Should -Throw '*HTTP readiness failed*'
+        $containers | Should -Contain 'fixture'
+    }
+
+    It 'registers the proxy even if Docker fails after creating it' {
+        $containers = [System.Collections.Generic.List[string]]::new()
+        Mock Invoke-Docker { throw 'Container startup failed' } -ParameterFilter { $Arguments[0] -eq 'run' }
+        {
+            Invoke-NginxFixture -Name 'fixture' -BackendHost 'tls-valid' -Network 'fixture-network' `
+                -FixtureDirectory $TestDrive -Containers $containers
+        } | Should -Throw '*Container startup failed*'
+        $containers | Should -Contain 'fixture'
+    }
+
+    It 'accepts only HTTP 502 with certificate verification evidence and no backend request' {
+        Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 502 } }
+        Assert-NginxTlsRejection -Name 'fixture' -Port '12345' `
+            -RequestPath (Join-Path $TestDrive 'requests') -TlsError 'upstream SSL certificate verify error'
+    }
+
+    It 'does not treat connection refusal as certificate rejection' {
+        Mock Invoke-WebRequest { throw 'Connection refused' }
+        {
+            Assert-NginxTlsRejection -Name 'fixture' -Port '12345' `
+                -RequestPath (Join-Path $TestDrive 'requests') -TlsError 'upstream SSL certificate verify error'
+        } | Should -Throw '*Connection refused*'
+    }
+
+    It 'rejects unexpected HTTP status <StatusCode>' -ForEach @(
+        @{ StatusCode = 200 }
+        @{ StatusCode = 503 }
+    ) {
+        Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = $StatusCode } }
+        {
+            Assert-NginxTlsRejection -Name 'fixture' -Port '12345' `
+                -RequestPath (Join-Path $TestDrive 'requests') -TlsError 'upstream SSL certificate verify error'
+        } | Should -Throw
+    }
+
+    It 'does not accept an unrelated upstream failure as certificate rejection' {
+        Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 502 } }
+        Mock Invoke-Docker { 'connect() failed (111: Connection refused)' }
+        {
+            Assert-NginxTlsRejection -Name 'fixture' -Port '12345' `
+                -RequestPath (Join-Path $TestDrive 'requests') -TlsError 'upstream SSL certificate verify error'
+        } | Should -Throw
+    }
+
+    It 'rejects certificate failures that still sent an application request' {
+        Mock Invoke-WebRequest { [pscustomobject]@{ StatusCode = 502 } }
+        $requestPath = Join-Path $TestDrive 'requests'
+        'GET /api/' | Set-Content -LiteralPath $requestPath
+        {
+            Assert-NginxTlsRejection -Name 'fixture' -Port '12345' `
+                -RequestPath $requestPath -TlsError 'upstream SSL certificate verify error'
+        } | Should -Throw
+    }
+
+    It 'reports only allowlisted status and startup indicators' {
+        Mock Invoke-Docker { 'status=exited exit=1 oom=false' } -ParameterFilter { $Arguments[0] -eq 'inspect' }
+        Mock Invoke-Docker {
+            'nginx: [emerg] invalid configuration /private/path Authorization: sensitive-fixture-value'
+        } -ParameterFilter { $Arguments[0] -eq 'logs' }
+        $containers = [System.Collections.Generic.List[string]]::new()
+        $containers.Add('fixture')
+
+        $diagnostics = (Get-TlsFixtureDiagnostics -Containers $containers) -join "`n"
+        $diagnostics | Should -Match 'status=exited exit=1 oom=false'
+        $diagnostics | Should -Match 'log indicator: emerg'
+        $diagnostics | Should -Match 'log indicator: invalid'
+        $diagnostics | Should -Not -Match 'sensitive-fixture-value|Authorization|/private/path'
+    }
+
+    It 'keeps diagnostics available when inspect and logs fail' {
+        Mock Invoke-Docker { throw 'sensitive-fixture-value' }
+        $containers = [System.Collections.Generic.List[string]]::new()
+        $containers.Add('fixture')
+
+        $diagnostics = (Get-TlsFixtureDiagnostics -Containers $containers) -join "`n"
+        $diagnostics | Should -Match 'status unavailable'
+        $diagnostics | Should -Match 'logs unavailable'
+        $diagnostics | Should -Not -Match 'sensitive-fixture-value'
+    }
+}
+
 Describe 'Production TLS certificate verification' -Tag 'Unit' {
     It 'contains no certificate verification bypasses in applicable production clients' {
         $productionClients = $script:ProductionClients | ForEach-Object {
@@ -368,6 +595,7 @@ server.listen(443, '0.0.0.0')
 
         try {
             Invoke-Docker -Arguments @('network', 'create', $network) | Out-Null
+            $containers.Add($serverContainer)
             Invoke-Docker -Arguments @(
                 'run', '--pull', 'never', '--detach', '--name', $serverContainer,
                 '--network', $network,
@@ -377,18 +605,15 @@ server.listen(443, '0.0.0.0')
                 $script:NodeImage,
                 'node', '/fixture/server.mjs'
             ) | Out-Null
-            $containers.Add($serverContainer)
-
             $untrustedNginx = "tls-nginx-untrusted-$suffix"
             $untrustedPort = Invoke-NginxFixture `
                 -Name $untrustedNginx `
                 -BackendHost 'tls-valid' `
                 -Network $network `
-                -FixtureDirectory $fixtureDirectory
-            $containers.Add($untrustedNginx)
-            & curl --silent --fail --max-time 5 "http://127.0.0.1:${untrustedPort}/api/" 2>$null
-            $LASTEXITCODE | Should -Not -Be 0
-            Test-Path -LiteralPath $requestPath | Should -BeFalse
+                -FixtureDirectory $fixtureDirectory `
+                -Containers $containers
+            Assert-NginxTlsRejection -Name $untrustedNginx -Port $untrustedPort `
+                -RequestPath $requestPath -TlsError 'upstream SSL certificate verify error'
 
             $wrongHostNginx = "tls-nginx-wrong-host-$suffix"
             $wrongHostPort = Invoke-NginxFixture `
@@ -396,11 +621,10 @@ server.listen(443, '0.0.0.0')
                 -BackendHost 'tls-wrong' `
                 -Network $network `
                 -FixtureDirectory $fixtureDirectory `
+                -Containers $containers `
                 -TrustFixtureCertificate
-            $containers.Add($wrongHostNginx)
-            & curl --silent --fail --max-time 5 "http://127.0.0.1:${wrongHostPort}/api/" 2>$null
-            $LASTEXITCODE | Should -Not -Be 0
-            Test-Path -LiteralPath $requestPath | Should -BeFalse
+            Assert-NginxTlsRejection -Name $wrongHostNginx -Port $wrongHostPort `
+                -RequestPath $requestPath -TlsError 'upstream SSL certificate does not match'
 
             & docker run --pull never --rm --network $network `
                 --env REDIS_HOST=tls-valid `
@@ -411,6 +635,20 @@ server.listen(443, '0.0.0.0')
                 python -c $script:RedisTlsClient 2>$null
             $LASTEXITCODE | Should -Not -Be 0
             Test-Path -LiteralPath $requestPath | Should -BeFalse
+
+            $trustedNginx = "tls-nginx-trusted-$suffix"
+            $trustedPort = Invoke-NginxFixture `
+                -Name $trustedNginx `
+                -BackendHost 'tls-valid' `
+                -Network $network `
+                -FixtureDirectory $fixtureDirectory `
+                -Containers $containers `
+                -TrustFixtureCertificate
+            $response = Invoke-WebRequest -Uri "http://127.0.0.1:${trustedPort}/api/" `
+                -NoProxy -SkipHttpErrorCheck -TimeoutSec 5
+            $response.StatusCode | Should -Be 204
+            (Get-Content -Raw -LiteralPath $requestPath) | Should -Match 'GET /api/'
+            Remove-Item -LiteralPath $requestPath
 
             & docker run --pull never --rm --network $network `
                 --volume "${fixtureDirectory}:/fixture:ro" `
@@ -436,6 +674,10 @@ server.listen(443, '0.0.0.0')
             $LASTEXITCODE | Should -Be 0
             Test-Path -LiteralPath $requestPath | Should -BeTrue
             (Get-Content -Raw -LiteralPath $requestPath) | Should -Match 'AUTH'
+        }
+        catch {
+            $diagnostics = Get-TlsFixtureDiagnostics -Containers $containers
+            throw "$($_.Exception.Message)`n$($diagnostics -join "`n")"
         }
         finally {
             foreach ($container in $containers) {
