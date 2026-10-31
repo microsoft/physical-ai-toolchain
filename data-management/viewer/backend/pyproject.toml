@@ -15,7 +15,7 @@ dependencies = [
     "slowapi==0.1.10",
     "aiofiles==25.1.0",
     "numpy==2.5.4",
-    "pyarrow==25.0.1",
+    "pyarrow==26.0.0",
     "Pillow==13.0.0",
     "av==18.1.0",
     "cachetools==7.2.4",
