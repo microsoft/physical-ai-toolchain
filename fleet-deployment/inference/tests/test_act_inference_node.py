@@ -501,7 +501,9 @@ class TestControlTick:
         node.publishers["/lerobot/joint_commands"].publish.assert_not_called()
         assert node._state.episode_step == 1
 
-    def test_delta_mode_adds_deltas_to_current_joints(self, node):
+    def test_given_delta_mode_when_control_tick_then_publishes_current_plus_delta(
+        self, node: ain_module.ACTInferenceNode
+    ) -> None:
         current = np.full(6, 0.1, dtype=np.float32)
         delta = np.full(6, 0.2, dtype=np.float32)
         node._state.observation = _RobotObservation(
@@ -519,7 +521,9 @@ class TestControlTick:
         traj = node.publishers["/lerobot/joint_commands"].publish.call_args.args[0]
         np.testing.assert_allclose(traj.points[0].positions, (current + delta).tolist())
 
-    def test_absolute_mode_publishes_policy_positions_unchanged(self, node):
+    def test_given_absolute_mode_when_control_tick_then_publishes_policy_positions_unchanged(
+        self, node: ain_module.ACTInferenceNode
+    ) -> None:
         current = np.full(6, 0.1, dtype=np.float32)
         absolute = np.full(6, 0.5, dtype=np.float32)
         node._state.observation = _RobotObservation(
