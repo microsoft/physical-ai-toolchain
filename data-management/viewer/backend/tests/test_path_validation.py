@@ -116,7 +116,7 @@ class TestRequestModelSanitization:
     def test_detection_request_sanitizes_model_and_coerces_primitives(self):
         request = DetectionRequest.model_validate(
             {
-                "frames": ["1", "2"],
+                "frames": [1, 2],
                 "confidence": "0.4",
                 "model": "yolo11n\r\n",
             }

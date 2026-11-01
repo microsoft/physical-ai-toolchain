@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -36,6 +38,13 @@ class TestDetectionRequest:
     def test_validate_frames_negative_raises(self):
         with pytest.raises(ValidationError, match="non-negative"):
             DetectionRequest(frames=[0, -1, 2])
+
+    @pytest.mark.parametrize("frame", [True, False, 1.0, 1.5, "1"])
+    def test_given_non_integer_frame_when_validating_json_then_rejects(self, frame: bool | float | str) -> None:
+        payload = json.dumps({"frames": [0, frame, 2]})
+
+        with pytest.raises(ValidationError, match="valid integer"):
+            DetectionRequest.model_validate_json(payload)
 
     @pytest.mark.parametrize("confidence", [-0.01, 1.01])
     def test_confidence_out_of_range(self, confidence: float):

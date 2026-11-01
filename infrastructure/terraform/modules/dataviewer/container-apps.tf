@@ -111,10 +111,15 @@ resource "azurerm_container_app" "backend" {
         }
       }
       dynamic "env" {
-        for_each = var.should_deploy_dataviewer_auth ? [1] : []
+        for_each = var.should_deploy_dataviewer_auth ? {
+          DATAVIEWER_AZURE_TENANT_ID  = data.azuread_client_config.current.tenant_id
+          DATAVIEWER_AZURE_CLIENT_ID  = azuread_application.dataviewer[0].client_id
+          DATAVIEWER_CALLER_OBJECT_ID = azurerm_user_assigned_identity.caller[0].principal_id
+          DATAVIEWER_CALLER_CLIENT_ID = azurerm_user_assigned_identity.caller[0].client_id
+        } : {}
         content {
-          name        = "DATAVIEWER_PROXY_KEY"
-          secret_name = "dataviewer-proxy-key"
+          name  = env.key
+          value = env.value
         }
       }
       env {
@@ -155,8 +160,11 @@ resource "azurerm_container_app" "frontend" {
   workload_profile_name        = "Consumption"
 
   identity {
-    type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.dataviewer.id]
+    type = "UserAssigned"
+    identity_ids = concat(
+      [azurerm_user_assigned_identity.dataviewer.id],
+      azurerm_user_assigned_identity.caller[*].id
+    )
   }
 
   dynamic "secret" {
@@ -184,8 +192,9 @@ resource "azurerm_container_app" "frontend" {
   }
 
   ingress {
-    target_port      = 8080
-    external_enabled = true
+    target_port                = 8080
+    external_enabled           = true
+    allow_insecure_connections = false
 
     traffic_weight {
       latest_revision = true
@@ -210,6 +219,52 @@ resource "azurerm_container_app" "frontend" {
       env {
         name  = "NGINX_BACKEND_SCHEME"
         value = "https"
+      }
+      env {
+        name  = "DATAVIEWER_CALLER_MODE"
+        value = var.should_deploy_dataviewer_auth ? "pending" : "off"
+      }
+
+      dynamic "liveness_probe" {
+        for_each = local.frontend_image != local.placeholder_image ? [1] : []
+        content {
+          port             = 8080
+          path             = "/"
+          transport        = "HTTP"
+          timeout          = 2
+          interval_seconds = 30
+        }
+      }
+
+      dynamic "readiness_probe" {
+        for_each = local.frontend_image != local.placeholder_image ? [1] : []
+        content {
+          port             = 8080
+          path             = "/health"
+          transport        = "HTTP"
+          timeout          = 10
+          interval_seconds = 30
+        }
+      }
+    }
+
+    dynamic "container" {
+      for_each = var.should_deploy_dataviewer_auth && local.backend_image != local.placeholder_image && local.frontend_image != local.placeholder_image ? [1] : []
+      content {
+        name    = "caller-helper"
+        image   = local.backend_image
+        command = ["python", "-m", "src.caller_auth_helper"]
+        cpu     = 0.25
+        memory  = "0.5Gi"
+
+        env {
+          name  = "DATAVIEWER_AZURE_CLIENT_ID"
+          value = azuread_application.dataviewer[0].client_id
+        }
+        env {
+          name  = "DATAVIEWER_CALLER_CLIENT_ID"
+          value = azurerm_user_assigned_identity.caller[0].client_id
+        }
       }
     }
   }
