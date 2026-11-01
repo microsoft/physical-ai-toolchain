@@ -1,7 +1,7 @@
 ---
 title: VLM-as-Judge
 description: Run vision-language evaluations with saved inputs, approval-gated jobs and confined HTTP media access
-ms.date: 2026-10-19
+ms.date: 2026-10-26
 ---
 
 Open-weight-first harness that scores LeRobot manipulation episodes and
@@ -9,7 +9,10 @@ policy-rollout videos with a vision-language model. Dataset and rollout CLIs
 and the HTTP API share the same engine.
 
 Curation clients resolve saved instructions and supported edit descriptors before
-execution. Malformed model output is an execution error; an inconclusive judgment
+execution. A malformed process-score response gets one explicit format-repair retry
+with the same frames and order. Both responses use strict count/range/type checks;
+a second malformed response is an execution error. Backend exceptions are not retried.
+An inconclusive judgment
 does not become a human `PARTIAL` label. Cache identity includes the saved snapshot,
 model revision or deployment digest, selected cameras, frame settings and process
 configuration. An unpinned model or mutable remote deployment is not an immutable
@@ -89,25 +92,48 @@ the CLI and the HTTP API import the service — no parallel paths.
 
 For Qwen3-VL-4B in bfloat16, start validation with a full 24 GB GPU and concurrency
 one. This is not a guaranteed minimum: model, frame and generation settings affect VRAM.
-Run curation commands from the repository root in an existing viewer backend
-environment with the required judge profile. Policy rollouts use the evaluator environment;
-`--no-sync` does not install missing dependencies.
+Run these commands from the repository root. The judge is an installable member of
+the root workspace and uses [uv.lock](../../uv.lock), not the independent parent
+evaluation lock. Curation and viewer remain separate packages; `JudgeService` runs
+in-process and does not own durable state or label writes.
+
+Restore a dedicated environment before using `--no-sync`:
+
+```bash
+export UV_PROJECT_ENVIRONMENT="$PWD/.venvs/judge/.venv"
+uv sync --frozen --no-default-groups --no-editable --all-packages \
+  --extra qwen3-vl --extra api --extra openai
+```
+
+For direct inference without curation or the viewer, select
+`--package physical-ai-vlm-judge` instead of `--all-packages`. Omit `qwen3-vl` for
+an echo or hosted-only environment; use `openai` for `openai-compat` and `api` for
+HTTP dependencies. These commands do not select root development tooling.
+Keep Azure ML tooling in a separate environment using the explicit
+[`azureml-tracking` group](../../CONTRIBUTING.md#python-workspace-and-profiles).
+
+Repeated video decoding can retain free glibc heap memory. The backend container
+and Linux/glibc OSMO judge entry default `MALLOC_ARENA_MAX` to `1` before Python
+starts. Supplied values, including an empty value, are preserved; other glibc
+tuning settings are not modified. Direct commands and local launchers do not set this default:
+on Linux/glibc, export `MALLOC_ARENA_MAX=1` before launching them to opt in.
+Revalidate latency and memory when changing allocator settings or concurrency.
 
 ```sh
 # 1. Smoke test (no model load, no GPU)
-uv run --project data-management/viewer/backend --no-sync bash \
+uv run --no-sync bash \
   data-management/curation/scripts/evaluate-leisaac-pick-orange.sh \
   --backend echo --dry-run --limit 2
 
 # 2. Evaluate one episode with a pinned Qwen3-VL-4B on a GPU host
 export VLM_JUDGE_MODEL_REVISION='<reviewed-full-40-hex-commit-sha>'
-uv run --project data-management/viewer/backend --no-sync bash \
+uv run --no-sync bash \
   data-management/curation/scripts/evaluate-leisaac-pick-orange.sh \
   --backend qwen3-vl --limit 1 \
   -- --single --model-revision "$VLM_JUDGE_MODEL_REVISION"
 
 # 3. Score policy rollouts using reviewed offline model artifacts
-uv run --project evaluation --no-sync bash \
+uv run --no-sync bash \
   evaluation/vlm_judge/scripts/evaluate-policy-rollouts.sh \
   --backend qwen3-vl --model-id /path/to/reviewed-qwen-model
 
@@ -116,13 +142,13 @@ export VLM_JUDGE_ALLOW_UNAUTHENTICATED=true
 export VLM_JUDGE_DATASETS='{"example-dataset":"/path/to/dataset"}'
 export VLM_JUDGE_LOCAL_ACTOR=local-operator
 export VLM_JUDGE_JOB_DIR=outputs/vlm-judge/jobs
-uv run --project data-management/viewer/backend --no-sync bash data-management/curation/scripts/serve-api.sh \
+uv run --no-sync bash data-management/curation/scripts/serve-api.sh \
   --backend qwen3-vl --port 8088
 
 # 5. Approved dataset against a vLLM server hosting a larger model
 VLM_JUDGE_BACKEND=openai-compat \
 VLM_JUDGE_MODEL_ID=Qwen/Qwen3-VL-30B-A3B-Instruct \
-uv run --project data-management/viewer/backend --no-sync bash \
+uv run --no-sync bash \
   data-management/curation/scripts/evaluate-dataset.sh \
   --dataset /path/to/approved-dataset --base-url http://localhost:8000/v1 \
   -- --approval-id "$APPROVAL_ID" --request-id "$REQUEST_ID"
@@ -213,8 +239,10 @@ and [GPU infrastructure guidance](../../infrastructure/README.md).
 
 The build extra is `openai`; the runtime backend is `openai-compat`. For inference
 inside the viewer process, use `JUDGE_EXTRAS=qwen3-vl` on a GPU-equipped host with
-NVIDIA device passthrough and a compatible driver/CUDA runtime. Do not combine these
-profiles with the backend's `vlm-judge` extra, which pins a different Transformers version.
+NVIDIA device passthrough and a compatible driver/CUDA runtime. The backend's
+`vlm-judge` extra delegates to the same workspace judge and Qwen dependency pins;
+the Docker build selects judge extras explicitly. Build from the repository root
+so the root lock and all member manifests are available.
 
 ### Deployment Boundaries
 
@@ -384,6 +412,14 @@ Dataset writers must be trusted; file replacement races are not prevented.
 
 The judge writes its verdicts to `judgments.partial.jsonl`, and the task renames that file to `judgments.jsonl` only after every selected episode or video was judged and every verdict passed the check. A failed, interrupted, or killed run leaves at most `judgments.partial.jsonl`, and a failed task still logs a summary of the verdicts it wrote.
 
+The payload carries the root manifest/lock and workspace member sources. The task
+entry verifies its pinned uv bootstrap, creates a Python 3.12 environment, and
+performs a frozen, non-editable restore of `physical-ai-vlm-judge` with only the
+selected backend extra and no default dependency groups. `uv pip check` runs
+before inference. A production-equivalent unpacked payload test is not evidence
+of an OSMO-submitted job. Both require target-native validation; a CPU smoke does
+not establish CUDA or aarch64 compatibility.
+
 An inconclusive verdict, where the outcome votes tie, has a `null` outcome; it counts as a complete verdict, and the task log reports how many verdicts were inconclusive.
 
 The input decides what the judge scores. A LeRobot dataset brings its episodes and instructions. Any other directory is judged as rollout videos, which need `--instruction`.
@@ -416,7 +452,7 @@ through the job lifecycle routes.
   "episode_id": "leisaac-pick-orange/episode_000007",
   "instruction": "Grab orange and place into plate",
   "judge_model": "Qwen/Qwen3-VL-4B-Instruct",
-  "prompt_version": "outcome-mcq-v1+gvl-process-v1+milestones-v1+failuremode-v1",
+  "prompt_version": "outcome-mcq-v1+gvl-process-v3+milestones-v1+failuremode-v1",
   "n_frames": 12,
   "outcome_success": false,
   "outcome_confidence": 0.667,
@@ -501,10 +537,21 @@ held in memory. No cryptographic content identity is claimed.
 
 ## 🧪 Tests
 
+Use a product test environment, separate from the runtime-only profile above:
+
 ```sh
-uv run --project evaluation --no-sync pytest -c evaluation/pyproject.toml \
-  --no-cov evaluation/tests/vlm_judge -q
+export UV_PROJECT_ENVIRONMENT="$PWD/.venvs/product-tests/.venv"
+uv sync --frozen --all-packages --group dev --extra openai
+uv run --no-sync pytest -c evaluation/vlm_judge/pyproject.toml \
+  evaluation/tests/vlm_judge -q
 ```
+
+The judge owns this retained test directory and its 35% unit coverage gate. Backend
+integration uses a separate 70% judge gate and 90% backend gate; independent
+SIL/HiL/metrics tests use `evaluation/pyproject.toml` and an 80% gate. Root test
+discovery does not replace these suites. See the
+[runtime evidence checklist](../../CONTRIBUTING.md#python-runtime-pre-pr-evidence)
+before changing native dependencies or installation profiles.
 
 The tests use a `ScriptedBackend` (canned responses keyed by prompt
 fragment) and a `StubService` to validate prompt parsers, cache
@@ -527,6 +574,6 @@ for enabling it (`VLM_JUDGE_ENABLED=true`), backend options, and usage.
   existing `evaluation/metrics/bootstrap_mlflow.py` flow picks them up.
 - **Cosmos-Reason1 NIM deployment.** Swap the `openai-compat` backend
   base URL onto an Azure AI Foundry NIM endpoint once the trial is
-  provisioned (see `.copilot-tracking/research/2026-04-30/`).
+  provisioned and validated.
 - **Pairwise A/B mode.** Add a `compare_episodes` agent step for
   RoboArena-style policy ranking when two rollouts share a task.

@@ -211,22 +211,25 @@ async def test_given_pre_move_inputs_when_relocated_then_snapshot_config_and_cac
     )
     service = JudgeService(ServiceConfig(backend=BackendConfig(kind="echo", model_id="echo")))
     config = ServiceExecutor(service).configuration({"process_method": "chronological", "views": ["wrist", "front"]})
-    config_hash = hashlib.sha256(json.dumps(config, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    cache_key = service.cache_for(None).key(
+    legacy_config = {**config, "prompt_version": "outcome-mcq-v1+gvl-process-v1+milestones-v1+failuremode-v1"}
+    config_hash = hashlib.sha256(json.dumps(legacy_config, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    cache_inputs = dict(
         episode_id="dataset/episode_000003",
         snapshot_id=snapshot.snapshot_id,
         video_paths={},
         instruction=snapshot.instruction,
         judge_model=service.model_id,
-        prompt_version=config["prompt_version"],
         video_windows=windows,
         media_identity=identities,
         agent_config=config["agent"],
     )
+    cache_key = service.cache_for(None).key(**cache_inputs, prompt_version=legacy_config["prompt_version"])
 
     assert snapshot.snapshot_id == "5c4af4b5b47420620d247d41859b6c8383704433891940e56d46af9a6f6b98dc"
     assert config_hash == "493eac88ef1936f0becf6fa042de863c3f1a70c1b327a8021703723a4cf7d6eb"
     assert bytes.fromhex(cache_key) == bytes.fromhex("9dd6791484adc5a3df5ae5d332d9cf0d4a23806be680ebee72ac668efba2e438")
+    assert hashlib.sha256(json.dumps(config, sort_keys=True, separators=(",", ":")).encode()).hexdigest() != config_hash
+    assert service.cache_for(None).key(**cache_inputs, prompt_version=config["prompt_version"]) != cache_key
 
 
 @pytest.mark.parametrize(

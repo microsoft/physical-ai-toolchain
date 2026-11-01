@@ -18,7 +18,9 @@
     {
       "pattern": "^(pyproject\\.toml|uv\\.lock)$",
       "categories": [
-        "tooling"
+        "tooling",
+        "dataviewer",
+        "evaluation"
       ]
     },
     {
@@ -408,7 +410,7 @@
         },
         {
           "ecosystem": "uv",
-          "directory": "/data-management/viewer/backend"
+          "directory": "/"
         },
         {
           "ecosystem": "docker",
@@ -756,7 +758,7 @@
         },
         {
           "ecosystem": "uv",
-          "directory": "/evaluation/vlm_judge"
+          "directory": "/"
         }
       ],
       "paths": [
