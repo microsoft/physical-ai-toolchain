@@ -402,13 +402,13 @@ class TestInit:
         }
 
 
-
 def _all_joint_names_and_positions(positions=None):
     """Build a complete JointState payload covering JOINT_ORDER."""
     names = [j.value for j in _inference_robot_types.JOINT_ORDER]
     if positions is None:
         positions = [float(i) * 0.1 for i in range(len(names))]
     return names, positions
+
 
 # ---------------------------------------------------------------------------
 # _on_joint_state

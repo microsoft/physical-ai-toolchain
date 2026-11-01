@@ -149,9 +149,7 @@ class ACTInferenceNode(Node):
         if present != expected:
             missing = sorted(expected - present)
             self._joints_ready = False
-            self.get_logger().warning(
-                f"Ignoring joint state missing expected joints: {missing}"
-            )
+            self.get_logger().warning(f"Ignoring joint state missing expected joints: {missing}")
             return
 
         positions = np.zeros(NUM_JOINTS, dtype=np.float32)
