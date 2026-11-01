@@ -14,11 +14,12 @@ resource; credentials are never logged.
 
 from __future__ import annotations
 
+import asyncio
 import base64
-import binascii
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -26,9 +27,12 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, Literal, cast
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .validation import SAFE_CAMERA_NAME_PATTERN, SAFE_DATASET_ID_PATTERN
 
@@ -183,63 +187,166 @@ class JwtProvider(AuthProvider):
 # ============================================================================
 
 
-class EasyAuthProvider(AuthProvider):
-    """Validate an Easy Auth principal bound to the trusted frontend proxy."""
+CALLER_TOKEN_HEADER = "X-Dataviewer-Caller-Token"
+_SUBJECT_CLAIMS = {"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", "sub"}
 
-    def __init__(self, expected_proxy_key: str) -> None:
-        if not expected_proxy_key:
-            raise ValueError("DATAVIEWER_PROXY_KEY is required for easy_auth")
+
+def _positive_auth_setting(name: str, default: int) -> int:
+    """Read a bounded-auth setting after .env loading; reject invalid configuration."""
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        raise ValueError(f"{name} must be a positive integer") from None
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def _single_header(request: Request, name: str, limit: int) -> str | None:
+    values = [value for key, value in request.scope["headers"] if key.lower() == name.lower().encode("ascii")]
+    if len(values) != 1 or not values[0] or len(values[0]) > limit:
+        return None
+    try:
+        value = values[0].decode("ascii")
+    except UnicodeDecodeError:
+        return None
+    return value if "," not in value and not any(character.isspace() for character in value) else None
+
+
+class CallerVerifier:
+    """Validate app-only v2 proof against one configured tenant and frontend ACL."""
+
+    def __init__(self, tenant_id: str, audience: str, object_id: str, client_id: str) -> None:
+        import jwt
+
+        for value in (tenant_id, audience, object_id, client_id):
+            try:
+                if str(UUID(value)) != value:
+                    raise ValueError
+            except (ValueError, AttributeError):
+                raise ValueError(
+                    "Hosted authentication requires canonical tenant, API and caller UUID settings"
+                ) from None
+        self._tenant_id = tenant_id
+        self._audience = audience
+        self._object_id = object_id
+        self._client_id = client_id
+        self._issuer = f"https://login.microsoftonline.com/{tenant_id}/v2.0"
+        self._max_token_bytes = _positive_auth_setting("DATAVIEWER_MAX_CALLER_TOKEN_BYTES", 8192)
+        self._auth_timeout = _positive_auth_setting("DATAVIEWER_AUTH_CALLER_TIMEOUT_SECONDS", 6)
+        self._jwks_client = jwt.PyJWKClient(
+            f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys",
+            cache_keys=False,
+            lifespan=_positive_auth_setting("DATAVIEWER_AUTH_JWKS_CACHE_SECONDS", 300),
+            timeout=_positive_auth_setting("DATAVIEWER_AUTH_JWKS_TIMEOUT_SECONDS", 5),
+        )
+        self._lock = asyncio.Lock()
+
+    def _decode(self, token: str) -> dict[str, Any]:
+        import jwt
+
+        signing_key = self._jwks_client.get_signing_key_from_jwt(token)
+        return jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=self._audience,
+            issuer=self._issuer,
+            options={
+                "require": ["ver", "tid", "idtyp", "oid", "sub", "azp", "exp", "nbf", "aud", "iss"],
+                "strict_aud": True,
+            },
+        )
+
+    async def authorize(self, request: Request) -> None:
+        import jwt
+
+        token = _single_header(request, CALLER_TOKEN_HEADER, self._max_token_bytes)
+        invalid = HTTPException(
+            status_code=401,
+            detail="Caller authentication required",
+            headers={"WWW-Authenticate": 'EasyAuth realm="DataViewer API"'},
+        )
+        if token is None:
+            raise invalid
         try:
-            self._expected_proxy_key = expected_proxy_key.encode("ascii")
-        except UnicodeEncodeError as exc:
-            raise ValueError("DATAVIEWER_PROXY_KEY must contain only ASCII characters") from exc
+            async with asyncio.timeout(self._auth_timeout):
+                async with self._lock:
+                    claims = await asyncio.to_thread(self._decode, token)
+            if (
+                claims["ver"] != "2.0"
+                or claims["tid"] != self._tenant_id
+                or claims["idtyp"] != "app"
+                or "scp" in claims
+                or any(not isinstance(claims[key], str) or not claims[key].strip() for key in ("oid", "sub", "azp"))
+                or any(
+                    isinstance(claims[key], bool)
+                    or not isinstance(claims[key], (int, float))
+                    or not math.isfinite(claims[key])
+                    for key in ("exp", "nbf")
+                )
+            ):
+                raise invalid
+        except (jwt.PyJWTError, ValueError, TypeError, KeyError, OSError, TimeoutError):
+            raise invalid from None
+        if claims["oid"] != self._object_id or claims["azp"] != self._client_id:
+            raise HTTPException(status_code=403, detail="Caller is not authorized")
+
+
+class EasyAuthProvider(AuthProvider):
+    """Accept a bounded forwarded user only after frontend workload authorization."""
+
+    def __init__(self, verifier: CallerVerifier) -> None:
+        self.verifier = verifier
+        self._max_encoded_bytes = _positive_auth_setting("DATAVIEWER_MAX_PRINCIPAL_ENCODED_BYTES", 8192)
+        self._max_decoded_bytes = _positive_auth_setting("DATAVIEWER_MAX_PRINCIPAL_DECODED_BYTES", 6144)
+        self._max_claims = _positive_auth_setting("DATAVIEWER_MAX_PRINCIPAL_CLAIMS", 64)
+        self._max_value_bytes = _positive_auth_setting("DATAVIEWER_MAX_PRINCIPAL_VALUE_BYTES", 2048)
 
     async def authenticate(self, request: Request) -> dict[str, Any] | None:
-        proxy_key = request.headers.get("X-Dataviewer-Proxy-Key", "")
-        principal = request.headers.get("X-MS-CLIENT-PRINCIPAL", "")
-        if not proxy_key or not principal:
+        await self.verifier.authorize(request)
+        principal = _single_header(request, "X-MS-CLIENT-PRINCIPAL", self._max_encoded_bytes)
+        if principal is None:
             return None
-
-        try:
-            supplied_proxy_key = proxy_key.encode("ascii")
-        except UnicodeEncodeError:
-            return None
-        if not secrets.compare_digest(supplied_proxy_key, self._expected_proxy_key):
-            return None
-
         try:
             decoded = base64.b64decode(principal, validate=True)
-            principal_document = json.loads(decoded)
-        except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            if len(decoded) > self._max_decoded_bytes:
+                return None
+            claims_json = json.loads(decoded)
+        except (ValueError, UnicodeDecodeError, RecursionError):
             return None
-        if not isinstance(principal_document, dict):
+        if not isinstance(claims_json, dict):
             return None
-
-        claims = principal_document.get("claims")
-        if not isinstance(claims, list):
+        claims = claims_json.get("claims")
+        if not isinstance(claims, list) or len(claims) > self._max_claims:
             return None
-
-        subject = ""
+        subjects = []
         name = ""
-        roles: list[str] = []
+        roles = []
         for claim in claims:
             if not isinstance(claim, dict):
                 return None
-            claim_type = claim.get("typ")
-            claim_value = claim.get("val")
-            if not isinstance(claim_type, str) or not isinstance(claim_value, str):
+            typ = claim.get("typ")
+            val = claim.get("val")
+            if not isinstance(typ, str) or not isinstance(val, str):
                 return None
-            if "nameidentifier" in claim_type:
-                subject = claim_value.strip()
-            elif claim_type == "name":
-                name = claim_value
-            elif claim_type == "roles" and claim_value:
-                roles.append(claim_value)
-
-        if not subject:
+            try:
+                type_bytes = typ.encode("utf-8")
+                value_bytes = val.encode("utf-8")
+            except UnicodeEncodeError:
+                return None
+            if not typ or len(type_bytes) > 256 or len(value_bytes) > self._max_value_bytes:
+                return None
+            if typ in _SUBJECT_CLAIMS:
+                subjects.append(val)
+            elif typ == "name":
+                name = val
+            elif typ == "roles" and val:
+                roles.append(val)
+        if len(subjects) != 1 or not subjects[0].strip():
             return None
         return {
-            "sub": subject,
+            "sub": subjects[0],
             "name": name,
             "roles": roles,
             "auth_method": "easy_auth",
@@ -279,7 +386,16 @@ def _build_provider() -> AuthProvider:
         return JwtProvider(jwks_uri=jwks_uri, audience=audience, issuer=issuer, auth_method="auth0")
 
     if provider_name == "easy_auth":
-        return EasyAuthProvider(os.environ.get("DATAVIEWER_PROXY_KEY", ""))
+        if os.environ.get("DATAVIEWER_AUTH_DISABLED", "false").lower() == "true":
+            raise ValueError("Hosted authentication cannot be disabled")
+        return EasyAuthProvider(
+            CallerVerifier(
+                os.environ.get("DATAVIEWER_AZURE_TENANT_ID", ""),
+                os.environ.get("DATAVIEWER_AZURE_CLIENT_ID", ""),
+                os.environ.get("DATAVIEWER_CALLER_OBJECT_ID", ""),
+                os.environ.get("DATAVIEWER_CALLER_CLIENT_ID", ""),
+            )
+        )
 
     logger.error("Unsupported DATAVIEWER_AUTH_PROVIDER value: %s", provider_name)
     raise ValueError(f"Unsupported DATAVIEWER_AUTH_PROVIDER: {provider_name}")
@@ -302,6 +418,34 @@ def reset_auth_provider() -> None:
     _provider = None
 
 
+def validate_hosted_auth_configuration() -> None:
+    """Fail startup before storage or background workers for invalid hosted settings."""
+    if os.environ.get("DATAVIEWER_AUTH_PROVIDER", "apikey").lower() == "easy_auth":
+        _get_provider()
+
+
+class HostedAuthMiddleware:
+    """Enforce hosted authentication before routing, including bootstrap and docs."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] == "http"
+            and os.environ.get("DATAVIEWER_AUTH_PROVIDER", "apikey").lower() == "easy_auth"
+            and not (scope["path"] == "/health" and scope["method"] in {"GET", "HEAD"})
+        ):
+            request = Request(scope, receive)
+            try:
+                request.state.hosted_user = await require_auth(request)
+            except HTTPException as exc:
+                response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
 # ============================================================================
 # FastAPI dependency
 # ============================================================================
@@ -314,7 +458,10 @@ async def require_auth(request: Request) -> dict[str, Any] | None:
     Raises ``HTTP 401`` with a ``WWW-Authenticate`` header on failure.
     Set ``DATAVIEWER_AUTH_DISABLED=true`` to bypass (local development only).
     """
-    if os.environ.get("DATAVIEWER_AUTH_DISABLED", "false").lower() == "true":
+    hosted = os.environ.get("DATAVIEWER_AUTH_PROVIDER", "apikey").lower() == "easy_auth"
+    if hosted and hasattr(request.state, "hosted_user"):
+        return request.state.hosted_user
+    if not hosted and os.environ.get("DATAVIEWER_AUTH_DISABLED", "false").lower() == "true":
         return None
 
     provider = _get_provider()

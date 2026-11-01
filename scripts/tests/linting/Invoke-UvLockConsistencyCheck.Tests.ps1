@@ -77,9 +77,160 @@ Describe 'Get-UvProject' -Tag 'Unit' {
         Mock git { $global:LASTEXITCODE = 1 } -ParameterFilter { $args[0] -eq '-C' }
         { Get-UvProject -RepoRoot $TestDrive } | Should -Throw '*tracked project manifests*'
     }
+
+    It 'Fails workspace discovery when no offline Python interpreter is available' {
+        '[project]' | Set-Content (Join-Path $TestDrive 'pyproject.toml')
+        Mock Get-Command { [pscustomobject]@{ Source = 'uv' } } -ParameterFilter {
+            $Name -eq 'uv' -and $CommandType -eq 'Application'
+        }
+        Mock uv { $global:LASTEXITCODE = 1 }
+
+        { Get-UvProject -RepoRoot $TestDrive } | Should -Throw '*available Python interpreter with tomllib*'
+
+        Should -Invoke uv -Times 1 -Exactly -ParameterFilter {
+            $args[0] -eq 'python' -and $args[1] -eq 'find' -and $args[2] -eq '--offline'
+        }
+    }
+}
+
+Describe 'Get-UvProject workspace ownership' -Tag 'Unit' {
+    BeforeEach {
+        Remove-Item (Join-Path $TestDrive 'data/library/uv.lock') -ErrorAction SilentlyContinue
+        foreach ($project in @('data/library', 'evaluation', 'evaluation/judge')) {
+            New-Item -ItemType Directory -Force -Path (Join-Path $TestDrive $project) | Out-Null
+            @"
+[project]
+name = "$($project.Replace('/', '-'))"
+version = "0.1.0"
+"@ | Set-Content (Join-Path $TestDrive "$project/pyproject.toml")
+        }
+        @'
+[project]
+name = "workspace-owner"
+version = "0.1.0"
+[tool.uv.workspace]
+members = ["data/library", "evaluation/judge"]
+'@ | Set-Content (Join-Path $TestDrive 'pyproject.toml')
+        'lock' | Set-Content (Join-Path $TestDrive 'uv.lock')
+        'lock' | Set-Content (Join-Path $TestDrive 'evaluation/uv.lock')
+        Mock git {
+            $global:LASTEXITCODE = 0
+            $root = $args[1]
+            $filter = if ($args -contains 'pyproject.toml') { 'pyproject.toml' } else { 'uv.lock' }
+            Get-ChildItem -Path $root -Filter $filter -Recurse -File | ForEach-Object {
+                [IO.Path]::GetRelativePath($root, $_.FullName) -replace '\\', '/'
+            }
+        } -ParameterFilter { $args[0] -eq '-C' }
+    }
+
+    It 'Checks the explicit workspace owner once without requiring member locks' {
+        $projects = @(Get-UvProject -RepoRoot $TestDrive)
+
+        $projects | Should -Be @('.', 'evaluation')
+    }
+
+    It 'Keeps the independent parent of an explicitly selected nested member' {
+        $projects = @(Get-UvProject -RepoRoot $TestDrive)
+
+        $projects | Should -Contain 'evaluation'
+        $projects | Should -Not -Contain 'evaluation/judge'
+    }
+
+    It 'Does not implicitly absorb a nested nonmember' {
+        New-Item -ItemType Directory -Force -Path (Join-Path $TestDrive 'data/independent') | Out-Null
+        '[project]' | Set-Content (Join-Path $TestDrive 'data/independent/pyproject.toml')
+
+        @(Get-UvProject -RepoRoot $TestDrive) | Should -Contain 'data/independent'
+    }
+
+    It 'Rejects a missing explicitly declared workspace member' {
+        Remove-Item (Join-Path $TestDrive 'data/library/pyproject.toml')
+
+        { Get-UvProject -RepoRoot $TestDrive } | Should -Throw '*member*'
+    }
+
+    It 'Rejects an orphan lock under a workspace member' {
+        'lock' | Set-Content (Join-Path $TestDrive 'data/library/uv.lock')
+
+        { Get-UvProject -RepoRoot $TestDrive } | Should -Throw '*lock*'
+    }
+
+    It 'Rejects malformed workspace membership instead of treating members as standalone' {
+        @'
+[project]
+name = "workspace-owner"
+version = "0.1.0"
+[tool.uv.workspace]
+members = "data/library"
+'@ | Set-Content (Join-Path $TestDrive 'pyproject.toml')
+
+        { Get-UvProject -RepoRoot $TestDrive } | Should -Throw '*workspace*'
+    }
+
+    It 'Selects the root lock for a member-only manifest change' {
+        Mock Get-ChangedFilesFromGit { @('evaluation/judge/pyproject.toml') }
+
+        @(Select-ChangedProject -Project @('.', 'evaluation') -RepoRoot $TestDrive) | Should -Be @('.')
+    }
+
+    It 'Keeps independent parent changes separate from the nested workspace member' {
+        Mock Get-ChangedFilesFromGit { @('evaluation/pyproject.toml') }
+
+        @(Select-ChangedProject -Project @('.', 'evaluation') -RepoRoot $TestDrive) | Should -Be @('evaluation')
+    }
+}
+
+Describe 'Get-CommittedUvLockProject' -Tag 'Unit' {
+    It 'Fails lock discovery when Git fails' {
+        Mock git { $global:LASTEXITCODE = 1 }
+
+        { Get-CommittedUvLockProject -RepoRoot $TestDrive } | Should -Throw '*Failed to list committed uv.lock files*'
+    }
+
+    It 'Includes the root lock and excludes vendored and tooling locks' {
+        $lockFiles = @(
+            'uv.lock',
+            'training/uv.lock',
+            '.venv/uv.lock',
+            'external/IsaacLab/uv.lock',
+            'node_modules/package/uv.lock',
+            '.git/uv.lock',
+            '.copilot-tracking/uv.lock',
+            'docs/docusaurus/uv.lock',
+            'nested/.venv/uv.lock'
+        )
+        foreach ($lockFile in $lockFiles) {
+            $lockPath = Join-Path $TestDrive $lockFile
+            New-Item -ItemType Directory -Force -Path (Split-Path $lockPath -Parent) | Out-Null
+            'lock' | Set-Content $lockPath
+        }
+        Mock git {
+            $global:LASTEXITCODE = 0
+            $lockFiles
+        }
+
+        @(Get-CommittedUvLockProject -RepoRoot $TestDrive) | Should -Be @('.', 'training')
+    }
+
+    It 'Omits deleted tracked locks without hiding existing standalone locks' {
+        New-Item -ItemType Directory -Force -Path (Join-Path $TestDrive 'independent') | Out-Null
+        'lock' | Set-Content (Join-Path $TestDrive 'independent/uv.lock')
+        Mock git {
+            $global:LASTEXITCODE = 0
+            @('deleted/uv.lock', 'independent/uv.lock')
+        }
+
+        @(Get-CommittedUvLockProject -RepoRoot $TestDrive) | Should -Be @('independent')
+    }
 }
 
 Describe 'Get-UvDependabotProject' -Tag 'Unit' {
+    It 'Rejects a missing Dependabot configuration' {
+        $dependabotPath = Join-Path $TestDrive 'missing-dependabot.yml'
+
+        { Get-UvDependabotProject -Path $dependabotPath } | Should -Throw "*Dependabot configuration not found: $dependabotPath*"
+    }
+
     It 'Reads and normalizes uv directories' {
         $dependabotPath = Join-Path $TestDrive 'dependabot.yml'
         @'
@@ -112,6 +263,136 @@ Describe 'Get-MissingUvDependabotProject' -Tag 'Unit' {
 }
 
 Describe 'Invoke-UvLockCheck' -Tag 'Unit' {
+    It 'Regenerates one authoritative workspace lock for <Scenario>' -ForEach @(
+        @{ Scenario = 'leaf-patch'; Repeated = $false; Optional = $false },
+        @{ Scenario = 'repeated-exact-pins'; Repeated = $true; Optional = $false },
+        @{ Scenario = 'inactive-extra-floor'; Repeated = $true; Optional = $true }
+    ) {
+        $uvExecutable = (Get-Command uv -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+        $workspace = Join-Path $TestDrive $Scenario
+        foreach ($directory in @($workspace, "$workspace/library", "$workspace/wheels")) {
+            New-Item -ItemType Directory -Force -Path $directory | Out-Null
+        }
+        $lockArgs = @('--offline', '--no-index', '--find-links', "$workspace/wheels")
+        foreach ($version in @('0.1.0', '0.1.1')) {
+            $distribution = "probe_leaf-$version.dist-info"
+            $archive = [IO.Compression.ZipFile]::Open("$workspace/wheels/probe_leaf-$version-py3-none-any.whl", 'Create')
+            try {
+                $entries = @{
+                    "$distribution/METADATA" = "Metadata-Version: 2.3`nName: probe-leaf`nVersion: $version`n"
+                    "$distribution/WHEEL"    = "Wheel-Version: 1.0`nRoot-Is-Purelib: true`nTag: py3-none-any`n"
+                    "$distribution/RECORD"   = ''
+                }
+                foreach ($entry in $entries.GetEnumerator()) {
+                    $writer = [IO.StreamWriter]::new($archive.CreateEntry($entry.Key).Open())
+                    try { $writer.Write($entry.Value) }
+                    finally { $writer.Dispose() }
+                }
+            }
+            finally { $archive.Dispose() }
+        }
+        $ownerManifest = @'
+[project]
+name = "update-probe"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["probe-leaf==0.1.0", "probe-library==0.1.0"]
+[tool.uv]
+package = false
+[tool.uv.workspace]
+members = ["library"]
+[tool.uv.sources]
+probe-library = { workspace = true }
+'@
+        $libraryManifest = @'
+[project]
+name = "probe-library"
+version = "0.1.0"
+requires-python = ">=3.12"
+'@
+        if ($Repeated) {
+            $libraryManifest += if ($Optional) {
+                "`n[project.optional-dependencies]`nunused = [`"probe-leaf==0.1.0`"]`n"
+            }
+            else {
+                "`ndependencies = [`"probe-leaf==0.1.0`"]`n"
+            }
+        }
+        $ownerManifest | Set-Content "$workspace/pyproject.toml"
+        $libraryManifest | Set-Content "$workspace/library/pyproject.toml"
+        & $uvExecutable --directory $workspace lock @lockArgs 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Be 0
+        $originalLock = Get-Content "$workspace/uv.lock" -Raw
+
+        $ownerManifest.Replace('probe-leaf==0.1.0', 'probe-leaf==0.1.1') | Set-Content "$workspace/pyproject.toml"
+        & $uvExecutable --directory $workspace lock --check @lockArgs 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Not -Be 0
+        (Get-Content "$workspace/uv.lock" -Raw) | Should -BeExactly $originalLock
+        if ($Repeated) {
+            & $uvExecutable --directory $workspace lock @lockArgs 2>&1 | Out-Null
+            $LASTEXITCODE | Should -Not -Be 0
+            $libraryManifest.Replace('probe-leaf==0.1.0', 'probe-leaf==0.1.1') | Set-Content "$workspace/library/pyproject.toml"
+        }
+        & $uvExecutable --directory $workspace lock @lockArgs 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Be 0
+        & $uvExecutable --directory $workspace lock --check @lockArgs 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Be 0
+        (Get-Content "$workspace/uv.lock" -Raw) | Should -Not -BeExactly $originalLock
+        "$workspace/library/uv.lock" | Should -Not -Exist
+        "$workspace/leaf/uv.lock" | Should -Not -Exist
+    }
+
+    It 'Detects changed inactive extra metadata without a resolved optional package' {
+        $uvExecutable = (Get-Command uv -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+        $consumer = Join-Path $TestDrive 'metadata-consumer'
+        foreach ($directory in @($consumer, "$consumer/library", "$consumer/feature")) {
+            New-Item -ItemType Directory -Force -Path $directory | Out-Null
+        }
+        @'
+[project]
+name = "metadata-consumer"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["metadata-library==0.1.0"]
+[tool.uv]
+package = false
+[tool.uv.sources]
+metadata-library = { path = "library" }
+metadata-feature = { path = "feature" }
+'@ | Set-Content (Join-Path $consumer 'pyproject.toml')
+        $libraryManifest = @'
+[project]
+name = "metadata-library"
+version = "0.1.0"
+requires-python = ">=3.12"
+[project.optional-dependencies]
+parquet = ["metadata-feature==0.1.0"]
+[tool.uv.sources]
+metadata-feature = { path = "../feature" }
+'@
+        $libraryManifest | Set-Content (Join-Path $consumer 'library/pyproject.toml')
+        @'
+[project]
+name = "metadata-feature"
+version = "0.1.0"
+requires-python = ">=3.12"
+'@ | Set-Content (Join-Path $consumer 'feature/pyproject.toml')
+
+        & $uvExecutable --directory $consumer lock --offline 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Be 0
+        $lockBefore = Get-Content (Join-Path $consumer 'uv.lock') -Raw
+        $lockBefore | Should -Not -Match '(?m)^name = "metadata-feature"$'
+        & $uvExecutable --directory $consumer lock --check --offline 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Be 0
+
+        $libraryManifest.Replace('parquet =', 'changed-parquet =') |
+        Set-Content (Join-Path $consumer 'library/pyproject.toml')
+        & $uvExecutable --directory $consumer lock --check --offline 2>&1 | Out-Null
+
+        $LASTEXITCODE | Should -Not -Be 0
+        (Get-Content (Join-Path $consumer 'uv.lock') -Raw) | Should -BeExactly $lockBefore
+    }
+
     It 'Returns the exit code and trimmed output from uv' {
         Mock uv {
             $global:LASTEXITCODE = 0
@@ -248,8 +529,8 @@ Describe 'New-UvLockReport' -Tag 'Unit' {
     It 'Reports an unavailable interpreter as a failed check, not lock drift' {
         $results = @([pscustomobject]@{
                 Project = '.'
-                Passed = $false
-                Detail = 'No interpreter found for Python 3.12.13'
+                Passed  = $false
+                Detail  = 'No interpreter found for Python 3.12.13'
             })
 
         $report = New-UvLockReport -Results $results -OutputPath $script:OutputPath
@@ -258,6 +539,16 @@ Describe 'New-UvLockReport' -Tag 'Unit' {
         $summary | Should -Match 'Failed Checks'
         $summary | Should -Match 'No interpreter found for Python 3.12.13'
         $summary | Should -Not -Match 'Run `uv lock`'
+    }
+
+    It 'Provides a fallback diagnostic when a failed check has no output' {
+        $results = @([pscustomobject]@{ Project = 'evaluation'; Passed = $false; Detail = '' })
+
+        $report = New-UvLockReport -Results $results -OutputPath $script:OutputPath
+
+        $report.DriftCount | Should -Be 1
+        (Get-Content $script:OutputPath -Raw | ConvertFrom-Json).check_passed | Should -BeFalse
+        (Get-Content $report.MarkdownPath -Raw) | Should -Match 'evaluation \| uv lock check failed without diagnostic output'
     }
 
     It 'Writes a step summary' {

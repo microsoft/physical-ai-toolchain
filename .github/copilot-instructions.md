@@ -13,6 +13,8 @@ Follow the affected area's existing conventions and scoped instructions. Use man
 * Prefer coherent root-cause fixes across the affected solution. Refactor when SOLID, KISS, or clearer responsibilities improve the design; use "1, 2, refactor" as a checkpoint, not a requirement to invent abstractions.
 * You may fix concrete issues discovered outside the original request. Validate those fixes and report them separately; avoid speculative cleanup.
 * Keep comments brief and factual. Avoid narration and plan-phase markers.
+* In shell scripts, use Bash for branching, iteration, and orchestration. Keep `jq` queries focused on one JSON extraction, transformation, or comparison; split large queries into named steps so failures identify the affected stage. Use structured templates for stable payloads where they reduce complexity, and pass values with `--arg` or `--argjson` rather than interpolating JSON strings.
+* Make operational limits, cache lifetimes, and timeouts environment-configurable with validated defaults. Read settings after the application's `.env` loading step, document overrides in its environment example, and keep protocol constants fixed unless configuration is part of their contract.
 * Do not modify vendored files in `external/`.
 * Follow [derived-file conventions](../scripts/README.md) when updating hve-core-derived scripts.
 
