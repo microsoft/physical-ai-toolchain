@@ -4,6 +4,10 @@ version = "0.8.0"
 description = "Physical AI Toolchain for Isaac Lab training"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+
+[project.urls]
+Repository = "https://github.com/microsoft/physical-ai-toolchain"
 
 [build-system]
 requires = ["hatchling"]
@@ -14,29 +18,46 @@ packages = ["training/rl"]
 
 [dependency-groups]
 dev = [
-    "hypothesis==6.168.3",
-    "numpy==2.5.3",
-    "ruff==0.16.9",
-    "pyarrow==25.0.1",
-    "imageio==2.38.0",
+    "physical-ai-curation==0.1.0",
+    "physical-ai-dataset-io==0.1.0",
+    "hypothesis==6.170.5",
+    "numpy==2.5.4",
+    "ruff==0.17.1",
+    "pyarrow==26.0.0",
+    "imageio==2.38.1",
     "imageio-ffmpeg==0.6.0",
     "pytest==9.1.1",
-    "pytest-mock==3.16.0",
+    "pytest-mock==3.17.0",
     "pytest-cov==7.1.0",
-    "pydantic==2.13.5",
-    "ipykernel==7.3.0",
+    "pydantic==2.14.1",
+    "ipykernel==7.4.0",
     "ipywidgets==8.1.9",
     "jsonschema[format]==4.26.0",
     "tqdm==4.70.1",
     "matplotlib==3.11.2",
-    "torch==2.14.0",
-    "azureml-mlflow==1.62.0.post6",
-    "azure-ai-ml==1.35.0",
+    "torch==2.14.1",
+    "azure-ai-ml==1.35.2",
 ]
-fuzz = ["atheris==3.1.0"]
+azureml-tracking = ["azureml-mlflow==1.62.0.post6"]
+fuzz = ["atheris==3.1.0; sys_platform == 'linux' and platform_machine == 'x86_64'"]
 
 [tool.uv]
+conflicts = [
+    [
+        { group = "azureml-tracking" },
+        { package = "lerobot-annotation-api", extra = "azure" },
+    ],
+]
+environments = [
+    "sys_platform == 'win32'",
+    "sys_platform == 'darwin'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+]
+prerelease = "if-necessary"
 constraint-dependencies = [
+    "cryptography==50.0.1",
+    "starlette==1.6.0",
     "pygments==2.21.0",
 ]
 override-dependencies = [
@@ -51,6 +72,32 @@ name = "pypi"
 url = "https://pypi.org/simple"
 default = true
 
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.workspace]
+members = [
+    "data-management/curation",
+    "data-management/dataset-io",
+    "data-management/viewer/backend",
+    "evaluation/vlm_judge",
+]
+
+[tool.uv.sources]
+physical-ai-curation = { workspace = true }
+physical-ai-dataset-io = { workspace = true }
+physical-ai-vlm-judge = { workspace = true }
+torch = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+]
+torchvision = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+]
+
 [tool.pytest.ini_options]
 testpaths = [
     "tests",
@@ -59,7 +106,7 @@ testpaths = [
     "fleet-deployment/inference/tests",
     "shared/ci/tests",
 ]
-pythonpath = [".", "data-management/tools"]
+pythonpath = [".", "data-management/tools", "data-management/curation", "data-management/dataset-io"]
 python_files = ["test_*.py", "fuzz_harness.py"]
 addopts = [
     "-ra",

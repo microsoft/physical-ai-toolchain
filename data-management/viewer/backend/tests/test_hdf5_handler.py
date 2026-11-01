@@ -324,13 +324,18 @@ class TestEpisodeAccess:
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         loader = MagicMock()
-        loader.load_episode.side_effect = RuntimeError("unreadable episode")
+        loader.load_episode.side_effect = RuntimeError("private-loader-payload\r\nforged")
         handler = _handler_with_loader(monkeypatch, tmp_path, loader)
+        handler._loaders["dataset\r\nforged"] = handler._loaders.pop("dataset")
 
-        assert handler.load_episode("dataset", 0) is None
+        assert handler.load_episode("dataset\r\nforged", 0) is None
         assert handler.load_episode("unknown", 0) is None
+        assert "HDF5 load_episode failed" in caplog.text
+        assert "private-loader-payload" not in caplog.text
+        assert all("\r" not in record.getMessage() and "\n" not in record.getMessage() for record in caplog.records)
 
     def test_get_trajectory_returns_episode_points(self, tmp_path: Path) -> None:
         _create_episode(tmp_path / "episode_0.hdf5", length=4)

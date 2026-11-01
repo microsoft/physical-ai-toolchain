@@ -33,10 +33,34 @@ describe('playback diagnostics', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.unstubAllGlobals()
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: originalLocation,
     })
+  })
+
+  it('remains inert without a browser window or supported persistent storage', () => {
+    vi.stubGlobal('window', undefined)
+    expect(getEnabledDiagnosticsChannels()).toEqual([])
+    enableDiagnostics()
+    disableDiagnostics()
+    recordDiagnosticEvent('workspace', 'synthetic')
+    expect(readDiagnosticEvents()).toEqual([])
+    vi.unstubAllGlobals()
+    Object.defineProperty(window, 'localStorage', { configurable: true, value: {} })
+    enableDiagnostics()
+    disableDiagnostics()
+    expect(isDiagnosticsEnabled()).toBe(false)
+  })
+
+  it('normalizes comma-separated channels and does not enable an empty selection', () => {
+    enableDiagnostics([])
+    expect(isDiagnosticsEnabled()).toBe(false)
+    enableDiagnostics('workspace, playback')
+    expect(getEnabledDiagnosticsChannels()).toEqual(['workspace', 'playback'])
+    clearDiagnosticEvents()
+    expect(readDiagnosticEvents()).toEqual([])
   })
 
   it('enables a channel from local storage without affecting default behavior', () => {

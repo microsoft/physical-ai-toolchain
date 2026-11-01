@@ -1,0 +1,21 @@
+# Negative smoke test, submitted by infrastructure/local/smoke-test-osmo.sh: the local pool allows no
+# ad-hoc host mounts, so OSMO must reject this workflow at submission.
+workflow:
+  name: "{{ workflow_name }}"
+  resources:
+    default:
+      cpu: 1
+      memory: 128Mi
+      storage: 128Mi
+      platform: default
+  tasks:
+    - name: host-mount
+      image: "{{ utility_image }}"
+      command: [sh]
+      args: [-c, "ls /host-etc"]
+      volumeMounts:
+        - /etc:/host-etc
+
+default-values:
+  workflow_name: local-osmo-mount-rejected
+  utility_image: busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e

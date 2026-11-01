@@ -1,0 +1,17 @@
+{
+    "sceneDetails": {
+        "weatherType": "What is the type of weather (Sunny, Rainy, Snowy, Foggy, Cloudy). Answer in one word",
+        "timeOfDay": "What is the time of day from given options only (Morning, Evening, Noon, Night). Answer in one word"
+    },
+    "roadDetails": {
+        "roadParameters": "what is the road width (Narrow, Medium, Wide). Answer in one word.",
+        "roadSurface": "What is the type of road (Asphalt, Concrete). Answer in one word."
+    },
+    "dynamicAgentDetails": {
+        "any_vehicle_lane_change": "Do any vehicles change lanes in the scene? If yes, answer 'Yes'. If no, answer 'No' in one word.",
+        "any_vehicle_cut_in": "Do any vehicles cutin the ego vehicle or another vehicle in the scene? If yes, answer 'Yes'. If no, answer 'No' in one word."
+    },
+    "otherAgentDetails": {
+        "pedestrianDetails": "Are there any pedestrians in the scene? If yes, answer 'Yes'. If no, answer 'No' in one word."
+    }
+}

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   buildDraftPersistencePayload,
   buildEditOperations,
+  buildEditStateFromOperations,
   buildEditStateUpdate,
   buildOriginalEditState,
   computeDirty,
@@ -58,6 +59,27 @@ function makeFullState(overrides: Record<string, unknown> = {}) {
 }
 
 describe('edit-store-helpers', () => {
+  it('restores recorded subtasks without aliasing and respects explicit removal', () => {
+    const recorded = [
+      {
+        id: 'recorded-0',
+        label: 'Reach',
+        frameRange: [0, 4] as [number, number],
+        color: '#3b82f6',
+        source: 'recorded' as const,
+      },
+    ]
+    const operations = { datasetId: 'ds-1', episodeIndex: 0 }
+    const snapshot = buildEditStateFromOperations(operations, recorded)
+
+    expect(snapshot.subtasks).toEqual(recorded)
+    snapshot.subtasks[0].label = 'Changed'
+    expect(recorded[0].label).toBe('Reach')
+    expect(
+      buildEditStateFromOperations({ ...operations, subtasks: [] }, recorded).subtasks,
+    ).toEqual([])
+  })
+
   it('recomputes dirty and validation state from the provided state update', () => {
     const originalState = {
       globalTransform: null,
@@ -315,6 +337,7 @@ describe('edit-store-helpers', () => {
         0,
         'local',
         expect.objectContaining({ datasetId: 'ds-1', episodeIndex: 0, removedFrames: [2, 4] }),
+        null,
       )
     })
 

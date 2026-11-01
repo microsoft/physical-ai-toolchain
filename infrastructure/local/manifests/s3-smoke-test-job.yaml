@@ -1,0 +1,79 @@
+# Proves the object store returns byte-identical objects for single-part and multipart uploads from a pod,
+# using the AWS CLI's default checksum behavior. Removes its test objects afterwards.
+# Rendered by 01-deploy-platform-services.sh, which substitutes only LOCAL_ placeholders.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: s3-smoke-test
+  namespace: ${LOCAL_PLATFORM_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: s3-smoke-test
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: s3-smoke-test
+        app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: smoke-test
+          image: ${LOCAL_S3_CLIENT_IMAGE}
+          env:
+            - name: HOME
+              value: /tmp
+            - name: AWS_ENDPOINT_URL
+              value: http://${LOCAL_S3_CLUSTER_IP}:${LOCAL_S3_PORT}
+            - name: AWS_DEFAULT_REGION
+              value: ${LOCAL_S3_REGION}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: ${LOCAL_S3_SECRET}
+                  key: access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ${LOCAL_S3_SECRET}
+                  key: secret-access-key
+            - name: BUCKET
+              value: ${LOCAL_OSMO_BUCKET}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              printf '[default]\ns3 =\n    addressing_style = path\n' > /tmp/aws-config
+              export AWS_CONFIG_FILE=/tmp/aws-config
+              prefix="s3://$BUCKET/.platform-smoke-test"
+              head -c 1048576 /dev/urandom > /tmp/single.bin
+              head -c 25165824 /dev/urandom > /tmp/multipart.bin
+              for name in single multipart; do
+                aws s3 cp "/tmp/$name.bin" "$prefix/$name.bin" --only-show-errors
+                aws s3 cp "$prefix/$name.bin" "/tmp/$name.out" --only-show-errors
+                if [ "$(sha256sum < "/tmp/$name.bin")" != "$(sha256sum < "/tmp/$name.out")" ]; then
+                  echo "The $name upload came back different"
+                  exit 1
+                fi
+                echo "The $name upload round-trips byte-identical"
+              done
+              aws s3 rm "$prefix/" --recursive --only-show-errors
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

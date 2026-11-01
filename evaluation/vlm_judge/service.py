@@ -15,10 +15,13 @@ backend is configured but not yet provisioned.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import math
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from .agent import AgentConfig, JudgeAgent
@@ -40,7 +43,7 @@ class BackendConfig:
 
     model_id: str = "Qwen/Qwen3-VL-4B-Instruct"
     revision: str | None = None
-    """Immutable HF commit SHA pinning the qwen3-vl download; None uses the default branch."""
+    """Required full HF commit SHA for qwen3-vl Hub models; omit for explicit local directories."""
     base_url: str | None = None
     api_key: str | None = None
     device_map: str = "auto"
@@ -72,7 +75,27 @@ class JudgeService:
         self._config = config or ServiceConfig()
         self._backend: JudgeBackend | None = None
         self._agent: JudgeAgent | None = None
-        self._cache = JudgeCache(self._config.cache_dir)
+        self._initialization_lock = Lock()
+        self._cache = JudgeCache(self._config.cache_dir, execution_config=self.execution_config)
+
+    @property
+    def execution_config(self) -> dict[str, object]:
+        """Credential-free identity of the declared inference and frame settings."""
+        backend = self._config.backend
+        model_locator = backend.model_id
+        if backend.kind == "qwen3-vl" and (
+            Path(model_locator).is_absolute() or model_locator.startswith(("./", "../"))
+        ):
+            model_locator = str(Path(model_locator).resolve())
+        return {
+            "backend": backend.kind,
+            "model_id": model_locator,
+            "revision": backend.revision.lower() if backend.revision else None,
+            "deployment": hashlib.sha256((backend.base_url or "").encode("utf-8")).hexdigest(),
+            "device_map": backend.device_map,
+            "dtype": backend.dtype,
+            "frames": asdict(self._config.frames),
+        }
 
     @property
     def config(self) -> ServiceConfig:
@@ -97,6 +120,9 @@ class JudgeService:
         force: bool = False,
         cache_dir: Path | None = None,
         process_method: str | None = None,
+        media_identity: Mapping[str, str] | None = None,
+        video_windows: Mapping[str, tuple[float, float]] | None = None,
+        snapshot_id: str | None = None,
     ) -> JudgeResult:
         """Score a single episode given one or more view MP4 paths.
 
@@ -112,6 +138,8 @@ class JudgeService:
         agent_config = replace(self._config.agent, process_method=effective_method)
         cache = self.cache_for(cache_dir)
         cache_key = cache.key(
+            episode_id=episode_id,
+            snapshot_id=snapshot_id,
             video_paths=video_paths,
             instruction=instruction,
             judge_model=self.model_id,
@@ -119,14 +147,16 @@ class JudgeService:
             from_s=from_s,
             to_s=to_s,
             agent_config=agent_config,
+            media_identity=media_identity,
+            video_windows=video_windows,
         )
         if not force and cache.enabled:
             cached = cache.get(cache_key)
             if cached is not None:
-                _LOGGER.info("Cache hit for %s (%s)", episode_id, cache_key[:12])
+                _LOGGER.info("Judge cache hit key=%s", cache_key[:12])
                 return _result_from_dict(cached)
 
-        frames = self._extract(video_paths=video_paths, from_s=from_s, to_s=to_s)
+        frames = self._extract(video_paths=video_paths, from_s=from_s, to_s=to_s, video_windows=video_windows)
         agent = self._ensure_agent()
         result = agent.judge(
             episode_id=episode_id,
@@ -134,6 +164,9 @@ class JudgeService:
             frames=frames,
             process_method=effective_method,
         )
+        result = JudgeResult.from_dict(result.to_dict())
+        if result.episode_id != episode_id or result.instruction != instruction:
+            raise ValueError("Judge result does not match the requested saved input")
         cache.put(cache_key, result.to_dict())
         return result
 
@@ -146,18 +179,19 @@ class JudgeService:
         """
         if cache_dir is None:
             return self._cache
-        return JudgeCache(cache_dir)
+        return JudgeCache(cache_dir, execution_config=self.execution_config)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     def _ensure_agent(self) -> JudgeAgent:
-        if self._agent is None:
-            backend = self._build_backend(self._config.backend)
-            self._backend = backend
-            self._agent = JudgeAgent(backend, config=self._config.agent)
-        return self._agent
+        with self._initialization_lock:
+            if self._agent is None:
+                backend = self._build_backend(self._config.backend)
+                self._backend = backend
+                self._agent = JudgeAgent(backend, config=self._config.agent)
+            return self._agent
 
     def _extract(
         self,
@@ -165,16 +199,24 @@ class JudgeService:
         video_paths: Mapping[str, Path | str],
         from_s: float | None,
         to_s: float | None,
-    ):
+        video_windows: Mapping[str, tuple[float, float]] | None = None,
+    ) -> list[Any]:
         if not video_paths:
             raise ValueError("video_paths must contain at least one entry")
         frame_cfg = self._config.frames
         per_view = []
         for view in sorted(video_paths):
+            start, end = (video_windows or {}).get(view, (from_s, to_s))
+            if (
+                start is not None
+                and end is not None
+                and (not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start)
+            ):
+                raise ValueError("Invalid per-camera video window")
             window = FrameWindow(
                 path=Path(video_paths[view]),
-                from_s=from_s,
-                to_s=to_s,
+                from_s=start,
+                to_s=end,
             )
             per_view.append(
                 extract_frames(
@@ -208,23 +250,8 @@ class JudgeService:
 
 
 def _result_from_dict(payload: dict[str, Any]) -> JudgeResult:
-    """Round-trip a ``JudgeResult`` from a cached JSON dict, tolerating extras."""
-    fields = {
-        "episode_id",
-        "instruction",
-        "judge_model",
-        "prompt_version",
-        "n_frames",
-        "outcome_success",
-        "outcome_confidence",
-        "outcome_n_valid_votes",
-        "progress_per_frame",
-        "voc",
-        "milestones",
-        "failure_mode",
-    }
-    kwargs = {k: payload[k] for k in fields if k in payload}
-    return JudgeResult(**kwargs)
+    """Validate and load canonical result fields, tolerating future metadata."""
+    return JudgeResult.from_dict(payload)
 
 
 __all__ = [

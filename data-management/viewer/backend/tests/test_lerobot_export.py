@@ -684,6 +684,43 @@ def test_failed_exports_leave_nothing_behind(
         assert list(output.iterdir()) == []
 
 
+@pytest.mark.parametrize("invalid", ["codec", "vector-width"], ids=["unsupported-codec", "ragged-state"])
+@pytest.mark.parametrize("existing", [False, True], ids=["new-output", "existing-output"])
+def test_given_invalid_source_when_exporting_then_rejects_it_and_cleans_output(
+    source: Path, invalid: str, existing: bool
+) -> None:
+    if invalid == "codec":
+        path = source / "meta/info.json"
+        info = json.loads(path.read_text())
+        info["features"][CAMERA]["info"]["video.codec"] = "unsupported-codec"
+        path.write_text(json.dumps(info))
+        message = "cannot be re-encoded"
+    else:
+        path = source / "data/chunk-000/file-000.parquet"
+        table = pq.read_table(path)
+        states = table.column("observation.state").to_pylist()
+        states[2] = states[2][:-1]
+        table = table.set_column(
+            table.schema.get_field_index("observation.state"), "observation.state", pa.array(states)
+        )
+        pq.write_table(table, path)
+        message = "different lengths"
+    output = source.parents[1] / "edited"
+    if existing:
+        output.mkdir()
+    before = _digests(source)
+    entries = sorted(path.name for path in output.parent.iterdir())
+
+    result = LeRobotExporter(source, output).export_episodes([0], _edits(0, removed_frames={1}))
+
+    assert result.success is False
+    assert message in result.error
+    assert _digests(source) == before
+    assert sorted(path.name for path in output.parent.iterdir()) == entries
+    if existing:
+        assert list(output.iterdir()) == []
+
+
 def test_an_unexpected_failure_is_logged_with_its_traceback(
     source: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

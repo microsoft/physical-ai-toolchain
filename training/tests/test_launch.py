@@ -153,6 +153,33 @@ class TestMaterializedCheckpoint:
         download_mock.assert_called_once_with(artifact_uri="azureml://artifact", dst_path="/tmp/skrl-ckpt-xyz")
         rmtree_mock.assert_called_with("/tmp/skrl-ckpt-xyz", ignore_errors=True)
 
+    def test_mlflow_backend_resolves_against_server(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls: list[tuple[str, str]] = []
+        fake_mlflow = ModuleType("mlflow")
+        fake_mlflow.set_tracking_uri = lambda uri: calls.append(("tracking", uri))
+        fake_mlflow.set_registry_uri = lambda uri: calls.append(("registry", uri))
+        fake_mlflow.set_experiment = lambda name: calls.append(("experiment", name))
+
+        def download(artifact_uri: str, dst_path: str) -> str:
+            calls.append(("download", artifact_uri))
+            return f"{dst_path}/model.pt"
+
+        fake_mlflow.artifacts = SimpleNamespace(download_artifacts=download)
+        monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+        monkeypatch.setattr(_MOD.tempfile, "mkdtemp", MagicMock(return_value="/tmp/skrl-ckpt-mlflow"))
+        monkeypatch.setattr(_MOD.shutil, "rmtree", MagicMock())
+
+        tracking = _MOD.MLflowTracking("http://mlflow.local:5000", experiment_name="exp")
+        with _MOD._materialized_checkpoint("models:/cartpole/1", tracking) as path:
+            assert path == "/tmp/skrl-ckpt-mlflow/model.pt"
+
+        assert calls == [
+            ("tracking", "http://mlflow.local:5000"),
+            ("registry", "http://mlflow.local:5000"),
+            ("experiment", "exp"),
+            ("download", "models:/cartpole/1"),
+        ]
+
     def test_download_failure_cleans_up_and_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         download_mock = MagicMock(side_effect=RuntimeError("boom"))
         fake_mlflow = ModuleType("mlflow")
@@ -199,6 +226,22 @@ class TestInitializeMlflowContext:
         args = SimpleNamespace(disable_mlflow=False, experiment_name=None, task=None)
         _, name = _MOD._initialize_mlflow_context(args)
         assert name == "isaaclab-training"
+
+    def test_mlflow_backend_skips_azure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow.local:5000")
+        bootstrap_mock = MagicMock()
+        monkeypatch.setattr(_MOD, "bootstrap_azure_ml", bootstrap_mock)
+        args = SimpleNamespace(disable_mlflow=False, tracking_backend="mlflow", experiment_name=None, task="Walk")
+        context, name = _MOD._initialize_mlflow_context(args)
+        assert isinstance(context, _MOD.MLflowTracking)
+        assert context.tracking_uri == "http://mlflow.local:5000"
+        assert context.experiment_name == name == "isaaclab-Walk"
+        bootstrap_mock.assert_not_called()
+
+    def test_environment_selects_backend(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TRACKING_BACKEND", "none")
+        args = SimpleNamespace(disable_mlflow=False, tracking_backend=None, experiment_name=None, task="Walk")
+        assert _MOD._initialize_mlflow_context(args) == (None, None)
 
 
 def _seed_training_packages(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -276,11 +319,11 @@ class TestValidateMlflowFlags:
 
 
 def _patch_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_MOD, "_ensure_dependencies", lambda: None)
+    monkeypatch.setattr(_MOD, "_ensure_dependencies", lambda *args, **kwargs: None)
 
 
 @contextmanager
-def _fake_ckpt(path: str | None):
+def _fake_ckpt(path: str | None, tracking: object = None):
     yield path
 
 
@@ -314,7 +357,7 @@ class TestMain:
         monkeypatch.setattr(_MOD, "_initialize_mlflow_context", lambda args: (None, None))
 
         @contextmanager
-        def fake_ckpt(uri: str | None):
+        def fake_ckpt(uri: str | None, tracking: object = None):
             assert uri == "azureml://artifact"
             yield "/tmp/ckpt/file.pt"
 

@@ -13,6 +13,8 @@ Follow the affected area's existing conventions and scoped instructions. Use man
 * Prefer coherent root-cause fixes across the affected solution. Refactor when SOLID, KISS, or clearer responsibilities improve the design; use "1, 2, refactor" as a checkpoint, not a requirement to invent abstractions.
 * You may fix concrete issues discovered outside the original request. Validate those fixes and report them separately; avoid speculative cleanup.
 * Keep comments brief and factual. Avoid narration and plan-phase markers.
+* In shell scripts, use Bash for branching, iteration, and orchestration. Keep `jq` queries focused on one JSON extraction, transformation, or comparison; split large queries into named steps so failures identify the affected stage. Use structured templates for stable payloads where they reduce complexity, and pass values with `--arg` or `--argjson` rather than interpolating JSON strings.
+* Make operational limits, cache lifetimes, and timeouts environment-configurable with validated defaults. Read settings after the application's `.env` loading step, document overrides in its environment example, and keep protocol constants fixed unless configuration is part of their contract.
 * Do not modify vendored files in `external/`.
 * Follow [derived-file conventions](../scripts/README.md) when updating hve-core-derived scripts.
 
@@ -44,8 +46,10 @@ Write natural, direct, reader-focused prose. Avoid corporate filler, inflated cl
 
 ## Agent Workflows
 
-* The primary agent writes and updates RPI plans; do not use `RPI Planner` subagents.
-* Follow the active RPI and HVE skill contracts for review, delegation, and validation. Respect the user's model selection rather than requiring a repository-specific model or local plugin.
+* Follow the active RPI and HVE skill contracts for review, delegation, and validation, as narrowed by the RPI rules below. Respect the user's model selection rather than requiring a repository-specific model or local plugin, except for the RPI subagent model below.
+* When using the `RPI Agent` or an `rpi-*` skill, orchestrate `Claude Haiku 5.5 (copilot)` subagents (unless the user explicitly selects another model to use for subagent(s)) using `long_context` for `context_tier` and one of (`low`, `medium`, `high`, `xhigh`, `max`) for `reasoning_effort` depending on which effort is needed.
+* For `rpi-research` and `rpi-review` subagents you will likely always want `max` for `reasoning_effort`
+* The primary agent writes and updates RPI plans and performs every `rpi-plan-critique` itself. Do not delegate plan authoring, plan edits, or plan critiques to subagents, and do not use `RPI Planner`.
 * Cloud agents use the [pinned RPI skill bootstrap](../docs/reference/copilot-artifacts.md), not the retired umbrella agents. Before cloud RPI work, verify required skill files, their `metadata.github-pinned` values against `RPI_SKILLS_REF`, and the generated tracking instruction. Stop on an incomplete bootstrap.
 * In cloud-agent PR work, persist completed RPI phases as PR comments and maintain an artifact index with the resolved upstream SHA in the PR description. If PR writes are unavailable, return the complete phase artifacts without claiming persistence.
 * Apply scoped dataviewer and OpenVEX instructions when those areas are affected, and call out AzureRM provider major-version changes explicitly.

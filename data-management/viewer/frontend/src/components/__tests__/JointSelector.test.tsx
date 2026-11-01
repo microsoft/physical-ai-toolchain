@@ -218,16 +218,22 @@ describe('JointSelector', () => {
   })
 
   describe('group management', () => {
-    it('calls onCreateGroup when creating a new group', () => {
+    it('calls onCreateGroup when creating a new group', async () => {
+      const user = userEvent.setup()
       const onCreateGroup = vi.fn()
       render(<JointSelector {...baseProps} editable onCreateGroup={onCreateGroup} />)
-      expect(onCreateGroup).toBeDefined()
+      fireEvent.contextMenu(screen.getByRole('button', { name: 'Right X' }))
+      await user.click(await screen.findByRole('menuitem', { name: 'New Grouping' }))
+      expect(onCreateGroup).toHaveBeenCalledWith('New Group', [0])
     })
 
-    it('calls onDeleteGroup callback', () => {
+    it('calls onDeleteGroup callback', async () => {
+      const user = userEvent.setup()
       const onDeleteGroup = vi.fn()
       render(<JointSelector {...baseProps} editable onDeleteGroup={onDeleteGroup} />)
-      expect(onDeleteGroup).toBeDefined()
+      fireEvent.contextMenu(screen.getByRole('button', { name: 'Right Arm' }))
+      await user.click(await screen.findByRole('menuitem', { name: /Delete/ }))
+      expect(onDeleteGroup).toHaveBeenCalledWith('right-pos')
     })
 
     it('each group is a droppable container with data-group-id', () => {
@@ -237,6 +243,39 @@ describe('JointSelector', () => {
       expect(container.querySelector('[data-group-id="right-pos"]')).toBeInTheDocument()
       expect(container.querySelector('[data-group-id="left-pos"]')).toBeInTheDocument()
     })
+  })
+  it('commits joint and group names while cancelling blank edits and Escape', async () => {
+    const user = userEvent.setup()
+    const onEditJointLabel = vi.fn()
+    const onEditGroupLabel = vi.fn()
+    render(
+      <JointSelector
+        {...baseProps}
+        editable
+        onEditJointLabel={onEditJointLabel}
+        onEditGroupLabel={onEditGroupLabel}
+      />,
+    )
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Right X' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit Name' }))
+    await user.clear(screen.getByRole('textbox'))
+    await user.type(screen.getByRole('textbox'), ' Shoulder{Enter}')
+    expect(onEditJointLabel).toHaveBeenCalledWith(0, 'Shoulder')
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Right Arm' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit Name' }))
+    await user.clear(screen.getByRole('textbox'))
+    await user.type(screen.getByRole('textbox'), ' Primary{Enter}')
+    expect(onEditGroupLabel).toHaveBeenCalledWith('right-pos', 'Primary')
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Right X' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit Name' }))
+    await user.clear(screen.getByRole('textbox'))
+    await user.keyboard('{Enter}')
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(onEditJointLabel).toHaveBeenCalledTimes(1)
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Right X' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit Name' }))
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
   })
   it('restores focus to a joint after dismissing its context menu', async () => {
     const user = userEvent.setup()
@@ -272,5 +311,24 @@ describe('JointSelector', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Move right' }))
 
     expect(onMoveJoint).toHaveBeenCalledWith(0, 'right-pos', 'right-pos', 2)
+  })
+
+  it('moves left through keyboard and menu actions without allowing a move before the first joint', async () => {
+    const user = userEvent.setup()
+    const onMoveJoint = vi.fn()
+    render(<JointSelector {...baseProps} editable onMoveJoint={onMoveJoint} />)
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Right Y' }), {
+      key: 'ArrowLeft',
+      altKey: true,
+    })
+    expect(onMoveJoint).toHaveBeenLastCalledWith(1, 'right-pos', 'right-pos', 0)
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Right Y' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Move left' }))
+    expect(onMoveJoint).toHaveBeenCalledTimes(2)
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Right X' }), {
+      key: 'ArrowLeft',
+      altKey: true,
+    })
+    expect(onMoveJoint).toHaveBeenCalledTimes(2)
   })
 })

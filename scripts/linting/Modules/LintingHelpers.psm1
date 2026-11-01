@@ -167,6 +167,7 @@ function Get-GitIgnorePatterns {
         return @()
     }
 
+    $rootPattern = $null
     $patterns = $lines | Where-Object {
         $_ -and -not $_.StartsWith('#') -and $_.Trim() -ne ''
     } | ForEach-Object {
@@ -175,7 +176,19 @@ function Get-GitIgnorePatterns {
         # Normalize to platform separator
         $normalizedPattern = $pattern.Replace('/', $sep).Replace('\', $sep)
 
-        if ($pattern.EndsWith('/')) {
+        # A leading slash anchors the pattern to the directory that holds the .gitignore.
+        if ($pattern.StartsWith('/')) {
+            if ($null -eq $rootPattern) {
+                $rootPath = Resolve-Path -LiteralPath (Split-Path -Parent $GitIgnorePath) -ErrorAction SilentlyContinue
+                $rootPattern = if ($rootPath) {
+                    [System.Management.Automation.WildcardPattern]::Escape($rootPath.ProviderPath.TrimEnd($sep))
+                }
+                else { '*' }
+            }
+            $anchored = $normalizedPattern.Trim($sep)
+            if ($pattern.EndsWith('/')) { "$rootPattern$sep$anchored$sep*" } else { "$rootPattern$sep$anchored*" }
+        }
+        elseif ($pattern.EndsWith('/')) {
             "*$sep$($normalizedPattern.TrimEnd($sep))$sep*"
         }
         elseif ($pattern.Contains('/') -or $pattern.Contains('\')) {

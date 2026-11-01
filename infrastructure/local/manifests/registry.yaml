@@ -1,0 +1,95 @@
+# Image registry for locally built images. Host networking binds it to the host loopback only, where
+# Docker pushes without TLS and K3s containerd pulls over HTTP. Nothing else on the network can reach it.
+# Rendered by 01-deploy-platform-services.sh, which substitutes only LOCAL_ placeholders.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry-data
+  namespace: ${LOCAL_PLATFORM_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: registry
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: ${LOCAL_STORAGE_CLASS}
+  resources:
+    requests:
+      storage: ${LOCAL_REGISTRY_STORAGE}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry
+  namespace: ${LOCAL_PLATFORM_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: registry
+    app.kubernetes.io/component: image-registry
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  replicas: 1
+  # Two pods can never hold the loopback port at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: registry
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: registry
+        app.kubernetes.io/component: image-registry
+        app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: registry
+          image: ${LOCAL_REGISTRY_IMAGE}
+          env:
+            - name: REGISTRY_HTTP_ADDR
+              value: ${LOCAL_REGISTRY_BIND_ADDRESS}
+            - name: REGISTRY_STORAGE_DELETE_ENABLED
+              value: "true"
+          ports:
+            - name: registry
+              containerPort: ${LOCAL_REGISTRY_PORT}
+          readinessProbe:
+            httpGet:
+              host: 127.0.0.1
+              path: /v2/
+              port: ${LOCAL_REGISTRY_PORT}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              host: 127.0.0.1
+              path: /v2/
+              port: ${LOCAL_REGISTRY_PORT}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: registry-data

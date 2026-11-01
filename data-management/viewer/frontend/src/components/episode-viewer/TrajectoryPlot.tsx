@@ -88,6 +88,11 @@ export const TrajectoryPlot = memo(function TrajectoryPlot({
 
   return (
     <div className={cn('flex min-h-0 flex-col gap-2', className)}>
+      {state.jointConfigSaveError && (
+        <p role="alert" className="text-destructive text-sm">
+          Joint settings were not saved. {state.jointConfigSaveError.message}
+        </p>
+      )}
       <TrajectoryPlotControls
         jointCount={state.jointCount}
         selectedJoints={state.selectedJoints}
@@ -138,7 +143,7 @@ export const TrajectoryPlot = memo(function TrajectoryPlot({
         labels={state.defaults?.labels ?? state.jointConfig.labels}
         onSave={(config) => {
           state.saveDefaults.mutate(
-            { datasetId: '_defaults', ...config },
+            { config: { datasetId: '_defaults', ...config }, etag: state.defaultsEtag },
             {
               onSuccess: () => {
                 state.setDefaultsOpen(false)
@@ -148,6 +153,7 @@ export const TrajectoryPlot = memo(function TrajectoryPlot({
           )
         }}
         isSaving={state.saveDefaults.isPending}
+        saveError={state.saveDefaults.error?.message}
       />
     </div>
   )

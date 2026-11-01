@@ -1,9 +1,9 @@
 ---
 sidebar_position: 3
 title: Experiment Tracking
-description: MLflow experiment tracking configuration for training workflows on Azure ML and OSMO
+description: MLflow experiment tracking and checkpoint registration for training workflows on Azure ML, OSMO, and self-hosted MLflow
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-10-16
 ms.topic: how-to
 keywords:
   - mlflow
@@ -12,11 +12,23 @@ keywords:
   - checkpoints
 ---
 
-Experiment tracking for Isaac Lab and LeRobot training workflows. Azure ML provides managed MLflow tracking on both platforms (Azure ML directly, OSMO via the Azure ML backend).
+Experiment tracking and checkpoint registration for Isaac Lab and LeRobot training. Jobs log to the Azure ML workspace's MLflow endpoint by default, or to a self-hosted MLflow server such as the one in the [local OSMO profile](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/local/README.md).
+
+## 🔀 Tracking Backends
+
+`TRACKING_BACKEND` selects where runs, metrics, and registered checkpoints go. Jobs default to `azureml`.
+
+| Backend   | Runs and metrics                        | Checkpoint registry          | Required configuration                                                    |
+|-----------|-----------------------------------------|------------------------------|---------------------------------------------------------------------------|
+| `azureml` | Azure ML workspace MLflow endpoint      | Azure ML model registry      | `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZUREML_WORKSPACE_NAME` |
+| `mlflow`  | MLflow server at `MLFLOW_TRACKING_URI`  | That server's model registry | `MLFLOW_TRACKING_URI`                                                     |
+| `none`    | Not recorded; outputs stay with the job | None                         | None                                                                      |
+
+Azure SDKs load only for `azureml`. The RL launchers also accept `--tracking-backend`, and `--disable-mlflow` selects `none`. With `none`, a checkpoint download (`--checkpoint-uri`) or registration request (`--register-checkpoint`, `REGISTER_CHECKPOINT`) fails before training starts.
 
 ## 📊 MLflow Tracking
 
-Azure ML manages MLflow as the default experiment tracking backend. Isaac Lab training with SKRL logs metrics automatically through monkey-patching.
+Isaac Lab training with SKRL logs metrics automatically through monkey-patching.
 
 ### Isaac Lab (Automatic)
 
@@ -44,7 +56,7 @@ See [MLflow Integration](mlflow-integration.md) for SKRL metric categories, filt
 
 ### LeRobot
 
-MLflow is enabled automatically for LeRobot training on both OSMO and Azure ML. Submit an OSMO training job:
+LeRobot training logs to the selected backend on both OSMO and Azure ML; `none` trains without tracking. Submit an OSMO training job:
 
 ```bash
 training/il/scripts/submit-osmo-lerobot-training.sh \
@@ -91,6 +103,15 @@ evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
   -r my-evaluated-model
 ```
 
+### MLflow Registry
+
+With the `mlflow` backend, each registration adds a version to the named model. The version points at a directory of run artifacts:
+
+- LeRobot checkpoints register the `checkpoints/<step>` directory the run already logged.
+- Single-file RL checkpoints, and checkpoints the run could not log, are first logged into `checkpoints/registered/<name>`, because MLflow resolves a version's source as a directory. When the run already holds that name, the new directory gets a numeric suffix, such as `pretrained_model-2`, so a later checkpoint never replaces the files an earlier version points at.
+
+Pass `models:/<name>/<version>` as a `--checkpoint-uri`, or download it with the MLflow CLI.
+
 ### Retrieve Registered Models
 
 ```bash
@@ -98,6 +119,10 @@ evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
 az ml model download \
   --name anymal-c-velocity --version 1 \
   --download-path ./checkpoint
+
+# Download from a self-hosted MLflow server
+MLFLOW_TRACKING_URI=http://<mlflow-host>:5000 \
+  mlflow artifacts download --artifact-uri models:/anymal-c-velocity/1 --dst-path ./checkpoint
 
 # Download from HuggingFace Hub
 huggingface-cli download user/trained-policy --local-dir ./checkpoint
@@ -128,6 +153,7 @@ training/rl/scripts/submit-osmo-training.sh \
 ## 🔗 Related Documentation
 
 - [MLflow Integration](mlflow-integration.md) for SKRL metric logging internals
+- [Local k3s Profile](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/local/README.md) for the self-hosted MLflow server
 - [Isaac Lab Training](isaac-lab-training.md) for RL training workflows
 - [LeRobot Training](lerobot-training.md) for behavioral cloning workflows
 - [Scripts Reference](../reference/scripts.md) for full CLI parameter tables

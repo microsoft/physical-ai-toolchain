@@ -16,6 +16,7 @@ interface EpisodeState {
   currentIndex: number
   /** Dataset the current episode belongs to */
   currentDatasetId: string | null
+  principalScopeId: string | null
   /** Loading state */
   isLoading: boolean
   /** Error message if any */
@@ -31,8 +32,11 @@ interface EpisodeState {
 interface EpisodeActions {
   /** Set the list of episodes */
   setEpisodes: (episodes: EpisodeMeta[]) => void
-  /** Set the current episode data and the dataset it belongs to */
-  setCurrentEpisode: (episode: EpisodeData | null, datasetId?: string | null) => void
+  /** Set the episode and its scope; same-source refreshes preserve playback. */
+  setCurrentEpisode: (
+    episode: EpisodeData | null,
+    scope?: { datasetId: string; principalScopeId: string },
+  ) => void
   /** Navigate to a specific episode index */
   navigateToEpisode: (index: number) => void
   /** Navigate to the next episode */
@@ -60,6 +64,7 @@ const initialState: EpisodeState = {
   currentEpisode: null,
   currentIndex: -1,
   currentDatasetId: null,
+  principalScopeId: null,
   isLoading: false,
   error: null,
   currentFrame: 0,
@@ -91,14 +96,26 @@ export const useEpisodeStore = create<EpisodeStore>()(
         set({ episodes, error: null }, false, 'setEpisodes')
       },
 
-      setCurrentEpisode: (episode, datasetId = null) => {
+      setCurrentEpisode: (episode, scope) => {
+        const previous = get()
+        const sameSource =
+          !!episode?.sourceId &&
+          !!episode.sourceRevision &&
+          previous.currentDatasetId === (scope?.datasetId ?? null) &&
+          previous.principalScopeId === (scope?.principalScopeId ?? null) &&
+          previous.currentEpisode?.sourceId === episode.sourceId &&
+          previous.currentEpisode?.sourceRevision === episode.sourceRevision &&
+          previous.currentEpisode?.meta.index === episode.meta.index
         set(
           {
             currentEpisode: episode,
+            currentDatasetId: episode ? (scope?.datasetId ?? null) : null,
+            principalScopeId: episode ? (scope?.principalScopeId ?? null) : null,
             currentIndex: episode?.meta.index ?? -1,
-            currentDatasetId: episode ? datasetId : null,
-            currentFrame: 0,
-            isPlaying: false,
+            currentFrame: sameSource
+              ? Math.max(0, Math.min(previous.currentFrame, episode.meta.length - 1))
+              : 0,
+            isPlaying: sameSource ? previous.isPlaying : false,
           },
           false,
           'setCurrentEpisode',

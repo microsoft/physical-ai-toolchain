@@ -1,6 +1,6 @@
 #!/bin/bash
-# Inference entry point script for OSMO workflow.
-# Supports ONNX, JIT, or both inference formats via --inference-format flag.
+# Evaluation entry point for the OSMO Isaac Lab workflow: gates the checkpoint on its success rate, then
+# exports it and replays the ONNX and/or JIT policy with video (--inference-format).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,6 +39,10 @@ VIDEO_LENGTH="${VIDEO_LENGTH:-200}"
 INFERENCE_FORMAT="${INFERENCE_FORMAT:-both}"
 CHECKPOINT_URI="${CHECKPOINT_URI:-}"
 CHECKPOINT_SHA256="${CHECKPOINT_SHA256:-}"
+FRAMEWORK="${FRAMEWORK:-skrl}"
+EVAL_EPISODES="${EVAL_EPISODES:-100}"
+SUCCESS_THRESHOLD="${SUCCESS_THRESHOLD:--1}"
+OUTPUT_DIR="${OUTPUT_DIR:-}"
 EXPORT_DIR=""
 
 usage() {
@@ -51,13 +55,21 @@ Options:
   --max-steps         Maximum simulation steps (default: 500)
   --video-length      Video recording length in steps (default: 200)
   --inference-format  Inference format: onnx, jit, or both (default: both)
-  --checkpoint-uri    URI to checkpoint (.pt file)
+  --checkpoint-uri    Checkpoint: runs:/ or models:/ URI, Azure Blob or http(s) URL, or an
+                      absolute path in the container, such as /policy in a runnable carrier
   --checkpoint-sha256  Expected SHA256 hash for checkpoint verification (required for plain http(s) URLs)
+  --framework         Training framework of the checkpoint: skrl or rsl_rl (default: skrl)
+  --eval-episodes     Episodes the success gate evaluates (default: 100)
+  --success-threshold Success rate the gate requires (default: -1, the evaluator's default)
+  --output-dir        Directory that receives the videos and metrics, such as the OSMO task output
   --headless          Run in headless mode
   -h, --help          Show this help message
 
 Environment Variables:
   TASK, NUM_ENVS, MAX_STEPS, VIDEO_LENGTH, INFERENCE_FORMAT, CHECKPOINT_URI, CHECKPOINT_SHA256
+  FRAMEWORK, EVAL_EPISODES, SUCCESS_THRESHOLD, OUTPUT_DIR
+  TRACKING_BACKEND (azureml, mlflow, or none) and MLFLOW_TRACKING_URI select where runs:/ and models:/
+  checkpoints download from and where results are logged
   PYTHON               Python command (default: python)
 EOF
   exit 0
@@ -92,6 +104,22 @@ while [[ $# -gt 0 ]]; do
       ;;
     --checkpoint-sha256|--checkpoint_sha256)
       CHECKPOINT_SHA256="$2"
+      shift 2
+      ;;
+    --framework)
+      FRAMEWORK="$2"
+      shift 2
+      ;;
+    --eval-episodes|--eval_episodes)
+      EVAL_EPISODES="$2"
+      shift 2
+      ;;
+    --success-threshold|--success_threshold)
+      SUCCESS_THRESHOLD="$2"
+      shift 2
+      ;;
+    --output-dir|--output_dir)
+      OUTPUT_DIR="$2"
       shift 2
       ;;
     --headless)
@@ -135,40 +163,28 @@ download_checkpoint() {
   local uri="$1"
   local dst_dir="$2"
 
-  if [[ "${uri}" == models:/* ]]; then
-    echo "Detected AzureML registered model URI"
-    run_python << MODEL_DOWNLOAD
+  if [[ "${uri}" == models:/* || "${uri}" == runs:/* ]]; then
+    echo "Detected tracking URI; downloading through the ${TRACKING_BACKEND:-azureml} tracking backend"
+    # The URI travels in the environment so it never becomes Python source.
+    CHECKPOINT_DOWNLOAD_URI="${uri}" CHECKPOINT_DOWNLOAD_DIR="${dst_dir}" run_python << 'TRACKED_DOWNLOAD'
 import os
+from pathlib import Path
 
-from training.utils import bootstrap_azure_ml
+from training.utils.tracking import create_tracking_backend
 
-# A registered checkpoint is a custom_model pointing at a single .pt artifact, not
-# an MLflow-format model, so mlflow.artifacts.download_artifacts("models:/...")
-# rejects it ("must be a directory containing an mlflow MLmodel"). Download via the
-# AzureML SDK, which handles arbitrary model artifacts.
-_, _, remainder = "${uri}".partition("models:/")
-name, _, version = remainder.partition("/")
-ctx = bootstrap_azure_ml(experiment_name=f"inference-{os.environ.get('TASK', 'unknown')}")
-ctx.client.models.download(name=name, version=version, download_path="${dst_dir}")
-print(f"Downloaded model {name}:{version} to ${dst_dir}")
-MODEL_DOWNLOAD
-  elif [[ "${uri}" == runs:/* ]]; then
-    echo "Detected MLflow run artifact URI"
-    run_python << MLFLOW_DOWNLOAD
-import os
-
-import mlflow
-
-from training.utils import bootstrap_azure_ml
-
-# Resolve the workspace's own MLflow tracking URI (region aware) and
-# authenticate via the pod's workload identity, matching the artifact upload
-# step. A hard-coded region endpoint 404s for workspaces in other regions.
-bootstrap_azure_ml(experiment_name=f"inference-{os.environ.get('TASK', 'unknown')}")
-
-local_path = mlflow.artifacts.download_artifacts(artifact_uri="${uri}", dst_path="${dst_dir}")
-print(f"Downloaded to: {local_path}")
-MLFLOW_DOWNLOAD
+uri = os.environ["CHECKPOINT_DOWNLOAD_URI"]
+backend = create_tracking_backend(experiment_name=f"inference-{os.environ.get('TASK', 'unknown')}")
+local_path = backend.download_artifacts(uri, Path(os.environ["CHECKPOINT_DOWNLOAD_DIR"]))
+print(f"Downloaded {uri} to: {local_path}")
+TRACKED_DOWNLOAD
+  elif [[ "${uri}" == /* ]]; then
+    # A path inside the task, such as /policy in a runnable carrier or a mounted dataset.
+    if [[ ! -e "${uri}" ]]; then
+      echo "Error: checkpoint path ${uri} does not exist in this container" >&2
+      exit 1
+    fi
+    echo "Using the checkpoint at ${uri}"
+    cp -RL "${uri}" "${dst_dir}/"
   elif [[ "${uri}" == https://*.blob.core.windows.net/* ]]; then
     echo "Detected Azure Blob Storage URL"
     BLOB_STORAGE_ACCOUNT=$(echo "${uri}" | sed -n 's|https://\([^.]*\)\.blob\.core\.windows\.net/.*|\1|p')
@@ -221,7 +237,11 @@ BLOB_DOWNLOAD
 
 download_checkpoint "${CHECKPOINT_URI}" "${CHECKPOINT_DIR}"
 
-CHECKPOINT_FILE=$(find "${CHECKPOINT_DIR}" -name "*.pt" -type f | head -1)
+# Prefer the best checkpoint, then the highest-numbered one (agent_<step>.pt, model_<iteration>.pt).
+CHECKPOINT_FILE=$(find "${CHECKPOINT_DIR}" -name "best_agent.pt" -type f | head -1)
+if [[ -z "${CHECKPOINT_FILE}" ]]; then
+  CHECKPOINT_FILE=$(find "${CHECKPOINT_DIR}" -name "*.pt" -type f | sort -V | tail -1)
+fi
 if [[ -z "${CHECKPOINT_FILE}" ]]; then
   echo "Error: No .pt checkpoint file found in ${CHECKPOINT_DIR}" >&2
   exit 1
@@ -241,7 +261,27 @@ if [[ -n "${CHECKPOINT_SHA256}" ]]; then
 fi
 
 EXPORT_DIR="${CHECKPOINT_DIR}/exported"
-mkdir -p "${EXPORT_DIR}"
+VIDEO_DIR="${EXPORT_DIR}/videos"
+METRICS_DIR="${EXPORT_DIR}/metrics"
+mkdir -p "${VIDEO_DIR}" "${METRICS_DIR}"
+
+echo "=============================================="
+echo "Gating ${FRAMEWORK} checkpoint on ${EVAL_EPISODES} episodes"
+echo "=============================================="
+# The evaluator exits 0 only when the success rate meets the threshold, and writes its verdict either way.
+# Replay and uploads still run on a failed gate, so the videos are there to inspect.
+GATE_PASSED=0
+if run_isaaclab -m evaluation.sil.policy_evaluation \
+    --model-path "${CHECKPOINT_FILE}" \
+    --task "${TASK}" \
+    --framework "${FRAMEWORK}" \
+    --eval-episodes "${EVAL_EPISODES}" \
+    --num-envs "${NUM_ENVS}" \
+    --success-threshold "${SUCCESS_THRESHOLD}" \
+    --output-metrics "${METRICS_DIR}/eval_metrics.json" \
+    ${HEADLESS}; then
+  GATE_PASSED=1
+fi
 
 echo "=============================================="
 echo "Exporting policy to: ${EXPORT_DIR}"
@@ -251,10 +291,6 @@ echo "=============================================="
 run_isaaclab "${SRC_DIR}/training/packaging/scripts/export_policy.py" \
     --checkpoint "${CHECKPOINT_FILE}" \
     --output-dir "${EXPORT_DIR}"
-
-VIDEO_DIR="${EXPORT_DIR}/videos"
-METRICS_DIR="${EXPORT_DIR}/metrics"
-mkdir -p "${VIDEO_DIR}" "${METRICS_DIR}"
 
 ONNX_SUCCESS=0
 JIT_SUCCESS=0
@@ -351,12 +387,24 @@ export INFERENCE_FORMAT
 
 run_python "${SRC_DIR}/evaluation/metrics/upload_artifacts.py"
 
+if [[ -n "${OUTPUT_DIR}" ]]; then
+  mkdir -p "${OUTPUT_DIR}"
+  cp -R "${VIDEO_DIR}" "${METRICS_DIR}" "${OUTPUT_DIR}/"
+  echo "Copied videos and metrics to ${OUTPUT_DIR}"
+fi
+
 echo "=============================================="
 echo "Inference workflow complete"
 echo "=============================================="
+echo "  Gate: $( [[ ${GATE_PASSED} -eq 1 ]] && echo 'PASSED' || echo 'FAILED' )"
 echo "  ONNX: $( [[ ${ONNX_SUCCESS} -eq 1 ]] && echo 'SUCCESS' || echo 'SKIPPED/FAILED' )"
 echo "  JIT:  $( [[ ${JIT_SUCCESS} -eq 1 ]] && echo 'SUCCESS' || echo 'SKIPPED/FAILED' )"
 echo "=============================================="
+
+if [[ ${GATE_PASSED} -ne 1 ]]; then
+  echo "Error: the policy did not pass the success gate; see ${METRICS_DIR}/eval_metrics.json" >&2
+  exit 1
+fi
 
 # Fail the job when the requested inference format did not run. ONNX is best-effort under
 # "both" (JIT is the primary format), so only JIT gates "both"; an explicit onnx/jit request

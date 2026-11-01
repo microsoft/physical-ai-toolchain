@@ -98,6 +98,7 @@ simulation_app = app_launcher.app
 
 import os
 import time
+import traceback
 
 import gymnasium as gym
 import numpy as np
@@ -445,5 +446,11 @@ def main(
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        traceback.print_exc()
+        sys.stdout.flush()
+        # SimulationApp.close() ends the process with status 0, so a failed replay exits with its own status first.
+        os._exit(1)
     simulation_app.close()

@@ -16,7 +16,7 @@ import json
 import random
 import re
 
-PROMPT_VERSION = "outcome-mcq-v1+gvl-process-v1+milestones-v1+failuremode-v1"
+PROMPT_VERSION = "outcome-mcq-v1+gvl-process-v3+milestones-v1+failuremode-v1"
 
 
 # -------------------------------------------------------------------------
@@ -92,8 +92,17 @@ estimating how much of the task is completed in that frame:
 
 Output ONLY a single JSON array of {n_frames} integers and nothing else. Example:
 
-  [0, 27, 13, 88, 41, 100]
+    {example}
 """
+
+
+def _process_example(n_frames: int, *, shuffled: bool = False) -> str:
+    scores = [round(index * 100 / max(1, n_frames - 1)) for index in range(n_frames)]
+    if shuffled:
+        remaining = scores[1:]
+        random.Random(0).shuffle(remaining)
+        scores[1:] = remaining
+    return json.dumps(scores)
 
 
 def render_process_prompt(*, instruction: str, n_frames: int) -> str:
@@ -101,6 +110,7 @@ def render_process_prompt(*, instruction: str, n_frames: int) -> str:
         instruction=instruction,
         n_frames=n_frames,
         n_shuffled=max(0, n_frames - 1),
+        example=_process_example(n_frames, shuffled=True),
     )
 
 
@@ -118,52 +128,50 @@ estimating how much of the task is completed in that frame:
 
 Output ONLY a single JSON array of {n_frames} integers and nothing else. Example:
 
-  [0, 14, 33, 60, 100]
+    {example}
 """
 
 
 def render_chronological_process_prompt(*, instruction: str, n_frames: int) -> str:
-    return CHRONOLOGICAL_PROCESS_USER_TEMPLATE.format(instruction=instruction, n_frames=n_frames)
+    return CHRONOLOGICAL_PROCESS_USER_TEMPLATE.format(
+        instruction=instruction, n_frames=n_frames, example=_process_example(n_frames)
+    )
+
+
+def render_process_repair_prompt(*, original_prompt: str, n_frames: int) -> str:
+    """Request one complete replacement response without repeating untrusted model text."""
+    positions = ", ".join(str(index) for index in range(1, n_frames + 1))
+    return (
+        f"{original_prompt}\nThe previous response did not satisfy the required format. "
+        f"Re-evaluate every displayed frame and return exactly {n_frames} integers in a single JSON array. "
+        f"Required frame positions, in the unchanged display order: {positions}. "
+        "Include the first frame; do not omit or combine frames, even when their progress is identical. "
+        "Every value must be an integer from 0 to 100. Count the entries before responding. "
+        "Output the complete replacement array only, with no explanation."
+    )
 
 
 _JSON_ARRAY_RE = re.compile(r"\[[^\[\]]*\]", re.DOTALL)
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-_INT_RE = re.compile(r"-?\d+")
 
 
 def parse_process_response(text: str, *, n_frames: int) -> list[int] | None:
-    """Extract a length-``n_frames`` progress array (each 0-100) from ``text``.
-
-    Tolerant of open-model output quirks: strips ``<think>`` blocks, recovers a
-    JSON array even amid prose or code fences, falls back to scanning bare
-    integers, clamps each value to 0-100, and pads/truncates to ``n_frames``
-    (small models frequently return ``n_frames - 1`` values). Returns ``None``
-    only when no integers can be recovered at all.
-    """
+    """Extract exactly the requested integer scores without inventing or coercing values."""
     if not text:
         return None
     cleaned = _THINK_RE.sub("", text)
-    values: list[float] | None = None
     match = _JSON_ARRAY_RE.search(cleaned)
-    if match is not None:
-        try:
-            parsed = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, list):
-            numeric = [v for v in parsed if isinstance(v, (int, float)) and not isinstance(v, bool)]
-            if numeric:
-                values = [float(v) for v in numeric]
-    if values is None:
-        ints = _INT_RE.findall(cleaned)
-        if ints:
-            values = [float(v) for v in ints]
-    if not values:
+    if match is None:
         return None
-    clamped = [max(0, min(100, round(v))) for v in values]
-    if len(clamped) >= n_frames:
-        return clamped[:n_frames]
-    return clamped + [clamped[-1]] * (n_frames - len(clamped))
+    try:
+        values = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(values, list) or len(values) != n_frames:
+        return None
+    if any(type(value) is not int or not 0 <= value <= 100 for value in values):
+        return None
+    return values
 
 
 def shuffle_with_anchor(

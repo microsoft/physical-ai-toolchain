@@ -1,3 +1,5 @@
+import { useMemo } from 'react'
+
 import {
   LabelPanel,
   LanguageInstructionWidget,
@@ -14,7 +16,6 @@ import { EpisodeAnalysisCard, MotionMetricsPanel } from '@/components/episode-an
 import { ExportDialog } from '@/components/export'
 import { Tabs } from '@/components/ui/tabs'
 import { JudgePanel } from '@/components/vlm-judge'
-import { useAnnotationStore } from '@/stores'
 
 import type { useAnnotationWorkspaceShell } from './useAnnotationWorkspaceShell'
 
@@ -25,12 +26,27 @@ interface AnnotationWorkspaceContentProps {
 export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContentProps) {
   const currentDataset = shell.currentDataset
   const currentEpisode = shell.currentEpisode
-  // Current (draft or saved) language instruction so the judge scores against
-  // what the annotator sees in the Language Instruction widget; falls back to
-  // dataset metadata on the backend when empty.
-  const currentInstruction = useAnnotationStore(
-    (state) => state.currentAnnotation?.languageInstruction?.instruction,
+  const trajectoryInputs = useMemo(
+    () => ({
+      positions: currentEpisode?.trajectoryData?.map((point) => point.jointPositions),
+      timestamps: currentEpisode?.trajectoryData?.map((point) => point.timestamp),
+      gripperStates: currentEpisode?.trajectoryData?.map((point) => point.gripperState),
+    }),
+    [currentEpisode?.trajectoryData],
   )
+  const cameraPreviewUnavailable = shell.selectedCameras.some((camera) => {
+    const transform = shell.cameraTransforms[camera]
+    return Boolean(
+      transform &&
+      (transform.crop ||
+        transform.resize ||
+        (transform.colorFilter && transform.colorFilter !== 'none') ||
+        (transform.colorAdjustment &&
+          Object.entries(transform.colorAdjustment).some(
+            ([name, value]) => value != null && value !== (name === 'gamma' ? 1 : 0),
+          ))),
+    )
+  })
 
   if (!currentDataset || !currentEpisode) {
     return null
@@ -51,9 +67,17 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
       currentFrame={shell.currentFrame}
       totalFrames={shell.totalFrames}
       resizeOutput={shell.globalTransform?.resize ?? null}
+      previewUnavailable={Boolean(shell.globalTransform?.crop) || cameraPreviewUnavailable}
       frameImageUrl={shell.frameImageUrl}
+      frameImageUrls={shell.frameImageUrls}
       cameras={shell.cameras}
       selectedCamera={shell.cameraName}
+      selectedCameras={shell.selectedCameras}
+      onSelectionChange={shell.setSelectedCameras}
+      videoTimeWindows={currentEpisode.videoTimeWindows}
+      originalFrameIndex={shell.originalFrameIndex}
+      sourceFrameCount={currentEpisode.meta.length}
+      datasetFps={currentDataset.fps}
       onSelectCamera={shell.setCameraName}
       isPlaying={shell.isPlaying}
       onTogglePlayback={shell.togglePlayback}
@@ -89,7 +113,7 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
     <JudgePanel
       datasetId={currentDataset.id}
       episodeIndex={currentEpisode.meta.index}
-      instruction={currentInstruction}
+      cameras={shell.cameras}
       totalEpisodes={currentDataset.totalEpisodes}
     />
   )
@@ -106,9 +130,7 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
     <MotionMetricsPanel
       datasetId={currentDataset.id}
       episodeId={String(currentEpisode.meta.index)}
-      positions={currentEpisode.trajectoryData?.map((point) => point.jointPositions)}
-      timestamps={currentEpisode.trajectoryData?.map((point) => point.timestamp)}
-      gripperStates={currentEpisode.trajectoryData?.map((point) => point.gripperState)}
+      {...trajectoryInputs}
     />
   )
 
@@ -129,10 +151,10 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
           onResetAllClick={shell.handleResetAllClick}
           onOpenExportDialog={shell.handleOpenExportDialog}
           canGoNextEpisode={shell.canGoNextEpisode}
-          canSaveAndNextEpisode={
-            Boolean(shell.onSaveAndNextEpisode) && !shell.saveEpisodeLabels.isPending
-          }
-          onSaveAndNextEpisode={() => void shell.handleSaveAndNextEpisode()}
+          canSaveEpisode={shell.canSaveEpisode}
+          onSaveEpisode={() => void shell.handleSaveEpisode()}
+          onNextEpisode={shell.onNextEpisode}
+          isSaving={shell.isSaving}
           saveStatusMessage={shell.saveStatusMessage}
         />
 

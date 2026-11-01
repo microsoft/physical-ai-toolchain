@@ -107,6 +107,30 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
+      "html": "<td>Stage <code>training/rl/</code> in object storage and submit an Isaac Lab training workflow</td>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "elmPartiallyObscuring",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-18",
+      "routeFamilies": [
+        "/reference"
+      ],
+      "rule": "color-contrast",
+      "signature": "0867dd2b8fe20d22",
+      "state": "default",
+      "target": "[\"table[aria-labelledby=\\\"submission-scripts\\\"] > tbody > tr:nth-child(2) > td:nth-child(2)\"]",
+      "theme": "light"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
       "html": "<p>Each tier carries a stable ID (<code>T0</code>–<code>T5</code>) and a stage name. The two are paired everywhere:</p>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -731,30 +755,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<code>submit-azureml-lerobot-training.sh</code>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "elmPartiallyObscuring",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-19",
-      "routeFamilies": [
-        "/reference"
-      ],
-      "rule": "color-contrast",
-      "signature": "300360bb59e4040d",
-      "state": "default",
-      "target": "[\"table[aria-labelledby=\\\"submission-scripts\\\"] > tbody > tr:nth-child(3) > td:nth-child(1) > code\"]",
-      "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<span class=\"token plain\">│ ┌──────────────┐ ┌───────────────────┐ │</span>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -817,30 +817,6 @@
       "state": "default",
       "target": "[\"table[aria-labelledby=\\\"component-inventory\\\"] > tbody > tr:nth-child(3) > td:nth-child(3)\"]",
       "theme": "light"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
-      "html": "<td>Point-to-site and site-to-site VPN for private cluster access</td>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "elmPartiallyObscuring",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/infrastructure"
-      ],
-      "rule": "color-contrast",
-      "signature": "37c572b0c926ebb8",
-      "state": "default",
-      "target": "[\"table[aria-labelledby=\\\"-deployment-guides\\\"] > tbody > tr:nth-child(4) > td:nth-child(2)\"]",
-      "theme": "dark"
     },
     {
       "classification": "unresolved",
@@ -1835,6 +1811,30 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
+      "html": "<td>Stage <code>training/rl/</code> in object storage and submit an Isaac Lab training workflow</td>",
+      "owner": "unassigned",
+      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
+      "reason": "elmPartiallyObscuring",
+      "reviewBy": null,
+      "reviewedOn": "2026-10-18",
+      "routeFamilies": [
+        "/reference"
+      ],
+      "rule": "color-contrast",
+      "signature": "8dd60126481c54ae",
+      "state": "default",
+      "target": "[\"table[aria-labelledby=\\\"submission-scripts\\\"] > tbody > tr:nth-child(2) > td:nth-child(2)\"]",
+      "theme": "dark"
+    },
+    {
+      "classification": "unresolved",
+      "count": 1,
+      "evidence": null,
+      "freshnessTriggers": [
+        "Docusaurus, theme, or plugin upgrade",
+        "authored content change in a listed route family",
+        "shared component, design token, or stylesheet change"
+      ],
       "html": "<p>After successfully training an Isaac Lab policy using <code>osmorobo-submit.sh</code>, the user attempted to evaluate the trained policy using <code>osmorobo-validate.sh</code>. The evaluation scri [truncated]",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -1859,30 +1859,6 @@
         "authored content change in a listed route family",
         "shared component, design token, or stylesheet change"
       ],
-      "html": "<code>submit-azureml-lerobot-training.sh</code>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "elmPartiallyObscuring",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-19",
-      "routeFamilies": [
-        "/reference"
-      ],
-      "rule": "color-contrast",
-      "signature": "94f29102e127896a",
-      "state": "default",
-      "target": "[\"table[aria-labelledby=\\\"submission-scripts\\\"] > tbody > tr:nth-child(3) > td:nth-child(1) > code\"]",
-      "theme": "light"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
       "html": "<span class=\"token plain\"> ┌────────────────────────┐</span>",
       "owner": "unassigned",
       "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
@@ -1897,30 +1873,6 @@
       "state": "default",
       "target": "[\".language-text > .codeBlockLines > .token-line:nth-child(21) > .plain.token\"]",
       "theme": "dark"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
-      "html": "<td>Required only for private HuggingFace datasets (<code>hf_token</code> credential); Azure Blob and Data Asset sources use managed identity</td>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "elmPartiallyObscuring",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/training"
-      ],
-      "rule": "color-contrast",
-      "signature": "95e08969ab07226e",
-      "state": "default",
-      "target": "[\"table[aria-labelledby=\\\"-prerequisites\\\"] > tbody > tr:nth-child(4) > td:nth-child(2)\"]",
-      "theme": "light"
     },
     {
       "classification": "unresolved",
@@ -1968,30 +1920,6 @@
       "signature": "9aac72c9b10673c9",
       "state": "default",
       "target": "[\".language-text > .codeBlockLines > .token-line:nth-child(20) > .plain.token\"]",
-      "theme": "light"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
-      "html": "<td>Point-to-site and site-to-site VPN for private cluster access</td>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "elmPartiallyObscuring",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/infrastructure"
-      ],
-      "rule": "color-contrast",
-      "signature": "9cf1bd57ab1f1a3c",
-      "state": "default",
-      "target": "[\"table[aria-labelledby=\\\"-deployment-guides\\\"] > tbody > tr:nth-child(4) > td:nth-child(2)\"]",
       "theme": "light"
     },
     {
@@ -2521,30 +2449,6 @@
       "state": "default",
       "target": "[\"table[aria-labelledby=\\\"component-inventory\\\"] > tbody > tr:nth-child(1) > td:nth-child(3)\"]",
       "theme": "light"
-    },
-    {
-      "classification": "unresolved",
-      "count": 1,
-      "evidence": null,
-      "freshnessTriggers": [
-        "Docusaurus, theme, or plugin upgrade",
-        "authored content change in a listed route family",
-        "shared component, design token, or stylesheet change"
-      ],
-      "html": "<td>Required only for private HuggingFace datasets (<code>hf_token</code> credential); Azure Blob and Data Asset sources use managed identity</td>",
-      "owner": "unassigned",
-      "rationale": "Seeded from crawl output; axe could not decide this result and no qualified review exists yet.",
-      "reason": "elmPartiallyObscuring",
-      "reviewBy": null,
-      "reviewedOn": "2026-09-28",
-      "routeFamilies": [
-        "/training"
-      ],
-      "rule": "color-contrast",
-      "signature": "d1de04071581dc56",
-      "state": "default",
-      "target": "[\"table[aria-labelledby=\\\"-prerequisites\\\"] > tbody > tr:nth-child(4) > td:nth-child(2)\"]",
-      "theme": "dark"
     },
     {
       "classification": "unresolved",

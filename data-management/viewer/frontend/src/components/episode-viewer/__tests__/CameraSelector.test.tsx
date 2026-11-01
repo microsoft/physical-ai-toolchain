@@ -7,6 +7,75 @@ import { renderWithQuery } from '@/test-utils/render'
 import { CameraSelector } from '../CameraSelector'
 
 describe('CameraSelector', () => {
+  it.each([false, true])(
+    'closes camera choices with Escape and restores focus (multiple=%s)',
+    async (multiple) => {
+      const user = userEvent.setup()
+      const onSelectCamera = vi.fn()
+      const onSelectionChange = vi.fn()
+      renderWithQuery(
+        <CameraSelector
+          cameras={['front', 'wrist']}
+          selectedCamera="front"
+          selectedCameras={multiple ? ['front', 'wrist'] : undefined}
+          onSelectCamera={onSelectCamera}
+          onSelectionChange={multiple ? onSelectionChange : undefined}
+        />,
+      )
+      const toggle = screen.getByRole('button', { name: multiple ? '2 cameras' : 'Front' })
+      await user.click(toggle)
+      await user.tab()
+
+      await user.keyboard('{Escape}')
+
+      expect(toggle).toHaveFocus()
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+      expect(onSelectCamera).not.toHaveBeenCalled()
+      expect(onSelectionChange).not.toHaveBeenCalled()
+    },
+  )
+
+  it('removes one selected camera while preserving the last remaining view', async () => {
+    const user = userEvent.setup()
+    const props = {
+      cameras: ['front', 'wrist'],
+      selectedCamera: 'front',
+      onSelectCamera: vi.fn(),
+      onSelectionChange: vi.fn(),
+    }
+    const { rerender } = renderWithQuery(
+      <CameraSelector {...props} selectedCameras={['front', 'wrist']} />,
+    )
+    await user.click(screen.getByRole('button', { name: '2 cameras' }))
+
+    await user.click(screen.getByRole('checkbox', { name: 'Front' }))
+
+    expect(props.onSelectionChange).toHaveBeenCalledWith(['wrist'])
+    rerender(<CameraSelector {...props} selectedCameras={['wrist']} />)
+    expect(screen.getByRole('button', { name: '1 camera' })).toBeVisible()
+    expect(screen.getByRole('checkbox', { name: 'Wrist' })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: 'Front' })).not.toBeChecked()
+  })
+
+  it('uses checked camera choices and prevents removing the last view', async () => {
+    const user = userEvent.setup()
+    const onSelectionChange = vi.fn()
+    renderWithQuery(
+      <CameraSelector
+        cameras={['front', 'wrist']}
+        selectedCamera="front"
+        selectedCameras={['front']}
+        onSelectCamera={vi.fn()}
+        onSelectionChange={onSelectionChange}
+      />,
+    )
+    await user.click(screen.getByRole('button'))
+    expect(screen.getByRole('checkbox', { name: 'Front' })).toBeDisabled()
+    await user.click(screen.getByRole('checkbox', { name: 'Wrist' }))
+    expect(onSelectionChange).toHaveBeenCalledWith(['front', 'wrist'])
+  })
+
   it('renders an empty state when no cameras are provided', () => {
     renderWithQuery(<CameraSelector cameras={[]} selectedCamera="" onSelectCamera={vi.fn()} />)
     expect(screen.getByText('No cameras available')).toBeInTheDocument()

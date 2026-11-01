@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Migrate LeRobot Checkpoints
 description: Convert LeRobot checkpoints trained before 0.6 to the processor-based checkpoint format
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-14
+ms.date: 2026-10-13
 ms.topic: how-to
 keywords:
   - lerobot

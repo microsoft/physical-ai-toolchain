@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import math
 import random
-from collections.abc import Sequence
-from dataclasses import asdict, dataclass, field
+from collections.abc import Mapping, Sequence
+from dataclasses import MISSING, asdict, dataclass, field, fields
 from typing import TYPE_CHECKING, Any
 
 from .backend import GenerationConfig, JudgeBackend
@@ -18,6 +19,7 @@ from .prompts import (
     render_chronological_process_prompt,
     render_outcome_prompt,
     render_process_prompt,
+    render_process_repair_prompt,
     shuffle_with_anchor,
 )
 
@@ -51,6 +53,44 @@ class JudgeResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> JudgeResult:
+        """Validate persisted or inferred evidence without coercing model output."""
+        required = {item.name for item in fields(cls) if item.default is MISSING and item.default_factory is MISSING}
+        if not isinstance(payload, Mapping) or not required.issubset(payload):
+            raise ValueError("Judge result is missing required fields")
+        for name in ("episode_id", "instruction", "judge_model", "prompt_version"):
+            if not isinstance(payload[name], str) or not payload[name].strip():
+                raise ValueError(f"Invalid judge result field: {name}")
+        for name, minimum in (("n_frames", 2), ("outcome_n_valid_votes", 0)):
+            if type(payload[name]) is not int or payload[name] < minimum:
+                raise ValueError(f"Invalid judge result field: {name}")
+        for name, minimum, maximum in (("outcome_confidence", 0, 1), ("voc", -1, 1)):
+            value = payload[name]
+            if type(value) not in (int, float) or not math.isfinite(value) or not minimum <= value <= maximum:
+                raise ValueError(f"Invalid judge result field: {name}")
+        if payload["outcome_success"] is not None and type(payload["outcome_success"]) is not bool:
+            raise ValueError("Invalid judge result outcome_success")
+        progress = payload["progress_per_frame"]
+        if not isinstance(progress, list) or any(type(value) is not int or not 0 <= value <= 100 for value in progress):
+            raise ValueError("Invalid judge result progress_per_frame")
+        if progress and len(progress) != payload["n_frames"]:
+            raise ValueError("Judge result progress does not match frame count")
+        milestones = payload.get("milestones", [])
+        if not isinstance(milestones, list):
+            raise ValueError("Invalid judge result milestones")
+        for milestone in milestones:
+            if (
+                not isinstance(milestone, dict)
+                or not all(isinstance(milestone.get(name), str) for name in ("name", "frame_range", "evidence"))
+                or not milestone["name"].strip()
+                or type(milestone.get("completed")) is not bool
+            ):
+                raise ValueError("Invalid judge result milestone")
+        if payload.get("failure_mode") is not None and not isinstance(payload["failure_mode"], str):
+            raise ValueError("Invalid judge result failure_mode")
+        return cls(**{item.name: payload[item.name] for item in fields(cls) if item.name in payload})
 
 
 def score_episode(
@@ -130,18 +170,16 @@ def _run_outcome(
         )
         decision = parse_outcome_response(text)
         if decision is None:
-            _LOGGER.warning(
-                "Outcome format violation on sample %d (truncated response: %r)",
-                i,
-                (text or "")[:120],
-            )
+            _LOGGER.warning("Judge outcome format violation sample=%d", int(i))
             continue
         votes.append(decision)
 
     if not votes:
-        return {"success": None, "confidence": 0.0, "n_valid_votes": 0}
+        raise ValueError("Judge outcome has no valid decisions")
 
     success_rate = sum(votes) / len(votes)
+    if sum(votes) * 2 == len(votes):
+        return {"success": None, "confidence": 0.5, "n_valid_votes": len(votes)}
     success = success_rate >= 0.5
     confidence = success_rate if success else 1.0 - success_rate
     return {
@@ -164,45 +202,37 @@ def _run_process(
     rng: random.Random,
     method: str = "gvl",
 ) -> dict[str, Any]:
-    n = len(frames)
+    frame_count = len(frames)
     config = GenerationConfig(max_new_tokens=512, temperature=0.0)
 
     if method == "chronological":
-        # Frames shown in true order; the model rates each in place (no un-shuffle).
+        order = list(range(frame_count))
+        prompt = render_chronological_process_prompt(instruction=instruction, n_frames=frame_count)
+    else:
+        order = shuffle_with_anchor(frame_count, rng=rng)
+        prompt = render_process_prompt(instruction=instruction, n_frames=frame_count)
+    ordered_frames = [frames[index] for index in order]
+
+    for attempt in range(2):
         text = backend.generate(
             system_prompt=PROCESS_SYSTEM_PROMPT,
-            user_prompt=render_chronological_process_prompt(instruction=instruction, n_frames=n),
-            images=list(frames),
+            user_prompt=prompt,
+            images=ordered_frames,
             config=config,
         )
-        values = parse_process_response(text, n_frames=n)
-        if values is None:
-            _LOGGER.warning(
-                "Process format violation; returning zeros (truncated response: %r)",
-                (text or "")[:160],
-            )
-            return {"progress_per_frame": [0] * n, "voc": 0.0}
-        return {"progress_per_frame": list(values), "voc": value_order_correlation(values)}
+        values = parse_process_response(text, n_frames=frame_count)
+        if values is not None:
+            break
+        if attempt == 0:
+            _LOGGER.warning("Judge process format violation; retrying once")
+            prompt = render_process_repair_prompt(original_prompt=prompt, n_frames=frame_count)
+    else:
+        _LOGGER.warning("Judge process format violation after retry")
+        raise ValueError("Invalid judge process result")
 
-    order = shuffle_with_anchor(n, rng=rng)
-    shuffled_frames = [frames[i] for i in order]
-    text = backend.generate(
-        system_prompt=PROCESS_SYSTEM_PROMPT,
-        user_prompt=render_process_prompt(instruction=instruction, n_frames=n),
-        images=shuffled_frames,
-        config=config,
-    )
-    shuffled_values = parse_process_response(text, n_frames=n)
-    if shuffled_values is None:
-        _LOGGER.warning(
-            "Process format violation; returning zeros (truncated response: %r)",
-            (text or "")[:160],
-        )
-        return {"progress_per_frame": [0] * n, "voc": 0.0}
-
-    chronological = [0] * n
+    chronological = [0] * frame_count
     for shuffled_idx, original_idx in enumerate(order):
-        chronological[original_idx] = shuffled_values[shuffled_idx]
+        chronological[original_idx] = values[shuffled_idx]
     return {"progress_per_frame": chronological, "voc": value_order_correlation(chronological)}
 
 

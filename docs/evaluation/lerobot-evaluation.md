@@ -3,7 +3,7 @@ sidebar_position: 2
 title: LeRobot ACT Policy Inference
 description: Run a trained ACT policy locally, on OSMO with MLflow plots, or on a UR10E robot via ROS2
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-14
+ms.date: 2026-10-15
 ms.topic: how-to
 keywords:
   - lerobot
@@ -129,17 +129,54 @@ Inference Results
 
 ## 📊 OSMO Evaluation with MLflow Plots
 
-Run batch evaluation across multiple episodes on OSMO with trajectory plots logged directly to AzureML Studio via MLflow.
+Run batch evaluation across multiple episodes on OSMO with trajectory plots logged through MLflow. Plots go to AzureML Studio by default; set `TRACKING_BACKEND=mlflow` and `MLFLOW_TRACKING_URI` in the job environment to log to a self-hosted MLflow server instead, or `TRACKING_BACKEND=none` to keep results in the output directory. See [Experiment Tracking](../training/experiment-tracking.md#-tracking-backends).
 
 ### Submit with MLflow Enabled
 
 ```bash
-scripts/submit-osmo-lerobot-inference.sh \
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
   --policy-repo-id alizaidi/hve-robo-act-train \
+  --policy-revision "<policy-commit-sha>" \
   --dataset-repo-id alizaidi/hve-robo-cell \
+  --dataset-revision "<dataset-commit-sha>" \
   --eval-episodes 10 \
   --mlflow-enable \
   --experiment-name lerobot-act-eval
+```
+
+### Policy Sources
+
+The replay evaluation feeds each dataset frame's joint state and every recorded camera to the policy and compares its actions with the recorded ones. Pick one policy source:
+
+| Option             | Policy                                                                                                                           |
+|--------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| `--policy-repo-id` | A Hugging Face repository at `--policy-revision`, or a path inside the task                                                      |
+| `--policy-uri`     | A model registered with the tracking backend: `models:/<name>/<version>` or `runs:/<id>/<path>`                                  |
+| `--policy-image`   | A runnable carrier from `fleet-deployment/setup/build-model-image.sh`, run as the task image; evaluates `/policy`                |
+| `--from-aml-model` | A model in the Azure ML registry, with `--model-name` and `--model-version`                                                      |
+| `--builtin-policy` | An untrained baseline: a one-step mint for `act` and `diffusion`, or the pinned `lerobot/smolvla_base`, unadapted, for `smolvla` |
+
+A trained policy should show lower action error than the untrained baseline of its family on the same episodes. On the [local OSMO profile](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/local/README.md), `--local-dataset` evaluates a dataset from the workstation's datasets directory, and `--policy-uri` reads the local MLflow registry:
+
+```bash
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
+  --profile local \
+  --policy-uri models:/so101-act/1 \
+  --local-dataset so101-learner \
+  --mlflow-enable
+```
+
+### SmolVLA
+
+`-p smolvla` evaluates SmolVLA policies with the VLA lock, which carries the `smolvla` extra, and passes each frame's task text to the policy. A SmolVLA policy fine-tuned with `--rename-map` keeps that mapping in its saved preprocessor. The unadapted base needs the mapping at evaluation, so pass the same `--rename-map` that training used:
+
+```bash
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
+  --profile local \
+  -p smolvla \
+  --builtin-policy \
+  --local-dataset my-learner-dataset \
+  --rename-map '{"observation.images.front": "observation.images.camera1"}'
 ```
 
 ### Viewing Plots in AzureML Studio
@@ -160,14 +197,17 @@ Numeric metrics are on the **Metrics** tab: per-episode values (`ep0_mse`, `ep0_
 
 ### OSMO Inference Script Parameters
 
-| Parameter           | Default      | Description                                 |
-|---------------------|--------------|---------------------------------------------|
-| `--policy-repo-id`  | (required)   | HuggingFace policy repository               |
-| `--dataset-repo-id` | (none)       | HuggingFace dataset for replay evaluation   |
-| `--eval-episodes`   | `10`         | Number of episodes to evaluate              |
-| `--mlflow-enable`   | `false`      | Log plots and metrics to AzureML via MLflow |
-| `--experiment-name` | auto-derived | MLflow experiment name                      |
-| `--register-model`  | (none)       | Register model to AzureML after evaluation  |
+| Parameter           | Default      | Description                                                           |
+|---------------------|--------------|-----------------------------------------------------------------------|
+| `--policy-repo-id`  | (none)       | HuggingFace policy repository; see Policy Sources for the others      |
+| `-p, --policy-type` | `act`        | Policy architecture: `act`, `diffusion`, or `smolvla`                 |
+| `--rename-map`      | (none)       | JSON map from dataset feature keys to the policy's keys               |
+| `--dataset-repo-id` | (none)       | HuggingFace dataset for replay evaluation                             |
+| `--local-dataset`   | (none)       | Dataset folder in the local datasets directory (local profile)        |
+| `--eval-episodes`   | `10`         | Number of episodes to evaluate                                        |
+| `--mlflow-enable`   | `false`      | Log plots and metrics through MLflow to the selected tracking backend |
+| `--experiment-name` | auto-derived | MLflow experiment name                                                |
+| `--register-model`  | (none)       | Register model to AzureML after evaluation (`azureml` backend only)   |
 
 ## 🤖 ROS2 Deployment
 

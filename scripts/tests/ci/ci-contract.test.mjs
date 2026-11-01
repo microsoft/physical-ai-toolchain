@@ -16,12 +16,14 @@ import { aggregateOutcomes, inspectReport, outcomeOutputs, publishOutcome, recor
 import { fullValidation, resolveWorkflowChangeRange } from '../../ci/resolve-workflow-change-range.mjs';
 import { comparePaths, loadContract, parseChangedPaths, selectChecks, selectionOutputs } from '../../ci/select-checks.mjs';
 import { readWorkflowGraph, validateWorkflows } from '../../ci/validate-workflows.mjs';
+import { validateSkillPackages } from '../../ci/validate-skills.mjs';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const selectorPath = join(root, 'scripts/ci/select-checks.mjs');
 const evaluatorPath = join(root, 'scripts/ci/evaluate-checks.mjs');
 const validatorPath = join(root, 'scripts/ci/validate-workflows.mjs');
 const resolverPath = join(root, 'scripts/ci/resolve-workflow-change-range.mjs');
+const skillValidatorPath = join(root, 'scripts/ci/validate-skills.mjs');
 const contract = loadContract();
 const graph = readWorkflowGraph(root);
 const allSelectors = [
@@ -46,6 +48,102 @@ const publicFeedsPath = '.github/workflows/public-dependency-feeds.yml';
 const publicFeedsReport = 'logs/public-dependency-feeds-results.json';
 const summaryId = 'pr-validation-summary';
 const unknownSha = '0'.repeat(40);
+
+test('product workspace: fuzz installs the backend and reuses the frozen environment', () => {
+  const steps = graph['.github/workflows/fuzz-regression-tests.yml'].jobs['fuzz-regression'].steps;
+  assert.match(steps.find(step => step.name === 'Install dependencies').run, /--all-packages --frozen --group dev/);
+  assert.match(steps.find(step => step.id === 'test').run, /uv run --all-packages --no-sync --frozen pytest/);
+});
+
+test('product workspace: accessibility restores the same environment used by Playwright', () => {
+  const job = graph['.github/workflows/accessibility-evidence.yml'].jobs['product-evidence'];
+  assert.equal(job.env.UV_PROJECT_ENVIRONMENT, '${{ github.workspace }}/data-management/viewer/backend/.venv');
+  const install = job.steps.find(step => step.name === 'Install Dataviewer API dependencies').run;
+  assert.match(install, /uv sync --project \. --all-packages --frozen --group dev/);
+  for (const extra of ['analysis', 'hdf5', 'export', 'auth', 'azure', 'api', 'openai']) {
+    assert.ok(install.includes(`--extra ${extra}`));
+  }
+});
+
+test('Pester provisions uv and Python for lock consistency integration tests', () => {
+  const steps = graph['.github/workflows/pester-tests.yml'].jobs.pester.steps;
+  const setup = steps.find(step => step.name === 'Setup uv');
+  assert.ok(setup);
+  assert.equal(setup.with.version, '0.12.20');
+  assert.equal(setup.with['python-version'], '3.12');
+  assert.ok(steps.indexOf(setup) < steps.findIndex(step => step.id === 'pester'));
+  assert.ok(steps.slice(steps.indexOf(setup) + 1, steps.findIndex(step => step.id === 'pester'))
+    .some(step => step.run === 'uv python install (Get-Content .python-version -Raw).Trim()'));
+});
+
+test('skill packages: repository packages satisfy the contract', () => {
+  assert.deepEqual(validateSkillPackages(root), []);
+});
+
+test('skill packages: reject mismatched names, unsupported fields and missing local links', t => {
+  const temporaryRoot = temporaryDirectory(t);
+  const skillRoot = join(temporaryRoot, '.github', 'skills', 'sample-skill');
+  mkdirSync(skillRoot, { recursive: true });
+  writeFileSync(join(skillRoot, 'SKILL.md'), [
+    '---',
+    'name: wrong-name',
+    'description: ""',
+    'unexpected: true',
+    '---',
+    '',
+    '# Sample',
+    '',
+    '[Missing](scripts/missing.sh)',
+    '',
+  ].join('\n'));
+
+  const errors = validateSkillPackages(temporaryRoot);
+  assert.ok(errors.some(error => error.includes("name 'wrong-name' must match directory 'sample-skill'")));
+  assert.ok(errors.some(error => error.includes("unsupported frontmatter field 'unexpected'")));
+  assert.ok(errors.some(error => error.includes('description must be a non-empty string')));
+  assert.ok(errors.some(error => error.includes('local link does not exist')));
+});
+
+test('skill packages: CLI reports invalid repositories', t => {
+  const temporaryRoot = temporaryDirectory(t);
+  const result = spawnSync(process.execPath, [skillValidatorPath, temporaryRoot], {
+    cwd: root,
+    env: nodeEnvironment,
+    encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /skills directory does not exist/);
+});
+
+test('product workspace: judge tests and coverage remain required in the backend owner', () => {
+  const steps = graph['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer'].steps;
+  const install = steps.find(step => step.id === 'install').run;
+  assert.match(install, /--project \.\.\/\.\.\/\.\. --all-packages --frozen/);
+  for (const extra of ['analysis', 'hdf5', 'export', 'auth', 'azure', 'api', 'openai', 'qwen3-vl']) {
+    assert.ok(install.includes(`--extra ${extra}`));
+  }
+  assert.equal(install.includes('--all-groups'), false);
+  assert.equal(install.includes('azureml-tracking'), false);
+  const judge = steps.find(step => step.id === 'judge_unit').run;
+  assert.match(judge, /--no-sync --frozen pytest/);
+  assert.ok(judge.includes('evaluation/vlm_judge/pyproject.toml'));
+  assert.ok(judge.includes('evaluation/tests/vlm_judge'));
+  assert.ok(judge.includes('--cov-fail-under=35'));
+  const owner = contract.execution['dataviewer-backend-pytests'].jobs['pytest-dataviewer'];
+  assert.ok(owner['required-steps'].includes('judge_unit'));
+  assert.ok(owner.reports.some(report => report.path === 'logs/pytest-vlm-judge-results.xml'));
+  const gates = steps.find(step => step.id === 'coverage_gate').run;
+  assert.ok(gates.includes('--fail-under=90'));
+  assert.ok(gates.includes('--fail-under=70'));
+});
+
+test('product workspace: independent evaluation keeps its own gate without judge coverage', () => {
+  const steps = graph['.github/workflows/evaluation-pytests.yml'].jobs.pytest.steps;
+  assert.equal(steps.find(step => step.id === 'install').run, 'uv sync --frozen --only-group dev');
+  assert.equal(steps.some(step => step.run?.includes('vlm_judge')), false);
+  assert.equal(steps.some(step => step.with?.flags === 'pytest-vlm-judge'), false);
+  assert.ok(steps.find(step => step.id === 'coverage_gate').run.includes('--fail-under=80'));
+});
 
 for (const owner of [prPath, mainPath]) {
   for (const jobId of ['accessibility-evidence', 'docusaurus-tests']) {
@@ -466,8 +564,8 @@ test('range resolver CLI: writes verified outputs and fails on infrastructure er
 });
 
 const selectionCases = [
-  ['root uv.lock selects every Python consumer', 'uv.lock', pythonConsumers],
-  ['root pyproject selects every Python consumer', 'pyproject.toml', pythonConsumers],
+  ['root uv.lock selects every Python consumer', 'uv.lock', [...pythonConsumers, 'containers']],
+  ['root pyproject selects every Python consumer', 'pyproject.toml', [...pythonConsumers, 'containers']],
   ['root conftest selects every Python consumer', 'tests/conftest.py', pythonConsumers],
   ['shared fixtures select every Python consumer', 'tests/fixtures/episodes/sample.json', pythonConsumers],
   ['docs source outside the site selects Docusaurus', 'docs/training/overview.md', ['docusaurus']],
@@ -478,6 +576,18 @@ const selectionCases = [
   ['shared shell defaults conservatively select every consumer', 'scripts/lib/common.sh', allSelectors],
   ['shared image scripts also select their own tests', 'shared/ci/smoke-image.sh', [...imageConsumers, 'shared_ci']],
   ['VLM judge selects evaluation, the viewer backend, and accessibility', 'evaluation/vlm_judge/judge.py', ['evaluation', 'dv_backend', 'accessibility']],
+  ['retained judge tests select their product owner', 'evaluation/tests/vlm_judge/test_run.py', ['evaluation', 'dv_backend', 'accessibility']],
+  ['independent evaluation source does not select the product owner', 'evaluation/sil/policy_evaluation.py', ['evaluation', 'accessibility']],
+  ...['physical_ai_curation/jobs.py', 'tests/test_jobs.py', 'pyproject.toml', 'uv.lock'].map(path => [
+    `curation package ${path} selects backend, fuzz, and accessibility`,
+    `data-management/curation/${path}`,
+    ['dv_backend', 'fuzz', 'accessibility', ...(path === 'pyproject.toml' ? ['containers'] : [])],
+  ]),
+  ...['physical_ai_dataset_io/lerobot.py', 'tests/test_lerobot.py', 'pyproject.toml', 'uv.lock'].map(path => [
+    `dataset-I/O package ${path} selects evaluator, backend, fuzz, and accessibility`,
+    `data-management/dataset-io/${path}`,
+    ['evaluation', 'dv_backend', 'fuzz', 'accessibility', ...(path === 'pyproject.toml' ? ['containers'] : [])],
+  ]),
   ['data-pipeline config selects its Python and accessibility tests', 'data-pipeline/pyproject.toml', ['data_pipeline', 'accessibility']],
   ['Terraform provider locks retain unconditional validation and accessibility', 'infrastructure/terraform/.terraform.lock.hcl', ['accessibility']],
   ['accessibility contracts select evidence and docs', '.github/accessibility/surfaces.yaml', ['accessibility', 'docusaurus']],
@@ -500,6 +610,20 @@ const selectionCases = [
 
 for (const [name, path, expected] of selectionCases) {
   test(`selector: ${name}`, () => assertSelection(selectChecks([path], contract), expected));
+}
+
+for (const path of [
+  'pyproject.toml', 'uv.lock',
+  'data-management/curation/pyproject.toml',
+  'data-management/dataset-io/pyproject.toml',
+  'data-management/viewer/backend/pyproject.toml',
+  'evaluation/vlm_judge/pyproject.toml',
+]) {
+  test(`selector: product dependency ${path} requires container validation`, () => {
+    const selected = selectChecks([path], contract);
+    assert.equal(selected.containers, true, 'Product dependency changes must exercise shipped containers');
+    assert.equal(selected.dv_backend, true, 'Product dependency changes must exercise backend consumers');
+  });
 }
 
 test('selector: full mode selects every consumer even without changed paths', () => {
@@ -1917,6 +2041,60 @@ for (const [name, mutate, diagnostic] of [
     mutate({ ...candidate, job, producer: job.steps.find(step => step.id === 'outcome') });
     const errors = validateWorkflows(candidate.graph, candidate.contract);
     assert.ok(errors.some(error => error.includes(diagnostic)), `Expected ${diagnostic}; received ${JSON.stringify(errors)}`);
+  });
+}
+
+for (const scenario of ['success', 'transient', 'exhausted', 'import-failure']) {
+  test(`Pester YAML setup: ${scenario} preserves bounded retries and pinned public installation`, () => {
+    const step = graph['.github/workflows/pester-tests.yml'].jobs.pester.steps.find(item => item.id === 'install-yaml');
+    assert.equal(step['timeout-minutes'], 3);
+    const script = `
+      $ErrorActionPreference = 'Stop'
+      $WarningPreference = 'SilentlyContinue'
+      $script:Attempts = 0
+      $script:Imports = 0
+      $script:Delays = 0
+      function Install-Module {
+        param($Name, $RequiredVersion, $Repository, [switch]$Force, [switch]$SkipPublisherCheck, $Scope, $ErrorAction)
+        if ($Name -ne 'powershell-yaml' -or $RequiredVersion -ne '0.4.12' -or
+            $Repository -ne 'PSGallery' -or $Scope -ne 'CurrentUser' -or $ErrorAction -ne 'Stop') {
+          throw 'Unexpected installation parameters'
+        }
+        $script:Attempts++
+        if ('${scenario}' -eq 'exhausted' -or ('${scenario}' -eq 'transient' -and $script:Attempts -lt 3)) {
+          throw 'Package failed to download'
+        }
+      }
+      function Import-Module {
+        param($Name, $RequiredVersion, $ErrorAction)
+        if ($Name -ne 'powershell-yaml' -or $RequiredVersion -ne '0.4.12' -or $ErrorAction -ne 'Stop') {
+          throw 'Unexpected import parameters'
+        }
+        $script:Imports++
+        if ('${scenario}' -eq 'import-failure') { throw 'Module import failed' }
+      }
+      function Start-Sleep {
+        param($Seconds)
+        if ($Seconds -ne 5) { throw 'Unexpected retry delay' }
+        $script:Delays++
+      }
+      $Failure = $null
+      try { & { ${step.run} } } catch { $Failure = $_.Exception.Message }
+      @{ Attempts = $script:Attempts; Imports = $script:Imports; Delays = $script:Delays; Failure = $Failure } |
+        ConvertTo-Json -Compress
+    `;
+    const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      cwd: root, encoding: 'utf8', timeout: 15_000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      Attempts: scenario === 'success' ? 1 : 3,
+      Imports: scenario === 'exhausted' ? 0 : scenario === 'import-failure' ? 3 : 1,
+      Delays: scenario === 'success' ? 0 : 2,
+      Failure: scenario === 'exhausted' ? 'Package failed to download' :
+        scenario === 'import-failure' ? 'Module import failed' : null,
+    });
   });
 }
 

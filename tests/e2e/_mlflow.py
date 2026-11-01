@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import math
 import tempfile
 import time
 from dataclasses import dataclass
@@ -8,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tests.e2e._aml import AzureMLJob, AzureMLWorkspace
-from tests.e2e._common import log_e2e
+from tests.e2e._common import RegisteredModel, log_e2e
 from tests.e2e._osmo import OSMOWorkflow
 
 if TYPE_CHECKING:
@@ -50,6 +52,17 @@ class MLflowTrackingResult:
     tags: dict[str, str]
 
 
+@dataclass(frozen=True)
+class MLflowServer:
+    """A self-hosted MLflow tracking server and model registry, such as the local platform profile's."""
+
+    tracking_uri: str
+
+
+# Where a lifecycle test reads runs and registered models: an Azure ML workspace or an MLflow server.
+MLflowTarget = AzureMLWorkspace | MLflowServer
+
+
 @lru_cache(maxsize=4)
 def _tracking_uri(subscription_id: str, resource_group: str, workspace_name: str) -> str:
     from azure.ai.ml import MLClient
@@ -68,15 +81,17 @@ def _tracking_uri(subscription_id: str, resource_group: str, workspace_name: str
     return tracking_uri
 
 
-def _mlflow_client(aml_workspace: AzureMLWorkspace) -> MlflowClient:
+def _target_tracking_uri(target: MLflowTarget) -> str:
+    if isinstance(target, MLflowServer):
+        return target.tracking_uri
+    return _tracking_uri(target.subscription_id, target.resource_group, target.workspace_name)
+
+
+def _mlflow_client(target: MLflowTarget) -> MlflowClient:
     import mlflow
     from mlflow.tracking import MlflowClient
 
-    tracking_uri = _tracking_uri(
-        aml_workspace.subscription_id,
-        aml_workspace.resource_group,
-        aml_workspace.workspace_name,
-    )
+    tracking_uri = _target_tracking_uri(target)
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_registry_uri(tracking_uri)
     return MlflowClient(tracking_uri=tracking_uri, registry_uri=tracking_uri)
@@ -94,12 +109,12 @@ def _search_experiment_runs_with_retry(
     max_results: int = 1,
     criteria: str | None = None,
 ) -> list[Run]:
-    """Search an experiment's runs, tolerating AzureML search-index lag.
+    """Search an experiment's runs, tolerating search-index lag.
 
     AzureML's MLflow ``get_experiment_by_name`` and ``search_runs`` are eventually
     consistent: a just-finished run (or even its experiment) can trail the search
     index by tens of seconds, so a single query races the index. Poll until a run
-    is visible or the budget is spent.
+    is visible or the budget is spent; a self-hosted server answers on the first query.
     """
     deadline = time.monotonic() + _MLFLOW_SEARCH_TIMEOUT_SECONDS
     waited = False
@@ -122,7 +137,7 @@ def _search_experiment_runs_with_retry(
             )
         if not waited:
             log_e2e(
-                f"Waiting up to {_MLFLOW_SEARCH_TIMEOUT_SECONDS}s for AzureML MLflow search to index "
+                f"Waiting up to {_MLFLOW_SEARCH_TIMEOUT_SECONDS}s for MLflow search to index "
                 f"{criteria or 'a run'} in experiment {experiment_name!r}"
             )
             waited = True
@@ -157,14 +172,14 @@ def _resolve_mlflow_run_id_by_correlation_id(
 
 
 def _assert_run_has_expected_tracking(
-    aml_workspace: AzureMLWorkspace,
+    target: MLflowTarget,
     *,
     run_id: str,
     experiment_name: str,
     required_metrics: tuple[str, ...] = REQUIRED_METRICS,
     required_params: tuple[str, ...] = REQUIRED_PARAMS,
 ) -> MLflowTrackingResult:
-    client = _mlflow_client(aml_workspace)
+    client = _mlflow_client(target)
     run = client.get_run(run_id)
     experiment = client.get_experiment(run.info.experiment_id)
     actual_experiment_name = experiment.name if experiment is not None else None
@@ -220,11 +235,11 @@ def assert_aml_lerobot_job_has_mlflow_tracking(job: AzureMLJob, aml_workspace: A
     log_e2e(f"AzureML LeRobot MLflow tracking passed: metrics=[{rendered_metrics}] params=[{rendered_params}]")
 
 
-def assert_osmo_workflow_has_mlflow_tracking(workflow: OSMOWorkflow, aml_workspace: AzureMLWorkspace) -> None:
-    client = _mlflow_client(aml_workspace)
+def assert_osmo_workflow_has_mlflow_tracking(workflow: OSMOWorkflow, target: MLflowTarget) -> None:
+    client = _mlflow_client(target)
     run_id = _resolve_mlflow_run_id_by_correlation_id(client, workflow.experiment_name, workflow.correlation_id)
     tracking = _assert_run_has_expected_tracking(
-        aml_workspace,
+        target,
         run_id=run_id,
         experiment_name=workflow.experiment_name,
     )
@@ -286,9 +301,9 @@ def assert_aml_osmo_proxy_has_mlflow_tracking(
 
 def assert_osmo_vla_has_mlflow_tracking(
     workflow: OSMOWorkflow,
-    aml_workspace: AzureMLWorkspace,
+    target: MLflowTarget,
 ) -> str:
-    client = _mlflow_client(aml_workspace)
+    client = _mlflow_client(target)
     correlation_id = workflow.correlation_id or workflow.workflow_id
     escaped_correlation_id = correlation_id.replace("'", "\\'")
     runs = _search_experiment_runs_with_retry(
@@ -319,13 +334,13 @@ def assert_osmo_vla_has_mlflow_tracking(
     return run.info.run_id
 
 
-def delete_mlflow_run(aml_workspace: AzureMLWorkspace, run_id: str) -> None:
+def delete_mlflow_run(target: MLflowTarget, run_id: str) -> None:
     log_e2e(f"Deleting MLflow run {run_id}")
-    _mlflow_client(aml_workspace).delete_run(run_id)
+    _mlflow_client(target).delete_run(run_id)
 
 
-def delete_mlflow_experiment(aml_workspace: AzureMLWorkspace, experiment_name: str) -> None:
-    client = _mlflow_client(aml_workspace)
+def delete_mlflow_experiment(target: MLflowTarget, experiment_name: str) -> None:
+    client = _mlflow_client(target)
     experiment = client.get_experiment_by_name(experiment_name)
     if experiment is None:
         return
@@ -397,24 +412,24 @@ _LEROBOT_EVAL_REQUIRED_PARAMS = (
 )
 
 
-def _resolve_latest_mlflow_run_id_by_experiment(aml_workspace: AzureMLWorkspace, experiment_name: str) -> str:
+def _resolve_latest_mlflow_run_id_by_experiment(target: MLflowTarget, experiment_name: str) -> str:
     """Resolve the most recent MLflow run in a per-run unique experiment.
 
     Used by OSMO LeRobot submission paths whose scripts do not set a
     ``correlation_id`` tag; the unique experiment name keeps the resolution
     unambiguous (a single run lands in each experiment).
     """
-    client = _mlflow_client(aml_workspace)
+    client = _mlflow_client(target)
     runs = _search_experiment_runs_with_retry(client, experiment_name, max_results=1)
     run_id = runs[0].info.run_id
     log_e2e(f"Resolved latest MLflow run in experiment {experiment_name}: run_id={run_id}")
     return run_id
 
 
-def assert_osmo_lerobot_training_has_mlflow_tracking(workflow: OSMOWorkflow, aml_workspace: AzureMLWorkspace) -> None:
-    run_id = _resolve_latest_mlflow_run_id_by_experiment(aml_workspace, workflow.experiment_name)
+def assert_osmo_lerobot_training_has_mlflow_tracking(workflow: OSMOWorkflow, target: MLflowTarget) -> None:
+    run_id = _resolve_latest_mlflow_run_id_by_experiment(target, workflow.experiment_name)
     tracking = _assert_run_has_expected_tracking(
-        aml_workspace,
+        target,
         run_id=run_id,
         experiment_name=workflow.experiment_name,
         required_metrics=_LEROBOT_REQUIRED_METRICS,
@@ -428,21 +443,150 @@ def assert_osmo_lerobot_training_has_mlflow_tracking(workflow: OSMOWorkflow, aml
     )
 
 
-def assert_osmo_lerobot_eval_has_mlflow_tracking(workflow: OSMOWorkflow, aml_workspace: AzureMLWorkspace) -> None:
-    run_id = _resolve_latest_mlflow_run_id_by_experiment(aml_workspace, workflow.experiment_name)
+@dataclass(frozen=True)
+class LeRobotEvalResult:
+    """The metrics of one LeRobot replay evaluation run."""
+
+    run_id: str
+    metrics: dict[str, float]
+
+    @property
+    def aggregate_mse(self) -> float:
+        return self.metrics["aggregate_mse"]
+
+    def action_error(self) -> dict[str, float]:
+        """Return the action-error metrics, which the same weights reproduce exactly; timing metrics vary."""
+        return {name: value for name, value in self.metrics.items() if name.endswith(("_mse", "_mae"))}
+
+
+def assert_evaluation_schema(metrics_payload: object, failure_cases: str) -> None:
+    """Assert evaluation schema v1: finite metrics, a passing aggregate verdict, and no failure cases."""
+    if not isinstance(metrics_payload, dict) or metrics_payload.get("evaluation_schema_version") != 1:
+        raise AssertionError(f"metrics.json is not evaluation schema version 1: {metrics_payload!r}")
+    if metrics_payload.get("aggregate_verdict") != "pass":
+        raise AssertionError(f"metrics.json aggregate verdict is {metrics_payload.get('aggregate_verdict')!r}")
+    entries = metrics_payload.get("metrics")
+    if not isinstance(entries, list) or not entries:
+        raise AssertionError("metrics.json lists no metrics")
+    for entry in entries:
+        value = entry.get("value") if isinstance(entry, dict) else None
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise AssertionError(f"metrics.json has a metric without a finite value: {entry!r}")
+    cases = [line for line in failure_cases.splitlines() if line.strip()]
+    if cases:
+        raise AssertionError(f"failure_cases.jsonl lists {len(cases)} failure case(s), first: {cases[0]}")
+
+
+def assert_osmo_lerobot_eval_has_mlflow_tracking(workflow: OSMOWorkflow, target: MLflowTarget) -> LeRobotEvalResult:
+    """Assert the replay evaluation's run, metrics, and evaluation schema files; return its metrics."""
+    run_id = _resolve_latest_mlflow_run_id_by_experiment(target, workflow.experiment_name)
     tracking = _assert_run_has_expected_tracking(
-        aml_workspace,
+        target,
         run_id=run_id,
         experiment_name=workflow.experiment_name,
         required_metrics=_LEROBOT_EVAL_REQUIRED_METRICS,
         required_params=_LEROBOT_EVAL_REQUIRED_PARAMS,
     )
+    client = _mlflow_client(target)
+    run = client.get_run(run_id)
+    metrics = dict(run.data.metrics)
+    non_finite = sorted(name for name, value in metrics.items() if not math.isfinite(value))
+    if non_finite:
+        raise AssertionError(f"MLflow run {run_id!r} has non-finite metrics {non_finite}")
+    requested = int(run.data.params["eval_episodes"])
+    if metrics.get("episodes_evaluated") != requested:
+        raise AssertionError(
+            f"MLflow run {run_id!r} evaluated {metrics.get('episodes_evaluated')!r} of {requested} episodes"
+        )
+    with tempfile.TemporaryDirectory(prefix="e2e-lerobot-eval-") as download_root:
+        metrics_file = Path(client.download_artifacts(run_id, "metrics.json", download_root))
+        failure_file = Path(client.download_artifacts(run_id, "failure_cases.jsonl", download_root))
+        assert_evaluation_schema(json.loads(metrics_file.read_text(encoding="utf-8")), failure_file.read_text())
+
     rendered_metrics = ", ".join(f"{name}={value}" for name, value in tracking.metrics.items())
     rendered_params = ", ".join(f"{name}={value}" for name, value in tracking.params.items())
     log_e2e(
         f"OSMO LeRobot eval MLflow tracking passed: run_id={run_id} "
         f"metrics=[{rendered_metrics}] params=[{rendered_params}]"
     )
+    return LeRobotEvalResult(run_id=run_id, metrics=metrics)
+
+
+@dataclass(frozen=True)
+class IsaacEvalGate:
+    """The verdict of one gated Isaac Lab evaluation run."""
+
+    run_id: str
+    success_rate: float
+    eval_episodes: int
+    videos: int
+
+
+def _artifact_files(client: MlflowClient, run_id: str, path: str) -> list[str]:
+    files: list[str] = []
+    for artifact in client.list_artifacts(run_id, path):
+        if artifact.is_dir:
+            files.extend(_artifact_files(client, run_id, artifact.path))
+        else:
+            files.append(artifact.path)
+    return files
+
+
+def assert_osmo_isaac_eval_gate(
+    workflow: OSMOWorkflow, target: MLflowTarget, *, minimum_success_rate: float
+) -> IsaacEvalGate:
+    """Assert that the gated evaluation passed, reached ``minimum_success_rate``, and logged rollout videos."""
+    run_id = _resolve_latest_mlflow_run_id_by_experiment(target, workflow.experiment_name)
+    client = _mlflow_client(target)
+    metrics = client.get_run(run_id).data.metrics
+    missing = [name for name in ("success_rate", "passed", "eval_episodes") if name not in metrics]
+    if missing:
+        raise AssertionError(f"MLflow run {run_id!r} has no gate metrics {missing}; available: {sorted(metrics)}")
+    if metrics["passed"] != 1.0:
+        raise AssertionError(f"MLflow run {run_id!r} records a failed gate: success_rate={metrics['success_rate']}")
+    if metrics["success_rate"] < minimum_success_rate:
+        raise AssertionError(
+            f"MLflow run {run_id!r} success_rate={metrics['success_rate']} is below {minimum_success_rate}"
+        )
+    videos = [path for path in _artifact_files(client, run_id, "videos") if path.endswith(".mp4")]
+    if not videos:
+        raise AssertionError(f"MLflow run {run_id!r} logged no rollout videos")
+    gate = IsaacEvalGate(
+        run_id=run_id,
+        success_rate=metrics["success_rate"],
+        eval_episodes=int(metrics["eval_episodes"]),
+        videos=len(videos),
+    )
+    workflow.handle.resource_identifiers["mlflow_run"] = run_id
+    log_e2e(
+        f"OSMO Isaac Lab gate passed: run_id={run_id} success_rate={gate.success_rate} "
+        f"episodes={gate.eval_episodes} videos={gate.videos}"
+    )
+    return gate
+
+
+def resolve_mlflow_registered_model(target: MLflowTarget, model_name: str) -> RegisteredModel:
+    """Resolve the concrete latest version of a model in an MLflow registry."""
+    client = _mlflow_client(target)
+    escaped_name = model_name.replace("'", "\\'")
+    versions = [int(version.version) for version in client.search_model_versions(f"name = '{escaped_name}'")]
+    if not versions:
+        raise AssertionError(f"Training run registered no versions under MLflow model {model_name!r}")
+    model = RegisteredModel(name=model_name, version=str(max(versions)))
+    log_e2e(f"Resolved MLflow model {model_name} to concrete version {model.version}")
+    return model
+
+
+def delete_mlflow_registered_model(target: MLflowTarget, model_name: str) -> None:
+    """Delete an MLflow registered model and its versions; the training runs keep their artifacts."""
+    from mlflow.exceptions import MlflowException
+
+    log_e2e(f"Deleting MLflow registered model {model_name}")
+    try:
+        _mlflow_client(target).delete_registered_model(model_name)
+    except MlflowException as error:
+        if error.error_code != "RESOURCE_DOES_NOT_EXIST":
+            raise
 
 
 def assert_aml_lerobot_eval_has_mlflow_tracking(job: AzureMLJob, aml_workspace: AzureMLWorkspace) -> None:

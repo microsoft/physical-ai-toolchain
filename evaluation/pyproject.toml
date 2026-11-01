@@ -3,6 +3,7 @@ name = "physical-ai-evaluation"
 version = "0.1.0"
 description = "Evaluation workflow runtime dependencies"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = [
     # Held below 2.3 because lerobot==0.6.1 declares numpy<2.3.
     "numpy==2.2.6",
@@ -38,11 +39,15 @@ dependencies = [
     "torchcodec==0.16.0",
 ]
 
+[project.urls]
+Repository = "https://github.com/microsoft/physical-ai-toolchain"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
+prerelease = "allow"
 environments = [
     "sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')",
 ]
@@ -87,6 +92,9 @@ prerelease = "allow"
 dev = [
     # Held below 16 because lerobot[dataset]==0.6.1 requires av<16.
     "av==15.1.0",
+    "fastapi==0.141.1",
+    "pydantic==2.13.5",
+    "httpx==0.28.1",
     "pytest==9.1.1",
     "pytest-mock==3.15.1",
     "pytest-cov==7.1.0",
@@ -102,6 +110,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+norecursedirs = ["vlm_judge"]
 addopts = [
     "-ra",
     "--strict-markers",

@@ -5,6 +5,7 @@ import { expect, test } from '@playwright/test';
 
 import labelData from '../src/data/labelRegistry.cjs';
 import {
+  analyzeAccessibility,
   expectNoUnexpectedPageErrors,
   expectPageReady,
   siteRoute,
@@ -453,6 +454,32 @@ test('Space-opened tiers support native forward and backward Tab traversal', asy
   expect(await dropdown.evaluate((element) => element.contains(document.activeElement))).toBe(false);
 });
 
+test('footnote return links have matching visible and accessible labels in both themes', async ({ page }) => {
+  await page.goto(siteRoute('/data-pipeline/chunking-compression-config'));
+  await expectPageReady(page);
+  const links = page.locator('a[data-footnote-backref]');
+  expect(await links.count()).toBeGreaterThan(7);
+
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((value) => document.documentElement.setAttribute('data-theme', value), theme);
+    for (const link of await links.all()) {
+      const label = await link.getAttribute('aria-label');
+      expect(label).toMatch(/^Back to reference \d+(?:-\d+)?$/);
+      await expect(link).toHaveText(label!);
+      await expect(link).toHaveAccessibleName(label!);
+    }
+    const results = await analyzeAccessibility(page);
+    expect([...results.violations, ...results.incomplete].filter(
+      (finding) => finding.id === 'label-content-name-mismatch',
+    )).toEqual([]);
+  }
+
+  const first = links.first();
+  const destination = await first.getAttribute('href');
+  await first.press('Enter');
+  await expect(page).toHaveURL((url) => url.hash === destination);
+});
+
 test('responsive navigation opens, activates a tier, and closes without trapping focus', evidence('dcs04-responsive-nav', [
   { journeyId: 'DCS04', method: 'PLAYWRIGHT_KEYBOARD' },
   { journeyId: 'DCS04', method: 'PLAYWRIGHT_TREE' },
@@ -462,8 +489,7 @@ test('responsive navigation opens, activates a tier, and closes without trapping
   await expectPageReady(page);
   const toggle = page.getByRole('button', { name: 'Toggle navigation bar' });
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await toggle.focus();
-  await page.keyboard.press('Enter');
+  await toggle.press('Enter');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   const sidebar = page.locator('.navbar-sidebar');
   await expect(sidebar).toBeVisible();
@@ -471,14 +497,12 @@ test('responsive navigation opens, activates a tier, and closes without trapping
   const caret = sidebar.locator('.menu__list-item-collapsible button.menu__caret');
   await expect(caret).toHaveAttribute('aria-expanded', 'false');
   await expect(caret).toHaveAccessibleName('Expand the dropdown');
-  await caret.focus();
-  await page.keyboard.press('Enter');
+  await caret.press('Enter');
   await expect(caret).toHaveAttribute('aria-expanded', 'true');
   await expect(caret).toHaveAccessibleName('Collapse the dropdown');
 
   const tierLink = sidebar.locator('a.menu__link').filter({ hasText: labelData.tierNavigation[0].label }).first();
-  await tierLink.focus();
-  await page.keyboard.press('Enter');
+  await tierLink.press('Enter');
   const tierPath = `/physical-ai-toolchain${labelData.tierNavigation[0].route}`;
   await expect(page).toHaveURL((url) => url.pathname === tierPath);
   await expectPageReady(page);

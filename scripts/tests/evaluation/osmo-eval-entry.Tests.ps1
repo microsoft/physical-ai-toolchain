@@ -5,7 +5,8 @@
 
 # Behavioral coverage for evaluation/sil/scripts/osmo-eval-entry.sh. Tests assert
 # the required checkpoint guard, runtime payload archive discovery, and the final
-# infer.sh invocation using both documented defaults and explicit env overrides.
+# infer.sh invocation, including the success gate, using both documented defaults
+# and explicit env overrides.
 
 BeforeDiscovery {
     $script:ToolsPresent = [bool](Get-Command bash -ErrorAction SilentlyContinue) -and
@@ -135,6 +136,10 @@ Describe 'osmo-eval-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
                 MAX_STEPS         = '1234'
                 VIDEO_LENGTH      = '77'
                 INFERENCE_FORMAT  = 'video'
+                FRAMEWORK         = 'rsl_rl'
+                EVAL_EPISODES     = '25'
+                SUCCESS_THRESHOLD = '0.8'
+                OUTPUT_DIR        = '/osmo/output'
             } -Stubs @{} -WorkDir $workspace
 
             $result.ExitCode | Should -Be 0
@@ -151,6 +156,14 @@ Describe 'osmo-eval-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
                 'video'
                 '--checkpoint-uri'
                 'azureml://models/policy/9'
+                '--framework'
+                'rsl_rl'
+                '--eval-episodes'
+                '25'
+                '--success-threshold'
+                '0.8'
+                '--output-dir'
+                '/osmo/output'
                 '--headless'
             )
         }
@@ -184,6 +197,14 @@ Describe 'osmo-eval-entry.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
                 'both'
                 '--checkpoint-uri'
                 'azureml://models/policy/11'
+                '--framework'
+                'skrl'
+                '--eval-episodes'
+                '100'
+                '--success-threshold'
+                '-1'
+                '--output-dir'
+                ''
                 '--headless'
             )
         }

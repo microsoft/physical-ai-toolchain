@@ -1,0 +1,43 @@
+# Proves K3s containerd pulls an image pushed to the loopback registry, without registries.yaml.
+# Rendered by 01-deploy-platform-services.sh, which substitutes only LOCAL_ placeholders.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: registry-smoke-test
+  namespace: ${LOCAL_PLATFORM_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: registry-smoke-test
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 180
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: registry-smoke-test
+        app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: smoke-test
+          image: ${LOCAL_REGISTRY_SMOKE_IMAGE}
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c", "echo Pulled from the local registry"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

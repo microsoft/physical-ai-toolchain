@@ -93,13 +93,15 @@ describe('useCurrentEpisode', () => {
     selectDataset()
     useEpisodeStore.getState().setEpisodes(sampleEpisodes)
 
-    mockFetch.mockResolvedValue(
-      jsonResponse({
-        meta: { index: 1, length: 120, task_index: 0, has_annotations: false },
-        video_urls: { front: 'http://example/1.mp4' },
-        cameras: ['front'],
-        trajectory_data: [],
-      }),
+    mockFetch.mockImplementation(async (url) =>
+      String(url).endsWith('/auth/context')
+        ? jsonResponse({ scope_id: 'principal-test', auth_mode: 'local' })
+        : jsonResponse({
+            meta: { index: 1, length: 120, task_index: 0, has_annotations: false },
+            video_urls: { front: 'http://example/1.mp4' },
+            cameras: ['front'],
+            trajectory_data: [],
+          }),
     )
 
     act(() => {
@@ -113,6 +115,8 @@ describe('useCurrentEpisode', () => {
     const stored = useEpisodeStore.getState().currentEpisode
     expect(stored?.meta.index).toBe(1)
     expect(stored?.cameras).toEqual(['front'])
+    expect(useEpisodeStore.getState().currentDatasetId).toBe('ds-1')
+    expect(useEpisodeStore.getState().principalScopeId).toBe('principal-test')
     expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/1', expect.any(Object))
   })
 })

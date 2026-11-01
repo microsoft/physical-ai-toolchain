@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   clearPersistedEditDraftsForTests,
+  hasPendingDraftWrites,
   loadPersistedAnnotationDraft,
   loadPersistedDraftEnvelope,
   loadPersistedEditDraft,
@@ -13,6 +14,7 @@ import {
   persistEditDraft,
   persistLabelDraft,
 } from '../edit-draft-storage'
+import * as offlineStorage from '../offline-storage'
 import { closeDB, getMetadata, setMetadata } from '../offline-storage'
 
 const sampleOperations = {
@@ -33,6 +35,16 @@ async function resetDB(): Promise<void> {
 }
 
 describe('edit-draft-storage (IndexedDB path)', () => {
+  it('releases the pending marker after a failed write', async () => {
+    vi.spyOn(offlineStorage, 'setMetadata').mockRejectedValueOnce(new Error('storage unavailable'))
+    await expect(
+      persistEditDraft('ds-1', 0, 'principal-one', sampleOperations as never),
+    ).rejects.toThrow('storage unavailable')
+    const pendingAfterFailure = hasPendingDraftWrites()
+    await persistEditDraft('ds-1', 0, 'principal-one', sampleOperations as never)
+    expect(pendingAfterFailure).toBe(false)
+  })
+
   beforeEach(async () => {
     await resetDB()
     await clearPersistedEditDraftsForTests()
@@ -177,11 +189,13 @@ describe('edit-draft-storage (in-memory fallback)', () => {
       availableLabels: ['SUCCESS', 'CUSTOM'],
       episodeLabels: { 0: ['CUSTOM'] },
       savedEpisodeLabels: { 0: ['SUCCESS'] },
+      sourceScopes: { 0: { sourceId: 'source-one', sourceRevision: 'generation-one' } },
     }
     await persistLabelDraft('ds-1', 'principal-one', { ...draft, baseEtag: '"labels-one"' })
 
     const loaded = await loadPersistedLabelDraft('ds-1', 'principal-one')
     expect(loaded).toMatchObject({ schemaVersion: 2, baseEtag: '"labels-one"' })
+    expect(loaded?.sourceScopes).toEqual(draft.sourceScopes)
     expect(loaded?.draft).toEqual({
       availableLabels: draft.availableLabels,
       episodeLabels: draft.episodeLabels,

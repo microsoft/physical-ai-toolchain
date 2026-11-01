@@ -19,9 +19,17 @@ from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from .auth import MediaSession, PrincipalContext, issue_media_session, require_auth, require_principal_context
+from .auth import (
+    HostedAuthMiddleware,
+    MediaSession,
+    PrincipalContext,
+    issue_media_session,
+    require_auth,
+    require_principal_context,
+    validate_hosted_auth_configuration,
+)
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token, require_csrf_token
-from .middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddleware
+from .middleware import ContentSizeLimitMiddleware, EpisodeCompressionMiddleware, SecurityHeadersMiddleware
 from .rate_limiter import limiter
 from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, vlm_judge
 from .routes import ai_analysis
@@ -51,6 +59,7 @@ load_dotenv(env_path)
 from .config import load_config  # noqa: E402
 
 _config = load_config()
+_job_router = vlm_judge.build_optional_job_router() if _config.vlm_judge_enabled else None
 
 logger = logging.getLogger(__name__)
 
@@ -99,11 +108,28 @@ def _validate_local_storage_writable(data_path: str) -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Validate local storage and clean up blob sync directories."""
+    validate_hosted_auth_configuration()
     if _config.storage_backend == "local":
         await asyncio.to_thread(_validate_local_storage_writable, _config.data_path)
 
-    yield
     from .services.dataset_service import get_dataset_service
+
+    workers = []
+    if _job_router is not None:
+        from .services.annotation_service import get_annotation_service
+        from .services.vlm_judge_service import create_judge_jobs
+
+        jobs = await create_judge_jobs(_config, get_dataset_service(), get_annotation_service())
+        _app.state.judge_jobs = jobs
+        workers = [asyncio.create_task(jobs.run_forever()) for _ in range(_config.vlm_judge_capacity)]
+    try:
+        yield
+    finally:
+        for worker in workers:
+            worker.cancel()
+        for worker in workers:
+            with suppress(asyncio.CancelledError):
+                _ = await worker
 
     try:
         service = get_dataset_service()
@@ -122,23 +148,6 @@ app = FastAPI(
     openapi_tags=[
         {"name": "auth", "description": "Authentication utilities"},
     ],
-    # OpenAPI security scheme definitions
-    components={
-        "securitySchemes": {
-            "ApiKeyAuth": {
-                "type": "apiKey",
-                "in": "header",
-                "name": "X-API-Key",
-                "description": "API key authentication (DATAVIEWER_AUTH_PROVIDER=apikey)",
-            },
-            "BearerAuth": {
-                "type": "http",
-                "scheme": "bearer",
-                "bearerFormat": "JWT",
-                "description": "Bearer JWT authentication (azure_ad / auth0 providers)",
-            },
-        }
-    },
 )
 install_responsive_swagger_ui(app)
 
@@ -182,8 +191,7 @@ async def validation_exception_handler(request, exc: RequestValidationError) -> 
 
 
 # Middleware stack (last added = outermost = first to execute)
-# Order: SecurityHeaders → ContentSizeLimit → CORS → FastAPI App
-app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(EpisodeCompressionMiddleware, minimum_size=1024, compresslevel=1)
 app.add_middleware(
     ContentSizeLimitMiddleware,
     max_content_length=int(os.environ.get("MAX_REQUEST_BODY_BYTES", str(10 * 1024 * 1024))),
@@ -195,6 +203,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-API-Key", "X-Request-ID"],
 )
+app.add_middleware(HostedAuthMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # All /api/* routes require authentication (health and csrf-token are on app directly)
 api_auth = [Depends(require_auth)]
@@ -208,6 +218,8 @@ app.include_router(labels.router, prefix="/api/datasets", tags=["labels"], depen
 app.include_router(joint_config.router, prefix="/api/datasets", tags=["joint-config"], dependencies=api_auth)
 app.include_router(joint_config.defaults_router, prefix="/api", tags=["joint-config"], dependencies=api_auth)
 if _config.vlm_judge_enabled:
+    if _job_router is not None:
+        app.include_router(_job_router, prefix="/api/judge", dependencies=api_auth)
     app.include_router(
         vlm_judge.router,
         prefix="/api/datasets",

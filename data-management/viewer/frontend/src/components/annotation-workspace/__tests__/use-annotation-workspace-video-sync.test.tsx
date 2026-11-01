@@ -1,16 +1,250 @@
 import { act, renderHook } from '@testing-library/react'
 import type { SyntheticEvent } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useAnnotationWorkspaceVideoSync } from '@/components/annotation-workspace/useAnnotationWorkspaceVideoSync'
 import type { FrameInsertion } from '@/types/episode-edit'
+
+function playbackOptions(
+  overrides: Partial<Parameters<typeof useAnnotationWorkspaceVideoSync>[0]> = {},
+): Parameters<typeof useAnnotationWorkspaceVideoSync>[0] {
+  return {
+    currentFrame: 0,
+    totalFrames: 10,
+    originalFrameIndex: 0,
+    activePlaybackRange: null,
+    playbackRangeStart: 0,
+    playbackRangeEnd: 9,
+    isPlaying: false,
+    playbackSpeed: 1,
+    autoPlay: false,
+    autoLoop: false,
+    shouldLoopPlaybackRange: false,
+    datasetFps: 10,
+    insertedFrames: new Map(),
+    removedFrames: new Set(),
+    videoSrc: null,
+    onSetCurrentFrame: vi.fn(),
+    onTogglePlayback: vi.fn(),
+    onSetFrameWithinPlaybackRange: vi.fn(),
+    onRecordEvent: vi.fn(),
+    ...overrides,
+  }
+}
 
 describe('useAnnotationWorkspaceVideoSync', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
 
-  it('requests playback after metadata loads when autoplay is armed', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  it('pauses normal playback synchronization while the document is hidden', () => {
+    const options = playbackOptions({ videoSrc: '/source.mp4' })
+    const { result, rerender, unmount } = renderHook(
+      ({ isPlaying }) => useAnnotationWorkspaceVideoSync({ ...options, isPlaying }),
+      { initialProps: { isPlaying: false } },
+    )
+    const video = document.createElement('video')
+    video.pause = vi.fn()
+    video.play = vi.fn(() => Promise.resolve())
+    result.current.videoRef.current = video
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+
+    rerender({ isPlaying: true })
+
+    expect(video.pause).toHaveBeenCalled()
+    expect(video.play).not.toHaveBeenCalled()
+    expect(options.onRecordEvent).not.toHaveBeenCalledWith(
+      'playback',
+      'sync-action',
+      expect.anything(),
+    )
+    unmount()
+  })
+
+  it('does not resume or seek video playback while the document is hidden', () => {
+    const options = playbackOptions({ videoSrc: '/source.mp4' })
+    const { result, unmount } = renderHook(() => useAnnotationWorkspaceVideoSync(options))
+    const video = document.createElement('video')
+    video.pause = vi.fn()
+    video.play = vi.fn(() => Promise.resolve())
+    result.current.videoRef.current = video
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+
+    act(() => {
+      result.current.handleResumePlayback(3)
+      vi.advanceTimersByTime(20)
+    })
+
+    expect(video.pause).toHaveBeenCalledOnce()
+    expect(video.play).not.toHaveBeenCalled()
+    expect(video.currentTime).toBe(0)
+    unmount()
+  })
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY])(
+    'resumes media with a non-finite duration: %s',
+    (duration) => {
+      const { result, unmount } = renderHook(() =>
+        useAnnotationWorkspaceVideoSync(playbackOptions({ videoSrc: '/source.mp4' })),
+      )
+      const video = document.createElement('video')
+      Object.defineProperty(video, 'duration', { configurable: true, value: duration })
+      video.pause = vi.fn()
+      video.play = vi.fn(() => Promise.resolve())
+      result.current.videoRef.current = video
+
+      act(() => {
+        result.current.handleResumePlayback(3)
+        vi.advanceTimersByTime(20)
+      })
+
+      expect(video.currentTime).toBeCloseTo(0.301)
+      expect(video.play).toHaveBeenCalledOnce()
+      unmount()
+    },
+  )
+
+  it.each([false, true])(
+    'gates frame-only autoplay on document visibility: hidden=%s',
+    (hidden) => {
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(hidden)
+      const options = playbackOptions({ autoPlay: true })
+      const { unmount } = renderHook(() => useAnnotationWorkspaceVideoSync(options))
+
+      expect(options.onTogglePlayback).toHaveBeenCalledTimes(hidden ? 0 : 1)
+      unmount()
+    },
+  )
+
+  it.each([false, true])(
+    'advances frame-only playback and %s loop behavior within selected bounds',
+    (loop) => {
+      const options = playbackOptions({
+        isPlaying: true,
+        currentFrame: 2,
+        originalFrameIndex: 2,
+        activePlaybackRange: [2, 4],
+        playbackRangeStart: 2,
+        playbackRangeEnd: 4,
+        shouldLoopPlaybackRange: loop,
+        autoLoop: loop,
+      })
+      const { rerender, unmount } = renderHook((props) => useAnnotationWorkspaceVideoSync(props), {
+        initialProps: options,
+      })
+      for (let step = 0; step < 40; step++) {
+        act(() => vi.advanceTimersByTime(20))
+        const currentFrame = vi.mocked(options.onSetCurrentFrame).mock.lastCall?.[0] ?? 2
+        rerender({ ...options, currentFrame, originalFrameIndex: currentFrame })
+      }
+      const frames = vi.mocked(options.onSetCurrentFrame).mock.calls.map(([frame]) => frame)
+      expect(frames.length).toBeGreaterThan(0)
+      expect(frames.every((frame) => frame >= 2 && frame <= 4)).toBe(true)
+      if (loop) expect(options.onTogglePlayback).not.toHaveBeenCalled()
+      else expect(options.onTogglePlayback).toHaveBeenCalledOnce()
+      unmount()
+    },
+  )
+
+  it('seeks with and without a video and resumes at the selected source window offset', () => {
+    const options = playbackOptions({ videoSrc: '/source.mp4', videoWindow: [2, 3] })
+    const { result, rerender, unmount } = renderHook(
+      (props) => useAnnotationWorkspaceVideoSync(props),
+      { initialProps: options },
+    )
+    act(() => {
+      expect(result.current.seekVideoFrame(-5, null, false)).toBe(0)
+    })
+    act(() => {
+      result.current.handleResumePlayback(0)
+      vi.advanceTimersByTime(20)
+    })
+    const video = document.createElement('video')
+    Object.defineProperty(video, 'duration', { value: 10, configurable: true })
+    Object.defineProperty(video, 'currentTime', { value: 0, configurable: true, writable: true })
+    video.pause = vi.fn()
+    video.play = vi.fn(() => Promise.resolve())
+    result.current.videoRef.current = video
+    act(() =>
+      result.current.handleLoadedMetadata({
+        currentTarget: video,
+      } as SyntheticEvent<HTMLVideoElement>),
+    )
+    act(() => {
+      expect(result.current.seekVideoFrame(9, [2, 4])).toBe(4)
+    })
+    expect(video.currentTime).toBeCloseTo(2.4)
+    rerender({ ...options, isPlaying: true, playbackSpeed: 2 })
+    act(() => {
+      result.current.handleResumePlayback(3)
+      vi.advanceTimersByTime(20)
+    })
+    expect(video.currentTime).toBeCloseTo(2.301)
+    expect(video.playbackRate).toBe(2)
+    expect(video.play).toHaveBeenCalled()
+    unmount()
+  })
+
+  it.each([false, true])(
+    'stops or loops at the end of a concatenated source window (loop=%s)',
+    (loop) => {
+      const options = playbackOptions({
+        isPlaying: true,
+        videoSrc: '/source.mp4',
+        videoWindow: [2, 3],
+        shouldLoopPlaybackRange: loop,
+        autoLoop: loop,
+      })
+      const { result, unmount } = renderHook(() => useAnnotationWorkspaceVideoSync(options))
+      const video = document.createElement('video')
+      Object.defineProperty(video, 'duration', { value: 10, configurable: true })
+      Object.defineProperty(video, 'currentTime', { value: 3, configurable: true, writable: true })
+      Object.defineProperty(video, 'paused', { value: false, configurable: true })
+      video.pause = vi.fn()
+      video.play = vi.fn(() => Promise.resolve())
+      result.current.videoRef.current = video
+      act(() => vi.advanceTimersByTime(20))
+      if (loop) {
+        expect(video.currentTime).toBeLessThan(3)
+        expect(options.onTogglePlayback).not.toHaveBeenCalled()
+      } else {
+        expect(video.pause).toHaveBeenCalledOnce()
+        expect(options.onTogglePlayback).toHaveBeenCalledOnce()
+      }
+      unmount()
+    },
+  )
+
+  it('recovers paused media while playback is active and cleans up its animation work', () => {
+    const options = playbackOptions({ isPlaying: true, videoSrc: '/source.mp4' })
+    const { result, unmount } = renderHook(() => useAnnotationWorkspaceVideoSync(options))
+    const video = document.createElement('video')
+    Object.defineProperty(video, 'currentTime', { value: 0.2, configurable: true, writable: true })
+    Object.defineProperty(video, 'duration', { value: 1, configurable: true })
+    Object.defineProperty(video, 'paused', { value: true, configurable: true })
+    video.pause = vi.fn()
+    video.play = vi.fn(() => Promise.resolve())
+    result.current.videoRef.current = video
+    act(() => vi.advanceTimersByTime(350))
+    expect(options.onRecordEvent).toHaveBeenCalledWith(
+      'playback',
+      'desync-recover',
+      expect.objectContaining({ currentFrame: 2 }),
+    )
+    expect(video.play).toHaveBeenCalled()
+    unmount()
+    vi.mocked(options.onSetCurrentFrame).mockClear()
+    act(() => vi.advanceTimersByTime(100))
+    expect(options.onSetCurrentFrame).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])('only requests metadata autoplay while visible (hidden=%s)', (hidden) => {
+    const visibility = vi.spyOn(document, 'hidden', 'get').mockReturnValue(hidden)
     const togglePlayback = vi.fn()
     const baseProps = {
       currentFrame: 0,
@@ -46,7 +280,8 @@ describe('useAnnotationWorkspaceVideoSync', () => {
         currentTarget: video,
       } as SyntheticEvent<HTMLVideoElement>)
     })
-    expect(togglePlayback).toHaveBeenCalledTimes(1)
+    expect(togglePlayback).toHaveBeenCalledTimes(hidden ? 0 : 1)
+    visibility.mockRestore()
   })
 
   it('re-arms autoplay when videoSrc changes between episodes', () => {
@@ -589,76 +824,80 @@ describe('useAnnotationWorkspaceVideoSync videoWindow', () => {
     expect(video.currentTime).toBeCloseTo(2.0, 5)
   })
 
-  it('preserves the windowed frame across paused preloaded camera switches', () => {
-    // totalFrames=30, windowDuration=3s → fps=10. Frame 6 → 0.6s episode time
-    // → toVideoTime(0.6) = 2.0 + 0.6 = 2.6
-    const baseProps = {
-      currentFrame: 6,
-      totalFrames: 30,
-      originalFrameIndex: 6,
-      activePlaybackRange: null as [number, number] | null,
-      playbackRangeStart: 0,
-      playbackRangeEnd: 29,
-      isPlaying: false,
-      playbackSpeed: 1,
-      autoPlay: false,
-      autoLoop: false,
-      shouldLoopPlaybackRange: false,
-      datasetFps: 30,
-      insertedFrames: new Map<number, FrameInsertion>(),
-      removedFrames: new Set<number>(),
-      videoSrc: '/videos/concat.mp4',
-      videoWindow: [2.0, 5.0] as [number, number],
-      onSetCurrentFrame: vi.fn(),
-      onTogglePlayback: vi.fn(),
-      onSetFrameWithinPlaybackRange: vi.fn(),
-      onRecordEvent: vi.fn(),
-    }
+  it.each([30, 20])(
+    'preserves the source window across camera switches with %i timeline frames',
+    (totalFrames) => {
+      // totalFrames=30, windowDuration=3s → fps=10. Frame 6 → 0.6s episode time
+      // → toVideoTime(0.6) = 2.0 + 0.6 = 2.6
+      const baseProps = {
+        currentFrame: 6,
+        totalFrames,
+        sourceFrameCount: 30,
+        originalFrameIndex: 6,
+        activePlaybackRange: null as [number, number] | null,
+        playbackRangeStart: 0,
+        playbackRangeEnd: totalFrames - 1,
+        isPlaying: false,
+        playbackSpeed: 1,
+        autoPlay: false,
+        autoLoop: false,
+        shouldLoopPlaybackRange: false,
+        datasetFps: 30,
+        insertedFrames: new Map<number, FrameInsertion>(),
+        removedFrames: new Set<number>(),
+        videoSrc: '/videos/concat.mp4',
+        videoWindow: [2.0, 5.0] as [number, number],
+        onSetCurrentFrame: vi.fn(),
+        onTogglePlayback: vi.fn(),
+        onSetFrameWithinPlaybackRange: vi.fn(),
+        onRecordEvent: vi.fn(),
+      }
 
-    const { result, rerender } = renderHook((props) => useAnnotationWorkspaceVideoSync(props), {
-      initialProps: baseProps,
-    })
-
-    const video = document.createElement('video')
-    Object.defineProperty(video, 'duration', { configurable: true, value: 60 })
-    Object.defineProperty(video, 'currentTime', { configurable: true, writable: true, value: 0 })
-
-    act(() => {
-      result.current.handleLoadedMetadata({
-        currentTarget: video,
-      } as SyntheticEvent<HTMLVideoElement>)
-    })
-
-    expect(video.currentTime).toBeCloseTo(2.6, 5)
-
-    const toolVideo = document.createElement('video')
-    Object.defineProperty(toolVideo, 'duration', { configurable: true, value: 60 })
-    Object.defineProperty(toolVideo, 'currentTime', {
-      configurable: true,
-      writable: true,
-      value: 0,
-    })
-    act(() => {
-      Object.defineProperty(result.current.videoRef, 'current', {
-        value: toolVideo,
-        writable: true,
+      const { result, rerender } = renderHook((props) => useAnnotationWorkspaceVideoSync(props), {
+        initialProps: baseProps,
       })
-    })
 
-    const toolProps = { ...baseProps, videoSrc: '/videos/tool.mp4' }
-    rerender(toolProps)
-    expect(toolVideo.currentTime).toBeCloseTo(2.6, 5)
+      const video = document.createElement('video')
+      Object.defineProperty(video, 'duration', { configurable: true, value: 60 })
+      Object.defineProperty(video, 'currentTime', { configurable: true, writable: true, value: 0 })
 
-    const advancedProps = { ...toolProps, currentFrame: 9, originalFrameIndex: 9 }
-    rerender(advancedProps)
-    expect(toolVideo.currentTime).toBeCloseTo(2.9, 5)
+      act(() => {
+        result.current.handleLoadedMetadata({
+          currentTarget: video,
+        } as SyntheticEvent<HTMLVideoElement>)
+      })
 
-    act(() => {
-      Object.defineProperty(result.current.videoRef, 'current', { value: video, writable: true })
-    })
-    rerender({ ...advancedProps, videoSrc: baseProps.videoSrc })
-    expect(video.currentTime).toBeCloseTo(2.9, 5)
-  })
+      expect(video.currentTime).toBeCloseTo(2.6, 5)
+
+      const toolVideo = document.createElement('video')
+      Object.defineProperty(toolVideo, 'duration', { configurable: true, value: 60 })
+      Object.defineProperty(toolVideo, 'currentTime', {
+        configurable: true,
+        writable: true,
+        value: 0,
+      })
+      act(() => {
+        Object.defineProperty(result.current.videoRef, 'current', {
+          value: toolVideo,
+          writable: true,
+        })
+      })
+
+      const toolProps = { ...baseProps, videoSrc: '/videos/tool.mp4' }
+      rerender(toolProps)
+      expect(toolVideo.currentTime).toBeCloseTo(2.6, 5)
+
+      const advancedProps = { ...toolProps, currentFrame: 9, originalFrameIndex: 9 }
+      rerender(advancedProps)
+      expect(toolVideo.currentTime).toBeCloseTo(2.9, 5)
+
+      act(() => {
+        Object.defineProperty(result.current.videoRef, 'current', { value: video, writable: true })
+      })
+      rerender({ ...advancedProps, videoSrc: baseProps.videoSrc })
+      expect(video.currentTime).toBeCloseTo(2.9, 5)
+    },
+  )
 
   it('seeks to frame/fps without offset when videoWindow is null', () => {
     // No window → videoOffset=0. videoDuration is updated via useState during the

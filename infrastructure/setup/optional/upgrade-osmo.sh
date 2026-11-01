@@ -450,8 +450,8 @@ stage_backup() {
     mkdir -p "$path/helm" "$path/configs" "$path/k8s"
 
     section "Save Helm Releases"
-    helm list --all -n "$NS_OSMO_CONTROL_PLANE" -o json > "$path/helm/releases-control-plane.json"
-    helm list --all -n "$NS_OSMO_OPERATOR" -o json > "$path/helm/releases-operator.json"
+    helm_list_all_releases -n "$NS_OSMO_CONTROL_PLANE" -o json > "$path/helm/releases-control-plane.json"
+    helm_list_all_releases -n "$NS_OSMO_OPERATOR" -o json > "$path/helm/releases-operator.json"
     jq -e 'any(.[]; .status != "uninstalled")' "$path/helm/releases-control-plane.json" >/dev/null || \
         fatal "No installed Helm releases in $NS_OSMO_CONTROL_PLANE"
     while IFS=$'\t' read -r ns release chart revision; do
@@ -540,7 +540,7 @@ stage_hop_62() {
     local plan="" upgrades="" service_tgz="" service_release="" migrations_dir="" connection=""
     local -a args
     backup_path="$backup_dir/$(latest_backup)"
-    releases=$(helm list --all -n "$NS_OSMO_CONTROL_PLANE" -o json)
+    releases=$(helm_list_all_releases -n "$NS_OSMO_CONTROL_PLANE" -o json)
     if jq -e 'any(.[]; .name == "osmo" and .status != "uninstalled")' <<< "$releases" >/dev/null; then
         fatal "Release osmo exists in $NS_OSMO_CONTROL_PLANE; this install already uses the 6.3 layout"
     fi

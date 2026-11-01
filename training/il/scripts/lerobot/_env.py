@@ -31,6 +31,20 @@ def parse_url_list_env(env_value: str | None) -> list[str]:
     return [item.strip() for item in parsed if isinstance(item, str) and item.strip()]
 
 
+def dataset_source() -> str:
+    """Return where the training dataset comes from: ``local``, ``blob``, or ``hf``.
+
+    ``DATASET_DIR`` names a complete dataset already on disk, such as one mounted from the local
+    data root; otherwise ``BLOB_URLS`` selects a Blob download, and anything else reads from the
+    Hugging Face Hub by ``DATASET_REPO_ID``.
+    """
+    if os.environ.get("DATASET_DIR", "").strip():
+        return "local"
+    if has_blob_urls():
+        return "blob"
+    return "hf"
+
+
 def has_blob_urls(env_value: str | None = None) -> bool:
     """Return ``True`` iff ``env_value`` resolves to at least one blob URL.
 

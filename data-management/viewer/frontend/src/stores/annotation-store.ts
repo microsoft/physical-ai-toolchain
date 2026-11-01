@@ -6,6 +6,7 @@ import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 
+import type { DraftSource } from '@/lib/edit-draft-storage'
 import type {
   Anomaly,
   DataQualityAnnotation,
@@ -15,10 +16,16 @@ import type {
   TaskCompletenessAnnotation,
   TrajectoryQualityAnnotation,
 } from '@/types'
+import { normalizeSubtaskInstructions } from '@/types'
 
 const EMPTY_ANOMALIES: Anomaly[] = []
 
 interface AnnotationState {
+  sourceBinding: DraftSource | null
+  resourceKey: string | null
+  baseEtag: string | null
+  draftHydrated: boolean
+  draftError: string | null
   /** Current annotation being edited */
   currentAnnotation: EpisodeAnnotation | null
   /** Original annotation (for dirty checking) */
@@ -37,6 +44,7 @@ interface AnnotationState {
   editGeneration: number
   /** Stale-write conflict retained for explicit resolution */
   conflict: {
+    sourceChanged?: boolean
     currentEtag: string | null
     submitted: EpisodeAnnotation
   } | null
@@ -66,7 +74,10 @@ interface AnnotationActions {
   /** Update notes */
   updateNotes: (notes: string) => void
   /** Update language instruction annotation */
-  updateLanguageInstruction: (update: Partial<LanguageInstructionAnnotation>) => void
+  updateLanguageInstruction: (
+    update: Partial<LanguageInstructionAnnotation>,
+    adoption?: EpisodeAnnotation['instructionAdoption'],
+  ) => void
   /** Clear language instruction */
   clearLanguageInstruction: () => void
   /** Replace the saved object detections list (one entry per reference frame) */
@@ -86,7 +97,11 @@ interface AnnotationActions {
   /** Retain a stale-write conflict without discarding local edits */
   setConflict: (currentEtag: string | null, submitted: EpisodeAnnotation) => void
   /** Apply a rebased draft over the latest server baseline */
-  resolveConflict: (merged: EpisodeAnnotation, serverBaseline: EpisodeAnnotation) => void
+  resolveConflict: (
+    merged: EpisodeAnnotation,
+    serverBaseline: EpisodeAnnotation,
+    serverEtag: string | null,
+  ) => void
   /** Reset annotation to original state */
   resetAnnotation: () => void
   /** Clear the current annotation */
@@ -96,6 +111,11 @@ interface AnnotationActions {
 type AnnotationStore = AnnotationState & AnnotationActions
 
 const initialState: AnnotationState = {
+  sourceBinding: null,
+  resourceKey: null,
+  baseEtag: null,
+  draftHydrated: false,
+  draftError: null,
   currentAnnotation: null,
   originalAnnotation: null,
   isDirty: false,
@@ -162,7 +182,8 @@ export const useAnnotationStore = create<AnnotationStore>()(
             annotatorId,
             isDirty: false,
             error: null,
-            contextGeneration: 0,
+            isSaving: false,
+            contextGeneration: get().contextGeneration + 1,
             editGeneration: 0,
             conflict: null,
           },
@@ -179,7 +200,8 @@ export const useAnnotationStore = create<AnnotationStore>()(
             annotatorId: annotation.annotatorId,
             isDirty: false,
             error: null,
-            contextGeneration: 0,
+            isSaving: false,
+            contextGeneration: get().contextGeneration + 1,
             editGeneration: 0,
             conflict: null,
           },
@@ -381,7 +403,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
         )
       },
 
-      updateLanguageInstruction: (update) => {
+      updateLanguageInstruction: (update, adoption) => {
         const { currentAnnotation } = get()
         if (!currentAnnotation) return
 
@@ -393,11 +415,42 @@ export const useAnnotationStore = create<AnnotationStore>()(
           subtaskInstructions: [],
         }
 
+        const instructionAdoption = { ...currentAnnotation.instructionAdoption }
+        if (update.instruction !== undefined && update.instruction !== existing.instruction) {
+          delete instructionAdoption.instruction
+        }
+        if (update.subtaskInstructions) {
+          const previous = new Map(
+            normalizeSubtaskInstructions(existing.subtaskInstructions).map((item) => [
+              item.id,
+              item.text,
+            ]),
+          )
+          const next = new Map(
+            normalizeSubtaskInstructions(update.subtaskInstructions).map((item) => [
+              item.id,
+              item.text,
+            ]),
+          )
+          for (const field of Object.keys(instructionAdoption)) {
+            if (
+              field.startsWith('subtasks/') &&
+              previous.get(field.slice(9)) !== next.get(field.slice(9))
+            ) {
+              delete instructionAdoption[field]
+            }
+          }
+        }
+        Object.assign(instructionAdoption, adoption)
+
         set(
           {
             currentAnnotation: {
               ...currentAnnotation,
               timestamp: new Date().toISOString(),
+              instructionAdoption: Object.keys(instructionAdoption).length
+                ? instructionAdoption
+                : undefined,
               languageInstruction: {
                 ...existing,
                 ...update,
@@ -415,7 +468,11 @@ export const useAnnotationStore = create<AnnotationStore>()(
         const { currentAnnotation } = get()
         if (!currentAnnotation) return
 
-        const { languageInstruction: _, ...rest } = currentAnnotation
+        const {
+          languageInstruction: _,
+          instructionAdoption: _adoption,
+          ...rest
+        } = currentAnnotation
         set(
           {
             currentAnnotation: {
@@ -533,6 +590,9 @@ export const useAnnotationStore = create<AnnotationStore>()(
         const { editGeneration } = get()
         set(
           {
+            ...(editGeneration === submittedEditGeneration
+              ? { currentAnnotation: structuredClone(submitted) }
+              : {}),
             originalAnnotation: structuredClone(submitted),
             isDirty: editGeneration !== submittedEditGeneration,
             isSaving: false,
@@ -556,11 +616,12 @@ export const useAnnotationStore = create<AnnotationStore>()(
         )
       },
 
-      resolveConflict: (merged, serverBaseline) => {
+      resolveConflict: (merged, serverBaseline, serverEtag) => {
         set(
           {
             currentAnnotation: structuredClone(merged),
             originalAnnotation: structuredClone(serverBaseline),
+            baseEtag: serverEtag,
             isDirty: true,
             error: null,
             conflict: null,
@@ -572,7 +633,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
       },
 
       clear: () => {
-        set(initialState, false, 'clear')
+        set({ ...initialState, contextGeneration: get().contextGeneration + 1 }, false, 'clear')
       },
     }),
     { name: 'annotation-store' },

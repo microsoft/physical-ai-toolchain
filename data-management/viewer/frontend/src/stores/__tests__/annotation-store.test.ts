@@ -1,7 +1,7 @@
 import { renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import type { Anomaly, EpisodeAnnotation } from '@/types'
+import type { Anomaly, EpisodeAnnotation, ObjectDetectionAnnotation } from '@/types'
 
 import {
   useAnnotationDirtyState,
@@ -220,6 +220,149 @@ describe('useAnnotationStore', () => {
       expect(state.isDirty).toBe(false)
       expect(state.isSaving).toBe(false)
       expect(state.originalAnnotation!.taskCompleteness.rating).toBe('failure')
+    })
+  })
+
+  it.each([
+    {
+      name: 'trajectory',
+      edit: () => useAnnotationStore.getState().updateTrajectoryQuality({ overallScore: 2 }),
+    },
+    {
+      name: 'quality',
+      edit: () => useAnnotationStore.getState().updateDataQuality({ overallQuality: 'poor' }),
+    },
+    { name: 'add anomaly', edit: () => useAnnotationStore.getState().addAnomaly(mockAnomaly) },
+    {
+      name: 'update anomaly',
+      edit: () => useAnnotationStore.getState().updateAnomaly('missing', { verified: true }),
+    },
+    { name: 'remove anomaly', edit: () => useAnnotationStore.getState().removeAnomaly('missing') },
+    {
+      name: 'verify anomaly',
+      edit: () => useAnnotationStore.getState().toggleAnomalyVerified('missing'),
+    },
+    { name: 'notes', edit: () => useAnnotationStore.getState().updateNotes('Draft') },
+    {
+      name: 'instruction',
+      edit: () => useAnnotationStore.getState().updateLanguageInstruction({ instruction: 'Draft' }),
+    },
+    {
+      name: 'clear instruction',
+      edit: () => useAnnotationStore.getState().clearLanguageInstruction(),
+    },
+    { name: 'detections', edit: () => useAnnotationStore.getState().setObjectDetections([]) },
+    {
+      name: 'remove detection',
+      edit: () => useAnnotationStore.getState().removeObjectDetection(0),
+    },
+  ])('does not create an annotation for $name before loading', ({ edit }) => {
+    edit()
+    expect(useAnnotationStore.getState()).toMatchObject({
+      currentAnnotation: null,
+      isDirty: false,
+      editGeneration: 0,
+    })
+  })
+
+  it('preserves unchanged adoption and removes provenance only for edited or deleted text', () => {
+    useAnnotationStore.getState().loadAnnotation(mockAnnotation)
+    useAnnotationStore.getState().updateLanguageInstruction(
+      {
+        instruction: 'Pick',
+        subtaskInstructions: [
+          { id: 'reach', text: 'Reach' },
+          { id: 'grasp', text: 'Grasp' },
+          { id: 'place', text: 'Place' },
+        ],
+      },
+      {
+        instruction: 'template',
+        'subtasks/reach': 'template',
+        'subtasks/grasp': 'retroactive',
+        'subtasks/place': 'template',
+      },
+    )
+    useAnnotationStore.getState().updateLanguageInstruction({
+      instruction: 'Pick',
+      subtaskInstructions: [
+        { id: 'reach', text: 'Reach' },
+        { id: 'grasp', text: 'Grip gently' },
+      ],
+    })
+    expect(useAnnotationStore.getState().currentAnnotation?.instructionAdoption).toEqual({
+      instruction: 'template',
+      'subtasks/reach': 'template',
+    })
+
+    useAnnotationStore
+      .getState()
+      .updateLanguageInstruction({ instruction: 'Move', subtaskInstructions: [] })
+    expect(useAnnotationStore.getState().currentAnnotation?.instructionAdoption).toBeUndefined()
+    useAnnotationStore.getState().clearLanguageInstruction()
+    expect(useAnnotationStore.getState().currentAnnotation?.languageInstruction).toBeUndefined()
+    expect(useAnnotationStore.getState().originalAnnotation).toEqual(mockAnnotation)
+  })
+
+  it('replaces frame detections by value, sorts them and preserves unrelated frames', () => {
+    const detection: ObjectDetectionAnnotation = {
+      frameIndex: 3,
+      camera: 'front',
+      queriedLabels: ['cup'],
+      detections: [],
+    }
+    useAnnotationStore.getState().upsertObjectDetection(detection)
+    expect(useAnnotationStore.getState().currentAnnotation).toBeNull()
+    useAnnotationStore.getState().loadAnnotation(mockAnnotation)
+    useAnnotationStore.getState().upsertObjectDetection(detection)
+    useAnnotationStore.getState().upsertObjectDetection({ ...detection, frameIndex: 1 })
+    useAnnotationStore.getState().upsertObjectDetection({ ...detection, camera: 'wrist' })
+    detection.queriedLabels.push('plate')
+
+    expect(useAnnotationStore.getState().currentAnnotation?.objectDetections).toEqual([
+      { frameIndex: 1, camera: 'front', queriedLabels: ['cup'], detections: [] },
+      { frameIndex: 3, camera: 'wrist', queriedLabels: ['cup'], detections: [] },
+    ])
+    useAnnotationStore.getState().removeObjectDetection(1)
+    expect(useAnnotationStore.getState().currentAnnotation?.objectDetections).toHaveLength(1)
+    expect(useAnnotationStore.getState().originalAnnotation?.objectDetections).toBeUndefined()
+  })
+
+  it('retains newer edits when an earlier submitted snapshot is acknowledged', () => {
+    useAnnotationStore.getState().loadAnnotation(mockAnnotation)
+    useAnnotationStore.getState().updateNotes('Submitted')
+    const submitted = structuredClone(useAnnotationStore.getState().currentAnnotation!)
+    const submittedGeneration = useAnnotationStore.getState().editGeneration
+    useAnnotationStore.getState().updateNotes('Newer draft')
+    useAnnotationStore.getState().markSubmittedSaved(submitted, submittedGeneration)
+
+    expect(useAnnotationStore.getState()).toMatchObject({
+      currentAnnotation: { notes: 'Newer draft' },
+      originalAnnotation: { notes: 'Submitted' },
+      isDirty: true,
+      isSaving: false,
+    })
+  })
+
+  it('rebases an explicit conflict onto the server revision without discarding local notes', () => {
+    useAnnotationStore.getState().loadAnnotation(mockAnnotation)
+    useAnnotationStore.getState().updateNotes('Local draft')
+    const submitted = structuredClone(useAnnotationStore.getState().currentAnnotation!)
+    useAnnotationStore.getState().setConflict('new-revision', submitted)
+    const server: EpisodeAnnotation = {
+      ...mockAnnotation,
+      taskCompleteness: { rating: 'failure', confidence: 3 },
+    }
+    useAnnotationStore
+      .getState()
+      .resolveConflict({ ...server, notes: submitted.notes }, server, 'new-revision')
+
+    expect(useAnnotationStore.getState()).toMatchObject({
+      currentAnnotation: { notes: 'Local draft', taskCompleteness: { rating: 'failure' } },
+      originalAnnotation: server,
+      baseEtag: 'new-revision',
+      conflict: null,
+      isDirty: true,
     })
   })
 

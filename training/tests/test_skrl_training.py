@@ -17,6 +17,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from training.utils.tracking import AzureMLTracking, RegisteredCheckpoint
+
 from .conftest import load_training_module
 
 if TYPE_CHECKING:
@@ -315,7 +317,7 @@ class TestRegisterCheckpointModel:
         monkeypatch.setitem(sys.modules, "azure.ai.ml.entities", entities_module)
 
         client = MagicMock()
-        context = SimpleNamespace(client=client)
+        context = AzureMLTracking(context=SimpleNamespace(client=client))
 
         _MOD._register_checkpoint_model(
             context=context,
@@ -340,7 +342,7 @@ class TestRegisterCheckpointModel:
 
         client = MagicMock()
         client.models.create_or_update.side_effect = RuntimeError("boom")
-        context = SimpleNamespace(client=client)
+        context = AzureMLTracking(context=SimpleNamespace(client=client))
 
         # Should not raise.
         _MOD._register_checkpoint_model(
@@ -364,12 +366,32 @@ class TestRegisterCheckpointModel:
 
         # Should not raise.
         _MOD._register_checkpoint_model(
-            context=SimpleNamespace(client=MagicMock()),
+            context=AzureMLTracking(context=SimpleNamespace(client=MagicMock())),
             model_name="m",
             checkpoint_uri="runs:/x/y",
             checkpoint_mode=None,
             task=None,
         )
+
+    def test_registers_through_any_backend(self) -> None:
+        backend = MagicMock()
+        backend.register_checkpoint.return_value = RegisteredCheckpoint("my-model", "3", "models:/my-model/3")
+
+        _MOD._register_checkpoint_model(
+            context=backend,
+            model_name="my-model",
+            checkpoint_uri="runs:/run-1/skrl-run/checkpoints/best_agent.pt",
+            checkpoint_mode="from-scratch",
+            task="Isaac-Cartpole-v0",
+            algorithm="PPO",
+        )
+
+        kwargs = backend.register_checkpoint.call_args.kwargs
+        assert kwargs["name"] == "my-model"
+        assert kwargs["artifact_uri"] == "runs:/run-1/skrl-run/checkpoints/best_agent.pt"
+        assert kwargs["tags"]["framework"] == "skrl"
+        assert kwargs["tags"]["task"] == "Isaac-Cartpole-v0"
+        assert kwargs["properties"]["success_threshold"] == "0.7"
 
 
 # ---------------------------------------------------------------------------
@@ -926,7 +948,7 @@ class TestMlflowRunContext:
         monkeypatch.setenv("MLFLOW_CORRELATION_ID", "corr-99")
         mlflow = MagicMock()
         env_cfg = SimpleNamespace(scene=None, num_envs=1)
-        context = SimpleNamespace(workspace_name="ws-1", tracking_uri="azureml://tracking")
+        context = AzureMLTracking(context=SimpleNamespace(workspace_name="ws-1", tracking_uri="azureml://tracking"))
         args = _make_mlflow_args(checkpoint_uri="runs:/abc")
 
         with _MOD.mlflow_run_context(
@@ -949,6 +971,8 @@ class TestMlflowRunContext:
         assert tags_call["checkpoint_resume"] == "/some/ckpt"
         assert tags_call["checkpoint_source_uri"] == "runs:/abc"
         assert tags_call["correlation_id"] == "corr-99"
+        mlflow.set_tracking_uri.assert_called_once_with("azureml://tracking")
+        mlflow.set_registry_uri.assert_called_once_with("azureml://tracking")
 
 
 # ---------------------------------------------------------------------------
@@ -1708,6 +1732,7 @@ class TestRunHydraTraining:
             "_run_training_with_mlflow",
             side_effect=SystemExit(0),
         )
+        prepare_shutdown = mocker.patch.object(_MOD, "prepare_for_shutdown")
         logger_error = mocker.patch.object(_MOD._LOGGER, "error")
         cli = _make_cli(seed=1)
         cli.agent = None
@@ -1721,6 +1746,7 @@ class TestRunHydraTraining:
         )
 
         env.close.assert_called_once()
+        prepare_shutdown.assert_called_once_with()
         logger_error.assert_not_called()
 
 

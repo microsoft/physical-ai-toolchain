@@ -54,24 +54,24 @@ jobs:
           persist-credentials: false
 
       - name: Setup Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: '3.12'
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           version: '0.12.20'
           checksum: '6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f'
 
       - name: Install dependencies
         id: install
-        run: uv sync --frozen --group dev
+        run: uv sync --frozen --group dev --group azureml-tracking
 
       - name: Run pytest
         id: test
         run: >-
-          uv run --frozen pytest -o addopts="" training/tests -v
+          uv run --no-sync --frozen pytest -o addopts="" training/tests -v
           --junitxml=logs/pytest-training-results.xml
           --cov=training
           --cov-report=term-missing
@@ -81,7 +81,7 @@ jobs:
       - name: Upload coverage.xml artifact
         if: always()
         continue-on-error: ${{ job.status == 'failure' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: pytest-training-coverage-xml
           path: logs/coverage-training.xml

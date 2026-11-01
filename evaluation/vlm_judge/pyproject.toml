@@ -3,29 +3,35 @@ name = "physical-ai-vlm-judge"
 version = "0.1.0"
 description = "VLM-as-judge harness for robot manipulation episodes"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = [
-    "av==18.1.0",
+    "physical-ai-dataset-io==0.1.0",
+    "av==19.0.1",
     "pandas==3.0.5",
-    "Pillow==12.3.0",
-    "pyarrow==25.0.1",
+    "Pillow==13.0.0",
+    "pyarrow==26.0.0",
+    "pydantic==2.14.1",
 ]
+
+[project.urls]
+Repository = "https://github.com/microsoft/physical-ai-toolchain"
 
 [project.optional-dependencies]
 api = [
-    "fastapi==0.141.1",
-    "pydantic==2.13.5",
-    "uvicorn[standard]==0.52.4",
+    "fastapi==0.159.1",
+    "uvicorn[standard]==0.54.0",
 ]
 openai = [
+    "azure-identity==1.26.0",
     "openai==3.6.0",
 ]
 qwen3-vl = [
     "accelerate==1.15.0",
     # Prevent prerelease resolution from selecting hf-xet 1.6.1a0.
     "hf-xet==1.6.0",
-    "torch==2.14.0",
-    "torchvision==0.29.0",
-    "transformers==5.16.1",
+    "torch==2.14.1",
+    "torchvision==0.29.1",
+    "transformers==5.20.2",
 ]
 
 [build-system]
@@ -36,30 +42,16 @@ build-backend = "setuptools.build_meta"
 packages = ["evaluation.vlm_judge"]
 package-dir = { "evaluation.vlm_judge" = "." }
 
-[tool.uv]
-environments = [
-    "sys_platform != 'linux'",
-    "sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "sys_platform == 'linux' and platform_machine == 'aarch64'",
-]
-prerelease = "allow"
-
-[[tool.uv.index]]
-name = "pypi"
-url = "https://pypi.org/simple"
-default = true
-
-[[tool.uv.index]]
-name = "pytorch-cu130"
-url = "https://download.pytorch.org/whl/cu130"
-explicit = true
-
-[tool.uv.sources]
-torch = [
-    { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
-    { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
-]
-torchvision = [
-    { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
-    { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+[tool.pytest.ini_options]
+testpaths = ["../tests/vlm_judge"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=evaluation.vlm_judge",
+    "--cov-branch",
+    "--cov-report=term-missing",
+    "--cov-report=xml:evaluation/logs/coverage-vlm-judge.xml",
+    "--cov-fail-under=35",
+    "--junitxml=evaluation/logs/pytest-vlm-judge-results.xml",
 ]

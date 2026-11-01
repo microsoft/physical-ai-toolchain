@@ -35,6 +35,7 @@ export interface JointConfigDefaultsEditorProps {
   labels: Record<string, string>
   onSave: (config: { groups: JointGroup[]; labels: Record<string, string> }) => void
   isSaving?: boolean
+  saveError?: string
   colors?: string[]
 }
 
@@ -217,6 +218,7 @@ export function JointConfigDefaultsEditor({
   labels: initialLabels,
   onSave,
   isSaving,
+  saveError,
   colors = JOINT_COLORS,
 }: JointConfigDefaultsEditorProps) {
   const [groups, setGroups] = useState<DraftGroup[]>(
@@ -231,6 +233,7 @@ export function JointConfigDefaultsEditor({
   const [movingJoint, setMovingJoint] = useState<string | null>(null)
   const [editingIndex, setEditingIndex] = useState<string | null>(null)
   const groupRefs = useRef(new Map<string, HTMLDivElement>())
+  const openerRef = useRef<HTMLElement | null>(null)
 
   // Reset local state when dialog opens with new props
   useEffect(() => {
@@ -335,7 +338,7 @@ export function JointConfigDefaultsEditor({
   }
 
   const handleSave = () => {
-    if (hasDuplicateIndices) {
+    if (isSaving || hasDuplicateIndices) {
       return
     }
 
@@ -359,7 +362,17 @@ export function JointConfigDefaultsEditor({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col">
+      <DialogContent
+        className="flex max-h-[80vh] max-w-2xl flex-col"
+        onOpenAutoFocus={() => {
+          openerRef.current =
+            document.activeElement instanceof HTMLElement ? document.activeElement : null
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          openerRef.current?.focus()
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings className="h-5 w-5" />
@@ -619,6 +632,11 @@ export function JointConfigDefaultsEditor({
           </div>
         </div>
 
+        {saveError && (
+          <Alert variant="destructive">
+            <AlertDescription>Joint defaults were not saved. {saveError}</AlertDescription>
+          </Alert>
+        )}
         <DialogFooter className="flex items-center justify-between gap-2 pt-4">
           <Button variant="outline" size="sm" onClick={handleReset}>
             Reset
@@ -631,7 +649,14 @@ export function JointConfigDefaultsEditor({
             <Button variant="ghost" size="sm" onClick={handleCancel}>
               Cancel
             </Button>
-            <Button size="sm" onClick={handleSave} disabled={isSaving || hasDuplicateIndices}>
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={hasDuplicateIndices}
+              aria-disabled={isSaving || hasDuplicateIndices}
+              aria-busy={isSaving}
+              className="aria-disabled:opacity-50"
+            >
               {isSaving ? 'Saving…' : 'Save'}
             </Button>
           </div>

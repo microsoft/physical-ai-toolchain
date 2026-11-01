@@ -123,7 +123,7 @@ describe('ExportDialog', () => {
     expect(startExport).toHaveBeenCalledWith(
       expect.objectContaining({
         episodeIndices: [0, 1],
-        outputPath: '/exports',
+        outputPath: 'dataset-1-export',
         applyEdits: true,
       }),
     )
@@ -350,6 +350,21 @@ describe('ExportDialog', () => {
     expect(
       screen.getByText(/original:\s*100,\s*removed:\s*3,\s*inserted:\s*0/i),
     ).toBeInTheDocument()
+  })
+
+  it('defaults the output to a new dataset named after the current one', () => {
+    const { rerender } = renderWithQuery(
+      <ExportDialog open onOpenChange={vi.fn()} datasetId="dataset-1" episodeIndices={[0]} />,
+    )
+    const input = screen.getByLabelText(/output directory/i)
+    expect(input).toHaveValue('dataset-1-export')
+    expect(input).toHaveAccessibleDescription(/datasets directory/i)
+
+    rerender(
+      <ExportDialog open onOpenChange={vi.fn()} datasetId="dataset-2" episodeIndices={[0]} />,
+    )
+
+    expect(screen.getByLabelText(/output directory/i)).toHaveValue('dataset-2-export')
   })
 
   it('updates outputPath and toggles checkboxes via user input', async () => {

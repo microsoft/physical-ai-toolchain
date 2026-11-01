@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -136,6 +137,59 @@ class TestBootstrapMlflow:
             managed_identity_client_id="client-xyz",
             authority="https://login.example",
         )
+
+
+class TestBootstrapBackends:
+    def test_mlflow_backend_configures_server(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setenv("TRACKING_BACKEND", "mlflow")
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow.local:5000")
+        monkeypatch.delenv("MLFLOW_REGISTRY_URI", raising=False)
+        mlflow = ModuleType("mlflow")
+        mlflow.set_tracking_uri = MagicMock()
+        mlflow.set_registry_uri = MagicMock()
+        mlflow.set_experiment = MagicMock()
+        monkeypatch.setitem(sys.modules, "mlflow", mlflow)
+        config_path = tmp_path / "mlflow_config.env"
+        TestBootstrapMlflow._patch_path(monkeypatch, config_path, tmp_path / "registry")
+
+        result = _MOD.bootstrap_mlflow(policy_type="act", job_name="job7")
+
+        assert result == _MOD.MLflowConfig("http://mlflow.local:5000", "lerobot-act-job7", "mlflow")
+        mlflow.set_tracking_uri.assert_called_once_with("http://mlflow.local:5000")
+        mlflow.set_registry_uri.assert_called_once_with("http://mlflow.local:5000")
+        mlflow.set_experiment.assert_called_once_with("lerobot-act-job7")
+        assert "MLFLOW_REGISTRY_URI" not in _MOD.os.environ
+        assert config_path.read_text() == (
+            "MLFLOW_TRACKING_URI=http://mlflow.local:5000\nMLFLOW_EXPERIMENT_NAME=lerobot-act-job7\n"
+        )
+
+    def test_mlflow_backend_requires_uri(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TRACKING_BACKEND", "mlflow")
+        monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+        monkeypatch.setitem(sys.modules, "mlflow", ModuleType("mlflow"))
+        with pytest.raises(SystemExit) as exc_info:
+            _MOD.bootstrap_mlflow()
+        assert exc_info.value.code == 1
+
+    def test_none_backend_skips_tracking(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TRACKING_BACKEND", "none")
+        monkeypatch.setitem(sys.modules, "mlflow", None)
+        result = _MOD.bootstrap_mlflow(experiment_name="ignored")
+        assert result == _MOD.MLflowConfig("", "", "none")
+
+    def test_unknown_backend_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TRACKING_BACKEND", "wandb")
+        with pytest.raises(SystemExit) as exc_info:
+            _MOD.bootstrap_mlflow()
+        assert exc_info.value.code == 1
+
+    def test_azureml_result_records_backend(
+        self, azure_env: None, fake_azure_modules: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("TRACKING_BACKEND", raising=False)
+        monkeypatch.delenv("MLFLOW_REGISTRY_URI", raising=False)
+        TestBootstrapMlflow._patch_path(monkeypatch, tmp_path / "cfg.env", tmp_path / "registry")
+        assert _MOD.bootstrap_mlflow().backend == "azureml"
 
 
 class TestAuthenticateHuggingface:

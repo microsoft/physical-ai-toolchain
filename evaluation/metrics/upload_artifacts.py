@@ -1,8 +1,11 @@
-"""Upload inference artifacts to MLflow and/or Azure Blob Storage.
+"""Upload inference artifacts to the tracking backend and, for Azure ML, to Azure Blob Storage.
 
-Reads environment variables to configure upload destination and uses
-the same bootstrap_azure_ml utility as training.
+``TRACKING_BACKEND`` selects the MLflow server through the same tracking strategy as training. The Azure ML
+backend also copies artifacts to the workspace storage account and falls back to direct Blob uploads when
+MLflow logging fails; other backends keep the artifacts in the export directory.
 """
+
+from __future__ import annotations
 
 import json
 import os
@@ -10,6 +13,19 @@ import traceback
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
+
+# Written by the gated policy evaluation: its metrics, threshold, and verdict.
+GATE_METRICS_FILE = "eval_metrics.json"
+_GATE_METRIC_KEYS = ("success_rate", "mean_reward", "std_reward", "mean_length", "eval_episodes", "success_threshold")
+
+
+def load_gate_metrics(metrics_dir: Path) -> dict:
+    """Load the gated evaluation's verdict, or an empty dict when the gate did not run."""
+    path = metrics_dir / GATE_METRICS_FILE
+    if not path.exists():
+        return {}
+    with open(path) as f:
+        return json.load(f)
 
 
 def load_metrics(metrics_dir: Path) -> tuple[dict, dict]:
@@ -54,24 +70,43 @@ def upload_to_mlflow(
     onnx_metrics: dict,
     jit_metrics: dict,
     timestamp: str,
+    gate_metrics: dict | None = None,
+    experiment_name: str | None = None,
 ) -> bool:
-    """Upload artifacts to MLflow via Azure ML integration."""
-    try:
-        import mlflow
+    """Log inference artifacts to the selected tracking backend's MLflow server.
 
-        from training.utils import AzureConfigError, bootstrap_azure_ml
+    The run's ``success_rate`` comes from the gated evaluation; replay alone records only whether it completed.
+    The run lands in ``experiment_name``, or ``inference-<task>`` when none is given.
+
+    Returns:
+        True when the artifacts were logged; False when tracking is off or logging failed.
+    """
+    try:
+        from training.utils import TrackingConfigError, create_tracking_backend
     except ImportError as e:
         print(f"[WARNING] training.utils not available: {e}")
         return False
 
+    experiment_name = experiment_name or f"inference-{task}"
     try:
-        experiment_name = f"inference-{task}"
-        context = bootstrap_azure_ml(experiment_name=experiment_name)
-        print(f"[MLflow] Connected to workspace: {context.workspace_name}")
-        print(f"[MLflow] Tracking URI: {context.tracking_uri}")
-    except AzureConfigError as e:
-        print(f"[WARNING] Azure ML not configured: {e}")
+        tracking = create_tracking_backend(experiment_name=experiment_name)
+    except TrackingConfigError as e:
+        print(f"[WARNING] Tracking backend not configured: {e}")
         return False
+    if not tracking.enabled:
+        print(f"[MLflow] Tracking disabled (TRACKING_BACKEND=none); artifacts stay in {export_dir}")
+        return False
+
+    try:
+        import mlflow
+    except ImportError as e:
+        print(f"[WARNING] mlflow not available: {e}")
+        return False
+
+    try:
+        tracking.configure_mlflow(mlflow)
+        print(f"[MLflow] Tracking backend: {tracking.name}")
+        print(f"[MLflow] Tracking URI: {tracking.tracking_uri}")
     except Exception as e:
         print(f"[WARNING] MLflow connection failed: {e}")
         return False
@@ -123,18 +158,19 @@ def upload_to_mlflow(
                 )
                 mlflow.log_artifact(str(metrics_dir / "jit_metrics.json"), artifact_path="metrics")
 
-            best_reward = max(
-                onnx_metrics.get("mean_episode_reward", 0),
-                jit_metrics.get("mean_episode_reward", 0),
-            )
-            total_episodes = onnx_metrics.get("total_episodes", 0) + jit_metrics.get("total_episodes", 0)
-            mlflow.log_metrics(
-                {
-                    "mean_reward": best_reward,
-                    "eval_episodes": total_episodes,
-                    "success_rate": 1.0 if (onnx_success or jit_success) else 0.0,
-                }
-            )
+            summary = {"inference_completed": 1.0 if (onnx_success or jit_success) else 0.0}
+            if gate_metrics:
+                summary.update({key: float(gate_metrics[key]) for key in _GATE_METRIC_KEYS if key in gate_metrics})
+                if "passed" in gate_metrics:
+                    summary["passed"] = 1.0 if gate_metrics["passed"] else 0.0
+                mlflow.log_artifact(str(metrics_dir / GATE_METRICS_FILE), artifact_path="metrics")
+            else:
+                summary["mean_reward"] = max(
+                    onnx_metrics.get("mean_episode_reward", 0),
+                    jit_metrics.get("mean_episode_reward", 0),
+                )
+                summary["eval_episodes"] = onnx_metrics.get("total_episodes", 0) + jit_metrics.get("total_episodes", 0)
+            mlflow.log_metrics(summary)
 
             for model_file in export_dir.glob("policy.*"):
                 mlflow.log_artifact(str(model_file), artifact_path="exported_models")
@@ -155,14 +191,14 @@ def upload_to_mlflow(
                         videos_logged += 1
 
             print(f"\n{'=' * 60}")
-            print("[MLflow] Artifacts logged to Azure ML Studio!")
+            print(f"[MLflow] Artifacts logged to the {tracking.name} tracking backend")
             print(f"[MLflow] Run ID: {run.info.run_id}")
             print(f"[MLflow] Experiment: {experiment_name}")
             print(f"[MLflow] Run name: {run_name}")
             print(f"[MLflow] Total videos: {videos_logged}")
             print(f"{'=' * 60}\n")
 
-            if context.storage:
+            if tracking.storage:
                 base_path = f"inference_outputs/{task}/{timestamp}"
                 files_to_upload = []
 
@@ -175,7 +211,7 @@ def upload_to_mlflow(
                             files_to_upload.append((str(video_file), f"{base_path}/videos/{video_file.name}"))
 
                 if files_to_upload:
-                    uploaded = context.storage.upload_files_batch(files_to_upload)
+                    uploaded = tracking.storage.upload_files_batch(files_to_upload)
                     print(f"[Blob] Uploaded {len(uploaded)} files to storage")
 
             return True
@@ -261,6 +297,16 @@ def upload_to_blob_fallback(
         return False
 
 
+def _blob_fallback_enabled() -> bool:
+    """Direct Blob uploads back up MLflow logging only for the Azure ML backend."""
+    from training.utils import TrackingConfigError, resolve_tracking_backend_name
+
+    try:
+        return resolve_tracking_backend_name() == "azureml"
+    except TrackingConfigError:
+        return False
+
+
 def main() -> None:
     """Main entry point for artifact upload."""
     from training.utils import set_env_defaults
@@ -300,18 +346,24 @@ def main() -> None:
         onnx_metrics=onnx_metrics,
         jit_metrics=jit_metrics,
         timestamp=timestamp,
+        gate_metrics=load_gate_metrics(metrics_dir),
+        experiment_name=os.environ.get("EXPERIMENT_NAME", "").strip() or None,
     )
 
-    if not mlflow_success:
-        print("[INFO] Falling back to direct blob storage upload...")
-        upload_to_blob_fallback(
-            task=task,
-            export_dir=export_dir,
-            blob_account=blob_account,
-            blob_container=blob_container,
-            checkpoint_uri=checkpoint_uri,
-            timestamp=timestamp,
-        )
+    if mlflow_success:
+        return
+    if not _blob_fallback_enabled():
+        print(f"[INFO] Artifacts kept in {export_dir}")
+        return
+    print("[INFO] Falling back to direct blob storage upload...")
+    upload_to_blob_fallback(
+        task=task,
+        export_dir=export_dir,
+        blob_account=blob_account,
+        blob_container=blob_container,
+        checkpoint_uri=checkpoint_uri,
+        timestamp=timestamp,
+    )
 
 
 if __name__ == "__main__":

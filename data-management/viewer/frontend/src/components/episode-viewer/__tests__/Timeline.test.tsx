@@ -169,12 +169,71 @@ describe('Timeline', () => {
 
   it('caps the rendered anomaly markers at the maximum visible count', () => {
     const anomalies = Array.from({ length: 60 }, (_, i) =>
-      makeAnomaly(String(i), i * 4, i * 4 + 1, 'high'),
+      makeAnomaly(String(i), i * 7, i * 7 + 1, 'high'),
     )
     setup({ anomalies })
     render(<Timeline />)
     const slider = screen.getByRole('slider')
     expect(slider.querySelectorAll('button[title]').length).toBeLessThanOrEqual(50)
+  })
+
+  it('renders edit and quality ranges and supports adjustment marker pointer and keyboard navigation', () => {
+    const { setCurrentFrame } = setup({
+      removedFrames: new Set([1, 2, 3, 8]),
+      insertedFrames: new Map([
+        [2, { interpolationFactor: 0.5 }],
+        [4, { interpolationFactor: 0.25 }],
+      ]),
+      trajectoryAdjustments: new Map([[20, {}]]),
+      dataQualityIssues: [
+        { type: 'blur', severity: 'critical', affectedFrames: [10, 15] },
+        { type: 'missing', severity: 'major', affectedFrames: [16, 18] },
+        { type: 'lighting', severity: 'minor', affectedFrames: [25, 26] },
+        { type: 'other', severity: 'minor' },
+      ],
+    })
+    render(<Timeline />)
+    expect(screen.getByTitle('Removed: frames 1-3')).toBeVisible()
+    expect(screen.getByTitle('Removed: frames 8-8')).toBeVisible()
+    expect(screen.getAllByTitle(/Inserted frame/)).toHaveLength(1)
+    expect(screen.getByText('Critical Issues')).toBeVisible()
+    expect(screen.getByText('Major Issues')).toBeVisible()
+    const marker = screen.getByTitle('Trajectory adjustment at frame 20')
+    fireEvent.click(marker)
+    fireEvent.keyDown(marker, { key: 'Enter' })
+    fireEvent.keyDown(marker, { key: ' ' })
+    expect(setCurrentFrame).toHaveBeenCalledTimes(3)
+    expect(setCurrentFrame).toHaveBeenLastCalledWith(20)
+  })
+
+  it('clusters close anomalies by severity and seeks to the representative', () => {
+    const { setCurrentFrame } = setup({
+      anomalies: [
+        makeAnomaly('low', 10, 10, 'low'),
+        makeAnomaly('high', 11, 11, 'high'),
+        makeAnomaly('far', 100, 101, 'medium'),
+      ],
+    })
+    render(<Timeline />)
+    const markers = screen.getByRole('slider').querySelectorAll('button[title]')
+    expect(markers).toHaveLength(2)
+    fireEvent.click(markers[0])
+    expect(setCurrentFrame).toHaveBeenCalledWith(11)
+  })
+
+  it('uses trajectory length when metadata is empty and seeks only during primary-button drags', () => {
+    const { setCurrentFrame } = setup({
+      episode: { meta: { length: 0 }, trajectoryData: [{}, {}, {}] },
+    })
+    render(<Timeline />)
+    const slider = screen.getByRole('slider')
+    expect(slider).toHaveAttribute('aria-valuemax', '2')
+    fireEvent.mouseMove(slider, { clientX: 400, buttons: 0 })
+    expect(setCurrentFrame).not.toHaveBeenCalled()
+    fireEvent.mouseMove(slider, { clientX: 400, buttons: 1 })
+    expect(setCurrentFrame).toHaveBeenCalledWith(1)
+    fireEvent.click(slider, { clientX: -50 })
+    expect(setCurrentFrame).toHaveBeenLastCalledWith(0)
   })
 
   it('positions the playhead based on the current frame', () => {

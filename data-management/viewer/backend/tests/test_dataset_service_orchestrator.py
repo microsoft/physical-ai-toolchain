@@ -7,9 +7,12 @@ connections.
 
 from __future__ import annotations
 
+import asyncio
+import shutil
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock
 
@@ -21,12 +24,17 @@ from src.api.services.dataset_service.service import DatasetService
 
 def _make_provider(**overrides: Any) -> MagicMock:
     provider = MagicMock()
+    provider.account_name = "testaccount"
+    provider.container_name = "testcontainer"
     provider.sync_dataset_to_local = AsyncMock(return_value=False)
+    provider.sync_episode_to_local = AsyncMock(return_value=False)
     provider.sync_meta_only_to_local = AsyncMock(return_value=False)
     provider.sync_hdf5_dataset_to_local = AsyncMock(return_value=False)
     provider.sync_hdf5_episode_to_local = AsyncMock(return_value=True)
     provider.count_hdf5_episodes = AsyncMock(return_value=0)
     provider.get_info_json = AsyncMock(return_value=None)
+    provider.get_metadata_revision = AsyncMock(return_value="metadata-one")
+    provider.get_episode_video_window = AsyncMock(return_value=None)
     provider.resolve_video_blob_path = AsyncMock(return_value="blob/path.mp4")
     provider.get_blob_properties = AsyncMock(return_value=None)
     provider.scan_all_dataset_ids = AsyncMock(return_value={"lerobot": [], "hdf5": []})
@@ -103,6 +111,507 @@ def _trajectory_point(frame: int = 0) -> TrajectoryPoint:
 
 
 class TestDatasetDiscovery:
+    @pytest.mark.parametrize("failure", ["fallback", "missing", "container"])
+    async def test_given_blob_manifest_missing_when_resolving_then_only_missing_objects_are_skipped(
+        self,
+        tmp_path: Path,
+        failure: str,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        from azure.core.exceptions import ResourceNotFoundError
+
+        missing = ResourceNotFoundError("private-provider-detail")
+        missing.error_code = "ContainerNotFound" if failure == "container" else "BlobNotFound"
+        blob = MagicMock()
+        blob.get_blob_properties = AsyncMock(
+            side_effect=[missing, SimpleNamespace(etag="hdf5-revision")] if failure == "fallback" else missing,
+        )
+        provider = _make_provider()
+        provider._get_client = AsyncMock(return_value=MagicMock())
+        container = provider._get_client.return_value.get_container_client.return_value
+        container.get_blob_client.return_value = blob
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        service._blob_dataset_ids.add("dataset")
+
+        if failure == "fallback":
+            source, revision = await service.get_source_revision("dataset", 0)
+            assert len(source) == len(revision) == 64
+            assert container.get_blob_client.call_args.args[0] == "dataset/episode_000000.hdf5"
+            provider.get_metadata_revision.assert_not_called()
+        else:
+            with pytest.raises(ValueError, match="Source generation is unavailable"):
+                await service.get_source_revision("dataset", 0)
+            assert blob.get_blob_properties.await_count == (13 if failure == "missing" else 1)
+        assert "private-provider-detail" not in caplog.text
+
+    @pytest.mark.parametrize("operation", ["source", "edit"])
+    async def test_given_remote_dataset_without_storage_when_loading_then_fails_closed(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        operation: str,
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+        service._blob_dataset_ids.add("dataset")
+        if operation == "edit":
+            monkeypatch.setattr(service, "get_source_revision", AsyncMock(return_value=("source", "revision")))
+            call = service._get_edit_episode("dataset", 0)
+        else:
+            call = service.get_source_revision("dataset", 0)
+
+        with pytest.raises(
+            ValueError,
+            match="Source storage unavailable" if operation == "edit" else "Source generation is unavailable",
+        ):
+            _ = await call
+
+    async def test_given_replaced_edit_context_when_reading_then_scratch_replaced_and_reused(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        provider = _make_provider(sync_episode_to_local=AsyncMock(return_value=True))
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        service._blob_dataset_ids.add("dataset")
+        previous = tmp_path / "previous"
+        previous.mkdir()
+        service._edit_blob_synced = ("old-generation", previous)
+        monkeypatch.setattr(service, "get_source_revision", AsyncMock(return_value=("source", "new")))
+        _patch_temp_directories(monkeypatch, tmp_path)
+
+        assert await service._get_edit_episode("dataset", 0) is None
+        assert await service._get_edit_episode("dataset", 0) is None
+
+        assert not previous.exists()
+        provider.sync_episode_to_local.assert_awaited_once()
+        assert service._edit_blob_synced is not None
+        service.cleanup_temp_dirs()
+
+    async def test_given_missing_local_manifest_when_no_hdf5_loader_then_source_rejected(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+        service._hdf5_handler = _make_handler()
+        service._hdf5_handler._get_loader.return_value = None
+
+        with pytest.raises(ValueError, match="Source generation is unavailable"):
+            await service.get_source_revision("dataset", 0)
+
+    @pytest.mark.parametrize("azure", [False, True])
+    @pytest.mark.parametrize("operation", ["list", "lookup", "path"])
+    async def test_given_local_dataset_when_selecting_storage_then_sources_are_exclusive(
+        self,
+        tmp_path: Path,
+        accessibility_dataset_path: Path,
+        azure: bool,
+        operation: str,
+    ) -> None:
+        shutil.copytree(accessibility_dataset_path / "a11y-synthetic", tmp_path / "local-only")
+        service = DatasetService(base_path=str(tmp_path), blob_provider=_make_provider() if azure else None)
+
+        if operation == "list":
+            datasets = await service.list_datasets(strict=True)
+            assert ("local-only" in {dataset.id for dataset in datasets}) is not azure
+        elif operation == "lookup":
+            dataset = await service.get_dataset("local-only")
+            assert (dataset is not None) is not azure
+        elif azure:
+            with pytest.raises(ValueError, match="Local dataset access"):
+                service._get_dataset_path("local-only")
+        else:
+            assert service._get_dataset_path("local-only") == tmp_path / "local-only"
+
+    async def test_given_missing_remote_catalog_entry_when_strictly_refreshed_then_cached_metadata_evicted(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path), blob_provider=_make_provider())
+        service._blob_dataset_ids.add("removed")
+        service._datasets["removed"] = DatasetInfo(id="removed", name="Removed", total_episodes=1, fps=30)
+
+        assert await service.list_datasets(strict=True) == []
+
+        assert "removed" not in service._datasets
+        assert "removed" not in service._blob_dataset_ids
+
+    async def test_given_failed_remote_catalog_scan_when_strict_then_failure_propagates(self, tmp_path: Path) -> None:
+        service = DatasetService(
+            base_path=str(tmp_path),
+            blob_provider=_make_provider(
+                scan_all_dataset_ids=AsyncMock(side_effect=OSError("Synthetic scan failure")),
+            ),
+        )
+
+        with pytest.raises(OSError, match="Synthetic scan failure"):
+            await service.list_datasets(strict=True)
+
+    @pytest.mark.parametrize("failure", ["dataset", "episode", "none", "changed", "success"])
+    async def test_given_remote_edit_fallback_when_loading_then_sync_and_generation_checked(
+        self,
+        tmp_path: Path,
+        accessibility_dataset_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        failure: str,
+    ) -> None:
+        provider = _make_provider()
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        service._blob_dataset_ids.add("dataset")
+        directories = _patch_temp_directories(monkeypatch, tmp_path)
+        revisions = [("source", "one"), ("source", "two" if failure == "changed" else "one")]
+        monkeypatch.setattr(service, "get_source_revision", AsyncMock(side_effect=revisions))
+
+        async def sync_dataset(dataset_id: str, path: Path) -> bool:
+            if failure == "dataset":
+                return False
+            if failure != "none":
+                shutil.copytree(accessibility_dataset_path / "a11y-synthetic", path, dirs_exist_ok=True)
+            return True
+
+        provider.sync_hdf5_dataset_to_local = sync_dataset
+        provider.sync_hdf5_episode_to_local.return_value = failure != "episode"
+
+        if failure in {"dataset", "episode", "changed"}:
+            with pytest.raises(
+                ValueError, match="Source changed" if failure == "changed" else "synchronization unavailable"
+            ):
+                await service._get_edit_episode("dataset", 0)
+            if failure != "changed":
+                assert not directories["dvw_edit_"].exists()
+                assert service._edit_blob_synced is None
+        else:
+            episode = await service._get_edit_episode("dataset", 0)
+            if failure == "none":
+                assert episode is None
+            else:
+                assert episode is not None
+                assert episode.source_id == "source"
+                assert episode.source_revision == "one"
+                assert episode.meta.length == 12
+        service.cleanup_temp_dirs()
+
+    async def test_given_missing_dataset_when_resolving_media_then_none_returned(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+        monkeypatch.setattr(service, "get_dataset", AsyncMock(return_value=None))
+
+        assert await service.get_episode_media_record("dataset", 0) is None
+
+    async def test_given_changed_remote_metadata_when_resolving_then_old_scratch_removed(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path), blob_provider=_make_provider())
+        service._blob_dataset_ids.add("dataset")
+        previous = tmp_path / "previous"
+        previous.mkdir()
+        service._blob_meta_synced["dataset"] = previous
+        monkeypatch.setattr(service, "get_dataset", AsyncMock(return_value=object()))
+        monkeypatch.setattr(service, "get_source_revision", AsyncMock(return_value=("source", "new")))
+        monkeypatch.setattr(service, "_ensure_blob_meta_synced", AsyncMock(return_value=None))
+
+        with pytest.raises(ValueError, match="Media metadata unavailable"):
+            await service.get_episode_media_record("dataset", 0)
+
+        assert not previous.exists()
+        assert "dataset" not in service._blob_meta_synced
+
+    async def test_given_full_media_scratch_when_materializing_then_existing_readers_preserved(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        service = DatasetService(
+            base_path=str(tmp_path),
+            blob_provider=_make_provider(
+                get_blob_properties=AsyncMock(return_value={"etag": "one", "size": 3}),
+            ),
+        )
+        service._blob_video_cache_dir = tmp_path / "scratch"
+        service._blob_video_cache_dir.mkdir()
+        retained = service._blob_video_cache_dir / "retained.mp4"
+        retained.write_bytes(b"existing")
+        service._blob_video_cache_bytes = service._blob_video_max_bytes
+
+        assert await service.materialize_blob_video("new.mp4") is None
+        assert retained.read_bytes() == b"existing"
+        assert service._blob_video_cache_bytes == service._blob_video_max_bytes
+
+    async def test_given_many_catalog_revisions_when_refreshing_then_history_bounded(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+        monkeypatch.setattr(
+            service,
+            "list_datasets",
+            AsyncMock(
+                side_effect=[
+                    [DatasetInfo(id=f"dataset-{index}", name=f"Dataset {index}", total_episodes=1, fps=30)]
+                    for index in range(6)
+                ]
+            ),
+        )
+        original = await service.query_catalog(refresh=True)
+        for _ in range(5):
+            await service.query_catalog(refresh=True)
+
+        assert len(service._catalog_snapshots) == 4
+        with pytest.raises(ValueError, match="snapshot expired"):
+            await service.query_catalog(snapshot_id=original.snapshot_id)
+
+    async def test_given_missing_local_catalog_metadata_when_strictly_discovered_then_rejected(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+
+        def scan(directory: Path, prefix: list[str], discovered: set[str]) -> None:
+            discovered.add("dataset")
+
+        monkeypatch.setattr(service, "_scan_directory", scan)
+        monkeypatch.setattr(service, "_discover_dataset", lambda dataset_id: None)
+
+        with pytest.raises(ValueError, match="Catalog dataset metadata unavailable"):
+            await service.list_datasets(strict=True)
+
+    async def test_given_deep_unknown_folders_when_scanning_then_depth_is_bounded(self, tmp_path: Path) -> None:
+        (tmp_path / "a" / "b" / "c" / "d" / "e" / "f").mkdir(parents=True)
+        service = DatasetService(base_path=str(tmp_path))
+        _install_handlers(service, _make_handler())
+
+        assert await service.list_datasets() == []
+
+    @pytest.mark.parametrize("codec", ["h264", "VP9", "av1", "hevc", "mpeg4", ""])
+    async def test_given_blob_codec_when_checked_then_only_browser_codecs_accepted(
+        self,
+        tmp_path: Path,
+        codec: str,
+    ) -> None:
+        provider = _make_provider(
+            get_info_json=AsyncMock(
+                return_value={
+                    "features": {"front": {"info": {"codec": codec}}},
+                }
+            )
+        )
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+
+        assert await service.blob_video_is_browser_compatible("dataset", "front") is (
+            codec.lower() in {"h264", "vp8", "vp9", "av1", "hevc"}
+        )
+
+    async def test_given_no_blob_provider_when_materializing_then_unavailable(self, tmp_path: Path) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+
+        assert await service.blob_video_is_browser_compatible("dataset", "front") is False
+        assert await service.materialize_blob_video("video.mp4") is None
+
+    @pytest.mark.parametrize("properties", [None, {}, {"etag": ""}, {"etag": 12}])
+    async def test_given_missing_video_validator_when_materializing_then_no_scratch_files(
+        self,
+        tmp_path: Path,
+        properties: dict[str, object] | None,
+    ) -> None:
+        service = DatasetService(
+            base_path=str(tmp_path),
+            blob_provider=_make_provider(get_blob_properties=AsyncMock(return_value=properties)),
+        )
+
+        assert await service.materialize_blob_video("video.mp4") is None
+        assert service._blob_video_cache_bytes == 0
+        assert service._blob_video_cache_dir is None
+
+    @pytest.mark.parametrize("failure", ["overflow", "short", "changed"])
+    async def test_given_inconsistent_video_transfer_when_materializing_then_scratch_budget_released(
+        self,
+        tmp_path: Path,
+        failure: str,
+    ) -> None:
+        properties = {"etag": "version-one", "size": 3}
+        after = {"etag": "version-two", "size": 3} if failure == "changed" else properties
+
+        async def stream(*args: object, **kwargs: object) -> AsyncIterator[bytes]:
+            yield {"overflow": b"four", "short": b"ab", "changed": b"abc"}[failure]
+
+        provider = _make_provider(
+            get_blob_properties=AsyncMock(side_effect=[properties, after]),
+            stream_video=stream,
+        )
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        service._blob_video_cache_dir = tmp_path / "scratch"
+        service._blob_video_cache_dir.mkdir()
+
+        assert await service.materialize_blob_video("video.mp4") is None
+        assert service._blob_video_cache_bytes == 0
+        assert list(service._blob_video_cache_dir.iterdir()) == []
+
+    @pytest.mark.parametrize("dataset_format", ["lerobot", "hdf5"])
+    async def test_given_missing_remote_metadata_when_catalog_refreshed_strictly_then_rejected(
+        self,
+        tmp_path: Path,
+        dataset_format: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        provider = _make_provider(scan_all_dataset_ids=AsyncMock(return_value={dataset_format: ["dataset"]}))
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        method = "_discover_blob_dataset" if dataset_format == "lerobot" else "_discover_blob_hdf5_dataset"
+        monkeypatch.setattr(service, method, AsyncMock(return_value=None))
+
+        with pytest.raises(ValueError, match="Catalog dataset metadata unavailable"):
+            await service.list_datasets(strict=True)
+
+    async def test_given_local_scan_failure_when_catalog_refreshed_strictly_then_failure_propagates(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+
+        def fail_scan(*args: object) -> None:
+            raise OSError("Synthetic directory unavailable")
+
+        monkeypatch.setattr(service, "_scan_directory", fail_scan)
+
+        with pytest.raises(OSError, match="directory unavailable"):
+            await service.list_datasets(strict=True)
+
+    @pytest.mark.parametrize("failure", ["metadata", "missing-record", "outside-root", "provider", "validator"])
+    async def test_given_unavailable_remote_media_when_resolving_then_fails_closed(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        failure: str,
+    ) -> None:
+        from physical_ai_dataset_io.lerobot import EpisodeRecord
+
+        root = tmp_path / "metadata"
+        root.mkdir()
+        provider = _make_provider(get_blob_properties=AsyncMock(return_value=None))
+        provider.get_blob_prefix.return_value = "dataset"
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        service._blob_dataset_ids.add("dataset")
+        service._media_metadata_revisions["dataset"] = ("source", "revision")
+        monkeypatch.setattr(
+            service,
+            "get_dataset",
+            AsyncMock(
+                return_value=DatasetInfo(
+                    id="dataset",
+                    name="Dataset",
+                    total_episodes=1,
+                    fps=30,
+                )
+            ),
+        )
+        monkeypatch.setattr(service, "get_source_revision", AsyncMock(return_value=("source", "revision")))
+        monkeypatch.setattr(
+            service, "_ensure_blob_meta_synced", AsyncMock(return_value=None if failure == "metadata" else root)
+        )
+        path = tmp_path / "outside.mp4" if failure == "outside-root" else root / "video.mp4"
+        record = EpisodeRecord("dataset/0", 0, "Move cube", 30, 30, {"front": path}, None, None)
+        monkeypatch.setattr(
+            "physical_ai_dataset_io.lerobot.iter_episodes",
+            lambda *args, **kwargs: iter([] if failure == "missing-record" else [record]),
+        )
+        if failure == "provider":
+            service._blob_provider = None
+
+        if failure == "missing-record":
+            assert await service.get_episode_media_record("dataset", 0) is None
+        else:
+            with pytest.raises(
+                ValueError,
+                match={
+                    "metadata": "Media metadata unavailable",
+                    "outside-root": "Invalid media path",
+                    "provider": "Media storage unavailable",
+                    "validator": "Versioned media unavailable",
+                }[failure],
+            ):
+                await service.get_episode_media_record("dataset", 0)
+
+    async def test_given_failed_selected_media_download_when_materializing_then_rejected(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+        service._blob_dataset_ids.add("dataset")
+        monkeypatch.setattr(service, "materialize_blob_video", AsyncMock(return_value=None))
+
+        with pytest.raises(ValueError, match="Selected camera media unavailable"):
+            await service.materialize_episode_media("dataset", {"front": Path("video.mp4")})
+
+    async def test_local_metadata_replacement_changes_generation_without_curation_files(self, tmp_path: Path) -> None:
+        root = tmp_path / "dataset"
+        metadata = root / "meta"
+        metadata.mkdir(parents=True)
+        (metadata / "info.json").write_text("{}")
+        tasks = metadata / "tasks.jsonl"
+        tasks.write_text('{"task":"first"}\n')
+        service = DatasetService(base_path=str(tmp_path))
+        source, revision = await service.get_source_revision("dataset", 0)
+        tasks.write_text('{"task":"replacement"}\n')
+        replacement_source, replacement_revision = await service.get_source_revision("dataset", 0)
+        assert source == replacement_source and revision != replacement_revision
+        (root / "annotations").mkdir()
+        (root / "annotations" / "episode.json").write_text("{}")
+        assert await service.get_source_revision("dataset", 0) == (replacement_source, replacement_revision)
+
+    @pytest.mark.asyncio
+    async def test_given_blob_generation_when_etag_changes_then_revision_changes(self, tmp_path: Path) -> None:
+        blob = MagicMock()
+        blob.get_blob_properties = AsyncMock(return_value=SimpleNamespace(etag='"generation-one"'))
+        container = MagicMock()
+        container.get_blob_client.return_value = blob
+        client = MagicMock()
+        client.get_container_client.return_value = container
+        provider = _make_provider(account_name="synthetic", container_name="datasets")
+        provider._get_client = AsyncMock(return_value=client)
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        service._blob_dataset_ids.add("owner--dataset")
+
+        source_id, revision = await service.get_source_revision("owner--dataset", 0)
+        blob.get_blob_properties.return_value = SimpleNamespace(etag='"generation-two"')
+        changed_source, changed_revision = await service.get_source_revision("owner--dataset", 0)
+
+        assert changed_source == source_id
+        assert changed_revision != revision
+        assert "synthetic" not in source_id
+        assert container.get_blob_client.call_args.args[0] == "owner/dataset/meta/info.json"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", [False, True])
+    async def test_given_unavailable_blob_revision_when_resolving_then_fails_closed(
+        self,
+        tmp_path: Path,
+        failure: bool,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        blob = MagicMock()
+        blob.get_blob_properties = AsyncMock(
+            side_effect=RuntimeError("private-storage-detail") if failure else None,
+            return_value=SimpleNamespace(etag=None),
+        )
+        client = MagicMock()
+        client.get_container_client.return_value.get_blob_client.return_value = blob
+        provider = _make_provider(account_name="synthetic", container_name="datasets")
+        provider._get_client = AsyncMock(return_value=client)
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        service._blob_dataset_ids.add("dataset")
+
+        with pytest.raises(ValueError, match="Source generation is unavailable"):
+            await service.get_source_revision("dataset", 0)
+
+        assert "Blob source generation lookup failed" in caplog.text
+        assert "private-storage-detail" not in caplog.text
+
     pytestmark = pytest.mark.asyncio
 
     @pytest.mark.parametrize(
@@ -266,6 +775,29 @@ class TestGetAndRegisterDataset:
 
 class TestListEpisodes:
     pytestmark = pytest.mark.asyncio
+
+    @pytest.mark.parametrize("indices", [[], [3, 8]])
+    async def test_local_dataset_listing_does_not_probe_blob_metadata(self, tmp_path: Path, indices: list[int]) -> None:
+        (tmp_path / "dataset").mkdir()
+        info = DatasetInfo(id="dataset", name="Dataset", total_episodes=len(indices), fps=30.0)
+        handler = _make_handler()
+        handler.can_handle.return_value = True
+        handler.discover.return_value = info
+        handler.has_loader.return_value = True
+        handler.list_episodes.return_value = (
+            indices,
+            {index: {"length": 10, "task_index": 1} for index in indices},
+        )
+        service = DatasetService(base_path=str(tmp_path), storage_adapter=_make_storage())
+        _install_handlers(service, handler)
+        await service.list_datasets()
+
+        episodes = await service.list_episodes("dataset")
+
+        assert [(episode.index, episode.length, episode.task_index) for episode in episodes] == [
+            (index, 10, 1) for index in indices
+        ]
+        assert service._blob_provider is None
 
     async def test_lists_registered_episode_range_with_filters_and_pagination(self, tmp_path: Path) -> None:
         storage = _make_storage([0, 3])
@@ -471,6 +1003,25 @@ class TestEpisodeRetrievalAndCache:
 class TestFrameAndCameraAccess:
     pytestmark = pytest.mark.asyncio
 
+    async def test_cold_blob_camera_inventory_preserves_canonical_names(self, tmp_path: Path) -> None:
+        provider = _make_provider(
+            get_info_json=AsyncMock(
+                return_value={
+                    "total_episodes": 1,
+                    "features": {
+                        "observation.images.front": {"dtype": "video"},
+                        "observation.images.wrist": {"dtype": "video"},
+                        "observation.state": {"dtype": "float32"},
+                    },
+                }
+            )
+        )
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        assert await service.get_episode_cameras("dataset", 0) == [
+            "observation.images.front",
+            "observation.images.wrist",
+        ]
+
     async def test_get_frame_image_returns_handler_frame(self, tmp_path: Path) -> None:
         handler = _make_handler()
         handler.has_loader.return_value = True
@@ -490,6 +1041,8 @@ class TestFrameAndCameraAccess:
 
         provider = _make_provider(
             get_info_json=AsyncMock(return_value={"total_episodes": 1, "fps": 24}),
+            get_blob_properties=AsyncMock(return_value={"size": 5, "etag": '"one"'}),
+            get_episode_video_window=AsyncMock(return_value=(5.0, 5.5)),
             resolve_video_blob_path=AsyncMock(return_value="dataset/video.mp4"),
             stream_video=stream_video,
         )
@@ -501,7 +1054,7 @@ class TestFrameAndCameraAccess:
         )
 
         def extract_frame(path: str, frame_idx: int, fps: float) -> bytes | None:
-            if Path(path).read_bytes() == b"video" and frame_idx == 7 and fps == 24.0:
+            if Path(path).read_bytes() == b"video" and frame_idx == 127 and fps == 24.0:
                 return b"blob-jpeg"
             return None
 
@@ -606,7 +1159,9 @@ class TestBlobVideoAccess:
             yield b"chunk-1"
             yield b"chunk-2"
 
-        provider = _make_provider(stream_video=stream_video)
+        provider = _make_provider(
+            stream_video=stream_video, get_blob_properties=AsyncMock(return_value={"size": 14, "etag": '"one"'})
+        )
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
         monkeypatch.setattr(
             "src.api.services.dataset_service.service.tempfile.gettempdir",
@@ -618,9 +1173,86 @@ class TestBlobVideoAccess:
 
         assert first is not None
         assert first == second
-        assert first.parent == tmp_path / "dvw_video_cache" / "blob"
+        assert first.parent == service._blob_video_cache_dir
         assert first.read_bytes() == b"chunk-1chunk-2"
         assert stream_calls == 1
+        provider.get_blob_properties.return_value = {"size": 14, "etag": '"two"'}
+        replaced = await service.materialize_blob_video("dataset/video.mp4")
+        assert replaced is not None and replaced != first
+        assert stream_calls == 2
+        service.cleanup_temp_dirs()
+        assert not first.exists() and not replaced.exists()
+
+    @pytest.mark.parametrize("blob_path", ["dataset/video.untrusted", "dataset/video.bad\\name", "../video.other"])
+    async def test_given_untrusted_blob_name_when_materializing_then_uses_fixed_cache_filename(
+        self, tmp_path: Path, blob_path: str
+    ) -> None:
+        async def stream_video(_path: str, **_kwargs: Any) -> AsyncIterator[bytes]:
+            yield b"video"
+
+        provider = _make_provider(
+            stream_video=stream_video, get_blob_properties=AsyncMock(return_value={"size": 5, "etag": '"one"'})
+        )
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+
+        try:
+            result = await service.materialize_blob_video(blob_path)
+
+            assert result is not None
+            assert result.parent == service._blob_video_cache_dir
+            assert result.suffix == ".mp4"
+            assert len(result.stem) == 64 and all(character in "0123456789abcdef" for character in result.stem)
+            assert result.read_bytes() == b"video"
+        finally:
+            service.cleanup_temp_dirs()
+
+    async def test_materialization_shares_concurrent_downloads_and_isolates_accounts(self, tmp_path: Path) -> None:
+        started = asyncio.Event()
+        release = asyncio.Event()
+        stream_calls = 0
+
+        async def stream_video(_path: str, **_kwargs: Any) -> AsyncIterator[bytes]:
+            nonlocal stream_calls
+            stream_calls += 1
+            started.set()
+            await release.wait()
+            yield b"video"
+
+        provider = _make_provider(
+            stream_video=stream_video, get_blob_properties=AsyncMock(return_value={"size": 5, "etag": '"one"'})
+        )
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        first_task = asyncio.create_task(service.materialize_blob_video("dataset/video.mp4"))
+        await started.wait()
+        second_task = asyncio.create_task(service.materialize_blob_video("dataset/video.mp4"))
+        release.set()
+        first, second = await asyncio.gather(first_task, second_task)
+        assert first is not None and first == second
+        assert stream_calls == 1
+        provider.account_name = "another-account"
+        other_account = await service.materialize_blob_video("dataset/video.mp4")
+        assert other_account is not None and other_account.name != first.name
+        assert stream_calls == 2
+        service.cleanup_temp_dirs()
+
+    async def test_materialization_releases_reservation_when_temporary_file_creation_fails(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        provider = _make_provider(get_blob_properties=AsyncMock(return_value={"size": 5, "etag": '"one"'}))
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider, video_cache_max_bytes=5)
+        monkeypatch.setattr(
+            "src.api.services.dataset_service.service.tempfile.mkstemp", MagicMock(side_effect=OSError("disk full"))
+        )
+        assert await service.materialize_blob_video("dataset/video.mp4") is None
+        assert service._blob_video_cache_bytes == 0
+        service.cleanup_temp_dirs()
+
+    async def test_materialization_rejects_media_over_the_scratch_budget(self, tmp_path: Path) -> None:
+        provider = _make_provider(get_blob_properties=AsyncMock(return_value={"size": 100, "etag": '"one"'}))
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider, video_cache_max_bytes=10)
+        assert await service.materialize_blob_video("dataset/video.mp4") is None
 
     async def test_materialize_blob_video_removes_partial_download_on_failure(
         self,
@@ -631,7 +1263,9 @@ class TestBlobVideoAccess:
             yield b"partial"
             raise RuntimeError("network failure")
 
-        provider = _make_provider(stream_video=stream_video)
+        provider = _make_provider(
+            stream_video=stream_video, get_blob_properties=AsyncMock(return_value={"size": 14, "etag": '"one"'})
+        )
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
         monkeypatch.setattr(
             "src.api.services.dataset_service.service.tempfile.gettempdir",
@@ -640,7 +1274,7 @@ class TestBlobVideoAccess:
 
         result = await service.materialize_blob_video("dataset/video-without-extension")
 
-        cache_dir = tmp_path / "dvw_video_cache" / "blob"
+        cache_dir = service._blob_video_cache_dir
         assert result is None
         assert list(cache_dir.iterdir()) == []
 

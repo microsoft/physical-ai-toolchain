@@ -174,7 +174,7 @@ describe('AnnotationWorkspace diagnostics', () => {
     fireEvent.click(screen.getByRole('button', { name: /create subtask/i }))
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save\s*&\s*next episode/i }))
+      fireEvent.click(screen.getByRole('button', { name: /^save episode$/i }))
       await Promise.resolve()
     })
 
@@ -183,8 +183,9 @@ describe('AnnotationWorkspace diagnostics', () => {
         ['labels', 'draft-change', expect.objectContaining({ episodeIndex: 0, labelCount: 1 })],
         ['export', 'dialog-open', expect.objectContaining({ activeTab: 'trajectory' })],
         ['subtasks', 'create', expect.objectContaining({ rangeStart: 2, rangeEnd: 6 })],
-        ['persistence', 'draft-saved', expect.objectContaining({ episodeIndex: 0 })],
+        ['persistence', 'edits-saved', expect.objectContaining({ episodeIndex: 0 })],
       ]),
     )
+    expect(handleSaveAndNextEpisode).not.toHaveBeenCalled()
   })
 })

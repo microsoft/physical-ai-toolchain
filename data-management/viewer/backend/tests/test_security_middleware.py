@@ -3,11 +3,81 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 
 import pytest
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from starlette.responses import JSONResponse, Response
 
 from src.api.middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddleware
+
+
+@pytest.fixture
+def compression_client() -> Iterator[TestClient]:
+    from src.api.main import app
+
+    probe_app = FastAPI(middleware=app.user_middleware)
+
+    @probe_app.get("/api/datasets/test/episodes/0")
+    async def episode() -> JSONResponse:
+        return JSONResponse({"trajectory_data": [0.123] * 2000}, headers={"ETag": '"episode-v1"'})
+
+    @probe_app.put("/api/datasets/test/episodes/0/annotations")
+    async def save(request: Request) -> JSONResponse:
+        return JSONResponse(await request.json(), headers={"ETag": request.headers["If-Match"]})
+
+    @probe_app.get("/api/datasets/test/episodes/0/video/front")
+    async def video() -> Response:
+        return Response(b"video" * 400, status_code=206, headers={"Content-Range": "bytes 0-1999/4000"})
+
+    with TestClient(probe_app) as client:
+        yield client
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "identity"])
+def test_given_episode_when_compression_negotiated_then_payload_preserved(
+    compression_client: TestClient, encoding: str
+) -> None:
+    response = compression_client.get("/api/datasets/test/episodes/0", headers={"Accept-Encoding": encoding})
+
+    assert response.status_code == 200
+    assert response.json() == {"trajectory_data": [0.123] * 2000}
+    assert response.headers["etag"] == '"episode-v1"'
+    if encoding == "gzip":
+        assert response.headers["content-encoding"] == "gzip"
+        assert "accept-encoding" in response.headers["vary"].lower()
+        assert int(response.headers["content-length"]) < len(response.content)
+    else:
+        assert "content-encoding" not in response.headers
+
+
+def test_given_annotation_save_when_gzip_accepted_then_body_and_revision_preserved(
+    compression_client: TestClient,
+) -> None:
+    annotation = {"notes": "annotation text " * 200}
+    response = compression_client.put(
+        "/api/datasets/test/episodes/0/annotations",
+        json=annotation,
+        headers={"Accept-Encoding": "gzip", "If-Match": '"revision-1"'},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == annotation
+    assert response.headers["etag"] == '"revision-1"'
+    assert "content-encoding" not in response.headers
+
+
+def test_given_video_range_when_gzip_accepted_then_range_remains_uncompressed(compression_client: TestClient) -> None:
+    response = compression_client.get(
+        "/api/datasets/test/episodes/0/video/front",
+        headers={"Accept-Encoding": "gzip", "Range": "bytes=0-1999"},
+    )
+
+    assert response.status_code == 206
+    assert response.content == b"video" * 400
+    assert response.headers["content-range"] == "bytes 0-1999/4000"
+    assert "content-encoding" not in response.headers
 
 
 @pytest.fixture

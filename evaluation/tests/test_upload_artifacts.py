@@ -7,13 +7,27 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from metrics.upload_artifacts import (
     get_video_search_paths,
+    load_gate_metrics,
     load_metrics,
     main,
     upload_to_blob_fallback,
     upload_to_mlflow,
 )
+
+from training.utils.tracking import MLflowTracking, NoTracking, TrackingConfigError, resolve_tracking_backend_name
+
+
+def _training_utils(**attrs: object) -> MagicMock:
+    """Stand in for ``training.utils`` while keeping the real tracking-backend resolution."""
+    utils = MagicMock(
+        TrackingConfigError=TrackingConfigError, resolve_tracking_backend_name=resolve_tracking_backend_name
+    )
+    for name, value in attrs.items():
+        setattr(utils, name, value)
+    return utils
 
 
 class TestLoadMetrics:
@@ -51,6 +65,17 @@ class TestLoadMetrics:
         assert jit == {}
 
 
+class TestLoadGateMetrics:
+    def test_reads_the_evaluation_verdict(self, tmp_path: Path) -> None:
+        verdict = {"success_rate": 0.8, "success_threshold": 0.7, "passed": True}
+        (tmp_path / "eval_metrics.json").write_text(json.dumps(verdict))
+
+        assert load_gate_metrics(tmp_path) == verdict
+
+    def test_missing_verdict_is_empty(self, tmp_path: Path) -> None:
+        assert load_gate_metrics(tmp_path) == {}
+
+
 class TestGetVideoSearchPaths:
     def test_returns_five_paths(self, tmp_path: Path) -> None:
         paths = get_video_search_paths(tmp_path / "export")
@@ -78,15 +103,15 @@ class TestUploadToMlflow:
         mock_mlflow.start_run.return_value.__enter__ = MagicMock(return_value=mock_run)
         mock_mlflow.start_run.return_value.__exit__ = MagicMock(return_value=False)
 
-        config_error = type("AzureConfigError", (RuntimeError,), {})
-        mock_utils = MagicMock()
-        mock_utils.AzureConfigError = config_error
+        config_error = TrackingConfigError
+        mock_utils = _training_utils()
 
         context = MagicMock()
-        context.workspace_name = "ws"
+        context.enabled = True
+        context.name = "azureml"
         context.tracking_uri = "https://tracking"
         context.storage = None
-        mock_utils.bootstrap_azure_ml.return_value = context
+        mock_utils.create_tracking_backend.return_value = context
 
         monkeypatch.setitem(sys.modules, "mlflow", mock_mlflow)
         monkeypatch.setitem(sys.modules, "training", MagicMock())
@@ -109,9 +134,9 @@ class TestUploadToMlflow:
         )
         assert result is False
 
-    def test_azure_config_error_returns_false(self, tmp_path: Path, monkeypatch) -> None:
+    def test_tracking_config_error_returns_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _, mock_utils, config_error = self._inject_mock_modules(monkeypatch)
-        mock_utils.bootstrap_azure_ml.side_effect = config_error("nope")
+        mock_utils.create_tracking_backend.side_effect = config_error("nope")
         result = upload_to_mlflow(
             task="t",
             export_dir=tmp_path,
@@ -127,7 +152,9 @@ class TestUploadToMlflow:
 
     def test_connection_error_returns_false(self, tmp_path: Path, monkeypatch) -> None:
         self._inject_mock_modules(monkeypatch)
-        sys.modules["training.utils"].bootstrap_azure_ml.side_effect = ConnectionError("refused")
+        sys.modules[
+            "training.utils"
+        ].create_tracking_backend.return_value.configure_mlflow.side_effect = ConnectionError("refused")
         result = upload_to_mlflow(
             task="t",
             export_dir=tmp_path,
@@ -193,7 +220,7 @@ class TestUploadToMlflow:
 
         _, mock_utils, _ = self._inject_mock_modules(monkeypatch)
         mock_storage = MagicMock()
-        mock_utils.bootstrap_azure_ml.return_value.storage = mock_storage
+        mock_utils.create_tracking_backend.return_value.storage = mock_storage
 
         (tmp_path / "policy.onnx").write_bytes(b"data")
         upload_to_mlflow(
@@ -218,7 +245,7 @@ class TestUploadToMlflow:
 
         _, mock_utils, _ = self._inject_mock_modules(monkeypatch)
         mock_storage = MagicMock()
-        mock_utils.bootstrap_azure_ml.return_value.storage = mock_storage
+        mock_utils.create_tracking_backend.return_value.storage = mock_storage
 
         export_dir = tmp_path / "empty_export"
         export_dir.mkdir()
@@ -300,7 +327,7 @@ class TestUploadToMlflow:
 
         _, mock_utils, _ = self._inject_mock_modules(monkeypatch)
         mock_storage = MagicMock()
-        mock_utils.bootstrap_azure_ml.return_value.storage = mock_storage
+        mock_utils.create_tracking_backend.return_value.storage = mock_storage
 
         export_dir = tmp_path / "export"
         export_dir.mkdir()
@@ -347,6 +374,146 @@ class TestUploadToMlflow:
             timestamp="20240101_000000",
         )
         assert result is False
+
+
+class TestUploadToSelfHostedBackends:
+    @staticmethod
+    def _env(monkeypatch: pytest.MonkeyPatch) -> None:
+        for key, value in {
+            "NUM_ENVS": "4",
+            "MAX_STEPS": "500",
+            "VIDEO_LENGTH": "200",
+            "INFERENCE_FORMAT": "jit",
+        }.items():
+            monkeypatch.setenv(key, value)
+
+    def _upload(self, tmp_path: Path, **overrides: object) -> bool:
+        return upload_to_mlflow(
+            task="t",
+            export_dir=tmp_path,
+            metrics_dir=tmp_path,
+            checkpoint_uri="models:/cartpole/1",
+            onnx_success=False,
+            jit_success=True,
+            onnx_metrics={},
+            jit_metrics={"mean_episode_reward": 1.5},
+            timestamp="20240101_000000",
+            **overrides,
+        )
+
+    def test_none_backend_skips_mlflow(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._env(monkeypatch)
+        utils = _training_utils()
+        utils.create_tracking_backend.return_value = NoTracking()
+        monkeypatch.setitem(sys.modules, "training.utils", utils)
+        monkeypatch.setitem(sys.modules, "mlflow", None)
+
+        assert self._upload(tmp_path) is False
+
+    def test_mlflow_backend_logs_to_server(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._env(monkeypatch)
+        (tmp_path / "policy.pt").write_bytes(b"x")
+        mock_mlflow = MagicMock()
+        mock_mlflow.start_run.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        mock_mlflow.start_run.return_value.__exit__ = MagicMock(return_value=False)
+        monkeypatch.setitem(sys.modules, "mlflow", mock_mlflow)
+        utils = _training_utils()
+        utils.create_tracking_backend.return_value = MLflowTracking(
+            "http://mlflow.local:5000", experiment_name="inference-t"
+        )
+        monkeypatch.setitem(sys.modules, "training.utils", utils)
+
+        assert self._upload(tmp_path) is True
+        utils.create_tracking_backend.assert_called_once_with(experiment_name="inference-t")
+        mock_mlflow.set_tracking_uri.assert_called_once_with("http://mlflow.local:5000")
+        mock_mlflow.set_experiment.assert_called_once_with("inference-t")
+        mock_mlflow.log_artifact.assert_any_call(str(tmp_path / "policy.pt"), artifact_path="exported_models")
+
+    def test_named_experiment_replaces_the_task_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._env(monkeypatch)
+        mock_mlflow = MagicMock()
+        mock_mlflow.start_run.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        mock_mlflow.start_run.return_value.__exit__ = MagicMock(return_value=False)
+        monkeypatch.setitem(sys.modules, "mlflow", mock_mlflow)
+        utils = _training_utils()
+        utils.create_tracking_backend.return_value = MLflowTracking(
+            "http://mlflow.local:5000", experiment_name="cartpole-gate"
+        )
+        monkeypatch.setitem(sys.modules, "training.utils", utils)
+
+        assert self._upload(tmp_path, experiment_name="cartpole-gate") is True
+        utils.create_tracking_backend.assert_called_once_with(experiment_name="cartpole-gate")
+
+
+class TestGateMetricsLogging:
+    @staticmethod
+    def _upload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gate_metrics: dict | None) -> MagicMock:
+        for key, value in {
+            "NUM_ENVS": "4",
+            "MAX_STEPS": "500",
+            "VIDEO_LENGTH": "200",
+            "INFERENCE_FORMAT": "jit",
+        }.items():
+            monkeypatch.setenv(key, value)
+        mock_mlflow = MagicMock()
+        mock_mlflow.start_run.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        mock_mlflow.start_run.return_value.__exit__ = MagicMock(return_value=False)
+        monkeypatch.setitem(sys.modules, "mlflow", mock_mlflow)
+        utils = _training_utils()
+        utils.create_tracking_backend.return_value = MLflowTracking("http://mlflow.local:5000", experiment_name="i")
+        monkeypatch.setitem(sys.modules, "training.utils", utils)
+        if gate_metrics is not None:
+            (tmp_path / "eval_metrics.json").write_text(json.dumps(gate_metrics))
+
+        assert upload_to_mlflow(
+            task="t",
+            export_dir=tmp_path,
+            metrics_dir=tmp_path,
+            checkpoint_uri="/policy",
+            onnx_success=False,
+            jit_success=True,
+            onnx_metrics={},
+            jit_metrics={"mean_episode_reward": 1.5, "total_episodes": 3},
+            timestamp="20240101_000000",
+            gate_metrics=gate_metrics,
+        )
+        return mock_mlflow
+
+    @staticmethod
+    def _logged(mock_mlflow: MagicMock) -> dict:
+        logged: dict = {}
+        for call in mock_mlflow.log_metrics.call_args_list:
+            logged.update(call.args[0])
+        return logged
+
+    def test_success_rate_comes_from_the_gated_evaluation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gate = {
+            "success_rate": 0.4,
+            "mean_reward": 12.0,
+            "eval_episodes": 20,
+            "success_threshold": 0.7,
+            "passed": False,
+        }
+
+        mock_mlflow = self._upload(tmp_path, monkeypatch, gate)
+
+        logged = self._logged(mock_mlflow)
+        assert logged["success_rate"] == 0.4
+        assert logged["mean_reward"] == 12.0
+        assert logged["eval_episodes"] == 20
+        assert logged["success_threshold"] == 0.7
+        assert logged["passed"] == 0.0
+        assert logged["inference_completed"] == 1.0
+        mock_mlflow.log_artifact.assert_any_call(str(tmp_path / "eval_metrics.json"), artifact_path="metrics")
+
+    def test_replay_alone_reports_no_success_rate(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        logged = self._logged(self._upload(tmp_path, monkeypatch, None))
+
+        assert "success_rate" not in logged
+        assert logged["inference_completed"] == 1.0
+        assert logged["mean_reward"] == 1.5
 
 
 class TestUploadToBlobFallback:
@@ -554,7 +721,7 @@ class TestMain:
     def test_mlflow_success_skips_blob_fallback(self, tmp_path: Path, monkeypatch) -> None:
         mock_set_defaults = MagicMock()
         monkeypatch.setitem(sys.modules, "training", MagicMock())
-        monkeypatch.setitem(sys.modules, "training.utils", MagicMock(set_env_defaults=mock_set_defaults))
+        monkeypatch.setitem(sys.modules, "training.utils", _training_utils(set_env_defaults=mock_set_defaults))
 
         for key, val in self._env_vars(tmp_path).items():
             monkeypatch.setenv(key, val)
@@ -573,7 +740,7 @@ class TestMain:
 
     def test_mlflow_failure_triggers_blob_fallback(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setitem(sys.modules, "training", MagicMock())
-        monkeypatch.setitem(sys.modules, "training.utils", MagicMock(set_env_defaults=MagicMock()))
+        monkeypatch.setitem(sys.modules, "training.utils", _training_utils(set_env_defaults=MagicMock()))
 
         for key, val in self._env_vars(tmp_path).items():
             monkeypatch.setenv(key, val)
@@ -594,7 +761,7 @@ class TestMain:
     def test_env_defaults_passed_correctly(self, tmp_path: Path, monkeypatch) -> None:
         mock_set_defaults = MagicMock()
         monkeypatch.setitem(sys.modules, "training", MagicMock())
-        monkeypatch.setitem(sys.modules, "training.utils", MagicMock(set_env_defaults=mock_set_defaults))
+        monkeypatch.setitem(sys.modules, "training.utils", _training_utils(set_env_defaults=mock_set_defaults))
 
         for key, val in self._env_vars(tmp_path).items():
             monkeypatch.setenv(key, val)
@@ -612,7 +779,7 @@ class TestMain:
 
     def test_onnx_and_jit_flags_parsed(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setitem(sys.modules, "training", MagicMock())
-        monkeypatch.setitem(sys.modules, "training.utils", MagicMock(set_env_defaults=MagicMock()))
+        monkeypatch.setitem(sys.modules, "training.utils", _training_utils(set_env_defaults=MagicMock()))
 
         env = self._env_vars(tmp_path)
         env["ONNX_SUCCESS"] = "1"
@@ -632,9 +799,25 @@ class TestMain:
             assert call_kwargs["onnx_metrics"] == {"a": 1}
             assert call_kwargs["jit_metrics"] == {"b": 2}
 
+    def test_non_azure_backend_keeps_artifacts_local(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setitem(sys.modules, "training", MagicMock())
+        monkeypatch.setitem(sys.modules, "training.utils", _training_utils(set_env_defaults=MagicMock()))
+        for key, val in self._env_vars(tmp_path).items():
+            monkeypatch.setenv(key, val)
+        monkeypatch.setenv("TRACKING_BACKEND", "mlflow")
+
+        with (
+            patch("metrics.upload_artifacts.load_metrics", return_value=({}, {})),
+            patch("metrics.upload_artifacts.upload_to_mlflow", return_value=False),
+            patch("metrics.upload_artifacts.upload_to_blob_fallback") as mock_blob,
+        ):
+            main()
+
+            mock_blob.assert_not_called()
+
     def test_optional_env_vars_default_to_empty(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setitem(sys.modules, "training", MagicMock())
-        monkeypatch.setitem(sys.modules, "training.utils", MagicMock(set_env_defaults=MagicMock()))
+        monkeypatch.setitem(sys.modules, "training.utils", _training_utils(set_env_defaults=MagicMock()))
 
         env = self._env_vars(tmp_path)
         del env["CHECKPOINT_URI"]

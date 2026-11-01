@@ -19,6 +19,9 @@ if TYPE_CHECKING:
     from PIL.Image import Image
 
 
+from physical_ai_dataset_io.media import MediaInputError
+
+
 @dataclass(frozen=True, slots=True)
 class FrameWindow:
     """Episode-aligned window inside a (possibly chunked) video file."""
@@ -36,6 +39,20 @@ def extract_frames(
 ) -> list[Image]:
     """Return ``n_frames`` PIL images sampled evenly across the window."""
     import av
+
+    try:
+        return _extract_frames(window, n_frames=n_frames, target_size=target_size)
+    except (av.FFmpegError, OSError, ValueError, RuntimeError, IndexError, OverflowError) as err:
+        raise MediaInputError("Invalid media input") from err
+
+
+def _extract_frames(
+    window: FrameWindow,
+    *,
+    n_frames: int,
+    target_size: tuple[int, int] | None,
+) -> list[Image]:
+    import av
     from PIL import Image as PILImage
 
     if n_frames <= 0:
@@ -50,7 +67,7 @@ def extract_frames(
         duration_s = _stream_duration_s(container, stream)
         from_s = max(window.from_s or 0.0, 0.0)
         to_s = window.to_s if window.to_s is not None else duration_s
-        if to_s <= from_s:
+        if not math.isfinite(from_s) or not math.isfinite(to_s) or to_s <= from_s:
             raise ValueError(
                 f"Invalid window {from_s:.3f}->{to_s:.3f}s for {window.path}",
             )

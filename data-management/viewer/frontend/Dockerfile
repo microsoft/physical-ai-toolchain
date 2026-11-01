@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ─── Build stage ─────────────────────────────────────────────────────────────
-FROM node:26.10.0-slim@sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1 AS build
+FROM node:26.11.1-slim@sha256:193fe51b64e77981119c98c2002c9e32a70e2f006fb4d25068ce0558998917f0 AS build
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ COPY package.json package-lock.json ./
 COPY data-management/viewer/frontend/package.json data-management/viewer/frontend/package.json
 RUN --mount=type=cache,target=/root/.npm \
     --mount=type=secret,id=npmrc,target=/root/.npmrc \
-    npm ci --ignore-scripts --workspace robotic-training-data-tool --include-workspace-root=false
+    npm ci --ignore-scripts
 
 COPY data-management/viewer/frontend data-management/viewer/frontend
 COPY data-management/viewer/specifications/language-tag-corpus.json data-management/viewer/specifications/language-tag-corpus.json
@@ -40,6 +40,9 @@ COPY --from=build /app/data-management/viewer/frontend/dist /usr/share/nginx/htm
 # nginx config: envsubst replaces ${NGINX_BACKEND_HOST} at container start
 COPY data-management/viewer/frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 
+# Renders the caller-authentication mode include files, then starts nginx
+COPY data-management/viewer/frontend/start-nginx.sh /usr/local/bin/start-nginx.sh
+
 ENV NGINX_BACKEND_HOST=backend:8000
 ENV NGINX_BACKEND_SCHEME=http
 ENV NGINX_RESOLVER=127.0.0.11
@@ -53,4 +56,4 @@ USER nginx
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --start-interval=3s --retries=3 \
     CMD wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1
 
-CMD ["/bin/sh", "-c", "envsubst '${NGINX_BACKEND_HOST} ${NGINX_BACKEND_SCHEME} ${NGINX_RESOLVER}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+CMD ["/bin/sh", "/usr/local/bin/start-nginx.sh"]

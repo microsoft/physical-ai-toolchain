@@ -1,7 +1,7 @@
 import { useMsal } from '@azure/msal-react'
 import { useEffect, useState } from 'react'
 
-import { handleResponse, mutationFetch } from '@/lib/api-client'
+import { apiPath, handleResponse, mutationFetch } from '@/lib/api-client'
 
 export function MediaAuthGate({ children }: { children: React.ReactNode }) {
   const { instance } = useMsal()
@@ -15,7 +15,7 @@ export function MediaAuthGate({ children }: { children: React.ReactNode }) {
 
     async function authorizeMedia() {
       try {
-        const response = await mutationFetch('/api/auth/media-session', {
+        const response = await mutationFetch(apiPath('auth/media-session'), {
           method: 'POST',
           signal: controller.signal,
         })

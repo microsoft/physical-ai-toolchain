@@ -7,8 +7,11 @@ versioned OSMO dataset via ``localpath`` rather than the base64 archive used by
 MLflow tracking is covered by ``test_e2e_osmo_rl_lifecycle``), so this test verifies the
 distinct delivery mechanism by asserting the workflow task ran to success.
 
+Runs against the platform profile ``PLATFORM_PROFILE`` selects (azure by default, or local).
+
 ```shell
 uv run pytest -vv -s -m e2e tests/e2e/test_e2e_osmo_rl_dataset_training.py
+PLATFORM_PROFILE=local uv run pytest -vv -s -m e2e tests/e2e/test_e2e_osmo_rl_dataset_training.py
 ```
 """
 
@@ -25,6 +28,7 @@ from tests.e2e._osmo import (
     monitor_osmo_workflow,
     submit_osmo_dataset_training,
 )
+from tests.e2e._profile import PlatformProfile
 
 _ISAAC_TASK_NAME = "isaac-training"
 
@@ -35,10 +39,12 @@ _ISAAC_TASK_NAME = "isaac-training"
 def test_osmo_rl_dataset_training_e2e(
     request: pytest.FixtureRequest,
     repo_root: Path,
+    platform_profile: PlatformProfile,
 ) -> None:
-    log_e2e("Starting OSMO RL dataset-injection e2e test")
+    log_e2e(f"Starting OSMO RL dataset-injection e2e test on the {platform_profile.name} profile")
     workflow = submit_osmo_dataset_training(
         repo_root,
+        platform_profile,
         task="Isaac-Velocity-Rough-Anymal-C-v0",
         max_iterations=10,
         num_envs=64,

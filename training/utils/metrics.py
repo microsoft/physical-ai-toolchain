@@ -8,9 +8,28 @@ CPU and memory metrics require ``psutil``. GPU metrics require
 from __future__ import annotations
 
 import logging
+import math
+import re
 from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
+
+# MLflow tracking servers accept metric names made of alphanumerics, underscores, dashes, periods, spaces,
+# colons, and slashes; Azure ML accepts more. skrl reports units in parentheses, such as "(ms)", which a
+# self-hosted server rejects together with every other metric in the same batch.
+_GROUPING_CHARACTERS = re.compile(r"[()\[\]{}]")
+_DISALLOWED_METRIC_CHARACTERS = re.compile(r"[^\w./ :-]")
+_REPEATED_SPACES = re.compile(r" {2,}")
+
+
+def mlflow_metric_name(name: str) -> str:
+    """Return ``name`` in the character set every MLflow tracking server accepts.
+
+    Grouping characters are dropped, so ``"Update time (ms)"`` becomes ``"Update time ms"``; any other
+    character outside the set becomes ``_``.
+    """
+    cleaned = _DISALLOWED_METRIC_CHARACTERS.sub("_", _GROUPING_CHARACTERS.sub("", name))
+    return _REPEATED_SPACES.sub(" ", cleaned).strip()
 
 
 def _is_tensor_scalar(value: Any) -> bool:
@@ -122,7 +141,8 @@ def _extract_from_value(name: str, value: int | float | Any, metrics: dict[str, 
     """Extract numeric value and add to metrics dict.
 
     Handles tensors, numpy arrays, and scalar types. Multi-element arrays
-    are converted to mean/std/min/max statistics.
+    are converted to mean/std/min/max statistics. The name is normalized with
+    ``mlflow_metric_name`` so every MLflow server accepts it.
 
     Args:
         name: Metric name.
@@ -131,6 +151,7 @@ def _extract_from_value(name: str, value: int | float | Any, metrics: dict[str, 
     """
     if value is None:
         return
+    name = mlflow_metric_name(name)
 
     try:
         if _is_tensor_scalar(value):
@@ -171,8 +192,25 @@ def _extract_from_tracking_data(
 
         if isinstance(value, dict):
             _extract_from_tracking_data(value, metrics, f"{metric_name}/", max_depth - 1)
+        elif isinstance(value, (list, tuple)):
+            # skrl appends a value per step or update and reduces the list when it writes the tag.
+            if value:
+                try:
+                    _extract_from_value(metric_name, _reduce_tracked_values(key, value), metrics)
+                except (ValueError, TypeError) as exc:
+                    _LOGGER.debug("Could not reduce tracked values for %s: %s", metric_name, exc)
         else:
             _extract_from_value(metric_name, value, metrics)
+
+
+def _reduce_tracked_values(tag: str, values: list[Any] | tuple[Any, ...]) -> float:
+    """Reduce an interval's tracked values as skrl does when it writes a tag: min, max, or mean by suffix."""
+    numbers = [float(value) for value in values]
+    if tag.endswith("(min)"):
+        return min(numbers)
+    if tag.endswith("(max)"):
+        return max(numbers)
+    return math.fsum(numbers) / len(numbers)
 
 
 _STANDARD_METRIC_ATTRS = [

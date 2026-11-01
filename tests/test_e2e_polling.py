@@ -12,15 +12,15 @@ class _FakeClock:
     def __init__(self) -> None:
         self.current = 0.0
 
-    def time(self) -> float:
+    def monotonic(self) -> float:
         return self.current
 
     def sleep(self, seconds: float) -> None:
         self.current += seconds
 
 
-def _raise_on_monotonic() -> float:
-    raise AssertionError("wait_for_status must use a suspend-aware wall clock")
+def _raise_on_wall_clock() -> float:
+    raise AssertionError("wait_for_status must not use an adjustable wall clock")
 
 
 def _wait_for_never_completed(
@@ -31,9 +31,9 @@ def _wait_for_never_completed(
     poll_interval_seconds: int,
     log: Callable[[str], None] | None = None,
 ) -> None:
-    monkeypatch.setattr(_common.time, "time", clock.time)
+    monkeypatch.setattr(_common.time, "time", _raise_on_wall_clock)
     monkeypatch.setattr(_common.time, "sleep", clock.sleep)
-    monkeypatch.setattr(_common.time, "monotonic", _raise_on_monotonic)
+    monkeypatch.setattr(_common.time, "monotonic", clock.monotonic)
     if log is not None:
         monkeypatch.setattr(_common, "log_e2e", log)
 
@@ -51,7 +51,7 @@ def test_aml_started_states_require_execution() -> None:
     assert {"Running", "Finalizing", "Completed"} == AML_STARTED_STATES
 
 
-def test_wait_for_status_uses_suspend_aware_wall_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wait_for_status_uses_monotonic_clock(monkeypatch: pytest.MonkeyPatch) -> None:
     clock = _FakeClock()
 
     _wait_for_never_completed(

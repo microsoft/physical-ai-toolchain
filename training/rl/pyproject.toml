@@ -27,6 +27,8 @@ dependencies = [
     "rsl-rl-lib==5.5.1",
     "skrl==2.1.0",
     "tensordict==0.14.2",
+    # Isaac Lab evaluation replays the exported ONNX policy on the CPU execution provider.
+    "onnxruntime==1.30.0",
     # marshmallow held at 3.x because azure-ai-ml==1.33.0 imports symbols that
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Mirror the IL pipeline; bump together with azure-ai-ml.

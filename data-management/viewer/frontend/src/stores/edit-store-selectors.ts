@@ -52,7 +52,7 @@ export const useEditDirtyState = () =>
   useEditStore(
     useShallow((state) => ({
       isDirty: state.isDirty,
-      markSaved: state.markSaved,
+      acknowledgeSave: state.acknowledgeSave,
       resetEdits: state.resetEdits,
     })),
   )

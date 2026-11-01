@@ -106,6 +106,15 @@ class AppConfig:
     vlm_judge_cache_dir: str | None = None
     """Directory for the SHA256-keyed result cache; None disables disk cache."""
 
+    vlm_judge_job_dir: str | None = None
+    """Shared durable local job root; defaults to DATA_DIR/.curation/judge."""
+
+    vlm_judge_capacity: int = 1
+    """Shared inference capacity, not a per-replica multiplier."""
+
+    vlm_judge_capacity_scope: str = "configured-inference-device"
+    """Common ownership scope for workers sharing the same inference device."""
+
 
 def load_config(env_path: Path | None = None) -> AppConfig:
     """
@@ -181,6 +190,9 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         vlm_judge_n_frames=vlm_judge_n_frames,
         vlm_judge_process_method=vlm_judge_process_method,
         vlm_judge_cache_dir=vlm_judge_cache_dir,
+        vlm_judge_job_dir=os.environ.get("VLM_JUDGE_JOB_DIR") or None,
+        vlm_judge_capacity=_positive_int_env("VLM_JUDGE_CAPACITY", 1),
+        vlm_judge_capacity_scope=os.environ.get("VLM_JUDGE_CAPACITY_SCOPE", "configured-inference-device"),
     )
 
 
@@ -270,21 +282,24 @@ def create_blob_dataset_provider(config: AppConfig):
     """
     Create a BlobDatasetProvider when storage_backend='azure'.
 
-    Returns None when storage_backend='local' or azure config is incomplete.
+    Returns None only when storage_backend='local'.
 
     Args:
         config: Application configuration.
 
     Returns:
         BlobDatasetProvider instance or None.
+
+    Raises:
+        ValueError: If Azure dataset configuration is incomplete.
+        ImportError: If Azure dataset dependencies are unavailable.
     """
     if config.storage_backend != "azure":
         return None
     if not config.azure_account_name or not config.azure_dataset_container:
-        logger.warning(
-            "Blob dataset provider skipped: AZURE_STORAGE_ACCOUNT_NAME and AZURE_STORAGE_DATASET_CONTAINER are required"
+        raise ValueError(
+            "AZURE_STORAGE_ACCOUNT_NAME and AZURE_STORAGE_DATASET_CONTAINER are required when STORAGE_BACKEND=azure"
         )
-        return None
 
     try:
         from .storage.blob_dataset import BlobDatasetProvider
@@ -300,9 +315,8 @@ def create_blob_dataset_provider(config: AppConfig):
             container_name=config.azure_dataset_container,
             sas_token=config.azure_sas_token,
         )
-    except ImportError:
-        logger.warning("BlobDatasetProvider unavailable: install azure-storage-blob and azure-identity")
-        return None
+    except ImportError as exc:
+        raise ImportError("Azure dataset dependencies unavailable: install the backend azure extra") from exc
 
 
 # Global config instance (populated on first load_app_config() call)

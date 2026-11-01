@@ -1,0 +1,12 @@
+# Service account for OSMO workflow pods. The client-id annotation is empty unless 02-deploy-osmo.sh
+# receives an Azure client ID; pods use it only when the pool template opts them in to the webhook.
+# Rendered by 02-deploy-osmo.sh, which substitutes only LOCAL_ placeholders.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: osmo-workflow
+  namespace: ${LOCAL_OSMO_WORKFLOWS_NAMESPACE}
+  labels:
+    app.kubernetes.io/part-of: ${LOCAL_PART_OF}
+  annotations:
+    azure.workload.identity/client-id: "${LOCAL_OSMO_AZURE_CLIENT_ID}"

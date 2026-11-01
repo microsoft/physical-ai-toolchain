@@ -189,6 +189,19 @@ export function normalizeLanguageTag(value: string): string | null {
   }
 }
 
+export interface SubtaskInstruction {
+  id: string
+  text: string
+}
+
+export function normalizeSubtaskInstructions(
+  items: readonly (SubtaskInstruction | string)[],
+): SubtaskInstruction[] {
+  return items.map((item, index) =>
+    typeof item === 'string' ? { id: `legacy-${index}`, text: item } : item,
+  )
+}
+
 /** Language instruction annotation for VLA-conditioned training */
 export interface LanguageInstructionAnnotation {
   /** Primary task instruction */
@@ -200,7 +213,7 @@ export interface LanguageInstructionAnnotation {
   /** Alternative phrasings for data augmentation */
   paraphrases: string[]
   /** Ordered subtask decomposition */
-  subtaskInstructions: string[]
+  subtaskInstructions: SubtaskInstruction[]
 }
 
 // ============================================================================
@@ -251,6 +264,7 @@ export interface EpisodeAnnotation {
   anomalies: AnomalyAnnotation
   /** Language instruction for VLA training */
   languageInstruction?: LanguageInstructionAnnotation
+  instructionAdoption?: Record<string, 'template' | 'retroactive'>
   /** Saved open-vocabulary object detections per reference frame */
   objectDetections?: ObjectDetectionAnnotation[]
   /** Free-form notes about the episode */
@@ -269,6 +283,32 @@ export interface EpisodeConsensus {
   agreementScore: number
 }
 
+export interface Contribution {
+  id: string
+  field: string
+  origin: 'human' | 'machine' | 'template' | 'retroactive' | 'legacy-unknown'
+  value: unknown
+  derivedFrom?: string[]
+  sequence: number
+  timestamp: string
+  authorId: string | null
+  machine: {
+    runId: string
+    resultId: string
+    runOrder: number
+    sourceRevision: string
+    inputRevision: string
+    configRevision: string
+  } | null
+}
+
+export interface ContributionLedger {
+  schemaVersion: '1.0.0'
+  contributions: Contribution[]
+  acceptances: Record<string, string[]>
+  withdrawn: string[]
+}
+
 /** Complete annotation file for an episode */
 export interface EpisodeAnnotationFile {
   /** Schema version for this file format */
@@ -281,6 +321,7 @@ export interface EpisodeAnnotationFile {
   annotations: EpisodeAnnotation[]
   /** Computed consensus (if multiple annotators) */
   consensus?: EpisodeConsensus
+  provenance?: Record<string, ContributionLedger>
 }
 
 // ============================================================================

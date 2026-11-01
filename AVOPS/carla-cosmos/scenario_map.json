@@ -1,0 +1,87 @@
+{
+  "roadParameters": {
+    "narrow": {
+      "scenario": "FollowLeadingVehicle.xosc",
+      "prompts": "narrow.txt",
+      "params": {"carla_town": "Town01_Opt", "carla_vehicles": "3", "carla_ego_speed_kmh": "20"}
+    },
+    "wide": {
+      "scenario": "FollowLeadingVehicle_Town04.xosc",
+      "prompts": "wide.txt",
+      "params": {"carla_town": "Town04_Opt", "carla_vehicles": "4", "carla_ego_speed_kmh": "70"}
+    }
+  },
+  "roadSurface": {
+    "asphalt": {
+      "scenario": "FollowLeadingVehicle_Town04.xosc",
+      "prompts": "asphalt.txt",
+      "params": {"carla_town": "Town04_Opt", "carla_vehicles": "4", "carla_ego_speed_kmh": "60"}
+    },
+    "concrete": {
+      "scenario": "FollowLeadingVehicle.xosc",
+      "prompts": "concrete.txt",
+      "params": {"carla_town": "Town01_Opt", "carla_vehicles": "3", "carla_ego_speed_kmh": "30"}
+    },
+    "gravel": {"scenario": "FollowLeadingVehicle_Town07.xosc", "prompts": "roadSurface_gravel.txt", "params": {}},
+    "dirt": {"scenario": "FollowLeadingVehicle_Town07.xosc", "prompts": "roadSurface_dirt.txt", "params": {}},
+    "pavement": {"scenario": "FollowLeadingVehicle.xosc", "prompts": "roadSurface_pavement.txt", "params": {}}
+  },
+  "trafficLights": {
+    "right": {
+      "scenario": "SignalizedJunctionRightTurn.xml",
+      "prompts": "trafficLights_right.txt",
+      "params": {
+        "carla_town": "Town10HD_Opt",
+        "carla_prefer_junction_start": "true",
+        "carla_ego_speed_kmh": "25",
+        "carla_junction_turn_probability": "1.0"
+      }
+    },
+    "left": {
+      "scenario": "SignalizedJunctionLeftTurn.xml",
+      "prompts": "trafficLights_left.txt",
+      "params": {
+        "carla_town": "Town10HD_Opt",
+        "carla_prefer_junction_start": "true",
+        "carla_ego_speed_kmh": "25",
+        "carla_junction_turn_probability": "1.0"
+      }
+    },
+    "straight": {
+      "scenario": "IntersectionCollisionAvoidance.xosc",
+      "prompts": "trafficLights_straight.txt",
+      "params": {"carla_town": "Town10HD_Opt", "carla_prefer_junction_start": "true", "carla_ego_speed_kmh": "30"}
+    },
+    "none": {
+      "scenario": "LaneChangeSimple.xosc",
+      "prompts": "trafficLights_none.txt",
+      "params": {"carla_town": "Town10HD_Opt", "carla_vehicles": "2", "carla_ego_speed_kmh": "30"}
+    }
+  },
+  "any_vehicle_lane_change": {
+    "yes": {
+      "scenario": "LaneChangeSimple.xosc",
+      "prompts": "any_vehicle_lane_change.txt",
+      "params": {"carla_town": "Town04_Opt", "carla_ego_speed_kmh": "20", "carla_camera_timeout": "15.0"}
+    }
+  },
+  "any_vehicle_cut_in": {
+    "yes": {
+      "scenario": "CutIn.xml",
+      "prompts": "any_vehicle_cut_in.txt",
+      "params": {
+        "carla_town": "Town04_Opt",
+        "carla_vehicles": "0",
+        "carla_ego_speed_kmh": "20",
+        "carla_camera_timeout": "15.0"
+      }
+    }
+  },
+  "pedestrianDetails": {
+    "yes": {
+      "scenario": "PedestrianCrossingFront.xosc",
+      "prompts": "pedestrianDetails.txt",
+      "params": {"carla_town": "Town01_Opt", "carla_ego_speed_kmh": "12", "carla_camera_timeout": "15.0"}
+    }
+  }
+}

@@ -8,8 +8,12 @@ __all__ = [
     "AzureConfigError",
     "AzureMLContext",
     "SystemMetricsCollector",
+    "TrackingBackend",
+    "TrackingConfigError",
     "bootstrap_azure_ml",
+    "create_tracking_backend",
     "require_env",
+    "resolve_tracking_backend_name",
     "set_env_defaults",
 ]
 
@@ -20,6 +24,10 @@ _EXPORTS = {
     "require_env": "training.utils.env",
     "set_env_defaults": "training.utils.env",
     "SystemMetricsCollector": "training.utils.metrics",
+    "TrackingBackend": "training.utils.tracking",
+    "TrackingConfigError": "training.utils.tracking",
+    "create_tracking_backend": "training.utils.tracking",
+    "resolve_tracking_backend_name": "training.utils.tracking",
 }
 
 
@@ -36,3 +44,9 @@ if TYPE_CHECKING:
     from training.utils.context import AzureConfigError, AzureMLContext, bootstrap_azure_ml
     from training.utils.env import require_env, set_env_defaults
     from training.utils.metrics import SystemMetricsCollector
+    from training.utils.tracking import (
+        TrackingBackend,
+        TrackingConfigError,
+        create_tracking_backend,
+        resolve_tracking_backend_name,
+    )

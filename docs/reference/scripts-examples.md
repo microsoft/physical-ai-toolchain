@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Script Examples
 description: Detailed submission examples for OSMO dataset training, LeRobot behavioral cloning, inference evaluation, AzureML training, and end-to-end pipelines.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-10-14
 ms.topic: reference
 keywords:
   - examples
@@ -55,7 +55,9 @@ The script stages files to exclude `__pycache__` and build artifacts via `.amlig
 
 ## LeRobot Behavioral Cloning
 
-The `training/il/scripts/submit-osmo-lerobot-training.sh` script submits LeRobot training workflows supporting ACT and Diffusion policy architectures. It trains from HuggingFace Hub datasets or Azure Blob datasets. The dependency contract is `training/il/pyproject.toml` with its committed `training/il/uv.lock`; runtime installation must preserve the project's configured package sources.
+The `training/il/scripts/submit-osmo-lerobot-training.sh` script submits LeRobot training workflows that train ACT and Diffusion policies from scratch or fine-tune SmolVLA from its pretrained base. It trains from HuggingFace Hub datasets, Azure Blob datasets, or, on the local profile, datasets in the workstation's datasets directory.
+
+The dependency contract is `training/il/lerobot/pyproject.toml` with its committed `uv.lock`, or `training/vla/lerobot/` for SmolVLA; runtime installation must preserve the project's configured package sources.
 
 ### LeRobot Submission Examples
 
@@ -74,27 +76,46 @@ The `training/il/scripts/submit-osmo-lerobot-training.sh` script submits LeRobot
   --blob-url https://account.blob.core.windows.net/datasets/pusht \
   -r pusht-model
 
-# Fine-tune from pre-trained policy
+# Fine-tune from a pretrained policy pinned to a Hub commit
 ./training/il/scripts/submit-osmo-lerobot-training.sh \
   -d user/my-dataset \
-  --policy-repo-id user/pretrained-act \
+  --policy-path user/pretrained-act \
+  --policy-path-revision "<policy-commit-sha>" \
   --training-steps 50000 \
   --batch-size 16
+
+# Local profile: ACT from a dataset in the workstation's datasets directory
+./training/il/scripts/submit-osmo-lerobot-training.sh \
+  --profile local \
+  --local-dataset my-learner-dataset \
+  -r my-act-policy
+
+# Local profile: fine-tune SmolVLA, mapping the dataset's cameras to the base model's
+./training/il/scripts/submit-osmo-lerobot-training.sh \
+  --profile local \
+  --local-dataset my-learner-dataset \
+  -p smolvla \
+  --rename-map '{"observation.images.front": "observation.images.camera1"}'
 ```
 
 ### LeRobot Parameters
 
-| Parameter           | Default                                              | Description                                                     |
-|---------------------|------------------------------------------------------|-----------------------------------------------------------------|
-| `--dataset-repo-id` | Required for HuggingFace; `dataset` for Blob sources | HuggingFace dataset repository ID or logical local dataset name |
-| `--blob-url`        | (none)                                               | Direct Azure Blob dataset URL; repeatable                       |
-| `--policy-type`     | `act`                                                | Policy: `act`, `diffusion`                                      |
-| `--job-name`        | `lerobot-act-training`                               | Job identifier                                                  |
-| `--policy-repo-id`  | (none)                                               | Pre-trained policy for fine-tuning                              |
-| `--training-steps`  | `100000`                                             | Total training iterations                                       |
-| `--batch-size`      | `32`                                                 | Training batch size                                             |
-| `--learning-rate`   | `1e-4`                                               | Optimizer learning rate                                         |
-| `--save-freq`       | `5000`                                               | Checkpoint save frequency                                       |
+| Parameter                | Default                                              | Description                                                           |
+|--------------------------|------------------------------------------------------|-----------------------------------------------------------------------|
+| `--profile`              | `azure` (`PLATFORM_PROFILE`)                         | Platform profile: `azure` or `local`                                  |
+| `--dataset-repo-id`      | Required for HuggingFace; `dataset` for Blob sources | HuggingFace dataset repository ID or logical local dataset name       |
+| `--blob-url`             | (none)                                               | Direct Azure Blob dataset URL; repeatable                             |
+| `--local-dataset`        | (none)                                               | Dataset folder in the profile's datasets directory, mounted read-only |
+| `--policy-type`          | `act`                                                | Policy: `act`, `diffusion`, `smolvla`                                 |
+| `--job-name`             | `lerobot-<policy-type>-training`                     | Job identifier                                                        |
+| `--policy-path`          | `lerobot/smolvla_base` for `smolvla`, else none      | Pretrained policy to fine-tune: Hub repository or container path      |
+| `--policy-path-revision` | Pinned base commit for `smolvla`                     | Commit SHA that pins a Hub `--policy-path`                            |
+| `--rename-map`           | (none)                                               | JSON map from dataset feature keys to the policy's keys               |
+| `--policy-repo-id`       | (none)                                               | Repository ID recorded on the trained policy; Hub push stays off      |
+| `--training-steps`       | `100000`                                             | Total training iterations                                             |
+| `--batch-size`           | `32`                                                 | Training batch size                                                   |
+| `--learning-rate`        | `1e-4`                                               | Optimizer learning rate                                               |
+| `--save-freq`            | `5000`                                               | Checkpoint save frequency                                             |
 
 ## LeRobot Inference
 

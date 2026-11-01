@@ -1,8 +1,11 @@
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: data-management/viewer/backend/Dockerfile
+      args:
+        BACKEND_EXTRAS: "${BACKEND_EXTRAS:-azure,analysis,export,auth,yolo}"
+        JUDGE_EXTRAS: "${JUDGE_EXTRAS:-}"
     restart: unless-stopped
     user: "${DATAVIEWER_UID:-999}:${DATAVIEWER_GID:-999}"
     ports:
@@ -19,6 +22,20 @@ services:
       DATA_DIR: "/data"
       DETECTION_MODELS_DIR: "/models"
       DETECTION_MODEL_DIGESTS: "${DETECTION_MODEL_DIGESTS:-{}}"
+
+      VLM_JUDGE_ENABLED: "${VLM_JUDGE_ENABLED:-false}"
+      VLM_JUDGE_BACKEND: "${VLM_JUDGE_BACKEND:-echo}"
+      VLM_JUDGE_MODEL_ID: "${VLM_JUDGE_MODEL_ID:-Qwen/Qwen3-VL-4B-Instruct}"
+      VLM_JUDGE_MODEL_REVISION: "${VLM_JUDGE_MODEL_REVISION:-}"
+      VLM_JUDGE_BASE_URL: "${VLM_JUDGE_BASE_URL:-}"
+      VLM_JUDGE_API_KEY: "${VLM_JUDGE_API_KEY:-}"
+      VLM_JUDGE_JOB_DIR: "/state/judge"
+      VLM_JUDGE_CACHE_DIR: "/scratch/judge"
+      VLM_JUDGE_CAPACITY: "${VLM_JUDGE_CAPACITY:-1}"
+      VLM_JUDGE_CAPACITY_SCOPE: "${VLM_JUDGE_CAPACITY_SCOPE:-configured-inference-device}"
+      VLM_JUDGE_N_FRAMES: "${VLM_JUDGE_N_FRAMES:-12}"
+      VLM_JUDGE_PROCESS_METHOD: "${VLM_JUDGE_PROCESS_METHOD:-gvl}"
+      HF_HOME: "/scratch/models"
 
       # Azure Blob Storage (required when STORAGE_BACKEND=azure)
       AZURE_STORAGE_ACCOUNT_NAME: "${AZURE_STORAGE_ACCOUNT_NAME:-}"
@@ -37,6 +54,9 @@ services:
       - "${DATAVIEWER_HOST_DATA_DIR:-./datasets}:/data:${DATAVIEWER_DATA_MOUNT_OPTIONS:-rw}"
       # Mount reviewed detection weights as immutable runtime inputs
       - "${DATAVIEWER_HOST_MODELS_DIR:-./models}:/models:ro"
+      - "judge-state:/state"
+    tmpfs:
+      - "/scratch:uid=${DATAVIEWER_UID:-999},gid=${DATAVIEWER_GID:-999}"
     healthcheck:
       test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
       interval: 30s
@@ -60,3 +80,6 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+
+volumes:
+  judge-state:

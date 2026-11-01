@@ -4,6 +4,122 @@ import { describe, expect, it, vi } from 'vitest'
 import { useAnnotationWorkspaceEpisodeActions } from '@/components/annotation-workspace/useAnnotationWorkspaceEpisodeActions'
 
 describe('useAnnotationWorkspaceEpisodeActions', () => {
+  it('saves all resources once without navigating from standalone Save', async () => {
+    let complete!: () => void
+    const pending = new Promise<void>((resolve) => {
+      complete = resolve
+    })
+    const annotations = vi.fn(() => pending)
+    const labels = vi.fn().mockResolvedValue(undefined)
+    const edits = vi.fn().mockResolvedValue(undefined)
+    const advance = vi.fn()
+    const { result } = renderHook(() =>
+      useAnnotationWorkspaceEpisodeActions({
+        diagnosticsEnabled: true,
+        currentDatasetId: 'dataset-1',
+        currentEpisodeIndex: 0,
+        currentEpisodeLabels: ['SUCCESS'],
+        savedLabelsForCurrentEpisode: [],
+        availableLabels: ['SUCCESS'],
+        labelDataLoaded: true,
+        hasEdits: true,
+        hasAnnotationChanges: true,
+        onResetEdits: vi.fn(),
+        onSetEpisodeLabels: vi.fn(),
+        onSaveEpisodeDraft: edits,
+        onSaveEpisodeLabels: labels,
+        onSaveEpisodeAnnotation: annotations,
+        onRecordEvent: vi.fn(),
+        canGoNextEpisode: true,
+        onAdvanceToNextEpisode: advance,
+      }),
+    )
+    let first!: Promise<void>
+    act(() => {
+      first = result.current.handleSaveEpisode()
+    })
+    await act(async () => {
+      await result.current.handleSaveEpisode()
+    })
+    expect(result.current.isSaving).toBe(true)
+    expect(annotations).toHaveBeenCalledOnce()
+    expect(labels).toHaveBeenCalledOnce()
+    expect(edits).toHaveBeenCalledOnce()
+    await act(async () => {
+      complete()
+      await first
+    })
+    expect(result.current.isSaving).toBe(false)
+    expect(advance).not.toHaveBeenCalled()
+  })
+
+  it('waits for durable edit acknowledgment before advancing', async () => {
+    let completeSave!: () => void
+    const save = new Promise<void>((resolve) => {
+      completeSave = resolve
+    })
+    const advance = vi.fn()
+    const { result } = renderHook(() =>
+      useAnnotationWorkspaceEpisodeActions({
+        diagnosticsEnabled: true,
+        currentDatasetId: 'dataset-1',
+        currentEpisodeIndex: 0,
+        currentEpisodeLabels: [],
+        savedLabelsForCurrentEpisode: [],
+        availableLabels: [],
+        labelDataLoaded: true,
+        hasEdits: true,
+        onResetEdits: vi.fn(),
+        onSetEpisodeLabels: vi.fn(),
+        onSaveEpisodeDraft: () => save,
+        onSaveEpisodeLabels: vi.fn(),
+        onRecordEvent: vi.fn(),
+        canGoNextEpisode: true,
+        onAdvanceToNextEpisode: advance,
+      }),
+    )
+    let pending!: Promise<void>
+    act(() => {
+      pending = result.current.handleSaveAndNextEpisode()
+    })
+    expect(advance).not.toHaveBeenCalled()
+    await act(async () => {
+      completeSave()
+      await pending
+    })
+    expect(advance).toHaveBeenCalledOnce()
+  })
+
+  it('retains the episode and reports an edit-save failure', async () => {
+    const advance = vi.fn()
+    const { result } = renderHook(() =>
+      useAnnotationWorkspaceEpisodeActions({
+        diagnosticsEnabled: true,
+        currentDatasetId: 'dataset-1',
+        currentEpisodeIndex: 0,
+        currentEpisodeLabels: [],
+        savedLabelsForCurrentEpisode: [],
+        availableLabels: [],
+        labelDataLoaded: true,
+        hasEdits: true,
+        onResetEdits: vi.fn(),
+        onSetEpisodeLabels: vi.fn(),
+        onSaveEpisodeDraft: () => {
+          throw new Error('unavailable')
+        },
+        onSaveEpisodeLabels: vi.fn(),
+        onRecordEvent: vi.fn(),
+        canGoNextEpisode: true,
+        onAdvanceToNextEpisode: advance,
+      }),
+    )
+    await act(async () => {
+      await result.current.handleSaveAndNextEpisode()
+    })
+    expect(advance).not.toHaveBeenCalled()
+    expect(result.current.saveStatusMessage).toMatch(/could not be saved/i)
+  })
+
   it('restores saved labels that are still available when reset-all runs', async () => {
     const handleResetEdits = vi.fn()
     const handleSetEpisodeLabels = vi.fn()

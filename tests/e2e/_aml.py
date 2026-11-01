@@ -17,6 +17,7 @@ import pytest
 
 from tests.e2e._common import (
     E2EHandle,
+    RegisteredModel,
     command_tuple,
     e2e_name,
     env_value,
@@ -114,14 +115,6 @@ class AzureMLJob:
     suspected_orphan: bool = False
 
 
-@dataclass(frozen=True)
-class AmlModelRef:
-    """A concrete registered AzureML model — never the mutable ``latest`` alias."""
-
-    name: str
-    version: str
-
-
 def _model_versions(payload: Any) -> list[int]:
     items = payload if isinstance(payload, list) else [payload]
     versions: list[int] = []
@@ -165,7 +158,7 @@ def resolve_registered_model(
     aml_workspace: AzureMLWorkspace,
     *,
     model_name: str,
-) -> AmlModelRef:
+) -> RegisteredModel:
     """Resolve the concrete latest version of a registered AzureML model.
 
     A lifecycle test registers its checkpoint under a unique model name, so the
@@ -177,13 +170,13 @@ def resolve_registered_model(
         raise AssertionError(f"Training run registered no versions under AzureML model {model_name!r}")
     version = str(max(versions))
     log_e2e(f"Resolved AzureML model {model_name} to concrete version {version}")
-    return AmlModelRef(name=model_name, version=version)
+    return RegisteredModel(name=model_name, version=version)
 
 
 def assert_registered_model_has_artifacts(
     repo_root: Path,
     aml_workspace: AzureMLWorkspace,
-    model: AmlModelRef,
+    model: RegisteredModel,
 ) -> None:
     """Download a registered model version and assert that it contains files."""
     with tempfile.TemporaryDirectory(prefix="e2e-model-artifacts-") as download_root:
@@ -586,7 +579,7 @@ class AmlLeRobotEvalPolicySource:
     description: str
 
 
-def aml_lerobot_policy_source_from_model(model: AmlModelRef) -> AmlLeRobotEvalPolicySource:
+def aml_lerobot_policy_source_from_model(model: RegisteredModel) -> AmlLeRobotEvalPolicySource:
     """Build an eval policy source from a concrete registered AzureML model."""
     return AmlLeRobotEvalPolicySource(
         args=("--from-aml-model", "--model-name", model.name, "--model-version", model.version),
@@ -594,7 +587,7 @@ def aml_lerobot_policy_source_from_model(model: AmlModelRef) -> AmlLeRobotEvalPo
     )
 
 
-def _resolve_aml_model_env(env_var: str) -> AmlModelRef | None:
+def _resolve_aml_model_env(env_var: str) -> RegisteredModel | None:
     model = env_value(env_var)
     if not model:
         return None
@@ -603,7 +596,7 @@ def _resolve_aml_model_env(env_var: str) -> AmlModelRef | None:
     model_name, model_version = (part.strip() for part in model.split(":", 1))
     if not model_name or not model_version:
         pytest.skip(f"{env_var} must include a non-empty AzureML model name and version")
-    return AmlModelRef(name=model_name, version=model_version)
+    return RegisteredModel(name=model_name, version=model_version)
 
 
 def resolve_aml_lerobot_eval_policy_override() -> AmlLeRobotEvalPolicySource | None:
@@ -791,7 +784,7 @@ def assert_aml_lerobot_eval_artifact_contract(job: AzureMLJob, *, eval_episodes:
     log_e2e(f"AzureML LeRobot eval artifact contract passed for job {job.name}")
 
 
-def resolve_aml_isaac_eval_model_override() -> AmlModelRef | None:
+def resolve_aml_isaac_eval_model_override() -> RegisteredModel | None:
     """Resolve an AzureML eval model from the environment, or ``None`` when unset."""
     return _resolve_aml_model_env(_AML_ISAAC_EVAL_MODEL_ENV)
 
@@ -800,7 +793,7 @@ def submit_aml_isaaclab_eval(
     repo_root: Path,
     aml_workspace: AzureMLWorkspace,
     *,
-    model: AmlModelRef,
+    model: RegisteredModel,
     task: str,
     eval_episodes: int,
     num_envs: int,

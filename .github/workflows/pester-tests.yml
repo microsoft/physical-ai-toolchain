@@ -66,6 +66,16 @@ jobs:
       - name: Setup Node.js and install dependencies
         uses: ./.github/actions/setup-node-deps
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: '0.12.20'
+          checksum: '6590717592ace991ff83a63fef799e3ad9d33ecc8f96c5d6bdd732496e79337f'
+          python-version: '3.12'
+
+      - name: Install Python
+        run: uv python install (Get-Content .python-version -Raw).Trim()
+
       - name: Create logs directory
         run: New-Item -ItemType Directory -Force -Path logs | Out-Null
 
@@ -77,8 +87,22 @@ jobs:
 
       - name: Install PowerShell-Yaml
         id: install-yaml
+        timeout-minutes: 3
         run: |
-          Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Force -SkipPublisherCheck -Scope CurrentUser
+          for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
+            try {
+              Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Repository PSGallery -Force -SkipPublisherCheck -Scope CurrentUser -ErrorAction Stop
+              Import-Module powershell-yaml -RequiredVersion 0.4.12 -ErrorAction Stop
+              break
+            }
+            catch {
+              if ($Attempt -eq 3) {
+                throw
+              }
+              Write-Warning "PowerShell-Yaml installation attempt $Attempt failed: $($_.Exception.Message)"
+              Start-Sleep -Seconds 5
+            }
+          }
 
       - name: Get changed files
         id: changed-files
@@ -210,7 +234,7 @@ jobs:
 
       - name: Upload test results
         if: always() && steps.pester.outcome != 'skipped'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pester-results-${{ matrix.os }}
           path: logs/pester-results-${{ matrix.os }}.xml
@@ -218,7 +242,7 @@ jobs:
 
       - name: Upload Coverage Report
         if: matrix.os == 'ubuntu-latest' && inputs.code-coverage && always() && steps.pester.outcome != 'skipped'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-report-${{ matrix.os }}
           path: logs/coverage-pester.xml

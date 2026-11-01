@@ -100,8 +100,8 @@ def test_category_paths_route_their_dependabot_directories() -> None:
     [
         ("package.json", {"tooling"}),
         ("package-lock.json", {"tooling", "dataviewer"}),
-        ("pyproject.toml", {"tooling"}),
-        ("uv.lock", {"tooling"}),
+        ("pyproject.toml", {"tooling", "dataviewer", "evaluation"}),
+        ("uv.lock", {"tooling", "dataviewer", "evaluation"}),
         (".github/workflows/smoke-cpu.yml", {"tooling"}),
     ],
 )

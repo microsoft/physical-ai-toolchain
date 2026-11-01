@@ -27,11 +27,14 @@ function buildDefaultConfig(datasetId = '_local'): JointConfig {
 
 interface JointConfigState {
   config: JointConfig
+  savedConfig: JointConfig | null
+  baseEtag: string | null | undefined
   isLoaded: boolean
 }
 
 interface JointConfigActions {
-  setConfig: (config: JointConfig) => void
+  setConfig: (config: JointConfig, etag?: string | null) => void
+  acknowledgeSave: (submitted: JointConfig, saved: JointConfig, etag: string | null) => void
   initDefaults: (datasetId?: string) => void
   updateLabel: (index: number, label: string) => void
   updateGroupLabel: (groupId: string, label: string) => void
@@ -51,6 +54,8 @@ type JointConfigStore = JointConfigState & JointConfigActions
 
 const initialState: JointConfigState = {
   config: buildDefaultConfig(),
+  savedConfig: null,
+  baseEtag: undefined,
   isLoaded: false,
 }
 
@@ -61,8 +66,22 @@ export const useJointConfigStore = create<JointConfigStore>()(
     (set, get) => ({
       ...initialState,
 
-      setConfig: (config) => {
-        set({ config, isLoaded: true }, false, 'setConfig')
+      setConfig: (config, etag) => {
+        set({ config, savedConfig: config, baseEtag: etag, isLoaded: true }, false, 'setConfig')
+      },
+
+      acknowledgeSave: (submitted, saved, etag) => {
+        const current = get().config
+        if (current.datasetId !== submitted.datasetId) return
+        set(
+          {
+            config: current === submitted ? saved : current,
+            savedConfig: saved,
+            baseEtag: etag ?? undefined,
+          },
+          false,
+          'acknowledgeSave',
+        )
       },
 
       initDefaults: (datasetId) => {

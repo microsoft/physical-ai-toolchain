@@ -113,10 +113,10 @@ const coverageBaselines = {
     lines: 50,
   },
   'src/components/annotation-workspace/useAnnotationWorkspaceShell.ts': {
-    statements: 85,
-    branches: 58,
-    functions: 80,
-    lines: 85,
+    statements: 90,
+    branches: 75,
+    functions: 95,
+    lines: 90,
   },
   'src/components/annotation-workspace/useAnnotationWorkspaceVideoSync.ts': {
     statements: 78,
@@ -190,8 +190,8 @@ const coverageBaselines = {
     functions: 76,
     lines: 85,
   },
-  'src/hooks/use-vlm-judge.ts': { statements: 45, branches: 18, functions: 45, lines: 50 },
-  'src/stores/annotation-store.ts': { statements: 77, branches: 54, functions: 75, lines: 85 },
+  'src/hooks/use-vlm-judge.ts': { statements: 95, branches: 90, functions: 95, lines: 95 },
+  'src/stores/annotation-store.ts': { statements: 95, branches: 88, functions: 95, lines: 98 },
 }
 
 // Per-file glob for a directory that skips files with coverage baselines, matched by file name.
@@ -205,7 +205,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(import.meta.dirname, './src'),
     },
   },
   test: {
@@ -235,10 +235,10 @@ export default defineConfig({
         'src/components/ui/**',
       ],
       thresholds: {
-        lines: 55,
-        functions: 55,
-        branches: 40,
-        statements: 55,
+        lines: 96,
+        functions: 95,
+        branches: 88,
+        statements: 95,
         // Per-file enforcement on hand-tested directories to catch regressions
         // in individual files. Component-level coverage tracked separately.
         [outsideBaselines('src/hooks')]: {
