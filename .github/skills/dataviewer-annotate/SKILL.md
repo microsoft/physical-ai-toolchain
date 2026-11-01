@@ -1,22 +1,27 @@
 ---
-description: 'One-shot: launch the dataviewer (with VLM judge enabled) and run the multi-step VLM-as-judge pipeline across an entire dataset.'
-agent: Dataviewer Developer
+name: dataviewer-annotate
+description: 'One-shot: launch the dataviewer with the VLM judge enabled and run the multi-step VLM-as-judge pipeline across an entire dataset. Use when the user runs /dataviewer-annotate.'
 argument-hint: "<datasetId> [mode=vlm-judge] [backend=qwen3-vl|echo|openai-compat] [modelId=...] [baseUrl=...] [persistLabels=true|false] [limit=N]"
+disable-model-invocation: true
 ---
 
 # Dataviewer Annotate
 
 Launch the dataviewer, ensure the VLM-as-judge harness is enabled, and score dataset episodes with the chosen judge backend.
 
-## Inputs
+This workflow follows Phase 5 ("VLM-as-Judge Evaluation") of the [Dataviewer Developer agent](../../agents/dataviewer-developer.agent.md) and the [dataviewer skill](../dataviewer/SKILL.md). Run it from that agent when available; from another agent, read both files first.
 
-* ${input:datasetId}: **Required.** Subdirectory name under `DATA_DIR`. Aliases accepted (`leisaac-pickup-orange` → `leisaac-pick-orange`).
-* ${input:mode:vlm-judge}: Annotation mode. Currently only `vlm-judge` is supported. Reserved for future modes (e.g. `joint-trajectory`).
-* ${input:backend:qwen3-vl}: One of `qwen3-vl`, `echo`, or `openai-compat`. With `qwen3-vl`, this prompt auto-launches the local OpenAI-compat shim so the dataviewer talks to the model via HTTP without colocating Torch in the dataviewer venv.
-* ${input:modelId:Qwen/Qwen3-VL-4B-Instruct}: Hugging Face id (`qwen3-vl`) or remote model name (`openai-compat`).
-* ${input:baseUrl}: OpenAI-compatible endpoint when `backend=openai-compat`; ignored otherwise.
-* ${input:persistLabels:true}: When `true` and the model returns a binary outcome with confidence ≥ 0.7, set the dataviewer label to `SUCCESS` / `FAILURE` (or `PARTIAL` for mid-confidence). Skipped on `outcome_success: null`.
-* ${input:limit:0}: Cap on number of episodes; `0` means the entire dataset.
+## Arguments
+
+Parse arguments from the request. The first bare value is `datasetId`; the rest are `name=value` pairs. Use the default when an argument is omitted.
+
+* `datasetId` (**required**): Subdirectory name under `DATA_DIR`. Aliases accepted (`leisaac-pickup-orange` → `leisaac-pick-orange`).
+* `mode` (default `vlm-judge`): Annotation mode. Currently only `vlm-judge` is supported. Reserved for future modes (e.g. `joint-trajectory`).
+* `backend` (default `qwen3-vl`): One of `qwen3-vl`, `echo`, or `openai-compat`. With `qwen3-vl`, this workflow auto-launches the local OpenAI-compat shim so the dataviewer talks to the model via HTTP without colocating Torch in the dataviewer venv.
+* `modelId` (default `Qwen/Qwen3-VL-4B-Instruct`): Hugging Face id (`qwen3-vl`) or remote model name (`openai-compat`).
+* `baseUrl` (optional): OpenAI-compatible endpoint when `backend=openai-compat`; ignored otherwise.
+* `persistLabels` (default `true`): When `true` and the model returns a binary outcome with confidence ≥ 0.7, set the dataviewer label to `SUCCESS` / `FAILURE` (or `PARTIAL` for mid-confidence). Skipped on `outcome_success: null`.
+* `limit` (default `0`): Cap on number of episodes; `0` means the entire dataset.
 
 ## Requirements
 
@@ -38,8 +43,8 @@ The URLs below use default ports. Substitute the resolved service URLs consisten
     DATAVIEWER_AUTH_DISABLED=true
 
     VLM_JUDGE_ENABLED=true
-    VLM_JUDGE_BACKEND=${backend}
-    VLM_JUDGE_MODEL_ID=${modelId}
+    VLM_JUDGE_BACKEND=<backend>
+    VLM_JUDGE_MODEL_ID=<modelId>
     VLM_JUDGE_BASE_URL=<resolve below>
     VLM_JUDGE_N_FRAMES=12
     VLM_JUDGE_CACHE_DIR=outputs/vlm-judge/cache
@@ -47,7 +52,7 @@ The URLs below use default ports. Substitute the resolved service URLs consisten
 
     Resolve `VLM_JUDGE_BASE_URL`:
     * `backend=qwen3-vl` → `http://127.0.0.1:8001/v1` (the shim) and pass `VLM_JUDGE_BACKEND=openai-compat` so the dataviewer's lightweight venv doesn't try to load Torch.
-    * `backend=openai-compat` → `${baseUrl}` exactly as provided. Fail fast if missing.
+    * `backend=openai-compat` → `baseUrl` exactly as provided. Fail fast if missing.
     * `backend=echo` → leave unset.
 
     Use existing protected credentials for remote endpoints; never replace an API key with a placeholder. Disable authentication only for an owned loopback development session. Preserve authentication and CSRF requirements on existing authenticated services.
@@ -60,7 +65,7 @@ The URLs below use default ports. Substitute the resolved service URLs consisten
         ```bash
         cd <repo> && source .venv/bin/activate && \
           PYTHONPATH="$PWD:$PWD/evaluation" \
-          python -m evaluation.vlm_judge.openai_shim --port 8001 --model-id ${modelId}
+          python -m evaluation.vlm_judge.openai_shim --port 8001 --model-id <modelId>
         ```
 
     * Wait for `/health` to return `{"status":"ok"}` before continuing.
@@ -77,7 +82,7 @@ The URLs below use default ports. Substitute the resolved service URLs consisten
       Wait for both services to become ready, and follow the dataviewer skill's accepted-dataset checks when a descriptor is present.
 
 5. **Open the dataviewer UI** at `http://localhost:5173`:
-    * Try `open_browser_page("http://localhost:5173")` first; if SimpleBrowser flakes, fall back to `mcp_playwright_browser_navigate`.
+    * Find browser tools with the host's tool search as described in the dataviewer skill's "Load browser automation tools" step. Try the integrated browser (`open_browser_page`) first; if SimpleBrowser flakes or is unavailable, fall back to the Playwright MCP navigate action (`browser_navigate`).
     * Switch to the resolved dataset via the header combobox (use the `[role="option"]` JS pattern documented in the dataviewer skill).
 
 6. **Iterate the dataset**:
@@ -92,7 +97,7 @@ The URLs below use default ports. Substitute the resolved service URLs consisten
           Read the latest dataset labels and ETag, preserve unrelated labels, and replace the outcome label with the selected value. Send `PUT /api/datasets/<id>/episodes/<idx>/labels` with `If-Match: <ETag>`, or `If-None-Match: *` when no ETag exists, plus required authentication and CSRF headers. Successful PUT requests persist immediately. Stop and reconcile HTTP 412 conflicts; do not retry with stale state. Verify the saved labels with GET instead of issuing a separate save request.
     * Stream progress to the user every ~10 episodes (e.g. `15/60 done — 11 SUCCESS, 4 FAILURE, mean VOC 0.62`).
 
-7. **Verify in the UI** by Playwright-navigating to a randomly chosen sample episode in the resolved dataset and asserting the **VLM Judge** panel renders an outcome badge.
+7. **Verify in the UI** by navigating the browser to a randomly chosen sample episode in the resolved dataset and asserting the **VLM Judge** panel renders an outcome badge.
 
 8. **Report**:
     * Total episodes scored, success rate, mean VOC, mean inference latency.

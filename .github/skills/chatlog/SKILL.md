@@ -1,17 +1,20 @@
 ---
-agent: agent
-description: Create and maintain structured conversation chatlogs capturing problems, solutions, and lessons learned
-argument-hint: mode={create|continue} log=<chatlog-name> maintain={true|false}
+name: chatlog
+description: 'Create and maintain structured conversation chatlogs capturing problems, solutions, and lessons learned. Use when the user runs /chatlog.'
+argument-hint: "mode={create|continue} log=<chatlog-name> maintain={true|false}"
+disable-model-invocation: true
 ---
 # Conversation Chatlog Manager
 
-Manage conversation details by creating and maintaining structured chatlog files that capture problem statements, solutions, technical details, and lessons learned. This prompt enables both creating new chatlogs and continuing conversations with existing chatlog context.
+Manage conversation details by creating and maintaining structured chatlog files that capture problem statements, solutions, technical details, and lessons learned. This skill enables both creating new chatlogs and continuing conversations with existing chatlog context.
 
-## Inputs
+## Arguments
 
-* ${input:mode:create}: Mode of operation - `create` to start a new chatlog, `continue` to work with an existing chatlog
-* ${input:log}: Chat log file name, path, or relative name (required when mode=continue and a *-chatlog.md was not attached, e.g., `.copilot-tracking/chatlogs/20251119-azureml-job-submission-chatlog.md`, `20251119-azureml-job-submission`, `azureml-job-submission`)
-* ${input:maintain:true}: Whether to continue updating the chatlog with new details from the ongoing conversation (true/false)
+Parse arguments from the request as `name=value` pairs. Use the default when an argument is omitted.
+
+* `mode` (default `create`): Mode of operation - `create` to start a new chatlog, `continue` to work with an existing chatlog
+* `log` (required when `mode=continue` and a *-chatlog.md was not attached): Chat log file name, path, or relative name (e.g., `.copilot-tracking/chatlogs/20251119-azureml-job-submission-chatlog.md`, `20251119-azureml-job-submission`, `azureml-job-submission`)
+* `maintain` (default `true`): Whether to continue updating the chatlog with new details from the ongoing conversation (true/false)
 
 ## Protocol
 
@@ -83,7 +86,7 @@ command here
 
 ## Related Documentation
 
-* [Link Title](URL)
+* [Link Title](https://example.com)
 
 ## Follow-up Issues
 
