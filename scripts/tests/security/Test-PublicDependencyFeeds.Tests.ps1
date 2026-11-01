@@ -163,6 +163,8 @@ Describe 'Invoke-PublicDependencyFeedScan' -Tag 'Unit' {
         It 'Reports <Rule> for <Name>' -ForEach @(
             @{ Name = 'unparseable npm lock'; FileName = 'package-lock.json'; Rule = 'npm-lock-parse'; Content = '{ "lockfileVersion": 3, "packages": {' }
             @{ Name = 'npm lockfile version 1'; FileName = 'package-lock.json'; Rule = 'npm-lock-version'; Content = '{ "lockfileVersion": 1, "dependencies": {} }' }
+            @{ Name = 'npm package entry that is not an object'; FileName = 'package-lock.json'; Rule = 'npm-lock-parse'; Content = '{ "lockfileVersion": 3, "packages": { "node_modules/tool": "1.0.0" } }' }
+            @{ Name = 'npm resolved shorthand'; FileName = 'package-lock.json'; Rule = 'url-scheme'; Entry = @{ version = '1.0.0'; resolved = 'github:example/tool#abc'; integrity = 'SHA512' } }
             @{ Name = 'npm entry without integrity'; FileName = 'package-lock.json'; Rule = 'npm-integrity-missing'; Entry = @{ version = '1.0.0'; resolved = 'NPM_TARBALL' } }
             @{ Name = 'npm entry without resolved'; FileName = 'package-lock.json'; Rule = 'npm-resolved-missing'; Entry = @{ version = '1.0.0'; integrity = 'SHA512' } }
             @{ Name = 'npm mixed weak integrity'; FileName = 'npm-shrinkwrap.json'; Rule = 'npm-integrity-weak'; Entry = @{ version = '1.0.0'; resolved = 'NPM_TARBALL'; integrity = 'SHA512 sha1-AAAA' } }
@@ -270,7 +272,7 @@ Describe 'Invoke-PublicDependencyFeedScan' -Tag 'Unit' {
                 'package-lock.json' = $lock
                 'uv.lock'           = $uvLock
                 'pyproject.toml'    = $pyproject
-                '.npmrc'            = @('registry=https://registry.npmjs.org/', 'strict-ssl=true')
+                '.npmrc'            = @('# canonical public registry', 'registry=https://registry.npmjs.org/', 'strict-ssl=true')
             }
 
             $result = Invoke-PublicDependencyFeedScan -RepoRoot $repoRoot
@@ -338,6 +340,18 @@ Describe 'Invoke-PublicDependencyFeedScan' -Tag 'Unit' {
             $result.violations[0].line | Should -BeGreaterThan 0
         }
 
+        It 'Reports line zero when a dependency spec cannot be located' {
+            $repoRoot = Join-Path $TestDrive 'manifest-compact'
+            $manifest = @{ dependencies = @{ tool = 'github:example/tool' } } | ConvertTo-Json -Compress
+            New-PublicFeedTestRepository -Path $repoRoot -Files @{ 'package.json' = $manifest }
+
+            $result = Invoke-PublicDependencyFeedScan -RepoRoot $repoRoot
+
+            $result.violationCount | Should -Be 1
+            $result.violations[0].rule | Should -Be 'npm-spec-not-registry'
+            $result.violations[0].line | Should -Be 0
+        }
+
         It 'Reports an unparseable package.json' {
             $repoRoot = Join-Path $TestDrive 'manifest-invalid'
             New-PublicFeedTestRepository -Path $repoRoot -Files @{ 'package.json' = '{ "dependencies": {' }
@@ -349,15 +363,16 @@ Describe 'Invoke-PublicDependencyFeedScan' -Tag 'Unit' {
     }
 }
 
+# Run the script in-process so Pester code coverage observes the main block.
 Describe 'Test-PublicDependencyFeeds main execution' -Tag 'Unit' {
-    It 'Writes results and exits zero for a clean repository' {
+    It 'Writes results to the default path and exits zero for a clean repository' {
         $repoRoot = Join-Path $TestDrive 'main-clean'
-        $outputPath = Join-Path $TestDrive 'clean-results.json'
+        $outputPath = Join-Path $repoRoot 'logs/public-dependency-feeds-results.json'
         New-PublicFeedTestRepository -Path $repoRoot -Files @{
             '.npmrc' = 'registry=https://registry.npmjs.org/'
         }
 
-        & (Get-Process -Id $PID).Path -NoProfile -File $script:ScriptPath -RepoRoot $repoRoot -OutputPath $outputPath -FailOnViolation *> $null
+        & $script:ScriptPath -RepoRoot $repoRoot -FailOnViolation *> $null
 
         $LASTEXITCODE | Should -Be 0
         Test-Path -LiteralPath $outputPath | Should -BeTrue
@@ -371,7 +386,7 @@ Describe 'Test-PublicDependencyFeeds main execution' -Tag 'Unit' {
             '.npmrc' = 'registry=https://private-feed.example.com/packaging/'
         }
 
-        & (Get-Process -Id $PID).Path -NoProfile -File $script:ScriptPath -RepoRoot $repoRoot -OutputPath $outputPath -FailOnViolation *> $null
+        & $script:ScriptPath -RepoRoot $repoRoot -OutputPath $outputPath -FailOnViolation *> $null
 
         $LASTEXITCODE | Should -Be 1
         Test-Path -LiteralPath $outputPath | Should -BeTrue
@@ -385,7 +400,7 @@ Describe 'Test-PublicDependencyFeeds main execution' -Tag 'Unit' {
             '.npmrc' = 'registry=https://private-feed.example.com/packaging/'
         }
 
-        & (Get-Process -Id $PID).Path -NoProfile -File $script:ScriptPath -RepoRoot $repoRoot -OutputPath $outputPath *> $null
+        & $script:ScriptPath -RepoRoot $repoRoot -OutputPath $outputPath *> $null
 
         $LASTEXITCODE | Should -Be 0
         Test-Path -LiteralPath $outputPath | Should -BeTrue
@@ -401,7 +416,7 @@ Describe 'Test-PublicDependencyFeeds main execution' -Tag 'Unit' {
             'requirements.txt' = "tool @ https://private-feed.example.com/tool.whl?token=$sentinel"
         }
 
-        $output = & (Get-Process -Id $PID).Path -NoProfile -File $script:ScriptPath -RepoRoot $repoRoot -OutputPath $outputPath -FailOnViolation *>&1 | Out-String
+        $output = & $script:ScriptPath -RepoRoot $repoRoot -OutputPath $outputPath -FailOnViolation *>&1 | Out-String
 
         $LASTEXITCODE | Should -Be 1
         $output | Should -Not -Match $sentinel
@@ -415,7 +430,7 @@ Describe 'Test-PublicDependencyFeeds main execution' -Tag 'Unit' {
         $repoRoot = Join-Path $TestDrive 'main-error'
         New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null
 
-        & (Get-Process -Id $PID).Path -NoProfile -File $script:ScriptPath -RepoRoot $repoRoot -OutputPath (Join-Path $TestDrive 'error-results.json') -FailOnViolation *> $null
+        & $script:ScriptPath -RepoRoot $repoRoot -OutputPath (Join-Path $TestDrive 'error-results.json') -FailOnViolation *> $null
 
         $LASTEXITCODE | Should -Be 2
     }
