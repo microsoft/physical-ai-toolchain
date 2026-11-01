@@ -178,7 +178,8 @@ class ACTInferenceNode(Node):
 
         cmd = self._runner.step(obs)
 
-        if self._action_mode == "absolute":
+        # Docs: delta = add policy deltas to current joints; absolute = use as-is.
+        if self._action_mode == "delta":
             cmd = cmd.as_absolute(obs.joint_positions)
 
         self._state.episode_step += 1
