@@ -193,6 +193,7 @@ def test_replayed_authenticated_message_is_rejected_before_handler(monkeypatch) 
     assert messenger.closecalled is True
     client_sock.close()
 
+
 def test_aes_gcm_evicts_oldest_when_replay_cache_full(monkeypatch) -> None:
     """Sustained traffic must not hard-fail once the bounded cache fills (#1938)."""
     key = secrets.token_bytes(32)
@@ -236,4 +237,3 @@ def test_aes_gcm_skew_rejection_mentions_clock_sync(monkeypatch) -> None:
 
     assert decryptMessage(encrypted, key) is None
     assert any("Sync peer clocks" in message for message in messages)
-
