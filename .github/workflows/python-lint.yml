@@ -61,7 +61,7 @@ jobs:
         run: |
           # Tee-Object creates no file when a clean run emits no output.
           New-Item ruff-check-results.txt -ItemType File -Force | Out-Null
-          uvx --from ruff==0.16.7 ruff check . --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
+          uvx --from ruff==0.17.1 ruff check . --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
             'RUFF_CHECK_FAILED=true' >> $env:GITHUB_ENV
@@ -72,7 +72,7 @@ jobs:
         id: ruff-format
         continue-on-error: true
         run: |
-          uvx --from ruff==0.16.7 ruff format --check --diff . 2>&1 | Tee-Object -FilePath ruff-format-results.txt
+          uvx --from ruff==0.17.1 ruff format --check --diff . 2>&1 | Tee-Object -FilePath ruff-format-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
             'RUFF_FORMAT_FAILED=true' >> $env:GITHUB_ENV
@@ -103,7 +103,7 @@ jobs:
       - name: Fail job if errors found
         if: (env.RUFF_CHECK_FAILED == 'true' || env.RUFF_FORMAT_FAILED == 'true' || env.HF_PINS_FAILED == 'true') && !inputs.soft-fail
         run: |
-          Write-Output "::error::Python lint violations detected. Run 'uvx --from ruff==0.16.7 ruff check --fix .', 'uvx --from ruff==0.16.7 ruff format .', and 'npm run lint:hfpins' locally."
+          Write-Output "::error::Python lint violations detected. Run 'uvx --from ruff==0.17.1 ruff check --fix .', 'uvx --from ruff==0.17.1 ruff format .', and 'npm run lint:hfpins' locally."
           exit 1
 
       - name: Publish execution evidence
