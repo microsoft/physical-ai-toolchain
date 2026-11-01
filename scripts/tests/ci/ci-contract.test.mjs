@@ -104,6 +104,46 @@ test('skill packages: reject mismatched names, unsupported fields and missing lo
   assert.ok(errors.some(error => error.includes('local link does not exist')));
 });
 
+test('skill packages: accept invocation fields with boolean values', t => {
+  const temporaryRoot = temporaryDirectory(t);
+  const skillRoot = join(temporaryRoot, '.github', 'skills', 'sample-skill');
+  mkdirSync(skillRoot, { recursive: true });
+  writeFileSync(join(skillRoot, 'SKILL.md'), [
+    '---',
+    'name: sample-skill',
+    "description: 'Sample workflow skill'",
+    "argument-hint: '[target=value]'",
+    'disable-model-invocation: true',
+    'user-invocable: false',
+    '---',
+    '',
+    '# Sample',
+    '',
+  ].join('\n'));
+
+  assert.deepEqual(validateSkillPackages(temporaryRoot), []);
+});
+
+test('skill packages: reject non-boolean invocation fields', t => {
+  const temporaryRoot = temporaryDirectory(t);
+  const skillRoot = join(temporaryRoot, '.github', 'skills', 'sample-skill');
+  mkdirSync(skillRoot, { recursive: true });
+  writeFileSync(join(skillRoot, 'SKILL.md'), [
+    '---',
+    'name: sample-skill',
+    'description: Sample workflow skill',
+    'disable-model-invocation: yes',
+    "user-invocable: 'sometimes'",
+    '---',
+    '',
+  ].join('\n'));
+
+  const errors = validateSkillPackages(temporaryRoot);
+  assert.ok(errors.some(error => error.includes('disable-model-invocation must be true or false')));
+  assert.ok(errors.some(error => error.includes('user-invocable must be true or false')));
+  assert.equal(errors.some(error => error.includes('unsupported frontmatter field')), false);
+});
+
 test('skill packages: CLI reports invalid repositories', t => {
   const temporaryRoot = temporaryDirectory(t);
   const result = spawnSync(process.execPath, [skillValidatorPath, temporaryRoot], {

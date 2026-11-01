@@ -12,7 +12,11 @@ const allowedFrontmatterFields = new Set([
   'compatibility',
   'metadata',
   'allowed-tools',
+  'argument-hint',
+  'disable-model-invocation',
+  'user-invocable',
 ]);
+const booleanFrontmatterFields = ['disable-model-invocation', 'user-invocable'];
 const namePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function scalarValue(value) {
@@ -126,6 +130,11 @@ export function validateSkillPackages(repositoryRoot) {
     if ('compatibility' in data &&
         (typeof data.compatibility !== 'string' || data.compatibility.trim().length === 0)) {
       errors.push(`${skillFile}: compatibility must be a non-empty string`);
+    }
+    for (const key of booleanFrontmatterFields) {
+      if (key in data && data[key] !== 'true' && data[key] !== 'false') {
+        errors.push(`${skillFile}: ${key} must be true or false`);
+      }
     }
     validateLocalLinks(markdown, skillFile, packageRoot, errors);
   }
