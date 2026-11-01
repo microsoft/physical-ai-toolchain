@@ -8,35 +8,35 @@ dependencies = [
     # Held below 2.3 because lerobot==0.6.1 declares numpy<2.3.
     "numpy==2.2.6",
     "azure-core==1.41.0",
-    "azure-storage-blob==12.30.3",
-    "azure-identity==1.25.3",
-    "azure-ai-ml==1.35.0",
+    "azure-storage-blob==12.31.0",
+    "azure-identity==1.26.0",
+    "azure-ai-ml==1.35.2",
     # Held at 3.x because azure-ai-ml==1.35.0 imports APIs removed in marshmallow 4.
     "marshmallow==3.26.2",
-    "mlflow-skinny==3.16.1",
+    "mlflow-skinny==3.17.2",
     "matplotlib==3.11.2",
     # Held below 26 because lerobot==0.6.1 declares packaging<26.
     "packaging==25.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
-    "onnx==1.23.0",
+    "onnx==1.23.2",
     "onnxscript==0.7.2",
-    "onnxruntime-gpu==1.30.0",
+    "onnxruntime-gpu==1.31.0",
     "toml==0.10.2",
-    "gymnasium==1.3.0",
-    "torch==2.14.0",
-    "torchvision==0.29.0",
-    "transformers==5.17.0",
-    "tensordict==0.14.2",
+    "gymnasium==1.4.0",
+    "torch==2.14.1",
+    "torchvision==0.29.1",
+    "transformers==5.20.2",
+    "tensordict==0.15.3",
     # The SIL evaluation reads LeRobot dataset videos/parquet (av, pyarrow)
     # and loads ACT checkpoints, so the [dataset] extra is required to
     # restore av, pyarrow, pandas, datasets, and torchcodec.
     "lerobot[dataset,diffusion]==0.6.1",
     # lerobot==0.6.1 permits diffusers releases affected by
     # GHSA-98h9-4798-4q5v; keep the runtime on the patched release.
-    "diffusers==0.40.0",
-    "torchcodec==0.16.0",
+    "diffusers==0.42.0",
+    "torchcodec==0.17.0",
 ]
 
 [project.urls]
@@ -55,13 +55,13 @@ environments = [
 # repeats a direct pin above and must be removed when the upstream cap is lifted.
 override-dependencies = [
     # lerobot==0.6.1 caps diffusers below 0.40.0; use the patched release.
-    "diffusers==0.40.0",
+    "diffusers==0.42.0",
     # lerobot==0.6.1 caps torch below 2.12.0; use the validated patched release.
-    "torch==2.14.0",
+    "torch==2.14.1",
     # lerobot==0.6.1 caps torchvision below 0.27.0; Torch 2.14 requires 0.29.0.
-    "torchvision==0.29.0",
+    "torchvision==0.29.1",
     # lerobot==0.6.1 caps torchcodec below 0.12.0; 0.16.0 supports Torch 2.14.
-    "torchcodec==0.16.0",
+    "torchcodec==0.17.0",
 ]
 package = false
 
@@ -92,18 +92,18 @@ prerelease = "allow"
 dev = [
     # Held below 16 because lerobot[dataset]==0.6.1 requires av<16.
     "av==15.1.0",
-    "fastapi==0.141.1",
-    "pydantic==2.13.5",
+    "fastapi==0.162.0",
+    "pydantic==2.14.1",
     "httpx==0.28.1",
     "pytest==9.1.1",
-    "pytest-mock==3.15.1",
+    "pytest-mock==3.17.0",
     "pytest-cov==7.1.0",
-    "hypothesis==6.168.1",
+    "hypothesis==6.170.9",
     # Keep aligned with the root constraint used by CPU smoke resolution.
     "pygments==2.21.0",
     "matplotlib==3.11.2",
     "numpy==2.2.6",
-    "torch==2.14.0",
+    "torch==2.14.1",
     "pyarrow==25.0.1",
 ]
 
