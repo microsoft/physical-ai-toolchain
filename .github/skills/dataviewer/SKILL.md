@@ -60,19 +60,22 @@ Drive the UI with whichever browser tool family the host provides:
 | Integrated browser | `open_browser_page`, `navigate_page`, `read_page`, `click_element`, `type_in_page`, `run_playwright_code`, `screenshot_page` | Acts on the page the user sees                     |
 | Playwright MCP     | `browser_snapshot`, `browser_navigate`, `browser_click`, `browser_type`, `browser_evaluate`, `browser_take_screenshot`       | Acts headlessly on a separate copy of the same URL |
 
-For the Playwright MCP background workflow, configure **headless mode** so it does not open a separate browser window. Its visual feedback goes through SimpleBrowser (Step 2). A Playwright MCP server configuration in `.vscode/mcp.json` can use:
+For the Playwright MCP background workflow, configure **headless mode** so it does not open a separate browser window. Its visual feedback goes through SimpleBrowser (Step 2). In the Copilot harness (the Copilot session target in VS Code, Copilot CLI, and the Copilot app), a workspace-root `.mcp.json` can use:
 
 ```json
-// .vscode/mcp.json
+// .mcp.json
 {
-  "servers": {
+  "mcpServers": {
     "playwright": {
       "command": "npx",
-      "args": ["@playwright/mcp@latest", "--headless"]
+      "args": ["@playwright/mcp@latest", "--headless"],
+      "tools": ["*"]
     }
   }
 }
 ```
+
+`"tools": ["*"]` exposes every server tool. Narrow it to the actions this skill uses (`browser_snapshot`, `browser_navigate`, `browser_click`, `browser_type`, `browser_evaluate`, `browser_take_screenshot`), and pin a reviewed `@playwright/mcp` version instead of `@latest`, because the server drives browser sessions that may be signed in. Local agent sessions in VS Code read `.vscode/mcp.json` instead, with the same server entry under a `servers` key and without the `tools` field.
 
 > [!IMPORTANT]
 > Use `--headless` for the MCP background workflow. Reconfiguring or installing a browser provider requires approval; do not change it merely to obtain inspection evidence.

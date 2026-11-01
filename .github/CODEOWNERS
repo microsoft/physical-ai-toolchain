@@ -28,5 +28,14 @@
 # OpenVEX dispositions can suppress vulnerability findings
 /security/vex/              @microsoft/edge-ai-core-dev
 
+# Top-level workflow runtimes (OSMO, etc.)
+/workflows/                 @microsoft/edge-ai-core-dev
+
+# Dependency manifests and lockfiles
+**/pyproject.toml           @microsoft/edge-ai-core-dev
+**/uv.lock                  @microsoft/edge-ai-core-dev
+**/package.json             @microsoft/edge-ai-core-dev
+**/package-lock.json        @microsoft/edge-ai-core-dev
+
 # Protect ownership file itself
 /.github/CODEOWNERS         @microsoft/edge-ai-core-dev

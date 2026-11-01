@@ -12,7 +12,11 @@ const allowedFrontmatterFields = new Set([
   'compatibility',
   'metadata',
   'allowed-tools',
+  'argument-hint',
+  'disable-model-invocation',
+  'user-invocable',
 ]);
+const booleanFrontmatterFields = ['disable-model-invocation', 'user-invocable'];
 const namePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function scalarValue(value) {
@@ -37,6 +41,7 @@ function frontmatter(markdown, skillPath, errors) {
     return null;
   }
   const data = {};
+  const rawValues = {};
   for (const [index, line] of match[1].split(/\r?\n/).entries()) {
     if (!line || /^\s/.test(line) || line.trimStart().startsWith('#')) {
       continue;
@@ -52,8 +57,9 @@ function frontmatter(markdown, skillPath, errors) {
       continue;
     }
     data[key] = scalarValue(rawValue);
+    rawValues[key] = rawValue.trim();
   }
-  return data;
+  return { data, rawValues };
 }
 
 function validateLocalLinks(markdown, skillFile, packageRoot, errors) {
@@ -105,10 +111,11 @@ export function validateSkillPackages(repositoryRoot) {
     }
     validateNoSymlinks(packageRoot, packageRoot, errors);
     const markdown = readFileSync(skillFile, 'utf8');
-    const data = frontmatter(markdown, skillFile, errors);
-    if (!data) {
+    const parsed = frontmatter(markdown, skillFile, errors);
+    if (!parsed) {
       continue;
     }
+    const { data, rawValues } = parsed;
     for (const key of Object.keys(data)) {
       if (!allowedFrontmatterFields.has(key)) {
         errors.push(`${skillFile}: unsupported frontmatter field '${key}'`);
@@ -126,6 +133,12 @@ export function validateSkillPackages(repositoryRoot) {
     if ('compatibility' in data &&
         (typeof data.compatibility !== 'string' || data.compatibility.trim().length === 0)) {
       errors.push(`${skillFile}: compatibility must be a non-empty string`);
+    }
+    for (const key of booleanFrontmatterFields) {
+      // Quoted values are YAML strings, not booleans, so check the unquoted source text.
+      if (key in rawValues && rawValues[key] !== 'true' && rawValues[key] !== 'false') {
+        errors.push(`${skillFile}: ${key} must be true or false`);
+      }
     }
     validateLocalLinks(markdown, skillFile, packageRoot, errors);
   }
