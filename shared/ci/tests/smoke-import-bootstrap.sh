@@ -132,3 +132,26 @@ project=evaluation
 domain=evaluation
 smoke_cpu
 echo 'CPU smoke installs exported local paths from the project directory'
+
+python3() { printf '%s\n' "$test_root"; }
+
+uv() {
+    case "$1" in
+        export)
+            [[ "$*" == *"--project training/rl"* ]]
+            printf 'locked-runtime-requirement\n'
+            ;;
+        pip)
+            [[ "$2" == install && " $* " == *" --no-config "* ]]
+            [[ "$(cat)" == 'locked-runtime-requirement' ]]
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+run_probe() { [[ "$1" == python3 ]]; }
+
+project=training/rl
+domain=rl
+smoke_image
+echo 'RL image smoke installs its lock without inheriting root uv constraints'

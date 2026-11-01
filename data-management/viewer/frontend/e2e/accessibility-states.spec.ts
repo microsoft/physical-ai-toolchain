@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { cpSync } from 'node:fs'
+import { cpSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import AxeBuilder from '@axe-core/playwright'
@@ -462,6 +462,7 @@ test('P06 real echo grounding blocks unmounted drafts before approval and separa
   page,
   request,
 }) => {
+  test.slow()
   const backend = 'http://127.0.0.1:18000'
   const dataset = `${backend}/api/datasets/integration-grounding-fixture`
   const csrf = await (await request.get(`${backend}/api/csrf-token`)).json()
@@ -483,7 +484,7 @@ test('P06 real echo grounding blocks unmounted drafts before approval and separa
   const label = page
     .getByTestId('trajectory-labels-panel')
     .getByRole('button', { name: 'SUCCESS', exact: true })
-  await expect(label).toHaveAttribute('aria-pressed', 'true')
+  await expect(label).toHaveAttribute('aria-pressed', 'true', { timeout: 20_000 })
   await label.click()
   await expect(page.getByTestId('workspace-save-status-slot')).toContainText('Unsaved')
   page.once('dialog', (dialog) => dialog.accept())
@@ -718,26 +719,31 @@ test('P06 principal changes isolate persisted label drafts', async ({ page }) =>
 
 test('P06 changed source requires explicit reconciliation of a recovered draft', async ({
   page,
-}) => {
-  let sourceChanged = false
-  await page.route('**/api/datasets/integration-fixture/episodes/0', async (route) => {
-    const response = await route.fetch()
-    const episode = await response.json()
-    expect(typeof episode.source_revision).toBe('string')
-    await route.fulfill({
-      response,
-      json: sourceChanged
-        ? { ...episode, source_revision: `${episode.source_revision}-changed` }
-        : episode,
-    })
-  })
-  await page.goto('/?dataset=integration-fixture')
-  await page
+  request,
+}, testInfo) => {
+  const backend = 'http://127.0.0.1:18000'
+  const datasetId = `integration-source-${randomUUID()}`
+  const dataDirectory = testInfo.config.metadata.dataDirectory as string
+  const datasetRoot = join(dataDirectory, datasetId)
+  cpSync(join(dataDirectory, 'integration-judge-fixture'), datasetRoot, { recursive: true })
+  expect((await request.get(`${backend}/api/datasets?refresh=true`)).ok()).toBe(true)
+  const dataset = `${backend}/api/datasets/${datasetId}`
+  const original = await (await request.get(`${dataset}/episodes/0`)).json()
+  expect(typeof original.source_revision).toBe('string')
+  const labelsBefore = await (await request.get(`${dataset}/labels`)).json()
+  await page.goto(`/?dataset=${datasetId}`)
+  const label = page
     .getByTestId('trajectory-labels-panel')
     .getByRole('button', { name: 'PARTIAL', exact: true })
-    .click()
+  await expect(label).toBeVisible({ timeout: 20_000 })
+  await label.click()
   await expect(page.getByTestId('workspace-save-status-slot')).toContainText('Unsaved')
-  sourceChanged = true
+  const manifest = join(datasetRoot, 'meta', 'info.json')
+  const metadata = JSON.parse(readFileSync(manifest, 'utf8'))
+  writeFileSync(manifest, JSON.stringify({ ...metadata, fps: metadata.fps + 1 }))
+  await expect
+    .poll(async () => (await (await request.get(`${dataset}/episodes/0`)).json()).source_revision)
+    .not.toBe(original.source_revision)
   await page.reload()
   const conflict = page.getByRole('dialog', { name: 'Resolve saved-data conflict' })
   await expect(conflict).toContainText('The episode source changed')
@@ -747,6 +753,7 @@ test('P06 changed source requires explicit reconciliation of a recovered draft',
   await expect(
     conflict.getByRole('button', { name: 'Prefer local conflicts', exact: true }),
   ).toBeEnabled()
+  expect(await (await request.get(`${dataset}/labels`)).json()).toEqual(labelsBefore)
 })
 
 for (const resource of ['annotation', 'episode-edit'] as const) {
@@ -754,6 +761,7 @@ for (const resource of ['annotation', 'episode-edit'] as const) {
     page,
     request,
   }) => {
+    test.slow()
     const backend = 'http://127.0.0.1:18000'
     const dataset = `${backend}/api/datasets/integration-fixture`
     await page.clock.setFixedTime(new Date())

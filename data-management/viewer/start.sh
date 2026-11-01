@@ -234,7 +234,10 @@ wait_for_either_service() {
 start_backend() {
     require_port_available "${BACKEND_PORT}" "Backend"
     log_info "Starting backend on port ${BACKEND_PORT}..."
-    local backend_sync_args=(--frozen --python 3.12 --group dev --extra analysis --extra export)
+    local backend_sync_args=(
+        --project "${REPO_ROOT}" --frozen --python 3.12 --no-default-groups --no-editable
+        --extra analysis --extra export --extra azure --extra auth
+    )
     local judge_extra=""
     local should_install_vlm_judge=false
 
@@ -292,16 +295,15 @@ start_backend() {
     export DATA_DIR
     log_info "Using DATA_DIR=${DATA_DIR}"
 
-    if [[ ! -d "${BACKEND_DIR}/.venv" ]] || [[ "${should_install_vlm_judge}" == "true" ]]; then
-        log_info "Restoring frozen backend dependencies..."
-        if [[ -n "${judge_extra}" ]]; then
-            UV_PROJECT_ENVIRONMENT="${BACKEND_DIR}/.venv" uv sync \
-                --project "${REPO_ROOT}/evaluation/vlm_judge" \
-                --frozen --inexact --no-dev --python 3.12 --extra "${judge_extra}"
-        fi
-        (cd "${BACKEND_DIR}" && uv sync --inexact "${backend_sync_args[@]}")
-        uv pip check --python "${BACKEND_DIR}/.venv/bin/python"
+    if [[ "${should_install_vlm_judge}" == "true" ]]; then
+        backend_sync_args+=(--all-packages)
+        [[ -z "${judge_extra}" ]] || backend_sync_args+=(--extra "${judge_extra}")
+    else
+        backend_sync_args+=(--package lerobot-annotation-api)
     fi
+    log_info "Restoring frozen backend dependencies..."
+    UV_PROJECT_ENVIRONMENT="${BACKEND_DIR}/.venv" uv sync "${backend_sync_args[@]}"
+    uv pip check --python "${BACKEND_DIR}/.venv/bin/python"
 
     (
         cd "${BACKEND_DIR}"

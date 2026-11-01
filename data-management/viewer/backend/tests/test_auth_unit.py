@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import sys
 import types
@@ -20,7 +19,14 @@ from src.api.auth import (
     reset_auth_provider,
     resolve_principal_context,
 )
-from tests.conftest import make_asgi_request
+from tests.conftest import (
+    NAMEID_CLAIM,
+    HostedCaller,
+    encode_bytes,
+    encode_principal,
+    make_asgi_request,
+    set_hosted_environment,
+)
 
 
 def _easy_auth_principal(*, subject: str = "user-1") -> str:
@@ -32,7 +38,7 @@ def _easy_auth_principal(*, subject: str = "user-1") -> str:
             {"typ": "roles", "val": "viewer"},
         ]
     }
-    return base64.b64encode(json.dumps(principal).encode()).decode()
+    return encode_principal(principal)
 
 
 @pytest.fixture(autouse=True)
@@ -72,18 +78,21 @@ class TestApiKeyProvider:
 
 class TestEasyAuthProvider:
     @pytest.mark.asyncio
-    async def test_bound_principal_is_authenticated(self):
-        provider = EasyAuthProvider("proxy-secret")
-        result = await provider.authenticate(
-            make_asgi_request(
-                "POST",
-                "/api/x",
-                headers={
-                    "X-MS-CLIENT-PRINCIPAL": _easy_auth_principal(),
-                    "X-Dataviewer-Proxy-Key": "proxy-secret",
-                },
-            )
+    async def test_decodes_principal(self, hosted_caller: HostedCaller) -> None:
+        principal = {
+            "claims": [
+                {"typ": NAMEID_CLAIM, "val": "user-1"},
+                {"typ": "name", "val": "Alice"},
+                {"typ": "roles", "val": "admin"},
+                {"typ": "roles", "val": "viewer"},
+            ]
+        }
+        request = make_asgi_request(
+            "POST", "/api/x", headers=hosted_caller.request_headers(principal=encode_principal(principal))
         )
+
+        result = await hosted_caller.provider.authenticate(request)
+
         assert result == {
             "sub": "user-1",
             "name": "Alice",
@@ -91,55 +100,247 @@ class TestEasyAuthProvider:
             "auth_method": "easy_auth",
         }
 
+    @pytest.mark.asyncio
+    async def test_missing_principal_returns_none(self, hosted_caller: HostedCaller) -> None:
+        request = make_asgi_request("POST", "/api/x", headers=hosted_caller.request_headers(principal=None))
+        assert await hosted_caller.provider.authenticate(request) is None
+
+    @pytest.mark.asyncio
+    async def test_invalid_base64_returns_none(self, hosted_caller: HostedCaller) -> None:
+        request = make_asgi_request(
+            "POST", "/api/x", headers=hosted_caller.request_headers(principal="not-valid-base64!!!")
+        )
+        assert await hosted_caller.provider.authenticate(request) is None
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_payload_returns_none(self, hosted_caller: HostedCaller) -> None:
+        request = make_asgi_request(
+            "POST", "/api/x", headers=hosted_caller.request_headers(principal=encode_bytes(b"not-json"))
+        )
+        assert await hosted_caller.provider.authenticate(request) is None
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "headers",
+        "payload",
         [
-            {"X-MS-CLIENT-PRINCIPAL": _easy_auth_principal()},
-            {
-                "X-MS-CLIENT-PRINCIPAL": _easy_auth_principal(),
-                "X-Dataviewer-Proxy-Key": "wrong",
-            },
-            {
-                "X-MS-CLIENT-PRINCIPAL": _easy_auth_principal(),
-                "X-Dataviewer-Proxy-Key": "é",
-            },
+            [],
+            {"claims": [None]},
+            {"claims": [{"typ": 1, "val": "user-1"}]},
+            {"claims": [{"typ": NAMEID_CLAIM, "val": 1}]},
+            {"claims": [{"typ": "", "val": "user-1"}]},
+            {"claims": [{"typ": "\ud800", "val": "user-1"}]},
+            {"claims": [{"typ": NAMEID_CLAIM, "val": "\ud800"}]},
+        ],
+        ids=[
+            "non-object",
+            "non-object-claim",
+            "non-string-type",
+            "non-string-value",
+            "empty-type",
+            "invalid-type-unicode",
+            "invalid-value-unicode",
         ],
     )
-    @pytest.mark.asyncio
-    async def test_unbound_principal_is_rejected(self, headers: dict[str, str]):
-        provider = EasyAuthProvider("proxy-secret")
-        assert await provider.authenticate(make_asgi_request("POST", "/api/x", headers=headers)) is None
+    async def test_given_malformed_principal_when_authenticated_then_denies_without_error(
+        self, hosted_caller: HostedCaller, payload: object
+    ) -> None:
+        principal = encode_bytes(json.dumps(payload).encode("utf-8"))
+        request = make_asgi_request("POST", "/api/x", headers=hosted_caller.request_headers(principal=principal))
 
+        assert await hosted_caller.provider.authenticate(request) is None
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "principal",
         [
-            "not-valid-base64!!!",
-            base64.b64encode(b"not-json").decode(),
-            base64.b64encode(json.dumps({}).encode()).decode(),
-            _easy_auth_principal(subject=" "),
+            {},
+            {"claims": []},
+            {"claims": [{"typ": "name", "val": "Alice"}]},
+            {"claims": [{"typ": NAMEID_CLAIM, "val": "   "}]},
+        ],
+        ids=["no-claims", "empty-claims", "no-subject", "blank-subject"],
+    )
+    async def test_blank_or_missing_subject_is_denied(self, hosted_caller: HostedCaller, principal: dict) -> None:
+        request = make_asgi_request(
+            "POST", "/api/x", headers=hosted_caller.request_headers(principal=encode_principal(principal))
+        )
+        assert await hosted_caller.provider.authenticate(request) is None
+
+    @pytest.mark.asyncio
+    async def test_missing_caller_proof_is_denied_before_principal(self, hosted_caller: HostedCaller) -> None:
+        request = make_asgi_request("POST", "/api/x", headers=hosted_caller.request_headers(include_caller=False))
+
+        with pytest.raises(HTTPException) as exc_info:
+            await hosted_caller.provider.authenticate(request)
+
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail == "Caller authentication required"
+
+    def test_www_authenticate_header(self, hosted_caller: HostedCaller) -> None:
+        assert isinstance(hosted_caller.provider, EasyAuthProvider)
+        assert hosted_caller.provider.www_authenticate == 'EasyAuth realm="DataViewer API"'
+
+
+def _principal_with_decoded_size(size: int) -> str:
+    """Return a structurally valid principal whose decoded JSON is exactly ``size`` bytes."""
+    subject = {"typ": NAMEID_CLAIM, "val": "user-1"}
+    roles_count = 1
+    while True:
+        empty_roles = [{"typ": "roles", "val": ""}] * roles_count
+        base_size = len(json.dumps({"claims": [subject, *empty_roles]}).encode("utf-8"))
+        if size - base_size <= 2048 * roles_count:
+            break
+        roles_count += 1
+    remaining = size - base_size
+    lengths = []
+    for _ in range(roles_count):
+        take = min(remaining, 2048)
+        lengths.append(take)
+        remaining -= take
+    payload = {"claims": [subject, *({"typ": "roles", "val": "r" * length} for length in lengths)]}
+    decoded = json.dumps(payload).encode("utf-8")
+    assert len(decoded) == size
+    return encode_bytes(decoded)
+
+
+def _largest_padding_within(caller: HostedCaller, limit: int) -> int:
+    low, high = 0, limit
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(caller.token({"pad": "x" * middle})) <= limit:
+            low = middle
+        else:
+            high = middle - 1
+    return low
+
+
+class TestPrincipalBounds:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "setting",
+        [
+            "DATAVIEWER_MAX_CALLER_TOKEN_BYTES",
+            "DATAVIEWER_MAX_PRINCIPAL_ENCODED_BYTES",
+            "DATAVIEWER_MAX_PRINCIPAL_DECODED_BYTES",
+            "DATAVIEWER_MAX_PRINCIPAL_CLAIMS",
+            "DATAVIEWER_MAX_PRINCIPAL_VALUE_BYTES",
         ],
     )
+    async def test_given_environment_limit_when_authenticating_then_enforces_override(
+        self, setting: str, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+    ) -> None:
+        monkeypatch.setenv(setting, "1")
+        caller = request.getfixturevalue("hosted_caller")
+        auth_request = make_asgi_request("POST", "/api/x", headers=caller.request_headers())
+
+        if setting == "DATAVIEWER_MAX_CALLER_TOKEN_BYTES":
+            with pytest.raises(HTTPException) as exc_info:
+                await caller.provider.authenticate(auth_request)
+            assert exc_info.value.status_code == 401
+        else:
+            assert await caller.provider.authenticate(auth_request) is None
+
+    @pytest.mark.parametrize(
+        "setting",
+        [
+            "DATAVIEWER_MAX_CALLER_TOKEN_BYTES",
+            "DATAVIEWER_MAX_PRINCIPAL_ENCODED_BYTES",
+            "DATAVIEWER_MAX_PRINCIPAL_DECODED_BYTES",
+            "DATAVIEWER_MAX_PRINCIPAL_CLAIMS",
+            "DATAVIEWER_MAX_PRINCIPAL_VALUE_BYTES",
+            "DATAVIEWER_AUTH_JWKS_CACHE_SECONDS",
+            "DATAVIEWER_AUTH_JWKS_TIMEOUT_SECONDS",
+            "DATAVIEWER_AUTH_CALLER_TIMEOUT_SECONDS",
+        ],
+    )
+    @pytest.mark.parametrize("value", ["", "0", "-1", "1.5", "not-an-integer"])
+    def test_given_invalid_environment_limit_when_starting_hosted_auth_then_rejects_configuration(
+        self, setting: str, value: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.api.auth import validate_hosted_auth_configuration
+
+        set_hosted_environment(monkeypatch)
+        monkeypatch.setenv(setting, value)
+
+        with pytest.raises(ValueError, match=f"{setting} must be a positive integer"):
+            validate_hosted_auth_configuration()
+
     @pytest.mark.asyncio
-    async def test_malformed_or_incomplete_principal_is_rejected(self, principal: str):
-        provider = EasyAuthProvider("proxy-secret")
-        result = await provider.authenticate(
-            make_asgi_request(
-                "POST",
-                "/api/x",
-                headers={
-                    "X-MS-CLIENT-PRINCIPAL": principal,
-                    "X-Dataviewer-Proxy-Key": "proxy-secret",
-                },
-            )
+    @pytest.mark.parametrize(("size", "accepted"), [(6144, True), (6145, False)], ids=["at-limit", "over-limit"])
+    async def test_principal_size_limit(self, hosted_caller: HostedCaller, size: int, accepted: bool) -> None:
+        request = make_asgi_request(
+            "POST", "/api/x", headers=hosted_caller.request_headers(principal=_principal_with_decoded_size(size))
         )
-        assert result is None
 
-    def test_empty_proxy_key_is_rejected_at_initialization(self):
-        with pytest.raises(ValueError, match="DATAVIEWER_PROXY_KEY"):
-            EasyAuthProvider("")
+        result = await hosted_caller.provider.authenticate(request)
 
-    def test_www_authenticate_header(self):
-        assert "EasyAuth" in EasyAuthProvider("proxy-secret").www_authenticate
+        assert (result is not None) is accepted
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("count", "accepted"), [(64, True), (65, False)], ids=["at-limit", "over-limit"])
+    async def test_claim_count_limit(self, hosted_caller: HostedCaller, count: int, accepted: bool) -> None:
+        claims = [{"typ": NAMEID_CLAIM, "val": "user-1"}, *({"typ": "roles", "val": "r"} for _ in range(count - 1))]
+        request = make_asgi_request(
+            "POST", "/api/x", headers=hosted_caller.request_headers(principal=encode_principal({"claims": claims}))
+        )
+
+        result = await hosted_caller.provider.authenticate(request)
+
+        assert (result is not None) is accepted
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("length", "accepted"), [(2048, True), (2049, False)], ids=["at-limit", "over-limit"])
+    async def test_claim_value_size_limit(self, hosted_caller: HostedCaller, length: int, accepted: bool) -> None:
+        principal = encode_principal({"claims": [{"typ": NAMEID_CLAIM, "val": "s" * length}]})
+        request = make_asgi_request("POST", "/api/x", headers=hosted_caller.request_headers(principal=principal))
+
+        result = await hosted_caller.provider.authenticate(request)
+
+        assert (result is not None) is accepted
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("length", "accepted"), [(256, True), (257, False)], ids=["at-limit", "over-limit"])
+    async def test_claim_type_size_limit(self, hosted_caller: HostedCaller, length: int, accepted: bool) -> None:
+        principal = encode_principal(
+            {"claims": [{"typ": NAMEID_CLAIM, "val": "user-1"}, {"typ": "t" * length, "val": "x"}]}
+        )
+        request = make_asgi_request("POST", "/api/x", headers=hosted_caller.request_headers(principal=principal))
+
+        result = await hosted_caller.provider.authenticate(request)
+
+        assert (result is not None) is accepted
+
+    @pytest.mark.asyncio
+    async def test_caller_token_size_limit(self, hosted_caller: HostedCaller) -> None:
+        limit = 8192
+        padding = _largest_padding_within(hosted_caller, limit)
+        within = hosted_caller.token({"pad": "x" * padding})
+        beyond = hosted_caller.token({"pad": "x" * (padding + 1)})
+        assert len(within) <= limit < len(beyond)
+
+        accepted = await hosted_caller.provider.authenticate(
+            make_asgi_request("POST", "/api/x", headers=hosted_caller.request_headers(caller_token=within))
+        )
+        assert accepted is not None
+
+        with pytest.raises(HTTPException) as exc_info:
+            await hosted_caller.provider.authenticate(
+                make_asgi_request("POST", "/api/x", headers=hosted_caller.request_headers(caller_token=beyond))
+            )
+        assert exc_info.value.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_non_ascii_caller_header_is_denied(self, hosted_caller: HostedCaller) -> None:
+        request = make_asgi_request(
+            "POST",
+            "/api/x",
+            headers=hosted_caller.request_headers(caller_token=f"{hosted_caller.token()}é"),
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await hosted_caller.provider.authenticate(request)
+
+        assert exc_info.value.status_code == 401
 
 
 class TestJwtProvider:
@@ -266,18 +467,18 @@ class TestProviderSelection:
         with pytest.raises(ValueError, match="DATAVIEWER_AUTH_PROVIDER"):
             await require_auth(make_asgi_request("POST", "/api/x"))
 
-    async def test_easy_auth_selection_requires_proxy_key(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_easy_auth_selection_requires_caller_identity(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "easy_auth")
-        monkeypatch.delenv("DATAVIEWER_PROXY_KEY", raising=False)
-        with pytest.raises(ValueError, match="DATAVIEWER_PROXY_KEY"):
+        monkeypatch.delenv("DATAVIEWER_CALLER_CLIENT_ID", raising=False)
+        with pytest.raises(ValueError, match="Hosted authentication"):
             await require_auth(make_asgi_request("POST", "/api/x"))
 
-    async def test_easy_auth_selection(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
-        monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "easy_auth")
-        monkeypatch.setenv("DATAVIEWER_PROXY_KEY", "proxy-secret")
-        await self._expect_challenge("EasyAuth")
+    async def test_easy_auth_selection(self, hosted_caller: HostedCaller) -> None:
+        with pytest.raises(HTTPException) as exc_info:
+            await require_auth(make_asgi_request("POST", "/api/x"))
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail == "Caller authentication required"
 
     async def test_azure_ad_selection(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
@@ -314,12 +515,9 @@ class TestRequireAuth:
     @pytest.mark.parametrize("proxy_key", [None, "wrong", "é"])
     async def test_forged_easy_auth_header_is_rejected(
         self,
-        monkeypatch: pytest.MonkeyPatch,
+        hosted_caller: HostedCaller,
         proxy_key: str | None,
     ):
-        monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
-        monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "easy_auth")
-        monkeypatch.setenv("DATAVIEWER_PROXY_KEY", "proxy-secret")
         headers = {"X-MS-CLIENT-PRINCIPAL": _easy_auth_principal()}
         if proxy_key is not None:
             headers["X-Dataviewer-Proxy-Key"] = proxy_key

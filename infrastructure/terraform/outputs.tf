@@ -244,5 +244,6 @@ output "dataviewer" {
     frontend    = module.dataviewer[0].frontend
     identity    = module.dataviewer[0].dataviewer_identity
     entra_id    = module.dataviewer[0].entra_id
+    caller_auth = module.dataviewer[0].caller_auth
   } : null
 }
