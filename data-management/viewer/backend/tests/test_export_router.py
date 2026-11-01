@@ -715,6 +715,79 @@ class TestLeRobotExports:
                 assert _export_through(client, endpoint, output)["success"] is True
 
 
+class TestOutputLocations:
+    """Both export formats refuse the same output locations before any exporter runs."""
+
+    @pytest.mark.parametrize("lerobot", [False, True], ids=["hdf5", "lerobot"])
+    @pytest.mark.parametrize("location", ["source", "inside", "containing", "other-dataset"])
+    def test_export_refuses_outputs_that_would_touch_existing_data(
+        self,
+        client: TestClient,
+        override_service,
+        dataset_layout,
+        monkeypatch: pytest.MonkeyPatch,
+        lerobot: bool,
+        location: str,
+    ) -> None:
+        base, _dataset, _output = dataset_layout
+        source = base / "group" / "ds-1"
+        source.mkdir(parents=True)
+        (source / "episode_000000.hdf5").write_bytes(b"source")
+        other = base / "ds-2"
+        other.mkdir()
+        (other / "episode_000000.hdf5").write_bytes(b"other")
+        override_service._get_dataset_path.return_value = source
+        override_service.dataset_is_lerobot.return_value = lerobot
+        if lerobot:
+            exporter, _instance = _patch_lerobot_exporter(monkeypatch)
+        else:
+            exporter = MagicMock(side_effect=AssertionError("HDF5Exporter must not run"))
+            _patch_exporter(monkeypatch, exporter)
+        output = {
+            "source": source,
+            "inside": source / "derived",
+            "containing": base / "group",
+            "other-dataset": other,
+        }[location]
+        before = _contents(base)
+
+        resp = client.post("/api/datasets/ds-1/export", json={"episodeIndices": [0], "outputPath": str(output)})
+
+        assert resp.status_code == 400
+        assert _contents(base) == before
+        assert not (source / "derived").exists()
+        exporter.assert_not_called()
+
+    @pytest.mark.parametrize("endpoint", ["export", "stream"])
+    def test_hdf5_export_is_refused_while_another_export_holds_the_output(
+        self, client: TestClient, override_service, dataset_layout, endpoint: str
+    ) -> None:
+        _base, _dataset, output_dir = dataset_layout
+
+        with hold_lock(output_dir):
+            result = _export_through(client, endpoint, output_dir)
+            assert sorted(path.name for path in output_dir.iterdir()) == [LOCK_FILE]
+
+        assert result["success"] is False
+        assert result["error"] == "Export failed"
+
+    def test_hdf5_stream_refuses_the_source_as_output(
+        self, client: TestClient, override_service, dataset_layout, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _base, dataset_dir, _output = dataset_layout
+        (dataset_dir / "episode_000000.hdf5").write_bytes(b"source")
+        exporter = MagicMock(side_effect=AssertionError("HDF5Exporter must not run"))
+        _patch_exporter(monkeypatch, exporter)
+
+        resp = client.post(
+            "/api/datasets/ds-1/export/stream", json={"episodeIndices": [0], "outputPath": str(dataset_dir)}
+        )
+
+        assert resp.status_code == 400
+        assert (dataset_dir / "episode_000000.hdf5").read_bytes() == b"source"
+        exporter.assert_not_called()
+
+
 class TestExportEpisodesStream:
     @pytest.mark.parametrize("suffix", ["", "/stream"])
     def test_failed_results_hide_diagnostics(
