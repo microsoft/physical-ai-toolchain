@@ -125,7 +125,7 @@
 
 	"onCreateCommand": {
 		"setup-dev": "./setup-dev.sh --disable-venv",
-		"npm-install": "npm install",
+		"npm-install": "npm ci",
 		"apt": "sudo apt update && sudo apt install -y shellcheck jq unzip ffmpeg postgresql-client redis-tools",
 		"tflint": "TFLINT_VERSION=v0.64.0 && case \"$(uname -m)\" in x86_64) TFLINT_ARCH=amd64; TFLINT_SHA256=cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537 ;; aarch64|arm64) TFLINT_ARCH=arm64; TFLINT_SHA256=560da89aacf59389d4eb029730dd5b109b7288096c32f2726a0d9e783a5ea8eb ;; *) echo \"Unsupported arch: $(uname -m)\" >&2; exit 1 ;; esac && curl -fsSL \"https://github.com/terraform-linters/tflint/releases/download/${TFLINT_VERSION}/tflint_linux_${TFLINT_ARCH}.zip\" -o /tmp/tflint.zip && echo \"${TFLINT_SHA256}  /tmp/tflint.zip\" | sha256sum -c --quiet - && sudo unzip -o /tmp/tflint.zip -d /usr/local/bin && rm /tmp/tflint.zip && tflint --init",
 		"actionlint": "ACTIONLINT_VERSION=1.7.12 ./scripts/setup/install-actionlint.sh",
