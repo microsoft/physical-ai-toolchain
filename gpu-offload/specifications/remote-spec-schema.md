@@ -72,9 +72,14 @@ stores it in a controller-managed Kubernetes Secret, and mounts the same key
 read-only into the client containers and every generated server stage.
 
 Encrypted frames authenticate their protocol version and issuance time. The
-runtime rejects stale or future-dated frames and tracks recently accepted
-nonces in a bounded process-wide replay window, so a captured frame cannot be
-dispatched more than once while the receiving process is running.
+runtime rejects frames older than 300 seconds or more than 30 seconds ahead of
+the receiver's wall clock, and tracks recently accepted nonces in a bounded
+process-wide replay window so a captured frame cannot be dispatched more than
+once while the receiving process is running. When the window is full, the
+oldest entries are evicted so sustained legitimate traffic is not rejected;
+binding replay state to receiver sessions is tracked separately. Peers must
+keep clocks synchronized (for example with NTP); otherwise every encrypted
+frame fails closed with a stale or future-dated error.
 
 ```yaml
 encryption: true
