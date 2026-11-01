@@ -480,6 +480,22 @@ class TestProviderSelection:
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail == "Caller authentication required"
 
+    async def test_azure_ad_missing_settings_fail_closed(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
+        monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "azure_ad")
+        monkeypatch.delenv("DATAVIEWER_AZURE_TENANT_ID", raising=False)
+        monkeypatch.delenv("DATAVIEWER_AZURE_CLIENT_ID", raising=False)
+        with pytest.raises(ValueError, match="DATAVIEWER_AZURE_TENANT_ID"):
+            await require_auth(make_asgi_request("POST", "/api/x"))
+
+    async def test_auth0_missing_settings_fail_closed(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
+        monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "auth0")
+        monkeypatch.delenv("DATAVIEWER_AUTH0_DOMAIN", raising=False)
+        monkeypatch.delenv("DATAVIEWER_AUTH0_AUDIENCE", raising=False)
+        with pytest.raises(ValueError, match="DATAVIEWER_AUTH0_DOMAIN"):
+            await require_auth(make_asgi_request("POST", "/api/x"))
+
     async def test_azure_ad_selection(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
         monkeypatch.setenv("DATAVIEWER_AUTH_PROVIDER", "azure_ad")
