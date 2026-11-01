@@ -19,6 +19,7 @@ from .prompts import (
     render_chronological_process_prompt,
     render_outcome_prompt,
     render_process_prompt,
+    render_process_repair_prompt,
     shuffle_with_anchor,
 )
 
@@ -201,39 +202,37 @@ def _run_process(
     rng: random.Random,
     method: str = "gvl",
 ) -> dict[str, Any]:
-    n = len(frames)
+    frame_count = len(frames)
     config = GenerationConfig(max_new_tokens=512, temperature=0.0)
 
     if method == "chronological":
-        # Frames shown in true order; the model rates each in place (no un-shuffle).
+        order = list(range(frame_count))
+        prompt = render_chronological_process_prompt(instruction=instruction, n_frames=frame_count)
+    else:
+        order = shuffle_with_anchor(frame_count, rng=rng)
+        prompt = render_process_prompt(instruction=instruction, n_frames=frame_count)
+    ordered_frames = [frames[index] for index in order]
+
+    for attempt in range(2):
         text = backend.generate(
             system_prompt=PROCESS_SYSTEM_PROMPT,
-            user_prompt=render_chronological_process_prompt(instruction=instruction, n_frames=n),
-            images=list(frames),
+            user_prompt=prompt,
+            images=ordered_frames,
             config=config,
         )
-        values = parse_process_response(text, n_frames=n)
-        if values is None:
-            _LOGGER.warning("Judge process format violation")
-            raise ValueError("Invalid judge process result")
-        return {"progress_per_frame": list(values), "voc": value_order_correlation(values)}
-
-    order = shuffle_with_anchor(n, rng=rng)
-    shuffled_frames = [frames[i] for i in order]
-    text = backend.generate(
-        system_prompt=PROCESS_SYSTEM_PROMPT,
-        user_prompt=render_process_prompt(instruction=instruction, n_frames=n),
-        images=shuffled_frames,
-        config=config,
-    )
-    shuffled_values = parse_process_response(text, n_frames=n)
-    if shuffled_values is None:
-        _LOGGER.warning("Judge process format violation")
+        values = parse_process_response(text, n_frames=frame_count)
+        if values is not None:
+            break
+        if attempt == 0:
+            _LOGGER.warning("Judge process format violation; retrying once")
+            prompt = render_process_repair_prompt(original_prompt=prompt, n_frames=frame_count)
+    else:
+        _LOGGER.warning("Judge process format violation after retry")
         raise ValueError("Invalid judge process result")
 
-    chronological = [0] * n
+    chronological = [0] * frame_count
     for shuffled_idx, original_idx in enumerate(order):
-        chronological[original_idx] = shuffled_values[shuffled_idx]
+        chronological[original_idx] = values[shuffled_idx]
     return {"progress_per_frame": chronological, "voc": value_order_correlation(chronological)}
 
 

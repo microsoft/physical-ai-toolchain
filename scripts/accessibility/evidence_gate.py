@@ -2608,6 +2608,7 @@ def _package_path(root: Path, relative: str) -> Path:
     parts = PurePosixPath(relative).parts
     hidden_exceptions = {
         "docs/docusaurus/.gitignore",
+        "docs/docusaurus/.npmrc",
         "docs/docusaurus/static/.nojekyll",
         "docs/docusaurus/build/.nojekyll",
     }

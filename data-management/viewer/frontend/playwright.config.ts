@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { defineConfig, devices } from '@playwright/test'
@@ -9,11 +9,9 @@ const dataDirectory = mkdtempSync(join(tmpdir(), 'dataviewer-e2e-'))
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url))
 process.once('exit', () => rmSync(dataDirectory, { recursive: true, force: true }))
 const isolatedEnvironment = {
-  PYTHONPATH: [
-    repositoryRoot,
-    join(repositoryRoot, 'data-management/curation'),
-    join(repositoryRoot, 'data-management/dataset-io'),
-  ].join(delimiter),
+  UV_PROJECT_ENVIRONMENT:
+    process.env.UV_PROJECT_ENVIRONMENT ??
+    join(repositoryRoot, 'data-management/viewer/backend/.venv'),
   DATAVIEWER_AUTH_DISABLED: 'true',
   STORAGE_BACKEND: 'local',
   DATA_DIR: dataDirectory,
@@ -22,7 +20,8 @@ const isolatedEnvironment = {
   VLM_JUDGE_CACHE_DIR: join(dataDirectory, 'cache'),
   VLM_JUDGE_JOB_DIR: join(dataDirectory, 'jobs'),
 }
-const seedDataset = `uv run --directory ../backend --no-sync --frozen python -c "import os; from pathlib import Path; from tests.api.test_vlm_judge_router import _build_dataset; [_build_dataset(Path(os.environ['DATA_DIR']) / dataset_id, instruction='Place the block', n_episodes=2) for dataset_id in ('integration-fixture', 'integration-judge-fixture', 'integration-grounding-fixture')]"`
+const python = 'uv run --project ../../.. --all-packages --no-sync --frozen'
+const seedDataset = `${python} --directory ../backend python -c "import os; from pathlib import Path; from tests.api.test_vlm_judge_router import _build_dataset; [_build_dataset(Path(os.environ['DATA_DIR']) / dataset_id, instruction='Place the block', n_episodes=2) for dataset_id in ('integration-fixture', 'integration-judge-fixture', 'integration-grounding-fixture')]"`
 
 export default defineConfig({
   metadata: { dataDirectory },
@@ -65,7 +64,7 @@ export default defineConfig({
       },
     },
     {
-      command: `${seedDataset} && uv run --project ../backend --no-sync --frozen python -m uvicorn src.api.main:app --app-dir ../backend --log-config ../backend/logging.json --host 127.0.0.1 --port 18000`,
+      command: `${seedDataset} && ${python} python -m uvicorn src.api.main:app --log-config ../backend/logging.json --host 127.0.0.1 --port 18000`,
       url: 'http://127.0.0.1:18000/docs',
       reuseExistingServer: false,
       timeout: 180_000,
@@ -77,16 +76,14 @@ export default defineConfig({
       },
     },
     {
-      command:
-        'uv run --project ../backend --no-sync --frozen python -m uvicorn physical_ai_curation.api:build_app --factory --host 127.0.0.1 --port 18001',
+      command: `${python} python -m uvicorn physical_ai_curation.api:build_app --factory --host 127.0.0.1 --port 18001`,
       url: 'http://127.0.0.1:18001/docs',
       reuseExistingServer: false,
       timeout: 180_000,
       env: isolatedEnvironment,
     },
     {
-      command:
-        'uv run --project ../backend --no-sync --frozen python -m uvicorn evaluation.vlm_judge.openai_shim:build_echo_app --factory --host 127.0.0.1 --port 18002',
+      command: `${python} python -m uvicorn evaluation.vlm_judge.openai_shim:build_echo_app --factory --host 127.0.0.1 --port 18002`,
       url: 'http://127.0.0.1:18002/docs',
       reuseExistingServer: false,
       timeout: 180_000,

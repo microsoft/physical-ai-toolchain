@@ -7,32 +7,38 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import numpy as np
+import pytest
+
+
 # Stub the cross-package training.rl.simulation_shutdown import used by sil.policy_evaluation
 # while loading the dependency-light training.utils modules the tests exercise: the checkpoint
 # integrity helpers used by security tests and the tracking strategy used by the MLflow scripts.
-if "training" not in sys.modules:
-    _training_utils_dir = Path(__file__).resolve().parents[2] / "training" / "utils"
-    _training = MagicMock()
-    _training.rl = MagicMock()
-    _training.rl.simulation_shutdown = MagicMock()
-    _training.rl.simulation_shutdown.prepare_for_shutdown = MagicMock()
-    _training.utils = MagicMock()
-    for _name in ("integrity", "tracking"):
-        _spec = importlib.util.spec_from_file_location(f"training.utils.{_name}", _training_utils_dir / f"{_name}.py")
-        if _spec is None or _spec.loader is None:
-            raise RuntimeError(f"Unable to load training.utils.{_name} from {_training_utils_dir}")
-        _module = importlib.util.module_from_spec(_spec)
-        sys.modules[_spec.name] = _module
-        _spec.loader.exec_module(_module)
-        setattr(_training.utils, _name, _module)
-    sys.modules["training"] = _training
-    sys.modules["training.rl"] = _training.rl
-    sys.modules["training.rl.simulation_shutdown"] = _training.rl.simulation_shutdown
-    sys.modules["training.utils"] = _training.utils
-
-import numpy as np
-import pytest
-from sil.robot_types import IMAGE_CHANNELS, IMAGE_HEIGHT, IMAGE_WIDTH, NUM_JOINTS
+def pytest_configure(config: pytest.Config) -> None:
+    """Initialize independent evaluation stubs without coupling judge collection to training."""
+    if config.rootpath == Path(__file__).resolve().parents[1] / "vlm_judge":
+        return
+    if "training" not in sys.modules:
+        _training_utils_dir = Path(__file__).resolve().parents[2] / "training" / "utils"
+        _training = MagicMock()
+        _training.rl = MagicMock()
+        _training.rl.simulation_shutdown = MagicMock()
+        _training.rl.simulation_shutdown.prepare_for_shutdown = MagicMock()
+        _training.utils = MagicMock()
+        for _name in ("integrity", "tracking"):
+            _spec = importlib.util.spec_from_file_location(
+                f"training.utils.{_name}", _training_utils_dir / f"{_name}.py"
+            )
+            if _spec is None or _spec.loader is None:
+                raise RuntimeError(f"Unable to load training.utils.{_name} from {_training_utils_dir}")
+            _module = importlib.util.module_from_spec(_spec)
+            sys.modules[_spec.name] = _module
+            _spec.loader.exec_module(_module)
+            setattr(_training.utils, _name, _module)
+        sys.modules["training"] = _training
+        sys.modules["training.rl"] = _training.rl
+        sys.modules["training.rl.simulation_shutdown"] = _training.rl.simulation_shutdown
+        sys.modules["training.utils"] = _training.utils
 
 
 @pytest.fixture
@@ -44,24 +50,32 @@ def rng() -> np.random.Generator:
 @pytest.fixture
 def joint_positions() -> np.ndarray:
     """Valid joint position array of shape ``(NUM_JOINTS,)``."""
+    from sil.robot_types import NUM_JOINTS
+
     return np.zeros(NUM_JOINTS, dtype=np.float64)
 
 
 @pytest.fixture
 def random_joint_positions(rng: np.random.Generator) -> np.ndarray:
     """Random joint positions in ``[-pi, pi]``."""
+    from sil.robot_types import NUM_JOINTS
+
     return rng.uniform(-np.pi, np.pi, size=(NUM_JOINTS,))
 
 
 @pytest.fixture
 def color_image() -> np.ndarray:
     """Valid color image array of shape ``(IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS)``."""
+    from sil.robot_types import IMAGE_CHANNELS, IMAGE_HEIGHT, IMAGE_WIDTH
+
     return np.zeros((IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS), dtype=np.uint8)
 
 
 @pytest.fixture
 def action_arrays(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
     """Predicted and ground truth action delta arrays of shape ``(100, NUM_JOINTS)``."""
+    from sil.robot_types import NUM_JOINTS
+
     predicted = rng.normal(0, 0.01, size=(100, NUM_JOINTS))
     ground_truth = rng.normal(0, 0.01, size=(100, NUM_JOINTS))
     return predicted, ground_truth

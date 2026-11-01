@@ -40,10 +40,12 @@ COPY --from=build /app/data-management/viewer/frontend/dist /usr/share/nginx/htm
 # nginx config: envsubst replaces ${NGINX_BACKEND_HOST} at container start
 COPY data-management/viewer/frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 
+# Renders the caller-authentication mode include files, then starts nginx
+COPY data-management/viewer/frontend/start-nginx.sh /usr/local/bin/start-nginx.sh
+
 ENV NGINX_BACKEND_HOST=backend:8000
 ENV NGINX_BACKEND_SCHEME=http
 ENV NGINX_RESOLVER=127.0.0.11
-ENV DATAVIEWER_PROXY_KEY=""
 
 EXPOSE 8080
 
@@ -54,4 +56,4 @@ USER nginx
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --start-interval=3s --retries=3 \
     CMD wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1
 
-CMD ["/bin/sh", "-c", "if [ -n \"$DATAVIEWER_PROXY_KEY\" ]; then export NGINX_PROXY_KEY_HEADER=\"$DATAVIEWER_PROXY_KEY\" NGINX_AUTHORIZATION_HEADER='\"\"'; else export NGINX_PROXY_KEY_HEADER='\"\"' NGINX_AUTHORIZATION_HEADER='$http_authorization'; fi && envsubst '${NGINX_BACKEND_HOST} ${NGINX_BACKEND_SCHEME} ${NGINX_RESOLVER} ${NGINX_PROXY_KEY_HEADER} ${NGINX_AUTHORIZATION_HEADER}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+CMD ["/bin/sh", "/usr/local/bin/start-nginx.sh"]

@@ -12,8 +12,9 @@ import pytest
 import torch
 from PIL import Image
 from pytest_mock import MockerFixture
-from vlm_judge.backend import GenerationConfig, OpenAICompatibleBackend, Qwen3VLBackend, _load_qwen3_vl_model
-from vlm_judge.service import BackendConfig, JudgeService
+
+from evaluation.vlm_judge.backend import GenerationConfig, OpenAICompatibleBackend, Qwen3VLBackend, _load_qwen3_vl_model
+from evaluation.vlm_judge.service import BackendConfig, JudgeService
 
 
 @pytest.mark.parametrize("temperature", [0.0, 0.4])
@@ -297,7 +298,7 @@ def test_given_matching_working_directory_when_loading_hub_id_then_rejects_ambig
 
 @pytest.mark.usefixtures("forbid_model_imports")
 def test_given_unpinned_shim_when_starting_then_inherits_loader_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    from vlm_judge.openai_shim import main
+    from evaluation.vlm_judge.openai_shim import main
 
     monkeypatch.delenv("VLM_SHIM_MODEL_REVISION", raising=False)
 

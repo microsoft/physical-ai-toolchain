@@ -707,6 +707,7 @@ import sys
 
 sys.path.insert(0, sys.argv[1])
 sys.path.append(sys.argv[2])
+sys.modules["evaluation"] = None
 assert importlib.util.find_spec("evaluation") is None
 
 from fastapi.testclient import TestClient

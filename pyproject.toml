@@ -20,29 +20,44 @@ packages = ["training/rl"]
 dev = [
     "physical-ai-curation==0.1.0",
     "physical-ai-dataset-io==0.1.0",
-    "hypothesis==6.170.2",
+    "hypothesis==6.170.5",
     "numpy==2.5.4",
     "ruff==0.17.1",
-    "pyarrow==25.0.1",
+    "pyarrow==26.0.0",
     "imageio==2.38.1",
     "imageio-ffmpeg==0.6.0",
     "pytest==9.1.1",
     "pytest-mock==3.17.0",
     "pytest-cov==7.1.0",
-    "pydantic==2.13.5",
+    "pydantic==2.14.1",
     "ipykernel==7.4.0",
     "ipywidgets==8.1.9",
     "jsonschema[format]==4.26.0",
     "tqdm==4.70.1",
     "matplotlib==3.11.2",
     "torch==2.14.1",
-    "azureml-mlflow==1.62.0.post6",
     "azure-ai-ml==1.35.2",
 ]
-fuzz = ["atheris==3.1.0"]
+azureml-tracking = ["azureml-mlflow==1.62.0.post6"]
+fuzz = ["atheris==3.1.0; sys_platform == 'linux' and platform_machine == 'x86_64'"]
 
 [tool.uv]
+conflicts = [
+    [
+        { group = "azureml-tracking" },
+        { package = "lerobot-annotation-api", extra = "azure" },
+    ],
+]
+environments = [
+    "sys_platform == 'win32'",
+    "sys_platform == 'darwin'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+]
+prerelease = "if-necessary"
 constraint-dependencies = [
+    "cryptography==50.0.1",
+    "starlette==1.6.0",
     "pygments==2.21.0",
 ]
 override-dependencies = [
@@ -52,9 +67,36 @@ override-dependencies = [
 ]
 package = false
 
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.workspace]
+members = [
+    "data-management/curation",
+    "data-management/dataset-io",
+    "data-management/viewer/backend",
+    "evaluation/vlm_judge",
+]
+
 [tool.uv.sources]
-physical-ai-curation = { path = "data-management/curation", editable = true }
-physical-ai-dataset-io = { path = "data-management/dataset-io", editable = true }
+physical-ai-curation = { workspace = true }
+physical-ai-dataset-io = { workspace = true }
+physical-ai-vlm-judge = { workspace = true }
+torch = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+]
+torchvision = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+]
 
 [tool.pytest.ini_options]
 testpaths = [

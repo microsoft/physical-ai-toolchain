@@ -10,7 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 from PIL import Image
-from vlm_judge.frames import (
+
+from evaluation.vlm_judge.frames import (
     FrameWindow,
     MediaInputError,
     _stream_duration_s,

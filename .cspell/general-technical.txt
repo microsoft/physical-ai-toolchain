@@ -494,6 +494,7 @@ georeplicated
 georeplication
 geoserver
 geospatial
+getconf
 gettype
 gigabytes
 git

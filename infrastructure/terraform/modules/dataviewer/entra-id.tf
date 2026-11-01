@@ -114,6 +114,23 @@ resource "azuread_application" "dataviewer" {
   feature_tags {
     enterprise = true
   }
+
+  optional_claims {
+    access_token {
+      name = "idtyp"
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [identifier_uris]
+  }
+}
+
+resource "azuread_application_identifier_uri" "dataviewer" {
+  count = var.should_deploy_dataviewer_auth ? 1 : 0
+
+  application_id = azuread_application.dataviewer[0].id
+  identifier_uri = "api://${azuread_application.dataviewer[0].client_id}"
 }
 
 resource "azuread_application_password" "dataviewer_easy_auth" {
@@ -130,4 +147,12 @@ resource "azuread_application_password" "dataviewer_easy_auth" {
 resource "azuread_service_principal" "dataviewer" {
   count     = var.should_deploy_dataviewer_auth ? 1 : 0
   client_id = azuread_application.dataviewer[0].client_id
+
+  lifecycle {
+    ignore_changes = [app_role_assignment_required]
+    postcondition {
+      condition     = self.app_role_assignment_required != true
+      error_message = "Role-less caller authentication requires assignment-optional issuance; approve an Application-role design before using assignment-required policy"
+    }
+  }
 }
