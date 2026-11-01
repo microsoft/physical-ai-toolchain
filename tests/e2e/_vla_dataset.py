@@ -1,15 +1,17 @@
 """
-Synthetic GR00T (NVIDIA Isaac-GR00T N1.5) fine-tuning dataset generator.
+Synthetic GR00T (NVIDIA Isaac-GR00T N1.5 and N1.7) fine-tuning dataset generator.
 
 Produces a minimal, self-contained LeRobot v2.0 dataset plus the GR00T-specific
-``meta/modality.json`` so the OSMO VLA fine-tuning e2e test no longer depends on a
-manually pre-staged dataset. A single embodiment spec drives both the on-disk
-dataset and the injected ``--data-config`` Python fragment, so the two cannot drift.
+``meta/modality.json`` so the VLA fine-tuning e2e tests no longer depend on a
+manually pre-staged dataset. A single embodiment spec drives the on-disk dataset,
+the injected N1.5 ``--data-config`` Python fragment, and the N1.7 modality config,
+so they cannot drift.
 
 Schema is pinned to Isaac-GR00T ``796ca8d`` (the N1.5 ref used by
-``training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh``):
-GR00T ships its own reader (``gr00t/data/dataset.py``), so the ``lerobot`` pip
-package is not required to load this dataset.
+``training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh``) and is also
+loadable by the N1.7 LeRobot episode loader at ``23ace64``.
+GR00T ships its own reader, so the ``lerobot`` pip package is not required to
+load this dataset.
 """
 
 from __future__ import annotations
@@ -234,6 +236,44 @@ def render_data_config_py() -> str:
 
 def write_data_config_file(path: Path) -> Path:
     path.write_text(render_data_config_py())
+    return path
+
+
+def render_n17_modality_config_py() -> str:
+    """GR00T N1.7 modality config matching ``meta/modality.json``.
+
+    Loaded by ``gr00t/experiment/launch_finetune.py`` via ``--modality_config_path``
+    and registered under ``EmbodimentTag.NEW_EMBODIMENT``.
+    """
+    state_keys = [name for name, _ in _STATE_FIELDS]
+    action_keys = [name for name, _ in _ACTION_FIELDS]
+    return (
+        "from __future__ import annotations\n"
+        "\n"
+        "from gr00t.configs.data.embodiment_configs import register_modality_config\n"
+        "from gr00t.data.embodiment_tags import EmbodimentTag\n"
+        "from gr00t.data.types import ModalityConfig\n"
+        "\n"
+        "register_modality_config(\n"
+        "    {\n"
+        f'        "video": ModalityConfig(delta_indices=[0], modality_keys={json.dumps([_VIDEO_KEY])}),\n'
+        f'        "state": ModalityConfig(delta_indices=[0], modality_keys={json.dumps(state_keys)}),\n'
+        '        "action": ModalityConfig(\n'
+        f"            delta_indices=list(range({_ACTION_HORIZON})),\n"
+        f"            modality_keys={json.dumps(action_keys)},\n"
+        "        ),\n"
+        '        "language": ModalityConfig(\n'
+        "            delta_indices=[0],\n"
+        f'            modality_keys=["annotation.{_ANNOTATION_KEY}"],\n'
+        "        ),\n"
+        "    },\n"
+        "    EmbodimentTag.NEW_EMBODIMENT,\n"
+        ")\n"
+    )
+
+
+def write_n17_modality_config_file(path: Path) -> Path:
+    path.write_text(render_n17_modality_config_py())
     return path
 
 
