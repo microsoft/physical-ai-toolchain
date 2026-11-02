@@ -101,6 +101,64 @@ BeforeAll {
         }
     }
 
+    function Set-TlsFixtureStage {
+        param(
+            [hashtable] $Status,
+            [ValidateSet(
+                'initialization', 'untrusted-readiness', 'untrusted-rejection',
+                'hostname-readiness', 'hostname-rejection', 'trusted-readiness',
+                'trusted-http', 'redis-untrusted', 'redis-hostname', 'redis-trusted'
+            )]
+            [string] $Stage
+        )
+
+        $Status.Clear()
+        $Status.Stage = $Stage
+    }
+
+    function Assert-TlsFixtureValue {
+        param(
+            [hashtable] $Status,
+            [ValidateSet('http-status', 'running', 'tls-error', 'backend-request', 'receipt-reset', 'redis-auth', 'exit-code')]
+            [string] $Check,
+            [int] $Expected,
+            [int] $Actual,
+            [switch] $Nonzero,
+            [switch] $ObserveOnly
+        )
+
+        $Status.Check = $Check
+        $Status.Expected = if ($Nonzero) { 'nonzero' } else { [string]$Expected }
+        $Status.Actual = [string]$Actual
+        if (-not $ObserveOnly) {
+            if ($Nonzero) {
+                $Actual | Should -Not -Be 0
+            }
+            else {
+                $Actual | Should -Be $Expected
+            }
+        }
+    }
+
+    function Get-TlsFixtureFailureSummary {
+        param([hashtable] $Status)
+
+        $summary = 'TLS fixture verification failed.'
+        $stages = (Get-Command Set-TlsFixtureStage).Parameters['Stage'].Attributes.ValidValues
+        if ($Status.Stage -cin $stages) {
+            $summary += " stage=$($Status.Stage)"
+        }
+        if ($Status.Check -cin @('http-status', 'running', 'tls-error', 'backend-request', 'receipt-reset', 'redis-auth', 'exit-code')) {
+            $summary += " check=$($Status.Check)"
+            foreach ($key in @('Expected', 'Actual')) {
+                if ($Status[$key] -cmatch '\A(?:-?[0-9]{1,10}|nonzero)\z') {
+                    $summary += " $($key.ToLowerInvariant())=$($Status[$key])"
+                }
+            }
+        }
+        return $summary
+    }
+
     function Invoke-NginxFixture {
         param(
             [Parameter(Mandatory)]
@@ -118,6 +176,8 @@ BeforeAll {
             [Parameter(Mandatory)]
             [AllowEmptyCollection()]
             [System.Collections.Generic.List[string]] $Containers,
+
+            [hashtable] $Status = @{},
 
             [Parameter()]
             [switch] $TrustFixtureCertificate
@@ -151,13 +211,15 @@ BeforeAll {
         $Containers.Add($Name)
         Invoke-Docker -Arguments $arguments | Out-Null
 
-        return Wait-NginxFixture -Name $Name
+        return Wait-NginxFixture -Name $Name -Status $Status
     }
 
     function Wait-NginxFixture {
         param(
             [Parameter(Mandatory)]
             [string] $Name,
+
+            [hashtable] $Status = @{},
 
             [ValidateRange(0, 60)]
             [int] $TimeoutSeconds = 10
@@ -166,12 +228,15 @@ BeforeAll {
         $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
         do {
             $running = Invoke-Docker -Arguments @('inspect', '--format', '{{.State.Running}}', $Name)
+            Assert-TlsFixtureValue -Status $Status -Check 'running' -Expected 1 `
+                -Actual ([int]($running -eq 'true')) -ObserveOnly
             if ($running -ne 'true') {
                 throw 'NGINX fixture exited before HTTP readiness'
             }
             $portOutput = Invoke-Docker -Arguments @('port', $Name, '8080/tcp')
             if ($portOutput) {
                 $port = ($portOutput -split ':')[-1]
+                Assert-TlsFixtureValue -Status $Status -Check 'http-status' -Expected 200 -Actual 0 -ObserveOnly
                 try {
                     $response = Invoke-WebRequest -Uri "http://127.0.0.1:${port}/" `
                         -NoProxy -SkipHttpErrorCheck -TimeoutSec 2
@@ -179,6 +244,10 @@ BeforeAll {
                 catch {
                     # A published port may precede the HTTP listener.
                     $response = $null
+                }
+                if ($response) {
+                    Assert-TlsFixtureValue -Status $Status -Check 'http-status' -Expected 200 `
+                        -Actual ([int]$response.StatusCode) -ObserveOnly
                 }
                 if ($response -and $response.StatusCode -eq 200) {
                     return $port
@@ -202,15 +271,20 @@ BeforeAll {
             [string] $RequestPath,
 
             [Parameter(Mandatory)]
-            [string] $TlsError
+            [string] $TlsError,
+            [hashtable] $Status = @{}
         )
 
+        Assert-TlsFixtureValue -Status $Status -Check 'http-status' -Expected 502 -Actual 0 -ObserveOnly
         $response = Invoke-WebRequest -Uri "http://127.0.0.1:${Port}/api/" `
             -NoProxy -SkipHttpErrorCheck -TimeoutSec 5
-        $response.StatusCode | Should -Be 502
+        Assert-TlsFixtureValue -Status $Status -Check 'http-status' -Expected 502 -Actual ([int]$response.StatusCode)
+        Assert-TlsFixtureValue -Status $Status -Check 'tls-error' -Expected 1 -Actual 0 -ObserveOnly
         $logs = Invoke-Docker -Arguments @('logs', $Name)
-        (($logs -join "`n") -match $TlsError) | Should -BeTrue -Because 'NGINX must report the expected TLS verification failure'
-        Test-Path -LiteralPath $RequestPath | Should -BeFalse
+        Assert-TlsFixtureValue -Status $Status -Check 'tls-error' -Expected 1 `
+            -Actual ([int](($logs -join "`n") -match $TlsError))
+        Assert-TlsFixtureValue -Status $Status -Check 'backend-request' -Expected 0 `
+            -Actual ([int](Test-Path -LiteralPath $RequestPath))
     }
 
     function Get-TlsFixtureDiagnostics {
@@ -556,6 +630,110 @@ Describe 'TLS fixture readiness and rejection guards' -Tag 'Unit' {
             ($args -join ' ') -eq "network rm $network"
         }
     }
+
+    It 'reports sanitized structured details for <Stage> <Check>' -ForEach @(
+        @{ Stage = 'untrusted-readiness'; Check = 'running'; Expected = '1'; Actual = '0' }
+        @{ Stage = 'hostname-readiness'; Check = 'running'; Expected = '1'; Actual = '0' }
+        @{ Stage = 'trusted-readiness'; Check = 'running'; Expected = '1'; Actual = '0' }
+        @{ Stage = 'untrusted-rejection'; Check = 'http-status'; Expected = '502'; Actual = '503' }
+        @{ Stage = 'hostname-rejection'; Check = 'http-status'; Expected = '502'; Actual = '503' }
+        @{ Stage = 'trusted-http'; Check = 'http-status'; Expected = '204'; Actual = '503' }
+        @{ Stage = 'trusted-http'; Check = 'receipt-reset'; Expected = '0'; Actual = '1' }
+        @{ Stage = 'redis-untrusted'; Check = 'exit-code'; Expected = 'nonzero'; Actual = '0' }
+        @{ Stage = 'redis-hostname'; Check = 'exit-code'; Expected = 'nonzero'; Actual = '0' }
+        @{ Stage = 'redis-trusted'; Check = 'exit-code'; Expected = '0'; Actual = '7' }
+    ) {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            $PSCommandPath, [ref]$null, [ref]$null
+        )
+        $fixtureTry = $ast.Find({
+                param($node)
+                $node -is [System.Management.Automation.Language.TryStatementAst] -and
+                $node.CatchClauses.Extent.Text -match 'Get-TlsFixtureDiagnostics -Containers'
+            }, $true)
+        $fixture = [scriptblock]::Create($fixtureTry.Extent.Text)
+        $network = 'fixture-network'
+        $serverContainer = 'fixture-server'
+        $fixtureDirectory = $TestDrive
+        $requestPath = Join-Path $TestDrive 'requests'
+        $suffix = 'fixture'
+        $containers = [System.Collections.Generic.List[string]]::new()
+        Mock Start-Sleep {}
+        Mock Invoke-Docker {
+            switch ($Arguments[0]) {
+                'inspect' {
+                    if ($Arguments -contains '{{.State.Running}}') {
+                        if ($status.Stage -eq $Stage) { 'false' } else { 'true' }
+                    }
+                    else { 'status=running exit=0 oom=false' }
+                }
+                'port' { '127.0.0.1:12345' }
+                'logs' {
+                    'upstream SSL certificate verify error; upstream SSL certificate does not match'
+                    'Authorization: sensitive-fixture-value /private/local-fixture'
+                }
+            }
+        }
+        Mock Invoke-WebRequest {
+            $code = if ($status.Stage -eq $Stage -and $Check -eq 'http-status') { 503 }
+            elseif ($status.Stage -like '*readiness') { 200 }
+            elseif ($status.Stage -eq 'trusted-http') { 204 }
+            else { 502 }
+            [pscustomobject]@{ StatusCode = $code }
+        }
+        Mock docker {
+            if ($args[0] -eq 'run') {
+                $global:LASTEXITCODE = if ($status.Stage -eq $Stage) { [int]$Actual }
+                elseif ($status.Stage -eq 'redis-trusted') { 0 }
+                else { 1 }
+            }
+        }
+        Mock Test-Path {
+            $status.Stage -in @('trusted-http', 'redis-trusted') -and $status.Check -ne 'receipt-reset'
+        } -ParameterFilter {
+            $LiteralPath -eq $requestPath
+        }
+        Mock Get-Content { 'GET /api/ AUTH' } -ParameterFilter { $LiteralPath -eq $requestPath }
+        Mock Remove-Item {
+            if ($Check -eq 'receipt-reset') {
+                throw 'Permission denied /private/local-fixture Authorization: sensitive-fixture-value'
+            }
+        } -ParameterFilter { $LiteralPath -eq $requestPath }
+
+        $failure = { & $fixture } | Should -Throw -PassThru
+        $report = ($failure | Out-String) + $failure.Exception.ToString()
+        $report | Should -Match "stage=$Stage check=$Check expected=$Expected actual=$Actual"
+        $report | Should -Not -Match 'sensitive-fixture-value|Authorization|/private/local-fixture'
+        $containers | Should -Contain $serverContainer
+        Should -Invoke Invoke-Docker -Times 1 -Exactly -ParameterFilter {
+            $Arguments[0] -eq 'run' -and $Arguments -contains "${fixtureDirectory}:/fixture"
+        }
+        Should -Invoke docker -Times 1 -Exactly -ParameterFilter {
+            ($args -join ' ') -eq "network rm $network"
+        }
+        Should -Invoke docker -Times 1 -Exactly -ParameterFilter {
+            ($args -join ' ') -eq "rm --force tls-nginx-untrusted-$suffix"
+        }
+        if ($Stage -in @('redis-hostname', 'redis-trusted') -or $Check -eq 'receipt-reset') {
+            Should -Invoke Remove-Item -Times 1 -Exactly -ParameterFilter {
+                $LiteralPath -eq $requestPath -and $Force
+            }
+        }
+    }
+
+    It 'omits non-allowlisted stages and structured values' {
+        $status = @{
+            Stage = '/private/local-fixture'
+            Check = 'Authorization'
+            Expected = 'sensitive-fixture-value'
+            Actual = '/private/local-fixture'
+        }
+        Get-TlsFixtureFailureSummary -Status $status | Should -Be 'TLS fixture verification failed.'
+        $status.Stage = 'trusted-http'
+        $status.Check = 'http-status'
+        Get-TlsFixtureFailureSummary -Status $status |
+            Should -Be 'TLS fixture verification failed. stage=trusted-http check=http-status'
+    }
 }
 
 Describe 'Production TLS certificate verification' -Tag 'Unit' {
@@ -653,6 +831,8 @@ server.listen(443, '0.0.0.0')
 '@ | Set-Content -LiteralPath $serverPath
 
         try {
+            $status = @{}
+            Set-TlsFixtureStage -Status $status -Stage 'initialization'
             Invoke-Docker -Arguments @('network', 'create', $network) | Out-Null
             $containers.Add($serverContainer)
             Invoke-Docker -Arguments @(
@@ -664,27 +844,32 @@ server.listen(443, '0.0.0.0')
                 $script:NodeImage,
                 'node', '/fixture/server.mjs'
             ) | Out-Null
+            Set-TlsFixtureStage -Status $status -Stage 'untrusted-readiness'
             $untrustedNginx = "tls-nginx-untrusted-$suffix"
             $untrustedPort = Invoke-NginxFixture `
                 -Name $untrustedNginx `
                 -BackendHost 'tls-valid' `
                 -Network $network `
                 -FixtureDirectory $fixtureDirectory `
-                -Containers $containers
+                -Containers $containers -Status $status
+            Set-TlsFixtureStage -Status $status -Stage 'untrusted-rejection'
             Assert-NginxTlsRejection -Name $untrustedNginx -Port $untrustedPort `
-                -RequestPath $requestPath -TlsError 'upstream SSL certificate verify error'
+                -RequestPath $requestPath -TlsError 'upstream SSL certificate verify error' -Status $status
 
+            Set-TlsFixtureStage -Status $status -Stage 'hostname-readiness'
             $wrongHostNginx = "tls-nginx-wrong-host-$suffix"
             $wrongHostPort = Invoke-NginxFixture `
                 -Name $wrongHostNginx `
                 -BackendHost 'tls-wrong' `
                 -Network $network `
                 -FixtureDirectory $fixtureDirectory `
-                -Containers $containers `
+                -Containers $containers -Status $status `
                 -TrustFixtureCertificate
+            Set-TlsFixtureStage -Status $status -Stage 'hostname-rejection'
             Assert-NginxTlsRejection -Name $wrongHostNginx -Port $wrongHostPort `
-                -RequestPath $requestPath -TlsError 'upstream SSL certificate does not match'
+                -RequestPath $requestPath -TlsError 'upstream SSL certificate does not match' -Status $status
 
+            Set-TlsFixtureStage -Status $status -Stage 'redis-untrusted'
             & docker run --pull never --rm --network $network `
                 --env REDIS_HOST=tls-valid `
                 --env REDIS_PORT=443 `
@@ -692,23 +877,32 @@ server.listen(443, '0.0.0.0')
                 --env REDIS_OPERATION=PING `
                 $script:PythonImage `
                 python -c $script:RedisTlsClient 2>$null
-            $LASTEXITCODE | Should -Not -Be 0
-            Test-Path -LiteralPath $requestPath | Should -BeFalse
+            Assert-TlsFixtureValue -Status $status -Check 'exit-code' -Actual $LASTEXITCODE -Nonzero
+            Assert-TlsFixtureValue -Status $status -Check 'backend-request' -Expected 0 `
+                -Actual ([int](Test-Path -LiteralPath $requestPath))
 
+            Set-TlsFixtureStage -Status $status -Stage 'trusted-readiness'
             $trustedNginx = "tls-nginx-trusted-$suffix"
             $trustedPort = Invoke-NginxFixture `
                 -Name $trustedNginx `
                 -BackendHost 'tls-valid' `
                 -Network $network `
                 -FixtureDirectory $fixtureDirectory `
-                -Containers $containers `
+                -Containers $containers -Status $status `
                 -TrustFixtureCertificate
+            Set-TlsFixtureStage -Status $status -Stage 'trusted-http'
+            Assert-TlsFixtureValue -Status $status -Check 'http-status' -Expected 204 -Actual 0 -ObserveOnly
             $response = Invoke-WebRequest -Uri "http://127.0.0.1:${trustedPort}/api/" `
                 -NoProxy -SkipHttpErrorCheck -TimeoutSec 5
-            $response.StatusCode | Should -Be 204
-            (Get-Content -Raw -LiteralPath $requestPath) | Should -Match 'GET /api/'
-            Remove-Item -LiteralPath $requestPath
+            Assert-TlsFixtureValue -Status $status -Check 'http-status' -Expected 204 -Actual ([int]$response.StatusCode)
+            Assert-TlsFixtureValue -Status $status -Check 'backend-request' -Expected 1 `
+                -Actual ([int]((Get-Content -Raw -LiteralPath $requestPath) -match 'GET /api/'))
+            Assert-TlsFixtureValue -Status $status -Check 'receipt-reset' -Expected 0 -Actual 1 -ObserveOnly
+            Remove-Item -LiteralPath $requestPath -Force
+            Assert-TlsFixtureValue -Status $status -Check 'receipt-reset' -Expected 0 `
+                -Actual ([int](Test-Path -LiteralPath $requestPath))
 
+            Set-TlsFixtureStage -Status $status -Stage 'redis-hostname'
             & docker run --pull never --rm --network $network `
                 --volume "${fixtureDirectory}:/fixture:ro" `
                 --env SSL_CERT_FILE=/fixture/server.crt `
@@ -718,9 +912,11 @@ server.listen(443, '0.0.0.0')
                 --env REDIS_OPERATION=PING `
                 $script:PythonImage `
                 python -c $script:RedisTlsClient 2>$null
-            $LASTEXITCODE | Should -Not -Be 0
-            Test-Path -LiteralPath $requestPath | Should -BeFalse
+            Assert-TlsFixtureValue -Status $status -Check 'exit-code' -Actual $LASTEXITCODE -Nonzero
+            Assert-TlsFixtureValue -Status $status -Check 'backend-request' -Expected 0 `
+                -Actual ([int](Test-Path -LiteralPath $requestPath))
 
+            Set-TlsFixtureStage -Status $status -Stage 'redis-trusted'
             & docker run --pull never --rm --network $network `
                 --volume "${fixtureDirectory}:/fixture:ro" `
                 --env SSL_CERT_FILE=/fixture/server.crt `
@@ -730,13 +926,16 @@ server.listen(443, '0.0.0.0')
                 --env REDIS_OPERATION=PING `
                 $script:PythonImage `
                 python -c $script:RedisTlsClient 2>$null
-            $LASTEXITCODE | Should -Be 0
-            Test-Path -LiteralPath $requestPath | Should -BeTrue
-            (Get-Content -Raw -LiteralPath $requestPath) | Should -Match 'AUTH'
+            Assert-TlsFixtureValue -Status $status -Check 'exit-code' -Expected 0 -Actual $LASTEXITCODE
+            Assert-TlsFixtureValue -Status $status -Check 'backend-request' -Expected 1 `
+                -Actual ([int](Test-Path -LiteralPath $requestPath))
+            Assert-TlsFixtureValue -Status $status -Check 'redis-auth' -Expected 1 `
+                -Actual ([int]((Get-Content -Raw -LiteralPath $requestPath) -match 'AUTH'))
         }
         catch {
             $diagnostics = Get-TlsFixtureDiagnostics -Containers $containers
-            throw "TLS fixture verification failed. See sanitized diagnostics below.`n$($diagnostics -join "`n")"
+            $summary = Get-TlsFixtureFailureSummary -Status $status
+            throw "$summary`n$($diagnostics -join "`n")"
         }
         finally {
             foreach ($container in $containers) {
