@@ -497,6 +497,65 @@ Describe 'TLS fixture readiness and rejection guards' -Tag 'Unit' {
         $diagnostics | Should -Match 'logs unavailable'
         $diagnostics | Should -Not -Match 'sensitive-fixture-value'
     }
+
+    It 'sanitizes the complete failure report when diagnostics are <DiagnosticState>' -ForEach @(
+        @{ DiagnosticState = 'available' }
+        @{ DiagnosticState = 'unavailable' }
+    ) {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            $PSCommandPath, [ref]$null, [ref]$null
+        )
+        $fixtureTry = @($ast.FindAll({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.TryStatementAst] -and
+                    $node.CatchClauses.Extent.Text -match 'Get-TlsFixtureDiagnostics -Containers'
+                }, $true))
+        $fixtureTry.Count | Should -Be 1
+        $fixture = [scriptblock]::Create($fixtureTry[0].Extent.Text)
+        $network = 'fixture-network'
+        $serverContainer = 'fixture-server'
+        $fixtureDirectory = $TestDrive
+        $containers = [System.Collections.Generic.List[string]]::new()
+        Mock Invoke-Docker {
+            throw 'docker run --env AUTHORIZATION=sensitive-fixture-value --volume /private/local-fixture:/fixture failed'
+        } -ParameterFilter { $Arguments[0] -eq 'run' }
+        Mock Invoke-Docker {
+            if ($DiagnosticState -eq 'unavailable') {
+                throw 'sensitive-fixture-value /private/local-fixture'
+            }
+            'status=exited exit=1 oom=false'
+        } -ParameterFilter { $Arguments[0] -eq 'inspect' }
+        Mock Invoke-Docker {
+            if ($DiagnosticState -eq 'unavailable') {
+                throw 'sensitive-fixture-value /private/local-fixture'
+            }
+            'nginx: [emerg] invalid configuration /private/local-fixture AUTHORIZATION=sensitive-fixture-value'
+        } -ParameterFilter { $Arguments[0] -eq 'logs' }
+        Mock docker {}
+
+        $failure = { & $fixture } | Should -Throw -PassThru
+        $report = ($failure | Out-String) + $failure.Exception.ToString()
+        $report | Should -Match 'TLS fixture verification failed'
+        $report | Should -Not -Match 'sensitive-fixture-value|AUTHORIZATION|/private/local-fixture|docker run|--volume'
+        if ($DiagnosticState -eq 'available') {
+            $report | Should -Match 'fixture-server: status=exited exit=1 oom=false'
+            $report | Should -Match 'log indicator: emerg'
+        }
+        else {
+            $report | Should -Match 'status unavailable'
+            $report | Should -Match 'logs unavailable'
+        }
+        $containers | Should -Contain $serverContainer
+        Should -Invoke Invoke-Docker -Times 1 -Exactly -ParameterFilter {
+            $Arguments[0] -eq 'run' -and $Arguments -contains "${fixtureDirectory}:/fixture"
+        }
+        Should -Invoke docker -Times 1 -Exactly -ParameterFilter {
+            ($args -join ' ') -eq "rm --force $serverContainer"
+        }
+        Should -Invoke docker -Times 1 -Exactly -ParameterFilter {
+            ($args -join ' ') -eq "network rm $network"
+        }
+    }
 }
 
 Describe 'Production TLS certificate verification' -Tag 'Unit' {
@@ -677,7 +736,7 @@ server.listen(443, '0.0.0.0')
         }
         catch {
             $diagnostics = Get-TlsFixtureDiagnostics -Containers $containers
-            throw "$($_.Exception.Message)`n$($diagnostics -join "`n")"
+            throw "TLS fixture verification failed. See sanitized diagnostics below.`n$($diagnostics -join "`n")"
         }
         finally {
             foreach ($container in $containers) {
