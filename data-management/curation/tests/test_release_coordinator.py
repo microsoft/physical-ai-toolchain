@@ -30,9 +30,10 @@ from physical_ai_curation.release.inputs import (
 from physical_ai_curation.release.jobs import JobRequest
 from physical_ai_curation.release.media import MediaWindow, ObjectPlanRequest, StorageEndpoint, SubsetEpisodeInput
 from physical_ai_curation.release.models import ProducerIdentity, VersionIdentity
-from physical_ai_curation.release.native_worker import _source_spec, native_operation
+from physical_ai_curation.release.native_worker import _source_spec, native_operation, restore_inputs
 from physical_ai_curation.release.publication import LocalPublisher
 from physical_ai_curation.release.record_storage import BlobLocation
+from physical_ai_curation.release.runner import ConfiguredExecution, execute_job
 from physical_ai_curation.release.store import LocalReleaseStore
 from physical_ai_curation.release.verification import verify_published
 from physical_ai_curation.saved_input import SavedResource
@@ -127,6 +128,83 @@ def test_given_query_bearing_container_url_when_blob_location_then_refused() -> 
 
     with pytest.raises(ReleaseInputError, match="query-free https container address"):
         _ = BlobReleaseSource(client).location
+
+
+def test_given_persisted_request_without_native_buffers_when_restored_then_fresh_guarded_identities(
+    tmp_path: Path,
+) -> None:
+    _source, _reader, _selection, _context, frozen, inputs, _video = _native_case(tmp_path)
+    prepared = prepare_saved_generation(
+        frozen.content,
+        inputs.request,
+        inputs.sources,
+        encode_options=inputs.encode_options,
+        camera_statistics=inputs.camera_statistics,
+    )
+    store = _store(tmp_path / "jobs", OffsetClock())
+    destination = tmp_path / "output"
+    request = replace(
+        _request(destination), frozen_request=generation_request_bytes(frozen, inputs), reserved_bytes=32 * 1024**2
+    )
+    job_id = store.accept(request).job_id
+    fence = store.claim(job_id, "worker-restore")
+    empty = replace(inputs, source_info={}, source_tables={}, source_tasks=pa.table({}))
+
+    restored = restore_inputs(store, job_id, fence, frozen, prepared, empty)
+
+    assert restored.source_info == inputs.source_info
+    assert restored.native_table_identities
+    assert restored.native_task_identity
+    assert restored.source_tables == {}
+    assert generation_request_bytes(frozen, restored) == store.frozen_request(job_id)
+    with native_operation(store, job_id, fence, frozen, prepared, restored, mode="validate"):
+        pass
+
+
+@pytest.mark.parametrize("processed", [False, True])
+def test_given_accepted_job_when_independent_runner_reopens_then_verified_without_acceptor_buffers(
+    tmp_path: Path, processed: bool
+) -> None:
+    source, reader, selection, context, frozen, inputs, _video = _native_case(tmp_path, processed=processed)
+    destination = tmp_path / "output"
+    root = tmp_path / "jobs"
+    store = _store(root, OffsetClock())
+    job_id = store.accept(
+        replace(
+            _request(destination), frozen_request=generation_request_bytes(frozen, inputs), reserved_bytes=32 * 1024**2
+        )
+    ).job_id
+    del store, inputs
+    reopened = _store(root, OffsetClock())
+
+    result = asyncio.run(
+        execute_job(reopened, job_id, ConfiguredExecution(source, reader, selection, context, destination))
+    )
+
+    assert result is not None
+    assert verify_published(LocalReleaseStore(destination / ATTEMPT.prefix), result.identity.manifest_sha256) == result
+    record = reopened.storage.snapshot()[job_id]
+    assert record["state"] == "committed"
+    assert record["diagnostics"]["validation.succeeded"]["count"] == 1
+    assert all(runtime["stopped"] for runtime in record["runtimes"].values())
+
+
+def test_given_stale_source_when_independent_runner_restores_then_no_destination_effect(tmp_path: Path) -> None:
+    source, reader, selection, context, frozen, inputs, _video = _native_case(tmp_path)
+    destination = tmp_path / "output"
+    store = _store(tmp_path / "jobs", OffsetClock())
+    job_id = store.accept(
+        replace(
+            _request(destination), frozen_request=generation_request_bytes(frozen, inputs), reserved_bytes=32 * 1024**2
+        )
+    ).job_id
+    (source.root / "meta/info.json").write_bytes(b"{}")
+
+    with pytest.raises(ReleaseInputError):
+        asyncio.run(execute_job(store, job_id, ConfiguredExecution(source, reader, selection, context, destination)))
+
+    assert not destination.exists()
+    assert store.storage.snapshot()[job_id]["diagnostics"]["validation.failed"]["count"] == 1
 
 
 def test_given_container_url_when_blob_location_then_container_and_https_account() -> None:
@@ -253,6 +331,31 @@ def _native_case(tmp_path: Path, *, processed: bool = False) -> tuple:
         frozen.content, request, inputs.sources, camera_statistics=inputs.camera_statistics
     )
     return source, reader, selection, context, frozen, replace(inputs, confirmed_digest=prepared.plan.digest), video
+
+
+@pytest.mark.parametrize("processed", [False, True])
+def test_given_frozen_native_source_when_planning_then_fixture_equivalent_without_acceptor_tables(
+    tmp_path: Path, processed: bool
+) -> None:
+    from physical_ai_curation.release.coordinator import plan_generation_inputs
+
+    source, _reader, _selection, _context_value, frozen, expected, _video = _native_case(tmp_path, processed=processed)
+    planned = plan_generation_inputs(
+        source,
+        frozen,
+        source_endpoint=expected.request.source,
+        destination_endpoint=expected.request.destination,
+        scratch_endpoint=expected.request.scratch,
+        producer=expected.producer,
+        tool=expected.request.tool,
+        scratch_bytes=expected.scratch_bytes,
+        output_bytes=expected.output_bytes,
+    )
+
+    assert generation_request_bytes(frozen, planned) == generation_request_bytes(frozen, expected)
+    assert planned.source_tables == {}
+    assert planned.source_tasks.num_rows == 0
+    assert not (tmp_path / "output").exists()
 
 
 NATIVE_BLOB_CODE = """

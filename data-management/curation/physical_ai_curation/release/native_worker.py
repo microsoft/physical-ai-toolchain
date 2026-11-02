@@ -8,6 +8,7 @@ import json
 import sys
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -126,8 +127,9 @@ def native_operation(
     prepared: NativeGenerationPlan,
     inputs: GenerationInputs,
     *,
-    mode: Literal["validate", "assemble"],
+    mode: Literal["validate", "assemble", "restore"],
     media: Mapping[str, VideoOutput] | None = None,
+    restored: dict[str, Any] | None = None,
 ) -> Iterator[list[tuple[str, Path, int, str]]]:
     """Run native decoding/assembly in a capped child and expose only stopped verified output."""
     if sum(table.nbytes for table in inputs.source_tables.values()) * 3 > store.settings.memory_bytes:
@@ -141,8 +143,9 @@ def native_operation(
         "sources": TypeAdapter(dict[str, SubsetEpisodeInput]).dump_python(dict(inputs.sources), mode="json"),
         "source": _source_spec(inputs.source_root),
         "source_info": inputs.source_info,
-        "tables": {episode: table_identity(table) for episode, table in inputs.source_tables.items()},
-        "tasks": table_identity(inputs.source_tasks),
+        "tables": inputs.native_table_identities
+        or {episode: table_identity(table) for episode, table in inputs.source_tables.items()},
+        "tasks": inputs.native_task_identity or table_identity(inputs.source_tasks),
         "camera_statistics": inputs.camera_statistics,
         "dataset_statistics": inputs.preserved_dataset_statistics,
         "producer": inputs.producer.model_dump(mode="json"),
@@ -179,6 +182,8 @@ def native_operation(
         result = json.loads(result_path.read_bytes())
         if result["state"] != "complete":
             raise ReleaseInputError("native inputs are not condition-bound or exceed supported processing bounds")
+        if restored is not None:
+            restored.update(result.get("restored", {}))
         store.record_io(job_id, fence, directory.name, {"source_verification_bytes": result["source_verified_bytes"]})
         outputs = []
         observed = len(content) + result_path.stat().st_size
@@ -196,6 +201,28 @@ def native_operation(
         store.release_scratch(job_id, fence)
 
 
+def restore_inputs(
+    store: ReleaseJobStore,
+    job_id: str,
+    fence: int,
+    frozen: FrozenReleaseInputs,
+    prepared: NativeGenerationPlan,
+    inputs: GenerationInputs,
+) -> GenerationInputs:
+    """Rebuild only frozen metadata/table identities in a stopped, bounded native child."""
+    restored = {}
+    with native_operation(store, job_id, fence, frozen, prepared, inputs, mode="restore", restored=restored):
+        pass
+    if set(restored) != {"source_info", "tables", "tasks"}:
+        raise ReleaseInputError("native restoration result is incomplete")
+    return replace(
+        inputs,
+        source_info=restored["source_info"],
+        native_table_identities=restored["tables"],
+        native_task_identity=restored["tasks"],
+    )
+
+
 def _process(request: Path, *, container_factory: Callable[[str, str], Any] | None = None) -> None:
     from physical_ai_curation.release.coordinator import (
         EPISODES_PATH,
@@ -211,7 +238,7 @@ def _process(request: Path, *, container_factory: Callable[[str, str], Any] | No
     if request.stat().st_size > MAX_SPEC_BYTES:
         raise CapacityError("native request exceeds its protocol bound")
     spec = json.loads(request.read_bytes())
-    if spec["version"] != 1 or spec["mode"] not in ("validate", "assemble"):
+    if spec["version"] != 1 or spec["mode"] not in ("validate", "assemble", "restore"):
         raise ReleaseInputError("unsupported native protocol")
     frozen = TypeAdapter(FrozenReleaseInputs).validate_python(spec["frozen"])
     prepared = TypeAdapter(NativeGenerationPlan).validate_python(spec["prepared"])
@@ -254,6 +281,7 @@ def _process(request: Path, *, container_factory: Callable[[str, str], Any] | No
             spec["memory_bytes"] // 2,
             table_identities=spec["tables"],
             task_identity=spec["tasks"],
+            restore=spec["mode"] == "restore",
         )
     objects = []
     remaining = spec["scratch_bytes"] - request.stat().st_size - MAX_RESULT_BYTES
@@ -292,8 +320,22 @@ def _process(request: Path, *, container_factory: Callable[[str, str], Any] | No
         write(TASKS_PATH, table=result.tasks)
         write(INFO_PATH, content=canonical_json_bytes(result.metadata.info))
         write(STATS_PATH, content=canonical_json_bytes(result.metadata.statistics))
+    restored = (
+        {}
+        if spec["mode"] != "restore"
+        else {
+            "source_info": bound.source_info,
+            "tables": {episode: table_identity(table) for episode, table in bound.source_tables.items()},
+            "tasks": table_identity(bound.source_tasks),
+        }
+    )
     content = json.dumps(
-        {"state": "complete", "objects": objects, "source_verified_bytes": bound.native_verified_bytes},
+        {
+            "state": "complete",
+            "objects": objects,
+            "source_verified_bytes": bound.native_verified_bytes,
+            "restored": restored,
+        },
         separators=(",", ":"),
     ).encode()
     if len(content) > MAX_RESULT_BYTES:

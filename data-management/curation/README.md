@@ -311,8 +311,37 @@ Lost payload or companion delete responses survive a job-store restart and requi
 explicit retry. Cleanup uses the configured total budget for streaming preflight
 checks and supervised children; a blocked child is stopped and reaped. Failure
 exposes `cleanup_state=failed` and retains capacity, rather than reporting clean
-cancellation. Independent worker activation and the public API/CLI remain
-unavailable. Provider tests with real children do not establish live Azure behavior.
+cancellation. Provider tests with real children do not establish live Azure behavior.
+
+`physical_ai_curation.release.runner.execute_job` restores an accepted request
+from durable JSON using a trusted `ConfiguredExecution` source, saved reader,
+selection, context and destination. Native metadata and table identities are
+reconstructed by a bounded guardian child; accepting-process Arrow buffers are
+not required. Sealed/committing jobs recover only the exact manifest, and uncertain
+effects require reconciliation rather than blind redispatch. `run_queue` performs
+one bounded pass using a service-owned resolver; it is not an HTTP background task.
+
+Standalone local execution uses an operator-owned configuration file:
+
+```bash
+python -m physical_ai_curation.release.runner --config worker.json --job JOB_ID
+```
+
+The bounded JSON configuration has `schema_version=curated-release-worker/v1`,
+`job_root`, `source_root`, `destination_root`, `selection`, `context` and
+`finalized=true`. Selection and context are the accepted `ReleaseSelection` and
+`FreezeContext` values, not newly chosen actor overrides. Standalone local
+composition requires `localuser`; hosted composition derives authority in the
+service. Exit zero means settled; exit one returns a fixed `recovery_required`
+result without exposing provider exceptions or paths. Use the native profile for
+generation; importing the runner does not load Arrow, Azure or media packages.
+
+Status includes bounded category/status/duration diagnostics and conservative
+current/peak journaled destination bytes. These include uncertain intents, not
+measured Blob allocation; independent absence or completed owned cleanup reduces
+current usage, never the historical peak. These counters do not replace capacity
+reservations or actual verification reads. Public submission/API clients remain a
+separate adapter layer.
 
 The Linux supervisor requires pidfds and procfs. It persists process start/boot
 identity before releasing the child start gate, drains descendants after controller
@@ -335,8 +364,7 @@ content through a durable reconciliation guard. It records copy identity before
 abort/delete and handles completed copies or already-absent cleanup residue.
 Provider-fault tests are not live Azure proof. Local and same-account Blob
 generation composition is implemented. Public cleanup/recovery entry points,
-independent worker activation and complete transfer diagnostics remain unfinished;
-these primitives are not yet a public standalone worker or submission service.
+public submission adapters and hosted/target acceptance remain separate work.
 
 ## 🔒 Storage and Security
 

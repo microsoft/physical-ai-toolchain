@@ -28,6 +28,7 @@ from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.jobs import (
     BLOB_OWNER_CLEANUP_PATH,
     EVENTS_NAME,
+    MAX_DIAGNOSTIC_DURATION_MS,
     AuthorityError,
     CancellationError,
     CapacityError,
@@ -2742,6 +2743,59 @@ def test_given_scratch_observation_when_status_read_then_actual_peak_not_reserve
     status = store.get(job.job_id, scope=SCOPE, principal=OWNER)
     assert status.scratch_bytes == status.observed_scratch_bytes == 0
     assert status.peak_scratch_bytes == 64
+
+
+def test_given_diagnostic_when_replayed_then_counted_once_and_survives_reopen(tmp_path: Path) -> None:
+    store = _store(tmp_path, FakeClock())
+    job = store.accept(_request(tmp_path))
+    fence = store.claim(job.job_id, "worker")
+    operation = "c" * 32
+    store.record_diagnostic(job.job_id, fence, operation, "encode", "succeeded", duration_ms=7)
+    store.record_diagnostic(job.job_id, fence, operation, "encode", "succeeded", duration_ms=7)
+    reopened = _store(tmp_path, FakeClock())
+    assert reopened.get(job.job_id, scope=SCOPE, principal=OWNER).diagnostics == {
+        "encode.succeeded": {"count": 1, "duration_ms": 7}
+    }
+    with pytest.raises(JobConflictError):
+        store.record_diagnostic(job.job_id, fence, operation, "encode", "failed", duration_ms=7)
+
+
+def test_given_untrusted_diagnostic_fields_when_recorded_then_refused_without_free_text(tmp_path: Path) -> None:
+    store = _store(tmp_path, FakeClock())
+    job = store.accept(_request(tmp_path))
+    fence = store.claim(job.job_id, "worker")
+    with pytest.raises(ReleaseJobError):
+        store.record_diagnostic(job.job_id, fence, "d" * 32, "/private/path", "failed")
+    with pytest.raises(ReleaseJobError):
+        store.record_diagnostic(job.job_id, fence, "d" * 32, "copy", "https://user:secret@host")
+    with pytest.raises(ReleaseJobError):
+        store.record_diagnostic(
+            job.job_id, fence, "d" * 32, "copy", "failed", duration_ms=MAX_DIAGNOSTIC_DURATION_MS + 1
+        )
+    with pytest.raises(ReleaseJobError):
+        store.record_diagnostic(job.job_id, fence, "not-hex", "copy", "failed")
+    assert store.get(job.job_id, scope=SCOPE, principal=OWNER).diagnostics == {}
+
+
+def test_given_destination_effects_when_reconciled_then_current_drops_and_peak_is_monotonic(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "dest", reserved=1024)).job_id
+    fence = store.claim(job_id, "worker-a")
+    control = ReleaseJobControl(store, job_id, fence)
+    with control.effect(ATTEMPT, "data/a.bin", 100, DIGEST):
+        pass
+    with pytest.raises(OSError), control.effect(ATTEMPT, "data/b.bin", 200, DIGEST):
+        raise OSError("write interrupted")
+    status = store.get(job_id, scope=SCOPE, principal=OWNER)
+    assert (status.destination_current_bytes, status.destination_peak_bytes) == (300, 300)
+
+    with pytest.raises(AuthorityError, match="pending"):
+        store.reconcile_effect(job_id, fence, "data/b.bin", observed="pending", length=200, digest=DIGEST)
+    assert store.get(job_id, scope=SCOPE, principal=OWNER).destination_current_bytes == 300
+
+    store.reconcile_effect(job_id, fence, "data/b.bin", observed="absent", length=200, digest=DIGEST)
+    reopened = _store(tmp_path / "ledger", FakeClock()).get(job_id, scope=SCOPE, principal=OWNER)
+    assert (reopened.destination_current_bytes, reopened.destination_peak_bytes) == (100, 300)
 
 
 def _interrupted_local_write(tmp_path: Path) -> tuple[ReleaseJobStore, str, int, Path, Path]:

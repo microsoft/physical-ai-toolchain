@@ -62,6 +62,12 @@ _READ_CHUNK = 1024 * 1024
 BLOB_OWNER_CLEANUP_PATH = "release/cleanup-owner.json"
 MAX_EVENT_PAGE = 1000
 MAX_RUNTIME_RECOVERY_PAGE = 128
+MAX_DIAGNOSTIC_DURATION_MS = 86_400_000
+MAX_DIAGNOSTIC_OPERATIONS = 256
+DIAGNOSTIC_CATEGORIES = frozenset(
+    {"encode", "validation", "copy", "reconciliation", "marker", "cleanup", "runtime_stop", "lease"}
+)
+DIAGNOSTIC_STATUSES = frozenset({"succeeded", "failed", "timed_out", "cancelled", "uncertain"})
 IO_COUNTERS = frozenset(
     {
         "storage_copy_bytes",
@@ -176,6 +182,7 @@ class JobRequest:
     frozen_request: bytes
     reserved_bytes: int
     route: str = "local"
+    execution_binding: bytes = b""
 
     def __post_init__(self) -> None:
         if not _TOKEN.fullmatch(self.scope) or not _TOKEN.fullmatch(self.idempotency_key):
@@ -192,6 +199,8 @@ class JobRequest:
         if not isinstance(self.frozen_request, bytes) or not 0 < len(self.frozen_request) <= MAX_REQUEST_BYTES:
             raise ReleaseJobError("frozen request is empty or exceeds the bound")
         _require_int(self.reserved_bytes, "reserved bytes", 1, MAX_BYTES)
+        if not isinstance(self.execution_binding, bytes) or len(self.execution_binding) > MAX_REQUEST_BYTES:
+            raise ReleaseJobError("execution binding exceeds its bound")
 
 
 @dataclass(frozen=True)
@@ -213,6 +222,9 @@ class JobStatus:
     observed_scratch_bytes: int = 0
     peak_scratch_bytes: int = 0
     io_counters: Mapping[str, int] = field(default_factory=dict)
+    destination_current_bytes: int = 0
+    destination_peak_bytes: int = 0
+    diagnostics: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -305,6 +317,7 @@ class ReleaseJobStore:
                 "volume_key": volume,
                 "reserved_bytes": request.reserved_bytes,
                 "frozen_request": base64.b64encode(request.frozen_request).decode("ascii"),
+                "execution_binding": base64.b64encode(request.execution_binding).decode("ascii"),
                 "state": "accepted",
                 "cancel_requested": False,
                 "cleanup_state": "none",
@@ -326,10 +339,28 @@ class ReleaseJobStore:
                 "temporaries": [],
                 "io_counters": {},
                 "io_observations": {},
+                "destination_peak_bytes": 0,
+                "diagnostic_operations": {},
+                "diagnostics": {},
                 "events": [],
             }
             self._emit(conn, job_id, "job.accepted", "info", {"reserved_bytes": request.reserved_bytes})
             return AcceptedJob(job_id, replayed=False)
+
+    def request_recovery(self, job_id: str, *, scope: str, principal: str) -> JobStatus:
+        """Record an authorized retry without changing leases, attempts or stop obligations."""
+        with self._transaction() as conn:
+            row = self._owned(conn, job_id, scope, principal)
+            if row["state"] in TERMINAL_STATES:
+                raise JobConflictError("terminal jobs cannot be retried")
+            self._emit(conn, job_id, "recovery.requested", "info", {})
+            return _status(conn, row)
+
+    def execution_binding(self, job_id: str) -> bytes:
+        """Return immutable private configuration for trusted workers, never HTTP clients."""
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            return base64.b64decode(row.get("execution_binding", ""), validate=True)
 
     def get(self, job_id: str, *, scope: str, principal: str) -> JobStatus:
         with self._transaction() as conn:
@@ -784,6 +815,7 @@ class ReleaseJobStore:
                 "status": "dispatched",
                 "copy_id": None,
             }
+            _record_destination_peak(row)
             return False
 
     def register_local_temporary(self, job_id: str, fence: int, path: str, name: str, identity: os.stat_result) -> None:
@@ -957,6 +989,7 @@ class ReleaseJobStore:
                 "status": "dispatched",
                 "copy_id": None,
             }
+            _record_destination_peak(row)
             self._emit(conn, job_id, "marker.dispatched", "info", {"fence": fence})
             return False
 
@@ -1184,6 +1217,7 @@ class ReleaseJobStore:
                 "copy_id": None,
                 "reconciliation": True,
             }
+            _record_destination_peak(row)
             row["cleanup_state"] = "running"
             self._emit(conn, job_id, "cleanup.companion_requested", "info", {"fence": fence})
         return length, digest
@@ -1300,6 +1334,39 @@ class ReleaseJobStore:
                 row["state"] = "committed"
                 self._emit(conn, job_id, "job.committed", "info", {})
 
+    def record_diagnostic(
+        self,
+        job_id: str,
+        fence: int,
+        operation_id: str,
+        category: str,
+        status: str,
+        *,
+        duration_ms: int = 0,
+    ) -> None:
+        """Record a fixed category, status and duration once per operation; no free-form text is accepted."""
+        if not isinstance(operation_id, str) or re.fullmatch(r"[0-9a-f]{32}|[0-9a-f]{64}", operation_id) is None:
+            raise ReleaseJobError("diagnostic operation identity is invalid")
+        if category not in DIAGNOSTIC_CATEGORIES or status not in DIAGNOSTIC_STATUSES:
+            raise ReleaseJobError("diagnostic category or status is invalid")
+        _require_int(duration_ms, "diagnostic duration", 0, MAX_DIAGNOSTIC_DURATION_MS)
+        observation = {"category": category, "status": status, "duration_ms": duration_ms}
+        with self._transaction() as conn:
+            row = self._lease(conn, job_id, fence)
+            existing = row["diagnostic_operations"].get(operation_id)
+            if existing is not None:
+                if existing != observation:
+                    raise JobConflictError("diagnostic observation conflicts with its recorded identity")
+                return
+            if len(row["diagnostic_operations"]) >= MAX_DIAGNOSTIC_OPERATIONS:
+                raise ReleaseJobError("diagnostic operation budget is exhausted")
+            row["diagnostic_operations"][operation_id] = observation
+            bucket = row["diagnostics"].setdefault(f"{category}.{status}", {"count": 0, "duration_ms": 0})
+            bucket["count"] += 1
+            bucket["duration_ms"] += duration_ms
+            severity = "info" if status == "succeeded" else "warning"
+            self._emit(conn, job_id, "diagnostic.recorded", severity, observation)
+
     def flush_events(self, *, max_events: int = 256) -> int:
         """Append up to max_events unexported events in sequence order, repairing a partial tail first."""
         _require_int(max_events, "event page size", 1, MAX_EVENT_PAGE)
@@ -1384,6 +1451,9 @@ class ReleaseJobStore:
         row = conn.get(job_id)
         if row is None:
             raise JobNotFoundError("job not found")
+        row.setdefault("diagnostic_operations", {})
+        row.setdefault("diagnostics", {})
+        row.setdefault("destination_peak_bytes", _destination_bytes(row))
         return row
 
     def _owned(self, conn: Mapping[str, dict[str, Any]], job_id: str, scope: str, principal: str) -> dict[str, Any]:
@@ -1561,7 +1631,22 @@ def _status(conn: Mapping[str, dict[str, Any]], row: Mapping[str, Any]) -> JobSt
         observed_scratch_bytes=row["observed_scratch_bytes"],
         peak_scratch_bytes=row["peak_scratch_bytes"],
         io_counters=dict(row["io_counters"]),
+        destination_current_bytes=_destination_bytes(row),
+        destination_peak_bytes=row.get("destination_peak_bytes", _destination_bytes(row)),
+        diagnostics={key: dict(value) for key, value in sorted(row.get("diagnostics", {}).items())},
     )
+
+
+def _destination_bytes(row: Mapping[str, Any]) -> int:
+    """Journaled destination bytes: every dispatched, uncertain or acknowledged effect until reconciled absent."""
+    if row["state"] == "cancelled" and row["cleanup_state"] == "completed":
+        return 0
+    return sum(effect["length"] for effect in row["effects"].values())
+
+
+def _record_destination_peak(row: dict[str, Any]) -> None:
+    """Advance the monotonic peak after any journaled increase; reconciliation never lowers it."""
+    row["destination_peak_bytes"] = max(row["destination_peak_bytes"], _destination_bytes(row))
 
 
 def _digest(text: str) -> str:
@@ -1579,6 +1664,8 @@ def _fingerprint(request: JobRequest, destination: str) -> str:
         "route": request.route,
         "scope": request.scope,
     }
+    if request.execution_binding:
+        canonical["execution_binding"] = hashlib.sha256(request.execution_binding).hexdigest()
     return _digest(json.dumps(canonical, sort_keys=True, separators=(",", ":")))
 
 

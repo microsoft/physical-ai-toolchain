@@ -30,15 +30,14 @@ import physical_ai_dataset_io.lerobot as dataset_module
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from evaluation.vlm_judge.judge import JudgeResult
+from evaluation.vlm_judge.prompts import PROMPT_VERSION
+from evaluation.vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig
 from fastapi.testclient import TestClient
 from physical_ai_curation import run as curation_run
 from physical_ai_curation.adapters.job_storage import LocalJobStore
 from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
 from physical_ai_dataset_io.media import MediaInputError, validate_video_path
-
-from evaluation.vlm_judge.judge import JudgeResult
-from evaluation.vlm_judge.prompts import PROMPT_VERSION
-from evaluation.vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig
 
 pytest_plugins = ["evaluation.tests.vlm_judge.conftest"]
 
@@ -164,9 +163,8 @@ def test_given_echo_shim_when_using_multimodal_api_then_returns_documented_compl
     import base64
     import io
 
-    from PIL import Image
-
     from evaluation.vlm_judge.openai_shim import build_echo_app
+    from PIL import Image
 
     image = io.BytesIO()
     Image.new("RGB", (12, 12), "red").save(image, "PNG")
@@ -478,11 +476,10 @@ def test_viewer_recovers_accepted_job_on_startup_without_browser(
 
 
 def test_configured_standalone_api_resolves_saved_inputs_without_caller_paths(tmp_path: Path) -> None:
+    from evaluation.vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig
     from fastapi import FastAPI
     from physical_ai_curation.adapters.job_storage import LocalJobStore
     from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
-
-    from evaluation.vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig
 
     _build_dataset(tmp_path, instruction=INSTRUCTION)
     service = JudgeService(ServiceConfig(backend=BackendConfig(kind="echo"), frames=FrameConfig(n_frames=4)))
@@ -625,6 +622,7 @@ def test_cold_blob_judge_downloads_only_selected_media_and_reuses_cache(
     from unittest.mock import AsyncMock, MagicMock
 
     from azure.core.exceptions import ResourceNotFoundError
+
     from src.api.services.dataset_service import DatasetService, get_dataset_service
     from src.api.storage.blob_dataset import BlobDatasetProvider
 
@@ -1170,12 +1168,12 @@ def test_backend_and_pin_changes_invalidate_service_and_viewer_cache(
     vlm_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from evaluation.vlm_judge.backend import EchoBackend
+    from evaluation.vlm_judge.service import JudgeService
+
     import src.api.routers.vlm_judge as router_mod
     import src.api.services.vlm_judge_service as service_mod
     from src.api.config import get_app_config
-
-    from evaluation.vlm_judge.backend import EchoBackend
-    from evaluation.vlm_judge.service import JudgeService
 
     original = service_mod.get_vlm_judge_service(get_app_config())
     assert original is not None
@@ -1246,6 +1244,7 @@ def test_given_submission_failure_when_posting_judge_then_returns_expected_confl
     vlm_client: TestClient, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     from physical_ai_curation.jobs import JudgeJobs
+
     from src.api.services.saved_input_service import SavedInputError
 
     async def reject_submission(self: JudgeJobs, *args: Any, **kwargs: Any) -> None:

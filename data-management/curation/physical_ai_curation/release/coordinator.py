@@ -30,6 +30,8 @@ from physical_ai_curation.release.local_worker import SupervisedLocalPublisher
 from physical_ai_curation.release.media import (
     MediaWindow,
     ObjectPlanRequest,
+    ReleaseMediaLimits,
+    StorageEndpoint,
     SubsetEpisodeInput,
     validate_processing_confirmation,
 )
@@ -50,6 +52,7 @@ from physical_ai_curation.release.models import (
     ReleasePreview,
     ReleaseResult,
     SourceObject,
+    VersionIdentity,
 )
 from physical_ai_curation.release.publication import PublicationAttempt
 from physical_ai_curation.release.record_storage import BlobLocation
@@ -85,6 +88,152 @@ class GenerationInputs:
     scratch_bytes: int
     output_bytes: int
     native_verified_bytes: int = 0
+    native_table_identities: Mapping[str, str] | None = None
+    native_task_identity: str | None = None
+
+
+def plan_generation_inputs(
+    source: LocalReleaseSource | BlobReleaseSource,
+    frozen: FrozenReleaseInputs,
+    *,
+    source_endpoint: StorageEndpoint,
+    destination_endpoint: StorageEndpoint,
+    scratch_endpoint: StorageEndpoint | None,
+    producer: ProducerIdentity,
+    tool: VersionIdentity,
+    scratch_bytes: int,
+    output_bytes: int,
+    limits: ReleaseMediaLimits | None = None,
+    encode_options: EncodeOptions | None = None,
+    metadata_budget: int = 16 * 1024**2,
+) -> GenerationInputs:
+    """Plan from frozen v3 metadata without decoding media or reserving output.
+
+    Source/destination endpoints and budgets come from trusted configuration.
+    Returned native frame buffers are empty: use ``restore_inputs`` in a claimed
+    worker before execution. Fresh native validation still checks these derived
+    descriptors, windows and statistics against the frozen bytes.
+    """
+    if type(metadata_budget) is not int or metadata_budget <= 0:
+        raise ReleaseInputError("native metadata budget must be positive")
+    identities = {item.path: item for item in frozen.content.source_objects}
+    remaining = metadata_budget
+
+    def read(path: str) -> bytes:
+        nonlocal remaining
+        identity = identities.get(path)
+        if identity is None or identity.length > remaining:
+            raise ReleaseInputError("native planning metadata exceeds its budget or is missing")
+        chunks = (
+            source.iter_bytes(identity, chunk_size=CHUNK_BYTES)
+            if isinstance(source, BlobReleaseSource)
+            else LocalReleaseStore(source.root).iter_bytes(path, chunk_size=CHUNK_BYTES)
+        )
+        content = bytearray()
+        for chunk in chunks:
+            if len(content) + len(chunk) > identity.length:
+                raise ReleaseInputError("native planning metadata changed")
+            content.extend(chunk)
+        remaining -= len(content)
+        if len(content) != identity.length or sha256_hex(bytes(content)) != identity.sha256:
+            raise ReleaseInputError("native planning metadata changed")
+        return bytes(content)
+
+    info = parse_strict_json(read(INFO_PATH))
+    if not isinstance(info, dict) or info.get("codebase_version") != "v3.0":
+        raise ReleaseInputError("only native LeRobot v3.0 planning is supported")
+    cameras = sorted(name for name, feature in info["features"].items() if feature.get("dtype") == "video")
+    rows = []
+    for path in sorted(identities):
+        if not path.startswith("meta/episodes/") or not path.endswith(".parquet"):
+            continue
+        parquet = pq.ParquetFile(pa.BufferReader(read(path)))
+        if parquet.metadata.num_rows > 10000 - len(rows):
+            raise ReleaseInputError("native planning supports at most 10000 source episodes")
+        table = parquet.read()
+        if table.nbytes * 3 > remaining:
+            raise ReleaseInputError("native planning tables exceed their budget")
+        remaining -= table.nbytes * 3
+        rows.extend(table.to_pylist())
+    by_episode = {row["episode_index"]: row for row in rows}
+    if len(by_episode) != len(rows):
+        raise ReleaseInputError("native episode metadata is ambiguous")
+    durations = {}
+
+    def video_path(camera: str, row: Mapping[str, object]) -> str:
+        prefix = f"videos/{camera}"
+        chunk, file = row.get(f"{prefix}/chunk_index"), row.get(f"{prefix}/file_index")
+        if type(chunk) is not int or chunk < 0 or type(file) is not int or file < 0:
+            raise ReleaseInputError("native media index is invalid")
+        return f"{prefix}/chunk-{chunk:03d}/file-{file:03d}.mp4"
+
+    for row in rows:
+        for camera in cameras:
+            path = video_path(camera, row)
+            durations[path] = max(durations.get(path, 0), row[f"videos/{camera}/to_timestamp"])
+    sources, summaries, windows = {}, {}, []
+    for episode in frozen.content.selected_episode_ids:
+        suffix = episode.rsplit("/episode_", 1)
+        if len(suffix) != 2 or not suffix[1].isdigit():
+            raise ReleaseInputError("native selected episode identity is invalid")
+        index = int(suffix[1])
+        row = by_episode.get(index)
+        if row is None:
+            raise ReleaseInputError("native selected episode is missing")
+        sources[episode] = SubsetEpisodeInput(episode, index, row["length"], float(info["fps"]))
+        summaries[episode] = {}
+        for camera in cameras:
+            path = video_path(camera, row)
+            identity = identities.get(path)
+            if identity is None:
+                raise ReleaseInputError("native camera object is missing")
+            windows.append(
+                MediaWindow(
+                    episode,
+                    camera,
+                    identity,
+                    row[f"videos/{camera}/from_timestamp"],
+                    row[f"videos/{camera}/to_timestamp"],
+                    durations[path],
+                )
+            )
+            summary = {
+                name: row[f"stats/{camera}/{name}"]
+                for name in ("min", "max", "mean", "std", "count")
+                if f"stats/{camera}/{name}" in row
+            }
+            if summary:
+                summaries[episode][camera] = summary
+    request = ObjectPlanRequest(
+        source=source_endpoint,
+        destination=destination_endpoint,
+        scratch=scratch_endpoint,
+        target_format=VersionIdentity(name="lerobot", version="v3.0"),
+        frozen_input_sha256=frozen.sha256,
+        selected_episode_ids=frozen.content.selected_episode_ids,
+        windows=tuple(windows),
+        tool=tool,
+        source_objects=frozen.content.source_objects,
+        limits=limits if limits is not None else ReleaseMediaLimits(),
+    )
+    prepared = prepare_saved_generation(
+        frozen.content, request, sources, encode_options=encode_options, camera_statistics=summaries
+    )
+    return GenerationInputs(
+        request=request,
+        sources=sources,
+        source_root=source.location if isinstance(source, BlobReleaseSource) else source.root,
+        source_info=info,
+        source_tables={},
+        source_tasks=pa.table({}),
+        camera_statistics=summaries,
+        preserved_dataset_statistics=None,
+        encode_options=encode_options,
+        producer=producer,
+        confirmed_digest=prepared.plan.digest,
+        scratch_bytes=scratch_bytes,
+        output_bytes=output_bytes,
+    )
 
 
 def generation_request_bytes(frozen: FrozenReleaseInputs, inputs: GenerationInputs) -> bytes:
@@ -122,6 +271,7 @@ def _validate_native_inputs(
     *,
     table_identities: Mapping[str, str] | None = None,
     task_identity: str | None = None,
+    restore: bool = False,
 ) -> GenerationInputs:
     from physical_ai_curation.release.native_worker import table_identity
 
@@ -181,7 +331,7 @@ def _validate_native_inputs(
     tasks_match = (
         table_identity(tasks) == task_identity if task_identity is not None else tasks.equals(inputs.source_tasks)
     )
-    if info != inputs.source_info or not tasks_match:
+    if not restore and (info != inputs.source_info or not tasks_match):
         raise ReleaseInputError("native metadata is not condition-bound to frozen bytes")
     cameras = sorted(name for name, feature in info["features"].items() if feature.get("dtype") == "video")
     durations = {}
@@ -217,7 +367,7 @@ def _validate_native_inputs(
             if table_identities is not None
             else supplied is not None and selected.equals(supplied)
         )
-        if not matches:
+        if not restore and not matches:
             raise ReleaseInputError("native table is not condition-bound to frozen bytes")
         selected_tables[episode] = selected
         summaries[episode] = {}

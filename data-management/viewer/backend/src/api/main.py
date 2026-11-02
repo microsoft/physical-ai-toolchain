@@ -31,7 +31,7 @@ from .auth import (
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token, require_csrf_token
 from .middleware import ContentSizeLimitMiddleware, EpisodeCompressionMiddleware, SecurityHeadersMiddleware
 from .rate_limiter import limiter
-from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, vlm_judge
+from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, releases, vlm_judge
 from .routes import ai_analysis
 from .services.dataset_service import EpisodeLoadError
 from .storage import RevisionConflictError
@@ -217,6 +217,7 @@ app.include_router(ai_analysis.router, prefix="/api", tags=["ai"], dependencies=
 app.include_router(labels.router, prefix="/api/datasets", tags=["labels"], dependencies=api_auth)
 app.include_router(joint_config.router, prefix="/api/datasets", tags=["joint-config"], dependencies=api_auth)
 app.include_router(joint_config.defaults_router, prefix="/api", tags=["joint-config"], dependencies=api_auth)
+app.include_router(releases.router, prefix="/api/releases/v1", tags=["releases"], dependencies=api_auth)
 if _config.vlm_judge_enabled:
     if _job_router is not None:
         app.include_router(_job_router, prefix="/api/judge", dependencies=api_auth)

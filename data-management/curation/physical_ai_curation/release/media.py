@@ -544,7 +544,10 @@ def _plan_digest(
                 "source_sha256": obj.source_sha256,
                 "reasons": list(obj.reasons),
                 "affected_cameras": list(obj.affected_cameras),
-                "windows": [[ref.episode_id, ref.camera, ref.from_timestamp, ref.to_timestamp] for ref in obj.windows],
+                "windows": [
+                    [ref.episode_id, ref.camera, float(ref.from_timestamp), float(ref.to_timestamp)]
+                    for ref in obj.windows
+                ],
                 "dependencies": list(obj.dependencies),
                 "confirmation_required": obj.confirmation_required,
             }
