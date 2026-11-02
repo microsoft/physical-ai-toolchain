@@ -416,6 +416,20 @@ def _all_joint_names_and_positions(positions=None):
 
 
 class TestOnJointState:
+    def test_runner_resets_only_when_readiness_is_lost(self, node: ain_module.ACTInferenceNode) -> None:
+        node._runner.reset.reset_mock()
+        incomplete = _JointState(names=["shoulder_pan_joint"], positions=[0.1])
+        node._on_joint_state(incomplete)
+        node._runner.reset.assert_not_called()
+
+        names, positions = _all_joint_names_and_positions()
+        node._on_joint_state(_JointState(names=names, positions=positions))
+        node._runner.reset.assert_not_called()
+        node._on_joint_state(incomplete)
+        node._runner.reset.assert_called_once_with()
+        node._on_joint_state(incomplete)
+        node._runner.reset.assert_called_once_with()
+
     def test_first_complete_message_creates_observation(self, node):
         names, positions = _all_joint_names_and_positions([0.5, 0.0, 1.5, 0.0, 0.0, 0.0])
         msg = _JointState(names=names, positions=positions, sec=2, nanosec=500_000_000)
@@ -501,6 +515,51 @@ class TestOnImage:
 
 
 class TestControlTick:
+    def test_recovery_generates_fresh_actions(self, node: ain_module.ACTInferenceNode) -> None:
+        import torch
+
+        from evaluation.sil.policy_runner import PolicyRunner
+
+        class QueuedPolicy:
+            def __init__(self) -> None:
+                self.actions = []
+                self.queries = 0
+
+            def reset(self) -> None:
+                self.actions.clear()
+
+            def select_action(self, observation: dict[str, torch.Tensor]) -> torch.Tensor:
+                if not self.actions:
+                    self.queries += 1
+                    positions = observation["observation.state"].unsqueeze(0)
+                    self.actions.extend([positions + 0.01, positions + 0.02])
+                return self.actions.pop(0)
+
+        policy = QueuedPolicy()
+        node._runner = PolicyRunner(policy, lambda obs: obs, lambda action: action, device="cpu")
+        node._action_mode = "delta"
+        node._enable_control = True
+        node._bridge.next_image = np.zeros((480, 848, 3), dtype=np.uint8)
+        node._on_image(_Image())
+        names, positions = _all_joint_names_and_positions([0.1] * 6)
+        node._on_joint_state(_JointState(names=names, positions=positions))
+        node._control_tick()
+        assert policy.queries == 1
+        assert len(policy.actions) == 1
+        assert node._cmd_pub.publish.call_args.args[0].points[0].positions == pytest.approx([0.11] * 6)
+
+        node._on_joint_state(_JointState(names=names[:-1], positions=positions[:-1]))
+        node._control_tick()
+        assert node._joints_ready is False
+        assert node._cmd_pub.publish.call_count == 1
+
+        node._on_joint_state(_JointState(names=names, positions=[0.3] * 6))
+        node._control_tick()
+        assert node._joints_ready is True
+        assert node._cmd_pub.publish.call_count == 2
+        assert node._cmd_pub.publish.call_args.args[0].points[0].positions == pytest.approx([0.31] * 6)
+        assert policy.queries == 2
+
     def test_returns_early_when_no_observation(self, node):
         node._control_tick()
         node._runner.step.assert_not_called()

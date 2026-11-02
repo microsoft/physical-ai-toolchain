@@ -148,6 +148,8 @@ class ACTInferenceNode(Node):
         present = {name for name in msg.name if name in expected}
         if present != expected:
             missing = sorted(expected - present)
+            if self._joints_ready:
+                self._runner.reset()
             self._joints_ready = False
             self.get_logger().warning(f"Ignoring joint state missing expected joints: {missing}")
             return
