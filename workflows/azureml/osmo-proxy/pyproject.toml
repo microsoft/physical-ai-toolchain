@@ -28,3 +28,8 @@ override-dependencies = [
     "gitpython==3.1.61",
 ]
 package = false
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true

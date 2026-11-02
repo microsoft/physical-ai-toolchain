@@ -6,10 +6,10 @@ requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
     "physical-ai-dataset-io==0.1.0",
-    "av==18.1.0",
+    "av==19.0.1",
     "pandas==3.0.5",
     "Pillow==13.0.0",
-    "pyarrow==25.0.1",
+    "pyarrow==26.0.0",
     "pydantic==2.14.1",
 ]
 
@@ -18,7 +18,7 @@ Repository = "https://github.com/microsoft/physical-ai-toolchain"
 
 [project.optional-dependencies]
 api = [
-    "fastapi==0.156.8",
+    "fastapi==0.159.1",
     "uvicorn[standard]==0.54.0",
 ]
 openai = [

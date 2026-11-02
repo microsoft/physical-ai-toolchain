@@ -1346,7 +1346,7 @@ class TestDocusaurusRetainedPackage:
         assert manifest["buildDigest"] != gate._digest_paths([page], source)
         assert gate.verify_docusaurus_package(package)["buildDigest"] == manifest["buildDigest"]
 
-    @pytest.mark.parametrize("relative", [".hidden", ".gitignore", "nested/.nojekyll", ".cache/asset.json"])
+    @pytest.mark.parametrize("relative", [".hidden", ".gitignore", ".npmrc", "nested/.nojekyll", ".cache/asset.json"])
     def test_build_marker_exception_does_not_allow_other_hidden_paths(self, tmp_path: Path, relative: str) -> None:
         source = tmp_path / "repository"
         hidden = source / "docs" / "docusaurus" / "build" / relative
@@ -1843,6 +1843,27 @@ class TestDocusaurusSourceManifest:
         assert first["sourceInputDigest"] != second["sourceInputDigest"]
         assert relative in {item["path"] for item in second["files"]}
         assert gate._package_path(root, relative) == added
+
+    def test_tracked_npm_config_is_retained_through_stage_and_verify(self, tmp_path: Path) -> None:
+        root = self._repository(tmp_path)
+        npmrc = root / "docs" / "docusaurus" / ".npmrc"
+        npmrc.write_text("registry=https://registry.npmjs.org/\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=root, check=True)
+        subprocess.run(["git", "commit", "--quiet", "-m", "npmrc"], cwd=root, check=True)
+        prepare_docusaurus_source_manifest(
+            root, root / "artifacts/accessibility/docusaurus/source-input-manifest.json", "pull-request"
+        )
+        package = tmp_path / "retained"
+
+        manifest = gate.stage_docusaurus_package(root, package)
+
+        retained = package / "docs" / "docusaurus" / ".npmrc"
+        assert retained.read_bytes() == npmrc.read_bytes()
+        record = next(item for item in manifest["files"] if item["path"] == "docs/docusaurus/.npmrc")
+        assert record["sha256"] == hashlib.sha256(npmrc.read_bytes()).hexdigest()
+        assert gate.verify_docusaurus_package(package)["files"] == manifest["files"]
+        with pytest.raises(ValueError, match="Hidden"):
+            gate._package_path(root, "docs/docusaurus/src/.npmrc")
 
     def test_given_dirty_release_sources_when_manifested_then_rejects(self, tmp_path: Path) -> None:
         root = self._repository(tmp_path)
