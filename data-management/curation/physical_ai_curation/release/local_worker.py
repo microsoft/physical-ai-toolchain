@@ -13,14 +13,20 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
-from physical_ai_curation.release.canonical import normalize_release_path, sha256_hex
+from physical_ai_curation.release.canonical import normalize_release_path, parse_strict_json, sha256_hex
 from physical_ai_curation.release.composition import NativeGenerationPlan
 from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.jobs import ReleaseJobControl, ReleaseJobStore
-from physical_ai_curation.release.models import MARKER_PATH, ReleaseResult, SourceObject
+from physical_ai_curation.release.models import MANIFEST_PATH, MARKER_PATH, ReleaseResult, SourceObject
 from physical_ai_curation.release.publication import LocalPublisher, PublicationAttempt
+from physical_ai_curation.release.record_storage import RecordLimits
+from physical_ai_curation.release.source_associations import (
+    LocalSourceAssociations,
+    SourceAssociationIntent,
+    source_association_binding,
+)
 from physical_ai_curation.release.store import CHUNK_BYTES, LocalReleaseStore
-from physical_ai_curation.release.verification import verify_published
+from physical_ai_curation.release.verification import MAX_CONTROL_BYTES, verify_published
 from physical_ai_curation.release.worker import run_supervised
 
 MAX_PROTOCOL_BYTES = 4 * 1024**2
@@ -284,6 +290,71 @@ def main() -> int:
     except Exception:
         return 1
     return 0
+
+
+class SourceAssociatedLocalPublisher(SupervisedLocalPublisher):
+    """Publish an accepted source association before effects and bind it before the final marker."""
+
+    def __init__(
+        self,
+        destination: Path,
+        attempt: PublicationAttempt,
+        jobs: ReleaseJobStore,
+        job_id: str,
+        fence: int,
+        intent: SourceAssociationIntent,
+    ) -> None:
+        super().__init__(destination, attempt, jobs, job_id, fence)
+        self.intent = intent
+        configuration = jobs.storage.configuration()
+        limits = RecordLimits(
+            **{
+                key: configuration[key]
+                for key in ("timeout_seconds", "max_record_bytes", "max_total_bytes", "max_jobs")
+            }
+        )
+        self.associations = LocalSourceAssociations(destination, limits=limits)
+        self._validate_association()
+
+    def _validate_association(self) -> None:
+        if (self.intent.attempt.key, self.intent.attempt.prefix) != (self.attempt.key, self.attempt.prefix):
+            raise ReleaseVerificationError("association attempt conflict")
+        self.jobs.validate_source_association(
+            self.job_id,
+            self.fence,
+            self.destination,
+            self.attempt,
+            source_association_binding(self.intent),
+            self.intent.scope_sha256,
+        )
+
+    def _claim_root(self) -> None:
+        self._validate_association()
+        self.associations.ensure_intent(self.intent)
+        super()._claim_root()
+
+    def _write_marker(self, marker: bytes, expected_manifest_sha256: str) -> None:
+        self._validate_association()
+        self.associations.bind_manifest(self.intent, expected_manifest_sha256, job_id=self.job_id, fence=self.fence)
+        super()._write_marker(marker, expected_manifest_sha256)
+
+    def publish(self, expected_manifest_sha256: str) -> ReleaseResult:
+        self._validate_association()
+        payload = self.store.read_control_bytes(MANIFEST_PATH, max_bytes=MAX_CONTROL_BYTES)
+        if sha256_hex(payload) != expected_manifest_sha256:
+            raise ReleaseVerificationError("association manifest digest conflict")
+        manifest = parse_strict_json(payload)
+        if not isinstance(manifest, dict) or manifest.get("frozen_input_sha256") != self.intent.frozen_input_sha256:
+            raise ReleaseVerificationError("association frozen input binding conflict")
+        if any(item.path == MARKER_PATH for item in self.store.list_objects()):
+            self.associations.require_checkpoint(
+                self.intent, expected_manifest_sha256, job_id=self.job_id, fence=self.fence
+            )
+        result = super().publish(expected_manifest_sha256)
+        self.associations.require_checkpoint(
+            self.intent, expected_manifest_sha256, job_id=self.job_id, fence=self.fence
+        )
+        return result
 
 
 if __name__ == "__main__":

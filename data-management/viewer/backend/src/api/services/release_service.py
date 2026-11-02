@@ -15,7 +15,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from physical_ai_curation.release.canonical import canonical_json_bytes
+from physical_ai_curation.release.azure_publication import BlobReleaseStore
+from physical_ai_curation.release.blob_source_associations import BlobSourceAssociations, BlobVerifiedAssociation
+from physical_ai_curation.release.canonical import canonical_json_bytes, parse_strict_json
 from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.inputs import SavedSelection
 from physical_ai_curation.release.jobs import (
@@ -29,9 +31,20 @@ from physical_ai_curation.release.jobs import (
     ReleaseJobStore,
     ReleaseRuntimeSettings,
 )
+from physical_ai_curation.release.projections import LABELS_PATH
 from physical_ai_curation.release.publication import PublicationAttempt
-from physical_ai_curation.release.record_storage import BlobLocation
+from physical_ai_curation.release.record_storage import (
+    BlobLocation,
+    RecordLimits,
+    _blob_container_client,
+    release_collection_location,
+)
 from physical_ai_curation.release.runner import ConfiguredExecution
+from physical_ai_curation.release.source_associations import LocalSourceAssociations, VerifiedAssociation
+from physical_ai_curation.release.store import LocalReleaseStore
+from physical_ai_curation.release.verification import MAX_CONTROL_BYTES
+from physical_ai_dataset_io.lerobot import EpisodeRecord, iter_episodes
+from physical_ai_dataset_io.media import validate_video_path
 
 __all__ = [
     "CAPABILITY_SCHEMA",
@@ -56,6 +69,7 @@ _DATASET_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _DATASET_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._\- ]{0,254}")
 _IDEMPOTENCY_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 _MAX_EPISODES = 10_000
+_MAX_MEDIA_BYTES = 512 * 1024**2
 
 
 class ReleaseApiError(Exception):
@@ -181,12 +195,14 @@ class ReleaseService:
         *,
         store_factory: Callable[[Path], ReleaseJobStore] | None = None,
         planner: ReleasePlanner | None = None,
+        blob_container_factory: Callable[[BlobLocation], Any] | None = None,
     ) -> None:
         self._settings = settings
         self._store_factory = store_factory or (
             lambda root: ReleaseJobStore(root, settings=ReleaseRuntimeSettings.from_environment(os.environ))
         )
         self._planner = planner
+        self._blob_container_factory = blob_container_factory or _default_blob_container
 
     @property
     def planner_configured(self) -> bool:
@@ -246,7 +262,7 @@ class ReleaseService:
 
     async def preview(self, scope: str, spec: ReleaseSpec) -> dict[str, Any]:
         """Describe the frozen request without persisting anything."""
-        destination = self._destination(spec.destination)
+        destination = self._destination(spec.destination, spec.dataset_id)
         prepared = await self._prepare(scope, spec, destination)
         return {
             "schema": CAPABILITY_SCHEMA,
@@ -268,7 +284,7 @@ class ReleaseService:
         if not _IDEMPOTENCY_KEY.fullmatch(idempotency_key):
             raise ReleaseApiError(422, "Idempotency-Key is invalid")
         store = self._store()
-        destination = self._destination(spec.destination)
+        destination = self._destination(spec.destination, spec.dataset_id)
         prepared = await self._prepare(scope, spec, destination)
         if _preview_digest(spec, prepared) != preview_digest:
             raise ReleaseApiError(409, "stale_preview")
@@ -367,12 +383,12 @@ class ReleaseService:
                 if artifact is not None:
                     if artifact not in artifacts:
                         raise ReleaseApiError(404, "release_artifact_not_found")
-                        content = publisher.store.read_control_bytes(artifacts[artifact], max_bytes=1024**2)
-                        return {
-                            "schema": CAPABILITY_SCHEMA,
-                            "artifact": artifact,
-                            "content": content.decode("utf-8") if artifact == "report" else json.loads(content),
-                        }
+                    content = publisher.store.read_control_bytes(artifacts[artifact], max_bytes=1024**2)
+                    return {
+                        "schema": CAPABILITY_SCHEMA,
+                        "artifact": artifact,
+                        "content": content.decode("utf-8") if artifact == "report" else json.loads(content),
+                    }
                 return {
                     "schema": CAPABILITY_SCHEMA,
                     "result": result.model_dump(mode="json"),
@@ -383,16 +399,172 @@ class ReleaseService:
         except (ReleaseVerificationError, OSError, ValueError, KeyError) as error:
             raise ReleaseApiError(409, "release_verification_failed") from error
 
+    def source_releases(self, scope: str, dataset_id: str) -> dict[str, Any]:
+        """List verified releases of one source visible to the caller; no paths or aliases in output."""
+        return {
+            "schema": CAPABILITY_SCHEMA,
+            "items": [
+                {
+                    "handle": item.handle,
+                    "dataset_name": item.dataset_name,
+                    "package_id": item.package_id,
+                    "manifest_sha256": item.manifest_sha256,
+                }
+                for item in self._verified_sources(scope, dataset_id)
+            ],
+        }
+
+    def source_release(self, scope: str, dataset_id: str, handle: str) -> dict[str, Any]:
+        """Read one verified release by handle, including its saved annotations.
+
+        The handle depends only on durable association intent and verified publication
+        bytes, so it survives restarts and job-row removal.
+        """
+        item = self._find_source(scope, dataset_id, handle)
+        try:
+            info_bytes = item.store.read_control_bytes("meta/info.json", max_bytes=MAX_CONTROL_BYTES)
+            info = parse_strict_json(info_bytes)
+            total = info["total_episodes"]
+            remaining = MAX_CONTROL_BYTES - len(info_bytes)
+            paths = {obj.path for obj in item.store.list_objects()}
+            annotations = []
+            labels = None
+            for path in sorted(paths):
+                if path != LABELS_PATH and not re.fullmatch(r"annotations/episodes/episode_[0-9]{6}\.json", path):
+                    continue
+                content = item.store.read_control_bytes(path, max_bytes=remaining)
+                remaining -= len(content)
+                projection = parse_strict_json(content)
+                if path == LABELS_PATH:
+                    labels = projection
+                else:
+                    annotations.append(projection)
+        except (ReleaseVerificationError, OSError, ValueError, KeyError, TypeError) as error:
+            raise ReleaseApiError(409, "release_verification_failed") from error
+        if type(total) is not int:
+            raise ReleaseApiError(409, "release_verification_failed")
+        return {
+            "schema": CAPABILITY_SCHEMA,
+            "handle": handle,
+            "dataset_name": item.dataset_name,
+            "package_id": item.package_id,
+            "manifest_sha256": item.manifest_sha256,
+            "total_episodes": total,
+            "annotations": annotations,
+            "labels": labels,
+        }
+
+    def source_episodes(self, scope: str, dataset_id: str, handle: str, *, cursor: int, limit: int) -> dict[str, Any]:
+        """Page native episode metadata of one verified local release. Blob reads are refused explicitly."""
+        if not cursor >= 0 or not 1 <= limit <= 100:
+            raise ReleaseApiError(422, "invalid_episode_page")
+        root = _local_root(self._find_source(scope, dataset_id, handle))
+        records = _episode_records(root)
+        return {
+            "schema": CAPABILITY_SCHEMA,
+            "items": [_episode_body(record) for record in records[cursor : cursor + limit]],
+            "total": len(records),
+            "next_cursor": cursor + limit if cursor + limit < len(records) else None,
+        }
+
+    def source_episode_media(
+        self, scope: str, dataset_id: str, handle: str, *, episode_index: int, camera: str
+    ) -> bytes:
+        """Return the MP4 container that holds one episode's camera stream, bounded in size.
+
+        LeRobot v3 packs several episodes into one container file; the episode's
+        ``from_timestamp`` and ``to_timestamp`` locate it inside that file.
+        """
+        root = _local_root(self._find_source(scope, dataset_id, handle))
+        records = _episode_records(root, indices=[episode_index])
+        if not records:
+            raise ReleaseApiError(404, "release_episode_not_found")
+        path = records[0].video_paths.get(camera)
+        if path is None:
+            raise ReleaseApiError(404, "release_media_not_found")
+        try:
+            if path.stat().st_size > _MAX_MEDIA_BYTES:
+                raise ReleaseApiError(422, "release_media_exceeds_bound")
+            return path.read_bytes()
+        except OSError as error:
+            raise ReleaseApiError(409, "release_verification_failed") from error
+
+    def _find_source(self, scope: str, dataset_id: str, handle: str) -> _SourceRelease:
+        for item in self._verified_sources(scope, dataset_id):
+            if item.handle == handle:
+                return item
+        raise ReleaseApiError(404, "release_not_found")
+
+    def _verified_sources(self, scope: str, dataset_id: str) -> list[_SourceRelease]:
+        """Discover verified releases of one source from every configured destination alias.
+
+        Each call re-verifies published bytes; nothing is cached. Records whose intent does
+        not match this source path and alias are hidden. Blob listing failures raise.
+        """
+        if not _DATASET_ID.fullmatch(dataset_id):
+            raise ReleaseApiError(422, "dataset id is invalid")
+        source_path = dataset_id.replace("--", "/")
+        scope_sha256 = hashlib.sha256(scope.encode()).hexdigest()
+        found: list[_SourceRelease] = []
+        for alias, location in sorted(self._settings.destinations.items()):
+            try:
+                collection = release_collection_location(location, source_path)
+            except (OSError, ValueError, ReleaseVerificationError):
+                continue
+            if isinstance(collection, Path):
+                local = LocalSourceAssociations(collection, limits=RecordLimits())
+                for verified in local.discover_verified(scope_sha256=scope_sha256):
+                    if not _intent_matches(verified, source_path, alias):
+                        continue
+                    found.append(
+                        _source_release(
+                            alias,
+                            source_path,
+                            scope_sha256,
+                            dataset_name=verified.root.name,
+                            package_id=verified.package_id,
+                            manifest_sha256=verified.manifest_sha256,
+                            store=LocalReleaseStore(verified.root),
+                            local_root=verified.root,
+                        )
+                    )
+                continue
+            try:
+                container = self._blob_container_factory(location)
+                associations = BlobSourceAssociations(container, collection, limits=RecordLimits())
+                verified_blobs = associations.discover_verified(scope_sha256=scope_sha256)
+            except ReleaseVerificationError as error:
+                raise ReleaseApiError(409, "release_verification_failed") from error
+            for verified in verified_blobs:
+                if not _intent_matches(verified, source_path, alias):
+                    continue
+                found.append(
+                    _source_release(
+                        alias,
+                        source_path,
+                        scope_sha256,
+                        dataset_name=verified.root.rstrip("/").rsplit("/", 1)[-1],
+                        package_id=verified.package_id,
+                        manifest_sha256=verified.manifest_sha256,
+                        store=BlobReleaseStore(container, verified.root),
+                        local_root=None,
+                    )
+                )
+        return found
+
     def _store(self) -> ReleaseJobStore:
         if self._settings.job_root is None:
             raise ReleaseApiError(503, "release job store is not configured")
         return self._store_factory(self._settings.job_root)
 
-    def _destination(self, alias: str) -> Path | BlobLocation:
+    def _destination(self, alias: str, dataset_id: str) -> Path | BlobLocation:
         location = self._settings.destinations.get(alias)
         if location is None:
             raise ReleaseApiError(404, "destination is not available")
-        return location
+        try:
+            return release_collection_location(location, dataset_id.replace("--", "/"))
+        except (OSError, ValueError, ReleaseVerificationError) as error:
+            raise ReleaseApiError(422, "release destination is unavailable or unsupported") from error
 
     async def _prepare(self, scope: str, spec: ReleaseSpec, destination: Path | BlobLocation) -> PreparedRelease:
         if self._planner is None:
@@ -403,6 +575,110 @@ class ReleaseService:
             raise ReleaseApiError(422, "release selection failed verification") from error
         except (OSError, ValueError, KeyError, TypeError) as error:
             raise ReleaseApiError(422, "release source is unavailable or unsupported") from error
+
+
+@dataclass(frozen=True)
+class _SourceRelease:
+    """One verified release visible to a scope; ``local_root`` is None for Blob releases."""
+
+    handle: str
+    dataset_name: str
+    package_id: str
+    manifest_sha256: str
+    store: LocalReleaseStore | BlobReleaseStore
+    local_root: Path | None
+
+
+def _source_handle(
+    *,
+    alias: str,
+    source_relative_path: str,
+    scope_sha256: str,
+    dataset_name: str,
+    package_id: str,
+    manifest_sha256: str,
+) -> str:
+    """Opaque handle bound to alias, source, scope, and verified publication identity."""
+    return hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "alias": alias,
+                "source_relative_path": source_relative_path,
+                "scope_sha256": scope_sha256,
+                "dataset_name": dataset_name,
+                "package_id": package_id,
+                "manifest_sha256": manifest_sha256,
+            }
+        )
+    ).hexdigest()
+
+
+def _source_release(
+    alias: str,
+    source_relative_path: str,
+    scope_sha256: str,
+    *,
+    dataset_name: str,
+    package_id: str,
+    manifest_sha256: str,
+    store: LocalReleaseStore | BlobReleaseStore,
+    local_root: Path | None,
+) -> _SourceRelease:
+    handle = _source_handle(
+        alias=alias,
+        source_relative_path=source_relative_path,
+        scope_sha256=scope_sha256,
+        dataset_name=dataset_name,
+        package_id=package_id,
+        manifest_sha256=manifest_sha256,
+    )
+    return _SourceRelease(handle, dataset_name, package_id, manifest_sha256, store, local_root)
+
+
+def _intent_matches(
+    verified: VerifiedAssociation | BlobVerifiedAssociation, source_relative_path: str, alias: str
+) -> bool:
+    """Admit only records whose accepted source path and destination alias match this request."""
+    return verified.source_relative_path == source_relative_path and verified.destination_alias == alias
+
+
+def _default_blob_container(location: BlobLocation) -> Any:
+    """Open the configured container with the Entra credential chain used by release Blob storage."""
+    return _blob_container_client(location.account_url, location.container)
+
+
+def _local_root(item: _SourceRelease) -> Path:
+    if item.local_root is None:
+        raise ReleaseApiError(409, "release_read_unsupported_for_blob")
+    return item.local_root
+
+
+def _episode_records(root: Path, indices: list[int] | None = None) -> list[EpisodeRecord]:
+    """Resolve published episodes through the shared dataset-io reader, confined to the release root."""
+    try:
+        records = list(
+            iter_episodes(
+                root,
+                indices=indices,
+                video_validator=lambda path: validate_video_path(path, root),
+            )
+        )
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise ReleaseApiError(409, "release_verification_failed") from error
+    return sorted(records, key=lambda record: record.episode_index)
+
+
+def _episode_body(record: EpisodeRecord) -> dict[str, Any]:
+    return {
+        "episode_index": record.episode_index,
+        "episode_id": record.episode_id,
+        "instruction": record.instruction,
+        "fps": record.fps,
+        "length": record.length,
+        "from_timestamp": record.from_timestamp,
+        "to_timestamp": record.to_timestamp,
+        "cameras": sorted(record.video_paths),
+    }
 
 
 def _preview_digest(spec: ReleaseSpec, prepared: PreparedRelease) -> str:

@@ -8,7 +8,7 @@ from dataclasses import asdict, replace
 from importlib.metadata import version
 from pathlib import Path
 
-from physical_ai_curation.release.canonical import canonical_json_bytes, parse_strict_json
+from physical_ai_curation.release.canonical import canonical_json_bytes, parse_strict_json, sha256_hex
 from physical_ai_curation.release.inputs import (
     BlobReleaseSource,
     FreezeContext,
@@ -19,8 +19,14 @@ from physical_ai_curation.release.inputs import (
 from physical_ai_curation.release.jobs import ReleaseJobStore, ReleaseRuntimeSettings
 from physical_ai_curation.release.media import StorageEndpoint, load_media_limits
 from physical_ai_curation.release.models import ProducerIdentity, VersionIdentity
+from physical_ai_curation.release.publication import PublicationAttempt
 from physical_ai_curation.release.record_storage import BlobLocation
 from physical_ai_curation.release.runner import ConfiguredExecution
+from physical_ai_curation.release.source_associations import (
+    SourceAssociationIntent,
+    source_association_binding,
+    source_association_key,
+)
 from pydantic import TypeAdapter
 
 from .annotation_service import get_annotation_service
@@ -129,25 +135,51 @@ class ViewerReleasePlanner:
             scratch_bytes=scratch_bytes,
             output_bytes=max(16 * 1024**2, capacity.payload_bytes * 2),
         )
+        intent = SourceAssociationIntent(
+            source_key=source_association_key(context.source[0]),
+            source_identity=context.source[0],
+            source_revision=context.source[1],
+            scope_sha256=sha256_hex(scope.encode()),
+            destination_alias=spec.destination,
+            source_relative_path=spec.dataset_id.replace("--", "/"),
+            effective_destination=(
+                str(destination.resolve()) if isinstance(destination, Path) else destination.as_text()
+            ),
+            attempt=PublicationAttempt(spec.package_id, spec.attempt_id, spec.dataset_name),
+            frozen_input_sha256=frozen.sha256,
+            display_name=spec.dataset_name,
+            description="",
+            accepted_at="1970-01-01T00:00:00+00:00",
+            source_display_label=spec.dataset_id,
+        )
+        source_association_binding(intent)
+        association = intent.model_dump(mode="json", exclude={"accepted_at"})
         binding = canonical_json_bytes(
             {
-                "schema": "curated-release-execution/v1",
+                "schema": "curated-release-execution/v3",
                 "selection": asdict(selection),
                 "context": asdict(context),
                 "destination": spec.destination,
+                "effective_destination": (
+                    {"kind": "local", "path": str(destination.resolve())}
+                    if isinstance(destination, Path)
+                    else {"kind": "blob", **asdict(destination)}
+                ),
                 "source_kind": source_endpoint.kind,
                 "finalized": spec.finalized,
+                "association": association,
             }
         )
         return PreparedRelease(
             generation_request_bytes(frozen, inputs),
-            max(1, capacity.payload_bytes + scratch_bytes),
+            max(1, max(capacity.payload_bytes, inputs.output_bytes) + scratch_bytes),
             {
                 "processing_digest": inputs.confirmed_digest,
                 "selected_count": len(selection.episode_indices),
                 "route": prepared.plan.route,
                 "capacity": asdict(capacity),
                 "native_scratch_bytes": native_scratch,
+                "destination_budget_bytes": inputs.output_bytes,
                 "blocking": list(prepared.plan.blocking),
                 "warnings": list(prepared.plan.warnings),
                 "actions": [asdict(item) for item in prepared.plan.objects],
@@ -160,12 +192,34 @@ class ViewerReleasePlanner:
             raise ReleaseApiError(503, "release worker is not configured")
         store = ReleaseJobStore(self.settings.job_root, settings=ReleaseRuntimeSettings.from_environment(os.environ))
         raw = parse_strict_json(store.execution_binding(job_id))
-        if raw["schema"] != "curated-release-execution/v1":
+        if raw["schema"] != "curated-release-execution/v3":
             raise ReleaseApiError(409, "release worker binding is unsupported")
         selection = TypeAdapter(ReleaseSelection).validate_python(raw["selection"])
         context = TypeAdapter(FreezeContext).validate_python(raw["context"])
-        destination = self.settings.destinations.get(raw["destination"])
-        if destination is None:
+        if raw["destination"] not in self.settings.destinations:
             raise ReleaseApiError(409, "configured destination is unavailable")
-        source = self._source(selection.dataset_id, finalized=raw["finalized"], kind=raw["source_kind"])
+        location = raw["effective_destination"]
+        if location["kind"] == "local" and set(location) == {"kind", "path"}:
+            destination = Path(location["path"])
+            if not destination.is_absolute() or destination.resolve() != destination:
+                raise ReleaseApiError(409, "accepted destination is unavailable")
+        elif location["kind"] == "blob" and set(location) == {"kind", "account_url", "container", "prefix"}:
+            destination = BlobLocation(location["account_url"], location["container"], location["prefix"])
+        else:
+            raise ReleaseApiError(409, "release destination binding is unsupported")
+        association = store.source_association(job_id)
+        expected_destination = str(destination) if isinstance(destination, Path) else destination.as_text()
+        if (
+            association is None
+            or association.effective_destination != expected_destination
+            or association.source_identity != context.source[0]
+            or association.source_revision != context.source[1]
+            or association.scope_sha256 != sha256_hex(context.principal_scope_id.encode())
+        ):
+            raise ReleaseApiError(409, "release association binding is unsupported")
+        source = (
+            None
+            if store.storage.snapshot()[job_id]["state"] == "committed"
+            else self._source(selection.dataset_id, finalized=raw["finalized"], kind=raw["source_kind"])
+        )
         return ConfiguredExecution(source, self.reader, selection, context, destination)

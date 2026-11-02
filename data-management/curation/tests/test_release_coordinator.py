@@ -18,6 +18,7 @@ import pytest
 from physical_ai_curation.release.canonical import sha256_hex
 from physical_ai_curation.release.composition import prepare_saved_generation
 from physical_ai_curation.release.coordinator import GenerationInputs, generation_request_bytes, run_release_generation
+from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.inputs import (
     BlobReleaseSource,
     FreezeContext,
@@ -34,14 +35,26 @@ from physical_ai_curation.release.native_worker import _source_spec, native_oper
 from physical_ai_curation.release.publication import LocalPublisher
 from physical_ai_curation.release.record_storage import BlobLocation
 from physical_ai_curation.release.runner import ConfiguredExecution, execute_job
+from physical_ai_curation.release.source_associations import LocalSourceAssociations, source_association_binding
 from physical_ai_curation.release.store import LocalReleaseStore
 from physical_ai_curation.release.verification import verify_published
 from physical_ai_curation.saved_input import SavedResource
 from test_release_composition import _generation_case
 from test_release_contracts import _producer_dict
 from test_release_inputs import SavedReader, _context, _selection
-from test_release_jobs import ATTEMPT, BLOB, FsContainer, OffsetClock, _ChildBlobPublisher, _request, _sdk_calls, _store
+from test_release_jobs import (
+    ATTEMPT,
+    BLOB,
+    OWNER,
+    FsContainer,
+    OffsetClock,
+    _ChildBlobPublisher,
+    _request,
+    _sdk_calls,
+    _store,
+)
 from test_release_media import _encode_source
+from test_release_publishers import _association_intent
 
 
 def _source_root(tmp_path: Path) -> Path:
@@ -162,16 +175,23 @@ def test_given_persisted_request_without_native_buffers_when_restored_then_fresh
 
 
 @pytest.mark.parametrize("processed", [False, True])
+@pytest.mark.parametrize("associated", [False, True])
 def test_given_accepted_job_when_independent_runner_reopens_then_verified_without_acceptor_buffers(
-    tmp_path: Path, processed: bool
+    tmp_path: Path, processed: bool, associated: bool
 ) -> None:
     source, reader, selection, context, frozen, inputs, _video = _native_case(tmp_path, processed=processed)
     destination = tmp_path / "output"
     root = tmp_path / "jobs"
     store = _store(root, OffsetClock())
+    intent = _association_intent(destination).model_copy(
+        update={"attempt": ATTEMPT, "scope_sha256": sha256_hex(OWNER.encode()), "frozen_input_sha256": frozen.sha256}
+    )
     job_id = store.accept(
         replace(
-            _request(destination), frozen_request=generation_request_bytes(frozen, inputs), reserved_bytes=32 * 1024**2
+            _request(destination),
+            frozen_request=generation_request_bytes(frozen, inputs),
+            reserved_bytes=32 * 1024**2,
+            execution_binding=source_association_binding(intent) if associated else b"",
         )
     ).job_id
     del store, inputs
@@ -187,9 +207,58 @@ def test_given_accepted_job_when_independent_runner_reopens_then_verified_withou
     assert record["state"] == "committed"
     assert record["diagnostics"]["validation.succeeded"]["count"] == 1
     assert all(runtime["stopped"] for runtime in record["runtimes"].values())
+    if associated:
+        from physical_ai_curation.release.record_storage import RecordLimits
+
+        source.root.rename(tmp_path / "source-unavailable")
+        associations = LocalSourceAssociations(destination, limits=RecordLimits())
+        assert associations.discover(source_key=intent.source_key, scope_sha256=intent.scope_sha256) == [
+            destination / ATTEMPT.prefix
+        ]
 
 
-def test_given_stale_source_when_independent_runner_restores_then_no_destination_effect(tmp_path: Path) -> None:
+@pytest.mark.parametrize("foreign", [False, True])
+def test_given_cancelled_associated_job_when_runner_reopens_then_pending_cleanup_precedes_capacity_release(
+    tmp_path: Path, foreign: bool
+) -> None:
+    from physical_ai_curation.release.record_storage import RecordLimits
+
+    source, reader, selection, context, frozen, inputs, _video = _native_case(tmp_path)
+    destination = tmp_path / "output"
+    store = _store(tmp_path / "jobs", OffsetClock())
+    intent = _association_intent(destination).model_copy(
+        update={"attempt": ATTEMPT, "scope_sha256": sha256_hex(OWNER.encode()), "frozen_input_sha256": frozen.sha256}
+    )
+    job_id = store.accept(
+        replace(
+            _request(destination),
+            frozen_request=generation_request_bytes(frozen, inputs),
+            reserved_bytes=32 * 1024**2,
+            execution_binding=source_association_binding(intent),
+        )
+    ).job_id
+    associations = LocalSourceAssociations(destination, limits=RecordLimits())
+    associations.ensure_intent(intent.model_copy(update={"source_revision": "foreign"}) if foreign else intent)
+    store.request_cancel(job_id, scope=_request(destination).scope, principal=OWNER)
+    source.root.rename(tmp_path / "removed-source")
+    configured = ConfiguredExecution(None, reader, selection, context, destination)
+
+    if foreign:
+        with pytest.raises(ReleaseVerificationError):
+            asyncio.run(execute_job(store, job_id, configured))
+    else:
+        assert asyncio.run(execute_job(store, job_id, configured)) is None
+
+    record = store.storage.snapshot()[job_id]
+    assert record["state"] == ("cancelling" if foreign else "cancelled")
+    assert (record["reservation"]["status"] == "released") is not foreign
+    assert (destination / "_release_associations" / f"{ATTEMPT.package_id}.json").exists() is foreign
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_given_stale_or_missing_source_when_independent_runner_restores_then_no_destination_effect(
+    tmp_path: Path, missing: bool
+) -> None:
     source, reader, selection, context, frozen, inputs, _video = _native_case(tmp_path)
     destination = tmp_path / "output"
     store = _store(tmp_path / "jobs", OffsetClock())
@@ -198,10 +267,15 @@ def test_given_stale_source_when_independent_runner_restores_then_no_destination
             _request(destination), frozen_request=generation_request_bytes(frozen, inputs), reserved_bytes=32 * 1024**2
         )
     ).job_id
-    (source.root / "meta/info.json").write_bytes(b"{}")
+    if not missing:
+        (source.root / "meta/info.json").write_bytes(b"{}")
 
     with pytest.raises(ReleaseInputError):
-        asyncio.run(execute_job(store, job_id, ConfiguredExecution(source, reader, selection, context, destination)))
+        asyncio.run(
+            execute_job(
+                store, job_id, ConfiguredExecution(None if missing else source, reader, selection, context, destination)
+            )
+        )
 
     assert not destination.exists()
     assert store.storage.snapshot()[job_id]["diagnostics"]["validation.failed"]["count"] == 1

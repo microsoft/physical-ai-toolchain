@@ -512,11 +512,11 @@ class DatasetService:
         """Recursively scan for datasets, building --separated IDs. Max 5 levels; hidden folders are skipped."""
         if len(prefix_parts) >= 5:
             return
-        for item in directory.iterdir():
-            if not item.is_dir() or item.name.startswith(".") or item.name == "_releases":
-                continue
-            from physical_ai_curation.release.publication import local_dataset_admitted
+        from physical_ai_curation.release.publication import OPERATIONAL_RELEASE_NAMESPACES, local_dataset_admitted
 
+        for item in directory.iterdir():
+            if not item.is_dir() or item.name.startswith(".") or item.name in OPERATIONAL_RELEASE_NAMESPACES:
+                continue
             if not local_dataset_admitted(item):
                 continue
             current_parts = [*prefix_parts, item.name]
@@ -1289,8 +1289,10 @@ class DatasetService:
         """
         if self._blob_provider is not None:
             raise ValueError("Local dataset access is disabled in Azure mode")
+        from physical_ai_curation.release.publication import OPERATIONAL_RELEASE_NAMESPACES
+
         parts = dataset_id.split("--") if "--" in dataset_id else [dataset_id]
-        if "_releases" in parts:
+        if OPERATIONAL_RELEASE_NAMESPACES.intersection(parts):
             raise ValueError("reserved releases require marker-aware admission")
         if len(parts) > 5:
             raise ValueError(f"Dataset nesting too deep (max 5 levels): {dataset_id}")

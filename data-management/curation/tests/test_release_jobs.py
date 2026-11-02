@@ -42,7 +42,7 @@ from physical_ai_curation.release.jobs import (
     ReleaseJobStore,
     ReleaseRuntimeSettings,
 )
-from physical_ai_curation.release.local_worker import SupervisedLocalPublisher
+from physical_ai_curation.release.local_worker import SourceAssociatedLocalPublisher, SupervisedLocalPublisher
 from physical_ai_curation.release.models import MANIFEST_PATH, MARKER_PATH, RECEIPT_PATH, REPORT_PATH, SourceObject
 from physical_ai_curation.release.publication import (
     LocalPublisher,
@@ -56,6 +56,7 @@ from physical_ai_curation.release.record_storage import (
     LocalRecordStorage,
     storage_from_configuration,
 )
+from physical_ai_curation.release.source_associations import source_association_binding
 from physical_ai_curation.release.store import LocalReleaseStore
 from physical_ai_curation.release.supervision import (
     MIN_MEMORY_BYTES,
@@ -67,7 +68,7 @@ from physical_ai_curation.release.supervision import (
 from physical_ai_curation.release.verification import build_marker, verify_candidate
 from physical_ai_curation.release.worker import SupervisedOutcome, run_supervised
 from test_release_contracts import _manifest_for, _payload_files, _write_package
-from test_release_publishers import _FakeBlobClient, _FakeContainer
+from test_release_publishers import _association_intent, _FakeBlobClient, _FakeContainer
 
 ATTEMPT = PublicationAttempt("pkg-001", "attempt-1")
 OTHER_ATTEMPT = PublicationAttempt("pkg-002", "attempt-2")
@@ -215,6 +216,30 @@ def test_given_accepted_job_when_store_reopened_then_state_and_frozen_request_su
     assert reopened.frozen_request(job_id) == b'{"request":1}'
 
 
+@pytest.mark.parametrize(
+    "field", ["diagnostic_operations", "diagnostics", "destination_peak_bytes", "execution_binding"]
+)
+@pytest.mark.parametrize("operation", ["get", "replay", "page"])
+def test_given_obsolete_job_record_when_read_then_rejected_without_upgrade(
+    tmp_path: Path, field: str, operation: str
+) -> None:
+    store = _store(tmp_path / "state", FakeClock())
+    job_id = store.accept(_request(tmp_path / "destination")).job_id
+    with store.storage.transaction() as records:
+        del records[job_id][field]
+    before = store.storage.snapshot()[job_id]
+
+    with pytest.raises(ReleaseJobError, match="unsupported"):
+        if operation == "get":
+            store.get(job_id, scope=SCOPE, principal=OWNER)
+        elif operation == "replay":
+            store.accept(_request(tmp_path / "destination"))
+        else:
+            store.page(scope=SCOPE, principal=OWNER)
+
+    assert store.storage.snapshot()[job_id] == before
+
+
 def test_given_accepted_job_when_read_independently_then_self_contained_json_is_authority(tmp_path: Path) -> None:
     root = tmp_path / "chosen-folder" / "state"
     store = _store(root, FakeClock())
@@ -293,13 +318,28 @@ def test_given_scratch_from_unobservable_host_when_recovering_then_retained(tmp_
     assert store.get(job.job_id, scope=SCOPE, principal=OWNER).scratch_bytes == 256
 
 
+@pytest.mark.parametrize("field", ["schema_version", "job_id"])
+def test_given_incomplete_record_envelope_when_committed_then_rejected_without_upgrade(
+    tmp_path: Path, field: str
+) -> None:
+    storage = LocalRecordStorage(tmp_path / "state")
+    key = "a" * 32
+    record = {"schema_version": "curated-release-job/v1", "job_id": key, "state": "accepted"}
+    del record[field]
+
+    with pytest.raises(ReleaseVerificationError, match="schema_version or job_id"), storage.transaction() as records:
+        records[key] = record
+
+    assert storage.snapshot() == {}
+
+
 def test_given_local_record_write_failure_when_reopened_then_old_snapshot_is_intact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     storage = LocalRecordStorage(tmp_path / "state")
     key = "a" * 32
     with storage.transaction() as records:
-        records[key] = {"state": "accepted"}
+        records[key] = {"schema_version": "curated-release-job/v1", "job_id": key, "state": "accepted"}
     original = storage.snapshot()
 
     def fail_replace(*_args: Any, **_kwargs: Any) -> None:
@@ -312,6 +352,108 @@ def test_given_local_record_write_failure_when_reopened_then_old_snapshot_is_int
     reopened = storage_from_configuration(storage.configuration())
     assert reopened.snapshot() == original
     assert [path.name for path in (tmp_path / "state" / "jobs").iterdir()] == [f"{key}.json"]
+
+
+@pytest.mark.parametrize("frozen_bound", [True, False])
+def test_given_accepted_source_association_when_published_then_checkpoint_precedes_supervised_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, frozen_bound: bool
+) -> None:
+    destination = tmp_path / "output/group-a/source-a/releases"
+    source = tmp_path / "source"
+    files = _payload_files()
+    manifest = _manifest_for(files)
+    digest = _write_package(source, files, manifest)
+    intent = _association_intent(destination).model_copy(
+        update={
+            "frozen_input_sha256": manifest.frozen_input_sha256 if frozen_bound else "0" * 64,
+            "scope_sha256": sha256_hex(OWNER.encode()),
+        }
+    )
+    store = _store(tmp_path / "state", OffsetClock())
+    request = replace(
+        _request(destination, attempt=intent.attempt, reserved=16 * 1024**2),
+        execution_binding=source_association_binding(intent),
+    )
+    job_id = store.accept(request).job_id
+    fence = store.claim(job_id, "worker-a")
+    publisher = SourceAssociatedLocalPublisher(destination, intent.attempt, store, job_id, fence, intent)
+    for item in LocalReleaseStore(source).list_objects():
+        if item.path in {RECEIPT_PATH, REPORT_PATH}:
+            continue
+        payload = (source / item.path).read_bytes()
+        publisher.write(item.path, (payload,), length=len(payload), sha256=sha256_hex(payload))
+    candidate = verify_candidate(publisher.store, digest)
+    store.seal(
+        job_id,
+        fence,
+        {
+            RECEIPT_PATH: (len(candidate.receipt_bytes), sha256_hex(candidate.receipt_bytes)),
+            REPORT_PATH: (len(candidate.report_bytes), sha256_hex(candidate.report_bytes)),
+        },
+    )
+    execute = publisher._execute
+    observed = []
+
+    def observe_marker(path: str, length: int, content: bytes) -> None:
+        if path == MARKER_PATH:
+            record = json.loads((destination / "_release_associations/pkg-001.json").read_bytes())
+            assert record["checkpoint"] == {"manifest_sha256": digest, "job_id": job_id, "fence": fence}
+            assert store.get(job_id, scope=SCOPE, principal=OWNER).state == "committing"
+            observed.append(path)
+        execute(path, length, content)
+
+    monkeypatch.setattr(publisher, "_execute", observe_marker)
+    if not frozen_bound:
+        with pytest.raises(ReleaseVerificationError, match="association frozen input"):
+            publisher.publish(digest)
+        assert not (publisher.root / MARKER_PATH).exists()
+        assert store.get(job_id, scope=SCOPE, principal=OWNER).state not in {"committing", "committed"}
+        return
+    result = publisher.publish(digest)
+    source.rename(tmp_path / "source-unavailable")
+
+    assert result.publication_state == "published"
+    assert observed == [MARKER_PATH]
+    assert publisher.associations.discover(source_key=intent.source_key, scope_sha256=intent.scope_sha256) == [
+        publisher.root
+    ]
+    marker_inode = (publisher.root / MARKER_PATH).stat().st_ino
+    sidecar = destination / "_release_associations/pkg-001.json"
+    sidecar.unlink()
+    with pytest.raises(ReleaseVerificationError, match="checkpoint is missing"):
+        publisher.publish(digest)
+    assert not sidecar.exists()
+    assert (publisher.root / MARKER_PATH).stat().st_ino == marker_inode
+
+
+@pytest.mark.parametrize("mismatch", ["scope", "binding", "destination", "fence"])
+def test_given_unaccepted_source_association_when_publisher_constructed_then_no_destination_write(
+    tmp_path: Path, mismatch: str
+) -> None:
+    destination = tmp_path / "output/group-a/source-a/releases"
+    intent = _association_intent(destination).model_copy(
+        update={"scope_sha256": sha256_hex(("other" if mismatch == "scope" else OWNER).encode())}
+    )
+    store = _store(tmp_path / "state", OffsetClock())
+    request = replace(
+        _request(destination, attempt=intent.attempt),
+        execution_binding=b"unaccepted" if mismatch == "binding" else source_association_binding(intent),
+    )
+    job_id = store.accept(request).job_id
+    fence = store.claim(job_id, "worker-a")
+
+    with pytest.raises(AuthorityError, match="accepted binding"):
+        SourceAssociatedLocalPublisher(
+            tmp_path / "wrong-output" if mismatch == "destination" else destination,
+            intent.attempt,
+            store,
+            job_id,
+            fence + 1 if mismatch == "fence" else fence,
+            intent,
+        )
+
+    assert not destination.exists()
+    assert not (tmp_path / "wrong-output").exists()
 
 
 @pytest.mark.parametrize("residue", ["malformed", "symlink"])
@@ -1681,9 +1823,15 @@ def test_given_tampered_ownership_companion_when_copy_requested_then_no_child_ru
 
 
 @pytest.mark.parametrize("lose_marker_stop_ack", [False, True])
+@pytest.mark.parametrize("associated", [False, True])
 def test_given_blob_candidate_when_supervised_upload_and_publish_then_independently_marked(
-    tmp_path: Path, lose_marker_stop_ack: bool
+    tmp_path: Path, lose_marker_stop_ack: bool, associated: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from physical_ai_curation.release.blob_worker import SourceAssociatedBlobPublisher
+
+    class AssociatedChildPublisher(_ChildBlobPublisher, SourceAssociatedBlobPublisher):
+        """Reuse the registered filesystem-SDK child with the associated publication policy."""
+
     root = tmp_path / "candidate"
     files = _payload_files()
     digest = _write_package(root, files, _manifest_for(files))
@@ -1691,9 +1839,32 @@ def test_given_blob_candidate_when_supervised_upload_and_publish_then_independen
     destination = FsContainer(sdk, "example", "release")
     clock = OffsetClock()
     store = _store(tmp_path / "ledger", clock)
-    job = store.accept(_blob_request(key="blob-publish", reserved=8 * 1024**2))
+    intent = _association_intent(tmp_path).model_copy(
+        update={
+            "attempt": ATTEMPT,
+            "effective_destination": BLOB.as_text(),
+            "scope_sha256": sha256_hex(OWNER.encode()),
+            "frozen_input_sha256": json.loads((root / MANIFEST_PATH).read_bytes())["frozen_input_sha256"],
+        }
+    )
+    monkeypatch.setattr(
+        FsBlob,
+        "acquire_lease",
+        lambda _blob, **_kwargs: SimpleNamespace(renew=lambda **_kwargs: None, release=lambda **_kwargs: None),
+        raising=False,
+    )
+    job = store.accept(
+        replace(
+            _blob_request(key="blob-publish", reserved=8 * 1024**2),
+            execution_binding=source_association_binding(intent) if associated else b"",
+        )
+    )
     fence = store.claim(job.job_id, "worker")
-    publisher = _ChildBlobPublisher(destination, BLOB, ATTEMPT, store, job.job_id, fence, sdk_root=sdk)
+    publisher_type = AssociatedChildPublisher if associated else _ChildBlobPublisher
+    association_arguments = {"intent": intent} if associated else {}
+    publisher = publisher_type(
+        destination, BLOB, ATTEMPT, store, job.job_id, fence, sdk_root=sdk, **association_arguments
+    )
     for item in LocalReleaseStore(root).list_objects():
         publisher.write_from_path(
             item.path, root / item.path, length=item.length, sha256=sha256_hex((root / item.path).read_bytes())
@@ -1707,6 +1878,15 @@ def test_given_blob_candidate_when_supervised_upload_and_publish_then_independen
             REPORT_PATH: (len(candidate.report_bytes), sha256_hex(candidate.report_bytes)),
         },
     )
+
+    if associated:
+        bind_manifest = publisher.associations.bind_manifest
+
+        def bind_under_commit(*args: Any, **kwargs: Any) -> None:
+            assert store.storage.snapshot()[job.job_id]["state"] == "committing"
+            bind_manifest(*args, **kwargs)
+
+        monkeypatch.setattr(publisher.associations, "bind_manifest", bind_under_commit)
 
     if lose_marker_stop_ack:
         execute = publisher._execute
@@ -1727,7 +1907,9 @@ def test_given_blob_candidate_when_supervised_upload_and_publish_then_independen
             publisher.publish(digest)
         clock.advance(31)
         fence = store.claim(job.job_id, "successor")
-        publisher = _ChildBlobPublisher(destination, BLOB, ATTEMPT, store, job.job_id, fence, sdk_root=sdk)
+        publisher = publisher_type(
+            destination, BLOB, ATTEMPT, store, job.job_id, fence, sdk_root=sdk, **association_arguments
+        )
     result = publisher.publish(digest)
     root.rename(tmp_path / "source-unavailable")
 
@@ -1739,6 +1921,10 @@ def test_given_blob_candidate_when_supervised_upload_and_publish_then_independen
     assert record["state"] == "committed"
     assert all(effect["status"] == "acknowledged" for effect in record["effects"].values())
     assert all(runtime["stopped"] for runtime in record["runtimes"].values())
+    if associated:
+        assert publisher.associations.discover(source_key=intent.source_key, scope_sha256=intent.scope_sha256) == [
+            publisher.root
+        ]
     with pytest.raises((AuthorityError, LedgerClosedError)):
         publisher.write("data/late.bin", [b"abc"], length=3, sha256=sha256_hex(b"abc"))
 
@@ -2796,6 +2982,38 @@ def test_given_destination_effects_when_reconciled_then_current_drops_and_peak_i
     store.reconcile_effect(job_id, fence, "data/b.bin", observed="absent", length=200, digest=DIGEST)
     reopened = _store(tmp_path / "ledger", FakeClock()).get(job_id, scope=SCOPE, principal=OWNER)
     assert (reopened.destination_current_bytes, reopened.destination_peak_bytes) == (100, 300)
+
+
+@pytest.mark.parametrize("expired", [False, True])
+def test_given_quick_supervised_child_when_dispatched_then_only_live_lease_is_renewed(
+    tmp_path: Path, expired: bool
+) -> None:
+    clock = FakeClock()
+    store = _store(tmp_path / "ledger", clock)
+    job = store.accept(_request(tmp_path / "destination"))
+    fence = store.claim(job.job_id, "worker")
+    clock.advance(31 if expired else 29)
+
+    def dispatch() -> None:
+        outcome = run_supervised(
+            store,
+            job.job_id,
+            fence,
+            [sys.executable, "-B", "-c", "pass"],
+            memory_bytes=MEMORY,
+            file_bytes=FILE_LIMIT,
+            heartbeat_seconds=5,
+            grace_seconds=FAST_GRACE,
+        )
+        assert (outcome.reason, outcome.returncode) == ("exited", 0)
+
+    if expired:
+        with pytest.raises(AuthorityError, match="lease expired"):
+            dispatch()
+    else:
+        dispatch()
+        clock.advance(2)
+        assert store.heartbeat(job.job_id, fence) is False
 
 
 def _interrupted_local_write(tmp_path: Path) -> tuple[ReleaseJobStore, str, int, Path, Path]:

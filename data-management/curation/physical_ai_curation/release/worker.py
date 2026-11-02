@@ -109,6 +109,7 @@ def run_supervised(
         if register_runtime is not None:
             register_runtime(runtime)
 
+    store.heartbeat(job_id, fence)
     supervisor = ProcessSupervisor(
         argv,
         memory_bytes=memory_bytes,

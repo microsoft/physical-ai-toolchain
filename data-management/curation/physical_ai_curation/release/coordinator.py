@@ -54,6 +54,7 @@ from physical_ai_curation.release.models import (
     SourceObject,
     VersionIdentity,
 )
+from physical_ai_curation.release.projections import materialize_saved_projections
 from physical_ai_curation.release.publication import PublicationAttempt
 from physical_ai_curation.release.record_storage import BlobLocation
 from physical_ai_curation.release.store import LocalReleaseStore, ReleaseStore
@@ -515,6 +516,11 @@ def _publication_runtime(
     fence: int,
     supplied: SupervisedLocalPublisher | SupervisedBlobPublisher | None,
 ) -> Iterator[SupervisedLocalPublisher | SupervisedBlobPublisher]:
+    association = store.source_association(job_id)
+    from physical_ai_curation.release.blob_worker import SourceAssociatedBlobPublisher
+    from physical_ai_curation.release.local_worker import SourceAssociatedLocalPublisher
+
+    associated = (SourceAssociatedLocalPublisher, SourceAssociatedBlobPublisher)
     if supplied is not None:
         actual = supplied.location if isinstance(supplied, SupervisedBlobPublisher) else supplied.destination
         if (
@@ -523,9 +529,14 @@ def _publication_runtime(
             or (supplied.jobs, supplied.job_id, supplied.fence) != (store, job_id, fence)
         ):
             raise ReleaseInputError("publisher does not match the accepted execution binding")
+        if association is not None and not isinstance(supplied, associated):
+            raise ReleaseInputError("source-associated job requires its accepted publisher")
         yield supplied
     elif isinstance(destination, Path):
-        yield SupervisedLocalPublisher(destination, attempt, store, job_id, fence)
+        if association is None:
+            yield SupervisedLocalPublisher(destination, attempt, store, job_id, fence)
+        else:
+            yield SourceAssociatedLocalPublisher(destination, attempt, store, job_id, fence, association)
     else:
         from azure.identity import DefaultAzureCredential
         from azure.storage.blob import ContainerClient
@@ -541,7 +552,10 @@ def _publication_runtime(
                 retry_total=0,
             ) as container,
         ):
-            yield SupervisedBlobPublisher(container, destination, attempt, store, job_id, fence)
+            if association is None:
+                yield SupervisedBlobPublisher(container, destination, attempt, store, job_id, fence)
+            else:
+                yield SourceAssociatedBlobPublisher(container, destination, attempt, store, job_id, fence, association)
 
 
 async def run_release_generation(
@@ -603,6 +617,10 @@ async def run_release_generation(
         camera_statistics=inputs.camera_statistics,
     )
     validate_processing_confirmation(prepared.plan, confirmed_digest=inputs.confirmed_digest)
+    projections = materialize_saved_projections(frozen.content, prepared.episodes, release_dataset_id=attempt.prefix)
+    projection_bytes = sum(len(payload) for payload in projections.values())
+    if prepared.plan.capacity.payload_bytes + projection_bytes > inputs.output_bytes:
+        raise ReleaseInputError("projection output exceeds the accepted destination budget")
 
     from physical_ai_curation.release.native_worker import native_operation
 
@@ -610,7 +628,9 @@ async def run_release_generation(
         pass
 
     with _publication_runtime(destination, attempt, store, job_id, fence, publisher) as selected:
-        return _publish_generation(store, job_id, fence, attempt, frozen, prepared, inputs, source, selected)
+        return _publish_generation(
+            store, job_id, fence, attempt, frozen, prepared, inputs, source, selected, projections
+        )
 
 
 def _publish_generation(
@@ -623,6 +643,7 @@ def _publish_generation(
     inputs: GenerationInputs,
     source: LocalReleaseSource | BlobReleaseSource,
     publisher: SupervisedLocalPublisher | SupervisedBlobPublisher,
+    projections: Mapping[str, bytes],
 ) -> ReleaseResult:
     from physical_ai_curation.release.native_worker import native_operation
 
@@ -653,14 +674,17 @@ def _publish_generation(
         warnings=prepared.plan.warnings,
         actions=prepared.plan.to_preview_actions(),
         capacity=CapacityEstimate(
-            estimated_object_count=len(prepared.plan.objects),
-            estimated_output_bytes=sum(obj.estimated_output_bytes for obj in prepared.plan.objects),
+            estimated_object_count=len(prepared.plan.objects) + len(projections),
+            estimated_output_bytes=sum(obj.estimated_output_bytes for obj in prepared.plan.objects)
+            + sum(len(payload) for payload in projections.values()),
         ),
     )
     preview_payload = serialize_model(preview)
     publisher.write(PREVIEW_PATH, [preview_payload], length=len(preview_payload), sha256=sha256_hex(preview_payload))
     lineage_length, lineage_digest, record_count = _lineage_identity(prepared)
     publisher.write_lineage(LINEAGE_PATH, prepared, length=lineage_length, sha256=lineage_digest)
+    for projection_path, projection in projections.items():
+        publisher.write(projection_path, [projection], length=len(projection), sha256=sha256_hex(projection))
 
     local_store = publisher.store
     inventory = _inventory(local_store)

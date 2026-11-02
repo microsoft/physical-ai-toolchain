@@ -28,6 +28,8 @@ from physical_ai_curation.release.verification import (
 )
 
 RELEASE_NAMESPACE = "_releases"
+ASSOCIATION_NAMESPACE = "_release_associations"
+OPERATIONAL_RELEASE_NAMESPACES = frozenset({RELEASE_NAMESPACE, ASSOCIATION_NAMESPACE})
 
 
 @dataclass(frozen=True)
@@ -93,7 +95,9 @@ def parse_ownership(content: bytes, dataset_name: str) -> PublicationAttempt:
 
 
 def local_dataset_admitted(root: Path) -> bool:
-    """Keep legacy discovery unchanged, but independently verify recorded release roots."""
+    """Admit ordinary source datasets; operational namespaces and recorded releases are separate."""
+    if root.name in OPERATIONAL_RELEASE_NAMESPACES:
+        return False
     companion = root.parent / RELEASE_NAMESPACE / f"{root.name}.json"
     try:
         companion.stat(follow_symlinks=False)
@@ -101,17 +105,7 @@ def local_dataset_admitted(root: Path) -> bool:
         return True
     except OSError:
         return False
-    try:
-        owner = parse_ownership(
-            LocalReleaseStore(root.parent).read_control_bytes(
-                ownership_path(root.name),
-                max_bytes=4096,
-            ),
-            root.name,
-        )
-        return verify_published(LocalReleaseStore(root)).identity.package_id == owner.package_id
-    except (OSError, ReleaseVerificationError):
-        return False
+    return False
 
 
 class PublicationControl(Protocol):
@@ -230,6 +224,16 @@ class LocalPublisher:
             if record.suffix != ".json" or not record.is_file() or record.is_symlink():
                 continue
             root = self.destination / record.stem
-            if root.is_dir() and not root.is_symlink() and local_dataset_admitted(root):
+            if not root.is_dir() or root.is_symlink():
+                continue
+            try:
+                owner = parse_ownership(
+                    LocalReleaseStore(self.destination).read_control_bytes(ownership_path(record.stem), max_bytes=4096),
+                    record.stem,
+                )
+                verified = verify_published(LocalReleaseStore(root))
+            except (OSError, ReleaseVerificationError):
+                continue
+            if verified.identity.package_id == owner.package_id:
                 admitted.append(root)
         return admitted

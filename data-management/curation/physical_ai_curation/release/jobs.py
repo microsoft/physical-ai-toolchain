@@ -22,6 +22,7 @@ from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.models import MARKER_PATH, RECEIPT_PATH, REPORT_PATH
 from physical_ai_curation.release.publication import PublicationAttempt, ownership_bytes, ownership_path
 from physical_ai_curation.release.record_storage import BlobLocation, LocalRecordStorage, RecordLimits, RecordStorage
+from physical_ai_curation.release.source_associations import SourceAssociationIntent
 from physical_ai_curation.release.store import LocalReleaseStore
 from physical_ai_curation.release.supervision import (
     ProcessIdentity,
@@ -261,6 +262,8 @@ class ReleaseJobStore:
     @contextmanager
     def _transaction(self) -> Iterator[dict[str, dict[str, Any]]]:
         with self.storage.transaction() as records:
+            for row in records.values():
+                _require_current_job(row)
             yield records
 
     def accept(self, request: JobRequest) -> AcceptedJob:
@@ -360,7 +363,7 @@ class ReleaseJobStore:
         """Return immutable private configuration for trusted workers, never HTTP clients."""
         with self._transaction() as conn:
             row = self._job(conn, job_id)
-            return base64.b64decode(row.get("execution_binding", ""), validate=True)
+            return base64.b64decode(row["execution_binding"], validate=True)
 
     def get(self, job_id: str, *, scope: str, principal: str) -> JobStatus:
         with self._transaction() as conn:
@@ -419,6 +422,54 @@ class ReleaseJobStore:
                 raise AuthorityError("cancellation recovery is not authorized")
             if row["cancel_requested"] and not cancellation:
                 raise CancellationError("cancellation was requested")
+
+    def source_association(self, job_id: str) -> SourceAssociationIntent | None:
+        """Restore private accepted association from durable binding and acceptance event."""
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            return self._restore_source_association(row)
+
+    @staticmethod
+    def _restore_source_association(row: Mapping[str, Any]) -> SourceAssociationIntent | None:
+        from physical_ai_curation.release.source_associations import restore_source_association
+
+        accepted = [event for event in row["events"] if event["event"] == "job.accepted"]
+        if len(accepted) != 1:
+            raise ReleaseJobError("unsupported release job acceptance record")
+        return restore_source_association(
+            base64.b64decode(row["execution_binding"], validate=True),
+            accepted_at=accepted[0]["occurred_at"],
+        )
+
+    def validate_source_association(
+        self,
+        job_id: str,
+        fence: int,
+        destination: Path | BlobLocation,
+        attempt: PublicationAttempt,
+        binding: bytes,
+        scope_sha256: str,
+    ) -> None:
+        """Check immutable accepted source/access identity; effect and commit guards authorize dispatch separately."""
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            if (
+                row["fence"] != fence
+                or row["destination"] != _destination_text(destination)
+                or row["attempt_prefix"] != attempt.prefix
+                or row["attempt_key"] != attempt.key
+                or row["route"] != ("local" if isinstance(destination, Path) else "blob")
+                or row["principal_digest"] != scope_sha256
+            ):
+                raise AuthorityError("source association does not match the accepted binding")
+        from physical_ai_curation.release.source_associations import source_association_binding
+
+        try:
+            accepted = self.source_association(job_id)
+        except ReleaseVerificationError as exc:
+            raise AuthorityError("source association does not match the accepted binding") from exc
+        if accepted is None or source_association_binding(accepted) != binding:
+            raise AuthorityError("source association does not match the accepted binding")
 
     def claim(self, job_id: str, worker: str) -> int:
         if not _TOKEN.fullmatch(worker):
@@ -1287,7 +1338,7 @@ class ReleaseJobStore:
                 return True
             parent_fd = _open_root_nofollow(root.parent)
             try:
-                return _remove_verified(
+                removed = _remove_verified(
                     parent_fd,
                     companion,
                     len(content),
@@ -1296,6 +1347,27 @@ class ReleaseJobStore:
                 )
             finally:
                 os.close(parent_fd)
+            if removed:
+                intent = self._restore_source_association(row)
+                if intent is not None:
+                    from physical_ai_curation.release.source_associations import LocalSourceAssociations
+
+                    if (
+                        intent.attempt.key != attempt.key
+                        or intent.attempt.prefix != attempt.prefix
+                        or intent.scope_sha256 != row["principal_digest"]
+                        or intent.effective_destination != row["destination"]
+                    ):
+                        raise AuthorityError("association cleanup differs from accepted execution")
+                    configuration = self.storage.configuration()
+                    limits = RecordLimits(
+                        **{
+                            key: configuration[key]
+                            for key in ("timeout_seconds", "max_record_bytes", "max_total_bytes", "max_jobs")
+                        }
+                    )
+                    LocalSourceAssociations(root.parent, limits=limits).remove_pending(intent)
+            return removed
 
     @contextmanager
     def publication(self, job_id: str, fence: int, attempt: PublicationAttempt, digest: str) -> Iterator[None]:
@@ -1451,9 +1523,6 @@ class ReleaseJobStore:
         row = conn.get(job_id)
         if row is None:
             raise JobNotFoundError("job not found")
-        row.setdefault("diagnostic_operations", {})
-        row.setdefault("diagnostics", {})
-        row.setdefault("destination_peak_bytes", _destination_bytes(row))
         return row
 
     def _owned(self, conn: Mapping[str, dict[str, Any]], job_id: str, scope: str, principal: str) -> dict[str, Any]:
@@ -1617,6 +1686,11 @@ class ReleaseJobControl:
             )
 
 
+def _require_current_job(row: Mapping[str, Any]) -> None:
+    if not {"diagnostic_operations", "diagnostics", "destination_peak_bytes", "execution_binding"}.issubset(row):
+        raise ReleaseJobError("unsupported release job record; clean obsolete state")
+
+
 def _status(conn: Mapping[str, dict[str, Any]], row: Mapping[str, Any]) -> JobStatus:
     reservation = row["reservation"]
     return JobStatus(
@@ -1632,8 +1706,8 @@ def _status(conn: Mapping[str, dict[str, Any]], row: Mapping[str, Any]) -> JobSt
         peak_scratch_bytes=row["peak_scratch_bytes"],
         io_counters=dict(row["io_counters"]),
         destination_current_bytes=_destination_bytes(row),
-        destination_peak_bytes=row.get("destination_peak_bytes", _destination_bytes(row)),
-        diagnostics={key: dict(value) for key, value in sorted(row.get("diagnostics", {}).items())},
+        destination_peak_bytes=row["destination_peak_bytes"],
+        diagnostics={key: dict(value) for key, value in sorted(row["diagnostics"].items())},
     )
 
 

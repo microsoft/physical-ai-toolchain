@@ -373,13 +373,14 @@ class TestNamedReleaseAdmission:
 
         assert await provider.dataset_exists("org--legacy") is True
 
-    async def test_given_finalized_release_when_reading_then_admitted(
+    async def test_given_finalized_release_when_ordinary_reading_then_excluded(
         self, named_release_blobs: dict[str, bytes]
     ) -> None:
         provider = _named_provider(named_release_blobs)
 
-        assert await provider.dataset_exists("org--plate") is True
-        assert await provider.get_info_json("org--plate") == {"total_episodes": 1}
+        assert await provider.dataset_exists("org--plate") is False
+        assert await provider.get_info_json("org--plate") is None
+        assert "org--plate" not in await provider.list_dataset_ids()
 
     @pytest.mark.parametrize("case", _REFUSED_CASES)
     async def test_given_refused_release_when_exists_then_refused(
@@ -405,23 +406,23 @@ class TestNamedReleaseAdmission:
         assert [chunk async for chunk in provider.stream_video(_PAYLOAD_BLOB)] == []
         assert list(local_dir.rglob("*")) == []
 
-    async def test_given_admitted_release_when_marker_removed_then_refused(
+    async def test_given_recorded_release_when_marker_removed_then_still_excluded(
         self, named_release_blobs: dict[str, bytes]
     ) -> None:
         container = _FakeBlobContainer(named_release_blobs)
         provider = _provider_for(container)
-        assert await provider.dataset_exists("org--plate") is True
+        assert await provider.dataset_exists("org--plate") is False
 
         del container.blobs[_MARKER_BLOB]
 
         assert await provider.dataset_exists("org--plate") is False
 
-    async def test_given_admitted_release_when_payload_changed_then_refused(
+    async def test_given_recorded_release_when_payload_changed_then_still_excluded(
         self, named_release_blobs: dict[str, bytes]
     ) -> None:
         container = _FakeBlobContainer(named_release_blobs)
         provider = _provider_for(container)
-        assert await provider.dataset_exists("org--plate") is True
+        assert await provider.dataset_exists("org--plate") is False
 
         container.blobs[_PAYLOAD_BLOB] = b"ITEM-BYTES"
 
@@ -461,7 +462,7 @@ class TestNamedReleaseAdmission:
 
         result = await provider.scan_all_dataset_ids()
 
-        assert result == {"lerobot": ["org--legacy", "org--plate"], "hdf5": []}
+        assert result == {"lerobot": ["org--legacy"], "hdf5": []}
 
     @pytest.mark.parametrize(
         ("setting", "value"),

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -14,11 +17,16 @@ import pyarrow.parquet as pq
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from physical_ai_curation.release.canonical import canonical_json_bytes, parse_strict_json
+from physical_ai_curation.release.jobs import ReleaseJobStore
+from physical_ai_curation.release.record_storage import BlobLocation, release_collection_location
+from physical_ai_curation.release.runner import execute_job
+from physical_ai_curation.release.store import LocalReleaseStore
 
 from src.api.auth import PrincipalContext, require_principal_context
 from src.api.routers.releases import router
 from src.api.services.dataset_service import DatasetService
-from src.api.services.release_service import ReleaseApiSettings, ReleaseService, get_release_service
+from src.api.services.release_service import ReleaseApiSettings, ReleaseService, _source_release, get_release_service
 from src.api.services.viewer_release_planner import ViewerReleasePlanner
 from tests.lerobot_sources import CAMERA, write_source
 
@@ -84,6 +92,9 @@ def test_preview_is_read_only_and_inventory_is_paged(release_api: tuple) -> None
     test_client, spec, settings, _app, _root = release_api
     preview = _preview(test_client, spec)
     assert preview["summary"]["selected_count"] == 2
+    assert preview["reserved_bytes"] >= (
+        preview["summary"]["native_scratch_bytes"] + preview["summary"]["destination_budget_bytes"]
+    )
     assert not settings.job_root.exists()
     assert not settings.destinations["local"].exists()
     first = test_client.get(BASE + "/inventory/native?limit=1").json()
@@ -110,6 +121,36 @@ def test_confirmed_acceptance_replays_and_survives_service_restart(release_api: 
     assert test_client.get(BASE + "/jobs").json()["items"][0]["job_id"] == job
     assert test_client.post(BASE + "/jobs/" + job + "/recover").status_code == 202
     assert test_client.get(BASE + "/jobs/" + job + "/result").status_code == 409
+
+
+def test_nested_source_acceptance_binds_collection_and_survives_alias_change(release_api: tuple) -> None:
+    test_client, spec, settings, _app, root = release_api
+    group = root.parent / "group-a"
+    group.mkdir()
+    root.rename(group / root.name)
+    spec = {**spec, "dataset_id": "group-a--native"}
+    job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
+    store = ReleaseJobStore(settings.job_root)
+    record = store.storage.snapshot()[job]
+    expected = settings.destinations["local"] / "group-a/native/releases"
+
+    assert record["destination"] == str(expected.resolve())
+    binding = json.loads(store.execution_binding(job))
+    assert binding["schema"] == "curated-release-execution/v3"
+    assert binding["effective_destination"] == {"kind": "local", "path": str(expected.resolve())}
+    intent = store.source_association(job)
+    assert intent is not None
+    assert intent.source_relative_path == "group-a/native"
+    assert intent.source_identity == binding["context"]["source"][0]
+    assert intent.source_revision == binding["context"]["source"][1]
+    assert intent.scope_sha256 == record["principal_digest"]
+    assert intent.effective_destination == str(expected.resolve())
+    assert intent.attempt.package_id == spec["package_id"]
+    assert "accepted_at" not in binding["association"]
+    changed = ReleaseApiSettings(settings.job_root, {"local": root.parent / "different-output"})
+    execution = ViewerReleasePlanner(changed).execution(job, store.frozen_request(job))
+    assert execution.destination == expected.resolve()
+    assert not expected.exists()
 
 
 @pytest.mark.parametrize("change", ["confirmation", "disk", "source", "name", "processing"])
@@ -161,8 +202,29 @@ def test_cancel_is_owned_and_csrf_protected(release_api: tuple, monkeypatch: pyt
     assert cancelled.json()["cancel_requested"] is True
 
 
+def test_given_accepted_viewer_job_when_runner_executes_then_association_is_retained(release_api: tuple) -> None:
+    test_client, spec, settings, _app, root = release_api
+    job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
+    store = ReleaseJobStore(settings.job_root)
+    execution = ViewerReleasePlanner(settings).execution(job, store.frozen_request(job))
+
+    result = asyncio.run(execute_job(store, job, execution))
+
+    assert result is not None
+    assert result.publication_state == "published"
+    root.rename(root.parent / "source-unavailable")
+    from physical_ai_curation.release.record_storage import RecordLimits
+    from physical_ai_curation.release.source_associations import LocalSourceAssociations
+
+    intent = store.source_association(job)
+    associations = LocalSourceAssociations(execution.destination, limits=RecordLimits())
+    assert associations.discover(source_key=intent.source_key, scope_sha256=intent.scope_sha256) == [
+        execution.destination / spec["dataset_name"]
+    ]
+
+
 def test_fresh_process_worker_publishes_and_artifacts_reverify(release_api: tuple) -> None:
-    test_client, spec, _settings, _app, _root = release_api
+    test_client, spec, settings, _app, source_root = release_api
     job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
     completed = subprocess.run(
         [sys.executable, "-m", "src.api.release_worker", "--once"],
@@ -177,9 +239,27 @@ def test_fresh_process_worker_publishes_and_artifacts_reverify(release_api: tupl
     result = test_client.get(BASE + "/jobs/" + job + "/result")
     assert result.status_code == 200, result.json()
     assert result.json()["result"]["publication_state"] == "published"
+    published = settings.destinations["local"] / "native/releases" / spec["dataset_name"]
+    artifact_contents = {}
     for artifact in result.json()["artifacts"]:
-        assert test_client.get(BASE + "/jobs/" + job + "/artifacts/" + artifact).status_code == 200
+        response = test_client.get(BASE + "/jobs/" + job + "/artifacts/" + artifact)
+        assert response.status_code == 200
+        content = (published / "release" / (artifact + (".md" if artifact == "report" else ".json"))).read_bytes()
+        assert response.json()["artifact"] == artifact
+        assert response.json()["content"] == (content.decode() if artifact == "report" else json.loads(content))
+        artifact_contents[artifact] = response.json()
+    source_root.rename(source_root.with_name("removed-source"))
+    retained = test_client.get(BASE + "/jobs/" + job + "/result")
+    assert retained.status_code == 200, retained.json()
+    assert retained.json() == result.json()
+    for artifact, expected in artifact_contents.items():
+        response = test_client.get(BASE + "/jobs/" + job + "/artifacts/" + artifact)
+        assert response.status_code == 200
+        assert response.json() == expected
     assert test_client.get(BASE + "/jobs/" + job + "/artifacts/not-allowed").status_code == 404
+    (published / "release/marker.json").unlink()
+    assert test_client.get(BASE + "/jobs/" + job + "/result").status_code == 409
+    assert test_client.get(BASE + "/jobs/" + job + "/artifacts/manifest").status_code == 409
 
 
 @pytest.fixture
@@ -195,3 +275,332 @@ def test_capabilities_reports_schema_without_paths(client: TestClient, local_aut
     assert body["schema"] == "curated-release-api/v1"
     assert body["destinations"] == []
     assert "path" not in str(body).lower()
+
+
+SOURCE = BASE + "/sources/native/releases"
+
+
+def _publish_local(test_client: TestClient, spec: dict, settings: ReleaseApiSettings) -> tuple[str, Path]:
+    job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
+    store = ReleaseJobStore(settings.job_root)
+    execution = ViewerReleasePlanner(settings).execution(job, store.frozen_request(job))
+    result = asyncio.run(execute_job(store, job, execution))
+    assert result is not None and result.publication_state == "published"
+    return job, settings.destinations["local"] / "native/releases" / spec["dataset_name"]
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_source_release_is_listed_and_read_after_job_and_source_removal(release_api: tuple) -> None:
+    test_client, spec, settings, _app, root = release_api
+    _job, published = _publish_local(test_client, spec, settings)
+    expected_episodes = json.loads((published / "meta/info.json").read_bytes())["total_episodes"]
+    assert expected_episodes == 2
+
+    listing = test_client.get(SOURCE)
+    assert listing.status_code == 200, listing.json()
+    items = listing.json()["items"]
+    assert [item["dataset_name"] for item in items] == [spec["dataset_name"]]
+    assert items[0]["manifest_sha256"] == _sha256(published / "release/manifest.json")
+    assert test_client.get(BASE + "/sources/other/releases").json()["items"] == []
+    handle = items[0]["handle"]
+
+    shutil.rmtree(settings.job_root)
+    root.rename(root.parent / "source-unavailable")
+
+    read = test_client.get(f"{SOURCE}/{handle}")
+    assert read.status_code == 200, read.json()
+    body = read.json()
+    assert body["total_episodes"] == expected_episodes
+    assert body["manifest_sha256"] == items[0]["manifest_sha256"]
+    assert str(settings.destinations["local"]) not in read.text
+    assert test_client.get(SOURCE).json()["items"] == items
+    assert test_client.get(f"{SOURCE}/{'0' * 64}").status_code == 404
+
+
+def test_source_release_is_hidden_from_other_principal(release_api: tuple) -> None:
+    test_client, spec, settings, app, _root = release_api
+    _publish_local(test_client, spec, settings)
+    handle = test_client.get(SOURCE).json()["items"][0]["handle"]
+    app.dependency_overrides[require_principal_context] = lambda: PrincipalContext(scope_id="other", auth_mode="local")
+
+    assert test_client.get(SOURCE).json()["items"] == []
+    assert test_client.get(f"{SOURCE}/{handle}").status_code == 404
+
+
+@pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
+def test_source_release_handle_refuses_mutation(release_api: tuple, method: str) -> None:
+    test_client, spec, settings, _app, _root = release_api
+    _job, published = _publish_local(test_client, spec, settings)
+    handle = test_client.get(SOURCE).json()["items"][0]["handle"]
+    before = _sha256(published / "release/manifest.json")
+
+    response = getattr(test_client, method)(f"{SOURCE}/{handle}")
+
+    assert response.status_code == 405
+    assert _sha256(published / "release/manifest.json") == before
+    assert test_client.get(f"{SOURCE}/{handle}").status_code == 200
+
+
+@pytest.mark.parametrize("target", ["marker", "manifest", "frozen"])
+def test_tampered_source_release_is_hidden_and_restores_when_bytes_return(release_api: tuple, target: str) -> None:
+    test_client, spec, settings, _app, _root = release_api
+    _job, published = _publish_local(test_client, spec, settings)
+    listing = test_client.get(SOURCE).json()["items"]
+    handle = listing[0]["handle"]
+    manifest_path = published / "release/manifest.json"
+    frozen_path = published / json.loads(manifest_path.read_bytes())["frozen_input_path"]
+    path = {
+        "marker": published / "release/marker.json",
+        "manifest": manifest_path,
+        "frozen": frozen_path,
+    }[target]
+    original = path.read_bytes()
+
+    path.write_bytes(original + b" ")
+    assert test_client.get(SOURCE).json()["items"] == []
+    assert test_client.get(f"{SOURCE}/{handle}").status_code == 404
+
+    path.write_bytes(original)
+    assert test_client.get(SOURCE).json()["items"] == listing
+    assert test_client.get(f"{SOURCE}/{handle}").status_code == 200
+
+
+SOURCE_EPISODES = SOURCE
+
+
+def test_source_episodes_are_paged_and_media_is_served_without_paths(release_api: tuple) -> None:
+    test_client, spec, settings, _app, _root = release_api
+    _job, published = _publish_local(test_client, spec, settings)
+    handle = test_client.get(SOURCE).json()["items"][0]["handle"]
+
+    page = test_client.get(f"{SOURCE}/{handle}/episodes", params={"limit": 1})
+    assert page.status_code == 200, page.json()
+    body = page.json()
+    assert body["total"] == 2
+    assert body["next_cursor"] == 1
+    assert [item["episode_index"] for item in body["items"]] == [0]
+    assert body["items"][0]["cameras"] == [CAMERA]
+    assert str(published) not in page.text
+    assert str(settings.destinations["local"]) not in page.text
+
+    second = test_client.get(f"{SOURCE}/{handle}/episodes", params={"cursor": 1, "limit": 1}).json()
+    assert [item["episode_index"] for item in second["items"]] == [1]
+    assert second["next_cursor"] is None
+
+    media = test_client.get(f"{SOURCE}/{handle}/episodes/0/media/{CAMERA}")
+    assert media.status_code == 200
+    assert media.headers["content-type"] == "video/mp4"
+    assert media.content == (published / f"videos/{CAMERA}/chunk-000/file-000.mp4").read_bytes()
+
+
+def test_source_episode_reads_refuse_unknown_episode_camera_and_bad_pages(release_api: tuple) -> None:
+    test_client, spec, settings, _app, _root = release_api
+    _publish_local(test_client, spec, settings)
+    handle = test_client.get(SOURCE).json()["items"][0]["handle"]
+
+    assert test_client.get(f"{SOURCE}/{handle}/episodes", params={"cursor": -1}).status_code == 422
+    assert test_client.get(f"{SOURCE}/{handle}/episodes", params={"limit": 101}).status_code == 422
+    missing_episode = test_client.get(f"{SOURCE}/{handle}/episodes/99/media/{CAMERA}")
+    assert missing_episode.status_code == 404
+    assert missing_episode.json()["detail"]["code"] == "release_episode_not_found"
+    missing_camera = test_client.get(f"{SOURCE}/{handle}/episodes/0/media/observation.images.absent")
+    assert missing_camera.status_code == 404
+    assert missing_camera.json()["detail"]["code"] == "release_media_not_found"
+    assert test_client.get(f"{SOURCE}/{handle}/episodes/0/media/..").status_code == 404
+    assert test_client.get(f"{SOURCE}/{'0' * 64}/episodes").status_code == 404
+
+
+def test_given_verified_projection_when_browsed_then_output_coordinates_not_frozen_originals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "published"
+    (root / "meta").mkdir(parents=True)
+    (root / "annotations/episodes").mkdir(parents=True)
+    annotation = {
+        "schema_version": "1.0.0",
+        "dataset_id": "published",
+        "output_episode_index": 0,
+        "source_episode_id": "native/episode_000017",
+        "annotations": [{"object_detections": [{"frame_index": 2}]}],
+    }
+    labels = {"dataset_id": "published", "episode_labels": {"0": ["accepted"]}}
+    (root / "meta/info.json").write_bytes(canonical_json_bytes({"total_episodes": 1}))
+    (root / "meta/episode_labels.json").write_bytes(canonical_json_bytes(labels))
+    (root / "annotations/episodes/episode_000000.json").write_bytes(canonical_json_bytes(annotation))
+    item = _source_release(
+        "local",
+        "native",
+        "0" * 64,
+        dataset_name="published",
+        package_id="package",
+        manifest_sha256="0" * 64,
+        store=LocalReleaseStore(root),
+        local_root=root,
+    )
+    service = ReleaseService(ReleaseApiSettings(None, {}))
+    monkeypatch.setattr(service, "_find_source", lambda *_: item)
+
+    body = service.source_release("scope", "native", item.handle)
+
+    assert body["annotations"] == [annotation]
+    assert body["labels"] == labels
+
+
+class _FakeBlobItem:
+    def __init__(self, name: str, data: bytes) -> None:
+        self.name = name
+        self.size = len(data)
+        self.etag = hashlib.sha256(data).hexdigest()
+        self.copy = None
+
+
+class _FakeBlobProperties:
+    def __init__(self, item: _FakeBlobItem) -> None:
+        self.size = item.size
+        self.etag = item.etag
+        self.copy = None
+
+
+class _FakeBlobDownload:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def chunks(self) -> Iterator[bytes]:
+        yield self._data
+
+
+class _FakeBlobClient:
+    def __init__(self, container: FakeBlobContainer, name: str) -> None:
+        self._container = container
+        self._name = name
+
+    def get_blob_properties(self) -> _FakeBlobProperties:
+        from azure.core.exceptions import ResourceNotFoundError
+
+        data = self._container.objects.get(self._name)
+        if data is None:
+            raise ResourceNotFoundError("missing")
+        return _FakeBlobProperties(_FakeBlobItem(self._name, data))
+
+    def download_blob(self, etag: str | None = None, match_condition: object = None, **_: object) -> _FakeBlobDownload:
+        return _FakeBlobDownload(self._container.objects[self._name])
+
+
+class FakeBlobContainer:
+    """In-memory container exposing only the read operations used by release association and store reads."""
+
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+
+    def list_blobs(self, name_starts_with: str = "", include: list[str] | None = None) -> list[_FakeBlobItem]:
+        return [
+            _FakeBlobItem(name, data)
+            for name, data in sorted(self.objects.items())
+            if name.startswith(name_starts_with)
+        ]
+
+    def get_blob_client(self, name: str) -> _FakeBlobClient:
+        return _FakeBlobClient(self, name)
+
+
+class _UnavailableBlobContainer:
+    def list_blobs(self, name_starts_with: str = "", include: list[str] | None = None) -> list[_FakeBlobItem]:
+        from azure.core.exceptions import ServiceRequestError
+
+        raise ServiceRequestError("container unavailable")
+
+
+BLOB_ACCOUNT = "https://releases.blob.core.windows.net"
+BLOB_PREFIX = "native/releases"
+
+
+def _mirror_publication(local_collection: Path, container: FakeBlobContainer, destination: BlobLocation) -> None:
+    """Copy one verified local collection into the fake container, rewriting only the destination intent."""
+    collection_text = release_collection_location(destination, "native").as_text()
+    for path in sorted(local_collection.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(local_collection).as_posix()
+        data = path.read_bytes()
+        if relative.startswith("_release_associations/"):
+            record = parse_strict_json(data)
+            record["intent"]["effective_destination"] = collection_text
+            record["intent"]["destination_alias"] = "remote"
+            data = canonical_json_bytes(record)
+        container.objects[f"{BLOB_PREFIX}/{relative}"] = data
+
+
+@pytest.fixture
+def blob_source(release_api: tuple) -> Iterator[tuple]:
+    test_client, spec, settings, app, root = release_api
+    _job, _published = _publish_local(test_client, spec, settings)
+    destination = BlobLocation(BLOB_ACCOUNT, "releases")
+    container = FakeBlobContainer()
+    _mirror_publication(settings.destinations["local"] / "native/releases", container, destination)
+    service = ReleaseService(
+        ReleaseApiSettings(settings.job_root, {"remote": destination}),
+        blob_container_factory=lambda location: container,
+    )
+    app.dependency_overrides[get_release_service] = lambda: service
+    yield test_client, spec, settings, container, root
+
+
+def test_blob_release_reads_match_local_contract_and_survive_source_removal(blob_source: tuple) -> None:
+    test_client, spec, settings, _container, root = blob_source
+    listing = test_client.get(SOURCE)
+    assert listing.status_code == 200, listing.json()
+    items = listing.json()["items"]
+    assert len(items) == 1
+    assert items[0]["dataset_name"] == spec["dataset_name"]
+    handle = items[0]["handle"]
+
+    read = test_client.get(f"{SOURCE}/{handle}")
+    assert read.status_code == 200, read.json()
+    assert read.json()["total_episodes"] == 2
+    assert read.json()["annotations"] == []
+    assert "blob.core.windows.net" not in read.text
+    assert "remote" not in read.text
+
+    shutil.rmtree(settings.job_root)
+    root.rename(root.parent / "source-removed")
+    retained = test_client.get(f"{SOURCE}/{handle}")
+    assert retained.status_code == 200
+    assert retained.json() == read.json()
+
+
+def test_blob_episode_projection_is_refused_explicitly_not_empty(blob_source: tuple) -> None:
+    test_client, _spec, _settings, _container, _root = blob_source
+    handle = test_client.get(SOURCE).json()["items"][0]["handle"]
+
+    episodes = test_client.get(f"{SOURCE}/{handle}/episodes")
+    assert episodes.status_code == 409
+    assert episodes.json()["detail"]["code"] == "release_read_unsupported_for_blob"
+    media = test_client.get(f"{SOURCE}/{handle}/episodes/0/media/{CAMERA}")
+    assert media.status_code == 409
+    assert media.json()["detail"]["code"] == "release_read_unsupported_for_blob"
+
+
+def test_blob_tampered_publication_is_hidden_and_listing_failure_is_explicit(blob_source: tuple) -> None:
+    test_client, _spec, settings, container, _root = blob_source
+    handle = test_client.get(SOURCE).json()["items"][0]["handle"]
+    frozen_name = f"{BLOB_PREFIX}/published/evidence/frozen-input.json"
+    original = container.objects[frozen_name]
+
+    container.objects[frozen_name] = original + b" "
+    assert test_client.get(SOURCE).json()["items"] == []
+    assert test_client.get(f"{SOURCE}/{handle}").status_code == 404
+
+    container.objects[frozen_name] = original
+    assert test_client.get(f"{SOURCE}/{handle}").status_code == 200
+
+    service = ReleaseService(
+        ReleaseApiSettings(settings.job_root, {"remote": BlobLocation(BLOB_ACCOUNT, "releases")}),
+        blob_container_factory=lambda location: _UnavailableBlobContainer(),
+    )
+    test_client.app.dependency_overrides[get_release_service] = lambda: service
+    unavailable = test_client.get(SOURCE)
+    assert unavailable.status_code == 409
+    assert unavailable.json()["detail"]["code"] == "release_verification_failed"

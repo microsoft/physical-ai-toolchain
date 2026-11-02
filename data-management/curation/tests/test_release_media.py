@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -12,6 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from physical_ai_curation.release.canonical import canonical_json_bytes
 from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.media import (
     ENV_PROCESSING_MEMORY,
@@ -32,7 +34,7 @@ from physical_ai_curation.release.media import (
     plan_release_objects,
     resolve_route,
 )
-from physical_ai_curation.release.models import PreviewAction, SourceObject, VersionIdentity
+from physical_ai_curation.release.models import FrozenInput, PreviewAction, SavedResource, SourceObject, VersionIdentity
 from physical_ai_curation.release.statistics import (
     MOMENT_KEYS,
     QUANTILE_KEYS,
@@ -398,6 +400,227 @@ def test_processing_estimate_allows_output_growth() -> None:
     )
 
     assert plan.objects[0].estimated_output_bytes == 1250
+
+
+PROJECTION_DATASET = "lab/ds"
+
+
+def _projection_episode(index: int, length: int = 10, removed: frozenset[int] = frozenset()) -> SubsetEpisodeInput:
+    return SubsetEpisodeInput(f"{PROJECTION_DATASET}/episode_{index:06d}", index, length, 10.0, removed)
+
+
+def _projection_frozen(*resources: tuple[str, object], episodes: tuple[int, ...] = (3, 7)) -> FrozenInput:
+    return FrozenInput(
+        selected_episode_ids=tuple(f"{PROJECTION_DATASET}/episode_{index:06d}" for index in episodes),
+        saved_resources=tuple(
+            SavedResource(resource_id=rid, revision="rev-1", value_json=canonical_json_bytes(value).decode())
+            for rid, value in resources
+        ),
+    )
+
+
+def _materialize_projections(frozen: FrozenInput, episodes: tuple[SubsetEpisodeInput, ...]) -> dict[str, bytes]:
+    from physical_ai_curation.release.projections import materialize_saved_projections
+
+    return materialize_saved_projections(frozen, episodes, release_dataset_id="released-dataset")
+
+
+def test_saved_annotation_materializes_at_output_index_path() -> None:
+    frozen = _projection_frozen(
+        (
+            "annotation/episode_000007",
+            {"annotations": [{"annotator_id": "reviewer-a", "task_completeness": {"rating": "success"}}]},
+        ),
+    )
+
+    files = _materialize_projections(frozen, (_projection_episode(3), _projection_episode(7)))
+
+    assert set(files) == {"annotations/episodes/episode_000001.json"}
+    payload = json.loads(files["annotations/episodes/episode_000001.json"])
+    assert payload["dataset_id"] == "released-dataset"
+    assert payload["output_episode_index"] == 1
+    assert payload["source_episode_id"] == f"{PROJECTION_DATASET}/episode_000007"
+    assert payload["annotations"][0]["task_completeness"] == {"rating": "success"}
+    assert files["annotations/episodes/episode_000001.json"] == canonical_json_bytes(payload)
+
+
+def test_labels_are_remapped_to_output_episode_keys_in_selection_order() -> None:
+    labels = {
+        "dataset_id": PROJECTION_DATASET,
+        "episodes": {"3": ["failure"], "7": ["success"]},
+        "analysis": {},
+        "provenance": {},
+    }
+    frozen = _projection_frozen(("labels/episode_000007", labels), ("labels/episode_000003", labels), episodes=(7, 3))
+
+    files = _materialize_projections(frozen, (_projection_episode(7), _projection_episode(3)))
+
+    payload = json.loads(files["meta/episode_labels.json"])
+    assert payload["episodes"] == {"0": ["success"], "1": ["failure"]}
+    assert payload["dataset_id"] == "released-dataset"
+
+
+def _machine_ledger(value: object) -> dict[str, object]:
+    contribution = {
+        "id": "c1",
+        "field": "labels",
+        "origin": "machine",
+        "value": value,
+        "sequence": 0,
+        "timestamp": "2026-01-01T00:00:00+00:00",
+        "machine": {
+            "run_id": "run-1",
+            "result_id": "result-1",
+            "run_order": 0,
+            "source_revision": "private-source-rev",
+            "input_revision": "input-rev",
+            "config_revision": "config-rev",
+        },
+    }
+    return {"schema_version": "1.0.0", "contributions": [contribution]}
+
+
+def test_labels_provenance_strips_private_source_revision_from_output() -> None:
+    labels = {
+        "dataset_id": PROJECTION_DATASET,
+        "episodes": {"7": ["success"]},
+        "provenance": {"7": _machine_ledger(["success"])},
+    }
+    frozen = _projection_frozen(("labels/episode_000007", labels), episodes=(7,))
+
+    files = _materialize_projections(frozen, (_projection_episode(7),))
+
+    raw = files["meta/episode_labels.json"]
+    assert b"private-source-rev" not in raw
+    machine = json.loads(raw)["provenance"]["0"]["contributions"][0]["machine"]
+    assert machine == {
+        "run_id": "run-1",
+        "result_id": "result-1",
+        "run_order": 0,
+        "input_revision": "input-rev",
+        "config_revision": "config-rev",
+    }
+    assert b"private-source-rev" in frozen.saved_resources[0].value_json.encode()
+
+
+def test_labels_provenance_with_private_principal_field_is_refused() -> None:
+    labels = {
+        "dataset_id": PROJECTION_DATASET,
+        "episodes": {"7": ["success"]},
+        "provenance": {"7": _machine_ledger({"principal_scope_id": "tenant-a"})},
+    }
+    frozen = _projection_frozen(("labels/episode_000007", labels), episodes=(7,))
+
+    with pytest.raises(ReleasePlanError, match="private principal"):
+        _materialize_projections(frozen, (_projection_episode(7),))
+
+
+def test_changed_episode_analysis_stays_frozen_not_output_valid() -> None:
+    labels = {
+        "dataset_id": PROJECTION_DATASET,
+        "available_labels": ["custom-label"],
+        "episodes": {"7": ["custom-label"]},
+        "analysis": {"7": {"grasp_success": True, "duration_s": 1.0}},
+    }
+    frozen = _projection_frozen(("labels/episode_000007", labels), episodes=(7,))
+
+    files = _materialize_projections(frozen, (_projection_episode(7, removed=frozenset({1})),))
+
+    payload = json.loads(files["meta/episode_labels.json"])
+    assert payload["analysis"] == {}
+    assert "custom-label" in payload["available_labels"]
+    assert json.loads(frozen.saved_resources[0].value_json)["analysis"]["7"]["grasp_success"] is True
+
+
+def test_frame_range_spans_remap_inclusively_around_removed_frames() -> None:
+    annotation = {
+        "annotations": [
+            {
+                "annotator_id": "reviewer-a",
+                "anomalies": {"anomalies": [{"id": "a1", "frame_range": [0, 2]}, {"id": "a2", "frame_range": [5, 9]}]},
+                "object_detections": [{"frame_index": 9}],
+            }
+        ]
+    }
+    frozen = _projection_frozen(("annotation/episode_000007", annotation), episodes=(7,))
+
+    files = _materialize_projections(frozen, (_projection_episode(7, removed=frozenset({1})),))
+
+    entry = json.loads(files["annotations/episodes/episode_000000.json"])["annotations"][0]
+    assert [item["frame_range"] for item in entry["anomalies"]["anomalies"]] == [[0, 0], [1, 1], [4, 8]]
+    assert entry["object_detections"][0]["frame_index"] == 8
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        {"annotations": [{"anomalies": {"anomalies": [{"frame_range": [8, 12]}]}}]},
+        {"annotations": [{"anomalies": {"anomalies": [{"frame_range": [5, 2]}]}}]},
+        {"annotations": [{"object_detections": [{"frame_index": 12}]}]},
+    ],
+    ids=["past-end", "inverted", "past-end-detection-frame"],
+)
+def test_unrepresentable_frame_references_are_rejected(annotation: dict[str, object]) -> None:
+    frozen = _projection_frozen(("annotation/episode_000007", annotation), episodes=(7,))
+
+    with pytest.raises(ReleasePlanError, match="frame"):
+        _materialize_projections(frozen, (_projection_episode(7, removed=frozenset({1})),))
+
+
+def test_projection_omits_excluded_annotations_and_preserves_source_claims() -> None:
+    annotation = {
+        "annotations": [
+            {
+                "task_completeness": {"rating": "success"},
+                "anomalies": {"anomalies": [{"frame_range": [1, 1]}]},
+                "data_quality": {"overall_quality": "good", "issues": [{"affected_frames": [0, 2]}]},
+                "object_detections": [{"frame_index": 1}],
+            }
+        ]
+    }
+    frozen = _projection_frozen(("annotation/episode_000007", annotation), episodes=(7,))
+
+    files = _materialize_projections(frozen, (_projection_episode(7, removed=frozenset({1})),))
+
+    entry = json.loads(files["annotations/episodes/episode_000000.json"])["annotations"][0]
+    assert entry["anomalies"]["anomalies"] == []
+    assert entry["object_detections"] == []
+    assert [issue["affected_frames"] for issue in entry["data_quality"]["issues"]] == [[0, 0], [1, 1]]
+    assert entry["source_claims"]["task_completeness"] == {"rating": "success"}
+    assert "task_completeness" not in entry
+
+
+def test_annotation_entries_are_remapped_once_and_never_dropped() -> None:
+    annotation = {
+        "annotations": [
+            {"annotator_id": "a", "anomalies": {"anomalies": [{"frame_range": [0, 2]}]}},
+            {"annotator_id": "b", "anomalies": {"anomalies": [{"frame_range": [0, 2]}]}},
+        ]
+    }
+    frozen = _projection_frozen(("annotation/episode_000007", annotation), episodes=(7,))
+
+    files = _materialize_projections(frozen, (_projection_episode(7, removed=frozenset({1})),))
+
+    entries = json.loads(files["annotations/episodes/episode_000000.json"])["annotations"]
+    assert len(entries) == 2
+    assert all(
+        [item["frame_range"] for item in entry["anomalies"]["anomalies"]] == [[0, 0], [1, 1]] for entry in entries
+    )
+
+
+@pytest.mark.parametrize("private_key", ["principal_scope_id", "source_id", "api_key"])
+def test_projection_refuses_private_principal_keys(private_key: str) -> None:
+    annotation = {"annotations": [{"annotator_id": "a", private_key: "private-value"}]}
+    frozen = _projection_frozen(("annotation/episode_000007", annotation), episodes=(7,))
+
+    with pytest.raises(ReleasePlanError, match="private"):
+        _materialize_projections(frozen, (_projection_episode(7),))
+
+
+def test_missing_saved_values_emit_no_projection_files() -> None:
+    frozen = _projection_frozen()
+
+    assert _materialize_projections(frozen, (_projection_episode(3), _projection_episode(7))) == {}
 
 
 @pytest.mark.parametrize("destination_available", [None, 10**12])

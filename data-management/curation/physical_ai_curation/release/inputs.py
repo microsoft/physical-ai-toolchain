@@ -433,8 +433,21 @@ def _referenced_authors(value: Any) -> set[str]:
     return authors
 
 
+def _selected_labels(value: dict[str, Any], episode_index: int) -> dict[str, Any]:
+    """Keep dataset label metadata and only the selected episode's labels, analysis, and provenance."""
+    key = str(episode_index)
+    selected = {
+        field: {key: value[field][key]}
+        for field in ("episodes", "analysis", "provenance")
+        if key in value.get(field, {})
+    }
+    return {field: value[field] for field in ("dataset_id", "available_labels") if field in value} | selected
+
+
 def _project_saved(value: dict[str, Any], item: SavedSelection, labels: dict[str, str]) -> dict[str, Any]:
-    if item.kind == "annotation":
+    if item.kind == "labels":
+        value = _selected_labels(value, item.episode_index)
+    elif item.kind == "annotation":
         authors = value.get("annotations", [])
         if item.annotation_author_id is not None:
             authors = [entry for entry in authors if entry.get("annotator_id") == item.annotation_author_id]

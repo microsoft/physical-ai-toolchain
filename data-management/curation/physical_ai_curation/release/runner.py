@@ -36,9 +36,9 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ConfiguredExecution:
-    """Trusted service/operator composition, never an HTTP request with client paths or actor overrides."""
+    """Trusted composition; source may be absent for committed verification, never generation."""
 
-    source: LocalReleaseSource | BlobReleaseSource
+    source: LocalReleaseSource | BlobReleaseSource | None
     reader: SavedInputReader
     selection: ReleaseSelection
     context: FreezeContext
@@ -86,6 +86,13 @@ async def execute_job(
         return None
     if record["state"] == "committed":
         with _publication_runtime(destination, attempt, store, job_id, record["fence"], None) as publisher:
+            from physical_ai_curation.release.blob_worker import SourceAssociatedBlobPublisher
+            from physical_ai_curation.release.local_worker import SourceAssociatedLocalPublisher
+
+            if isinstance(publisher, (SourceAssociatedLocalPublisher, SourceAssociatedBlobPublisher)):
+                publisher.associations.require_checkpoint(
+                    publisher.intent, record["commit_digest"], job_id=job_id, fence=record["fence"]
+                )
             return verify_published(publisher.store, record["commit_digest"])
 
     fence = store.claim(job_id, worker_id)
@@ -117,6 +124,8 @@ async def execute_job(
         payload = parse_strict_json(raw)
         if payload.get("schema_version") != "curated-release-generation/v1":
             raise ReleaseInputError("unsupported durable generation request")
+        if configured.source is None:
+            raise ReleaseInputError("generation requires the accepted source")
         frozen = TypeAdapter(FrozenReleaseInputs).validate_python(payload["frozen"])
         await revalidate_release_inputs(
             frozen,

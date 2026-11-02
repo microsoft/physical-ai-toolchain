@@ -129,11 +129,11 @@ def _plan_commit(
     document = working[key]
     if (
         not isinstance(document, dict)
-        or document.get("schema_version", SCHEMA_VERSION) != SCHEMA_VERSION
-        or document.get("job_id", key) != key
+        or document.get("schema_version") != SCHEMA_VERSION
+        or document.get("job_id") != key
     ):
         raise ReleaseVerificationError(f"job record has invalid schema_version or job_id: {key}")
-    body = canonical_json_bytes({**document, "schema_version": SCHEMA_VERSION, "job_id": key})
+    body = canonical_json_bytes(document)
     if len(body) > limits.max_record_bytes:
         raise ReleaseVerificationError("job record exceeds max_record_bytes")
     if key not in records and len(records) >= limits.max_jobs:
@@ -329,6 +329,20 @@ class BlobLocation:
         """Return the canonical text used for persistence, fingerprints, and binding comparisons."""
         base = f"{self.account_url}/{self.container}"
         return f"{base}/{self.prefix}" if self.prefix else base
+
+
+def release_collection_location(destination: Path | BlobLocation, source_relative_path: str) -> Path | BlobLocation:
+    """Resolve a confined source-specific collection without creating files or importing Azure."""
+    source_path = normalize_release_path(source_relative_path)
+    if isinstance(destination, BlobLocation):
+        return BlobLocation(
+            destination.account_url, destination.container, _child(destination.prefix, f"{source_path}/releases")
+        )
+    root = destination.resolve()
+    collection = (root / source_path / "releases").resolve()
+    if not collection.is_relative_to(root):
+        raise ValueError("release collection escapes configured destination")
+    return collection
 
 
 def _blob_container_client(account_url: str, container_name: str) -> Any:

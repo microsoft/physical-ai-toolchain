@@ -59,6 +59,7 @@ _SYNC_META_BLOBS = {
 }
 
 _RELEASES_NAMESPACE = "_releases"
+_RESERVED_NAMESPACES = frozenset({_RELEASES_NAMESPACE, "_release_associations"})
 _OWNERSHIP_MAX_BYTES = 64 * 1024
 _DEFAULT_RELEASE_VERIFY_TIMEOUT_SECONDS = 30.0
 _DEFAULT_RELEASE_VERIFY_MAX_BYTES = 4 * 1024**3
@@ -273,7 +274,7 @@ class BlobDatasetProvider:
     @staticmethod
     def get_blob_prefix(dataset_id: str) -> str:
         """Convert a --separated dataset ID to a /-separated blob prefix."""
-        if "_releases" in dataset_id.replace("--", "/").split("/"):
+        if _RESERVED_NAMESPACES.intersection(dataset_id.replace("--", "/").split("/")):
             raise ValueError("reserved releases require marker-aware admission")
         return dataset_id_to_blob_prefix(dataset_id)
 
@@ -329,28 +330,11 @@ class BlobDatasetProvider:
             return False
 
     async def _admit_release(self, dataset_id: str, deadline: float) -> bool:
-        """Admit legacy datasets, and named releases only when verified as published."""
+        """Admit ordinary sources only; recorded releases use immutable release contexts."""
         prefix = self.get_blob_prefix(dataset_id)
         client = await self._get_client()
         container = client.get_container_client(self.container_name)
-        raw = await self._read_ownership(container, prefix)
-        if raw is None:
-            return True
-
-        from physical_ai_curation.release.publication import parse_ownership
-
-        owner = parse_ownership(raw, prefix.rsplit("/", 1)[-1])
-
-        from physical_ai_curation.release.azure_publication import BlobReleaseStore
-        from physical_ai_curation.release.verification import verify_published
-
-        bridge = _ReleaseBridge(asyncio.get_running_loop(), deadline, self._release_verify_max_bytes)
-        try:
-            store = BlobReleaseStore(_SyncContainer(bridge, container), prefix)
-            result = await asyncio.to_thread(verify_published, store)
-        finally:
-            bridge.close()
-        return result.publication_state == "published" and result.identity.package_id == owner.package_id
+        return await self._read_ownership(container, prefix) is None
 
     async def _read_ownership(self, container: Any, prefix: str) -> bytes | None:
         owner_blob = container.get_blob_client(_ownership_blob_path(prefix))
@@ -372,7 +356,7 @@ class BlobDatasetProvider:
 
     async def _admit_blob_path(self, blob_path: str) -> bool:
         parts = blob_path.split("/")
-        if any(not part or part in (".", "..", "_releases") for part in parts):
+        if any(not part or part in (".", "..", *_RESERVED_NAMESPACES) for part in parts):
             return False
         for depth in range(1, min(5, len(parts) - 1) + 1):
             if not await self._admitted("--".join(parts[:depth])):
@@ -432,7 +416,7 @@ class BlobDatasetProvider:
 
         async def _walk(prefix: str, depth: int) -> None:
             segments = prefix.rstrip("/").split("/") if prefix else []
-            if "_releases" in segments:
+            if _RESERVED_NAMESPACES.intersection(segments):
                 return
             if 1 <= len(segments) <= max_depth and await _has_info_json(prefix):
                 dataset_id = "--".join(segments)
@@ -484,7 +468,7 @@ class BlobDatasetProvider:
 
     async def dataset_exists(self, dataset_id: str) -> bool:
         """Return True if the dataset has a meta/info.json blob."""
-        if "_releases" in dataset_id.replace("--", "/").split("/"):
+        if _RESERVED_NAMESPACES.intersection(dataset_id.replace("--", "/").split("/")):
             return False
         blob_path = f"{self.get_blob_prefix(dataset_id)}/meta/info.json"
         try:

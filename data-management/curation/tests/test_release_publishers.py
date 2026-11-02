@@ -6,6 +6,7 @@ import itertools
 import os
 import stat
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,15 @@ from physical_ai_curation.release.azure_publication import BlobPublisher, BlobRe
 from physical_ai_curation.release.canonical import canonical_json_bytes, sha256_hex
 from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.models import MARKER_PATH, SourceObject
-from physical_ai_curation.release.publication import LocalPublisher, PublicationAttempt
+from physical_ai_curation.release.publication import LocalPublisher, PublicationAttempt, local_dataset_admitted
+from physical_ai_curation.release.record_storage import BlobLocation, RecordLimits, release_collection_location
+from physical_ai_curation.release.source_associations import (
+    LocalSourceAssociations,
+    SourceAssociationIntent,
+    restore_source_association,
+    source_association_binding,
+    source_association_key,
+)
 from physical_ai_curation.release.store import LocalReleaseStore
 from test_release_contracts import _manifest_for, _payload_files, _write_package
 
@@ -44,6 +53,196 @@ class OwnedControl:
         yield
 
 
+def _association_intent(collection: Path) -> SourceAssociationIntent:
+    return SourceAssociationIntent(
+        source_key=source_association_key("trusted-source"),
+        source_identity="trusted-source",
+        source_revision="accepted-revision",
+        scope_sha256=sha256_hex(b"principal-a"),
+        destination_alias="output",
+        source_relative_path="group-a/source-a",
+        effective_destination=str(collection.resolve()),
+        attempt=PublicationAttempt("pkg-001", "attempt-1", "release-a"),
+        frozen_input_sha256=sha256_hex(canonical_json_bytes({"schema_version": "1.0.0"})),
+        display_name="Release A",
+        description="Selected training episodes",
+        accepted_at="2026-11-02T12:00:00+00:00",
+        source_display_label="Source A",
+    )
+
+
+def _viewer_association_binding(intent: SourceAssociationIntent) -> dict[str, Any]:
+    return {
+        "schema": "curated-release-execution/v3",
+        "selection": {},
+        "context": {},
+        "destination": intent.destination_alias,
+        "effective_destination": {"kind": "local", "path": intent.effective_destination},
+        "source_kind": "local",
+        "finalized": True,
+        "association": intent.model_dump(mode="json", exclude={"accepted_at"}),
+    }
+
+
+def test_given_viewer_intent_when_restored_then_acceptance_time_comes_from_durable_event(tmp_path: Path) -> None:
+    intent = _association_intent(tmp_path)
+    binding = canonical_json_bytes(_viewer_association_binding(intent))
+
+    restored = restore_source_association(binding, accepted_at=0)
+
+    assert restored == intent.model_copy(update={"accepted_at": "1970-01-01T00:00:00+00:00"})
+    assert restore_source_association(source_association_binding(intent), accepted_at=0) == intent
+
+
+@pytest.mark.parametrize("invalid", ["legacy", "timestamp", "oversized", "checkpoint", "missing_blob"])
+def test_given_invalid_accepted_association_when_restored_then_rejected(tmp_path: Path, invalid: str) -> None:
+    intent = _association_intent(tmp_path)
+    raw = _viewer_association_binding(intent)
+    if invalid == "legacy":
+        raw["schema"] = "curated-release-execution/v2"
+    elif invalid == "timestamp":
+        raw["association"]["accepted_at"] = intent.accepted_at
+    elif invalid == "oversized":
+        raw["association"]["description"] = "x" * (16 * 1024)
+    elif invalid == "missing_blob":
+        raw["effective_destination"] = {"kind": "blob"}
+        raw["association"] = None
+    else:
+        raw = {
+            "schema_version": "curated-release-association/v1",
+            "intent": intent.model_dump(mode="json"),
+            "checkpoint": {"manifest_sha256": "a" * 64, "job_id": "b" * 32, "fence": 1},
+        }
+
+    with pytest.raises(ReleaseVerificationError, match="unsupported accepted source association"):
+        restore_source_association(canonical_json_bytes(raw), accepted_at=0)
+
+
+def test_given_pending_association_when_output_removed_then_cleanup_is_repeat_safe(tmp_path: Path) -> None:
+    intent = _association_intent(tmp_path)
+    associations = LocalSourceAssociations(tmp_path, limits=RecordLimits())
+    associations.ensure_intent(intent)
+
+    associations.remove_pending(intent)
+    associations.remove_pending(intent)
+
+    assert not (tmp_path / "_release_associations/pkg-001.json").exists()
+
+
+@pytest.mark.parametrize("protection", ["output", "checkpoint", "foreign"])
+def test_given_protected_association_when_cleanup_attempted_then_record_is_retained(
+    tmp_path: Path, protection: str
+) -> None:
+    intent = _association_intent(tmp_path)
+    associations = LocalSourceAssociations(tmp_path, limits=RecordLimits())
+    associations.ensure_intent(intent)
+    if protection == "output":
+        (tmp_path / intent.attempt.prefix).mkdir()
+    elif protection == "checkpoint":
+        associations.bind_manifest(intent, "a" * 64, job_id="b" * 32, fence=1)
+    candidate = intent.model_copy(update={"source_revision": "foreign"}) if protection == "foreign" else intent
+    record = tmp_path / "_release_associations/pkg-001.json"
+    original = record.read_bytes()
+
+    with pytest.raises(ReleaseVerificationError):
+        associations.remove_pending(candidate)
+
+    assert record.read_bytes() == original
+
+
+def test_given_association_intent_when_replayed_then_identity_cannot_change(tmp_path: Path) -> None:
+    collection = release_collection_location(tmp_path, "group-a/source-a")
+    associations = LocalSourceAssociations(collection, limits=RecordLimits())
+    intent = _association_intent(collection)
+    associations.ensure_intent(intent)
+    original = (collection / "_release_associations/pkg-001.json").read_bytes()
+
+    associations.ensure_intent(intent)
+    with pytest.raises(ReleaseVerificationError, match="association conflict"):
+        associations.ensure_intent(intent.model_copy(update={"source_revision": "changed"}))
+
+    assert (collection / "_release_associations/pkg-001.json").read_bytes() == original
+    assert associations.discover(source_key=intent.source_key, scope_sha256=intent.scope_sha256) == []
+
+
+def test_given_bound_association_when_digest_changes_then_checkpoint_is_not_overwritten(tmp_path: Path) -> None:
+    collection = release_collection_location(tmp_path, "group-a/source-a")
+    associations = LocalSourceAssociations(collection, limits=RecordLimits())
+    intent = _association_intent(collection)
+    associations.ensure_intent(intent)
+    associations.bind_manifest(intent, "a" * 64, job_id="b" * 32, fence=1)
+    original = (collection / "_release_associations/pkg-001.json").read_bytes()
+
+    associations.bind_manifest(intent, "a" * 64, job_id="b" * 32, fence=2)
+    with pytest.raises(ReleaseVerificationError, match="association conflict"):
+        associations.bind_manifest(intent, "c" * 64, job_id="b" * 32, fence=2)
+
+    assert (collection / "_release_associations/pkg-001.json").read_bytes() == original
+
+
+def test_given_competing_association_commits_when_finalized_then_only_one_digest_wins(tmp_path: Path) -> None:
+    collection = release_collection_location(tmp_path, "group-a/source-a")
+    associations = LocalSourceAssociations(collection, limits=RecordLimits())
+    intent = _association_intent(collection)
+    associations.ensure_intent(intent)
+
+    def bind(digest: str) -> str | None:
+        try:
+            associations.bind_manifest(intent, digest, job_id="b" * 32, fence=1)
+            return digest
+        except ReleaseVerificationError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(bind, ["a" * 64, "c" * 64]))
+
+    assert outcomes.count(None) == 1
+    winner = next(digest for digest in outcomes if digest is not None)
+    associations.require_checkpoint(intent, winner, job_id="b" * 32, fence=1)
+
+
+def test_given_association_namespace_symlink_when_intent_written_then_outside_unchanged(tmp_path: Path) -> None:
+    collection = release_collection_location(tmp_path / "output", "group-a/source-a")
+    collection.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (collection / "_release_associations").symlink_to(outside, target_is_directory=True)
+    associations = LocalSourceAssociations(collection, limits=RecordLimits())
+
+    with pytest.raises(ReleaseVerificationError):
+        associations.ensure_intent(_association_intent(collection))
+
+    assert list(outside.iterdir()) == []
+
+
+def test_given_published_association_when_source_removed_then_only_accepted_scope_can_read(tmp_path: Path) -> None:
+    collection = release_collection_location(tmp_path / "destination", "group-a/source-a")
+    intent = _association_intent(collection)
+    source = tmp_path / "source"
+    files = _payload_files()
+    manifest = _manifest_for(files)
+    digest = _write_package(source, files, manifest)
+    intent = intent.model_copy(update={"frozen_input_sha256": manifest.frozen_input_sha256})
+    associations = LocalSourceAssociations(collection, limits=RecordLimits())
+    associations.ensure_intent(intent)
+    control = OwnedControl()
+    publisher = LocalPublisher(collection, intent.attempt, control)
+    for item in LocalReleaseStore(source).list_objects():
+        content = (source / item.path).read_bytes()
+        publisher.write(item.path, (content,), length=len(content), sha256=sha256_hex(content))
+    associations.bind_manifest(intent, digest, job_id="b" * 32, fence=1)
+    assert associations.discover(source_key=intent.source_key, scope_sha256=intent.scope_sha256) == []
+    control.commit = True
+    publisher.publish(digest)
+    source.rename(tmp_path / "source-unavailable")
+
+    assert associations.discover(source_key=intent.source_key, scope_sha256=intent.scope_sha256) == [publisher.root]
+    assert associations.discover(source_key=intent.source_key, scope_sha256=sha256_hex(b"other")) == []
+    assert associations.discover(source_key=sha256_hex(b"other-source"), scope_sha256=intent.scope_sha256) == []
+    (publisher.root / "media/front/episode-000.mp4").write_bytes(b"tampered")
+    assert associations.discover(source_key=intent.source_key, scope_sha256=intent.scope_sha256) == []
+
+
 def test_given_candidate_when_publish_then_independent_marker_gated_same_root(tmp_path: Path) -> None:
     source = tmp_path / "source"
     files = _payload_files()
@@ -64,6 +263,7 @@ def test_given_candidate_when_publish_then_independent_marker_gated_same_root(tm
 
     assert result.publication_state == "published"
     assert publisher.discover() == [publisher.root]
+    assert not local_dataset_admitted(publisher.root)
     assert publisher.publish(digest) == result
     assert (publisher.root / "media/front/episode-000.mp4").read_bytes() == files["media/front/episode-000.mp4"]
 
@@ -89,6 +289,54 @@ def test_given_chosen_dataset_name_when_written_then_layout_has_no_attempt_segme
     assert (publisher.root / "data/item").read_bytes() == b"x"
     assert (tmp_path / "_releases" / "plate-release.json").is_file()
     assert not (publisher.root / "try-a").exists()
+
+
+def test_given_nested_source_when_collection_resolved_then_full_path_preserved(tmp_path: Path) -> None:
+    destination = tmp_path / "destination"
+
+    collection = release_collection_location(destination, "group-a/source-a")
+
+    assert collection == destination / "group-a/source-a/releases"
+    assert not destination.exists()
+
+
+def test_given_blob_source_when_collection_resolved_then_configured_prefix_preserved() -> None:
+    destination = BlobLocation("https://samples.blob.core.windows.net", "releases", "configured")
+
+    collection = release_collection_location(destination, "group-a/source-a")
+
+    assert collection == BlobLocation(
+        destination.account_url, destination.container, "configured/group-a/source-a/releases"
+    )
+
+
+@pytest.mark.parametrize("source_path", ["../source", "group/../source", "group//source", "/source", "group\\source"])
+def test_given_unsafe_source_path_when_collection_resolved_then_refused(tmp_path: Path, source_path: str) -> None:
+    with pytest.raises((ValueError, ReleaseVerificationError)):
+        release_collection_location(tmp_path / "destination", source_path)
+
+
+def test_given_collection_symlink_escape_when_resolved_then_refused(tmp_path: Path) -> None:
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (destination / "group-a").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises((ValueError, ReleaseVerificationError)):
+        release_collection_location(destination, "group-a/source-a")
+
+    assert list(outside.iterdir()) == []
+
+
+def test_given_two_sources_when_same_release_name_published_then_ownership_is_source_local(tmp_path: Path) -> None:
+    for source_path in ("group-a/source-a", "group-a/source-b"):
+        collection = release_collection_location(tmp_path, source_path)
+        publisher = LocalPublisher(collection, PublicationAttempt("package", "attempt", "same-name"), OwnedControl())
+        publisher.write("data/item", (b"x",), length=1, sha256=sha256_hex(b"x"))
+
+        assert (collection / "_releases/same-name.json").is_file()
+        assert (collection / "same-name/data/item").read_bytes() == b"x"
 
 
 def test_given_named_root_owned_when_other_attempt_writes_then_foreign_attempt_refused(tmp_path: Path) -> None:
@@ -202,6 +450,19 @@ class _FakeDownload:
         yield self._data
 
 
+class _FakeLease:
+    def __init__(self, container: _FakeContainer, name: str) -> None:
+        self.container = container
+        self.name = name
+
+    def renew(self, **kwargs: Any) -> None:
+        if self.name not in self.container.leases:
+            raise _azure_errors().HttpResponseError(message="lease lost")
+
+    def release(self, **kwargs: Any) -> None:
+        self.container.leases.discard(self.name)
+
+
 class _FakeBlobClient:
     def __init__(self, container: _FakeContainer, name: str) -> None:
         self.container = container
@@ -253,10 +514,23 @@ class _FakeBlobClient:
         container.fault("upload_blob", after=False)
         if self.name in container.blobs and not overwrite:
             raise _azure_errors().ResourceExistsError("exists")
+        if kwargs.get("match_condition") == _match_conditions().IfNotModified:
+            current = container.blobs.get(self.name)
+            if current is None or kwargs.get("etag") != current.etag:
+                raise _azure_errors().ResourceModifiedError("changed")
         payload = data if isinstance(data, bytes) else b"".join(data)
         container.blobs[self.name] = _FakeRecord(payload, dict(metadata or {}), None)
         container.fault("upload_blob", after=True)
         return {}
+
+    def acquire_lease(self, lease_duration: int, **kwargs: Any) -> _FakeLease:
+        self._record()
+        if self.name in self.container.leases:
+            error = _azure_errors().HttpResponseError(message="LeaseAlreadyPresent")
+            error.status_code = 409
+            raise error
+        self.container.leases.add(self.name)
+        return _FakeLease(self.container, self.name)
 
     def download_blob(self, etag: str | None = None, match_condition: Any = None, **kwargs: Any) -> _FakeDownload:
         record = self._record()
@@ -308,6 +582,7 @@ class _FakeContainer:
         self.corrupt_copy = False
         self.pending_data: dict[str, bytes] = {}
         self.copy_count = 0
+        self.leases: set[str] = set()
         self.registry = registry
         registry[self.url] = self
 
@@ -771,3 +1046,197 @@ def test_given_no_commit_when_publish_marker_then_refused_without_marker(
         publisher._publish_marker(b"marker", expected_manifest_sha256=sha256_hex(b"marker"))
 
     assert _name(publisher, MARKER_PATH) not in destination.blobs
+
+
+BLOB_COLLECTION = BlobLocation("https://dest-account.blob.core.windows.net", "release", "releases/group-a/source-a")
+BLOB_NAMESPACE = f"{BLOB_COLLECTION.prefix}/_release_associations"
+BLOB_LOCK = f"{BLOB_NAMESPACE}/.lock"
+
+
+def _blob_record(package_id: str = "pkg-001") -> str:
+    return f"{BLOB_NAMESPACE}/{package_id}.json"
+
+
+def _blob_intent(tmp_path: Path) -> SourceAssociationIntent:
+    return _association_intent(tmp_path).model_copy(update={"effective_destination": BLOB_COLLECTION.as_text()})
+
+
+def _blob_associations(container: _FakeContainer, *, limits: RecordLimits | None = None) -> Any:
+    from physical_ai_curation.release.blob_source_associations import BlobSourceAssociations
+
+    return BlobSourceAssociations(container, BLOB_COLLECTION, limits=limits or RecordLimits())
+
+
+def test_given_blob_intent_when_replayed_then_create_only_and_identity_cannot_change(
+    tmp_path: Path, destination: _FakeContainer
+) -> None:
+    associations = _blob_associations(destination)
+    intent = _blob_intent(tmp_path)
+    associations.ensure_intent(intent)
+    original = destination.blobs[_blob_record()].data
+
+    associations.ensure_intent(intent)
+    with pytest.raises(ReleaseVerificationError, match="association conflict"):
+        associations.ensure_intent(intent.model_copy(update={"source_revision": "changed"}))
+
+    assert destination.blobs[_blob_record()].data == original
+    assert associations.discover(source_key=intent.source_key, scope_sha256=intent.scope_sha256) == []
+
+
+def test_given_blob_intent_for_other_destination_when_ensured_then_refused_before_writes(
+    tmp_path: Path, destination: _FakeContainer
+) -> None:
+    other = BlobLocation(BLOB_COLLECTION.account_url, "release", "releases/other-source").as_text()
+    intent = _blob_intent(tmp_path).model_copy(update={"effective_destination": other})
+
+    with pytest.raises(ReleaseVerificationError, match="destination conflict"):
+        _blob_associations(destination).ensure_intent(intent)
+
+    assert destination.blobs == {}
+
+
+def test_given_blob_pending_association_when_output_removed_then_cleanup_is_repeat_safe(
+    tmp_path: Path, destination: _FakeContainer
+) -> None:
+    associations = _blob_associations(destination)
+    intent = _blob_intent(tmp_path)
+    associations.ensure_intent(intent)
+
+    associations.remove_pending(intent)
+    associations.remove_pending(intent)
+
+    assert _blob_record() not in destination.blobs
+
+
+@pytest.mark.parametrize("protection", ["output", "checkpoint", "foreign"])
+def test_given_protected_blob_association_when_cleanup_attempted_then_record_is_retained(
+    tmp_path: Path, destination: _FakeContainer, protection: str
+) -> None:
+    associations = _blob_associations(destination)
+    intent = _blob_intent(tmp_path)
+    associations.ensure_intent(intent)
+    if protection == "output":
+        destination.put(f"{BLOB_COLLECTION.prefix}/{intent.attempt.prefix}/media/front/episode-000.mp4", b"x")
+    elif protection == "checkpoint":
+        associations.bind_manifest(intent, "a" * 64, job_id="b" * 32, fence=1)
+    candidate = intent.model_copy(update={"source_revision": "foreign"}) if protection == "foreign" else intent
+    original = destination.blobs[_blob_record()].data
+
+    with pytest.raises(ReleaseVerificationError):
+        associations.remove_pending(candidate)
+
+    assert destination.blobs[_blob_record()].data == original
+
+
+def test_given_blob_checkpoint_when_bound_then_same_commit_is_idempotent_and_conflicts_refused(
+    tmp_path: Path, destination: _FakeContainer
+) -> None:
+    associations = _blob_associations(destination)
+    intent = _blob_intent(tmp_path)
+    associations.ensure_intent(intent)
+    associations.bind_manifest(intent, "a" * 64, job_id="b" * 32, fence=1)
+    original = destination.blobs[_blob_record()].data
+
+    associations.bind_manifest(intent, "a" * 64, job_id="b" * 32, fence=2)
+    with pytest.raises(ReleaseVerificationError, match="association conflict"):
+        associations.bind_manifest(intent, "c" * 64, job_id="b" * 32, fence=2)
+    associations.require_checkpoint(intent, "a" * 64, job_id="b" * 32, fence=2)
+
+    assert destination.blobs[_blob_record()].data == original
+
+
+def test_given_checkpoint_revision_conflict_when_bound_then_refused_and_record_unchanged(
+    tmp_path: Path, destination: _FakeContainer
+) -> None:
+    associations = _blob_associations(destination)
+    intent = _blob_intent(tmp_path)
+    associations.ensure_intent(intent)
+    original = destination.blobs[_blob_record()].data
+    destination.inject("upload_blob", _azure_errors().ResourceModifiedError("changed"), after=False)
+
+    with pytest.raises(ReleaseVerificationError, match="association write refused"):
+        associations.bind_manifest(intent, "a" * 64, job_id="b" * 32, fence=1)
+
+    assert destination.blobs[_blob_record()].data == original
+    with pytest.raises(ReleaseVerificationError, match="checkpoint is missing"):
+        associations.require_checkpoint(intent, "a" * 64, job_id="b" * 32, fence=1)
+
+
+def test_given_lost_checkpoint_response_when_retried_then_reconciled_without_overwrite(
+    tmp_path: Path, destination: _FakeContainer
+) -> None:
+    associations = _blob_associations(destination)
+    intent = _blob_intent(tmp_path)
+    associations.ensure_intent(intent)
+    destination.inject("upload_blob", _azure_errors().ServiceRequestError("reset"), after=True)
+
+    associations.bind_manifest(intent, "a" * 64, job_id="b" * 32, fence=1)
+
+    associations.require_checkpoint(intent, "a" * 64, job_id="b" * 32, fence=1)
+
+
+def test_given_held_association_lock_when_intent_written_then_bounded_wait_refuses_without_record(
+    tmp_path: Path, destination: _FakeContainer
+) -> None:
+    destination.put(BLOB_LOCK, b"")
+    destination.leases.add(BLOB_LOCK)
+    associations = _blob_associations(destination, limits=RecordLimits(timeout_seconds=0.05))
+
+    with pytest.raises(TimeoutError, match="contention"):
+        associations.ensure_intent(_blob_intent(tmp_path))
+
+    assert _blob_record() not in destination.blobs
+
+
+@pytest.mark.parametrize("bound", ["jobs", "bytes"])
+def test_given_record_bound_when_second_package_admitted_then_refused_and_first_retained(
+    tmp_path: Path, destination: _FakeContainer, bound: str
+) -> None:
+    first = _blob_intent(tmp_path)
+    second = first.model_copy(update={"attempt": PublicationAttempt("pkg-002", "attempt-2", "release-b")})
+    _blob_associations(destination).ensure_intent(first)
+    size = len(destination.blobs[_blob_record()].data)
+    limits = RecordLimits(max_jobs=1) if bound == "jobs" else RecordLimits(max_record_bytes=size, max_total_bytes=size)
+    original = destination.blobs[_blob_record()].data
+
+    with pytest.raises(ReleaseVerificationError, match="bounds exceeded"):
+        _blob_associations(destination, limits=limits).ensure_intent(second)
+
+    assert _blob_record("pkg-002") not in destination.blobs
+    assert destination.blobs[_blob_record()].data == original
+
+
+def test_given_blob_release_when_verified_then_discovery_is_scoped_and_tamper_evident(
+    tmp_path: Path, destination: _FakeContainer, control: OwnedControl
+) -> None:
+    source = tmp_path / "source"
+    files = _payload_files()
+    manifest = _manifest_for(files)
+    digest = _write_package(source, files, manifest)
+    intent = _blob_intent(tmp_path).model_copy(update={"frozen_input_sha256": manifest.frozen_input_sha256})
+    associations = _blob_associations(destination)
+    associations.ensure_intent(intent)
+    publisher = BlobPublisher(destination, intent.attempt, control, root_prefix=BLOB_COLLECTION.prefix)
+    for item in LocalReleaseStore(source).list_objects():
+        content = (source / item.path).read_bytes()
+        publisher.write(item.path, (content,), length=len(content), sha256=sha256_hex(content))
+    associations.bind_manifest(intent, digest, job_id="b" * 32, fence=1)
+    assert associations.discover(source_key=intent.source_key, scope_sha256=intent.scope_sha256) == []
+
+    control.commit = True
+    publisher.publish(digest)
+
+    assert associations.discover(source_key=intent.source_key, scope_sha256=intent.scope_sha256) == [publisher.root]
+    assert associations.discover(source_key=intent.source_key, scope_sha256=sha256_hex(b"other")) == []
+    assert associations.discover(source_key=sha256_hex(b"other-source"), scope_sha256=intent.scope_sha256) == []
+    destination.blobs[publisher.root + PATH].data = b"tampered"
+    assert associations.discover(source_key=intent.source_key, scope_sha256=intent.scope_sha256) == []
+
+
+def test_given_non_blob_collection_when_constructed_then_unsupported_refused(
+    tmp_path: Path, destination: _FakeContainer
+) -> None:
+    from physical_ai_curation.release.blob_source_associations import BlobSourceAssociations
+
+    with pytest.raises(ReleaseVerificationError, match="unsupported"):
+        BlobSourceAssociations(destination, tmp_path, limits=RecordLimits())

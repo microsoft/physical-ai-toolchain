@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -221,6 +222,36 @@ def test_given_machine_ledger_when_freeze_then_preserves_origin_revision(local_s
 
     assert '"source_revision":"bound-source-content"' in frozen.content.saved_resources[0].value_json
     assert frozen.content.ledger_contribution_ids == ("finding-1",)
+
+
+def test_given_labels_for_other_episodes_when_freeze_then_only_selected_episode_retained(
+    local_source: LocalReleaseSource,
+) -> None:
+    class LabelsReader(SavedReader):
+        async def release_resource(self, dataset_id: str, selection: SavedSelection) -> SavedResource:
+            return SavedResource(
+                {
+                    "dataset_id": "sample",
+                    "available_labels": ["success", "failure"],
+                    "episodes": {"0": ["success"], "1": ["failure"]},
+                    "analysis": {"0": {"duration_s": 1.0}, "1": {"duration_s": 2.0}},
+                    "provenance": {
+                        "0": {"schema_version": "1.0.0", "contributions": []},
+                        "1": {"schema_version": "1.0.0", "contributions": []},
+                    },
+                },
+                "labels-v1",
+            )
+
+    selection = _selection(SavedSelection(kind="labels", episode_index=0, expected_revision="labels-v1"))
+    frozen = asyncio.run(freeze_release_inputs(local_source, LabelsReader(), selection, _context()))
+
+    value = json.loads(frozen.content.saved_resources[0].value_json)
+    assert value["episodes"] == {"0": ["success"]}
+    assert value["analysis"] == {"0": {"duration_s": 1.0}}
+    assert set(value["provenance"]) == {"0"}
+    assert value["available_labels"] == ["success", "failure"]
+    assert value["dataset_id"] == "sample"
 
 
 def test_given_no_recording_receipt_when_freeze_then_origin_explicitly_unknown(

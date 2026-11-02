@@ -1,7 +1,7 @@
 ---
 title: Curation
 description: Saved-input curation, durable judge jobs and portable release verification.
-ms.date: 2026-10-30
+ms.date: 2026-11-02
 ms.topic: reference
 ---
 
@@ -156,27 +156,95 @@ The caller supplies admitted source streams and a private output sink. The helpe
 does not check storage revisions, own effects or publish a release.
 
 `release.publication.LocalPublisher` writes independent, create-only objects under
-the chosen dataset name beneath an explicitly supplied destination. The name
+the chosen dataset name beneath an explicitly supplied collection. The name
 defaults to the package ID; `PublicationAttempt.dataset_name` selects another
-name. Configure a parent subfolder to group releases, or use the normal `data_dir`
-or Azure dataset container. Attempt identity does not add another dataset level.
+name. Trusted composition uses `release.record_storage.release_collection_location`
+to derive `DEST/<full-source-relative-path>/releases` from a configured local root
+or Blob container/prefix. For source `group-a/source-a`, a named package is
+`DEST/group-a/source-a/releases/release-a`. The viewer release service resolves
+this collection before preview/acceptance and persists the effective destination
+in its private `curated-release-execution/v3` binding. Restart uses that accepted
+location, not a newly derived alias root. Attempt identity adds no dataset level.
 An external `_releases/<dataset_name>.json` companion binds the named root to its
 package/attempt before payload writes; existing unowned roots are never adopted.
 Directory entries and completed object names are synchronized before completion.
 `prepare` independently verifies destination content and writes derived receipt
 and report artifacts. `publish` writes the canonical marker without a rename or
-promotion copy, then verifies the published package. Generic viewer catalogs
-exclude operational metadata, not completed release datasets. Publisher and viewer
-discovery admit recorded names only after independent marker/content verification;
-direct reads apply the same check. Legacy datasets without an ownership record
-remain ordinary datasets and are not labelled verified releases. Blob admission
-uses the existing async storage client through a bounded streaming bridge, with
-no second credential client or whole-payload buffer. Configure its total deadline
-and byte budget after environment loading; the defaults are 30 seconds and 4 GiB.
-Larger releases may need higher configured bounds. A missing marker, changed
-payload, unavailable ownership probe or exhausted budget refuses admission rather
-than falling back to legacy discovery. Dataset video uploads do not mutate a
-recorded release.
+promotion copy, then verifies the published package. Local ordinary dataset
+admission excludes all recorded release roots, including completed ones. Dedicated
+publisher discovery independently verifies ownership and marker/content bindings.
+Source-associated viewer listing and retained read-only metadata handles use
+verified destination associations for local and Blob collections. Both exclude
+recorded releases from the ordinary catalog. Ordinary source identity must not
+bypass release immutability. Missing markers or unavailable verification never
+authorize published access.
+
+The coordinator writes selected frozen annotation and label projections beside
+native output: `annotations/episodes/episode_<output-index>.json` uses six-digit
+indices, and `meta/episode_labels.json` uses release dataset identity and output
+episode keys. Retained-frame annotation spans are remapped; source-only claims
+and analysis invalidated by removed frames remain historical frozen evidence.
+These objects are inventoried before sealing. Saved edit instructions are not
+replayed against generated output. Retained metadata reads return these published
+projections, not original source-coordinate frozen resources. They use a shared
+response-byte bound and are not mutable source-write envelopes. Complete selected
+label-reader and preview/admission accounting parity remain integration work.
+
+For headless publication, `release.source_associations.SourceAssociationIntent`
+binds trusted source identity/revision, existing principal scope, destination and
+presentation values. Persist `source_association_binding(intent)` in the accepted
+`JobRequest.execution_binding`. The coordinator and independent runner restore
+that intent and select `release.local_worker.SourceAssociatedLocalPublisher` or
+`release.blob_worker.SourceAssociatedBlobPublisher` for the accepted route;
+an explicitly supplied publisher must match the accepted association.
+The publisher compares the intent with the durable job, creates its private
+`_release_associations/<package-id>.json` before payload effects and binds the
+final manifest under commit authority before the supervised marker writer starts.
+A different frozen-input digest is refused before irreversible commit. Same-job
+recovery preserves the first matching checkpoint; marked packages with missing
+associations are not adopted.
+
+`LocalSourceAssociations.discover` takes trusted source and existing principal
+scope digests, then independently verifies ownership, marker, manifest and frozen
+input bindings. It needs neither the source bytes nor job history. Its results
+are local library paths, not HTTP handles or permission grants. The private record
+format is `curated-release-association/v1`, bounded to 16 KiB. Accepted bindings
+must contain a pending intent, not a final checkpoint. Preparation and restoration
+enforce the intent bound; contention and
+collection bounds reuse configured durable-record limits. Both operational
+namespaces are excluded from ordinary local dataset scanning and direct lookup.
+Viewer v3 binds deterministic local or Blob association fields before acceptance and
+restores the acceptance timestamp from the durable job event. Native admission
+reserves the selected output budget alongside peak scratch, rather than preliminary
+generated-object estimates. Committed job result and allowlisted artifact reads
+verify the accepted destination and association without opening the original
+source. Removing the marker still refuses those reads. Job-scoped controls require
+retained job records; source-linked metadata handles do not. Local native episode
+and media reads also survive source removal. Blob episode/media routes currently
+refuse unsupported reads explicitly; metadata/projection reads are supported.
+Local cancellation removes only a matching pending association after owned output
+cleanup and before capacity release; conflicting or finalized records are retained.
+Associated Blob cancellation fault/restart proof remains incomplete. Supervised
+dispatch renews a live worker lease even for children shorter than the heartbeat
+interval; it never revives an expired fence.
+
+### Clean Start After Release Contract Changes
+
+Old release layouts, incomplete former job records and previous execution
+bindings are unsupported. There are no migration tools, old-command aliases,
+fallback parsers or automatic missing-field upgrades. Users are responsible for
+cleaning obsolete release structures before starting the updated workflow.
+
+Stop release workers and settle or reconcile pending local processes and remote
+copies first. Never delete job/effect records while uncertain work still depends
+on them. Archive any old published packages or diagnostics needed for retention
+outside the configured active roots. Then remove obsolete flat release directories,
+their ownership/association sidecars, former job records and unused private
+runtime/scratch state. Start with an empty release job root and the source-mirrored
+collection layout. Do not delete source datasets or another active user's state.
+This is an operator cleanup procedure, not automatic package adoption or migration.
+Current supported source formats and truthful unknown-origin provenance remain
+supported data, not release compatibility fallbacks.
 
 `release.azure_publication.BlobPublisher` uses injected synchronous Azure clients,
 create-only destination writes, source ETag conditions and independent streaming

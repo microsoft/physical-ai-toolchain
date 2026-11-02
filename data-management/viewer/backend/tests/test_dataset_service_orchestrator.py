@@ -134,8 +134,11 @@ class TestDatasetDiscovery:
         with pytest.raises(ValueError, match="release"):
             service._get_dataset_path("plate-release")
 
-    async def test_given_unpublished_reserved_tree_when_scan_then_not_a_legacy_dataset(self, tmp_path: Path) -> None:
-        candidate = tmp_path / "_releases" / "pkg" / "attempt"
+    @pytest.mark.parametrize("namespace", ["_releases", "_release_associations"])
+    async def test_given_operational_namespace_when_scanned_then_not_an_ordinary_dataset(
+        self, tmp_path: Path, namespace: str
+    ) -> None:
+        candidate = tmp_path / namespace / "pkg" / "attempt"
         candidate.mkdir(parents=True)
         service = DatasetService(base_path=str(tmp_path))
         handler = _make_handler()
@@ -147,7 +150,7 @@ class TestDatasetDiscovery:
 
         assert discovered == set()
         with pytest.raises(ValueError, match="reserved"):
-            service._get_dataset_path("_releases--pkg--attempt")
+            service._get_dataset_path(f"{namespace}--pkg--attempt")
 
     @pytest.mark.parametrize("failure", ["fallback", "missing", "container"])
     async def test_given_blob_manifest_missing_when_resolving_then_only_missing_objects_are_skipped(

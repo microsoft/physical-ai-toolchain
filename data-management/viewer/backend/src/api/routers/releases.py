@@ -220,6 +220,78 @@ async def get_result(
         _raise(error)
 
 
+@router.get("/sources/{dataset_id}/releases")
+async def list_source_releases(
+    dataset_id: str,
+    principal: PrincipalContext = Depends(require_principal_context),
+    service: ReleaseService = Depends(get_release_service),
+) -> dict[str, Any]:
+    """List verified releases of a source visible to the caller. Read-only; no paths in output."""
+    try:
+        return service.source_releases(_scope(principal), dataset_id.replace("\r", "").replace("\n", ""))
+    except ReleaseApiError as error:
+        _raise(error)
+
+
+@router.get("/sources/{dataset_id}/releases/{handle}")
+async def get_source_release(
+    dataset_id: str,
+    handle: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")],
+    principal: PrincipalContext = Depends(require_principal_context),
+    service: ReleaseService = Depends(get_release_service),
+) -> dict[str, Any]:
+    """Read one verified source release by opaque handle. Read-only; 404 when not visible."""
+    try:
+        return service.source_release(_scope(principal), dataset_id.replace("\r", "").replace("\n", ""), handle)
+    except ReleaseApiError as error:
+        _raise(error)
+
+
+@router.get("/sources/{dataset_id}/releases/{handle}/episodes")
+async def list_source_episodes(
+    dataset_id: str,
+    handle: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")],
+    cursor: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    principal: PrincipalContext = Depends(require_principal_context),
+    service: ReleaseService = Depends(get_release_service),
+) -> dict[str, Any]:
+    """Page native episode metadata of a verified local release. Paths are never returned."""
+    try:
+        return service.source_episodes(
+            _scope(principal),
+            dataset_id.replace("\r", "").replace("\n", ""),
+            handle,
+            cursor=int(cursor),
+            limit=int(limit),
+        )
+    except ReleaseApiError as error:
+        _raise(error)
+
+
+@router.get("/sources/{dataset_id}/releases/{handle}/episodes/{episode_index}/media/{camera}")
+async def get_source_episode_media(
+    dataset_id: str,
+    handle: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")],
+    episode_index: Annotated[int, Path(ge=0)],
+    camera: Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]{1,128}$")],
+    principal: PrincipalContext = Depends(require_principal_context),
+    service: ReleaseService = Depends(get_release_service),
+) -> Response:
+    """Return the MP4 container holding one episode's camera stream from a verified local release."""
+    try:
+        content = service.source_episode_media(
+            _scope(principal),
+            dataset_id.replace("\r", "").replace("\n", ""),
+            handle,
+            episode_index=int(episode_index),
+            camera=camera,
+        )
+    except ReleaseApiError as error:
+        _raise(error)
+    return Response(content=content, media_type="video/mp4", headers={"Cache-Control": "no-store"})
+
+
 @router.get("/jobs/{job_id}/artifacts/{artifact}")
 async def get_artifact(
     job_id: JobId,

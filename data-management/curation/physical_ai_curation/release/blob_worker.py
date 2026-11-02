@@ -33,7 +33,8 @@ from physical_ai_curation.release.azure_publication import (
     _properties,
     _verified_stream,
 )
-from physical_ai_curation.release.canonical import normalize_release_path, sha256_hex
+from physical_ai_curation.release.blob_source_associations import BlobSourceAssociations
+from physical_ai_curation.release.canonical import normalize_release_path, parse_strict_json, sha256_hex
 from physical_ai_curation.release.composition import NativeGenerationPlan
 from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.jobs import (
@@ -51,11 +52,17 @@ from physical_ai_curation.release.local_worker import (
     LINUX_F_SEAL_WRITE,
     MAX_PROTOCOL_BYTES,
 )
-from physical_ai_curation.release.models import MARKER_PATH, ReleaseResult, SourceObject
+from physical_ai_curation.release.models import MANIFEST_PATH, MARKER_PATH, ReleaseResult, SourceObject
 from physical_ai_curation.release.publication import PublicationAttempt, ownership_bytes, ownership_path
-from physical_ai_curation.release.record_storage import BlobLocation, storage_from_configuration
+from physical_ai_curation.release.record_storage import BlobLocation, RecordLimits, storage_from_configuration
+from physical_ai_curation.release.source_associations import SourceAssociationIntent, source_association_binding
 from physical_ai_curation.release.store import CHUNK_BYTES, LocalReleaseStore
-from physical_ai_curation.release.verification import build_marker, verify_candidate, verify_published
+from physical_ai_curation.release.verification import (
+    MAX_CONTROL_BYTES,
+    build_marker,
+    verify_candidate,
+    verify_published,
+)
 from physical_ai_curation.release.worker import run_supervised
 
 
@@ -312,7 +319,11 @@ class SupervisedBlobPublisher(BlobPublisher):
             length=length,
             digest=digest,
         )
+        self._retire_association()
         self.jobs.settle_cancellation(self.job_id, self.fence, output_removed=True)
+
+    def _retire_association(self) -> None:
+        """Hook for removing a pending association after outputs are gone and before settlement."""
 
     def _record_copy(self, source: SourceObject) -> None:
         operation = sha256_hex(f"blob-copy:{self.attempt.key}:{source.path}:{source.revision}".encode())
@@ -453,6 +464,77 @@ class SupervisedBlobPublisher(BlobPublisher):
                 raise ReleaseVerificationError("supervised blob copy did not complete")
         finally:
             os.close(descriptor)
+
+
+class SourceAssociatedBlobPublisher(SupervisedBlobPublisher):
+    """Publish an accepted Blob source association before effects and bind it before the final marker."""
+
+    def __init__(
+        self,
+        container: Any,
+        location: BlobLocation,
+        attempt: PublicationAttempt,
+        jobs: ReleaseJobStore,
+        job_id: str,
+        fence: int,
+        intent: SourceAssociationIntent,
+    ) -> None:
+        super().__init__(container, location, attempt, jobs, job_id, fence)
+        self.intent = intent
+        configuration = jobs.storage.configuration()
+        limits = RecordLimits(
+            **{
+                key: configuration[key]
+                for key in ("timeout_seconds", "max_record_bytes", "max_total_bytes", "max_jobs")
+            }
+        )
+        self.associations = BlobSourceAssociations(container, location, limits=limits)
+        self._validate_association()
+
+    def _validate_association(self) -> None:
+        if (self.intent.attempt.key, self.intent.attempt.prefix) != (self.attempt.key, self.attempt.prefix):
+            raise ReleaseVerificationError("association attempt conflict")
+        self.jobs.validate_source_association(
+            self.job_id,
+            self.fence,
+            self.location,
+            self.attempt,
+            source_association_binding(self.intent),
+            self.intent.scope_sha256,
+        )
+
+    def _claim_root(self) -> None:
+        self._validate_association()
+        self.associations.ensure_intent(self.intent)
+        super()._claim_root()
+
+    def _publish_marker(self, marker: bytes, *, expected_manifest_sha256: str) -> None:
+        self._validate_association()
+        with self.control.publication(self.attempt, expected_manifest_sha256):
+            self.associations.bind_manifest(self.intent, expected_manifest_sha256, job_id=self.job_id, fence=self.fence)
+            super()._publish_marker(marker, expected_manifest_sha256=expected_manifest_sha256)
+
+    def _retire_association(self) -> None:
+        self._validate_association()
+        self.associations.remove_pending(self.intent)
+
+    def publish(self, expected_manifest_sha256: str) -> ReleaseResult:
+        self._validate_association()
+        payload = self.store.read_control_bytes(MANIFEST_PATH, max_bytes=MAX_CONTROL_BYTES)
+        if sha256_hex(payload) != expected_manifest_sha256:
+            raise ReleaseVerificationError("association manifest digest conflict")
+        manifest = parse_strict_json(payload)
+        if not isinstance(manifest, dict) or manifest.get("frozen_input_sha256") != self.intent.frozen_input_sha256:
+            raise ReleaseVerificationError("association frozen input binding conflict")
+        if any(item.path == MARKER_PATH for item in self.store.list_objects()):
+            self.associations.require_checkpoint(
+                self.intent, expected_manifest_sha256, job_id=self.job_id, fence=self.fence
+            )
+        result = super().publish(expected_manifest_sha256)
+        self.associations.require_checkpoint(
+            self.intent, expected_manifest_sha256, job_id=self.job_id, fence=self.fence
+        )
+        return result
 
 
 class _RegisteredCopyControl:
