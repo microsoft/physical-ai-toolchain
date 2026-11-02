@@ -15,6 +15,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from physical_ai_curation.models import DatasetLabelsFile
 from physical_ai_curation.release.canonical import sha256_hex
 from physical_ai_curation.release.composition import prepare_saved_generation
 from physical_ai_curation.release.coordinator import GenerationInputs, generation_request_bytes, run_release_generation
@@ -29,7 +30,13 @@ from physical_ai_curation.release.inputs import (
     freeze_release_inputs,
 )
 from physical_ai_curation.release.jobs import JobRequest
-from physical_ai_curation.release.media import MediaWindow, ObjectPlanRequest, StorageEndpoint, SubsetEpisodeInput
+from physical_ai_curation.release.media import (
+    MediaWindow,
+    ObjectPlanRequest,
+    ReleasePlanError,
+    StorageEndpoint,
+    SubsetEpisodeInput,
+)
 from physical_ai_curation.release.models import ProducerIdentity, VersionIdentity
 from physical_ai_curation.release.native_worker import _source_spec, native_operation, restore_inputs
 from physical_ai_curation.release.publication import LocalPublisher
@@ -442,7 +449,60 @@ _process(Path(sys.argv[1]), container_factory=fs_factory(Path(sys.argv[2])))
 """
 
 
-def _blob_native_case(tmp_path: Path, *, processed: bool = False) -> tuple:
+@pytest.mark.parametrize("invalid_frames", [False, True])
+def test_given_invalid_or_overbudget_projection_when_generating_then_refused_before_runtime_or_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid_frames: bool
+) -> None:
+    source, reader, _old_selection, context, _old_frozen, inputs, _video = _native_case(tmp_path)
+    reader.annotations = SavedResource(
+        {"annotations": [{"object_detections": [{"frame_index": 99 if invalid_frames else 0}]}]},
+        "annotation-v1",
+    )
+    selection = _selection(SavedSelection("annotation", 0, "annotation-v1"))
+    frozen = asyncio.run(freeze_release_inputs(source, reader, selection, context))
+    inputs = replace(inputs, request=replace(inputs.request, frozen_input_sha256=frozen.sha256))
+    prepared = prepare_saved_generation(
+        frozen.content, inputs.request, inputs.sources, camera_statistics=inputs.camera_statistics
+    )
+    inputs = replace(
+        inputs,
+        confirmed_digest=prepared.plan.digest,
+        output_bytes=inputs.output_bytes if invalid_frames else prepared.plan.capacity.payload_bytes,
+    )
+    destination = tmp_path / "output"
+    store = _store(tmp_path / "ledger", OffsetClock())
+    request = replace(
+        _request(destination), frozen_request=generation_request_bytes(frozen, inputs), reserved_bytes=32 * 1024**2
+    )
+    job = store.accept(request)
+    fence = store.claim(job.job_id, "worker")
+
+    def forbid_dispatch(*args: object, **kwargs: object) -> None:
+        raise AssertionError("projection rejection must precede runtime and destination effects")
+
+    monkeypatch.setattr("physical_ai_curation.release.native_worker.native_operation", forbid_dispatch)
+    monkeypatch.setattr("physical_ai_curation.release.coordinator._publication_runtime", forbid_dispatch)
+    with pytest.raises((ReleaseInputError, ReleasePlanError), match=r"outside|destination budget"):
+        asyncio.run(
+            run_release_generation(
+                store=store,
+                job_id=job.job_id,
+                fence=fence,
+                destination=destination,
+                attempt=ATTEMPT,
+                expected=frozen,
+                source=source,
+                reader=reader,
+                selection=selection,
+                context=context,
+                inputs=inputs,
+            )
+        )
+    assert not destination.exists()
+    assert store.get(job.job_id, scope=request.scope, principal=OWNER).scratch_bytes == 0
+
+
+def _blob_native_case(tmp_path: Path, *, processed: bool = False, saved: bool = False) -> tuple:
     local, reader, selection, context, _, inputs, _ = _native_case(tmp_path, processed=processed)
     sdk = tmp_path / "sdk"
     remote = FsContainer(sdk, "example", "source")
@@ -450,6 +510,29 @@ def _blob_native_case(tmp_path: Path, *, processed: bool = False) -> tuple:
         if path.is_file():
             remote.put("native/" + path.relative_to(local.root).as_posix(), path.read_bytes())
     source = BlobReleaseSource(remote, prefix="native")
+    if saved:
+        reader.annotations = SavedResource(
+            {
+                "annotations": [
+                    {"annotator_id": "private-human", "detected_objects": [{"label": "cup", "frame_index": 0}]}
+                ]
+            },
+            "annotation-v1",
+        )
+        labels = DatasetLabelsFile(dataset_id="sample", episodes={"0": ["accepted"], "99": ["excluded"]})
+
+        async def selected_labels(_dataset_id: str, _selection_value: SavedSelection) -> SavedResource:
+            return SavedResource(labels.model_dump(mode="json"), "labels-v1")
+
+        reader.release_resource = selected_labels
+        selection = replace(
+            selection,
+            resources=(
+                *selection.resources,
+                SavedSelection(kind="annotation", episode_index=0, expected_revision="annotation-v1"),
+                SavedSelection(kind="labels", episode_index=0, expected_revision="labels-v1"),
+            ),
+        )
     frozen = asyncio.run(freeze_release_inputs(source, reader, selection, context))
     identities = {item.path: item for item in frozen.content.source_objects}
     endpoint = StorageEndpoint(alias="blob", kind="blob", account=source.location.account_url)
@@ -523,10 +606,13 @@ def test_given_blob_native_inputs_when_supervised_then_only_conditioned_tables_r
 
 
 @pytest.mark.parametrize("processed", [False, True])
+@pytest.mark.parametrize("saved", [False, True])
 def test_given_blob_source_when_coordinated_then_independent_native_release(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, processed: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, processed: bool, saved: bool
 ) -> None:
-    source, reader, selection, context, frozen, inputs, sdk, remote = _blob_native_case(tmp_path, processed=processed)
+    source, reader, selection, context, frozen, inputs, sdk, remote = _blob_native_case(
+        tmp_path, processed=processed, saved=saved
+    )
     monkeypatch.setattr(
         "physical_ai_curation.release.native_worker._command",
         lambda path: [sys.executable, "-B", "-c", NATIVE_BLOB_CODE, str(path), str(sdk), str(Path(__file__).parent)],
@@ -571,6 +657,18 @@ def test_given_blob_source_when_coordinated_then_independent_native_release(
     assert verify_published(publisher.store, result.identity.manifest_sha256) == result
     info = json.loads(publisher.store.read_control_bytes("meta/info.json", max_bytes=1024**2))
     assert info["total_frames"] == 2
+    if saved:
+        released_labels = json.loads(publisher.store.read_control_bytes("meta/episode_labels.json", max_bytes=1024**2))
+        annotation = json.loads(
+            publisher.store.read_control_bytes("annotations/episodes/episode_000000.json", max_bytes=1024**2)
+        )
+        assert released_labels["episodes"] == {"0": ["accepted"]}
+        assert released_labels["dataset_id"] == ATTEMPT.prefix
+        assert annotation["output_episode_index"] == 0
+        assert annotation["annotations"][0]["detected_objects"][0]["frame_index"] == 0
+        inventory = json.loads(publisher.store.read_control_bytes("release/inventory.json", max_bytes=1024**2))
+        paths = {entry["path"] for entry in inventory["entries"]}
+        assert {"meta/episode_labels.json", "annotations/episodes/episode_000000.json"} <= paths
     record = store.storage.snapshot()[job.job_id]
     assert record["state"] == "committed"
     if processed:

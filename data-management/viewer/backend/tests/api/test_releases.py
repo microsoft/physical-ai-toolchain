@@ -17,6 +17,7 @@ import pyarrow.parquet as pq
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from physical_ai_curation.models import DatasetLabelsFile
 from physical_ai_curation.release.canonical import canonical_json_bytes, parse_strict_json
 from physical_ai_curation.release.jobs import ReleaseJobStore
 from physical_ai_curation.release.record_storage import BlobLocation, release_collection_location
@@ -24,10 +25,14 @@ from physical_ai_curation.release.runner import execute_job
 from physical_ai_curation.release.store import LocalReleaseStore
 
 from src.api.auth import PrincipalContext, require_principal_context
+from src.api.models.annotations import EpisodeAnnotationFile
 from src.api.routers.releases import router
+from src.api.services.annotation_service import AnnotationService
 from src.api.services.dataset_service import DatasetService
+from src.api.services.label_storage import LocalLabelStorage
 from src.api.services.release_service import ReleaseApiSettings, ReleaseService, _source_release, get_release_service
 from src.api.services.viewer_release_planner import ViewerReleasePlanner
+from src.api.storage.local_revision import write_conditional
 from tests.lerobot_sources import CAMERA, write_source
 
 BASE = "/api/releases/v1"
@@ -51,6 +56,8 @@ def release_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tup
     import src.api.services.viewer_release_planner as planner_module
 
     monkeypatch.setattr(planner_module, "get_dataset_service", lambda: datasets)
+    annotations = AnnotationService(base_path=str(root.parent))
+    monkeypatch.setattr(planner_module, "get_annotation_service", lambda: annotations)
     app = FastAPI()
     app.include_router(router, prefix=BASE)
     app.dependency_overrides[get_release_service] = lambda: ReleaseService(
@@ -86,6 +93,25 @@ def _submit(test_client: TestClient, spec: dict, preview: dict, *, key: str = "r
             "local_disk_acknowledged": True,
         },
     )
+
+
+@pytest.mark.parametrize("name", ["CURATION_RELEASE_READ_METADATA_BYTES", "CURATION_RELEASE_READ_MEDIA_BYTES"])
+@pytest.mark.parametrize("value", ["0", "-1", "invalid"])
+def test_given_invalid_retained_read_limit_when_loading_settings_then_refused(name: str, value: str) -> None:
+    from src.api.services.release_service import load_release_api_settings
+
+    with pytest.raises(ValueError, match="positive integer"):
+        load_release_api_settings({name: value})
+
+
+def test_given_retained_read_overrides_when_loading_settings_then_applied() -> None:
+    from src.api.services.release_service import load_release_api_settings
+
+    settings = load_release_api_settings(
+        {"CURATION_RELEASE_READ_METADATA_BYTES": "1024", "CURATION_RELEASE_READ_MEDIA_BYTES": "2048"}
+    )
+    assert settings.metadata_max_bytes == 1024
+    assert settings.media_max_bytes == 2048
 
 
 def test_preview_is_read_only_and_inventory_is_paged(release_api: tuple) -> None:
@@ -430,13 +456,22 @@ def test_given_verified_projection_when_browsed_then_output_coordinates_not_froz
     (root / "meta/info.json").write_bytes(canonical_json_bytes({"total_episodes": 1}))
     (root / "meta/episode_labels.json").write_bytes(canonical_json_bytes(labels))
     (root / "annotations/episodes/episode_000000.json").write_bytes(canonical_json_bytes(annotation))
+    entries = [
+        {"path": path.relative_to(root).as_posix(), "length": path.stat().st_size, "sha256": _sha256(path)}
+        for path in sorted(root.rglob("*.json"))
+    ]
+    (root / "release").mkdir()
+    inventory = canonical_json_bytes({"schema_version": "1.0.0", "entries": entries})
+    (root / "release/inventory.json").write_bytes(inventory)
+    manifest = canonical_json_bytes({"inventory_sha256": hashlib.sha256(inventory).hexdigest()})
+    (root / "release/manifest.json").write_bytes(manifest)
     item = _source_release(
         "local",
         "native",
         "0" * 64,
         dataset_name="published",
         package_id="package",
-        manifest_sha256="0" * 64,
+        manifest_sha256=hashlib.sha256(manifest).hexdigest(),
         store=LocalReleaseStore(root),
         local_root=root,
     )
@@ -571,16 +606,160 @@ def test_blob_release_reads_match_local_contract_and_survive_source_removal(blob
     assert retained.json() == read.json()
 
 
-def test_blob_episode_projection_is_refused_explicitly_not_empty(blob_source: tuple) -> None:
-    test_client, _spec, _settings, _container, _root = blob_source
+def test_blob_episode_reads_match_local_contract_and_survive_source_removal(blob_source: tuple) -> None:
+    test_client, _spec, settings, container, root = blob_source
     handle = test_client.get(SOURCE).json()["items"][0]["handle"]
 
-    episodes = test_client.get(f"{SOURCE}/{handle}/episodes")
-    assert episodes.status_code == 409
-    assert episodes.json()["detail"]["code"] == "release_read_unsupported_for_blob"
+    page = test_client.get(f"{SOURCE}/{handle}/episodes", params={"limit": 1})
+    assert page.status_code == 200, page.json()
+    body = page.json()
+    assert body["total"] == 2
+    assert body["next_cursor"] == 1
+    assert [item["episode_index"] for item in body["items"]] == [0]
+    assert body["items"][0]["cameras"] == [CAMERA]
+    assert "blob.core.windows.net" not in page.text
+
+    full = test_client.get(f"{SOURCE}/{handle}/episodes", params={"limit": 100})
+    assert full.status_code == 200, full.json()
+    assert [item["episode_index"] for item in full.json()["items"]] == [0, 1]
+
     media = test_client.get(f"{SOURCE}/{handle}/episodes/0/media/{CAMERA}")
-    assert media.status_code == 409
-    assert media.json()["detail"]["code"] == "release_read_unsupported_for_blob"
+    assert media.status_code == 200, media.json()
+    assert media.headers["content-type"] == "video/mp4"
+    assert media.content == container.objects[f"{BLOB_PREFIX}/published/videos/{CAMERA}/chunk-000/file-000.mp4"]
+
+    shutil.rmtree(settings.job_root)
+    root.rename(root.parent / "source-removed")
+    retained_full = test_client.get(f"{SOURCE}/{handle}/episodes", params={"limit": 100})
+    assert retained_full.status_code == 200
+    assert retained_full.json() == full.json()
+    retained_media = test_client.get(f"{SOURCE}/{handle}/episodes/0/media/{CAMERA}")
+    assert retained_media.status_code == 200
+    assert retained_media.content == media.content
+
+
+@pytest.mark.parametrize("remote", [False, True])
+def test_given_selected_curation_when_released_then_retained_output_projections_are_immutable(
+    release_api: tuple, remote: bool
+) -> None:
+    test_client, spec, settings, app, root = release_api
+    labels = DatasetLabelsFile(dataset_id="native", episodes={"1": ["accepted"], "99": ["excluded"]})
+    labels_etag = asyncio.run(LocalLabelStorage(str(root.parent)).save("native", labels, if_none_match=True))
+    annotation_path = root / "annotations/episodes/episode_000001.json"
+    annotation = EpisodeAnnotationFile.model_validate(
+        {
+            "dataset_id": "native",
+            "episode_index": 1,
+            "annotations": [
+                {
+                    "annotator_id": "localuser",
+                    "timestamp": "2026-11-02T00:00:00Z",
+                    "task_completeness": {"rating": "success", "confidence": 5},
+                    "trajectory_quality": {
+                        "overall_score": 5,
+                        "metrics": {"smoothness": 5, "efficiency": 5, "safety": 5, "precision": 5},
+                    },
+                    "data_quality": {"overall_quality": "good", "issues": []},
+                    "anomalies": {"anomalies": []},
+                }
+            ],
+        }
+    )
+    annotation_etag = write_conditional(annotation_path, annotation.model_dump_json(), if_none_match=True)
+    selected = {
+        **spec,
+        "episode_indices": [1],
+        "resources": [
+            {"kind": "labels", "episode_index": 1, "expected_revision": labels_etag},
+            {"kind": "annotation", "episode_index": 1, "expected_revision": annotation_etag},
+        ],
+    }
+    baseline = _preview(test_client, {**spec, "episode_indices": [1]})
+    preview = _preview(test_client, selected)
+    summary = preview["summary"]
+    assert summary["projection_objects"] == 2
+    assert summary["projection_bytes"] > 0
+    assert summary["capacity"]["generated_bytes"] == (
+        baseline["summary"]["capacity"]["generated_bytes"] + summary["projection_bytes"]
+    )
+    assert preview["reserved_bytes"] >= summary["destination_budget_bytes"] + summary["native_scratch_bytes"]
+    _job, published = _publish_local(test_client, selected, settings)
+    frozen_bytes = (published / "evidence/frozen-input.json").read_bytes()
+    assert b"labels/episode_000001" in frozen_bytes
+    assert b'"output_episode_index":0' in (published / "annotations/episodes/episode_000000.json").read_bytes()
+    if remote:
+        destination = BlobLocation(BLOB_ACCOUNT, "releases")
+        container = FakeBlobContainer()
+        _mirror_publication(settings.destinations["local"] / "native/releases", container, destination)
+        service = ReleaseService(
+            ReleaseApiSettings(settings.job_root, {"remote": destination}),
+            blob_container_factory=lambda location: container,
+        )
+        app.dependency_overrides[get_release_service] = lambda: service
+    handle = test_client.get(SOURCE).json()["items"][0]["handle"]
+    before = test_client.get(f"{SOURCE}/{handle}").json()
+    assert before["labels"]["dataset_id"] == "published"
+    assert before["labels"]["episodes"] == {"0": ["accepted"]}
+    assert len(before["annotations"]) == 1
+    assert before["annotations"][0]["output_episode_index"] == 0
+    assert before["annotations"][0]["source_episode_id"].endswith("episode_000001")
+    shutil.rmtree(settings.job_root)
+    root.rename(root.parent / "source-removed")
+    retained = test_client.get(f"{SOURCE}/{handle}")
+    assert retained.status_code == 200, retained.json()
+    assert retained.json() == before
+    for method in ("post", "put", "patch", "delete"):
+        assert test_client.request(method.upper(), f"{SOURCE}/{handle}", json={}).status_code == 405
+    assert (published / "evidence/frozen-input.json").read_bytes() == frozen_bytes
+
+
+def test_given_blob_bytes_change_after_admission_when_read_then_inventoried_hash_refuses_response(
+    blob_source: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    test_client, _spec, _settings, container, _root = blob_source
+    handle = test_client.get(SOURCE).json()["items"][0]["handle"]
+    service = test_client.app.dependency_overrides[get_release_service]()
+    original = service._find_source
+
+    def admit_then_change(*args: object) -> object:
+        item = original(*args)
+        name = f"{BLOB_PREFIX}/published/meta/info.json"
+        changed = json.loads(container.objects[name])
+        changed["total_episodes"] = 3
+        container.objects[name] = canonical_json_bytes(changed)
+        return item
+
+    monkeypatch.setattr(service, "_find_source", admit_then_change)
+    response = test_client.get(f"{SOURCE}/{handle}")
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "release_verification_failed"
+
+
+@pytest.mark.parametrize("view", ["metadata", "episodes", "media"])
+def test_given_blob_revision_read_failure_after_admission_when_browsing_then_safe_verification_error(
+    blob_source: tuple, monkeypatch: pytest.MonkeyPatch, view: str
+) -> None:
+    from azure.core.exceptions import HttpResponseError
+
+    test_client, _spec, _settings, _container, _root = blob_source
+    handle = test_client.get(SOURCE).json()["items"][0]["handle"]
+    service = test_client.app.dependency_overrides[get_release_service]()
+    original = service._find_source
+
+    def refuse_read(*_args: object, **_kwargs: object) -> bytes:
+        raise HttpResponseError("private-account endpoint and provider failure")
+
+    def admit_then_fail(*args: object) -> object:
+        item = original(*args)
+        monkeypatch.setattr(item.store, "read_control_bytes", refuse_read)
+        return item
+
+    monkeypatch.setattr(service, "_find_source", admit_then_fail)
+    suffix = {"metadata": "", "episodes": "/episodes", "media": f"/episodes/0/media/{CAMERA}"}[view]
+    response = test_client.get(f"{SOURCE}/{handle}{suffix}")
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "release_verification_failed"
+    assert "private-account" not in response.text
 
 
 def test_blob_tampered_publication_is_hidden_and_listing_failure_is_explicit(blob_source: tuple) -> None:

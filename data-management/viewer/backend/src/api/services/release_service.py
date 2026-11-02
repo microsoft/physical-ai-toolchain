@@ -6,11 +6,13 @@ operator-owned configuration and never returned to, or accepted from, clients.
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import os
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import ExitStack
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -31,6 +33,7 @@ from physical_ai_curation.release.jobs import (
     ReleaseJobStore,
     ReleaseRuntimeSettings,
 )
+from physical_ai_curation.release.models import INVENTORY_PATH, MANIFEST_PATH, Inventory
 from physical_ai_curation.release.projections import LABELS_PATH
 from physical_ai_curation.release.publication import PublicationAttempt
 from physical_ai_curation.release.record_storage import (
@@ -41,10 +44,9 @@ from physical_ai_curation.release.record_storage import (
 )
 from physical_ai_curation.release.runner import ConfiguredExecution
 from physical_ai_curation.release.source_associations import LocalSourceAssociations, VerifiedAssociation
-from physical_ai_curation.release.store import LocalReleaseStore
+from physical_ai_curation.release.store import CHUNK_BYTES, LocalReleaseStore
 from physical_ai_curation.release.verification import MAX_CONTROL_BYTES
 from physical_ai_dataset_io.lerobot import EpisodeRecord, iter_episodes
-from physical_ai_dataset_io.media import validate_video_path
 
 __all__ = [
     "CAPABILITY_SCHEMA",
@@ -70,6 +72,7 @@ _DATASET_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._\- ]{0,254}")
 _IDEMPOTENCY_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 _MAX_EPISODES = 10_000
 _MAX_MEDIA_BYTES = 512 * 1024**2
+_MAX_METADATA_BYTES = 64 * 1024**2
 
 
 class ReleaseApiError(Exception):
@@ -87,6 +90,8 @@ class ReleaseApiSettings:
 
     job_root: Path | None
     destinations: Mapping[str, Path | BlobLocation] = field(default_factory=dict)
+    metadata_max_bytes: int = _MAX_METADATA_BYTES
+    media_max_bytes: int = _MAX_MEDIA_BYTES
 
     @property
     def enabled(self) -> bool:
@@ -120,7 +125,24 @@ def load_release_api_settings(environ: Mapping[str, str]) -> ReleaseApiSettings:
                 destinations[alias] = Path(location)
             else:
                 raise ValueError(f"{RELEASE_DESTINATIONS_ENV} entries must be configured storage roots")
-    return ReleaseApiSettings(job_root=job_root, destinations=destinations)
+    limits = {}
+    for name, default in (
+        ("CURATION_RELEASE_READ_METADATA_BYTES", _MAX_METADATA_BYTES),
+        ("CURATION_RELEASE_READ_MEDIA_BYTES", _MAX_MEDIA_BYTES),
+    ):
+        try:
+            value = int(environ.get(name, str(default)))
+        except ValueError as error:
+            raise ValueError(f"{name} must be a positive integer") from error
+        if value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+        limits[name] = value
+    return ReleaseApiSettings(
+        job_root=job_root,
+        destinations=destinations,
+        metadata_max_bytes=limits["CURATION_RELEASE_READ_METADATA_BYTES"],
+        media_max_bytes=limits["CURATION_RELEASE_READ_MEDIA_BYTES"],
+    )
 
 
 @dataclass(frozen=True)
@@ -401,18 +423,20 @@ class ReleaseService:
 
     def source_releases(self, scope: str, dataset_id: str) -> dict[str, Any]:
         """List verified releases of one source visible to the caller; no paths or aliases in output."""
-        return {
-            "schema": CAPABILITY_SCHEMA,
-            "items": [
-                {
-                    "handle": item.handle,
-                    "dataset_name": item.dataset_name,
-                    "package_id": item.package_id,
-                    "manifest_sha256": item.manifest_sha256,
-                }
-                for item in self._verified_sources(scope, dataset_id)
-            ],
-        }
+        with ExitStack() as stack:
+            items = self._verified_sources(scope, dataset_id, stack)
+            return {
+                "schema": CAPABILITY_SCHEMA,
+                "items": [
+                    {
+                        "handle": item.handle,
+                        "dataset_name": item.dataset_name,
+                        "package_id": item.package_id,
+                        "manifest_sha256": item.manifest_sha256,
+                    }
+                    for item in items
+                ],
+            }
 
     def source_release(self, scope: str, dataset_id: str, handle: str) -> dict[str, Any]:
         """Read one verified release by handle, including its saved annotations.
@@ -420,46 +444,51 @@ class ReleaseService:
         The handle depends only on durable association intent and verified publication
         bytes, so it survives restarts and job-row removal.
         """
-        item = self._find_source(scope, dataset_id, handle)
-        try:
-            info_bytes = item.store.read_control_bytes("meta/info.json", max_bytes=MAX_CONTROL_BYTES)
-            info = parse_strict_json(info_bytes)
-            total = info["total_episodes"]
-            remaining = MAX_CONTROL_BYTES - len(info_bytes)
-            paths = {obj.path for obj in item.store.list_objects()}
-            annotations = []
-            labels = None
-            for path in sorted(paths):
-                if path != LABELS_PATH and not re.fullmatch(r"annotations/episodes/episode_[0-9]{6}\.json", path):
-                    continue
-                content = item.store.read_control_bytes(path, max_bytes=remaining)
-                remaining -= len(content)
-                projection = parse_strict_json(content)
-                if path == LABELS_PATH:
-                    labels = projection
-                else:
-                    annotations.append(projection)
-        except (ReleaseVerificationError, OSError, ValueError, KeyError, TypeError) as error:
-            raise ReleaseApiError(409, "release_verification_failed") from error
-        if type(total) is not int:
-            raise ReleaseApiError(409, "release_verification_failed")
-        return {
-            "schema": CAPABILITY_SCHEMA,
-            "handle": handle,
-            "dataset_name": item.dataset_name,
-            "package_id": item.package_id,
-            "manifest_sha256": item.manifest_sha256,
-            "total_episodes": total,
-            "annotations": annotations,
-            "labels": labels,
-        }
+        with ExitStack() as stack:
+            item = self._find_source(scope, dataset_id, handle, stack)
+            try:
+                files = _release_files(item, metadata_max_bytes=self._settings.metadata_max_bytes)
+                info_bytes = files.read_bytes("meta/info.json")
+                info = parse_strict_json(info_bytes)
+                total = info["total_episodes"]
+                remaining = MAX_CONTROL_BYTES - len(info_bytes)
+                paths = files.paths()
+                annotations = []
+                labels = None
+                for path in sorted(paths):
+                    if path != LABELS_PATH and not re.fullmatch(r"annotations/episodes/episode_[0-9]{6}\.json", path):
+                        continue
+                    content = files.read_bytes(path)
+                    if len(content) > remaining:
+                        raise ReleaseVerificationError("projection response exceeds bound")
+                    remaining -= len(content)
+                    projection = parse_strict_json(content)
+                    if path == LABELS_PATH:
+                        labels = projection
+                    else:
+                        annotations.append(projection)
+            except _release_read_errors() as error:
+                raise ReleaseApiError(409, "release_verification_failed") from error
+            if type(total) is not int:
+                raise ReleaseApiError(409, "release_verification_failed")
+            return {
+                "schema": CAPABILITY_SCHEMA,
+                "handle": handle,
+                "dataset_name": item.dataset_name,
+                "package_id": item.package_id,
+                "manifest_sha256": item.manifest_sha256,
+                "total_episodes": total,
+                "annotations": annotations,
+                "labels": labels,
+            }
 
     def source_episodes(self, scope: str, dataset_id: str, handle: str, *, cursor: int, limit: int) -> dict[str, Any]:
-        """Page native episode metadata of one verified local release. Blob reads are refused explicitly."""
+        """Page native episode metadata of one verified release, read through its store for local and Blob."""
         if not cursor >= 0 or not 1 <= limit <= 100:
             raise ReleaseApiError(422, "invalid_episode_page")
-        root = _local_root(self._find_source(scope, dataset_id, handle))
-        records = _episode_records(root)
+        with ExitStack() as stack:
+            item = self._find_source(scope, dataset_id, handle, stack)
+            records = _episode_records(_release_files(item, metadata_max_bytes=self._settings.metadata_max_bytes))
         return {
             "schema": CAPABILITY_SCHEMA,
             "items": [_episode_body(record) for record in records[cursor : cursor + limit]],
@@ -475,31 +504,29 @@ class ReleaseService:
         LeRobot v3 packs several episodes into one container file; the episode's
         ``from_timestamp`` and ``to_timestamp`` locate it inside that file.
         """
-        root = _local_root(self._find_source(scope, dataset_id, handle))
-        records = _episode_records(root, indices=[episode_index])
-        if not records:
-            raise ReleaseApiError(404, "release_episode_not_found")
-        path = records[0].video_paths.get(camera)
-        if path is None:
-            raise ReleaseApiError(404, "release_media_not_found")
-        try:
-            if path.stat().st_size > _MAX_MEDIA_BYTES:
-                raise ReleaseApiError(422, "release_media_exceeds_bound")
-            return path.read_bytes()
-        except OSError as error:
-            raise ReleaseApiError(409, "release_verification_failed") from error
+        with ExitStack() as stack:
+            item = self._find_source(scope, dataset_id, handle, stack)
+            files = _release_files(item, metadata_max_bytes=self._settings.metadata_max_bytes)
+            records = _episode_records(files, indices=[episode_index])
+            if not records:
+                raise ReleaseApiError(404, "release_episode_not_found")
+            path = records[0].video_paths.get(camera)
+            if path is None:
+                raise ReleaseApiError(404, "release_media_not_found")
+            return _release_media(files, path.as_posix(), media_max_bytes=self._settings.media_max_bytes)
 
-    def _find_source(self, scope: str, dataset_id: str, handle: str) -> _SourceRelease:
-        for item in self._verified_sources(scope, dataset_id):
+    def _find_source(self, scope: str, dataset_id: str, handle: str, stack: ExitStack) -> _SourceRelease:
+        for item in self._verified_sources(scope, dataset_id, stack):
             if item.handle == handle:
                 return item
         raise ReleaseApiError(404, "release_not_found")
 
-    def _verified_sources(self, scope: str, dataset_id: str) -> list[_SourceRelease]:
+    def _verified_sources(self, scope: str, dataset_id: str, stack: ExitStack) -> list[_SourceRelease]:
         """Discover verified releases of one source from every configured destination alias.
 
-        Each call re-verifies published bytes; nothing is cached. Records whose intent does
-        not match this source path and alias are hidden. Blob listing failures raise.
+        Each call re-verifies published bytes; nothing is cached. Blob containers opened here
+        are closed when ``stack`` exits. Records whose intent does not match this source path
+        and alias are hidden. Blob listing failures raise.
         """
         if not _DATASET_ID.fullmatch(dataset_id):
             raise ReleaseApiError(422, "dataset id is invalid")
@@ -531,6 +558,7 @@ class ReleaseService:
                 continue
             try:
                 container = self._blob_container_factory(location)
+                stack.callback(_close_container, container)
                 associations = BlobSourceAssociations(container, collection, limits=RecordLimits())
                 verified_blobs = associations.discover_verified(scope_sha256=scope_sha256)
             except ReleaseVerificationError as error:
@@ -647,23 +675,133 @@ def _default_blob_container(location: BlobLocation) -> Any:
     return _blob_container_client(location.account_url, location.container)
 
 
-def _local_root(item: _SourceRelease) -> Path:
-    if item.local_root is None:
-        raise ReleaseApiError(409, "release_read_unsupported_for_blob")
-    return item.local_root
+def _close_container(container: Any) -> None:
+    close = getattr(container, "close", None)
+    if callable(close):
+        close()
 
 
-def _episode_records(root: Path, indices: list[int] | None = None) -> list[EpisodeRecord]:
-    """Resolve published episodes through the shared dataset-io reader, confined to the release root."""
-    try:
-        records = list(
-            iter_episodes(
-                root,
-                indices=indices,
-                video_validator=lambda path: validate_video_path(path, root),
-            )
+class _ReleaseFiles:
+    """Dataset-relative LeRobot view over one verified release store.
+
+    The accepted manifest's inventory binds membership, length and content, even
+    if storage changes after admission. Metadata reads share one byte budget.
+    """
+
+    def __init__(
+        self,
+        store: LocalReleaseStore | BlobReleaseStore,
+        *,
+        name: str,
+        manifest_sha256: str,
+        metadata_max_bytes: int,
+    ) -> None:
+        self._store = store
+        manifest_bytes = store.read_control_bytes(MANIFEST_PATH, max_bytes=MAX_CONTROL_BYTES)
+        if hashlib.sha256(manifest_bytes).hexdigest() != manifest_sha256:
+            raise ReleaseVerificationError("release manifest changed after admission")
+        manifest = parse_strict_json(manifest_bytes)
+        inventory_bytes = store.read_control_bytes(INVENTORY_PATH, max_bytes=MAX_CONTROL_BYTES)
+        if hashlib.sha256(inventory_bytes).hexdigest() != manifest["inventory_sha256"]:
+            raise ReleaseVerificationError("release inventory changed after admission")
+        inventory = Inventory.model_validate(parse_strict_json(inventory_bytes))
+        self._objects = {entry.path: entry for entry in inventory.entries}
+        self._budget = metadata_max_bytes
+        self.name = name
+
+    def read_bytes(self, relative: str) -> bytes:
+        if relative not in self._objects:
+            raise FileNotFoundError(relative)
+        entry = self._objects[relative]
+        if entry.length > self._budget:
+            raise ReleaseVerificationError("release metadata exceeds bound")
+        data = self._store.read_control_bytes(relative, max_bytes=self._budget)
+        self._budget -= len(data)
+        if len(data) != entry.length or hashlib.sha256(data).hexdigest() != entry.sha256:
+            raise ReleaseVerificationError("release metadata changed after admission")
+        return data
+
+    def paths(self) -> set[str]:
+        return set(self._objects)
+
+    def exists(self, relative: str) -> bool:
+        return relative in self._objects
+
+    def find(self, directory: str, pattern: str) -> list[str]:
+        prefix = f"{directory}/"
+        return sorted(
+            path
+            for path in self._objects
+            if path.startswith(prefix) and fnmatch.fnmatchcase(path.rsplit("/", 1)[-1], pattern)
         )
-    except (OSError, ValueError, KeyError, TypeError) as error:
+
+    def path(self, relative: str) -> Path:
+        return Path(relative)
+
+    def size(self, relative: str) -> int | None:
+        entry = self._objects.get(relative)
+        return entry.length if entry is not None else None
+
+    def stream(self, relative: str) -> Iterator[bytes]:
+        entry = self._objects[relative]
+        digest = hashlib.sha256()
+        total = 0
+        for chunk in self._store.iter_bytes(relative, chunk_size=CHUNK_BYTES):
+            digest.update(chunk)
+            total += len(chunk)
+            if total > entry.length:
+                raise ReleaseVerificationError("release media exceeds inventoried length")
+            yield chunk
+        if total != entry.length or digest.hexdigest() != entry.sha256:
+            raise ReleaseVerificationError("release media changed after admission")
+
+
+def _release_read_errors() -> tuple[type[Exception], ...]:
+    errors = (ReleaseVerificationError, OSError, ValueError, KeyError, TypeError)
+    try:
+        from azure.core.exceptions import AzureError
+    except ImportError:
+        return errors
+    return (*errors, AzureError)
+
+
+def _release_files(item: _SourceRelease, *, metadata_max_bytes: int = _MAX_METADATA_BYTES) -> _ReleaseFiles:
+    try:
+        return _ReleaseFiles(
+            item.store,
+            name=item.dataset_name,
+            manifest_sha256=item.manifest_sha256,
+            metadata_max_bytes=metadata_max_bytes,
+        )
+    except _release_read_errors() as error:
+        raise ReleaseApiError(409, "release_verification_failed") from error
+
+
+def _release_media(files: _ReleaseFiles, relative: str, *, media_max_bytes: int) -> bytes:
+    """Stream one container through its store, bounded by its listed length."""
+    size = files.size(relative)
+    if size is None:
+        raise ReleaseApiError(404, "release_media_not_found")
+    if size > media_max_bytes:
+        raise ReleaseApiError(422, "release_media_exceeds_bound")
+    data = bytearray()
+    try:
+        for chunk in files.stream(relative):
+            data.extend(chunk)
+            if len(data) > size:
+                raise ReleaseVerificationError(f"{relative} exceeds its published length")
+        if len(data) != size:
+            raise ReleaseVerificationError(f"{relative} is shorter than its published length")
+    except _release_read_errors() as error:
+        raise ReleaseApiError(409, "release_verification_failed") from error
+    return bytes(data)
+
+
+def _episode_records(files: _ReleaseFiles, indices: list[int] | None = None) -> list[EpisodeRecord]:
+    """Resolve published episodes through the shared dataset-io reader over store-backed files."""
+    try:
+        records = list(iter_episodes(files, indices=indices))
+    except _release_read_errors() as error:
         raise ReleaseApiError(409, "release_verification_failed") from error
     return sorted(records, key=lambda record: record.episode_index)
 

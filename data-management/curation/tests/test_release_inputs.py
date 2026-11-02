@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from physical_ai_curation.adapters.local_saved_input import LocalSavedInputReader
 from physical_ai_curation.evidence import bind_job_evidence
 from physical_ai_curation.release.canonical import serialize_model
 from physical_ai_curation.release.inputs import (
@@ -22,7 +23,7 @@ from physical_ai_curation.release.inputs import (
     freeze_release_inputs,
     revalidate_release_inputs,
 )
-from physical_ai_curation.saved_input import SavedResource
+from physical_ai_curation.saved_input import SavedInputError, SavedResource
 
 
 class SavedReader:
@@ -252,6 +253,47 @@ def test_given_labels_for_other_episodes_when_freeze_then_only_selected_episode_
     assert set(value["provenance"]) == {"0"}
     assert value["available_labels"] == ["success", "failure"]
     assert value["dataset_id"] == "sample"
+
+
+def test_given_local_labels_file_when_release_resource_then_file_and_content_etag_returned(tmp_path: Path) -> None:
+    labels = {"dataset_id": "sample", "available_labels": ["success"], "episodes": {"0": ["success"]}}
+    (tmp_path / "meta").mkdir()
+    (tmp_path / "meta/episode_labels.json").write_bytes(json.dumps(labels).encode())
+    reader = LocalSavedInputReader(tmp_path)
+
+    resource = asyncio.run(
+        reader.release_resource("sample", SavedSelection(kind="labels", episode_index=0, expected_revision="labels-v1"))
+    )
+    other = asyncio.run(
+        reader.release_resource("sample", SavedSelection(kind="ledger", episode_index=0, expected_revision="ledger-v1"))
+    )
+
+    assert resource.value == labels
+    assert resource.etag is not None and resource.etag.startswith('"')
+    assert other == SavedResource(None, None)
+
+
+def test_given_local_labels_for_other_dataset_when_release_resource_then_identity_refused(tmp_path: Path) -> None:
+    (tmp_path / "meta").mkdir()
+    (tmp_path / "meta/episode_labels.json").write_bytes(json.dumps({"dataset_id": "other"}).encode())
+
+    with pytest.raises(SavedInputError, match="identity mismatch"):
+        asyncio.run(
+            LocalSavedInputReader(tmp_path).release_resource(
+                "sample", SavedSelection(kind="labels", episode_index=0, expected_revision="labels-v1")
+            )
+        )
+
+
+def test_given_malformed_labels_when_freeze_then_refused_before_acceptance(local_source: LocalReleaseSource) -> None:
+    class MalformedLabelsReader(SavedReader):
+        async def release_resource(self, dataset_id: str, selection: SavedSelection) -> SavedResource:
+            return SavedResource({"episodes": {"0": ["success"]}}, "labels-v1")
+
+    selection = _selection(SavedSelection(kind="labels", episode_index=0, expected_revision="labels-v1"))
+
+    with pytest.raises(ReleaseInputError, match="invalid portable evidence"):
+        asyncio.run(freeze_release_inputs(local_source, MalformedLabelsReader(), selection, _context()))
 
 
 def test_given_no_recording_receipt_when_freeze_then_origin_explicitly_unknown(

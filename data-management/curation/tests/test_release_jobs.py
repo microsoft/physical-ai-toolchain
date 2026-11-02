@@ -22,7 +22,8 @@ from urllib.parse import urlsplit
 
 import physical_ai_curation
 import pytest
-from physical_ai_curation.release.blob_worker import SupervisedBlobPublisher, _process
+from physical_ai_curation.release.blob_source_associations import BlobSourceAssociations
+from physical_ai_curation.release.blob_worker import SourceAssociatedBlobPublisher, SupervisedBlobPublisher, _process
 from physical_ai_curation.release.canonical import canonical_json_bytes, sha256_hex
 from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.jobs import (
@@ -54,6 +55,7 @@ from physical_ai_curation.release.record_storage import (
     BlobLocation,
     BlobRecordStorage,
     LocalRecordStorage,
+    RecordLimits,
     storage_from_configuration,
 )
 from physical_ai_curation.release.source_associations import source_association_binding
@@ -1447,6 +1449,7 @@ class FsBlob:
         _check_etag(etag, self.container.load(self.name))
         self.container.remove(self.name)
         self.container.lose_response("delete_blob")
+        self.container.lose_response(f"delete_blob:{self.name}")
 
     def abort_copy(self, copy_id: str) -> None:
         from azure.core.exceptions import HttpResponseError
@@ -1827,8 +1830,6 @@ def test_given_tampered_ownership_companion_when_copy_requested_then_no_child_ru
 def test_given_blob_candidate_when_supervised_upload_and_publish_then_independently_marked(
     tmp_path: Path, lose_marker_stop_ack: bool, associated: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from physical_ai_curation.release.blob_worker import SourceAssociatedBlobPublisher
-
     class AssociatedChildPublisher(_ChildBlobPublisher, SourceAssociatedBlobPublisher):
         """Reuse the registered filesystem-SDK child with the associated publication policy."""
 
@@ -1927,6 +1928,154 @@ def test_given_blob_candidate_when_supervised_upload_and_publish_then_independen
         ]
     with pytest.raises((AuthorityError, LedgerClosedError)):
         publisher.write("data/late.bin", [b"abc"], length=3, sha256=sha256_hex(b"abc"))
+
+
+ASSOCIATION_RECORD = f"datasets/_release_associations/{ATTEMPT.package_id}.json"
+
+
+class _AssociatedChildBlobPublisher(_ChildBlobPublisher, SourceAssociatedBlobPublisher):
+    """Registered filesystem-SDK child with the associated publication and cancellation policy."""
+
+
+def _associated_cancel_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    monkeypatch.setattr(
+        FsBlob,
+        "acquire_lease",
+        lambda _blob, **_kwargs: SimpleNamespace(renew=lambda **_kwargs: None, release=lambda **_kwargs: None),
+        raising=False,
+    )
+    sdk = tmp_path / "sdk"
+    source = FsContainer(sdk, "example", "source")
+    source.put("data/a.bin", b"abc", {"kind": "frame"})
+    source_object, source_etag = _source_object(source, "data/a.bin", b"abc")
+    intent = _association_intent(tmp_path).model_copy(
+        update={
+            "attempt": ATTEMPT,
+            "effective_destination": BLOB.as_text(),
+            "scope_sha256": sha256_hex(OWNER.encode()),
+        }
+    )
+    store = ReleaseJobStore(tmp_path / "ledger", settings=SETTINGS, clock=OffsetClock(), free_bytes=_no_local_disk)
+    job = store.accept(
+        replace(
+            _blob_request(key="blob-associated-cancel", reserved=1024),
+            execution_binding=source_association_binding(intent),
+        )
+    )
+    fence = store.claim(job.job_id, "worker-a")
+    destination = FsContainer(sdk, "example", "release")
+    publisher = _AssociatedChildBlobPublisher(
+        destination, BLOB, ATTEMPT, store, job.job_id, fence, sdk_root=sdk, intent=intent
+    )
+    return SimpleNamespace(
+        sdk=sdk,
+        source=source,
+        source_object=source_object,
+        source_etag=source_etag,
+        intent=intent,
+        store=store,
+        job_id=job.job_id,
+        fence=fence,
+        destination=destination,
+        publisher=publisher,
+    )
+
+
+def _pending_associated_copy(fixture: SimpleNamespace) -> None:
+    fixture.destination.inject_response_loss("start_copy_from_url")
+    with pytest.raises((ReleaseVerificationError, AuthorityError)):
+        fixture.publisher.copy(fixture.source, fixture.source_object, fixture.source_etag)
+    record = fixture.destination.load(DEST_NAME)
+    fixture.destination.save(DEST_NAME, _payload(record), record["metadata"], {**record["copy"], "status": "pending"})
+    assert fixture.destination.exists(ASSOCIATION_RECORD)
+
+
+def test_given_associated_pending_copy_when_cancelled_then_record_removed_after_output_and_companion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _associated_cancel_fixture(tmp_path, monkeypatch)
+    _pending_associated_copy(fixture)
+    fixture.store.request_cancel(fixture.job_id, scope=SCOPE, principal=OWNER)
+
+    fixture.publisher.cleanup_cancelled()
+
+    assert not fixture.destination.exists(DEST_NAME)
+    assert not fixture.destination.exists(COMPANION)
+    assert not fixture.destination.exists(ASSOCIATION_RECORD)
+    assert [call["name"] for call in _sdk_calls(fixture.sdk, "delete_blob")][-2:] == [COMPANION, ASSOCIATION_RECORD]
+    assert fixture.source.read("data/a.bin") == b"abc"
+    state = fixture.store.get(fixture.job_id, scope=SCOPE, principal=OWNER)
+    assert state.state == "cancelled"
+    assert state.capacity_state == "released"
+
+
+@pytest.mark.parametrize(
+    ("conflict", "refusal"),
+    [("finalized", "association cleanup conflict"), ("foreign", "association conflict")],
+)
+def test_given_associated_record_conflicts_when_cancelled_then_record_retained_and_capacity_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, conflict: str, refusal: str
+) -> None:
+    fixture = _associated_cancel_fixture(tmp_path, monkeypatch)
+    _pending_associated_copy(fixture)
+    if conflict == "finalized":
+        fixture.publisher.associations.bind_manifest(
+            fixture.intent, "a" * 64, job_id=fixture.job_id, fence=fixture.fence
+        )
+    else:
+        fixture.destination.remove(ASSOCIATION_RECORD)
+        BlobSourceAssociations(fixture.destination, BLOB, limits=RecordLimits()).ensure_intent(
+            fixture.intent.model_copy(update={"source_revision": "changed"})
+        )
+    retained = fixture.destination.read(ASSOCIATION_RECORD)
+    fixture.store.request_cancel(fixture.job_id, scope=SCOPE, principal=OWNER)
+
+    with pytest.raises(ReleaseVerificationError, match=refusal):
+        fixture.publisher.cleanup_cancelled()
+
+    assert fixture.destination.read(ASSOCIATION_RECORD) == retained
+    assert all(call["name"] != ASSOCIATION_RECORD for call in _sdk_calls(fixture.sdk, "delete_blob"))
+    state = fixture.store.get(fixture.job_id, scope=SCOPE, principal=OWNER)
+    assert state.state == "cancelling"
+    assert state.cleanup_state == "failed"
+    assert state.capacity_state == "retained"
+
+
+def test_given_associated_record_delete_lost_when_restarted_then_cleanup_settles_without_redispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _associated_cancel_fixture(tmp_path, monkeypatch)
+    _pending_associated_copy(fixture)
+    fixture.store.request_cancel(fixture.job_id, scope=SCOPE, principal=OWNER)
+    fixture.destination.inject_response_loss(f"delete_blob:{ASSOCIATION_RECORD}")
+
+    with pytest.raises(OSError, match="response lost"):
+        fixture.publisher.cleanup_cancelled()
+
+    assert not fixture.destination.exists(ASSOCIATION_RECORD)
+    failed = fixture.store.get(fixture.job_id, scope=SCOPE, principal=OWNER)
+    assert failed.state == "cancelling"
+    assert failed.cleanup_state == "failed"
+    assert failed.capacity_state == "retained"
+
+    reopened = ReleaseJobStore(fixture.store.root, settings=SETTINGS, clock=OffsetClock(), free_bytes=_no_local_disk)
+    _AssociatedChildBlobPublisher(
+        fixture.destination,
+        BLOB,
+        ATTEMPT,
+        reopened,
+        fixture.job_id,
+        fixture.fence,
+        sdk_root=fixture.sdk,
+        intent=fixture.intent,
+    ).cleanup_cancelled()
+
+    state = reopened.get(fixture.job_id, scope=SCOPE, principal=OWNER)
+    assert state.state == "cancelled"
+    assert state.capacity_state == "released"
+    assert not fixture.destination.exists(DEST_NAME)
+    assert not fixture.destination.exists(COMPANION)
+    assert len(_sdk_calls(fixture.sdk, "start_copy_from_url")) == 1
 
 
 def test_given_blob_destination_with_local_route_when_constructed_then_refused() -> None:

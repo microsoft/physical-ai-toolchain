@@ -19,15 +19,19 @@ from .annotation_service import AnnotationService
 from .dataset_service import DatasetService
 
 if TYPE_CHECKING:
+    from physical_ai_curation.release.inputs import SavedSelection
     from physical_ai_dataset_io.lerobot import EpisodeRecord
 
     from .label_storage import LabelStorage
 
 
 class ViewerSavedInputReader:
-    def __init__(self, datasets: DatasetService, annotations: AnnotationService) -> None:
+    def __init__(
+        self, datasets: DatasetService, annotations: AnnotationService, label_storage: LabelStorage | None = None
+    ) -> None:
         self.datasets = datasets
         self.annotations = annotations
+        self.label_storage = label_storage
 
     async def annotation(self, dataset_id: str, episode_index: int) -> SavedResource:
         resource = await self.annotations.get_annotation_versioned(dataset_id, episode_index)
@@ -39,6 +43,15 @@ class ViewerSavedInputReader:
         resource = await self.annotations.get_saved_edits(
             dataset_id, episode_index, author_id=principal_scope_id, source_id=source[0], source_revision=source[1]
         )
+        return SavedResource(resource.value.model_dump(mode="json") if resource.value else None, resource.etag)
+
+    async def release_resource(self, dataset_id: str, selection: SavedSelection) -> SavedResource:
+        """Read the dataset labels file for an explicit release selection; other kinds are unavailable here."""
+        if selection.kind != "labels":
+            return SavedResource(None, None)
+        if self.label_storage is None:
+            raise SavedInputError("Labels storage is unavailable", 503)
+        resource = await self.label_storage.load_versioned(dataset_id)
         return SavedResource(resource.value.model_dump(mode="json") if resource.value else None, resource.etag)
 
     async def source_revision(self, dataset_id: str, episode_index: int) -> tuple[str, str]:

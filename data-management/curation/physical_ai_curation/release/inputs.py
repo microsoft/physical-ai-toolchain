@@ -17,7 +17,7 @@ from typing import Any, Literal, Protocol
 from urllib.parse import urlsplit
 
 from physical_ai_curation.evidence import read_job_evidence
-from physical_ai_curation.models import ContributionLedger, MachineOrigin
+from physical_ai_curation.models import ContributionLedger, DatasetLabelsFile, MachineOrigin
 from physical_ai_curation.release.canonical import (
     canonical_json_bytes,
     normalize_release_path,
@@ -446,6 +446,7 @@ def _selected_labels(value: dict[str, Any], episode_index: int) -> dict[str, Any
 
 def _project_saved(value: dict[str, Any], item: SavedSelection, labels: dict[str, str]) -> dict[str, Any]:
     if item.kind == "labels":
+        DatasetLabelsFile.model_validate(value)
         value = _selected_labels(value, item.episode_index)
     elif item.kind == "annotation":
         authors = value.get("annotations", [])

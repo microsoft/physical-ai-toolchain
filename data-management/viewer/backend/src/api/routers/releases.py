@@ -18,7 +18,14 @@ from ..services.release_service import (
     get_release_service,
 )
 
-router = APIRouter()
+
+class ReleaseErrorBody(BaseModel):
+    """Release failures or FastAPI request-validation details."""
+
+    detail: dict[str, str] | list[dict[str, Any]]
+
+
+router = APIRouter(responses={422: {"model": ReleaseErrorBody}})
 
 JobId = Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")]
 MAX_EPISODE_SELECTION = 10_000

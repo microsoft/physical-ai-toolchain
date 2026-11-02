@@ -6,8 +6,12 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from physical_ai_curation.saved_input import SavedInputError, SavedResource
+
+if TYPE_CHECKING:
+    from physical_ai_curation.release.inputs import SavedSelection
 
 
 def local_source_revision(root: Path, metadata_paths: list[Path] | None = None) -> tuple[str, str]:
@@ -78,6 +82,15 @@ class LocalSavedInputReader:
             if descriptor.get("source_revision") != source[1]:
                 raise SavedInputError("Saved edit source revision changed")
         return SavedResource(descriptor, resource.etag)
+
+    async def release_resource(self, dataset_id: str, selection: SavedSelection) -> SavedResource:
+        """Read the dataset labels file for an explicit release selection; other kinds are unavailable here."""
+        if selection.kind != "labels":
+            return SavedResource(None, None)
+        resource = await asyncio.to_thread(self._read, Path("meta") / "episode_labels.json")
+        if resource.value is not None and resource.value.get("dataset_id") != dataset_id:
+            raise SavedInputError("Curation dataset identity mismatch")
+        return resource
 
     async def source_revision(self, dataset_id: str, episode_index: int) -> tuple[str, str]:
         return await asyncio.to_thread(local_source_revision, self.root)

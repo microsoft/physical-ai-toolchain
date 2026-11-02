@@ -187,8 +187,14 @@ and analysis invalidated by removed frames remain historical frozen evidence.
 These objects are inventoried before sealing. Saved edit instructions are not
 replayed against generated output. Retained metadata reads return these published
 projections, not original source-coordinate frozen resources. They use a shared
-response-byte bound and are not mutable source-write envelopes. Complete selected
-label-reader and preview/admission accounting parity remain integration work.
+response-byte bound and are not mutable source-write envelopes. Local and viewer
+saved-input readers load explicitly selected labels with their expected file ETag
+and validate their dataset identity and schema before freezing. Preview includes
+projection object/byte counts in generated and destination capacity. Invalid
+frame mappings or projections outside the accepted output budget are refused
+before runtime or publication dispatch. A transcode reservation includes the
+largest affected source spool, accepted encoder output budget and protocol files,
+not a second full copy of the dataset.
 
 For headless publication, `release.source_associations.SourceAssociationIntent`
 binds trusted source identity/revision, existing principal scope, destination and
@@ -219,12 +225,25 @@ reserves the selected output budget alongside peak scratch, rather than prelimin
 generated-object estimates. Committed job result and allowlisted artifact reads
 verify the accepted destination and association without opening the original
 source. Removing the marker still refuses those reads. Job-scoped controls require
-retained job records; source-linked metadata handles do not. Local native episode
-and media reads also survive source removal. Blob episode/media routes currently
-refuse unsupported reads explicitly; metadata/projection reads are supported.
+retained job records; source-linked metadata handles do not. Local and Blob native
+episode/media reads share the dataset-I/O LeRobot interpreter and survive source
+and job-record removal without local Blob staging. Each read binds membership,
+length and hash to the accepted manifest inventory, so changes after admission
+are refused. Blob reads retain revision conditions; local reads use confined
+descriptors. The viewer metadata budget defaults to 64 MiB and the buffered media
+response limit to 512 MiB. Configure positive
+`CURATION_RELEASE_READ_METADATA_BYTES` and `CURATION_RELEASE_READ_MEDIA_BYTES`
+after environment loading; the backend environment example documents both.
+Ordinary annotation/edit targets require admitted source datasets. Label
+persistence separately rejects recorded packages and their descendants, including
+unavailable ownership records, instead of relying on catalog visibility alone.
 Local cancellation removes only a matching pending association after owned output
 cleanup and before capacity release; conflicting or finalized records are retained.
-Associated Blob cancellation fault/restart proof remains incomplete. Supervised
+Associated Blob cancellation removes the pending association after owned payload
+and companion cleanup. Foreign/finalized records or uncertain deletion retain
+capacity; reopening the durable store reconciles an already deleted record without
+dispatching the copy again. These are filesystem/SDK fault-fixture results, not live
+Azure authorization or cancellation proof. Supervised
 dispatch renews a live worker lease even for children shorter than the heartbeat
 interval; it never revives an expired fence.
 

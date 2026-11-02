@@ -19,7 +19,6 @@ Expected blob layout per dataset:
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import hashlib
 import io
 import json
@@ -27,7 +26,7 @@ import logging
 import math
 import os
 import time
-from collections.abc import AsyncIterable, AsyncIterator, Coroutine, Iterator
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -94,103 +93,6 @@ async def _read_bounded(download: Any, max_bytes: int) -> bytes:
         if len(data) > max_bytes:
             raise ValueError("ownership document exceeds bound")
     return bytes(data)
-
-
-async def _next_or_exhausted(iterator: AsyncIterator[Any]) -> Any:
-    """Return the next item, or the exhaustion sentinel."""
-    try:
-        return await iterator.__anext__()
-    except StopAsyncIteration:
-        return _EXHAUSTED
-
-
-class _ReleaseBridge:
-    """Runs async Blob SDK calls on the event loop from a worker thread.
-
-    Every call is bounded by a shared deadline, and streamed bytes are bounded
-    by a shared budget. After close(), further calls raise.
-    """
-
-    def __init__(self, loop: asyncio.AbstractEventLoop, deadline: float, max_bytes: int) -> None:
-        self._loop = loop
-        self._deadline = deadline
-        self._max_bytes = max_bytes
-        self._consumed = 0
-        self._closed = False
-
-    def close(self) -> None:
-        self._closed = True
-
-    def _remaining(self) -> float:
-        if self._closed:
-            raise _ReleaseDeadlineError("release bridge closed")
-        remaining = self._deadline - time.monotonic()
-        if remaining <= 0:
-            raise _ReleaseDeadlineError("release verification deadline exceeded")
-        return remaining
-
-    def run(self, coro: Coroutine[Any, Any, _T]) -> _T:
-        """Await a coroutine on the event loop and return its result."""
-        try:
-            remaining = self._remaining()
-        except BaseException:
-            coro.close()
-            raise
-        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        try:
-            return future.result(timeout=remaining)
-        except concurrent.futures.TimeoutError:
-            future.cancel()
-            raise _ReleaseDeadlineError("release verification deadline exceeded") from None
-
-    def iterate(self, aiterable: AsyncIterable[Any]) -> Iterator[Any]:
-        """Yield items from an async iterable, one bridged step at a time."""
-        iterator = aiterable.__aiter__()
-        while True:
-            item = self.run(_next_or_exhausted(iterator))
-            if item is _EXHAUSTED:
-                return
-            yield item
-
-    def consume(self, size: int) -> None:
-        self._consumed += size
-        if self._consumed > self._max_bytes:
-            raise _ReleaseBudgetError("release verification byte budget exceeded")
-
-
-class _SyncBlobDownload:
-    def __init__(self, bridge: _ReleaseBridge, download: Any) -> None:
-        self._bridge = bridge
-        self._download = download
-
-    def chunks(self) -> Iterator[bytes]:
-        for chunk in self._bridge.iterate(self._download.chunks()):
-            self._bridge.consume(len(chunk))
-            yield chunk
-
-
-class _SyncBlobClient:
-    def __init__(self, bridge: _ReleaseBridge, blob: Any) -> None:
-        self._bridge = bridge
-        self._blob = blob
-
-    def get_blob_properties(self) -> Any:
-        return self._bridge.run(self._blob.get_blob_properties())
-
-    def download_blob(self, **kwargs: Any) -> _SyncBlobDownload:
-        return _SyncBlobDownload(self._bridge, self._bridge.run(self._blob.download_blob(**kwargs)))
-
-
-class _SyncContainer:
-    def __init__(self, bridge: _ReleaseBridge, container: Any) -> None:
-        self._bridge = bridge
-        self._container = container
-
-    def list_blobs(self, **kwargs: Any) -> Iterator[Any]:
-        return self._bridge.iterate(self._container.list_blobs(**kwargs))
-
-    def get_blob_client(self, name: str) -> _SyncBlobClient:
-        return _SyncBlobClient(self._bridge, self._container.get_blob_client(name))
 
 
 class BlobDatasetProvider:
@@ -358,7 +260,7 @@ class BlobDatasetProvider:
         parts = blob_path.split("/")
         if any(not part or part in (".", "..", *_RESERVED_NAMESPACES) for part in parts):
             return False
-        for depth in range(1, min(5, len(parts) - 1) + 1):
+        for depth in range(1, len(parts)):
             if not await self._admitted("--".join(parts[:depth])):
                 return False
         return True

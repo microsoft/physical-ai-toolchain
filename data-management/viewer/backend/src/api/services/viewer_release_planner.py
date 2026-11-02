@@ -19,6 +19,7 @@ from physical_ai_curation.release.inputs import (
 from physical_ai_curation.release.jobs import ReleaseJobStore, ReleaseRuntimeSettings
 from physical_ai_curation.release.media import StorageEndpoint, load_media_limits
 from physical_ai_curation.release.models import ProducerIdentity, VersionIdentity
+from physical_ai_curation.release.projections import materialize_saved_projections
 from physical_ai_curation.release.publication import PublicationAttempt
 from physical_ai_curation.release.record_storage import BlobLocation
 from physical_ai_curation.release.runner import ConfiguredExecution
@@ -31,6 +32,7 @@ from pydantic import TypeAdapter
 
 from .annotation_service import get_annotation_service
 from .dataset_service import get_dataset_service
+from .label_storage import BlobLabelStorage, LabelStorage, LocalLabelStorage
 from .release_service import PreparedRelease, ReleaseApiError, ReleaseApiSettings, ReleaseSpec
 from .saved_input_service import ViewerSavedInputReader
 
@@ -41,7 +43,15 @@ class ViewerReleasePlanner:
     def __init__(self, settings: ReleaseApiSettings) -> None:
         self.settings = settings
         self.datasets = get_dataset_service()
-        self.reader = ViewerSavedInputReader(self.datasets, get_annotation_service())
+        self.reader = ViewerSavedInputReader(
+            self.datasets, get_annotation_service(), label_storage=self._label_storage()
+        )
+
+    def _label_storage(self) -> LabelStorage:
+        provider = self.datasets._blob_provider
+        if self.datasets.has_blob_provider() and provider is not None:
+            return BlobLabelStorage(provider)
+        return LocalLabelStorage(self.datasets.base_path)
 
     def _source(self, dataset_id: str, *, finalized: bool, kind: str | None = None):
         if kind == "local" or (kind is None and not self.datasets.has_blob_provider()):
@@ -68,6 +78,8 @@ class ViewerReleasePlanner:
     async def prepare(self, scope: str, spec: ReleaseSpec, destination: Path | BlobLocation) -> PreparedRelease:
         from physical_ai_curation.release.composition import prepare_saved_generation
         from physical_ai_curation.release.coordinator import generation_request_bytes, plan_generation_inputs
+        from physical_ai_curation.release.execution import MAX_RESULT_BYTES as ENCODE_RESULT_BYTES
+        from physical_ai_curation.release.execution import MAX_SPEC_BYTES as ENCODE_SPEC_BYTES
         from physical_ai_curation.release.native_worker import MAX_RESULT_BYTES, MAX_SPEC_BYTES
 
         if await self.datasets.get_dataset(spec.dataset_id) is None:
@@ -127,13 +139,42 @@ class ViewerReleasePlanner:
             frozen.content, inputs.request, inputs.sources, camera_statistics=inputs.camera_statistics
         )
         capacity = prepared.plan.capacity
+        attempt = PublicationAttempt(spec.package_id, spec.attempt_id, spec.dataset_name)
+        projections = materialize_saved_projections(
+            frozen.content, prepared.episodes, release_dataset_id=attempt.prefix
+        )
+        projection_bytes = sum(len(content) for content in projections.values())
+        capacity = replace(
+            capacity,
+            generated_bytes=capacity.generated_bytes + projection_bytes,
+            destination_required_bytes=(
+                capacity.destination_required_bytes + projection_bytes
+                if capacity.destination_required_bytes is not None
+                else None
+            ),
+            combined_required_bytes=(
+                capacity.combined_required_bytes + projection_bytes
+                if capacity.combined_required_bytes is not None
+                else None
+            ),
+        )
         table_bytes = sum(item.length for item in frozen.content.source_objects if item.path.startswith("data/"))
         native_scratch = MAX_SPEC_BYTES + MAX_RESULT_BYTES + max(16 * 1024**2, table_bytes * 3)
+        output_budget = max(16 * 1024**2, capacity.payload_bytes * 2)
+        encoding_scratch = max(
+            (
+                (item.source_length or 0) + output_budget + ENCODE_SPEC_BYTES + ENCODE_RESULT_BYTES
+                for item in prepared.plan.objects
+                if item.action == "transcode"
+            ),
+            default=0,
+        )
+        native_scratch = max(native_scratch, encoding_scratch)
         scratch_bytes = max(capacity.scratch_peak_bytes, native_scratch)
         inputs = replace(
             inputs,
             scratch_bytes=scratch_bytes,
-            output_bytes=max(16 * 1024**2, capacity.payload_bytes * 2),
+            output_bytes=output_budget,
         )
         intent = SourceAssociationIntent(
             source_key=source_association_key(context.source[0]),
@@ -145,7 +186,7 @@ class ViewerReleasePlanner:
             effective_destination=(
                 str(destination.resolve()) if isinstance(destination, Path) else destination.as_text()
             ),
-            attempt=PublicationAttempt(spec.package_id, spec.attempt_id, spec.dataset_name),
+            attempt=attempt,
             frozen_input_sha256=frozen.sha256,
             display_name=spec.dataset_name,
             description="",
@@ -178,6 +219,8 @@ class ViewerReleasePlanner:
                 "selected_count": len(selection.episode_indices),
                 "route": prepared.plan.route,
                 "capacity": asdict(capacity),
+                "projection_bytes": projection_bytes,
+                "projection_objects": len(projections),
                 "native_scratch_bytes": native_scratch,
                 "destination_budget_bytes": inputs.output_bytes,
                 "blocking": list(prepared.plan.blocking),
