@@ -525,115 +525,22 @@ the committed result instead. Failed or uncertain cleanup retains capacity and
 requires reconciliation, not deletion of its job records. Return from read-only
 release browsing to the source Episodes tab to continue source annotation.
 
-### API surface
+### Automation and Contracts
 
-| Method and path                                                     | Purpose                                                                    |
-|---------------------------------------------------------------------|----------------------------------------------------------------------------|
-| `GET /api/releases/v1/capabilities`                                 | Schema and supported features                                              |
-| `GET /api/releases/v1/destinations`                                 | Configured destination aliases                                             |
-| `POST /api/releases/v1/preview`                                     | Read-only preview; no job is persisted and no capacity is reserved         |
-| `GET /api/releases/v1/preview`                                      | Read a preview by its query selection                                      |
-| `POST /api/releases/v1/jobs`                                        | Submit with `Idempotency-Key`; returns `202`, `Location`, `Retry-After: 5` |
-| `GET /api/releases/v1/requests`                                     | Scoped lookup of accepted requests for reload recovery                     |
-| `GET /api/releases/v1/jobs`, `GET /api/releases/v1/jobs/{job_id}`   | List and read job status                                                   |
-| `POST /api/releases/v1/jobs/{job_id}/cancel`, `.../recover`         | Cancel or recover a job (`202`)                                            |
-| `GET /api/releases/v1/jobs/{job_id}/result`                         | Committed result only; otherwise `409 release_result_not_verified`         |
-| `GET /api/releases/v1/jobs/{job_id}/artifacts/{artifact}`           | Artifact aliases `manifest`, `inventory`, `receipt`, `report`              |
-| `GET /api/releases/v1/inventory/{dataset_id}`                       | Source inventory with judge and freshness status                           |
-| `GET /api/releases/v1/sources/{dataset_id}/releases`                | Retained verified releases for a source                                    |
-| `GET .../sources/{dataset_id}/releases/{handle}`                    | One retained release                                                       |
-| `GET .../releases/{handle}/episodes`                                | Paged episodes in the release                                              |
-| `GET .../releases/{handle}/episodes/{episode_index}/media/{camera}` | Episode video (`video/mp4`, `Cache-Control: no-store`)                     |
+Release supports local-to-local and same-account Blob-to-Blob publication from
+supported v2.1/v3 sources to v3 output. Selected saved labels, annotations, ledgers
+and bound judge evidence are included without running inference. Published output
+is independent of the source and remains read-only. Keep its expected manifest
+SHA-256 separately for verification of the intended release.
 
-Requests are strict: unknown fields are rejected. Mutations require authentication and
-the CSRF token. Operator paths stay server-side; clients see only aliases and handles.
-
-### Release contract
-
-| Topic              | Contract                                                                                                                             |
-|--------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| Format             | LeRobot v3 output from supported v2.1 or v3 sources. Obsolete release layouts are not migrated.                                      |
-| Collection         | Immutable `DEST/<full-source-relative-path>/releases/<name>`, associated with its source                                             |
-| Browse             | Retained releases are browsed by source and handle, independent of job rows and source reloads                                       |
-| Judge data         | Selected saved labels, the edit ledger, and bound judge evidence are copied. Release performs no inference and has no approval gate. |
-| Evidence           | Frozen evidence is captured at preview. Output-coordinate projections are derived from it and do not alter it.                       |
-| Finalization       | Local source must be quiescent at finalization; the operator attests this with the finalized acknowledgment.                         |
-| Capacity           | Preview reports estimated bytes. Submission reserves them; `507` when capacity is insufficient.                                      |
-| Cancel and recover | Cancellation is asynchronous; confirm stopped effects and cleanup in job status. Recovery retains conflicting or finalized records.  |
-| Commit             | A release is committed only after verification of the manifest, inventory, and checksums.                                            |
-| Identities         | `verify` checks a release directory against an expected manifest SHA-256 and reports checksum mismatches.                            |
-| Cleanup            | Strict, current-only. Obsolete layouts are removed by the operator, not migrated.                                                    |
-
-### Headless client
-
-The client in `physical_ai_curation.release.client` uses only Python's standard
-library and runs the same API from scripts or CI. Set `RELEASE_API_URL` and either `RELEASE_API_KEY` or
-`RELEASE_BEARER_TOKEN`; setting both is a usage error. Credentials are sent only as
-headers, plaintext HTTP to a non-loopback host is refused when credentials are set,
-redirects are not followed, and errors are reduced to fixed codes.
-
-```text
-python -m physical_ai_curation.release.client [--base-url URL] [--timeout-seconds N] [--format {json,text}] COMMAND
-```
-
-| Command                                                                                                             | Purpose                                                  |
-|---------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------|
-| `preview --request FILE`                                                                                            | Read-only preview from a JSON request file               |
-| `submit --request FILE --preview-digest D --processing-digest D --idempotency-key K [--ack-local-disk] [--confirm]` | Submit a previewed request                               |
-| `status JOB_ID`, `wait JOB_ID [--timeout S] [--interval S]`                                                         | Read or wait for a job                                   |
-| `list [--cursor N] [--limit N] [--dataset-id ID]`                                                                   | List jobs                                                |
-| `accepted-request --idempotency-key K`                                                                              | Recover an accepted request after a lost response        |
-| `cancel JOB_ID`, `recover JOB_ID`, `result JOB_ID`                                                                  | Job control and committed result                         |
-| `artifact JOB_ID ALIAS`                                                                                             | Download `manifest`, `inventory`, `receipt`, or `report` |
-| `inventory DATASET_ID [--cursor N] [--limit N]`                                                                     | Source inventory                                         |
-| `source-releases DATASET_ID`, `source-release DATASET_ID HANDLE`                                                    | Retained releases for a source                           |
-| `source-episodes DATASET_ID HANDLE [--cursor N] [--limit N]`                                                        | Episodes in a retained release                           |
-| `source-media DATASET_ID HANDLE EPISODE_INDEX CAMERA --output NEW_FILE`                                             | Write episode media; existing files are refused          |
-| `verify PATH --expected-manifest SHA256`                                                                            | Verify a release directory against its manifest          |
-
-Exit codes: `0` success, `2` usage, `3` refused, `4` remote error, `5` transport error,
-`6` verification failed, `7` wait timed out, `8` job not committed.
-
-Request files are JSON objects with `destination`, `package_id`, `attempt_id`,
-`dataset_name`, `dataset_id`, `description`, `episode_indices`, `resources`, and
-`finalized`.
-
-### Library composition
-
-A trusted caller injects a `JudgeEvidenceAuthority` explicitly; the release package
-does not discover one. Runtime limits come from
-`ReleaseRuntimeSettings.from_environment(os.environ)`. Package boundaries keep the
-release library free of the viewer, decoder, evaluator, and Azure SDK dependencies.
-The optional Azure ML path is absent from this workflow.
-
-### Evidence limits
-
-| Area                                                                         | Status                                                                                         |
-|------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
-| Unit and static checks                                                       | Local backend and frontend coverage gates pass                                                 |
-| Real-browser core, stale, capacity, cancel, reload, reflow, and focus checks | Fourteen isolated real-backend release workflow cases pass                                     |
-| Retained browsing                                                            | Local episodes/media and immutable evidence-key preservation are tested                        |
-| Live Blob publication/readback/cancellation                                  | Exact and mixed synthetic packages pass; completed-copy cancellation and reopened cleanup pass |
-| Hosted ingress                                                               | Application-principal identity and CSRF checks pass on the test deployment                     |
-| GPU validation                                                               | Not performed                                                                                  |
-| Assistive-technology validation                                              | Not performed                                                                                  |
-
-The 2026-11-03 live same-account proof used bearer-authorized synchronous copies
-and a synthetic contract package, not native video. It checked actual copy IDs and
-successful status, exact destination bytes, inventory, marker visibility,
-independently expected manifest identity, stopped children, released capacity and
-unchanged source after cancellation. Both packages verified after source removal;
-owned test objects were removed. Native LeRobot generation/readability is covered
-separately by CPU fixtures, not inferred from that live storage proof.
-
-Pending-copy/abort transitions, Blob-backed job-state faults and source-association
-cleanup retain deterministic fixture coverage, not live service acceptance claims.
-Keyboard checks are browser automation, not human assistive-technology sign-off.
-These gates establish the implemented core workflow within its documented limits;
-they do not establish GPU execution, cross-account support or downstream training.
-See [architecture and review boundaries](../curation/README.md#architecture-and-review-boundaries)
-and [verification, accounting and integration](../curation/README.md#verification-accounting-and-integration)
-for the library and operator contracts.
+Use the [headless client](../curation/README.md#headless-client) for scripts and CI,
+or the [standalone worker](../curation/README.md#standalone-worker) for configured
+local execution. The [release specification](../specifications/curated-dataset-release.specification.md)
+defines supported operations, package layout, provenance, authentication, capacity
+and [API contracts](../specifications/curated-dataset-release.specification.md#api-contract).
+See [storage and runtime settings](../curation/README.md#storage-and-runtime-settings)
+for operating limits and [cleanup guidance](../curation/README.md#clean-start-after-release-contract-changes)
+before removing obsolete state.
 
 ## 🔒 Authentication with Entra ID
 

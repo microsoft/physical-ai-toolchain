@@ -1,4 +1,8 @@
-# Data Management
+---
+title: Data Management
+description: Dataset curation, storage, annotation and viewer documentation for the Physical AI Toolchain.
+ms.date: 2026-11-03
+---
 
 Dataset curation, storage, annotation, versioning, and the viewer application for the Physical AI Toolchain.
 
@@ -47,14 +51,14 @@ docker compose up
 
 ## 📖 Documentation
 
-| Guide                                                                         | Description                                                             |
-|-------------------------------------------------------------------------------|-------------------------------------------------------------------------|
-| [Viewer README](viewer/README.md)                                             | Architecture, API reference, auth configuration                         |
-| [Curation README](curation/README.md)                                         | Release library, judge jobs, and headless tooling                       |
-| [Release workflow](viewer/README.md#-curated-release)                         | Selection, API/CLI, refusal recovery and evidence limits                |
-| [Release architecture](curation/README.md#architecture-and-review-boundaries) | Storage/evidence ownership, component review and integration boundaries |
-| [Dataset Curation Spec](specifications/dataset-curation.specification.md)     | Filtering, splitting, merging, conversion, validation                   |
-| [Viewer Deployment Spec](specifications/viewer-deployment.specification.md)   | Kubernetes deployment architecture                                      |
+| Guide                                                                           | Description                                                                     |
+|---------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| [Viewer README](viewer/README.md)                                               | Setup, user workflows and authentication configuration                          |
+| [Curation README](curation/README.md)                                           | Library, CLI, worker and operating guidance                                     |
+| [Release workflow](viewer/README.md#-curated-release)                           | Saved selection, preview, publication and recovery                              |
+| [Curated Release Spec](specifications/curated-dataset-release.specification.md) | Source selection, immutable packages, lifecycle, verification and API contracts |
+| [Dataset Curation Spec](specifications/dataset-curation.specification.md)       | Filtering, splitting, merging, conversion, validation                           |
+| [Viewer Deployment Spec](specifications/viewer-deployment.specification.md)     | Kubernetes deployment architecture                                              |
 
 ## 🗂️ Dataset Storage
 

@@ -78,198 +78,75 @@ now provides direct metadata-based inference only. Policy rollouts and the OpenA
 shim remain in evaluation. See [evaluation/vlm_judge/README.md](../../evaluation/vlm_judge/README.md)
 for inference and model configuration.
 
-## 📦 Release Library Foundations
+## 📦 Curated Releases
 
-`physical_ai_curation.release` provides versioned contracts, saved-input freezing,
-object planning and independent package verification without a decoder, evaluator,
-Azure SDK or web framework. Optional table, statistics and encoding helpers add
-generation without a publication workflow. Guarded publication and durable job
-primitives are available. The local coordinator composes native release generation.
-The viewer exposes a scoped release API and source Releases workflow, and
-`physical_ai_curation.release.client` provides a headless client. See the
-[viewer README](../viewer/README.md) for the operator contract and evidence limits.
+`physical_ai_curation.release` freezes selected saved inputs, plans copy/processing
+actions, publishes independent LeRobot v3 datasets and verifies completed packages.
+Use the [viewer workflow](../viewer/README.md#-curated-release) interactively or the
+headless client below. Release consumes saved evidence; it does not run inference
+or require judge approval.
 
-Use `verify_candidate` from `physical_ai_curation.release.verification` to check
-canonical control files, inventoried bytes, frozen source/output references,
-preview output paths and bounded frame-lineage records. It does not publish or
-discover a package. `verify_published` additionally requires matching receipt,
-report and completion-marker bindings. Both accept an independently obtained
-`expected_manifest_sha256`; without it, verification establishes internal
-consistency rather than protection against replacement of the whole package.
-Hashes do not authenticate a producer or prove recording dates, quality or the
-truth of provenance claims.
+Supported routes are local-to-local and same-account Blob-to-Blob from supported
+v2.1/v3 sources. Finalize local sources before release. Destinations use
+`DEST/<source-relative-path>/releases/<release-name>` and stay read-only after
+publication. The [release specification](../specifications/curated-dataset-release.specification.md)
+defines the complete route, selection, layout, lifecycle and verification contracts.
 
-Source freezing requires explicit saved selections. Local admission requires a
-finalized, quiescent source; observed changes invalidate its revision binding.
-It is not a universal point-in-time filesystem snapshot. Viewer local no-auth
-mode supplies `localuser` automatically; authenticated scope and CSRF remain
-authoritative without a separate release-role or grant policy.
+### Library Use
 
-`plan_release_objects` classifies exact copies, generated metadata and necessary
-encoding for LeRobot v3 targets. It opens no media or storage; planning alone
-does not establish publication or native readability.
-Capacity estimates remain advisory; the job store separately admits durable
-reservations and supervised execution applies hard runtime bounds.
-Call `load_media_limits` after application environment loading;
-its overrides are listed in the [backend environment example](../viewer/backend/.env.example).
+Import contracts and verification from `physical_ai_curation.release` without
+installing the viewer, evaluator, decoder or Azure SDK. Native generation and Blob
+adapters require the consumer dependencies listed above. A trusted composition
+supplies source/saved-input readers, destination, job storage and identity; selected
+judge evidence additionally requires an explicit `JudgeEvidenceAuthority`.
 
-### Supported Routes
+Use `verify_candidate` from `physical_ai_curation.release.verification` before
+publication and `verify_published` for a completed package. Supply an independently
+obtained `expected_manifest_sha256`. Without it, verification establishes internal
+consistency, not that the package is the intended release. Verification does not
+authenticate its producer or certify recording dates, provenance truth or quality.
 
-| Source and destination                     | Target                                     | Execution and limits                                                             |
-|--------------------------------------------|--------------------------------------------|----------------------------------------------------------------------------------|
-| Local to local                             | LeRobot v3 from supported v2.1 or v3 input | Independent exact copies; generated metadata and only necessary media encoding   |
-| Same-account Blob to Blob                  | LeRobot v3 from supported v2.1 or v3 input | Condition-bound service copies; affected media downloads and generated uploads   |
-| Local to Blob or Blob to local             | Not supported                              | Mixed storage routes are refused                                                 |
-| Cross-account Blob                         | Not supported                              | Source URLs must be same-account and query-free; no credential-bearing copy URLs |
-| v2.1 output or arbitrary format conversion | Not supported                              | Reading a source format does not imply publishing that format                    |
+### Headless Client
 
-Unchanged video takes the copy path without a decoder. Frame removal and supported
-saved color edits require the processing confirmation bound to the current preview.
-The [viewer evidence limits](../viewer/README.md#evidence-limits) distinguish native
-CPU generation tests from live synthetic Blob publication tests. No route implies
-an Azure quota guarantee or a general point-in-time source snapshot.
+The standard-library client uses the same scoped API as the viewer. Set
+`RELEASE_API_URL` and either `RELEASE_API_KEY` or `RELEASE_BEARER_TOKEN`; setting
+both credentials is a usage error. Credentials are sent only as headers. With
+credentials set, plaintext HTTP to non-loopback hosts is refused. Redirects are
+not followed, and remote errors are reduced to fixed codes.
 
-`execute_exact_copy` writes an independent, create-only local object through
-descriptor-bound reads and writes, checking the planned byte length and digest.
-Source and destination roots must be disjoint; symlinks and unsafe paths are
-rejected. A successful object copy is not a release commit, durable capacity
-reservation or proof of native LeRobot readability. Use `iter_subset_frames` for
-streamed frame mappings; the materialized timeline helper admits its estimated
-memory cost before allocation.
+```text
+python -m physical_ai_curation.release.client [--base-url URL] [--timeout-seconds N] [--format {json,text}] COMMAND
+```
 
-`release.tables` retains selected recorded columns, rebuilds native output
-coordinates, writes a named task index and produces episode/video references.
-Persistent language changes are retimed through shared dataset-I/O logic;
-events on removed frames are dropped. Table and statistics operations require
-NumPy, PyArrow and Pandas in the composing runtime, not the base installation.
-Missing mandatory media summaries are explicit errors. Count-weighted moments
-retain sample counts; aggregated quantiles are labelled approximate. Valid source
-summaries can be preserved for a full selection only when counts and independently
-generated moments agree. These checks do not prove that supplied source summaries
-are truthful or that saved transforms were applied.
+| Command                                                                                                             | Purpose                                                                |
+|---------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------|
+| `preview --request FILE`                                                                                            | Read-only preview from a JSON request file                             |
+| `submit --request FILE --preview-digest D --processing-digest D --idempotency-key K [--ack-local-disk] [--confirm]` | Submit a previewed request                                             |
+| `status JOB_ID`, `wait JOB_ID [--timeout S] [--interval S]`                                                         | Read or wait for a job                                                 |
+| `list [--cursor N] [--limit N] [--dataset-id ID]`                                                                   | List jobs                                                              |
+| `accepted-request --idempotency-key K`                                                                              | Recover acceptance after a lost response                               |
+| `cancel JOB_ID`, `recover JOB_ID`, `result JOB_ID`                                                                  | Job control and verified result                                        |
+| `artifact JOB_ID ALIAS`                                                                                             | Download `manifest`, `inventory`, `receipt` or `report`                |
+| `inventory DATASET_ID [--cursor N] [--limit N]`                                                                     | Source and saved-evidence inventory                                    |
+| `source-releases DATASET_ID`, `source-release DATASET_ID HANDLE`                                                    | Retained releases for a source                                         |
+| `source-episodes DATASET_ID HANDLE [--cursor N] [--limit N]`                                                        | Episodes in a retained release                                         |
+| `source-media DATASET_ID HANDLE EPISODE_INDEX CAMERA --output NEW_FILE`                                             | Write episode media; existing files are refused                        |
+| `verify PATH --expected-manifest SHA256`                                                                            | Verify local published output against an independent manifest identity |
 
-`release.composition.prepare_saved_generation` reads selected frozen saved values,
-validates their dataset/episode identity and composes frame removal plus saved
-`invert` and `grayscale` color filters. Grayscale additionally requires Pillow.
-Crop, resize, color adjustment, other filters, insertion, trajectory changes,
-subtask replacement and combined global/camera transforms are refused during
-preview. Unselected edits never enter the plan, and annotations do not replace
-recorded task identity. Encoder options and copied-camera summaries participate
-in the existing object planner's digest. Missing copied-camera summaries block
-preview without decoding video. Shared-object encoding follows frozen output
-episode order, not canonical source-ID order.
+Request files contain `destination`, `package_id`, `attempt_id`, `dataset_name`,
+`dataset_id`, `description`, `episode_indices`, `resources` and `finalized`. Use
+current saved revisions from inventory and the digests returned by preview.
+See the [API contract](../specifications/curated-dataset-release.specification.md#api-contract)
+for routes and response semantics.
 
-`release.tables.generate_native_selection` combines this plan, condition-bound
-source tables/tasks and actual encoded-media results into native data/episode
-tables and statistics. It checks confirmation, output frame windows, video rates,
-geometry and codec descriptors. It neither opens storage nor publishes files.
-The caller must revalidate frozen source/saved identities, regenerate the plan
-and check confirmation before media effects; checking again during assembly does
-not replace that pre-dispatch check. The caller also retains frozen evidence and
-streamed frame mappings for later package assembly.
+Exit codes: `0` success, `2` usage, `3` refused, `4` remote error, `5` transport error,
+`6` verification failed, `7` wait timed out, `8` job not committed.
 
-`release.encoding.encode_windows` additionally requires PyAV. It reads explicit
-frame windows from a seekable binary stream and writes H.264 video with contiguous
-timestamps. Frame removal, per-window color filters and explicit low-level
-horizontal/vertical flips are supported. Flips are not current saved-edit fields.
-Short media,
-timestamp gaps, incompatible rates and insufficient estimated memory are errors.
-Video summaries describe bounded samples of transformed RGB frames before lossy
-encoding; their counts are sampled frames, not pixels or all episode frames.
-The caller supplies admitted source streams and a private output sink. The helper
-does not check storage revisions, own effects or publish a release.
-
-`release.publication.LocalPublisher` writes independent, create-only objects under
-the chosen dataset name beneath an explicitly supplied collection. The name
-defaults to the package ID; `PublicationAttempt.dataset_name` selects another
-name. Trusted composition uses `release.record_storage.release_collection_location`
-to derive `DEST/<full-source-relative-path>/releases` from a configured local root
-or Blob container/prefix. For source `group-a/source-a`, a named package is
-`DEST/group-a/source-a/releases/release-a`. The viewer release service resolves
-this collection before preview/acceptance and persists the effective destination
-in its private `curated-release-execution/v3` binding. Restart uses that accepted
-location, not a newly derived alias root. Attempt identity adds no dataset level.
-An external `_releases/<dataset_name>.json` companion binds the named root to its
-package/attempt before payload writes; existing unowned roots are never adopted.
-Directory entries and completed object names are synchronized before completion.
-`prepare` independently verifies destination content and writes derived receipt
-and report artifacts. `publish` writes the canonical marker without a rename or
-promotion copy, then verifies the published package. Local ordinary dataset
-admission excludes all recorded release roots, including completed ones. Dedicated
-publisher discovery independently verifies ownership and marker/content bindings.
-Source-associated viewer listing and retained read-only metadata handles use
-verified destination associations for local and Blob collections. Both exclude
-recorded releases from the ordinary catalog. Ordinary source identity must not
-bypass release immutability. Missing markers or unavailable verification never
-authorize published access.
-
-The coordinator writes selected frozen annotation and label projections beside
-native output: `annotations/episodes/episode_<output-index>.json` uses six-digit
-indices, and `meta/episode_labels.json` uses release dataset identity and output
-episode keys. Retained-frame annotation spans are remapped; source-only claims
-and analysis invalidated by removed frames remain historical frozen evidence.
-These objects are inventoried before sealing. Saved edit instructions are not
-replayed against generated output. Retained metadata reads return these published
-projections, not original source-coordinate frozen resources. They use a shared
-response-byte bound and are not mutable source-write envelopes. Local and viewer
-saved-input readers load explicitly selected labels with their expected file ETag
-and validate their dataset identity and schema before freezing. Preview includes
-projection object/byte counts in generated and destination capacity. Invalid
-frame mappings or projections outside the accepted output budget are refused
-before runtime or publication dispatch. A transcode reservation includes the
-largest affected source spool, accepted encoder output budget and protocol files,
-not a second full copy of the dataset.
-
-For headless publication, `release.source_associations.SourceAssociationIntent`
-binds trusted source identity/revision, existing principal scope, destination and
-presentation values. Persist `source_association_binding(intent)` in the accepted
-`JobRequest.execution_binding`. The coordinator and independent runner restore
-that intent and select `release.local_worker.SourceAssociatedLocalPublisher` or
-`release.blob_worker.SourceAssociatedBlobPublisher` for the accepted route;
-an explicitly supplied publisher must match the accepted association.
-The publisher compares the intent with the durable job, creates its private
-`_release_associations/<package-id>.json` before payload effects and binds the
-final manifest under commit authority before the supervised marker writer starts.
-A different frozen-input digest is refused before irreversible commit. Same-job
-recovery preserves the first matching checkpoint; marked packages with missing
-associations are not adopted.
-
-`LocalSourceAssociations.discover` takes trusted source and existing principal
-scope digests, then independently verifies ownership, marker, manifest and frozen
-input bindings. It needs neither the source bytes nor job history. Its results
-are local library paths, not HTTP handles or permission grants. The private record
-format is `curated-release-association/v1`, bounded to 16 KiB. Accepted bindings
-must contain a pending intent, not a final checkpoint. Preparation and restoration
-enforce the intent bound; contention and
-collection bounds reuse configured durable-record limits. Both operational
-namespaces are excluded from ordinary local dataset scanning and direct lookup.
-Viewer v3 binds deterministic local or Blob association fields before acceptance and
-restores the acceptance timestamp from the durable job event. Native admission
-reserves the selected output budget alongside peak scratch, rather than preliminary
-generated-object estimates. Committed job result and allowlisted artifact reads
-verify the accepted destination and association without opening the original
-source. Removing the marker still refuses those reads. Job-scoped controls require
-retained job records; source-linked metadata handles do not. Local and Blob native
-episode/media reads share the dataset-I/O LeRobot interpreter and survive source
-and job-record removal without local Blob staging. Each read binds membership,
-length and hash to the accepted manifest inventory, so changes after admission
-are refused. Blob reads retain revision conditions; local reads use confined
-descriptors. The viewer metadata budget defaults to 64 MiB and the buffered media
-response limit to 512 MiB. Configure positive
-`CURATION_RELEASE_READ_METADATA_BYTES` and `CURATION_RELEASE_READ_MEDIA_BYTES`
-after environment loading; the backend environment example documents both.
-Ordinary annotation/edit targets require admitted source datasets. Label
-persistence separately rejects recorded packages and their descendants, including
-unavailable ownership records, instead of relying on catalog visibility alone.
-Local cancellation removes only a matching pending association after owned output
-cleanup and before capacity release; conflicting or finalized records are retained.
-Associated Blob cancellation removes the pending association after owned payload
-and companion cleanup. Foreign/finalized records or uncertain deletion retain
-capacity; reopening the durable store reconciles an already deleted record without
-dispatching the copy again. These are filesystem/SDK fault-fixture results, not live
-Azure authorization or cancellation proof. Supervised
-dispatch renews a live worker lease even for children shorter than the heartbeat
-interval; it never revives an expired fence.
+After an uncertain submit, retain the original idempotency key and look up its
+accepted request before retrying. For stale selection, fetch current inventory and
+preview again. Cancellation is not immediate cleanup: inspect effects stopped,
+cleanup and capacity status. Once committing has begun, recover the exact committed
+result instead of trying to cancel it. Never delete job records to clear a reservation.
 
 ### Clean Start After Release Contract Changes
 
@@ -289,149 +166,7 @@ This is an operator cleanup procedure, not automatic package adoption or migrati
 Current supported source formats and truthful unknown-origin provenance remain
 supported data, not release compatibility fallbacks.
 
-`release.azure_publication.BlobPublisher` uses injected synchronous Azure clients,
-create-only destination writes, source ETag conditions and independent streaming
-verification. Source URLs must be query-free and same-account. Source bearer
-authorization requests synchronous service copy. The configured supervised worker
-uses that route; pending-copy reconciliation is covered by fault fixtures, not a
-live asynchronous acceptance claim. Pending or failed copies block
-verification. Abort cleanup binds the owned operation and copy ID and uses
-conditional deletion. SDK imports are lazy.
-
-Both publishers require `PublicationControl` to durably record and fence effects
-before dispatch, retain uncertain intents and serialize publication with
-cancellation. Publication requires an irrevocable commit decision and a closed
-ledger with stopped writers. The adapters are not standalone job runners or an
-unsupervised publication API. Provider tests do not establish live Azure
-authorization, copy limits or cancellation behavior.
-
-`validate_processing_confirmation` requires the current preview digest whenever
-processing needs confirmation. Missing statistics and capacity blockers cannot
-be overridden. The composer must first revalidate frozen inputs and regenerate
-the plan; this check is not authentication, fencing or durable job admission.
-
-### Storage-Native Job State
-
-`release.jobs.ReleaseJobStore` persists release acceptance, scoped idempotency,
-fenced leases, reservations, effect intents and lifecycle events as versioned
-per-job JSON records. Local records live under `jobs/<job_id>.json` beneath the
-explicitly configured state folder. Choose a folder beneath `data_dir`, a separate
-folder or a subfolder of a selected directory. No database server or SQLite file
-is required. Each transition replaces one complete record atomically and syncs
-the file and directory while holding a filesystem lock.
-
-`release.record_storage.BlobRecordStorage` uses the selected container/prefix for
-the same job documents. It coordinates acceptance with a renewable Blob lease,
-conditional record writes and a pending-write checkpoint. A replacement owner
-finishes that checkpoint before admitting new work; a lost response does not
-permit a duplicate job. An Azure-backed job does not depend on a local database
-or local state cache. Indexes, idempotency bindings and reservations are rebuilt
-from persisted records when the service reopens the store. Initial deployment
-trades indexed lookup performance for self-contained, inspectable storage.
-
-`release.record_storage.BlobLocation` binds a remote payload destination to its
-canonical HTTPS account origin, container and prefix. Job acceptance does not
-resolve that destination as a local path or measure worker disk as Azure capacity.
-Blob payload reservations share an account-wide application ceiling, including
-retained output, across containers, prefixes and execution hosts using the same
-job authority. `CURATION_RELEASE_BLOB_RESERVATION_LIMIT_BYTES` defaults to 1 TiB;
-this is an admission policy limit, not measured Azure quota or free space. Use the
-same configured ceiling for workers sharing that authority. Local scratch still
-requires its own filesystem reservation and can fail independently of remote
-payload admission.
-
-Mutable operational records remain separate from immutable published package
-bytes, within configured storage. Local runtime proofs and scratch may use a
-configured worker folder. Missing proof from an unavailable execution host is an
-unresolved obligation, not evidence that the old writer stopped. There is no
-automatic migration from the earlier uncommitted database implementation.
-
-Pass settings from `ReleaseRuntimeSettings.from_environment(os.environ)` after
-environment loading. The [backend environment example](../viewer/backend/.env.example)
-documents lease, reserve, native memory, termination, liveness, contention and
-recovery overrides, plus bounded record sizes and scan counts. State storage must
-remain available across worker restarts. A supplied Blob adapter accepts the
-same validated limits explicitly; optional Azure imports remain lazy.
-
-### Supervised Execution
-
-Acceptance precedes `running`; `sealed` closes payload effects and journals exact
-receipt/report identities. `committing` records the irrevocable manifest-bound
-decision before the final marker, and `committed` records verified publication.
-The final local or Blob marker uses a separate commit-bound intent and registered guardian
-child; closing the payload ledger never grants a general late-write capability.
-Recovery checks the persisted guardian proof even when the controller lost its
-stop acknowledgment. It removes only registered inode-matching marker partials,
-verifies an existing marker before acknowledging it, and retains foreign residue.
-Pending marker effects or writers cannot advance the job to `committed`.
-Cancellation moves an uncommitted job to `cancelling`; stopped effects, cleanup
-and retained capacity are separate status fields. No clean cancellation is reported
-while an effect or private scratch charge is unresolved. A new worker cannot
-dispatch another path while an earlier intent remains unresolved.
-
-`release.coordinator.generation_request_bytes` supplies the exact durable request
-binding. `run_release_generation` revalidates frozen source/saved/context identities,
-checks that binding and the confirmed plan, then executes guarded local/local or
-same-account Blob/Blob output. Mixed routes, cross-account copies and overlapping
-source/output roots are refused. Blob source reads bind fresh raw ETag/version
-identity to the frozen revision, use conditional requests and verify streamed
-content. Unsupported version-specific copy URLs remain refused; query strings
-and credential-bearing source addresses are not accepted.
-Native metadata and table decoding/assembly run in capped guardian children;
-affected video spools run sequentially under the same boundary. Unchanged video
-copies never invoke an encoder or decoder. Local payload copies, server-side Blob
-copies, generated files and streamed lineage run in registered guardian children.
-Azure credentials are acquired within the child, not serialized in its protocol.
-Native scratch and output sinks reject
-growth before exceeding admitted bounds. Shared filesystems use one reservation;
-separate scratch filesystems receive independent durable charges.
-
-Private workspaces journal their creator's kernel identity and directory inode
-before receiving bytes. Normal cleanup requires current creator authority and
-stopped children; restart recovery additionally requires independent creator-exit
-evidence. Replaced directories, symlink residue, exhausted cleanup budgets and
-uncertain creation outcomes retain their charge. State and scratch roots are
-service-private directories, not shared writable output areas. Unknown destination
-residue is not deleted or reported as completed cleanup.
-
-Scoped status separates reserved scratch, observed current scratch and measured
-peak scratch. Idempotent completed-I/O observations record original-source and
-independent destination verification reads, unchanged-copy bytes and generated
-local output. These are not estimates or proof of unobserved partial effects.
-Blob composition additionally records completed storage-copy bytes, verified
-affected-media downloads and independently verified generated uploads. Local
-copies are not mislabeled as remote traffic. Uncertain transfers do not count as
-acknowledged observations.
-
-`SupervisedBlobPublisher.reconcile_copy(cancel=True)` requires durable cancellation
-and a journaled copy identity before starting a separate registered cleanup child.
-It rechecks ownership, aborts a pending copy and conditionally deletes only its
-unpublished residue, including completion during abort. Lost delete responses
-remain unresolved until independent absence and stopped-writer proof are observed.
-Ordinary writer registration remains refused after cancellation. This copy-level
-reconciliation does not complete whole-release cleanup, remove the ownership
-companion or release retained capacity.
-
-`SupervisedBlobPublisher.cleanup_cancelled()` checks the entire unpublished
-root against durable payload/control intents before deleting anything. Markers,
-unjournaled objects and foreign ownership prevent cleanup. Each registered child
-rechecks the companion, settles pending copies and deletes with current ETag
-conditions. A separate cleanup-only intent authorizes removal of the exact
-companion after the payload root is empty. Capacity is released only after stopped
-writer proof and independent absence checks for both root and companion.
-Lost payload or companion delete responses survive a job-store restart and require
-explicit retry. Cleanup uses the configured total budget for streaming preflight
-checks and supervised children; a blocked child is stopped and reaped. Failure
-exposes `cleanup_state=failed` and retains capacity, rather than reporting clean
-cancellation. Provider tests with real children do not establish live Azure behavior.
-
-`physical_ai_curation.release.runner.execute_job` restores an accepted request
-from durable JSON using a trusted `ConfiguredExecution` source, saved reader,
-selection, context and destination. Native metadata and table identities are
-reconstructed by a bounded guardian child; accepting-process Arrow buffers are
-not required. Sealed/committing jobs recover only the exact manifest, and uncertain
-effects require reconciliation rather than blind redispatch. `run_queue` performs
-one bounded pass using a service-owned resolver; it is not an HTTP background task.
+### Standalone Worker
 
 Standalone local execution uses an operator-owned configuration file:
 
@@ -458,134 +193,34 @@ result. Without the binding, evidence selections are refused. Local saved labels
 episode contribution ledgers and evidence use the same revision and projection
 contracts as the viewer reader; hosted execution still derives its own authority.
 
-Status includes bounded category/status/duration diagnostics and conservative
-current/peak journaled destination bytes. These include uncertain intents, not
-measured Blob allocation; independent absence or completed owned cleanup reduces
-current usage, never the historical peak. These counters do not replace capacity
-reservations or actual verification reads. Public submission/API clients remain a
-separate adapter layer.
+### Storage and Runtime Settings
 
-The Linux supervisor requires pidfds and procfs. It persists process start/boot
-identity before releasing the child start gate, drains descendants after controller
-loss and emits stop proof only after reaping. Missing proof, a killed guardian or
-an unsupported host remains unresolved; a reused PID is not evidence of shutdown.
-`recover_runtimes` processes at most 128 registered runtimes per invocation within
-one configured total wait budget. Recheck status before replacement effects.
+Run supervised workers on Linux with pidfds and procfs. Keep job storage available
+across restarts and runtime/scratch directories private to the service. Missing
+process-stop proof or uncertain cleanup requires reconciliation, not forced removal.
 
-Job pages contain at most 100 entries and expose only the requesting principal's
-scope. Lifecycle transitions and their event outbox share a transaction; JSONL
-export repairs only a partial final record and verifies existing cursors against
-the events embedded in job records. The export is reconstructible local
-application telemetry, not OTLP or job authority. There is no automatic job/event
-TTL or reservation expiry. Retain job records and relevant operational evidence
-until all active effects and output-retention obligations are reconciled;
-reads never prune them.
+| Setting                                         | Operator purpose                                                                                  |
+|-------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| `RELEASE_JOB_ROOT`                              | Required local job/runtime root for the viewer release service                                    |
+| `RELEASE_DESTINATIONS`                          | Configured aliases for absolute local destinations or Blob locations                              |
+| `RELEASE_JOB_STORAGE`                           | Optional Blob location for shared durable job records                                             |
+| `CURATION_RELEASE_BLOB_RESERVATION_LIMIT_BYTES` | Shared application ceiling for Blob payload reservations; defaults to 1 TiB, not Azure free space |
+| `CURATION_RELEASE_READ_METADATA_BYTES`          | Retained metadata read limit; defaults to 64 MiB                                                  |
+| `CURATION_RELEASE_READ_MEDIA_BYTES`             | Buffered retained-media response limit; defaults to 512 MiB                                       |
 
-### Architecture and Review Boundaries
+Load the application environment before calling
+`ReleaseRuntimeSettings.from_environment(os.environ)` or `load_media_limits`.
+The [backend environment example](../viewer/backend/.env.example) documents lease,
+memory, reserve, termination, cleanup, recovery and record-size overrides. Workers
+sharing job authority must use the same Blob reservation ceiling. Local scratch
+has its own capacity requirement even for Blob destinations.
 
-The viewer and headless client submit the same scoped API contracts. The service
-resolves configured storage and saved-input authority, freezes the selection,
-previews the plan and accepts one durable request. An independent worker restores
-that request, revalidates it and runs registered effects. Only destination
-verification and the marker-last commit make a release visible. Dataset-I/O owns
-native interpretation; curation owns release policy; adapters own credentials and
-transport. Review these responsibilities independently of PR count.
-
-| Review area        | Owning boundary                                                                                              | Invariant to check                                                                                |
-|--------------------|--------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
-| Contracts          | [Release models](physical_ai_curation/release/models.py) and verifier                                        | Versioned strict schemas, selected evidence, external expected identity and closed inventory      |
-| Media              | [Native generation](physical_ai_curation/release/tables.py) and encoding                                     | Source/output coordinates, recorded task identity, statistics and copy-first execution            |
-| Storage            | [Local publication](physical_ai_curation/release/publication.py) and Blob publication                        | Confined create-only output, conditional copies, independent reads and marker-last visibility     |
-| Lifecycle          | [Durable jobs](physical_ai_curation/release/jobs.py) and supervised workers                                  | Accepted authority, leases/fences, stopped writers, retained capacity and safe reconciliation     |
-| Authentication     | [Viewer release service](../viewer/backend/src/api/services/release_service.py) and shared auth dependencies | Existing principal/source scope and CSRF, without release roles or new grants                     |
-| API and automation | [Headless client](physical_ai_curation/release/client.py) and independent runner                             | Idempotency, accepted-request lookup, bounded errors and verified results                         |
-| Viewer             | [Release workflow](../viewer/README.md#-curated-release)                                                     | Saved-selection preview, refusal recovery, accessible status and immutable source-linked browsing |
-
-### Layout and Evidence Ownership
-
-The configured destination contains a source-mirrored collection, not a second
-mutable source dataset. This illustrative layout omits native shard names; the
-manifest and inventory determine the actual object set.
-
-```text
-DEST/<source-relative-path>/releases/
-  <release-name>/
-    meta/, data/, videos/          Native v3 dataset objects
-    annotations/                  Selected output-coordinate projections
-    evidence/frozen-input.json    Selected immutable saved values
-    evidence/preview.json         Frozen plan
-    release/manifest.json         Package bindings
-    release/inventory.json        Object lengths and hashes
-    release/receipt.json          Verification receipt
-    release/report.md             Derived readable report
-    release/marker.json           Final publication boundary
-  _releases/<release-name>.json    Private attempt ownership
-  _release_associations/           Private source/principal associations
-```
-
-Configured job storage separately holds `jobs/<job_id>.json`, coordination records
-and reservations. Worker-private scratch and process proofs are not published
-payload. Preview writes none of these. Concurrent readers require verified
-publication; conflicting saves invalidate selected revisions; worker replacement
-must reconcile earlier effects before dispatch. Source removal does not invalidate
-verified retained output, but job control still needs retained job records.
-
-Compact release control JSON uses `schema_version` with supported major version 1;
-current model/verifier versions are `1.0.0`. Reject unsupported major versions and
-unknown fields rather than guessing compatibility. API and private worker bindings
-are separate versioned contracts, not aliases for the package schema.
-
-Domain provenance JSONL is a streamed, inventoried package object when declared
-by the manifest. Its versioned record envelope and digest/count/order bindings
-preserve source-to-output lineage without loading the complete stream into a
-compact control document. Live operational JSONL is different: lifecycle events
-come from durable job records and remain outside the sealed package. Never append
-later cancellation or recovery events to published evidence. Application JSONL is
-not OTLP and does not establish distributed traces. A future OpenTelemetry adapter
-may map bounded categories/status and seconds/bytes measurements and propagate
-available trace context; no such exporter or fabricated trace identity is implied.
-Diagnostics must not expose raw authors, tokens, private paths or provider errors.
-
-### Verification, Accounting and Integration
-
-Keep the expected manifest SHA-256 independently of the downloaded package and
-pass it to the verifier. A hash learned only from the same package proves internal
-consistency, not that it is the intended release. Verification covers inventoried
-bytes and declared bindings; it does not certify training quality, completeness
-beyond the selected evidence, or the truth of a recording-origin claim. Preserve
-unknown origin as unknown. Release producer/time describes this release operation,
-not an inferred recorder identity or recording date. Signing, WORM storage and
-legal-retention policy are outside this workflow.
-
-| Accounting category                 | Interpretation and cost boundary                                                                               |
-|-------------------------------------|----------------------------------------------------------------------------------------------------------------|
-| Exact local copies                  | Independent local output bytes, not remote network transfer                                                    |
-| Service-side Blob copies            | Acknowledged storage-copy bytes; storage operations and retained allocation still have costs                   |
-| Source and destination verification | Separate reads, including independent destination readback; copy-first does not eliminate verification traffic |
-| Affected-media downloads            | Source bytes needed for processing; unchanged video is not downloaded for encoding                             |
-| Generated uploads                   | Acknowledged generated output sent to Blob, separate from service-copy bytes                                   |
-| Scratch and destination             | Reserved bounds, observed current usage and historical peak are distinct; uncertain effects retain capacity    |
-
-Partial or uncertain transfers are not acknowledged-byte measurements. Blob
-admission limits are application policy, not provider free-space measurements.
-Estimate costs using the deployment's storage transactions, retention, network
-path and processing runtime; no fixed price, throughput or savings ratio follows
-from these counters.
-
-The stable downstream boundary is a verified manifest identity, verifier result,
-committed result/artifact API and retained read-only release handle. Optional
-[issue 2123](https://github.com/microsoft/physical-ai-toolchain/issues/2123)
-registration and training/model integration should consume that boundary without
-changing core publication. Azure ML registration is absent from the core workflow;
-API/library integration is available; downstream training, target GPU and human
-assistive-technology validation have not been performed by release acceptance.
-
-`BlobPublisher.reconcile_copy` observes destination ownership, copy ID and actual
-content through a durable reconciliation guard. It records copy identity before
-abort/delete and handles completed copies or already-absent cleanup residue.
-Provider-fault tests are not live Azure proof. Local and same-account Blob
-generation composition is implemented. Public cleanup/recovery entry points,
-public submission adapters and hosted/target acceptance remain separate work.
+Status distinguishes estimates, reserved bytes, observed current usage and peak
+usage. Verification reads, service copies, processing downloads and generated
+uploads have different costs; see
+[capacity and accounting](../specifications/curated-dataset-release.specification.md#capacity-and-accounting).
+Retain job records and operational events until active effects and output-retention
+obligations are reconciled. There is no automatic job/event expiry or read-time pruning.
 
 ## 🔒 Storage and Security
 
