@@ -51,15 +51,8 @@ class _ReplayWindow:
             if nonce in self._seen:
                 return False
             if len(self._seen) >= self.max_entries:
-                # Capacity is a memory bound, not a hard throughput ceiling. Drop the
-                # soonest-to-expire entries so sustained legitimate traffic can continue
-                # while recent nonces stay protected. Per-session sequencing belongs in #1693.
-                overflow = len(self._seen) - self.max_entries + 1
-                for seen_nonce, _expiry in sorted(self._seen.items(), key=lambda item: item[1])[:overflow]:
-                    del self._seen[seen_nonce]
-                logger.warning(
-                    f"Authenticated replay cache was full; evicted {overflow} oldest nonce(s)",
-                )
+                logger.error("Authenticated replay cache is full; rejecting message")
+                return False
             self._seen[nonce] = now + self.max_age_seconds
             return True
 
