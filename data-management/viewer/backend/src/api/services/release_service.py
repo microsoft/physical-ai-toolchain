@@ -38,6 +38,7 @@ from physical_ai_curation.release.projections import LABELS_PATH
 from physical_ai_curation.release.publication import PublicationAttempt
 from physical_ai_curation.release.record_storage import (
     BlobLocation,
+    BlobRecordStorage,
     RecordLimits,
     _blob_container_client,
     release_collection_location,
@@ -46,6 +47,7 @@ from physical_ai_curation.release.runner import ConfiguredExecution
 from physical_ai_curation.release.source_associations import LocalSourceAssociations, VerifiedAssociation
 from physical_ai_curation.release.store import CHUNK_BYTES, LocalReleaseStore
 from physical_ai_curation.release.verification import MAX_CONTROL_BYTES
+from physical_ai_curation.saved_input import SavedInputError
 from physical_ai_dataset_io.lerobot import EpisodeRecord, iter_episodes
 
 __all__ = [
@@ -92,6 +94,7 @@ class ReleaseApiSettings:
     destinations: Mapping[str, Path | BlobLocation] = field(default_factory=dict)
     metadata_max_bytes: int = _MAX_METADATA_BYTES
     media_max_bytes: int = _MAX_MEDIA_BYTES
+    job_storage: BlobLocation | None = None
 
     @property
     def enabled(self) -> bool:
@@ -108,6 +111,15 @@ def load_release_api_settings(environ: Mapping[str, str]) -> ReleaseApiSettings:
             raise ValueError(f"{RELEASE_JOB_ROOT_ENV} must be an absolute path")
 
     raw_destinations = environ.get(RELEASE_DESTINATIONS_ENV, "").strip()
+    job_storage = None
+    if environ.get("RELEASE_JOB_STORAGE", "").strip():
+        try:
+            state = json.loads(environ["RELEASE_JOB_STORAGE"])
+            if not isinstance(state, dict) or set(state) != {"account_url", "container", "prefix"}:
+                raise ValueError("invalid state location")
+            job_storage = BlobLocation(**state)
+        except (ValueError, TypeError) as error:
+            raise ValueError("RELEASE_JOB_STORAGE must be a configured Blob location") from error
     destinations: dict[str, Path | BlobLocation] = {}
     if raw_destinations:
         try:
@@ -142,7 +154,29 @@ def load_release_api_settings(environ: Mapping[str, str]) -> ReleaseApiSettings:
         destinations=destinations,
         metadata_max_bytes=limits["CURATION_RELEASE_READ_METADATA_BYTES"],
         media_max_bytes=limits["CURATION_RELEASE_READ_MEDIA_BYTES"],
+        job_storage=job_storage,
     )
+
+
+def open_release_job_store(settings: ReleaseApiSettings) -> ReleaseJobStore:
+    """Compose shared durable state while keeping native scratch on the configured local root."""
+    if settings.job_root is None:
+        raise ReleaseApiError(503, "release job store is not configured")
+    runtime = ReleaseRuntimeSettings.from_environment(os.environ)
+    location = settings.job_storage
+    storage = None
+    if location is not None:
+        storage = BlobRecordStorage(
+            _default_blob_container(location),
+            account_url=location.account_url,
+            container_name=location.container,
+            prefix=location.prefix,
+            timeout_seconds=runtime.state_timeout_seconds,
+            max_record_bytes=runtime.state_max_record_bytes,
+            max_total_bytes=runtime.state_max_total_bytes,
+            max_jobs=runtime.state_max_jobs,
+        )
+    return ReleaseJobStore(settings.job_root, settings=runtime, storage=storage)
 
 
 @dataclass(frozen=True)
@@ -157,8 +191,11 @@ class ReleaseSpec:
     episode_indices: tuple[int, ...]
     resources: tuple[SavedSelection, ...] = ()
     finalized: bool = False
+    description: str = ""
 
     def __post_init__(self) -> None:
+        if len(self.description) > 2000:
+            raise ReleaseApiError(422, "description exceeds its bound")
         if not _ALIAS.fullmatch(self.destination):
             raise ReleaseApiError(422, "destination alias is invalid")
         for value in (self.package_id, self.attempt_id):
@@ -220,9 +257,7 @@ class ReleaseService:
         blob_container_factory: Callable[[BlobLocation], Any] | None = None,
     ) -> None:
         self._settings = settings
-        self._store_factory = store_factory or (
-            lambda root: ReleaseJobStore(root, settings=ReleaseRuntimeSettings.from_environment(os.environ))
-        )
+        self._store_factory = store_factory or (lambda _root: open_release_job_store(settings))
         self._planner = planner
         self._blob_container_factory = blob_container_factory or _default_blob_container
 
@@ -257,16 +292,35 @@ class ReleaseService:
     def destinations(self) -> list[dict[str, str]]:
         return [{"alias": alias} for alias in sorted(self._settings.destinations)]
 
-    def jobs(self, scope: str, *, cursor: int, limit: int) -> dict[str, Any]:
+    def jobs(self, scope: str, *, cursor: int, limit: int, dataset_id: str | None = None) -> dict[str, Any]:
         store = self._store()
         try:
             page = store.page(scope=scope, principal=scope, cursor=cursor, limit=limit)
         except ReleaseJobError as error:
             raise _map_job_error(error) from error
+        items = []
+        for item in page.items:
+            content = store.execution_binding(item.job_id)
+            binding = parse_strict_json(content) if content else {}
+            source = binding.get("selection", {}).get("dataset_id")
+            if dataset_id is None or source == dataset_id:
+                items.append({**_status_body(item), "dataset_id": source})
         return {
-            "items": [_status_body(item) for item in page.items],
+            "items": items,
             "next_cursor": page.next_cursor,
         }
+
+    def accepted_request(self, scope: str, idempotency_key: str) -> dict[str, Any]:
+        """Resolve a private accepted-request pointer without source reads or state mutation."""
+        if not _IDEMPOTENCY_KEY.fullmatch(idempotency_key):
+            raise ReleaseApiError(422, "Idempotency-Key is invalid")
+        try:
+            accepted = self._store().accepted_request(scope=scope, principal=scope, idempotency_key=idempotency_key)
+        except ReleaseJobError as error:
+            raise _map_job_error(error) from error
+        if accepted is None:
+            raise ReleaseApiError(404, "release request was not found")
+        return {"job_id": accepted.job_id, "replayed": True}
 
     def status(self, scope: str, job_id: str) -> dict[str, Any]:
         store = self._store()
@@ -306,6 +360,27 @@ class ReleaseService:
         if not _IDEMPOTENCY_KEY.fullmatch(idempotency_key):
             raise ReleaseApiError(422, "Idempotency-Key is invalid")
         store = self._store()
+        client_request_digest = hashlib.sha256(
+            canonical_json_bytes(
+                {
+                    "selection": asdict(spec),
+                    "preview_digest": preview_digest,
+                    "processing_digest": processing_digest,
+                    "local_disk_acknowledged": local_disk_acknowledged,
+                }
+            )
+        ).hexdigest()
+        try:
+            accepted = store.accepted_request(
+                scope=scope,
+                principal=scope,
+                idempotency_key=idempotency_key,
+                client_request_digest=client_request_digest,
+            )
+        except ReleaseJobError as error:
+            raise _map_job_error(error) from error
+        if accepted is not None:
+            return accepted
         destination = self._destination(spec.destination, spec.dataset_id)
         prepared = await self._prepare(scope, spec, destination)
         if _preview_digest(spec, prepared) != preview_digest:
@@ -328,6 +403,7 @@ class ReleaseService:
             reserved_bytes=prepared.reserved_bytes,
             route="blob" if isinstance(destination, BlobLocation) else "local",
             execution_binding=prepared.execution_binding,
+            client_request_digest=client_request_digest,
         )
         try:
             return store.accept(request)
@@ -338,7 +414,7 @@ class ReleaseService:
         except ReleaseJobError as error:
             raise ReleaseApiError(422, "release request was rejected") from error
 
-    async def inventory(self, dataset_id: str, *, cursor: int, limit: int) -> dict[str, Any]:
+    async def inventory(self, dataset_id: str, *, cursor: int, limit: int, scope: str = "localuser") -> dict[str, Any]:
         if not cursor >= 0 or not 1 <= limit <= 100:
             raise ReleaseApiError(422, "invalid_inventory_page")
         datasets = getattr(self._planner, "datasets", None)
@@ -349,9 +425,79 @@ class ReleaseService:
             raise ReleaseApiError(422, "source_inventory_limit_exceeded")
         indices = sorted({episode.index for episode in episodes})
         selected = indices[cursor : cursor + limit]
+        reader_factory = getattr(self._planner, "reader_for_scope", None)
+        reader = reader_factory(scope) if reader_factory else getattr(self._planner, "reader", None)
+        items = []
+        for index in selected:
+            item = {
+                "episode_index": index,
+                "resources": [],
+                "annotation": False,
+                "edits": False,
+                "labels": None,
+                "provenance": None,
+                "judge": None,
+            }
+            if reader is not None:
+                try:
+                    annotation = await reader.annotation(dataset_id, index)
+                    source = await reader.source_revision(dataset_id, index)
+                    edits = await reader.edits(dataset_id, index, scope, source)
+                    labels = await reader.release_resource(dataset_id, SavedSelection("labels", index, "inventory"))
+                    ledger_resource = await reader.release_resource(
+                        dataset_id, SavedSelection("ledger", index, "inventory")
+                    )
+                    for kind, resource in (
+                        ("annotation", annotation),
+                        ("edits", edits),
+                        ("labels", labels),
+                        ("ledger", ledger_resource),
+                    ):
+                        if resource.value is not None and resource.etag:
+                            item["resources"].append(
+                                {"kind": kind, "episode_index": index, "expected_revision": resource.etag}
+                            )
+                    item["annotation"] = annotation.value is not None
+                    item["edits"] = edits.value is not None
+                    values = labels.value or {}
+                    item["labels"] = values.get("episodes", {}).get(str(index))
+                    ledger = values.get("provenance", {}).get(str(index))
+                    item["provenance"] = (
+                        {
+                            "origins": sorted(
+                                {entry.get("origin", "unknown") for entry in (ledger or {}).get("contributions", [])}
+                            )
+                        }
+                        if ledger
+                        else None
+                    )
+                except (SavedInputError, *_release_read_errors()) as error:
+                    raise ReleaseApiError(409, "saved_inventory_unavailable") from error
+                try:
+                    evidence = await reader.release_resource(dataset_id, SavedSelection("evidence", index, "inventory"))
+                    if evidence.value is not None and evidence.etag:
+                        result = evidence.value["target"]["result"]
+                        success = result["outcome_success"]
+                        item["judge"] = {
+                            "status": "succeeded",
+                            "freshness": "current",
+                            "confidence": result["outcome_confidence"],
+                            "outcome": "success" if success is True else "failure" if success is False else None,
+                        }
+                        item["resources"].append(
+                            {"kind": "evidence", "episode_index": index, "expected_revision": evidence.etag}
+                        )
+                except (SavedInputError, *_release_read_errors()):
+                    item["judge"] = {
+                        "status": "unavailable",
+                        "freshness": "unknown",
+                        "confidence": None,
+                        "outcome": None,
+                    }
+            items.append(item)
         return {
             "schema": CAPABILITY_SCHEMA,
-            "items": [{"episode_index": index} for index in selected],
+            "items": items,
             "total": len(indices),
             "next_cursor": cursor + limit if cursor + limit < len(indices) else None,
         }
@@ -451,7 +597,15 @@ class ReleaseService:
                 info_bytes = files.read_bytes("meta/info.json")
                 info = parse_strict_json(info_bytes)
                 total = info["total_episodes"]
-                remaining = MAX_CONTROL_BYTES - len(info_bytes)
+                manifest_bytes = item.store.read_control_bytes(MANIFEST_PATH, max_bytes=MAX_CONTROL_BYTES)
+                if hashlib.sha256(manifest_bytes).hexdigest() != item.manifest_sha256:
+                    raise ReleaseVerificationError("release manifest changed after admission")
+                frozen_path = parse_strict_json(manifest_bytes)["frozen_input_path"]
+                frozen_bytes = files.read_bytes(frozen_path)
+                frozen_evidence = parse_strict_json(frozen_bytes)
+                remaining = MAX_CONTROL_BYTES - len(info_bytes) - len(frozen_bytes)
+                if remaining < 0:
+                    raise ReleaseVerificationError("projection response exceeds bound")
                 paths = files.paths()
                 annotations = []
                 labels = None
@@ -478,6 +632,7 @@ class ReleaseService:
                 "package_id": item.package_id,
                 "manifest_sha256": item.manifest_sha256,
                 "total_episodes": total,
+                "frozen_evidence": frozen_evidence,
                 "annotations": annotations,
                 "labels": labels,
             }
@@ -599,7 +754,7 @@ class ReleaseService:
             raise ReleaseApiError(503, "release planning is not configured")
         try:
             return await self._planner.prepare(scope, spec, destination)
-        except ReleaseVerificationError as error:
+        except (ReleaseVerificationError, SavedInputError) as error:
             raise ReleaseApiError(422, "release selection failed verification") from error
         except (OSError, ValueError, KeyError, TypeError) as error:
             raise ReleaseApiError(422, "release source is unavailable or unsupported") from error

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
+from physical_ai_curation.adapters.job_storage import BlobJobStore
+from physical_ai_curation.adapters.local_saved_input import JudgeEvidenceAuthority, bound_judge_evidence, content_etag
+from physical_ai_curation.evidence import read_job_evidence
 from physical_ai_curation.saved_input import (
     SavedInputError,
     SavedInputSnapshot,
@@ -25,13 +28,76 @@ if TYPE_CHECKING:
     from .label_storage import LabelStorage
 
 
+class JudgeStateReader(Protocol):
+    async def read(self) -> dict[str, Any]:
+        """Return persisted judge state without taking a write transaction."""
+
+
+class AzureJudgeStateReader:
+    """Read persisted judge state from the blob container used by judge jobs."""
+
+    def __init__(self, provider: Any | None) -> None:
+        self.provider = provider
+
+    async def read(self) -> dict[str, Any]:
+        if self.provider is None:
+            raise SavedInputError("Judge evidence storage is unavailable", 503)
+        client = await self.provider._get_client()
+        blob = client.get_container_client(self.provider.container_name).get_blob_client("_curation/judge/state.json")
+        return await BlobJobStore(blob).read()
+
+
+class ScopedJudgeEvidenceAuthority:
+    """Expose judge evidence only for one principal, the current generation, and the current source revision.
+
+    Absence returns None. A newest matching entry that fails validation or is stale is refused, never replaced
+    by an older entry.
+    """
+
+    def __init__(self, store: JudgeStateReader, datasets: DatasetService, *, principal_scope_id: str) -> None:
+        self.store = store
+        self.datasets = datasets
+        self.principal_scope_id = principal_scope_id
+
+    async def evidence(self, dataset_id: str, episode_index: int) -> dict[str, Any] | None:
+        state = await self.store.read()
+        generation = state["generations"].get(dataset_id, 0)
+        candidates = [
+            (job, target)
+            for job in state["jobs"].values()
+            if job["dataset_id"] == dataset_id
+            and job["actor"] == self.principal_scope_id
+            and job.get("result_kind", "judge") == "judge"
+            and job["generation"] == generation
+            for target in job["targets"]
+            if target["episode_index"] == episode_index and target["status"] == "succeeded"
+        ]
+        if not candidates:
+            return None
+        job, target = max(candidates, key=lambda pair: pair[0]["run_order"])
+        try:
+            read_job_evidence(job, target)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SavedInputError("Judge evidence binding is invalid") from exc
+        current = await self.datasets.get_source_revision(dataset_id, episode_index)
+        if (target["input"]["source_id"], target["input"]["source_revision"]) != tuple(current):
+            raise SavedInputError("Judge evidence source revision changed")
+        return {"job": job, "target": target}
+
+
 class ViewerSavedInputReader:
     def __init__(
-        self, datasets: DatasetService, annotations: AnnotationService, label_storage: LabelStorage | None = None
+        self,
+        datasets: DatasetService,
+        annotations: AnnotationService,
+        label_storage: LabelStorage | None = None,
+        *,
+        judge_evidence: JudgeEvidenceAuthority | None = None,
     ) -> None:
         self.datasets = datasets
         self.annotations = annotations
         self.label_storage = label_storage
+        self.judge_evidence = judge_evidence
 
     async def annotation(self, dataset_id: str, episode_index: int) -> SavedResource:
         resource = await self.annotations.get_annotation_versioned(dataset_id, episode_index)
@@ -46,13 +112,26 @@ class ViewerSavedInputReader:
         return SavedResource(resource.value.model_dump(mode="json") if resource.value else None, resource.etag)
 
     async def release_resource(self, dataset_id: str, selection: SavedSelection) -> SavedResource:
-        """Read the dataset labels file for an explicit release selection; other kinds are unavailable here."""
-        if selection.kind != "labels":
+        """Read selected labels, episode ledger, or bound judge evidence; other kinds are unavailable here."""
+        if selection.kind == "evidence":
+            if self.judge_evidence is None:
+                raise SavedInputError("Judge evidence authority is not bound", 503)
+            bound = await self.judge_evidence.evidence(dataset_id, selection.episode_index)
+            return bound_judge_evidence(bound, dataset_id, selection.episode_index)
+        if selection.kind not in {"labels", "ledger"}:
             return SavedResource(None, None)
         if self.label_storage is None:
             raise SavedInputError("Labels storage is unavailable", 503)
         resource = await self.label_storage.load_versioned(dataset_id)
-        return SavedResource(resource.value.model_dump(mode="json") if resource.value else None, resource.etag)
+        if resource.value is not None and resource.value.dataset_id != dataset_id:
+            raise SavedInputError("Curation dataset identity mismatch")
+        if selection.kind == "labels":
+            return SavedResource(resource.value.model_dump(mode="json") if resource.value else None, resource.etag)
+        ledger = resource.value.provenance.get(str(selection.episode_index)) if resource.value else None
+        if ledger is None:
+            return SavedResource(None, None)
+        value = ledger.model_dump(mode="json")
+        return SavedResource(value, content_etag(value))
 
     async def source_revision(self, dataset_id: str, episode_index: int) -> tuple[str, str]:
         return await self.datasets.get_source_revision(dataset_id, episode_index)
@@ -189,4 +268,12 @@ async def resolve_saved_input(
     )
 
 
-__all__ = ["SavedInputError", "SavedInputSnapshot", "ViewerSavedInputReader", "resolve_saved_input"]
+__all__ = [
+    "AzureJudgeStateReader",
+    "JudgeStateReader",
+    "SavedInputError",
+    "SavedInputSnapshot",
+    "ScopedJudgeEvidenceAuthority",
+    "ViewerSavedInputReader",
+    "resolve_saved_input",
+]

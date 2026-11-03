@@ -9,6 +9,7 @@ code and HTTP status, so server detail text and secrets are never echoed.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hmac
 import http.client
 import http.cookiejar
@@ -40,11 +41,13 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 MAX_TIMEOUT_SECONDS = 60.0
 DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_REQUEST_FILE_BYTES = 1024 * 1024
+MAX_DESCRIPTION_CHARS = 2000
 MAX_CREDENTIAL_CHARS = 4096
 DEFAULT_WAIT_TIMEOUT_SECONDS = 600.0
 MAX_WAIT_TIMEOUT_SECONDS = 86_400.0
 DEFAULT_WAIT_INTERVAL_SECONDS = 5.0
 MAX_WAIT_INTERVAL_SECONDS = 300.0
+MEDIA_ACCEPT = "video/mp4"
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -64,6 +67,7 @@ REQUEST_FIELDS = frozenset(
         "attempt_id",
         "dataset_name",
         "dataset_id",
+        "description",
         "episode_indices",
         "resources",
         "finalized",
@@ -76,6 +80,8 @@ _ERROR_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _ARTIFACT = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 _DIGEST = re.compile(r"^[A-Za-z0-9:_-]{1,64}$")
+_HANDLE = re.compile(r"^[0-9a-f]{64}$")
+_CAMERA = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _NEVER_SET = threading.Event()
 
 
@@ -197,6 +203,22 @@ def _job_path(job_id: str) -> str:
     return job_id
 
 
+def _dataset_id(value: str) -> str:
+    if not value or len(value) > 255 or value in {".", ".."} or any(not ch.isprintable() for ch in value):
+        raise ReleaseClientError("dataset_id_invalid", EXIT_USAGE)
+    return value
+
+
+def _dataset_segment(dataset_id: str) -> str:
+    return urllib.parse.quote(_dataset_id(dataset_id), safe="")
+
+
+def _handle_segment(handle: str) -> str:
+    if not _HANDLE.fullmatch(handle):
+        raise ReleaseClientError("handle_invalid", EXIT_USAGE)
+    return handle
+
+
 class ReleaseApiClient:
     """Minimal bounded client for the release API."""
 
@@ -220,7 +242,7 @@ class ReleaseApiClient:
             _NoRedirect(),
         )
 
-    def _send(
+    def _transmit(
         self,
         method: str,
         path: str,
@@ -228,11 +250,12 @@ class ReleaseApiClient:
         query: Mapping[str, str] | None = None,
         body: bytes | None = None,
         headers: Mapping[str, str] | None = None,
-    ) -> Any:
+        accept: str = "application/json",
+    ) -> bytes:
         url = self._base + path
         if query:
             url = f"{url}?{urllib.parse.urlencode(query)}"
-        request_headers = {"Accept": "application/json"}
+        request_headers = {"Accept": accept}
         if self._credentials is not None:
             request_headers[self._credentials.header_name] = self._credentials.header_value
         if body is not None:
@@ -255,6 +278,18 @@ class ReleaseApiClient:
             raise ReleaseClientError("transport_failed", EXIT_TRANSPORT) from None
         if len(raw) > self._max_bytes:
             raise ReleaseClientError("response_too_large", EXIT_TRANSPORT)
+        return raw
+
+    def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        query: Mapping[str, str] | None = None,
+        body: bytes | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> Any:
+        raw = self._transmit(method, path, query=query, body=body, headers=headers)
         try:
             return json.loads(raw)
         except ValueError:
@@ -309,13 +344,26 @@ class ReleaseApiClient:
     def destinations(self) -> Any:
         return self.get(f"{API_PREFIX}/destinations")
 
-    def jobs(self, *, cursor: int, limit: int) -> Any:
-        return self.get(f"{API_PREFIX}/jobs", {"cursor": str(cursor), "limit": str(limit)})
+    def jobs(self, *, cursor: int, limit: int, dataset_id: str | None = None) -> Any:
+        query = {"cursor": str(cursor), "limit": str(limit)}
+        if dataset_id is not None:
+            query["dataset_id"] = _dataset_id(dataset_id)
+        return self.get(f"{API_PREFIX}/jobs", query)
+
+    def accepted_request(self, idempotency_key: str) -> Any:
+        return self._send(
+            "GET",
+            f"{API_PREFIX}/requests",
+            headers={IDEMPOTENCY_HEADER: _idempotency_key(idempotency_key)},
+        )
 
     def status(self, job_id: str) -> Any:
         return self.get(f"{API_PREFIX}/jobs/{_job_path(job_id)}")
 
-    def preview(self, selection: str) -> Any:
+    def preview(self, body: Mapping[str, Any]) -> Any:
+        return self.post(f"{API_PREFIX}/preview", body=body)
+
+    def preview_query(self, selection: str) -> Any:
         return self.get(f"{API_PREFIX}/preview", {"selection": selection})
 
     def submit(self, body: Mapping[str, Any], idempotency_key: str) -> Any:
@@ -336,10 +384,32 @@ class ReleaseApiClient:
         return self.get(f"{API_PREFIX}/jobs/{_job_path(job_id)}/artifacts/{alias}")
 
     def inventory(self, dataset_id: str, *, cursor: int, limit: int) -> Any:
-        if not dataset_id or len(dataset_id) > 255 or any(not ch.isprintable() for ch in dataset_id):
-            raise ReleaseClientError("dataset_id_invalid", EXIT_USAGE)
-        quoted = urllib.parse.quote(dataset_id, safe="")
-        return self.get(f"{API_PREFIX}/inventory/{quoted}", {"cursor": str(cursor), "limit": str(limit)})
+        return self.get(
+            f"{API_PREFIX}/inventory/{_dataset_segment(dataset_id)}",
+            {"cursor": str(cursor), "limit": str(limit)},
+        )
+
+    def source_releases(self, dataset_id: str) -> Any:
+        return self.get(f"{API_PREFIX}/sources/{_dataset_segment(dataset_id)}/releases")
+
+    def source_release(self, dataset_id: str, handle: str) -> Any:
+        path = f"{API_PREFIX}/sources/{_dataset_segment(dataset_id)}/releases/{_handle_segment(handle)}"
+        return self.get(path)
+
+    def source_episodes(self, dataset_id: str, handle: str, *, cursor: int, limit: int) -> Any:
+        path = f"{API_PREFIX}/sources/{_dataset_segment(dataset_id)}/releases/{_handle_segment(handle)}/episodes"
+        return self.get(path, {"cursor": str(cursor), "limit": str(limit)})
+
+    def source_episode_media(self, dataset_id: str, handle: str, *, episode_index: int, camera: str) -> bytes:
+        if not isinstance(episode_index, int) or not 0 <= episode_index <= 2**31 - 1:
+            raise ReleaseClientError("episode_index_invalid", EXIT_USAGE)
+        if camera in {".", ".."} or not _CAMERA.fullmatch(camera):
+            raise ReleaseClientError("camera_invalid", EXIT_USAGE)
+        path = (
+            f"{API_PREFIX}/sources/{_dataset_segment(dataset_id)}/releases/{_handle_segment(handle)}"
+            f"/episodes/{episode_index}/media/{camera}"
+        )
+        return self._transmit("GET", path, accept=MEDIA_ACCEPT)
 
 
 def wait_for_job(
@@ -401,6 +471,10 @@ def _load_request(path: Path) -> dict[str, Any]:
     if set(payload) - REQUEST_FIELDS:
         # Covers server-owned fields (digests, local_disk_acknowledged) that must come from flags.
         raise ReleaseClientError("request_field_refused", EXIT_USAGE)
+    if "description" in payload:
+        description = payload["description"]
+        if not isinstance(description, str) or len(description) > MAX_DESCRIPTION_CHARS:
+            raise ReleaseClientError("description_invalid", EXIT_USAGE)
     return payload
 
 
@@ -459,14 +533,17 @@ def _run(
 
     client = _build_client(args, environ)
     if command == "preview":
-        return client.preview(_canonical_json(_load_request(args.request)))
+        return client.preview(_load_request(args.request))
     if command == "status":
         return client.status(args.job_id)
     if command == "list":
         return client.jobs(
             cursor=_bounded_int(args.cursor, 0, 2**31 - 1),
             limit=_bounded_int(args.limit, 1, 100),
+            dataset_id=args.dataset_id,
         )
+    if command == "accepted-request":
+        return client.accepted_request(args.idempotency_key)
     if command == "wait":
         return wait_for_job(
             client,
@@ -490,7 +567,39 @@ def _run(
             cursor=_bounded_int(args.cursor, 0, 2**31 - 1),
             limit=_bounded_int(args.limit, 1, 100),
         )
+    if command == "source-releases":
+        return client.source_releases(args.dataset_id)
+    if command == "source-release":
+        return client.source_release(args.dataset_id, args.handle)
+    if command == "source-episodes":
+        return client.source_episodes(
+            args.dataset_id,
+            args.handle,
+            cursor=_bounded_int(args.cursor, 0, 2**31 - 1),
+            limit=_bounded_int(args.limit, 1, 100),
+        )
+    if command == "source-media":
+        return _save_media(client, args)
     raise ReleaseClientError("command_unknown", EXIT_USAGE)
+
+
+def _save_media(client: ReleaseApiClient, args: argparse.Namespace) -> dict[str, Any]:
+    content = client.source_episode_media(
+        args.dataset_id,
+        args.handle,
+        episode_index=args.episode_index,
+        camera=args.camera,
+    )
+    try:
+        with args.output.open("xb") as handle:
+            handle.write(content)
+    except FileExistsError:
+        raise ReleaseClientError("output_exists", EXIT_USAGE) from None
+    except OSError:
+        with contextlib.suppress(OSError):
+            args.output.unlink()
+        raise ReleaseClientError("output_unwritable", EXIT_USAGE) from None
+    return {"bytes": len(content), "path": str(args.output)}
 
 
 def _emit_success(command: str, payload: Any, output_format: str) -> None:
@@ -546,6 +655,10 @@ def _build_parser() -> argparse.ArgumentParser:
     jobs = commands.add_parser("list", help="List caller-owned jobs.")
     jobs.add_argument("--cursor", type=int, default=0)
     jobs.add_argument("--limit", type=int, default=50)
+    jobs.add_argument("--dataset-id", default=None)
+
+    accepted = commands.add_parser("accepted-request", help="Look up an accepted request by idempotency key.")
+    accepted.add_argument("--idempotency-key", required=True)
 
     wait = commands.add_parser("wait", help="Poll a job until it is terminal.")
     wait.add_argument("job_id")
@@ -568,6 +681,26 @@ def _build_parser() -> argparse.ArgumentParser:
     inventory.add_argument("dataset_id")
     inventory.add_argument("--cursor", type=int, default=0)
     inventory.add_argument("--limit", type=int, default=50)
+
+    source_releases = commands.add_parser("source-releases", help="List verified releases of a source dataset.")
+    source_releases.add_argument("dataset_id")
+
+    source_release = commands.add_parser("source-release", help="Show one verified source release.")
+    source_release.add_argument("dataset_id")
+    source_release.add_argument("handle", help="64-character lowercase hex release handle.")
+
+    source_episodes = commands.add_parser("source-episodes", help="Page episode metadata of a verified release.")
+    source_episodes.add_argument("dataset_id")
+    source_episodes.add_argument("handle")
+    source_episodes.add_argument("--cursor", type=int, default=0)
+    source_episodes.add_argument("--limit", type=int, default=50)
+
+    source_media = commands.add_parser("source-media", help="Write one episode camera MP4 to a new file.")
+    source_media.add_argument("dataset_id")
+    source_media.add_argument("handle")
+    source_media.add_argument("episode_index", type=int)
+    source_media.add_argument("camera")
+    source_media.add_argument("--output", type=Path, required=True, help="New file path. Existing files are refused.")
 
     verify = commands.add_parser("verify", help="Verify a published release directory offline.")
     verify.add_argument("path")

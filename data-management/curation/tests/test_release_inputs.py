@@ -285,6 +285,101 @@ def test_given_local_labels_for_other_dataset_when_release_resource_then_identit
         )
 
 
+def test_given_local_labels_provenance_when_release_ledger_then_episode_ledger_and_content_etag_returned(
+    tmp_path: Path,
+) -> None:
+    ledger = {"schema_version": "1.0.0", "contributions": []}
+    labels = {"dataset_id": "sample", "available_labels": ["success"], "episodes": {}, "provenance": {"0": ledger}}
+    (tmp_path / "meta").mkdir()
+    (tmp_path / "meta/episode_labels.json").write_bytes(json.dumps(labels).encode())
+    reader = LocalSavedInputReader(tmp_path)
+
+    resource = asyncio.run(
+        reader.release_resource("sample", SavedSelection(kind="ledger", episode_index=0, expected_revision="ledger-v1"))
+    )
+    absent = asyncio.run(
+        reader.release_resource("sample", SavedSelection(kind="ledger", episode_index=1, expected_revision="ledger-v1"))
+    )
+
+    assert resource.value == ledger
+    assert resource.etag is not None and resource.etag.startswith('"')
+    assert absent == SavedResource(None, None)
+
+
+class _BoundJudgeAuthority:
+    def __init__(self, bound: dict[str, object] | None) -> None:
+        self.bound = bound
+
+    async def evidence(self, dataset_id: str, episode_index: int) -> dict[str, object] | None:
+        return self.bound
+
+
+def _bound_judge_evidence(episode_index: int = 0) -> dict[str, object]:
+    job = {
+        "id": "run-1",
+        "dataset_id": "sample",
+        "config": {"execution": {"backend": "echo"}, "prompt_version": "test-1"},
+    }
+    target = {
+        "input_key": "input-1",
+        "episode_index": episode_index,
+        "input": {"snapshot_id": "input-1", "instruction": "saved task"},
+    }
+    payload = {
+        "episode_id": f"sample/episode_{episode_index:06d}",
+        "instruction": "saved task",
+        "judge_model": "echo",
+        "prompt_version": "test-1",
+        "n_frames": 2,
+        "outcome_success": False,
+        "outcome_confidence": 0.9,
+        "outcome_n_valid_votes": 1,
+        "progress_per_frame": [0, 0],
+        "voc": 0.0,
+    }
+    record = bind_job_evidence(job, target, payload)
+    target.update({"result": record.payload, "evidence": record.model_dump(mode="json")})
+    return {"job": job, "target": target}
+
+
+def test_given_unbound_judge_authority_when_release_evidence_then_refused(tmp_path: Path) -> None:
+    with pytest.raises(SavedInputError, match="not bound"):
+        asyncio.run(
+            LocalSavedInputReader(tmp_path).release_resource(
+                "sample", SavedSelection(kind="evidence", episode_index=0, expected_revision="evidence-v1")
+            )
+        )
+
+
+def test_given_bound_judge_evidence_for_other_episode_when_release_evidence_then_scope_refused(tmp_path: Path) -> None:
+    reader = LocalSavedInputReader(
+        tmp_path, judge_evidence=_BoundJudgeAuthority(_bound_judge_evidence(episode_index=2))
+    )
+
+    with pytest.raises(SavedInputError, match="scope mismatch"):
+        asyncio.run(
+            reader.release_resource(
+                "sample", SavedSelection(kind="evidence", episode_index=0, expected_revision="evidence-v1")
+            )
+        )
+
+
+def test_given_bound_judge_evidence_when_release_evidence_then_validated_pair_and_content_etag_returned(
+    tmp_path: Path,
+) -> None:
+    bound = _bound_judge_evidence()
+    reader = LocalSavedInputReader(tmp_path, judge_evidence=_BoundJudgeAuthority(bound))
+
+    resource = asyncio.run(
+        reader.release_resource(
+            "sample", SavedSelection(kind="evidence", episode_index=0, expected_revision="evidence-v1")
+        )
+    )
+
+    assert resource.value == bound
+    assert resource.etag is not None and resource.etag.startswith('"')
+
+
 def test_given_malformed_labels_when_freeze_then_refused_before_acceptance(local_source: LocalReleaseSource) -> None:
     class MalformedLabelsReader(SavedReader):
         async def release_resource(self, dataset_id: str, selection: SavedSelection) -> SavedResource:

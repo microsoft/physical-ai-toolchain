@@ -114,6 +114,51 @@ def test_given_retained_read_overrides_when_loading_settings_then_applied() -> N
     assert settings.media_max_bytes == 2048
 
 
+def test_given_blob_job_state_when_service_reopens_then_accepted_job_is_retained(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from test_release_jobs import _RecordContainer
+
+    from src.api.services import release_service as service_module
+
+    test_client, spec, settings, app, _root = release_api
+    monkeypatch.setenv(
+        "RELEASE_JOB_STORAGE",
+        json.dumps(
+            {"account_url": "https://example.blob.core.windows.net", "container": "state", "prefix": "releases"}
+        ),
+    )
+    configured = service_module.load_release_api_settings(os.environ)
+    assert configured.job_storage is not None
+    container = _RecordContainer()
+    monkeypatch.setattr(service_module, "_default_blob_container", lambda _location: container)
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(
+        configured, planner=ViewerReleasePlanner(configured)
+    )
+    accepted = _submit(test_client, spec, _preview(test_client, spec))
+    assert accepted.status_code == 202, accepted.json()
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(configured)
+    assert test_client.get(BASE + "/jobs/" + accepted.json()["job_id"]).json()["state"] == "accepted"
+    assert not (settings.job_root / "jobs").exists()
+
+
+def test_given_browser_release_request_when_preflight_then_idempotency_header_allowed(client: TestClient) -> None:
+    from src.api.main import _config
+
+    response = client.options(
+        BASE + "/jobs",
+        headers={
+            "Origin": _config.cors_origins[0],
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Idempotency-Key,X-CSRF-Token,Content-Type",
+        },
+    )
+    assert response.status_code == 200
+    assert "idempotency-key" in response.headers["access-control-allow-headers"].lower()
+    response = client.get(BASE + "/capabilities", headers={"Origin": _config.cors_origins[0]})
+    assert "location" in response.headers["access-control-expose-headers"].lower()
+
+
 def test_preview_is_read_only_and_inventory_is_paged(release_api: tuple) -> None:
     test_client, spec, settings, _app, _root = release_api
     preview = _preview(test_client, spec)
@@ -124,10 +169,31 @@ def test_preview_is_read_only_and_inventory_is_paged(release_api: tuple) -> None
     assert not settings.job_root.exists()
     assert not settings.destinations["local"].exists()
     first = test_client.get(BASE + "/inventory/native?limit=1").json()
-    assert first["items"] == [{"episode_index": 0}]
+    assert [item["episode_index"] for item in first["items"]] == [0]
     assert first["next_cursor"] == 1
     second = test_client.get(BASE + "/inventory/native?cursor=1&limit=1").json()
-    assert second["items"] == [{"episode_index": 1}]
+    assert [item["episode_index"] for item in second["items"]] == [1]
+
+
+def test_given_saved_labels_when_inventory_read_then_exact_revisions_are_selectable(release_api: tuple) -> None:
+    test_client, spec, _settings, _app, root = release_api
+    labels = DatasetLabelsFile(dataset_id="native", episodes={"1": ["accepted"]})
+    (root / "meta/episode_labels.json").write_text(labels.model_dump_json())
+    inventory = test_client.get(BASE + "/inventory/native?limit=1&cursor=1").json()
+    row = inventory["items"][0]
+    assert row["labels"] == ["accepted"]
+    assert row["resources"][0]["kind"] == "labels"
+    preview = test_client.post(
+        BASE + "/preview",
+        json={
+            **spec,
+            "description": "Selected saved labels",
+            "resources": row["resources"],
+        },
+    )
+    assert preview.status_code == 200, preview.json()
+    assert preview.json()["summary"]["destination_kind"] == "local"
+    assert preview.json()["summary"]["available_bytes"] > 0
 
 
 def test_confirmed_acceptance_replays_and_survives_service_restart(release_api: tuple) -> None:
@@ -147,6 +213,102 @@ def test_confirmed_acceptance_replays_and_survives_service_restart(release_api: 
     assert test_client.get(BASE + "/jobs").json()["items"][0]["job_id"] == job
     assert test_client.post(BASE + "/jobs/" + job + "/recover").status_code == 202
     assert test_client.get(BASE + "/jobs/" + job + "/result").status_code == 409
+
+
+def test_given_bound_judge_evidence_when_inventory_read_then_revision_is_selectable(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.adapters.job_storage import LocalJobStore
+    from physical_ai_curation.evidence import bind_job_evidence
+
+    from tests.api.test_saved_judge_evidence_authority import _judge_job
+
+    test_client, spec, settings, _app, root = release_api
+    source = asyncio.run(DatasetService(base_path=str(root.parent)).get_source_revision("native", 1))
+    job = _judge_job("judge-run", run_order=1, actor="localuser", episode=1, source=source)
+    job["dataset_id"] = "native"
+    target = job["targets"][0]
+    target["result"]["episode_id"] = "native/episode_000001"
+    target["evidence"] = bind_job_evidence(job, target, target["result"]).to_dict()
+    store = LocalJobStore(settings.job_root.parent / "judge")
+
+    async def persist() -> None:
+        async with store.transaction() as state:
+            state["jobs"][job["id"]] = job
+
+    asyncio.run(persist())
+    monkeypatch.setattr(ViewerReleasePlanner, "_judge_state", lambda _self: store)
+    row = test_client.get(BASE + "/inventory/native?limit=1&cursor=1").json()["items"][0]
+    assert row["judge"] == {"status": "succeeded", "freshness": "current", "confidence": 1.0, "outcome": "success"}
+    assert any(resource["kind"] == "evidence" for resource in row["resources"])
+    assert test_client.post(BASE + "/preview", json={**spec, "resources": row["resources"]}).status_code == 200
+
+    target["input"]["source_revision"] = "stale"
+    target["evidence"] = bind_job_evidence(job, target, target["result"]).to_dict()
+    asyncio.run(persist())
+    row = test_client.get(BASE + "/inventory/native?limit=1&cursor=1").json()["items"][0]
+    assert row["judge"]["status"] == "unavailable"
+    assert not any(resource["kind"] == "evidence" for resource in row["resources"])
+    assert test_client.post(BASE + "/preview", json=spec).status_code == 200
+
+
+def test_given_headless_job_when_listing_then_source_filter_does_not_fail(release_api: tuple) -> None:
+    from physical_ai_curation.release.jobs import JobRequest
+    from physical_ai_curation.release.publication import PublicationAttempt
+
+    test_client, _spec, settings, _app, _root = release_api
+    store = ReleaseJobStore(settings.job_root)
+    accepted = store.accept(
+        JobRequest(
+            scope="localuser",
+            principal="localuser",
+            idempotency_key="headless-job",
+            attempt=PublicationAttempt("headless-package", "headless-attempt", "headless"),
+            destination=settings.destinations["local"],
+            frozen_request=b"{}",
+            reserved_bytes=1,
+        )
+    )
+    response = test_client.get(BASE + "/jobs")
+    assert response.status_code == 200
+    assert response.json()["items"][0]["job_id"] == accepted.job_id
+    assert response.json()["items"][0]["dataset_id"] is None
+    assert test_client.get(BASE + "/jobs?dataset_id=native").json()["items"] == []
+
+
+def test_given_body_preview_when_requested_then_no_state_is_written(release_api: tuple) -> None:
+    test_client, spec, settings, _app, _root = release_api
+    response = test_client.post(BASE + "/preview", json=spec)
+    assert response.status_code == 200, response.json()
+    assert response.json()["digest"] == _preview(test_client, spec)["digest"]
+    assert not settings.job_root.exists()
+    assert not settings.destinations["local"].exists()
+
+
+def test_given_lost_acceptance_when_source_removed_then_replay_uses_accepted_request(release_api: tuple) -> None:
+    test_client, spec, settings, app, root = release_api
+    preview = _preview(test_client, spec)
+    accepted = _submit(test_client, spec, preview)
+    assert accepted.status_code == 202
+    root.rename(root.parent / "source-unavailable")
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(settings)
+
+    replay = _submit(test_client, spec, preview)
+    assert replay.status_code == 202, replay.json()
+    assert replay.json() == {"job_id": accepted.json()["job_id"], "replayed": True}
+    conflict = _submit(test_client, {**spec, "episode_indices": [0]}, preview)
+    assert conflict.status_code == 409
+
+
+def test_given_accepted_request_when_lookup_then_only_owner_can_resolve(release_api: tuple) -> None:
+    test_client, spec, _settings, app, _root = release_api
+    accepted = _submit(test_client, spec, _preview(test_client, spec)).json()
+    response = test_client.get(BASE + "/requests", headers={"Idempotency-Key": "release-key-1"})
+    assert response.status_code == 200
+    assert response.json()["job_id"] == accepted["job_id"]
+    assert test_client.get(BASE + "/jobs?dataset_id=another-source").json()["items"] == []
+    app.dependency_overrides[require_principal_context] = lambda: PrincipalContext(scope_id="other", auth_mode="local")
+    assert test_client.get(BASE + "/requests", headers={"Idempotency-Key": "release-key-1"}).status_code == 404
 
 
 def test_nested_source_acceptance_binds_collection_and_survives_alias_change(release_api: tuple) -> None:
@@ -341,6 +503,8 @@ def test_source_release_is_listed_and_read_after_job_and_source_removal(release_
     body = read.json()
     assert body["total_episodes"] == expected_episodes
     assert body["manifest_sha256"] == items[0]["manifest_sha256"]
+    frozen_name = json.loads((published / "release/manifest.json").read_bytes())["frozen_input_path"]
+    assert body["frozen_evidence"] == json.loads((published / frozen_name).read_bytes())
     assert str(settings.destinations["local"]) not in read.text
     assert test_client.get(SOURCE).json()["items"] == items
     assert test_client.get(f"{SOURCE}/{'0' * 64}").status_code == 404
@@ -453,9 +617,12 @@ def test_given_verified_projection_when_browsed_then_output_coordinates_not_froz
         "annotations": [{"object_detections": [{"frame_index": 2}]}],
     }
     labels = {"dataset_id": "published", "episode_labels": {"0": ["accepted"]}}
+    frozen = {"dataset_id": "native", "episodes": [{"source_episode_id": "native/episode_000017", "frame_index": 2}]}
     (root / "meta/info.json").write_bytes(canonical_json_bytes({"total_episodes": 1}))
     (root / "meta/episode_labels.json").write_bytes(canonical_json_bytes(labels))
     (root / "annotations/episodes/episode_000000.json").write_bytes(canonical_json_bytes(annotation))
+    (root / "evidence").mkdir()
+    (root / "evidence/frozen-input.json").write_bytes(canonical_json_bytes(frozen))
     entries = [
         {"path": path.relative_to(root).as_posix(), "length": path.stat().st_size, "sha256": _sha256(path)}
         for path in sorted(root.rglob("*.json"))
@@ -463,7 +630,9 @@ def test_given_verified_projection_when_browsed_then_output_coordinates_not_froz
     (root / "release").mkdir()
     inventory = canonical_json_bytes({"schema_version": "1.0.0", "entries": entries})
     (root / "release/inventory.json").write_bytes(inventory)
-    manifest = canonical_json_bytes({"inventory_sha256": hashlib.sha256(inventory).hexdigest()})
+    manifest = canonical_json_bytes(
+        {"inventory_sha256": hashlib.sha256(inventory).hexdigest(), "frozen_input_path": "evidence/frozen-input.json"}
+    )
     (root / "release/manifest.json").write_bytes(manifest)
     item = _source_release(
         "local",
@@ -482,6 +651,8 @@ def test_given_verified_projection_when_browsed_then_output_coordinates_not_froz
 
     assert body["annotations"] == [annotation]
     assert body["labels"] == labels
+    assert body["frozen_evidence"] == frozen
+    assert body["frozen_evidence"] not in body["annotations"]
 
 
 class _FakeBlobItem:

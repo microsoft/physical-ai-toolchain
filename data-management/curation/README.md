@@ -78,8 +78,10 @@ for inference and model configuration.
 object planning and independent package verification without a decoder, evaluator,
 Azure SDK or web framework. Optional table, statistics and encoding helpers add
 generation without a publication workflow. Guarded publication and durable job
-primitives are available. The local coordinator composes native release generation;
-public CLI/API submission and viewer controls remain open.
+primitives are available. The local coordinator composes native release generation.
+The viewer exposes a scoped release API and source Releases workflow, and
+`physical_ai_curation.release.client` provides a headless client. See the
+[viewer README](../viewer/README.md) for the operator contract and evidence limits.
 
 Use `verify_candidate` from `physical_ai_curation.release.verification` to check
 canonical control files, inventoried bytes, frozen source/output references,

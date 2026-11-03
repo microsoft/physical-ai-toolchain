@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 from dataclasses import asdict, replace
 from importlib.metadata import version
 from pathlib import Path
 
+from physical_ai_curation.adapters.job_storage import LocalJobStore
 from physical_ai_curation.release.canonical import canonical_json_bytes, parse_strict_json, sha256_hex
 from physical_ai_curation.release.inputs import (
     BlobReleaseSource,
@@ -16,7 +18,7 @@ from physical_ai_curation.release.inputs import (
     ReleaseSelection,
     freeze_release_inputs,
 )
-from physical_ai_curation.release.jobs import ReleaseJobStore, ReleaseRuntimeSettings
+from physical_ai_curation.release.jobs import ReleaseRuntimeSettings
 from physical_ai_curation.release.media import StorageEndpoint, load_media_limits
 from physical_ai_curation.release.models import ProducerIdentity, VersionIdentity
 from physical_ai_curation.release.projections import materialize_saved_projections
@@ -30,11 +32,17 @@ from physical_ai_curation.release.source_associations import (
 )
 from pydantic import TypeAdapter
 
+from ..config import get_app_config
 from .annotation_service import get_annotation_service
 from .dataset_service import get_dataset_service
 from .label_storage import BlobLabelStorage, LabelStorage, LocalLabelStorage
-from .release_service import PreparedRelease, ReleaseApiError, ReleaseApiSettings, ReleaseSpec
-from .saved_input_service import ViewerSavedInputReader
+from .release_service import PreparedRelease, ReleaseApiError, ReleaseApiSettings, ReleaseSpec, open_release_job_store
+from .saved_input_service import (
+    AzureJudgeStateReader,
+    JudgeStateReader,
+    ScopedJudgeEvidenceAuthority,
+    ViewerSavedInputReader,
+)
 
 
 class ViewerReleasePlanner:
@@ -43,8 +51,24 @@ class ViewerReleasePlanner:
     def __init__(self, settings: ReleaseApiSettings) -> None:
         self.settings = settings
         self.datasets = get_dataset_service()
-        self.reader = ViewerSavedInputReader(
-            self.datasets, get_annotation_service(), label_storage=self._label_storage()
+        self._annotations = get_annotation_service()
+        self.reader = ViewerSavedInputReader(self.datasets, self._annotations, label_storage=self._label_storage())
+
+    def reader_for_scope(self, scope: str) -> ViewerSavedInputReader:
+        """Return a reader whose judge evidence is bound to the principal scope."""
+        authority = ScopedJudgeEvidenceAuthority(self._judge_state(), self.datasets, principal_scope_id=scope)
+        return ViewerSavedInputReader(
+            self.datasets, self._annotations, label_storage=self._label_storage(), judge_evidence=authority
+        )
+
+    def _judge_state(self) -> JudgeStateReader:
+        config = get_app_config()
+        if config.storage_backend == "azure":
+            return AzureJudgeStateReader(self.datasets._blob_provider)
+        return LocalJobStore(
+            Path(config.vlm_judge_job_dir)
+            if config.vlm_judge_job_dir
+            else Path(self.datasets.base_path) / ".curation" / "judge"
         )
 
     def _label_storage(self) -> LabelStorage:
@@ -91,7 +115,7 @@ class ViewerReleasePlanner:
             await self.datasets.get_source_revision(spec.dataset_id, spec.episode_indices[0]),
             ((scope, "localuser" if scope == "localuser" else "curator"),),
         )
-        frozen = await freeze_release_inputs(source, self.reader, selection, context)
+        frozen = await freeze_release_inputs(source, self.reader_for_scope(scope), selection, context)
         runtime = ReleaseRuntimeSettings.from_environment(os.environ)
         limits = load_media_limits(os.environ)
         if isinstance(source, LocalReleaseSource):
@@ -189,7 +213,7 @@ class ViewerReleasePlanner:
             attempt=attempt,
             frozen_input_sha256=frozen.sha256,
             display_name=spec.dataset_name,
-            description="",
+            description=spec.description,
             accepted_at="1970-01-01T00:00:00+00:00",
             source_display_label=spec.dataset_id,
         )
@@ -217,6 +241,8 @@ class ViewerReleasePlanner:
             {
                 "processing_digest": inputs.confirmed_digest,
                 "selected_count": len(selection.episode_indices),
+                "destination_kind": "local" if isinstance(destination, Path) else "blob",
+                "available_bytes": shutil.disk_usage(ancestor).free if isinstance(destination, Path) else None,
                 "route": prepared.plan.route,
                 "capacity": asdict(capacity),
                 "projection_bytes": projection_bytes,
@@ -233,7 +259,7 @@ class ViewerReleasePlanner:
     def execution(self, job_id: str, frozen_request: bytes) -> ConfiguredExecution:
         if self.settings.job_root is None:
             raise ReleaseApiError(503, "release worker is not configured")
-        store = ReleaseJobStore(self.settings.job_root, settings=ReleaseRuntimeSettings.from_environment(os.environ))
+        store = open_release_job_store(self.settings)
         raw = parse_strict_json(store.execution_binding(job_id))
         if raw["schema"] != "curated-release-execution/v3":
             raise ReleaseApiError(409, "release worker binding is unsupported")
@@ -265,4 +291,6 @@ class ViewerReleasePlanner:
             if store.storage.snapshot()[job_id]["state"] == "committed"
             else self._source(selection.dataset_id, finalized=raw["finalized"], kind=raw["source_kind"])
         )
-        return ConfiguredExecution(source, self.reader, selection, context, destination)
+        return ConfiguredExecution(
+            source, self.reader_for_scope(context.principal_scope_id), selection, context, destination
+        )

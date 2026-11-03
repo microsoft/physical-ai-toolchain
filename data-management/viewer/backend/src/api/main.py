@@ -201,7 +201,8 @@ app.add_middleware(
     allow_origins=_config.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-API-Key", "X-Request-ID"],
+    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-API-Key", "X-Request-ID", "Idempotency-Key"],
+    expose_headers=["Location", "Retry-After", "ETag"],
 )
 app.add_middleware(HostedAuthMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)

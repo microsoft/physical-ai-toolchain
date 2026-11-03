@@ -6,6 +6,8 @@ import { DatasetWorkspace } from '@/components/app-shell/DatasetWorkspace'
 import { DataviewerEpisodeList } from '@/components/app-shell/DataviewerEpisodeList'
 import { DataviewerEpisodeViewer } from '@/components/app-shell/DataviewerEpisodeViewer'
 import { DataviewerShellHeader } from '@/components/app-shell/DataviewerShellHeader'
+import { ReleaseWorkspace } from '@/components/release/ReleaseWorkspace'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { useCapabilities, useDataset, useEpisodes } from '@/hooks/use-datasets'
 import { useDataviewerShellState } from '@/hooks/use-dataviewer-shell-state'
@@ -15,11 +17,21 @@ import { useDatasetLabels } from '@/hooks/use-labels'
 import { queryClient } from '@/lib/query-client'
 import { useDatasetStore, useEpisodeStore } from '@/stores'
 
+type SourceTab = 'episodes' | 'releases'
+
 export function AppContent() {
   const shellState = useDataviewerShellState({})
   const datasetId = shellState.datasetId
   const [catalogOpen, setCatalogOpen] = useState(!datasetId)
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
+  const [sourceTab, setSourceTab] = useState<SourceTab>('episodes')
+  const switchSourceTab = (tab: SourceTab) => {
+    if (tab === sourceTab) return
+    const playback = useEpisodeStore.getState()
+    if (playback.isPlaying) playback.togglePlayback()
+    document.querySelectorAll('video').forEach((video) => video.pause())
+    setSourceTab(tab)
+  }
   const toggleWorkspace = () => {
     const playback = useEpisodeStore.getState()
     if (playback.isPlaying) playback.togglePlayback()
@@ -45,7 +57,10 @@ export function AppContent() {
   const setDatasetId = (id: string) => {
     if (shellState.setDatasetId(id) !== false) {
       setCatalogOpen(false)
-      if (id !== datasetId) setWorkspaceOpen(false)
+      if (id !== datasetId) {
+        setWorkspaceOpen(false)
+        setSourceTab('episodes')
+      }
     }
   }
   const setSelectedEpisode = shellState.setSelectedEpisode
@@ -59,6 +74,7 @@ export function AppContent() {
   // Load joint configuration for the selected dataset
   useJointConfig()
 
+  const episodesHidden = catalogOpen || workspaceOpen || sourceTab === 'releases'
   const totalEpisodes = episodes?.length ?? selectedDataset?.totalEpisodes ?? 0
   const canGoPreviousEpisode = selectedEpisode > 0
   const canGoNextEpisode = totalEpisodes > 0 && selectedEpisode < totalEpisodes - 1
@@ -89,6 +105,19 @@ export function AppContent() {
         isWarmingCache={shellState.isWarmingCache}
       />
 
+      {datasetId && !catalogOpen && (
+        <Tabs
+          value={sourceTab}
+          onValueChange={(value) => switchSourceTab(value as SourceTab)}
+          className="border-b px-4 pt-2"
+        >
+          <TabsList aria-label="Source views">
+            <TabsTrigger value="episodes">Episodes</TabsTrigger>
+            <TabsTrigger value="releases">Releases</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
+
       <DatasetCatalog
         visible={catalogOpen || !datasetId}
         selectedId={datasetId}
@@ -109,14 +138,17 @@ export function AppContent() {
           />
         </div>
       )}
+      {datasetId && !catalogOpen && sourceTab === 'releases' && (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <ReleaseWorkspace datasetId={datasetId} />
+        </div>
+      )}
       {datasetId && (
-        <KeyboardShortcutsContext.Provider value={!catalogOpen && !workspaceOpen}>
+        <KeyboardShortcutsContext.Provider value={!episodesHidden}>
           <div
-            hidden={catalogOpen || workspaceOpen}
-            inert={catalogOpen || workspaceOpen}
-            className={
-              catalogOpen || workspaceOpen ? 'hidden' : 'flex min-h-0 flex-1 flex-col sm:flex-row'
-            }
+            hidden={episodesHidden}
+            inert={episodesHidden}
+            className={episodesHidden ? 'hidden' : 'flex min-h-0 flex-1 flex-col sm:flex-row'}
           >
             <aside className="bg-card flex max-h-64 w-full flex-col overflow-hidden border-b sm:max-h-none sm:w-64 sm:border-r sm:border-b-0">
               <DataviewerEpisodeList

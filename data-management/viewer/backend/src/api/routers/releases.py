@@ -44,6 +44,7 @@ class ReleaseSpecBody(BaseModel):
     episode_indices: list[int] = Field(min_length=1, max_length=MAX_EPISODE_SELECTION)
     resources: list[dict[str, Any]] = Field(default_factory=list, max_length=30000)
     finalized: bool = False
+    description: str = Field(default="", max_length=2000)
     preview_digest: str = Field(default="", max_length=64)
     processing_digest: str = Field(default="", max_length=64)
     local_disk_acknowledged: bool = False
@@ -58,6 +59,7 @@ class ReleaseSpecBody(BaseModel):
             episode_indices=tuple(self.episode_indices),
             resources=tuple(SavedSelection(**item) for item in self.resources),
             finalized=self.finalized,
+            description=self.description,
         )
 
 
@@ -105,10 +107,24 @@ async def list_jobs(
     service: ReleaseService = Depends(get_release_service),
     cursor: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
+    dataset_id: str | None = Query(default=None, max_length=255),
 ) -> dict[str, Any]:
     """List release jobs owned by the caller, ordered by acceptance."""
     try:
-        return service.jobs(_scope(principal), cursor=int(cursor), limit=int(limit))
+        return service.jobs(_scope(principal), cursor=int(cursor), limit=int(limit), dataset_id=_sanitized(dataset_id))
+    except ReleaseApiError as error:
+        _raise(error)
+
+
+@router.get("/requests")
+async def lookup_request(
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
+    principal: PrincipalContext = Depends(require_principal_context),
+    service: ReleaseService = Depends(get_release_service),
+) -> dict[str, Any]:
+    """Resolve a previously accepted request without repeating selection or source access."""
+    try:
+        return service.accepted_request(_scope(principal), idempotency_key.replace("\r", "").replace("\n", ""))
     except ReleaseApiError as error:
         _raise(error)
 
@@ -157,6 +173,23 @@ async def submit_job(
     return {"job_id": accepted.job_id, "replayed": accepted.replayed}
 
 
+@router.post("/preview", dependencies=[Depends(require_csrf_token)])
+async def preview_release_body(
+    body: ReleaseSpecBody,
+    principal: PrincipalContext = Depends(require_principal_context),
+    service: ReleaseService = Depends(get_release_service),
+) -> dict[str, Any]:
+    """Preview a bounded body without accepting a job or reserving output."""
+    try:
+        body = ReleaseSpecBody.model_validate(_sanitized(body.model_dump()))
+        body.episode_indices = [int(index) for index in body.episode_indices]
+        return await service.preview(_scope(principal), body.to_spec())
+    except ReleaseApiError as error:
+        _raise(error)
+    except (ValueError, TypeError):
+        _raise(ReleaseApiError(422, "invalid_release_selection"))
+
+
 @router.get("/preview")
 async def preview_release(
     selection: str = Query(max_length=1024 * 1024),
@@ -197,7 +230,10 @@ async def source_inventory(
 ) -> dict[str, Any]:
     try:
         return await service.inventory(
-            dataset_id.replace("\r", "").replace("\n", ""), cursor=int(cursor), limit=int(limit)
+            dataset_id.replace("\r", "").replace("\n", ""),
+            cursor=int(cursor),
+            limit=int(limit),
+            scope=_scope(principal),
         )
     except ReleaseApiError as error:
         _raise(error)

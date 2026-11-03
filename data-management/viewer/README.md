@@ -205,19 +205,27 @@ Expected blob structure:
 
 ### Full Environment Variable Reference
 
-| Variable                             | Default         | Description                                                    |
-|--------------------------------------|-----------------|----------------------------------------------------------------|
-| `STORAGE_BACKEND`                    | `local`         | Storage backend: `local` or `azure`                            |
-| `DATA_DIR`                           | `./data`        | Local dataset directory (local mode)                           |
-| `AZURE_STORAGE_ACCOUNT_NAME`         | —               | Azure Storage account name (azure mode)                        |
-| `AZURE_STORAGE_DATASET_CONTAINER`    | —               | Blob container for dataset files                               |
-| `AZURE_STORAGE_ANNOTATION_CONTAINER` | —               | Blob container for annotations (defaults to dataset container) |
-| `AZURE_STORAGE_SAS_TOKEN`            | —               | SAS token (omit to use DefaultAzureCredential / MSI)           |
-| `BACKEND_HOST`                       | `127.0.0.1`     | Bind address (`0.0.0.0` for containers)                        |
-| `BACKEND_PORT`                       | `8000`          | API server port                                                |
-| `LOG_LEVEL`                          | `info`          | Uvicorn log level                                              |
-| `FRONTEND_PORT`                      | `5173`          | Dev server port                                                |
-| `CORS_ORIGINS`                       | localhost ports | Comma-separated allowed CORS origins                           |
+| Variable                                    | Default         | Description                                                                             |
+|---------------------------------------------|-----------------|-----------------------------------------------------------------------------------------|
+| `STORAGE_BACKEND`                           | `local`         | Storage backend: `local` or `azure`                                                     |
+| `DATA_DIR`                                  | `./data`        | Local dataset directory (local mode)                                                    |
+| `AZURE_STORAGE_ACCOUNT_NAME`                | —               | Azure Storage account name (azure mode)                                                 |
+| `AZURE_STORAGE_DATASET_CONTAINER`           | —               | Blob container for dataset files                                                        |
+| `AZURE_STORAGE_ANNOTATION_CONTAINER`        | —               | Blob container for annotations (defaults to dataset container)                          |
+| `AZURE_STORAGE_SAS_TOKEN`                   | —               | SAS token (omit to use DefaultAzureCredential / MSI)                                    |
+| `BACKEND_HOST`                              | `127.0.0.1`     | Bind address (`0.0.0.0` for containers)                                                 |
+| `BACKEND_PORT`                              | `8000`          | API server port                                                                         |
+| `LOG_LEVEL`                                 | `info`          | Uvicorn log level                                                                       |
+| `FRONTEND_PORT`                             | `5173`          | Dev server port                                                                         |
+| `CORS_ORIGINS`                              | localhost ports | Comma-separated allowed CORS origins                                                    |
+| `RELEASE_JOB_ROOT`                          | —               | Absolute local directory for release job state; unset disables the release API          |
+| `RELEASE_DESTINATIONS`                      | —               | JSON object mapping destination aliases to absolute paths or Blob location objects      |
+| `RELEASE_JOB_STORAGE`                       | —               | Optional JSON Blob location (`account_url`, `container`, `prefix`) for shared job state |
+| `CURATION_RELEASE_READ_METADATA_BYTES`      | `67108864`      | Bound on release metadata reads (64 MiB)                                                |
+| `CURATION_RELEASE_READ_MEDIA_BYTES`         | `536870912`     | Bound on release media reads (512 MiB)                                                  |
+| `CURATION_RELEASE_PROCESSING_MEMORY_BYTES`  | `2147483648`    | Processing working-memory budget (2 GiB)                                                |
+| `CURATION_RELEASE_RESERVE_BYTES`            | `1073741824`    | Capacity reserve per volume (1 GiB)                                                     |
+| `CURATION_RELEASE_TRANSCODE_OUTPUT_PERCENT` | `100`           | Output-size estimate multiplier for selected media; advisory, not a hard cap            |
 
 ### VLM-as-Judge (experimental)
 
@@ -454,6 +462,124 @@ The shim reads these variables ([`evaluation/vlm_judge/openai_shim.py`](../../ev
 > host with `VLM_SHIM_ALLOW_REMOTE_IMAGES=false`; the viewer sends `data:` URIs.
 > Do not expose it through LAN listeners, proxies, tunnels or port forwarding.
 > Authentication and ingress hardening remain separate work.
+
+## 📦 Curated Release
+
+The release workflow turns selected source episodes into an immutable, verified
+LeRobot v3 dataset. The viewer exposes it through the source Episodes and Releases
+tabs and a scoped API under `/api/releases/v1`. Releases are available only when
+`RELEASE_JOB_ROOT` and `RELEASE_DESTINATIONS` are configured.
+
+### Viewer workflow
+
+| Surface   | Behavior                                                                                                  |
+|-----------|-----------------------------------------------------------------------------------------------------------|
+| Selection | In Releases, choose Create release, then filter and order source episodes in the dialog                   |
+| Preview   | Read-only. Computes the release plan and digests without persisting a job or reserving capacity           |
+| Submit    | Requires the matching preview digests and any shown acknowledgments; a changed selection invalidates them |
+| Releases  | Lists verified releases for the source, their episodes, and camera media, with job status                 |
+
+The dialog requires a declaration that the local source dataset is finalized and
+will not change during release. Confirm any processing actions shown by the preview.
+A local-disk acknowledgment is shown
+for local destinations, or when the preview does not report a destination kind, and
+states the reserved bytes. Submission is blocked while the preview reports blocking
+entries. Selection, filter, or finalized-source declaration changes discard the preview.
+
+### API surface
+
+| Method and path                                                     | Purpose                                                                    |
+|---------------------------------------------------------------------|----------------------------------------------------------------------------|
+| `GET /api/releases/v1/capabilities`                                 | Schema and supported features                                              |
+| `GET /api/releases/v1/destinations`                                 | Configured destination aliases                                             |
+| `POST /api/releases/v1/preview`                                     | Read-only preview; no job is persisted and no capacity is reserved         |
+| `GET /api/releases/v1/preview`                                      | Read a preview by its query selection                                      |
+| `POST /api/releases/v1/jobs`                                        | Submit with `Idempotency-Key`; returns `202`, `Location`, `Retry-After: 5` |
+| `GET /api/releases/v1/requests`                                     | Scoped lookup of accepted requests for reload recovery                     |
+| `GET /api/releases/v1/jobs`, `GET /api/releases/v1/jobs/{job_id}`   | List and read job status                                                   |
+| `POST /api/releases/v1/jobs/{job_id}/cancel`, `.../recover`         | Cancel or recover a job (`202`)                                            |
+| `GET /api/releases/v1/jobs/{job_id}/result`                         | Committed result only; otherwise `409 release_result_not_verified`         |
+| `GET /api/releases/v1/jobs/{job_id}/artifacts/{artifact}`           | Artifact aliases `manifest`, `inventory`, `receipt`, `report`              |
+| `GET /api/releases/v1/inventory/{dataset_id}`                       | Source inventory with judge and freshness status                           |
+| `GET /api/releases/v1/sources/{dataset_id}/releases`                | Retained verified releases for a source                                    |
+| `GET .../sources/{dataset_id}/releases/{handle}`                    | One retained release                                                       |
+| `GET .../releases/{handle}/episodes`                                | Paged episodes in the release                                              |
+| `GET .../releases/{handle}/episodes/{episode_index}/media/{camera}` | Episode video (`video/mp4`, `Cache-Control: no-store`)                     |
+
+Requests are strict: unknown fields are rejected. Mutations require authentication and
+the CSRF token. Operator paths stay server-side; clients see only aliases and handles.
+
+### Release contract
+
+| Topic              | Contract                                                                                                                             |
+|--------------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| Format             | LeRobot v3 output from supported v2.1 or v3 sources. Obsolete release layouts are not migrated.                                      |
+| Collection         | Immutable `DEST/<full-source-relative-path>/releases/<name>`, associated with its source                                             |
+| Browse             | Retained releases are browsed by source and handle, independent of job rows and source reloads                                       |
+| Judge data         | Selected saved labels, the edit ledger, and bound judge evidence are copied. Release performs no inference and has no approval gate. |
+| Evidence           | Frozen evidence is captured at preview. Output-coordinate projections are derived from it and do not alter it.                       |
+| Finalization       | Local source must be quiescent at finalization; the operator attests this with the finalized acknowledgment.                         |
+| Capacity           | Preview reports estimated bytes. Submission reserves them; `507` when capacity is insufficient.                                      |
+| Cancel and recover | Cancellation is asynchronous; confirm stopped effects and cleanup in job status. Recovery retains conflicting or finalized records.  |
+| Commit             | A release is committed only after verification of the manifest, inventory, and checksums.                                            |
+| Identities         | `verify` checks a release directory against an expected manifest SHA-256 and reports checksum mismatches.                            |
+| Cleanup            | Strict, current-only. Obsolete layouts are removed by the operator, not migrated.                                                    |
+
+### Headless client
+
+The client in `physical_ai_curation.release.client` uses only Python's standard
+library and runs the same API from scripts or CI. Set `RELEASE_API_URL` and either `RELEASE_API_KEY` or
+`RELEASE_BEARER_TOKEN`; setting both is a usage error. Credentials are sent only as
+headers, plaintext HTTP to a non-loopback host is refused when credentials are set,
+redirects are not followed, and errors are reduced to fixed codes.
+
+```text
+python -m physical_ai_curation.release.client [--base-url URL] [--timeout-seconds N] [--format {json,text}] COMMAND
+```
+
+| Command                                                                                                             | Purpose                                                  |
+|---------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------|
+| `preview --request FILE`                                                                                            | Read-only preview from a JSON request file               |
+| `submit --request FILE --preview-digest D --processing-digest D --idempotency-key K [--ack-local-disk] [--confirm]` | Submit a previewed request                               |
+| `status JOB_ID`, `wait JOB_ID [--timeout S] [--interval S]`                                                         | Read or wait for a job                                   |
+| `list [--cursor N] [--limit N] [--dataset-id ID]`                                                                   | List jobs                                                |
+| `accepted-request --idempotency-key K`                                                                              | Recover an accepted request after a lost response        |
+| `cancel JOB_ID`, `recover JOB_ID`, `result JOB_ID`                                                                  | Job control and committed result                         |
+| `artifact JOB_ID ALIAS`                                                                                             | Download `manifest`, `inventory`, `receipt`, or `report` |
+| `inventory DATASET_ID [--cursor N] [--limit N]`                                                                     | Source inventory                                         |
+| `source-releases DATASET_ID`, `source-release DATASET_ID HANDLE`                                                    | Retained releases for a source                           |
+| `source-episodes DATASET_ID HANDLE [--cursor N] [--limit N]`                                                        | Episodes in a retained release                           |
+| `source-media DATASET_ID HANDLE EPISODE_INDEX CAMERA --output NEW_FILE`                                             | Write episode media; existing files are refused          |
+| `verify PATH --expected-manifest SHA256`                                                                            | Verify a release directory against its manifest          |
+
+Exit codes: `0` success, `2` usage, `3` refused, `4` remote error, `5` transport error,
+`6` verification failed, `7` wait timed out, `8` job not committed.
+
+Request files are JSON objects with `destination`, `package_id`, `attempt_id`,
+`dataset_name`, `dataset_id`, `description`, `episode_indices`, `resources`, and
+`finalized`.
+
+### Library composition
+
+A trusted caller injects a `JudgeEvidenceAuthority` explicitly; the release package
+does not discover one. Runtime limits come from
+`ReleaseRuntimeSettings.from_environment(os.environ)`. Package boundaries keep the
+release library free of the viewer, decoder, evaluator, and Azure SDK dependencies.
+The optional Azure ML path is absent from this workflow.
+
+### Evidence limits
+
+| Area                                                       | Status                                                                  |
+|------------------------------------------------------------|-------------------------------------------------------------------------|
+| Unit and static checks                                     | Local backend and frontend coverage gates pass                          |
+| Real-browser core, stale, cancel, reflow, and focus checks | Seven isolated real-backend release workflow cases pass                 |
+| Retained browsing                                          | Local episodes/media and immutable evidence-key preservation are tested |
+| Live Blob publication/readback/cancellation                | Not established by SDK fixtures or successful read-only reachability    |
+| Hosted ingress                                             | Unresolved                                                              |
+| GPU validation                                             | Not performed                                                           |
+| Assistive-technology validation                            | Not performed                                                           |
+
+This section does not claim full acceptance of the release workflow.
 
 ## 🔒 Authentication with Entra ID
 

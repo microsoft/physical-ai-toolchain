@@ -1,0 +1,335 @@
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { ReleasePreview } from '@/api/releases'
+import {
+  ReleaseDialog,
+  type ReleaseDialogProps,
+  type ReleaseItem,
+} from '@/components/release/ReleaseDialog'
+import { useEpisodeReadiness } from '@/hooks/use-episode-readiness'
+import { fetchPrincipalContext } from '@/lib/principal-context'
+import { renderWithQuery } from '@/test-utils/render'
+
+vi.mock('@/hooks/use-episode-readiness', () => ({
+  useEpisodeReadiness: vi.fn(),
+}))
+
+vi.mock('@/lib/principal-context', () => ({
+  fetchPrincipalContext: vi.fn(),
+}))
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+const items: ReleaseItem[] = [
+  {
+    episodeIndex: 0,
+    annotation: true,
+    edits: false,
+    labels: ['pick'],
+    resources: [{ resourceId: 'cam-a', revisionNo: 1 }],
+  },
+  { episodeIndex: 1, annotation: false, edits: true, labels: null, resources: [] },
+  { episodeIndex: 2, annotation: true, edits: false, labels: null, resources: null },
+  { episodeIndex: 3, annotation: true, edits: true, labels: ['place'], resources: [] },
+]
+
+function makePreview(overrides: Partial<ReleasePreview['summary']> = {}): ReleasePreview {
+  return {
+    schema: 'v1',
+    digest: 'digest-1',
+    reservedBytes: 2048,
+    summary: {
+      processingDigest: 'proc-1',
+      blocking: [],
+      warnings: [],
+      actions: ['encode'],
+      destinationKind: 'local',
+      ...overrides,
+    },
+  }
+}
+
+function renderDialog(overrides: Partial<ReleaseDialogProps> = {}) {
+  const props: ReleaseDialogProps = {
+    datasetId: 'dataset-1',
+    open: true,
+    onOpenChange: vi.fn(),
+    items,
+    inventoryReady: true,
+    destinations: ['local-disk'],
+    onPreview: vi.fn().mockResolvedValue(makePreview()),
+    onSubmit: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  }
+  renderWithQuery(<ReleaseDialog {...props} />)
+  return props
+}
+
+function episodeList() {
+  return screen.getByRole('list', { name: 'Episodes' })
+}
+
+async function fillRequiredFields(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText('Release name'), 'Release A')
+}
+
+describe('ReleaseDialog', () => {
+  beforeEach(() => {
+    vi.mocked(useEpisodeReadiness).mockReturnValue({ ready: true, reason: null })
+    vi.mocked(fetchPrincipalContext).mockResolvedValue({ scopeId: 'scope-1', authMode: 'local' })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it('renders the fixed target and keeps release disabled until episodes are selected', () => {
+    renderDialog()
+
+    expect(screen.getByText(/Target: v3/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /submit release/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /preview release/i })).toBeDisabled()
+  })
+
+  it('combines filters and appends shown episodes in selection order', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.selectOptions(screen.getByLabelText('Annotation'), 'yes')
+    await user.click(screen.getByRole('button', { name: 'Select shown' }))
+    await user.selectOptions(screen.getByLabelText('Annotation'), 'any')
+    await user.selectOptions(screen.getByLabelText('Edits'), 'yes')
+    await user.click(screen.getByRole('button', { name: 'Select shown' }))
+
+    expect(screen.getByRole('checkbox', { name: 'Episode 1' })).toBeChecked()
+    expect(screen.getByText('#4')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Review selected' }))
+    const rows = within(episodeList()).getAllByRole('listitem')
+    expect(rows).toHaveLength(4)
+    expect(rows[0]).toHaveTextContent('Episode 0')
+    expect(rows[3]).toHaveTextContent('Episode 1')
+  })
+
+  it('disables select all while the full inventory is not loaded', () => {
+    renderDialog({ inventoryReady: false })
+
+    expect(screen.getByRole('button', { name: 'Select all' })).toBeDisabled()
+  })
+
+  it('blocks preview when a selected episode is not ready', async () => {
+    const user = userEvent.setup()
+    vi.mocked(useEpisodeReadiness).mockReturnValue({
+      ready: false,
+      reason: 'Episode 2: unsaved edits',
+    })
+    renderDialog()
+    await fillRequiredFields(user)
+
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 1' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 2' }))
+
+    expect(useEpisodeReadiness).toHaveBeenLastCalledWith('dataset-1', [1, 2], true)
+    expect(screen.getByText('Episode 2: unsaved edits')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /preview release/i })).toBeDisabled()
+  })
+
+  it('invalidates the preview and acknowledgments when the selection changes', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('button', { name: /preview release/i }))
+    expect(await screen.findByText('Reserved bytes')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 1' }))
+
+    expect(screen.queryByText('Reserved bytes')).toBeNull()
+    expect(screen.getByRole('button', { name: /submit release/i })).toBeDisabled()
+  })
+
+  it('blocks submission when the preview reports blocking entries', async () => {
+    const user = userEvent.setup()
+    renderDialog({
+      onPreview: vi.fn().mockResolvedValue(makePreview({ blocking: ['Missing frames'] })),
+    })
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('checkbox', { name: /I declare/i }))
+    await user.click(screen.getByRole('button', { name: /preview release/i }))
+
+    expect(await screen.findByText('Missing frames')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /submit release/i })).toBeDisabled()
+  })
+
+  it.each(['local', 'blob'])(
+    'shows backend capacity and scopes disk acknowledgment for %s',
+    async (destinationKind) => {
+      const user = userEvent.setup()
+      renderDialog({
+        onPreview: vi
+          .fn()
+          .mockResolvedValue(makePreview({ destinationKind, availableBytes: 4096 })),
+      })
+      await fillRequiredFields(user)
+      await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+      await user.click(screen.getByRole('button', { name: /preview release/i }))
+      await screen.findByText('Reserved bytes')
+      if (destinationKind === 'local') {
+        expect(screen.getByText('Backend available space')).toBeVisible()
+        expect(screen.getByText('4.0 KiB')).toBeVisible()
+        expect(screen.getByRole('checkbox', { name: /local disk/i })).toBeVisible()
+      } else {
+        expect(screen.queryByRole('checkbox', { name: /local disk/i })).toBeNull()
+      }
+    },
+  )
+
+  it('submits the previewed body with snake_case resources and retries with the same key', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(undefined)
+    const props = renderDialog({ onSubmit })
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('checkbox', { name: /I declare/i }))
+    await user.click(screen.getByRole('button', { name: /preview release/i }))
+    await user.click(await screen.findByRole('checkbox', { name: /processing action/i }))
+    await user.click(screen.getByRole('checkbox', { name: /local disk/i }))
+    await user.click(screen.getByRole('button', { name: /submit release/i }))
+
+    const retry = await screen.findByRole('button', { name: /retry submission/i })
+    expect(screen.getByRole('button', { name: /discard and start over/i })).toBeInTheDocument()
+    await user.click(retry)
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2))
+    const [firstRequest, firstSubmission] = onSubmit.mock.calls[0]
+    const [secondRequest, secondSubmission] = onSubmit.mock.calls[1]
+    expect(firstRequest).toEqual(secondRequest)
+    expect(firstRequest).toEqual(
+      expect.objectContaining({
+        datasetId: 'dataset-1',
+        episodeIndices: [0],
+        datasetName: 'Release A',
+        finalized: true,
+        resources: [{ resource_id: 'cam-a', revision_no: 1 }],
+      }),
+    )
+    expect(firstSubmission).toEqual({
+      previewDigest: 'digest-1',
+      processingDigest: 'proc-1',
+      localDiskAcknowledged: true,
+      idempotencyKey: expect.stringMatching(UUID_PATTERN),
+    })
+    expect(secondSubmission.idempotencyKey).toBe(firstSubmission.idempotencyKey)
+    expect(props.onOpenChange).toHaveBeenCalledWith(false)
+  })
+})
+
+describe('ReleaseDialog selection evidence', () => {
+  const evidenceItems: ReleaseItem[] = [
+    {
+      episodeIndex: 10,
+      annotation: true,
+      edits: false,
+      labels: null,
+      resources: [],
+      provenance: { origins: ['camera'] },
+      judge: { status: 'saved_analysis', freshness: 'unknown', confidence: 0.4, outcome: 'fail' },
+    },
+    {
+      episodeIndex: 11,
+      annotation: false,
+      edits: false,
+      labels: ['pick'],
+      resources: [],
+      provenance: { origins: ['teleop', 'camera'] },
+      judge: null,
+    },
+    {
+      episodeIndex: 12,
+      annotation: false,
+      edits: false,
+      labels: null,
+      resources: null,
+      provenance: null,
+      judge: null,
+    },
+  ]
+
+  beforeEach(() => {
+    vi.mocked(useEpisodeReadiness).mockReturnValue({ ready: true, reason: null })
+    vi.mocked(fetchPrincipalContext).mockResolvedValue({ scopeId: 'scope-1', authMode: 'local' })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it('shows provenance origins and judge freshness as reported on each row', () => {
+    renderDialog({ items: evidenceItems })
+
+    expect(screen.getByRole('checkbox', { name: 'Episode 10' }).closest('li')).toHaveTextContent(
+      'origin: camera',
+    )
+    expect(screen.getByRole('checkbox', { name: 'Episode 10' }).closest('li')).toHaveTextContent(
+      'judge saved_analysis, freshness unknown',
+    )
+    expect(screen.getByRole('checkbox', { name: 'Episode 11' }).closest('li')).toHaveTextContent(
+      'origin: teleop, camera',
+    )
+    expect(
+      screen.getByRole('checkbox', { name: 'Episode 12' }).closest('li'),
+    ).not.toHaveTextContent('origin')
+  })
+
+  it('summarizes selected evidence without inferring judge freshness', async () => {
+    const user = userEvent.setup()
+    renderDialog({ items: evidenceItems })
+
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 10' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 11' }))
+
+    expect(screen.getByText('Provenance origins: camera 2, teleop 1')).toBeInTheDocument()
+    expect(screen.getByText('Judge analyses: 1; freshness unknown: 1')).toBeInTheDocument()
+  })
+
+  it('filters by provenance origin across the full population', async () => {
+    const user = userEvent.setup()
+    renderDialog({ items: evidenceItems })
+
+    await user.selectOptions(screen.getByLabelText('Provenance origin'), 'teleop')
+
+    const rows = within(episodeList()).getAllByRole('listitem')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toHaveTextContent('Episode 11')
+  })
+
+  it('filters by judge analysis presence', async () => {
+    const user = userEvent.setup()
+    renderDialog({ items: evidenceItems })
+
+    await user.selectOptions(screen.getByLabelText('Judge analysis'), 'yes')
+
+    const rows = within(episodeList()).getAllByRole('listitem')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toHaveTextContent('Episode 10')
+  })
+
+  it('does not gate selection or preview on an adverse judge outcome', async () => {
+    const user = userEvent.setup()
+    renderDialog({ items: evidenceItems })
+    await user.type(screen.getByLabelText('Release name'), 'Release B')
+
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 10' }))
+
+    expect(screen.getByRole('checkbox', { name: 'Episode 10' })).toBeChecked()
+    expect(screen.getByRole('button', { name: /preview release/i })).toBeEnabled()
+  })
+})

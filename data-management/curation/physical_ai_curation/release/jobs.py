@@ -184,6 +184,7 @@ class JobRequest:
     reserved_bytes: int
     route: str = "local"
     execution_binding: bytes = b""
+    client_request_digest: str = ""
 
     def __post_init__(self) -> None:
         if not _TOKEN.fullmatch(self.scope) or not _TOKEN.fullmatch(self.idempotency_key):
@@ -202,6 +203,8 @@ class JobRequest:
         _require_int(self.reserved_bytes, "reserved bytes", 1, MAX_BYTES)
         if not isinstance(self.execution_binding, bytes) or len(self.execution_binding) > MAX_REQUEST_BYTES:
             raise ReleaseJobError("execution binding exceeds its bound")
+        if self.client_request_digest and not re.fullmatch(r"[0-9a-f]{64}", self.client_request_digest):
+            raise ReleaseJobError("invalid client request digest")
 
 
 @dataclass(frozen=True)
@@ -284,7 +287,10 @@ class ReleaseJobStore:
                 None,
             )
             if same_key is not None:
-                if same_key["request_digest"] != request_digest:
+                if (
+                    same_key["request_digest"] != request_digest
+                    or same_key["client_request_digest"] != request.client_request_digest
+                ):
                     raise JobConflictError("idempotency key is bound to a different request")
                 return AcceptedJob(same_key["job_id"], replayed=True)
             live = next(
@@ -312,6 +318,7 @@ class ReleaseJobStore:
                 "principal_digest": principal,
                 "idempotency_key": request.idempotency_key,
                 "request_digest": request_digest,
+                "client_request_digest": request.client_request_digest,
                 "logical_identity": identity,
                 "attempt_prefix": request.attempt.prefix,
                 "attempt_key": request.attempt.key,
@@ -349,6 +356,25 @@ class ReleaseJobStore:
             }
             self._emit(conn, job_id, "job.accepted", "info", {"reserved_bytes": request.reserved_bytes})
             return AcceptedJob(job_id, replayed=False)
+
+    def accepted_request(
+        self, *, scope: str, principal: str, idempotency_key: str, client_request_digest: str | None = None
+    ) -> AcceptedJob | None:
+        """Resolve an exact accepted client request without opening its source or changing state."""
+        for row in self.storage.snapshot().values():
+            _require_current_job(row)
+            if (row["scope"], row["principal_digest"], row["idempotency_key"]) != (
+                scope,
+                _digest(principal),
+                idempotency_key,
+            ):
+                continue
+            if client_request_digest is not None and (
+                not client_request_digest or row["client_request_digest"] != client_request_digest
+            ):
+                raise JobConflictError("idempotency key is bound to a different request")
+            return AcceptedJob(row["job_id"], replayed=True)
+        return None
 
     def request_recovery(self, job_id: str, *, scope: str, principal: str) -> JobStatus:
         """Record an authorized retry without changing leases, attempts or stop obligations."""
@@ -1687,7 +1713,13 @@ class ReleaseJobControl:
 
 
 def _require_current_job(row: Mapping[str, Any]) -> None:
-    if not {"diagnostic_operations", "diagnostics", "destination_peak_bytes", "execution_binding"}.issubset(row):
+    if not {
+        "diagnostic_operations",
+        "diagnostics",
+        "destination_peak_bytes",
+        "execution_binding",
+        "client_request_digest",
+    }.issubset(row):
         raise ReleaseJobError("unsupported release job record; clean obsolete state")
 
 
@@ -1737,6 +1769,7 @@ def _fingerprint(request: JobRequest, destination: str) -> str:
         "reserved_bytes": request.reserved_bytes,
         "route": request.route,
         "scope": request.scope,
+        "client_request_digest": request.client_request_digest,
     }
     if request.execution_binding:
         canonical["execution_binding"] = hashlib.sha256(request.execution_binding).hexdigest()

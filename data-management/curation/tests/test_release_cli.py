@@ -33,6 +33,9 @@ from test_release_contracts import MiniaturePackage, _finalize, miniature  # noq
 JOB_ID = "a" * 32
 KEY = "test-release-key-0001"
 CSRF_TOKEN = "ab" * 32
+HANDLE = "c" * 64
+SOURCES_PREFIX = f"{API_PREFIX}/sources/"
+MEDIA_BYTES = b"\x00\x00\x00\x18ftypmp42MEDIA"
 SPEC: dict[str, Any] = {
     "destination": "lab",
     "package_id": "pkg-001",
@@ -81,6 +84,31 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _reply_bytes(self, status: int, body: bytes, content_type: str) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _source(self, rest: str, query: dict[str, list[str]]) -> None:
+        segments = rest.split("/")
+        if len(segments) < 2 or segments[1] != "releases":
+            self._reply(404, {"detail": "Not Found"})
+        elif len(segments) == 2:
+            self._reply(200, {"releases": []})
+        elif len(segments) == 3:
+            self._reply(200, {"handle": segments[2]})
+        elif len(segments) == 4 and segments[3] == "episodes":
+            cursor = query.get("cursor", [""])[0]
+            limit = query.get("limit", [""])[0]
+            self._reply(200, {"episodes": [], "cursor": cursor, "limit": limit})
+        elif len(segments) == 7 and segments[3] == "episodes" and segments[5] == "media":
+            self._reply_bytes(200, MEDIA_BYTES, "video/mp4")
+        else:
+            self._reply(404, {"detail": "Not Found"})
+
     def _handle(self, body: bytes) -> None:
         fake = self.server
         headers = {name.lower(): value for name, value in self.headers.items()}
@@ -106,7 +134,11 @@ class _Handler(BaseHTTPRequestHandler):
                 return
 
         route = (self.command, path)
-        if route == ("GET", f"{API_PREFIX}/capabilities"):
+        if route == ("POST", f"{API_PREFIX}/preview"):
+            self._reply(200, {"echo": json.loads(body)})
+        elif path.startswith(SOURCES_PREFIX):
+            self._source(path[len(SOURCES_PREFIX) :], query)
+        elif route == ("GET", f"{API_PREFIX}/capabilities"):
             self._reply(200, {"schema": "curated-release-api/v1", "operations": ["status"]})
         elif route == ("GET", f"{API_PREFIX}/jobs/{JOB_ID}"):
             self._reply(200, {"job_id": JOB_ID, "state": fake.next_state()})
@@ -114,7 +146,18 @@ class _Handler(BaseHTTPRequestHandler):
             if "idempotency-key" not in headers:
                 self._reply(400, {"detail": "Idempotency-Key header is required"})
                 return
+            if fake.submit_conflict:
+                detail = {"schema": "curated-release-api/v1", "code": "release_idempotency_conflict"}
+                self._reply(409, {"detail": detail})
+                return
             self._reply(202, {"job_id": JOB_ID, "replayed": False}, {"Location": f"{API_PREFIX}/jobs/{JOB_ID}"})
+        elif route == ("GET", f"{API_PREFIX}/requests"):
+            if "idempotency-key" not in headers:
+                self._reply(400, {"detail": "Idempotency-Key header is required"})
+            else:
+                self._reply(200, {"job_id": JOB_ID, "replayed": True})
+        elif route == ("GET", f"{API_PREFIX}/jobs"):
+            self._reply(200, {"jobs": []})
         elif route == ("GET", f"{API_PREFIX}/preview"):
             self._reply(200, {"selection": query.get("selection", [""])[0]})
         elif route == ("GET", f"{API_PREFIX}/jobs/{JOB_ID}/result"):
@@ -138,6 +181,7 @@ class FakeReleaseApi(ThreadingHTTPServer):
         self.requests: list[RecordedRequest] = []
         self.expected_api_key: str | None = KEY
         self.omit_csrf_cookie = False
+        self.submit_conflict = False
         self.states: list[str] = ["committed"]
 
     def next_state(self) -> str:
@@ -301,7 +345,7 @@ def test_given_request_file_with_server_owned_field_when_preview_then_refused(
     assert api.requests == []
 
 
-def test_given_request_when_preview_then_selection_is_canonical_json(
+def test_given_request_when_preview_then_post_body_is_canonical_json_with_csrf(
     api: FakeReleaseApi, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # Arrange
@@ -312,8 +356,26 @@ def test_given_request_when_preview_then_selection_is_canonical_json(
 
     # Assert
     assert code == EXIT_OK
-    selection = parse_qs(urlsplit(api.requests[-1].target).query)["selection"][0]
-    assert selection == json.dumps(SPEC, sort_keys=True, separators=(",", ":"))
+    post = api.requests[-1]
+    assert post.method == "POST"
+    assert post.target == f"{API_PREFIX}/preview"
+    assert post.headers["x-csrf-token"] == CSRF_TOKEN
+    assert post.body == json.dumps(SPEC, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    assert json.loads(capsys.readouterr().out)["result"] == {"echo": SPEC}
+
+
+def test_given_selection_when_preview_query_then_get_retained_without_csrf(api: FakeReleaseApi) -> None:
+    # Arrange
+    client = ReleaseApiClient(api.base_url, credentials=load_credentials({"RELEASE_API_KEY": KEY}))
+
+    # Act
+    payload = client.preview_query('{"a":1}')
+
+    # Assert
+    request = api.requests[-1]
+    assert request.method == "GET"
+    assert "x-csrf-token" not in request.headers
+    assert payload == {"selection": '{"a":1}'}
 
 
 def test_given_csrf_cookie_withheld_when_submit_then_bootstrap_fails_before_post(
@@ -580,3 +642,231 @@ def test_given_wrong_expected_manifest_when_verify_then_rejected(
     # Assert
     assert code == EXIT_VERIFY
     assert _stderr_error(capsys)["code"] == "verification_failed"
+
+
+def test_given_same_body_and_key_when_resubmitted_then_identical_post_bytes(
+    api: FakeReleaseApi, tmp_path: Path
+) -> None:
+    # Arrange
+    request = _write_spec(tmp_path)
+    args = _submit_args(request, "--ack-local-disk", "--confirm")
+
+    # Act
+    first = main(args, environ=_env(api.base_url))
+    second = main(args, environ=_env(api.base_url))
+
+    # Assert
+    posts = [item for item in api.requests if item.method == "POST" and item.target == f"{API_PREFIX}/jobs"]
+    assert first == second == EXIT_OK
+    assert len(posts) == 2
+    assert posts[0].body == posts[1].body
+    assert posts[0].headers["idempotency-key"] == posts[1].headers["idempotency-key"] == "idem-key-0001"
+
+
+def test_given_key_reused_with_changed_body_when_submit_then_remote_conflict_reported(
+    api: FakeReleaseApi, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    api.submit_conflict = True
+    request = _write_spec(tmp_path)
+
+    # Act
+    code = main(_submit_args(request, "--ack-local-disk", "--confirm"), environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_REMOTE
+    assert _stderr_error(capsys) == {"code": "release_idempotency_conflict", "status": 409}
+
+
+def test_given_dataset_with_separator_when_source_releases_then_segment_escaped(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Act
+    code = main(["source-releases", "ds/one two"], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_OK
+    last = api.requests[-1]
+    assert last.method == "GET"
+    assert last.target == f"{API_PREFIX}/sources/ds%2Fone%20two/releases"
+    assert "x-csrf-token" not in last.headers
+
+
+def test_given_cursor_and_limit_when_source_episodes_then_query_sent(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Act
+    code = main(
+        ["source-episodes", "ds-001", HANDLE, "--cursor", "5", "--limit", "10"],
+        environ=_env(api.base_url),
+    )
+
+    # Assert
+    assert code == EXIT_OK
+    target = urlsplit(api.requests[-1].target)
+    assert target.path == f"{API_PREFIX}/sources/ds-001/releases/{HANDLE}/episodes"
+    assert parse_qs(target.query) == {"cursor": ["5"], "limit": ["10"]}
+
+
+def test_given_camera_when_source_media_then_bytes_written_to_new_file(
+    api: FakeReleaseApi, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    output = tmp_path / "front.mp4"
+
+    # Act
+    code = main(
+        ["source-media", "ds-001", HANDLE, "3", "front.rgb", "--output", str(output)],
+        environ=_env(api.base_url),
+    )
+
+    # Assert
+    assert code == EXIT_OK
+    assert output.read_bytes() == MEDIA_BYTES
+    assert json.loads(capsys.readouterr().out)["result"] == {"bytes": len(MEDIA_BYTES), "path": str(output)}
+    assert api.requests[-1].target == f"{API_PREFIX}/sources/ds-001/releases/{HANDLE}/episodes/3/media/front.rgb"
+
+
+def test_given_existing_output_when_source_media_then_refused_and_file_unchanged(
+    api: FakeReleaseApi, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    output = tmp_path / "front.mp4"
+    output.write_bytes(b"keep")
+
+    # Act
+    code = main(
+        ["source-media", "ds-001", HANDLE, "3", "front.rgb", "--output", str(output)],
+        environ=_env(api.base_url),
+    )
+
+    # Assert
+    assert code == EXIT_USAGE
+    assert _stderr_error(capsys)["code"] == "output_exists"
+    assert output.read_bytes() == b"keep"
+
+
+def test_given_malformed_handle_when_source_release_then_refused_without_request(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Act
+    code = main(["source-release", "ds-001", "../../etc"], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_USAGE
+    assert _stderr_error(capsys)["code"] == "handle_invalid"
+    assert api.requests == []
+
+
+def test_given_traversal_camera_when_source_media_then_refused_without_request_or_file(
+    api: FakeReleaseApi, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    output = tmp_path / "out.mp4"
+
+    # Act
+    code = main(
+        ["source-media", "ds-001", HANDLE, "0", "..", "--output", str(output)],
+        environ=_env(api.base_url),
+    )
+
+    # Assert
+    assert code == EXIT_USAGE
+    assert _stderr_error(capsys)["code"] == "camera_invalid"
+    assert api.requests == []
+    assert not output.exists()
+
+
+def test_given_description_when_preview_then_forwarded_in_body(
+    api: FakeReleaseApi, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    request = _write_spec(tmp_path, description="Pick-and-place batch")
+
+    # Act
+    code = main(["preview", "--request", str(request)], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_OK
+    assert json.loads(api.requests[-1].body)["description"] == "Pick-and-place batch"
+
+
+@pytest.mark.parametrize(
+    "description",
+    [pytest.param("x" * 2001, id="too-long"), pytest.param(5, id="not-string")],
+)
+def test_given_invalid_description_when_preview_then_refused_without_request(
+    api: FakeReleaseApi, tmp_path: Path, capsys: pytest.CaptureFixture[str], description: object
+) -> None:
+    # Arrange
+    request = _write_spec(tmp_path, description=description)
+
+    # Act
+    code = main(["preview", "--request", str(request)], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_USAGE
+    assert _stderr_error(capsys)["code"] == "description_invalid"
+    assert api.requests == []
+
+
+def test_given_idempotency_key_when_accepted_request_then_get_with_header_and_no_csrf(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Act
+    code = main(["accepted-request", "--idempotency-key", "idem-key-0001"], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_OK
+    assert json.loads(capsys.readouterr().out)["result"] == {"job_id": JOB_ID, "replayed": True}
+    assert [(item.method, item.target) for item in api.requests] == [("GET", f"{API_PREFIX}/requests")]
+    assert api.requests[-1].headers["idempotency-key"] == "idem-key-0001"
+    assert "x-csrf-token" not in api.requests[-1].headers
+
+
+def test_given_malformed_idempotency_key_when_accepted_request_then_refused_without_request(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Act
+    code = main(["accepted-request", "--idempotency-key", "bad key"], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_USAGE
+    assert _stderr_error(capsys)["code"] == "idempotency_key_invalid"
+    assert api.requests == []
+
+
+def test_given_dataset_filter_when_list_then_dataset_id_query_sent(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Act
+    code = main(["list", "--dataset-id", "ds/one two"], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_OK
+    target = urlsplit(api.requests[-1].target)
+    assert target.path == f"{API_PREFIX}/jobs"
+    assert parse_qs(target.query) == {"cursor": ["0"], "limit": ["50"], "dataset_id": ["ds/one two"]}
+
+
+def test_given_no_dataset_filter_when_list_then_query_unchanged(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Act
+    code = main(["list"], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_OK
+    assert parse_qs(urlsplit(api.requests[-1].target).query) == {"cursor": ["0"], "limit": ["50"]}
+
+
+def test_given_empty_dataset_filter_when_list_then_refused_without_request(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Act
+    code = main(["list", "--dataset-id", ""], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_USAGE
+    assert _stderr_error(capsys)["code"] == "dataset_id_invalid"
+    assert api.requests == []

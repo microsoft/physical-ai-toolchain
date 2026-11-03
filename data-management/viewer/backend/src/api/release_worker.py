@@ -9,10 +9,14 @@ import logging
 import os
 import sys
 
-from physical_ai_curation.release.jobs import ReleaseJobStore, ReleaseRuntimeSettings
 from physical_ai_curation.release.runner import run_queue
 
-from .services.release_service import ReleaseApiError, get_release_planner, load_release_api_settings
+from .services.release_service import (
+    ReleaseApiError,
+    get_release_planner,
+    load_release_api_settings,
+    open_release_job_store,
+)
 from .services.viewer_release_planner import ViewerReleasePlanner
 
 logger = logging.getLogger("release_worker")
@@ -49,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
 
     planner = get_release_planner() or ViewerReleasePlanner(settings)
 
-    store = ReleaseJobStore(settings.job_root, settings=ReleaseRuntimeSettings.from_environment(os.environ))
+    store = open_release_job_store(settings)
     try:
         outcomes = asyncio.run(run_queue(store, planner.execution, worker_id=args.worker_id, limit=args.limit))
     except ReleaseApiError:

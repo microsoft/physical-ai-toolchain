@@ -6,8 +6,9 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
+from physical_ai_curation.evidence import read_job_evidence
 from physical_ai_curation.saved_input import SavedInputError, SavedResource
 
 if TYPE_CHECKING:
@@ -40,11 +41,39 @@ def local_source_revision(root: Path, metadata_paths: list[Path] | None = None) 
     )
 
 
+def content_etag(value: dict[str, Any]) -> str:
+    """Return a quoted content revision for one JSON object."""
+    return f'"{hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}"'
+
+
+def bound_judge_evidence(bound: dict[str, Any] | None, dataset_id: str, episode_index: int) -> SavedResource:
+    """Validate an explicitly bound judge job/target pair for one episode and return it as a saved resource."""
+    if bound is None:
+        return SavedResource(None, None)
+    job, target = bound.get("job"), bound.get("target")
+    if not isinstance(job, dict) or not isinstance(target, dict):
+        raise SavedInputError("Invalid judge evidence binding")
+    if job.get("dataset_id") != dataset_id or target.get("episode_index") != episode_index:
+        raise SavedInputError("Judge evidence binding scope mismatch")
+    try:
+        read_job_evidence(job, target)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SavedInputError("Judge evidence binding is invalid") from exc
+    value = {"job": job, "target": target}
+    return SavedResource(value, content_etag(value))
+
+
+class JudgeEvidenceAuthority(Protocol):
+    async def evidence(self, dataset_id: str, episode_index: int) -> dict[str, Any] | None:
+        """Return the explicitly bound {job, target} pair for one episode, or None when none is bound."""
+
+
 class LocalSavedInputReader:
     """Read the documented local curation layout beneath one configured dataset root."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, judge_evidence: JudgeEvidenceAuthority | None = None) -> None:
         self.root = root.resolve()
+        self.judge_evidence = judge_evidence
 
     def _read(self, relative: Path) -> SavedResource:
         path = (self.root / relative).resolve()
@@ -83,14 +112,30 @@ class LocalSavedInputReader:
                 raise SavedInputError("Saved edit source revision changed")
         return SavedResource(descriptor, resource.etag)
 
-    async def release_resource(self, dataset_id: str, selection: SavedSelection) -> SavedResource:
-        """Read the dataset labels file for an explicit release selection; other kinds are unavailable here."""
-        if selection.kind != "labels":
-            return SavedResource(None, None)
-        resource = await asyncio.to_thread(self._read, Path("meta") / "episode_labels.json")
+    def _labels(self, dataset_id: str) -> SavedResource:
+        resource = self._read(Path("meta") / "episode_labels.json")
         if resource.value is not None and resource.value.get("dataset_id") != dataset_id:
             raise SavedInputError("Curation dataset identity mismatch")
         return resource
+
+    async def release_resource(self, dataset_id: str, selection: SavedSelection) -> SavedResource:
+        """Read selected labels, episode ledger, or bound judge evidence; other kinds are unavailable."""
+        if selection.kind == "labels":
+            return await asyncio.to_thread(self._labels, dataset_id)
+        if selection.kind == "ledger":
+            labels = await asyncio.to_thread(self._labels, dataset_id)
+            ledger = ((labels.value or {}).get("provenance") or {}).get(str(selection.episode_index))
+            if ledger is None:
+                return SavedResource(None, None)
+            if not isinstance(ledger, dict):
+                raise SavedInputError("Invalid saved ledger")
+            return SavedResource(ledger, content_etag(ledger))
+        if selection.kind == "evidence":
+            if self.judge_evidence is None:
+                raise SavedInputError("Judge evidence authority is not bound", 503)
+            bound = await self.judge_evidence.evidence(dataset_id, selection.episode_index)
+            return bound_judge_evidence(bound, dataset_id, selection.episode_index)
+        return SavedResource(None, None)
 
     async def source_revision(self, dataset_id: str, episode_index: int) -> tuple[str, str]:
         return await asyncio.to_thread(local_source_revision, self.root)
