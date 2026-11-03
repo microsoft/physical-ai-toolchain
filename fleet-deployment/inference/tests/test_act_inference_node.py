@@ -537,7 +537,8 @@ class TestControlTick:
 
         policy = QueuedPolicy()
         node._runner = PolicyRunner(policy, lambda obs: obs, lambda action: action, device="cpu")
-        node._action_mode = "delta"
+        # Absolute mode: fake policy already returns absolute targets (current + offset).
+        node._action_mode = "absolute"
         node._enable_control = True
         node._bridge.next_image = np.zeros((480, 848, 3), dtype=np.uint8)
         node._on_image(_Image())
@@ -603,6 +604,7 @@ class TestControlTick:
             joint_positions=current,
             color_image=np.zeros((480, 848, 3), dtype=np.uint8),
         )
+        node._joints_ready = True
         node._action_mode = "delta"
         node._enable_control = True
         node._runner.step.return_value = _JointPositionCommand(
