@@ -239,6 +239,23 @@ Keep environment-tier verification manual, and add only a real MLflow server in 
 
 A companion change, not an alternative, runs the real MLflow client against a throwaway MLflow server in ordinary CI with SQLite storage. It catches MLflow client API changes on every pull request at almost no cost, while this decision covers what only Azure can show. The OSMO replay mirror is the first path to adopt it.
 
+### Future Uses
+
+Once the environment and its approval flow exist, other work that today needs a person on a GPU node can reuse them. These uses are out of scope for this decision. Each would be adopted separately, roughly in this order:
+
+| Use                                                                                             | Value                                                                                                 | Builds on                                                          |
+|-------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|
+| Validate upgrades that Dependabot holds back, such as NumPy for the Isaac runtime               | Lift held versions with evidence instead of a manual Isaac Sim and RL smoke run                       | The same workflow, run against a trial branch                      |
+| Maintainer-approved runs for non-Dependabot pull requests to training, evaluation, or workflows | Contributor changes get the same Azure evidence as dependency bumps                                   | The protected-environment approval gate                            |
+| Image digest and Azure ML environment refreshes                                                 | New images are proven with the GPU smoke and lifecycle checks before merge                            | `scripts/update-image-digests.sh` and the existing checks          |
+| Nightly performance and cost baselines                                                          | Training slowdowns from runtime bumps show up as trends, not surprises                                | Metrics the nightly runs already log to MLflow                     |
+| Fixed evaluation baselines                                                                      | Model-quality regressions are caught, not only crashes                                                | SIL evaluation and the VLM judge against a pinned checkpoint       |
+| Periodic rebuild from scratch                                                                   | Tests Terraform, AzureRM provider, Helm, and setup-script changes end to end, and the deployment docs | The `e2e-infrastructure` skill, run by a separately privileged job |
+| Release gating                                                                                  | Each release carries a full environment-tier result                                                   | The environment tier of `verify.py`                                |
+| A shared target for agents, issue reproduction, and onboarding                                  | Agents and maintainers use a known-good environment instead of personal ones                          | The E2E and training skills, with a separate read-mostly identity  |
+
+Each new use keeps this decision's guardrails: runs come from schedules or approvals, never from every push; data is test-only; and a new use gets its own identity or role rather than widening the CI identity. GPU time per use counts against the same budget alert, and competing uses run in separate windows or move to a second instance.
+
 Revisit this decision when any of these change:
 
 * GitHub allows Dependabot pull request workflows to obtain an Azure OIDC token without elevated trust.
