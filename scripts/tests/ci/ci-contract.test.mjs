@@ -135,6 +135,47 @@ test('product workspace: judge tests and coverage remain required in the backend
   const gates = steps.find(step => step.id === 'coverage_gate').run;
   assert.ok(gates.includes('--fail-under=90'));
   assert.ok(gates.includes('--fail-under=70'));
+
+  const generate = steps.find(step => step.id === 'coverage_generate');
+  assert.ok(generate);
+  assert.match(generate.if, /!cancelled\(\)/);
+  assert.match(generate.if, /steps\.install\.outcome == 'success'/);
+  assert.ok(generate.run.includes('coverage xml'));
+  assert.ok(generate.run.includes('backend_status=$?'));
+  assert.ok(generate.run.includes('judge_status=$?'));
+  assert.ok(generate.run.includes('rm -f'));
+  assert.ok(generate.run.includes('coverage-dataviewer.xml'));
+  assert.ok(generate.run.includes('coverage-vlm-judge-backend.xml'));
+  assert.equal(generate["continue-on-error"], true);
+
+  const validate = steps.find(step => step.id === 'coverage_validate');
+  assert.ok(validate);
+  assert.ok(validate.run.includes('ET.parse'));
+  assert.ok(validate.run.includes('lines-valid'));
+  assert.ok(validate.run.includes('line-rate'));
+  assert.equal(validate["continue-on-error"], true);
+
+  const gate = steps.find(step => step.id === 'coverage_gate');
+  assert.match(gate.if, /!cancelled\(\)/);
+  assert.match(gate.if, /steps\.install\.outcome == 'success'/);
+
+  const backendUpload = steps.find(step =>
+    step.uses?.startsWith('codecov/codecov-action') &&
+    step.with?.name === 'pytest-dataviewer-coverage'
+  );
+  assert.ok(backendUpload);
+  assert.equal(backendUpload.with.disable_search, true);
+  assert.equal(backendUpload.with.files, 'logs/coverage-dataviewer.xml');
+  assert.match(backendUpload.if, /backend_valid == 'true'/);
+
+  const judgeBackendUpload = steps.find(step =>
+    step.uses?.startsWith('codecov/codecov-action') &&
+    step.with?.name === 'pytest-vlm-judge-backend-coverage'
+  );
+  assert.ok(judgeBackendUpload);
+  assert.equal(judgeBackendUpload.with.disable_search, true);
+  assert.equal(judgeBackendUpload.with.files, 'logs/coverage-vlm-judge-backend.xml');
+  assert.match(judgeBackendUpload.if, /judge_backend_valid == 'true'/);
 });
 
 test('product workspace: independent evaluation keeps its own gate without judge coverage', () => {

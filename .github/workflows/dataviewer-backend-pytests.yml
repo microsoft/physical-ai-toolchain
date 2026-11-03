@@ -82,13 +82,92 @@ jobs:
           --cov=src --cov=evaluation.vlm_judge
           --cov-report= --cov-fail-under=0
 
-      - name: Generate scoped coverage reports and enforce gates
-        id: coverage_gate
+      - name: Generate scoped coverage reports
+        id: coverage_generate
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
         run: |
-          uv run --project ../../.. --all-packages --no-sync coverage xml --include='*/backend/src/*' --fail-under=0 -o ../../../logs/coverage-dataviewer.xml
-          uv run --project ../../.. --all-packages --no-sync coverage xml --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' --fail-under=0 -o ../../../logs/coverage-vlm-judge-backend.xml
-          uv run --project ../../.. --all-packages --no-sync coverage report --include='*/backend/src/*' --fail-under=90
-          uv run --project ../../.. --all-packages --no-sync coverage report --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' --fail-under=70
+          set -euo pipefail
+          mkdir -p ../../../logs
+          rm -f ../../../logs/coverage-dataviewer.xml
+          rm -f ../../../logs/coverage-vlm-judge-backend.xml
+
+          if [ ! -s .coverage ]; then
+            echo "::warning::Coverage data is unavailable; scoped reports cannot be generated."
+            exit 1
+          fi
+
+          set +e
+          uv run --project ../../.. --all-packages --no-sync coverage xml \
+            --include='*/backend/src/*' --fail-under=0 \
+            -o ../../../logs/coverage-dataviewer.xml
+          backend_status=$?
+
+          uv run --project ../../.. --all-packages --no-sync coverage xml \
+            --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' \
+            --fail-under=0 -o ../../../logs/coverage-vlm-judge-backend.xml
+          judge_status=$?
+          set -e
+
+          if [ "$backend_status" -ne 0 ] || [ "$judge_status" -ne 0 ]; then
+            echo "::warning::One or more scoped coverage reports could not be generated."
+            exit 1
+          fi
+
+      - name: Validate scoped coverage reports
+        id: coverage_validate
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          reports = {
+              "backend_valid": Path("../../../logs/coverage-dataviewer.xml"),
+              "judge_backend_valid": Path("../../../logs/coverage-vlm-judge-backend.xml"),
+          }
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              for name, path in reports.items():
+                  valid = False
+                  try:
+                      root = ET.parse(path).getroot()
+                      valid = (
+                          root.tag == "coverage"
+                          and int(root.attrib.get("lines-valid", "0")) > 0
+                          and 0.0 <= float(root.attrib.get("line-rate", "")) <= 1.0
+                      )
+                  except (OSError, ET.ParseError, ValueError):
+                      pass
+
+                  print(f"{name}={'true' if valid else 'false'}", file=output)
+                  if not valid:
+                      print(f"::warning::Coverage report unavailable or invalid: {path}")
+          PY
+
+      - name: Enforce scoped coverage gates
+        id: coverage_gate
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+
+          if [ "${{ steps.coverage_validate.outputs.backend_valid }}" != "true" ]; then
+            echo "::error::Dataviewer backend coverage report is missing or invalid."
+            exit 1
+          fi
+
+          if [ "${{ steps.coverage_validate.outputs.judge_backend_valid }}" != "true" ]; then
+            echo "::error::Judge backend coverage report is missing or invalid."
+            exit 1
+          fi
+
+          uv run --project ../../.. --all-packages --no-sync coverage report \
+            --include='*/backend/src/*' --fail-under=90
+
+          uv run --project ../../.. --all-packages --no-sync coverage report \
+            --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' --fail-under=70
 
       - name: Run product-owned judge unit tests
         id: judge_unit
@@ -115,13 +194,15 @@ jobs:
             logs/coverage-dataviewer.xml
             logs/coverage-vlm-judge-backend.xml
             logs/coverage-vlm-judge.xml
+          if-no-files-found: ignore
           retention-days: 30
 
       - name: Upload coverage to Codecov
-        if: ${{ inputs.code-coverage && always() }}
+        if: ${{ inputs.code-coverage && always() && steps.coverage_validate.outputs.backend_valid == 'true' }}
         continue-on-error: ${{ job.status == 'failure' || steps.test.outcome != 'success' || steps.coverage_report.outcome == 'failure' || steps.coverage_upload.outcome == 'failure' }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
+          disable_search: true
           files: logs/coverage-dataviewer.xml
           use_oidc: true
           fail_ci_if_error: false
@@ -130,10 +211,11 @@ jobs:
           name: pytest-dataviewer-coverage
 
       - name: Upload judge coverage to Codecov
-        if: ${{ inputs.code-coverage && always() }}
+        if: ${{ inputs.code-coverage && always() && steps.coverage_validate.outputs.judge_backend_valid == 'true' }}
         continue-on-error: ${{ job.status == 'failure' || steps.test.outcome != 'success' || steps.coverage_report.outcome == 'failure' || steps.coverage_upload.outcome == 'failure' }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
+          disable_search: true
           files: logs/coverage-vlm-judge-backend.xml
           use_oidc: true
           fail_ci_if_error: false

@@ -1610,7 +1610,8 @@
               "run-sha256": "3e34d539de1f384e58b36e0a15d7e7716962b8acafc4c408014d518ea844353d"
             },
             "coverage_gate": {
-              "run-sha256": "a3bdc15b1babee2b05fe1d4dcb92c200908adf7dc742648fc7c3175d2e93e79c"
+              "run-sha256": "f57e4cdd50a51c852d5f0e8d9299252dcc88a8585693eb5db82e70fd9280839c",
+              "if": "${{ !cancelled() && steps.install.outcome == 'success' }}"
             },
             "judge_unit": {
               "run-sha256": "fb9ad8b81e9fe71d8b4d8b964f73246f4e5dc2aef6cb0e808d3a05e991497769"
