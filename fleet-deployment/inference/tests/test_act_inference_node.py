@@ -541,6 +541,13 @@ class TestControlTick:
         traj = node.publishers["/lerobot/joint_commands"].publish.call_args.args[0]
         np.testing.assert_allclose(traj.points[0].positions, absolute.tolist())
 
+    def test_given_unknown_action_mode_when_init_then_raises_value_error(self, local_policy_repo: str) -> None:
+        with (
+            _node_parameter_overrides(policy_repo=local_policy_repo, action_mode="invalid"),
+            pytest.raises(ValueError, match="action_mode must be 'delta' or 'absolute', got 'invalid'"),
+        ):
+            ain_module.ACTInferenceNode()
+
     def test_logs_at_30_step_boundary(self, node):
         node._state.observation = _RobotObservation(
             joint_positions=np.zeros(6, dtype=np.float32),
