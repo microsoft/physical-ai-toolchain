@@ -56,7 +56,9 @@ class ViewerReleasePlanner:
 
     def reader_for_scope(self, scope: str) -> ViewerSavedInputReader:
         """Return a reader whose judge evidence is bound to the principal scope."""
-        authority = ScopedJudgeEvidenceAuthority(self._judge_state(), self.datasets, principal_scope_id=scope)
+        authority = ScopedJudgeEvidenceAuthority(
+            self._judge_state(), self.datasets.get_source_revision, principal_scope_id=scope
+        )
         return ViewerSavedInputReader(
             self.datasets, self._annotations, label_storage=self._label_storage(), judge_evidence=authority
         )

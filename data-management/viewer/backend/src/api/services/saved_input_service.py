@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from physical_ai_curation.adapters.job_storage import BlobJobStore
-from physical_ai_curation.adapters.local_saved_input import JudgeEvidenceAuthority, bound_judge_evidence, content_etag
-from physical_ai_curation.evidence import read_job_evidence
+from physical_ai_curation.adapters.local_saved_input import (
+    JudgeEvidenceAuthority,
+    JudgeStateReader,
+    ScopedJudgeEvidenceAuthority,
+    bound_judge_evidence,
+    content_etag,
+)
 from physical_ai_curation.saved_input import (
     SavedInputError,
     SavedInputSnapshot,
@@ -28,11 +33,6 @@ if TYPE_CHECKING:
     from .label_storage import LabelStorage
 
 
-class JudgeStateReader(Protocol):
-    async def read(self) -> dict[str, Any]:
-        """Return persisted judge state without taking a write transaction."""
-
-
 class AzureJudgeStateReader:
     """Read persisted judge state from the blob container used by judge jobs."""
 
@@ -45,44 +45,6 @@ class AzureJudgeStateReader:
         client = await self.provider._get_client()
         blob = client.get_container_client(self.provider.container_name).get_blob_client("_curation/judge/state.json")
         return await BlobJobStore(blob).read()
-
-
-class ScopedJudgeEvidenceAuthority:
-    """Expose judge evidence only for one principal, the current generation, and the current source revision.
-
-    Absence returns None. A newest matching entry that fails validation or is stale is refused, never replaced
-    by an older entry.
-    """
-
-    def __init__(self, store: JudgeStateReader, datasets: DatasetService, *, principal_scope_id: str) -> None:
-        self.store = store
-        self.datasets = datasets
-        self.principal_scope_id = principal_scope_id
-
-    async def evidence(self, dataset_id: str, episode_index: int) -> dict[str, Any] | None:
-        state = await self.store.read()
-        generation = state["generations"].get(dataset_id, 0)
-        candidates = [
-            (job, target)
-            for job in state["jobs"].values()
-            if job["dataset_id"] == dataset_id
-            and job["actor"] == self.principal_scope_id
-            and job.get("result_kind", "judge") == "judge"
-            and job["generation"] == generation
-            for target in job["targets"]
-            if target["episode_index"] == episode_index and target["status"] == "succeeded"
-        ]
-        if not candidates:
-            return None
-        job, target = max(candidates, key=lambda pair: pair[0]["run_order"])
-        try:
-            read_job_evidence(job, target)
-        except (KeyError, TypeError, ValueError) as exc:
-            raise SavedInputError("Judge evidence binding is invalid") from exc
-        current = await self.datasets.get_source_revision(dataset_id, episode_index)
-        if (target["input"]["source_id"], target["input"]["source_revision"]) != tuple(current):
-            raise SavedInputError("Judge evidence source revision changed")
-        return {"job": job, "target": target}
 
 
 class ViewerSavedInputReader:

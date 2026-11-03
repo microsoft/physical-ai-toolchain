@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -66,6 +67,52 @@ def bound_judge_evidence(bound: dict[str, Any] | None, dataset_id: str, episode_
 class JudgeEvidenceAuthority(Protocol):
     async def evidence(self, dataset_id: str, episode_index: int) -> dict[str, Any] | None:
         """Return the explicitly bound {job, target} pair for one episode, or None when none is bound."""
+
+
+class JudgeStateReader(Protocol):
+    async def read(self) -> dict[str, Any]:
+        """Return persisted judge state without taking a write transaction."""
+
+
+class ScopedJudgeEvidenceAuthority:
+    """Read current principal/generation evidence and refuse stale or invalid newest results."""
+
+    def __init__(
+        self,
+        store: JudgeStateReader,
+        source_revision: Callable[[str, int], Awaitable[tuple[str, str]]],
+        *,
+        principal_scope_id: str,
+    ) -> None:
+        self.store = store
+        self.source_revision = source_revision
+        self.principal_scope_id = principal_scope_id
+
+    async def evidence(self, dataset_id: str, episode_index: int) -> dict[str, Any] | None:
+        """Return the newest validated matching result; never substitute an older result."""
+        state = await self.store.read()
+        generation = state["generations"].get(dataset_id, 0)
+        candidates = [
+            (job, target)
+            for job in state["jobs"].values()
+            if job["dataset_id"] == dataset_id
+            and job["actor"] == self.principal_scope_id
+            and job.get("result_kind", "judge") == "judge"
+            and job["generation"] == generation
+            for target in job["targets"]
+            if target["episode_index"] == episode_index and target["status"] == "succeeded"
+        ]
+        if not candidates:
+            return None
+        job, target = max(candidates, key=lambda pair: pair[0]["run_order"])
+        try:
+            read_job_evidence(job, target)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SavedInputError("Judge evidence binding is invalid") from exc
+        current = await self.source_revision(dataset_id, episode_index)
+        if (target["input"]["source_id"], target["input"]["source_revision"]) != tuple(current):
+            raise SavedInputError("Judge evidence source revision changed")
+        return {"job": job, "target": target}
 
 
 class LocalSavedInputReader:

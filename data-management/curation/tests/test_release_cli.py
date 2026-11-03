@@ -169,6 +169,14 @@ class _Handler(BaseHTTPRequestHandler):
             self._reply(409, {"detail": detail})
         elif route == ("POST", f"{API_PREFIX}/jobs/{JOB_ID}/cancel"):
             self._reply(202, {"job_id": JOB_ID, "state": "cancelled"})
+        elif route == ("POST", f"{API_PREFIX}/jobs/{JOB_ID}/recover"):
+            self._reply(202, {"job_id": JOB_ID, "state": "recovering"})
+        elif route == ("GET", f"{API_PREFIX}/jobs/{JOB_ID}/artifacts/manifest"):
+            self._reply(200, {"alias": "manifest"})
+        elif path.startswith(f"{API_PREFIX}/inventory/"):
+            cursor = query.get("cursor", [""])[0]
+            limit = query.get("limit", [""])[0]
+            self._reply(200, {"inventory": path[len(f"{API_PREFIX}/inventory/") :], "cursor": cursor, "limit": limit})
         else:
             self._reply(404, {"detail": "Not Found"})
 
@@ -870,3 +878,140 @@ def test_given_empty_dataset_filter_when_list_then_refused_without_request(
     assert code == EXIT_USAGE
     assert _stderr_error(capsys)["code"] == "dataset_id_invalid"
     assert api.requests == []
+
+
+@pytest.mark.parametrize(
+    ("command", "suffix"),
+    [pytest.param("cancel", "cancel", id="cancel"), pytest.param("recover", "recover", id="recover")],
+)
+def test_given_mutation_when_main_then_post_carries_matching_csrf_and_key(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str], command: str, suffix: str
+) -> None:
+    # Act
+    code = main([command, JOB_ID], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_OK
+    post = api.requests[-1]
+    assert post.method == "POST"
+    assert post.target == f"{API_PREFIX}/jobs/{JOB_ID}/{suffix}"
+    assert post.headers["x-csrf-token"] == CSRF_TOKEN
+    assert f"csrf_token={CSRF_TOKEN}" in post.headers["cookie"]
+    assert post.headers["x-api-key"] == KEY
+    assert post.body == b""
+    assert json.loads(capsys.readouterr().out)["command"] == command
+
+
+def test_given_cancel_when_csrf_cookie_withheld_then_no_post_sent(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Arrange
+    api.omit_csrf_cookie = True
+
+    # Act
+    code = main(["cancel", JOB_ID], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_TRANSPORT
+    assert _stderr_error(capsys)["code"] == "csrf_bootstrap_failed"
+    assert all(item.method == "GET" for item in api.requests)
+
+
+@pytest.mark.parametrize("command", ["cancel", "recover"])
+def test_given_malformed_job_id_when_mutation_then_refused_without_request(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str], command: str
+) -> None:
+    # Act
+    code = main([command, "not-a-job"], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_USAGE
+    assert _stderr_error(capsys)["code"] == "job_id_invalid"
+    assert api.requests == []
+
+
+def test_given_artifact_alias_when_artifact_then_get_without_csrf_and_output_printed(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Act
+    code = main(["artifact", JOB_ID, "manifest"], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_OK
+    assert json.loads(capsys.readouterr().out)["result"] == {"alias": "manifest"}
+    last = api.requests[-1]
+    assert last.method == "GET"
+    assert last.target == f"{API_PREFIX}/jobs/{JOB_ID}/artifacts/manifest"
+    assert "x-csrf-token" not in last.headers
+
+
+@pytest.mark.parametrize("alias", ["../result", "Manifest", "a/b"])
+def test_given_invalid_artifact_alias_when_artifact_then_refused_without_request(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str], alias: str
+) -> None:
+    # Act
+    code = main(["artifact", JOB_ID, alias], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_USAGE
+    assert _stderr_error(capsys)["code"] == "artifact_alias_invalid"
+    assert api.requests == []
+
+
+def test_given_dataset_with_separator_when_inventory_then_segment_escaped_and_paged(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Act
+    code = main(["inventory", "ds/one two", "--cursor", "4", "--limit", "7"], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_OK
+    last = api.requests[-1]
+    target = urlsplit(last.target)
+    assert last.method == "GET"
+    assert target.path == f"{API_PREFIX}/inventory/ds%2Fone%20two"
+    assert parse_qs(target.query) == {"cursor": ["4"], "limit": ["7"]}
+    assert "x-csrf-token" not in last.headers
+    assert json.loads(capsys.readouterr().out)["result"]["inventory"] == "ds%2Fone%20two"
+
+
+def test_given_traversal_dataset_when_inventory_then_refused_without_request(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Act
+    code = main(["inventory", ".."], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_USAGE
+    assert _stderr_error(capsys)["code"] == "dataset_id_invalid"
+    assert api.requests == []
+
+
+def test_given_dataset_when_source_releases_then_get_without_csrf_and_output_printed(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Act
+    code = main(["source-releases", "ds-001"], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_OK
+    assert json.loads(capsys.readouterr().out)["result"] == {"releases": []}
+    last = api.requests[-1]
+    assert last.method == "GET"
+    assert last.target == f"{API_PREFIX}/sources/ds-001/releases"
+    assert "x-csrf-token" not in last.headers
+
+
+def test_given_valid_handle_when_source_release_then_get_path_and_output(
+    api: FakeReleaseApi, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Act
+    code = main(["source-release", "ds-001", HANDLE], environ=_env(api.base_url))
+
+    # Assert
+    assert code == EXIT_OK
+    assert json.loads(capsys.readouterr().out)["result"] == {"handle": HANDLE}
+    last = api.requests[-1]
+    assert last.method == "GET"
+    assert last.target == f"{API_PREFIX}/sources/ds-001/releases/{HANDLE}"
+    assert "x-csrf-token" not in last.headers

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -232,12 +233,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--job", required=True)
     args = parser.parse_args(argv)
     try:
-        from physical_ai_curation.adapters.local_saved_input import LocalSavedInputReader
+        from physical_ai_curation.adapters.job_storage import LocalJobStore
+        from physical_ai_curation.adapters.local_saved_input import LocalSavedInputReader, ScopedJudgeEvidenceAuthority
 
         if args.config.stat().st_size > 1024**2:
             raise ValueError("worker configuration exceeds its bound")
         config: Any = parse_strict_json(args.config.read_bytes())
-        if set(config) != {
+        required = {
             "schema_version",
             "job_root",
             "source_root",
@@ -245,16 +247,31 @@ def main(argv: list[str] | None = None) -> int:
             "selection",
             "context",
             "finalized",
-        } or (config["schema_version"] != "curated-release-worker/v1" or config["finalized"] is not True):
+        }
+        if (
+            not isinstance(config, dict)
+            or not required.issubset(config)
+            or set(config) - required - {"judge_state_root"}
+            or config["schema_version"] != "curated-release-worker/v1"
+            or config["finalized"] is not True
+        ):
             raise ValueError("invalid worker configuration")
         context = TypeAdapter(FreezeContext).validate_python(config["context"])
         if context.principal_scope_id != "localuser":
             raise ValueError("standalone local execution requires deliberate localuser composition")
         root = Path(config["source_root"])
-        store = ReleaseJobStore(Path(config["job_root"]), settings=ReleaseRuntimeSettings.from_environ())
+        reader = LocalSavedInputReader(root)
+        if "judge_state_root" in config:
+            judge_root = config["judge_state_root"]
+            if not isinstance(judge_root, str) or not judge_root.strip():
+                raise ValueError("invalid judge state root")
+            reader.judge_evidence = ScopedJudgeEvidenceAuthority(
+                LocalJobStore(Path(judge_root)), reader.source_revision, principal_scope_id=context.principal_scope_id
+            )
+        store = ReleaseJobStore(Path(config["job_root"]), settings=ReleaseRuntimeSettings.from_environment(os.environ))
         binding = ConfiguredExecution(
             LocalReleaseSource(root, finalized=True),
-            LocalSavedInputReader(root),
+            reader,
             TypeAdapter(ReleaseSelection).validate_python(config["selection"]),
             context,
             Path(config["destination_root"]),

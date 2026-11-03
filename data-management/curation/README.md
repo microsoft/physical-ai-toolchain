@@ -425,6 +425,16 @@ service. Exit zero means settled; exit one returns a fixed `recovery_required`
 result without exposing provider exceptions or paths. Use the native profile for
 generation; importing the runner does not load Arrow, Azure or media packages.
 
+For selections containing judge evidence, set `judge_state_root` to the explicitly
+configured judge job directory containing `state.json`. The worker does not guess
+this location or run inference. `ScopedJudgeEvidenceAuthority` in
+`physical_ai_curation.adapters.local_saved_input` reads only the accepted principal's
+current generation and validates the newest result against the current source
+revision. Invalid or stale evidence is refused rather than replaced by an older
+result. Without the binding, evidence selections are refused. Local saved labels,
+episode contribution ledgers and evidence use the same revision and projection
+contracts as the viewer reader; hosted execution still derives its own authority.
+
 Status includes bounded category/status/duration diagnostics and conservative
 current/peak journaled destination bytes. These include uncertain intents, not
 measured Blob allocation; independent absence or completed owned cleanup reduces

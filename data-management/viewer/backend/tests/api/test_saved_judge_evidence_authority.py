@@ -86,7 +86,7 @@ async def _store_with(root: Path, *jobs: dict[str, Any], generation: int = 0) ->
 def _authority(
     store: LocalJobStore, revision: tuple[str, str] = ("source-id", "rev-1")
 ) -> ScopedJudgeEvidenceAuthority:
-    return ScopedJudgeEvidenceAuthority(store, _Datasets(revision), principal_scope_id=PRINCIPAL)
+    return ScopedJudgeEvidenceAuthority(store, _Datasets(revision).get_source_revision, principal_scope_id=PRINCIPAL)
 
 
 @pytest.mark.asyncio

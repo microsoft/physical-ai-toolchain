@@ -176,9 +176,29 @@ def test_preview_is_read_only_and_inventory_is_paged(release_api: tuple) -> None
 
 
 def test_given_saved_labels_when_inventory_read_then_exact_revisions_are_selectable(release_api: tuple) -> None:
+    from physical_ai_curation.adapters.local_saved_input import LocalSavedInputReader
+    from physical_ai_curation.release.inputs import SavedSelection
+
+    from src.api.services.saved_input_service import ViewerSavedInputReader
+
     test_client, spec, _settings, _app, root = release_api
-    labels = DatasetLabelsFile(dataset_id="native", episodes={"1": ["accepted"]})
+    labels = DatasetLabelsFile(
+        dataset_id="native",
+        episodes={"1": ["accepted"]},
+        provenance={"1": {"schema_version": "1.0.0", "contributions": []}},
+    )
     (root / "meta/episode_labels.json").write_text(labels.model_dump_json())
+    standalone = LocalSavedInputReader(root)
+    viewer = ViewerSavedInputReader(
+        DatasetService(base_path=str(root.parent)),
+        AnnotationService(base_path=str(root.parent)),
+        LocalLabelStorage(root.parent),
+    )
+    for kind in ("labels", "ledger"):
+        selection = SavedSelection(kind=kind, episode_index=1, expected_revision="pending")
+        assert asyncio.run(standalone.release_resource("native", selection)) == asyncio.run(
+            viewer.release_resource("native", selection)
+        )
     inventory = test_client.get(BASE + "/inventory/native?limit=1&cursor=1").json()
     row = inventory["items"][0]
     assert row["labels"] == ["accepted"]
@@ -219,7 +239,10 @@ def test_given_bound_judge_evidence_when_inventory_read_then_revision_is_selecta
     release_api: tuple, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from physical_ai_curation.adapters.job_storage import LocalJobStore
+    from physical_ai_curation.adapters.local_saved_input import LocalSavedInputReader, ScopedJudgeEvidenceAuthority
     from physical_ai_curation.evidence import bind_job_evidence
+    from physical_ai_curation.release.inputs import SavedSelection
+    from physical_ai_curation.saved_input import SavedInputError
 
     from tests.api.test_saved_judge_evidence_authority import _judge_job
 
@@ -238,14 +261,52 @@ def test_given_bound_judge_evidence_when_inventory_read_then_revision_is_selecta
 
     asyncio.run(persist())
     monkeypatch.setattr(ViewerReleasePlanner, "_judge_state", lambda _self: store)
+    reader = LocalSavedInputReader(root)
+    reader.judge_evidence = ScopedJudgeEvidenceAuthority(store, reader.source_revision, principal_scope_id="localuser")
     row = test_client.get(BASE + "/inventory/native?limit=1&cursor=1").json()["items"][0]
     assert row["judge"] == {"status": "succeeded", "freshness": "current", "confidence": 1.0, "outcome": "success"}
     assert any(resource["kind"] == "evidence" for resource in row["resources"])
-    assert test_client.post(BASE + "/preview", json={**spec, "resources": row["resources"]}).status_code == 200
+    selected = SavedSelection(**next(item for item in row["resources"] if item["kind"] == "evidence"))
+    standalone = asyncio.run(reader.release_resource("native", selected))
+    assert standalone.value == {"job": job, "target": target}
+    assert standalone.etag == selected.expected_revision
+    selected_spec = {**spec, "resources": row["resources"]}
+    preview = test_client.post(BASE + "/preview", json=selected_spec)
+    assert preview.status_code == 200
+    accepted = _submit(test_client, selected_spec, preview.json())
+    assert accepted.status_code == 202
+    job_id = accepted.json()["job_id"]
+    execution = parse_strict_json(ReleaseJobStore(settings.job_root).execution_binding(job_id))
+    config = settings.job_root.parent / "worker.json"
+    config.write_text(
+        json.dumps(
+            {
+                "schema_version": "curated-release-worker/v1",
+                "job_root": str(settings.job_root),
+                "source_root": str(root),
+                "destination_root": execution["effective_destination"]["path"],
+                "selection": execution["selection"],
+                "context": execution["context"],
+                "finalized": True,
+                "judge_state_root": str(store.root),
+            }
+        )
+    )
+    completed = subprocess.run(
+        [sys.executable, "-m", "physical_ai_curation.release.runner", "--config", str(config), "--job", job_id],
+        capture_output=True,
+        timeout=90,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout.decode()
+    assert test_client.get(BASE + "/jobs/" + job_id).json()["state"] == "committed"
+    assert test_client.get(BASE + "/jobs/" + job_id + "/result").status_code == 200
 
     target["input"]["source_revision"] = "stale"
     target["evidence"] = bind_job_evidence(job, target, target["result"]).to_dict()
     asyncio.run(persist())
+    with pytest.raises(SavedInputError, match="source revision changed"):
+        asyncio.run(reader.release_resource("native", selected))
     row = test_client.get(BASE + "/inventory/native?limit=1&cursor=1").json()["items"][0]
     assert row["judge"]["status"] == "unavailable"
     assert not any(resource["kind"] == "evidence" for resource in row["resources"])
