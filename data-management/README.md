@@ -6,6 +6,8 @@ Dataset curation, storage, annotation, versioning, and the viewer application fo
 
 ```text
 data-management/
+├── curation/                          # Saved evidence and curated release library
+├── dataset-io/                        # Shared native dataset interpretation
 ├── viewer/                            # Dataset Analysis Tool (FastAPI + React)
 ├── setup/                             # Viewer deployment scripts
 ├── tools/                             # CLI tools for dataset operations
@@ -45,12 +47,14 @@ docker compose up
 
 ## 📖 Documentation
 
-| Guide                                                                       | Description                                           |
-|-----------------------------------------------------------------------------|-------------------------------------------------------|
-| [Viewer README](viewer/README.md)                                           | Architecture, API reference, auth configuration       |
-| [Curation README](curation/README.md)                                       | Release library, judge jobs, and headless tooling     |
-| [Dataset Curation Spec](specifications/dataset-curation.specification.md)   | Filtering, splitting, merging, conversion, validation |
-| [Viewer Deployment Spec](specifications/viewer-deployment.specification.md) | Kubernetes deployment architecture                    |
+| Guide                                                                         | Description                                                             |
+|-------------------------------------------------------------------------------|-------------------------------------------------------------------------|
+| [Viewer README](viewer/README.md)                                             | Architecture, API reference, auth configuration                         |
+| [Curation README](curation/README.md)                                         | Release library, judge jobs, and headless tooling                       |
+| [Release workflow](viewer/README.md#-curated-release)                         | Selection, API/CLI, refusal recovery and evidence limits                |
+| [Release architecture](curation/README.md#architecture-and-review-boundaries) | Storage/evidence ownership, component review and integration boundaries |
+| [Dataset Curation Spec](specifications/dataset-curation.specification.md)     | Filtering, splitting, merging, conversion, validation                   |
+| [Viewer Deployment Spec](specifications/viewer-deployment.specification.md)   | Kubernetes deployment architecture                                      |
 
 ## 🗂️ Dataset Storage
 

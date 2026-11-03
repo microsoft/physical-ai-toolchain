@@ -1,7 +1,7 @@
 ---
 title: Curation
 description: Saved-input curation, durable judge jobs and portable release verification.
-ms.date: 2026-11-02
+ms.date: 2026-11-03
 ms.topic: reference
 ---
 
@@ -32,6 +32,12 @@ using the viewer. The evaluator environment alone does not install curation.
 See [data-management/viewer/README.md](../viewer/README.md) for the viewer's frozen
 restore and launch profiles. A curation-only application supplies its own storage
 adapters; importing the base package does not install an evaluator.
+
+Native release consumers additionally provide NumPy, PyArrow and Pandas for
+tables/statistics, PyAV for necessary encoding, and Pillow for grayscale edits.
+Blob consumers provide Azure Identity and Azure Storage Blob clients. These are
+consumer runtime requirements, not additional curation extras. Restore the
+consumer's locked profile; do not install the judge model runtime for release work.
 
 ## 🚀 Commands
 
@@ -100,12 +106,28 @@ mode supplies `localuser` automatically; authenticated scope and CSRF remain
 authoritative without a separate release-role or grant policy.
 
 `plan_release_objects` classifies exact copies, generated metadata and necessary
-encoding for LeRobot v3 targets. It opens no media or storage. Local-to-local and
-same-account Blob-to-Blob are planned routes, not live target publication evidence.
+encoding for LeRobot v3 targets. It opens no media or storage; planning alone
+does not establish publication or native readability.
 Capacity estimates remain advisory; the job store separately admits durable
 reservations and supervised execution applies hard runtime bounds.
 Call `load_media_limits` after application environment loading;
 its overrides are listed in the [backend environment example](../viewer/backend/.env.example).
+
+### Supported Routes
+
+| Source and destination                     | Target                                     | Execution and limits                                                             |
+|--------------------------------------------|--------------------------------------------|----------------------------------------------------------------------------------|
+| Local to local                             | LeRobot v3 from supported v2.1 or v3 input | Independent exact copies; generated metadata and only necessary media encoding   |
+| Same-account Blob to Blob                  | LeRobot v3 from supported v2.1 or v3 input | Condition-bound service copies; affected media downloads and generated uploads   |
+| Local to Blob or Blob to local             | Not supported                              | Mixed storage routes are refused                                                 |
+| Cross-account Blob                         | Not supported                              | Source URLs must be same-account and query-free; no credential-bearing copy URLs |
+| v2.1 output or arbitrary format conversion | Not supported                              | Reading a source format does not imply publishing that format                    |
+
+Unchanged video takes the copy path without a decoder. Frame removal and supported
+saved color edits require the processing confirmation bound to the current preview.
+The [viewer evidence limits](../viewer/README.md#evidence-limits) distinguish native
+CPU generation tests from live synthetic Blob publication tests. No route implies
+an Azure quota guarantee or a general point-in-time source snapshot.
 
 `execute_exact_copy` writes an independent, create-only local object through
 descriptor-bound reads and writes, checking the planned byte length and digest.
@@ -270,8 +292,9 @@ supported data, not release compatibility fallbacks.
 `release.azure_publication.BlobPublisher` uses injected synchronous Azure clients,
 create-only destination writes, source ETag conditions and independent streaming
 verification. Source URLs must be query-free and same-account. Source bearer
-authorization requests synchronous service copy; asynchronous reconciliation is
-separate and requires a service-authorized source. Pending or failed copies block
+authorization requests synchronous service copy. The configured supervised worker
+uses that route; pending-copy reconciliation is covered by fault fixtures, not a
+live asynchronous acceptance claim. Pending or failed copies block
 verification. Abort cleanup binds the owned operation and copy ID and uses
 conditional deletion. SDK imports are lazy.
 
@@ -457,6 +480,105 @@ application telemetry, not OTLP or job authority. There is no automatic job/even
 TTL or reservation expiry. Retain job records and relevant operational evidence
 until all active effects and output-retention obligations are reconciled;
 reads never prune them.
+
+### Architecture and Review Boundaries
+
+The viewer and headless client submit the same scoped API contracts. The service
+resolves configured storage and saved-input authority, freezes the selection,
+previews the plan and accepts one durable request. An independent worker restores
+that request, revalidates it and runs registered effects. Only destination
+verification and the marker-last commit make a release visible. Dataset-I/O owns
+native interpretation; curation owns release policy; adapters own credentials and
+transport. Review these responsibilities independently of PR count.
+
+| Review area        | Owning boundary                                                                                              | Invariant to check                                                                                |
+|--------------------|--------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| Contracts          | [Release models](physical_ai_curation/release/models.py) and verifier                                        | Versioned strict schemas, selected evidence, external expected identity and closed inventory      |
+| Media              | [Native generation](physical_ai_curation/release/tables.py) and encoding                                     | Source/output coordinates, recorded task identity, statistics and copy-first execution            |
+| Storage            | [Local publication](physical_ai_curation/release/publication.py) and Blob publication                        | Confined create-only output, conditional copies, independent reads and marker-last visibility     |
+| Lifecycle          | [Durable jobs](physical_ai_curation/release/jobs.py) and supervised workers                                  | Accepted authority, leases/fences, stopped writers, retained capacity and safe reconciliation     |
+| Authentication     | [Viewer release service](../viewer/backend/src/api/services/release_service.py) and shared auth dependencies | Existing principal/source scope and CSRF, without release roles or new grants                     |
+| API and automation | [Headless client](physical_ai_curation/release/client.py) and independent runner                             | Idempotency, accepted-request lookup, bounded errors and verified results                         |
+| Viewer             | [Release workflow](../viewer/README.md#-curated-release)                                                     | Saved-selection preview, refusal recovery, accessible status and immutable source-linked browsing |
+
+### Layout and Evidence Ownership
+
+The configured destination contains a source-mirrored collection, not a second
+mutable source dataset. This illustrative layout omits native shard names; the
+manifest and inventory determine the actual object set.
+
+```text
+DEST/<source-relative-path>/releases/
+  <release-name>/
+    meta/, data/, videos/          Native v3 dataset objects
+    annotations/                  Selected output-coordinate projections
+    evidence/frozen-input.json    Selected immutable saved values
+    evidence/preview.json         Frozen plan
+    release/manifest.json         Package bindings
+    release/inventory.json        Object lengths and hashes
+    release/receipt.json          Verification receipt
+    release/report.md             Derived readable report
+    release/marker.json           Final publication boundary
+  _releases/<release-name>.json    Private attempt ownership
+  _release_associations/           Private source/principal associations
+```
+
+Configured job storage separately holds `jobs/<job_id>.json`, coordination records
+and reservations. Worker-private scratch and process proofs are not published
+payload. Preview writes none of these. Concurrent readers require verified
+publication; conflicting saves invalidate selected revisions; worker replacement
+must reconcile earlier effects before dispatch. Source removal does not invalidate
+verified retained output, but job control still needs retained job records.
+
+Compact release control JSON uses `schema_version` with supported major version 1;
+current model/verifier versions are `1.0.0`. Reject unsupported major versions and
+unknown fields rather than guessing compatibility. API and private worker bindings
+are separate versioned contracts, not aliases for the package schema.
+
+Domain provenance JSONL is a streamed, inventoried package object when declared
+by the manifest. Its versioned record envelope and digest/count/order bindings
+preserve source-to-output lineage without loading the complete stream into a
+compact control document. Live operational JSONL is different: lifecycle events
+come from durable job records and remain outside the sealed package. Never append
+later cancellation or recovery events to published evidence. Application JSONL is
+not OTLP and does not establish distributed traces. A future OpenTelemetry adapter
+may map bounded categories/status and seconds/bytes measurements and propagate
+available trace context; no such exporter or fabricated trace identity is implied.
+Diagnostics must not expose raw authors, tokens, private paths or provider errors.
+
+### Verification, Accounting and Integration
+
+Keep the expected manifest SHA-256 independently of the downloaded package and
+pass it to the verifier. A hash learned only from the same package proves internal
+consistency, not that it is the intended release. Verification covers inventoried
+bytes and declared bindings; it does not certify training quality, completeness
+beyond the selected evidence, or the truth of a recording-origin claim. Preserve
+unknown origin as unknown. Release producer/time describes this release operation,
+not an inferred recorder identity or recording date. Signing, WORM storage and
+legal-retention policy are outside this workflow.
+
+| Accounting category                 | Interpretation and cost boundary                                                                               |
+|-------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| Exact local copies                  | Independent local output bytes, not remote network transfer                                                    |
+| Service-side Blob copies            | Acknowledged storage-copy bytes; storage operations and retained allocation still have costs                   |
+| Source and destination verification | Separate reads, including independent destination readback; copy-first does not eliminate verification traffic |
+| Affected-media downloads            | Source bytes needed for processing; unchanged video is not downloaded for encoding                             |
+| Generated uploads                   | Acknowledged generated output sent to Blob, separate from service-copy bytes                                   |
+| Scratch and destination             | Reserved bounds, observed current usage and historical peak are distinct; uncertain effects retain capacity    |
+
+Partial or uncertain transfers are not acknowledged-byte measurements. Blob
+admission limits are application policy, not provider free-space measurements.
+Estimate costs using the deployment's storage transactions, retention, network
+path and processing runtime; no fixed price, throughput or savings ratio follows
+from these counters.
+
+The stable downstream boundary is a verified manifest identity, verifier result,
+committed result/artifact API and retained read-only release handle. Optional
+[issue 2123](https://github.com/microsoft/physical-ai-toolchain/issues/2123)
+registration and training/model integration should consume that boundary without
+changing core publication. Azure ML registration is absent from the core workflow;
+API/library integration is available; downstream training, target GPU and human
+assistive-technology validation have not been performed by release acceptance.
 
 `BlobPublisher.reconcile_copy` observes destination ownership, copy ID and actual
 content through a durable reconciliation guard. It records copy identity before

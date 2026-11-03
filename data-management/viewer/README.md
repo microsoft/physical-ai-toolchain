@@ -472,6 +472,24 @@ tabs and a scoped API under `/api/releases/v1`. Releases are available only when
 
 ### Viewer workflow
 
+The source header remains above the Episodes and Releases tabs. Releases are not
+added to the ordinary dataset catalog. The desktop and narrow-screen views follow
+the same flow; the dialog keeps selection, preview and submission together.
+
+```text
+Source header
+  Episodes | Releases
+               Create release
+                 Episode selection and order
+                 Saved evidence, destination and name
+                 Preview: blockers, bytes, processing and acknowledgments
+                 Submit
+               Job status: effects, cleanup, cancel and recovery
+               Verified result: manifest, inventory, receipt and report
+                 Read-only episodes and camera media
+                 Return to source Episodes
+```
+
 | Surface   | Behavior                                                                                                  |
 |-----------|-----------------------------------------------------------------------------------------------------------|
 | Selection | In Releases, choose Create release, then filter and order source episodes in the dialog                   |
@@ -485,6 +503,27 @@ A local-disk acknowledgment is shown
 for local destinations, or when the preview does not report a destination kind, and
 states the reserved bytes. Submission is blocked while the preview reports blocking
 entries. Selection, filter, or finalized-source declaration changes discard the preview.
+
+### Refusal and Recovery
+
+A changed saved revision returns `409 stale_preview`. The dialog refreshes the
+source inventory and keeps the refusal visible; review the new selection and
+create a fresh preview. The known insufficient-capacity `507` is a definite
+refusal, not an accepted job. Release or increase the relevant capacity before
+previewing and submitting again.
+
+A transport failure or other ambiguous server failure can occur after acceptance.
+Retain the idempotency key and use accepted-request lookup; do not submit a new
+key to guess the outcome. Reload reconnects to an accepted job without resubmitting.
+A foreign-scope or unavailable job stays unavailable rather than exposing another
+principal's state. Clearing that browser pointer does not cancel the underlying job.
+
+Cancellation requests a transition, not immediate deletion. Confirm stopped
+effects, completed cleanup and released capacity separately in status. Once the
+irrevocable commit decision has won, cancellation is too late; recover and verify
+the committed result instead. Failed or uncertain cleanup retains capacity and
+requires reconciliation, not deletion of its job records. Return from read-only
+release browsing to the source Episodes tab to continue source annotation.
 
 ### API surface
 
@@ -569,17 +608,32 @@ The optional Azure ML path is absent from this workflow.
 
 ### Evidence limits
 
-| Area                                                       | Status                                                                     |
-|------------------------------------------------------------|----------------------------------------------------------------------------|
-| Unit and static checks                                     | Local backend and frontend coverage gates pass                             |
-| Real-browser core, stale, cancel, reflow, and focus checks | Seven isolated real-backend release workflow cases pass                    |
-| Retained browsing                                          | Local episodes/media and immutable evidence-key preservation are tested    |
-| Live Blob publication/readback/cancellation                | Not established by SDK fixtures or successful read-only reachability       |
-| Hosted ingress                                             | Application-principal identity and CSRF checks pass on the test deployment |
-| GPU validation                                             | Not performed                                                              |
-| Assistive-technology validation                            | Not performed                                                              |
+| Area                                                                         | Status                                                                                         |
+|------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
+| Unit and static checks                                                       | Local backend and frontend coverage gates pass                                                 |
+| Real-browser core, stale, capacity, cancel, reload, reflow, and focus checks | Fourteen isolated real-backend release workflow cases pass                                     |
+| Retained browsing                                                            | Local episodes/media and immutable evidence-key preservation are tested                        |
+| Live Blob publication/readback/cancellation                                  | Exact and mixed synthetic packages pass; completed-copy cancellation and reopened cleanup pass |
+| Hosted ingress                                                               | Application-principal identity and CSRF checks pass on the test deployment                     |
+| GPU validation                                                               | Not performed                                                                                  |
+| Assistive-technology validation                                              | Not performed                                                                                  |
 
-This section does not claim full acceptance of the release workflow.
+The 2026-11-03 live same-account proof used bearer-authorized synchronous copies
+and a synthetic contract package, not native video. It checked actual copy IDs and
+successful status, exact destination bytes, inventory, marker visibility,
+independently expected manifest identity, stopped children, released capacity and
+unchanged source after cancellation. Both packages verified after source removal;
+owned test objects were removed. Native LeRobot generation/readability is covered
+separately by CPU fixtures, not inferred from that live storage proof.
+
+Pending-copy/abort transitions, Blob-backed job-state faults and source-association
+cleanup retain deterministic fixture coverage, not live service acceptance claims.
+Keyboard checks are browser automation, not human assistive-technology sign-off.
+These gates establish the implemented core workflow within its documented limits;
+they do not establish GPU execution, cross-account support or downstream training.
+See [architecture and review boundaries](../curation/README.md#architecture-and-review-boundaries)
+and [verification, accounting and integration](../curation/README.md#verification-accounting-and-integration)
+for the library and operator contracts.
 
 ## 🔒 Authentication with Entra ID
 
