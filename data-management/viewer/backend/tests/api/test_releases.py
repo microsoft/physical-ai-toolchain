@@ -6,11 +6,14 @@ import asyncio
 import hashlib
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -36,6 +39,665 @@ from src.api.storage.local_revision import write_conditional
 from tests.lerobot_sources import CAMERA, write_source
 
 BASE = "/api/releases/v1"
+
+
+@pytest.mark.parametrize("arguments", [[], ["--once", "--limit", "0"], ["--once", "--limit", "101"]])
+def test_given_invalid_worker_arguments_when_run_then_usage_error(arguments: list[str]) -> None:
+    from src.api.release_worker import main
+
+    with pytest.raises(SystemExit) as error:
+        main(arguments)
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize("root", ["", "relative/jobs"])
+def test_given_disabled_or_invalid_worker_when_run_then_configuration_exit(
+    monkeypatch: pytest.MonkeyPatch, root: str
+) -> None:
+    from src.api.release_worker import main
+
+    monkeypatch.setenv("RELEASE_JOB_ROOT", root)
+    monkeypatch.delenv("RELEASE_JOB_STORAGE", raising=False)
+    monkeypatch.delenv("RELEASE_DESTINATIONS", raising=False)
+    assert main(["--once"]) == 2
+
+
+@pytest.mark.parametrize("injected", [False, True])
+def test_given_empty_worker_queue_when_run_then_safe_success_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, injected: bool
+) -> None:
+    from src.api import release_worker
+
+    settings = ReleaseApiSettings(tmp_path / "jobs")
+    monkeypatch.setattr(release_worker, "load_release_api_settings", lambda _environ: settings)
+    planner = ViewerReleasePlanner(settings) if injected else None
+    monkeypatch.setattr(release_worker, "get_release_planner", lambda: planner)
+    with caplog.at_level("INFO", logger="release_worker"):
+        assert release_worker.main(["--once", "--limit", "100", "--worker-id", "test-worker"]) == 0
+    summary = json.loads(caplog.records[-1].message)
+    assert summary == {"schema_version": "curated-release-worker-outcome/v1", "outcomes": []}
+
+
+def test_given_worker_api_failure_when_run_then_safe_configuration_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from src.api import release_worker
+    from src.api.services.release_service import ReleaseApiError
+
+    async def fail_queue(*args: object, **kwargs: object) -> tuple:
+        raise ReleaseApiError(503, "private provider detail")
+
+    monkeypatch.setattr(release_worker, "load_release_api_settings", lambda _environ: ReleaseApiSettings(tmp_path))
+    monkeypatch.setattr(release_worker, "run_queue", fail_queue)
+    assert release_worker.main(["--once"]) == 2
+    assert "release worker pass failed" in caplog.text
+    assert "private provider detail" not in caplog.text
+
+
+def test_given_worker_module_when_disabled_then_process_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RELEASE_JOB_ROOT", "")
+    monkeypatch.delenv("RELEASE_DESTINATIONS", raising=False)
+    monkeypatch.delenv("RELEASE_JOB_STORAGE", raising=False)
+    monkeypatch.setattr(sys, "argv", ["release_worker", "--once"])
+    monkeypatch.delitem(sys.modules, "src.api.release_worker", raising=False)
+    with pytest.raises(SystemExit) as error:
+        runpy.run_module("src.api.release_worker", run_name="__main__")
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "environ",
+    [
+        {"RELEASE_JOB_ROOT": "relative"},
+        {"RELEASE_DESTINATIONS": "{"},
+        {"RELEASE_DESTINATIONS": "[]"},
+        {"RELEASE_DESTINATIONS": '{"INVALID":"/output"}'},
+        {"RELEASE_DESTINATIONS": '{"local":"relative"}'},
+        {"RELEASE_JOB_STORAGE": "[]"},
+        {"RELEASE_JOB_STORAGE": "{"},
+    ],
+)
+def test_given_invalid_release_configuration_when_loaded_then_refused(environ: dict[str, str]) -> None:
+    from src.api.services.release_service import load_release_api_settings
+
+    with pytest.raises(ValueError):
+        load_release_api_settings(environ)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("description", "x" * 2001),
+        ("destination", "INVALID"),
+        ("package_id", "bad/id"),
+        ("attempt_id", "bad/id"),
+        ("dataset_name", "bad--name"),
+        ("dataset_id", "../private"),
+        ("episode_indices", ()),
+        ("episode_indices", (-1,)),
+        ("episode_indices", (True,)),
+        ("episode_indices", (0, 0)),
+    ],
+)
+def test_given_invalid_selection_when_constructed_then_safe_refusal(field: str, value: object) -> None:
+    from src.api.services.release_service import ReleaseApiError, ReleaseSpec
+
+    selection = dict(
+        destination="local",
+        package_id="package",
+        attempt_id="attempt",
+        dataset_name="output",
+        dataset_id="native",
+        episode_indices=(0,),
+    )
+    selection[field] = value
+    with pytest.raises(ReleaseApiError) as error:
+        ReleaseSpec(**selection)
+    assert error.value.status_code == 422
+
+
+@pytest.mark.parametrize("operation", ["status", "cancel", "recover", "result"])
+def test_given_unknown_job_when_operated_then_not_found(tmp_path: Path, operation: str) -> None:
+    from src.api.services.release_service import ReleaseApiError
+
+    service = ReleaseService(ReleaseApiSettings(tmp_path / "jobs"))
+    with pytest.raises(ReleaseApiError) as error:
+        getattr(service, operation)("localuser", "0" * 32)
+    assert error.value.status_code == 404
+
+
+@pytest.mark.parametrize("cursor,limit", [(-1, 10), (0, 0), (0, 101)])
+def test_given_invalid_inventory_page_when_requested_then_refused(cursor: int, limit: int) -> None:
+    from src.api.services.release_service import ReleaseApiError
+
+    service = ReleaseService(ReleaseApiSettings(None))
+    with pytest.raises(ReleaseApiError) as error:
+        asyncio.run(service.inventory("native", cursor=cursor, limit=limit))
+    assert error.value.status_code == 422
+
+
+def test_given_unconfigured_service_when_operated_then_safe_unavailability(tmp_path: Path) -> None:
+    from src.api.services.release_service import ReleaseApiError, ReleaseSpec, open_release_job_store
+
+    spec = ReleaseSpec("local", "package", "attempt", "output", "native", (0,))
+    disabled = ReleaseApiSettings(None)
+    with pytest.raises(ReleaseApiError, match="not configured"):
+        open_release_job_store(disabled)
+    with pytest.raises(ReleaseApiError, match="not configured"):
+        ReleaseService(disabled).jobs("localuser", cursor=0, limit=10)
+    service = ReleaseService(ReleaseApiSettings(tmp_path / "jobs", {"local": tmp_path / "output"}))
+    with pytest.raises(ReleaseApiError, match="planning is not configured"):
+        asyncio.run(service.preview("localuser", spec))
+    with pytest.raises(ReleaseApiError, match="source is unavailable"):
+        asyncio.run(service.inventory("native", cursor=0, limit=10))
+    with pytest.raises(ReleaseApiError, match="invalid"):
+        service.accepted_request("localuser", "bad/key")
+    with pytest.raises(ReleaseApiError, match="not found"):
+        service.accepted_request("localuser", "missing-key")
+
+
+def test_given_blob_destination_when_configured_then_location_and_planner_are_retained(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from src.api.services import release_service as service_module
+
+    settings = service_module.load_release_api_settings(
+        {
+            "RELEASE_DESTINATIONS": json.dumps(
+                {
+                    "remote": {
+                        "account_url": "https://example.blob.core.windows.net",
+                        "container": "releases",
+                        "prefix": "output",
+                    }
+                }
+            )
+        }
+    )
+    assert settings.destinations["remote"] == BlobLocation(
+        "https://example.blob.core.windows.net", "releases", "output"
+    )
+    monkeypatch.setattr(service_module, "_PLANNER", None)
+    planner = ViewerReleasePlanner(ReleaseApiSettings(tmp_path))
+    service_module.set_release_planner(planner)
+    assert service_module.get_release_planner() is planner
+    service_module.set_release_planner(None)
+    assert service_module.get_release_planner() is None
+    monkeypatch.setenv("RELEASE_JOB_ROOT", "relative")
+    with pytest.raises(service_module.ReleaseApiError, match="configuration is invalid"):
+        service_module.get_release_service()
+
+
+@pytest.mark.parametrize("error_type,status", [(OSError, 422), (ValueError, 422), (KeyError, 422), (TypeError, 422)])
+def test_given_unavailable_source_when_previewed_then_safe_error(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch, error_type: type[Exception], status: int
+) -> None:
+    test_client, spec, _settings, _app, _root = release_api
+
+    async def unavailable(*args: object, **kwargs: object) -> None:
+        raise error_type("private source details")
+
+    monkeypatch.setattr(ViewerReleasePlanner, "prepare", unavailable)
+    response = test_client.post(BASE + "/preview", json=spec)
+    assert response.status_code == status
+    assert "private source details" not in response.text
+
+
+@pytest.mark.parametrize(
+    "error_name,status", [("CapacityError", 507), ("JobConflictError", 409), ("ReleaseJobError", 422)]
+)
+def test_given_admission_failure_when_submitted_then_safe_status(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch, error_name: str, status: int
+) -> None:
+    from physical_ai_curation.release import jobs
+
+    test_client, spec, _settings, _app, _root = release_api
+    preview = _preview(test_client, spec)
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise getattr(jobs, error_name)("private admission detail")
+
+    monkeypatch.setattr(ReleaseJobStore, "accept", refuse)
+    response = _submit(test_client, spec, preview)
+    assert response.status_code == status
+    assert "private admission detail" not in response.text
+
+
+def test_given_invalid_job_lookup_when_called_then_safe_rejection(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.release.jobs import ReleaseJobError
+
+    test_client, spec, settings, app, _root = release_api
+    assert test_client.get(BASE + "/preview", params={"selection": "{"}).status_code == 422
+    assert test_client.get(BASE + "/requests", headers={"Idempotency-Key": "bad/key"}).status_code == 422
+    assert test_client.post(BASE + "/jobs", headers={"Idempotency-Key": "bad/key"}, json=spec).status_code == 422
+    service = ReleaseService(settings)
+    from src.api.services.release_service import ReleaseApiError
+
+    with pytest.raises(ReleaseApiError):
+        service.jobs("localuser", cursor=-1, limit=1)
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise ReleaseJobError("private storage detail")
+
+    monkeypatch.setattr(ReleaseJobStore, "page", refuse)
+    assert test_client.get(BASE + "/jobs").status_code == 422
+    monkeypatch.setattr(ReleaseJobStore, "accepted_request", refuse)
+    response = test_client.get(BASE + "/requests", headers={"Idempotency-Key": "valid-key"})
+    assert response.status_code == 422
+    assert "private storage detail" not in response.text
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(ReleaseApiSettings(None))
+    assert test_client.get(BASE + "/jobs").status_code == 503
+
+
+@pytest.mark.parametrize("change", ["schema", "alias", "relative", "kind", "association", "blob"])
+def test_given_tampered_execution_binding_when_restored_then_refused(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    from src.api.services import viewer_release_planner as planner_module
+    from src.api.services.release_service import ReleaseApiError
+
+    test_client, spec, settings, _app, _root = release_api
+    job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
+    store = ReleaseJobStore(settings.job_root)
+    binding = parse_strict_json(store.execution_binding(job))
+    if change == "schema":
+        binding["schema"] = "unsupported"
+    elif change == "alias":
+        binding["destination"] = "missing"
+    elif change == "relative":
+        binding["effective_destination"]["path"] = "relative"
+    elif change == "kind":
+        binding["effective_destination"] = {"kind": "unsupported"}
+    elif change == "association":
+        binding["effective_destination"]["path"] = str(settings.job_root.parent / "foreign")
+    else:
+        binding["effective_destination"] = {
+            "kind": "blob",
+            "account_url": "https://example.blob.core.windows.net",
+            "container": "releases",
+            "prefix": "",
+        }
+    monkeypatch.setattr(store, "execution_binding", lambda _job: canonical_json_bytes(binding))
+    monkeypatch.setattr(planner_module, "open_release_job_store", lambda _settings: store)
+    with pytest.raises(ReleaseApiError) as error:
+        ViewerReleasePlanner(settings).execution(job, store.frozen_request(job))
+    assert error.value.status_code == 409
+
+
+@pytest.mark.parametrize("failure", ["oversized", "unreadable"])
+def test_given_invalid_source_inventory_when_read_then_safe_refusal(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from physical_ai_curation.saved_input import SavedInputError
+
+    test_client, _spec, settings, app, _root = release_api
+    planner = ViewerReleasePlanner(settings)
+    if failure == "oversized":
+        monkeypatch.setattr(planner.datasets, "list_episodes", AsyncMock(return_value=[None] * 10001))
+        expected = (422, "source_inventory_limit_exceeded")
+    else:
+        reader = planner.reader_for_scope("localuser")
+        monkeypatch.setattr(reader, "annotation", AsyncMock(side_effect=SavedInputError("private detail")))
+        monkeypatch.setattr(planner, "reader_for_scope", lambda _scope: reader)
+        expected = (409, "saved_inventory_unavailable")
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(settings, planner=planner)
+
+    response = test_client.get(BASE + "/inventory/native")
+
+    assert response.status_code == expected[0]
+    assert response.json()["detail"]["code"] == expected[1]
+    assert "private detail" not in response.text
+
+
+@pytest.mark.parametrize("failure", ["missing_planner", "invalid_binding"])
+def test_given_unavailable_recovery_binding_when_recovered_then_safe_refusal(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    test_client, spec, settings, app, _root = release_api
+    job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
+    planner = ViewerReleasePlanner(settings) if failure == "invalid_binding" else None
+    if planner is not None:
+        monkeypatch.setattr(planner, "execution", MagicMock(side_effect=ValueError("private binding detail")))
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(settings, planner=planner)
+
+    response = test_client.post(BASE + f"/jobs/{job}/recover")
+
+    assert response.status_code == (409 if planner else 503)
+    assert "private binding detail" not in response.text
+
+
+def test_given_unavailable_destination_when_previewed_then_safe_refusal(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.api.services import release_service as service_module
+
+    test_client, spec, _settings, _app, _root = release_api
+    response = test_client.get(BASE + "/preview", params={"selection": json.dumps({**spec, "destination": "missing"})})
+    assert response.status_code == 404
+    monkeypatch.setattr(
+        service_module, "release_collection_location", MagicMock(side_effect=ValueError("private path"))
+    )
+    response = test_client.get(BASE + "/preview", params={"selection": json.dumps(spec)})
+    assert response.status_code == 422
+    assert "private path" not in response.text
+    assert test_client.get(BASE + "/sources/native/releases").json()["items"] == []
+
+
+def test_given_invalid_retained_source_request_when_read_then_refused() -> None:
+    from src.api.services.release_service import ReleaseApiError
+
+    service = ReleaseService(ReleaseApiSettings(None))
+    with pytest.raises(ReleaseApiError, match="dataset id is invalid"):
+        service.source_releases("localuser", "../private")
+    with pytest.raises(ReleaseApiError, match="invalid_episode_page"):
+        service.source_episodes("localuser", "native", "handle", cursor=-1, limit=1)
+
+
+def _inventoried_store(root: Path, contents: dict[str, bytes]) -> tuple[LocalReleaseStore, str]:
+    """Build minimal inventoried bytes for store-backed post-admission checks."""
+    from physical_ai_curation.release.models import INVENTORY_PATH, MANIFEST_PATH, Inventory, InventoryEntry
+
+    inventory = Inventory(
+        entries=tuple(
+            InventoryEntry(path=path, length=len(content), sha256=hashlib.sha256(content).hexdigest())
+            for path, content in sorted(contents.items())
+        )
+    )
+    inventory_bytes = canonical_json_bytes(inventory.model_dump(mode="json"))
+    manifest = canonical_json_bytes(
+        {
+            "inventory_sha256": hashlib.sha256(inventory_bytes).hexdigest(),
+            "frozen_input_path": "frozen.json",
+        }
+    )
+    for path, content in {**contents, INVENTORY_PATH: inventory_bytes, MANIFEST_PATH: manifest}.items():
+        target = root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    return LocalReleaseStore(root), hashlib.sha256(manifest).hexdigest()
+
+
+@pytest.mark.parametrize("control", ["manifest", "inventory"])
+def test_given_changed_control_after_admission_when_files_opened_then_refused(tmp_path: Path, control: str) -> None:
+    from physical_ai_curation.release.models import INVENTORY_PATH, MANIFEST_PATH
+
+    from src.api.services.release_service import ReleaseApiError, _release_files
+
+    store, digest = _inventoried_store(tmp_path, {"meta/info.json": b"{}"})
+    item = _source_release(
+        "local",
+        "native",
+        "0" * 64,
+        dataset_name="published",
+        package_id="package",
+        manifest_sha256=digest,
+        store=store,
+        local_root=tmp_path,
+    )
+    target = tmp_path / (MANIFEST_PATH if control == "manifest" else INVENTORY_PATH)
+    target.write_bytes(target.read_bytes() + b" ")
+
+    with pytest.raises(ReleaseApiError, match="release_verification_failed") as error:
+        _release_files(item)
+    assert error.value.status_code == 409
+
+
+@pytest.mark.parametrize("failure", ["missing", "budget", "metadata", "long", "short", "hash"])
+def test_given_invalid_inventoried_read_when_consumed_then_refused(tmp_path: Path, failure: str) -> None:
+    from physical_ai_curation.release.errors import ReleaseVerificationError
+
+    from src.api.services.release_service import _ReleaseFiles
+
+    store, digest = _inventoried_store(tmp_path, {"meta/info.json": b"{}", "videos/camera.mp4": b"video"})
+    files = _ReleaseFiles(
+        store, name="published", manifest_sha256=digest, metadata_max_bytes=1 if failure == "budget" else 100
+    )
+    if failure == "missing":
+        with pytest.raises(FileNotFoundError):
+            files.read_bytes("meta/missing.json")
+    elif failure in {"budget", "metadata"}:
+        if failure == "metadata":
+            (tmp_path / "meta/info.json").write_bytes(b"[]")
+        with pytest.raises(ReleaseVerificationError, match="metadata"):
+            files.read_bytes("meta/info.json")
+    else:
+        (tmp_path / "videos/camera.mp4").write_bytes({"long": b"longer", "short": b"tiny", "hash": b"other"}[failure])
+        with pytest.raises(ReleaseVerificationError, match="media"):
+            list(files.stream("videos/camera.mp4"))
+
+
+@pytest.mark.parametrize("failure", ["missing", "budget", "long", "short"])
+def test_given_invalid_media_response_when_buffered_then_safe_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from src.api.services.release_service import ReleaseApiError, _release_media, _ReleaseFiles
+
+    store, digest = _inventoried_store(tmp_path, {"videos/camera.mp4": b"video"})
+    files = _ReleaseFiles(store, name="published", manifest_sha256=digest, metadata_max_bytes=100)
+    if failure in {"long", "short"}:
+        monkeypatch.setattr(files, "stream", lambda _path: iter([b"longer" if failure == "long" else b"tiny"]))
+    with pytest.raises(ReleaseApiError) as error:
+        _release_media(
+            files,
+            "missing.mp4" if failure == "missing" else "videos/camera.mp4",
+            media_max_bytes=1 if failure == "budget" else 100,
+        )
+    assert error.value.status_code == {"missing": 404, "budget": 422, "long": 409, "short": 409}[failure]
+
+
+@pytest.mark.parametrize("failure", ["manifest", "base_budget", "projection_budget", "episode_type"])
+def test_given_invalid_retained_detail_when_read_then_safe_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from physical_ai_curation.release.models import MANIFEST_PATH
+
+    from src.api.services import release_service as service_module
+
+    contents = {
+        "meta/info.json": canonical_json_bytes({"total_episodes": True if failure == "episode_type" else 1}),
+        "frozen.json": b"{}",
+        "annotations/episodes/episode_000000.json": b'{"description":"' + b"a" * 1000 + b'"}',
+    }
+    store, digest = _inventoried_store(tmp_path, contents)
+    item = _source_release(
+        "local",
+        "native",
+        "0" * 64,
+        dataset_name="published",
+        package_id="package",
+        manifest_sha256=digest,
+        store=store,
+        local_root=tmp_path,
+    )
+    service = ReleaseService(ReleaseApiSettings(None))
+    monkeypatch.setattr(service, "_find_source", lambda *_args: item)
+    original_read = store.read_control_bytes
+    reads = 0
+
+    def read_control(relative: str, *, max_bytes: int) -> bytes:
+        nonlocal reads
+        content = original_read(relative, max_bytes=max_bytes)
+        if relative == MANIFEST_PATH:
+            reads += 1
+            if failure == "manifest" and reads == 2:
+                return content + b" "
+            if failure in {"base_budget", "projection_budget"} and reads == 2:
+                monkeypatch.setattr(service_module, "MAX_CONTROL_BYTES", 1 if failure == "base_budget" else 100)
+        return content
+
+    monkeypatch.setattr(store, "read_control_bytes", read_control)
+    with pytest.raises(service_module.ReleaseApiError, match="release_verification_failed") as error:
+        service.source_release("localuser", "native", item.handle)
+    assert error.value.status_code == 409
+
+
+def test_given_invalid_episode_metadata_when_read_then_safe_refusal(tmp_path: Path) -> None:
+    from src.api.services.release_service import ReleaseApiError, _episode_records, _ReleaseFiles
+
+    store, digest = _inventoried_store(tmp_path, {"meta/info.json": b"invalid json"})
+    files = _ReleaseFiles(store, name="published", manifest_sha256=digest, metadata_max_bytes=100)
+    with pytest.raises(ReleaseApiError, match="release_verification_failed"):
+        _episode_records(files)
+
+
+def test_given_optional_azure_sdk_missing_when_errors_resolved_then_local_errors_remain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.api.services.release_service import _release_read_errors
+
+    monkeypatch.setitem(sys.modules, "azure.core.exceptions", None)
+    assert OSError in _release_read_errors()
+
+
+@pytest.mark.parametrize("missing", ["dataset", "worker", "blob_provider"])
+def test_given_missing_planner_dependency_when_used_then_refused(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    from src.api.services.release_service import ReleaseApiError, ReleaseSpec
+
+    _client, body, settings, _app, _root = release_api
+    spec = ReleaseSpec(**{**body, "episode_indices": tuple(body["episode_indices"])})
+    planner = ViewerReleasePlanner(settings if missing != "worker" else ReleaseApiSettings(None))
+    if missing == "dataset":
+        monkeypatch.setattr(planner.datasets, "get_dataset", AsyncMock(return_value=None))
+    if missing == "blob_provider":
+        with pytest.raises(ReleaseApiError, match="release source is unavailable"):
+            planner._source("native", finalized=True, kind="blob")
+    else:
+        with pytest.raises(ReleaseApiError) as error:
+            asyncio.run(planner.prepare("localuser", spec, settings.destinations["local"]))
+        assert error.value.status_code == (404 if missing == "dataset" else 503)
+    if missing == "worker":
+        with pytest.raises(ReleaseApiError, match="release worker is not configured"):
+            planner.execution("job", b"{}")
+
+
+def test_given_blob_source_and_destination_when_planned_then_configured_binding_is_retained(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import azure.identity
+    import azure.storage.blob
+
+    from src.api.services import viewer_release_planner as planner_module
+    from src.api.services.label_storage import BlobLabelStorage
+    from src.api.services.release_service import ReleaseSpec
+    from src.api.services.saved_input_service import AzureJudgeStateReader, ViewerSavedInputReader
+
+    _client, body, settings, _app, root = release_api
+    planner = ViewerReleasePlanner(settings)
+    local_reader = ViewerSavedInputReader(planner.datasets, planner._annotations, LocalLabelStorage(str(root.parent)))
+    container = FakeBlobContainer()
+    monkeypatch.setattr(container, "url", "https://example.blob.core.windows.net/datasets", raising=False)
+    container.objects = {
+        "native/" + path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()
+    }
+    provider = MagicMock(account_name="example", container_name="datasets")
+    provider.get_blob_prefix.return_value = "native"
+    monkeypatch.setattr(planner.datasets, "_blob_provider", provider)
+    monkeypatch.setattr(planner.datasets, "has_blob_provider", lambda: True)
+    monkeypatch.setattr(planner.datasets, "get_dataset", AsyncMock(return_value=object()))
+    monkeypatch.setattr(planner.datasets, "get_source_revision", AsyncMock(return_value=("source-id", "revision-1")))
+    monkeypatch.setattr(planner_module, "get_app_config", lambda: SimpleNamespace(storage_backend="azure"))
+    assert isinstance(planner._judge_state(), AzureJudgeStateReader)
+    assert isinstance(planner._label_storage(), BlobLabelStorage)
+    monkeypatch.setattr(planner, "reader_for_scope", lambda _scope: local_reader)
+    credential = object()
+    monkeypatch.setattr(azure.identity, "DefaultAzureCredential", lambda: credential)
+    client = MagicMock()
+    client.get_container_client.return_value = container
+    factory = MagicMock(return_value=client)
+    monkeypatch.setattr(azure.storage.blob, "BlobServiceClient", factory)
+    destination = BlobLocation("https://example.blob.core.windows.net", "output", "native/releases")
+    spec = ReleaseSpec(**{**body, "episode_indices": tuple(body["episode_indices"])})
+
+    prepared = asyncio.run(planner.prepare("localuser", spec, destination))
+
+    binding = parse_strict_json(prepared.execution_binding)
+    assert binding["source_kind"] == "blob"
+    assert binding["effective_destination"]["container"] == "output"
+    assert binding["association"]["effective_destination"] == destination.as_text()
+    assert prepared.summary["destination_kind"] == "blob"
+    assert prepared.reserved_bytes > 0
+    assert factory.call_args.kwargs["account_url"] == "https://example.blob.core.windows.net"
+    assert factory.call_args.kwargs["credential"] is credential
+    assert factory.call_args.kwargs["retry_total"] == 0
+    client.get_container_client.assert_called_once_with("datasets")
+
+
+@pytest.mark.parametrize("kind", ["local", "blob"])
+@pytest.mark.parametrize("mismatch", ["source", "alias"])
+def test_given_foreign_association_when_listed_then_hidden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, mismatch: str
+) -> None:
+    from src.api.services import release_service as service_module
+
+    verified = SimpleNamespace(
+        source_relative_path="other" if mismatch == "source" else "native",
+        destination_alias="other" if mismatch == "alias" else "destination",
+    )
+    container = MagicMock()
+    factory = MagicMock(return_value=container)
+    monkeypatch.setattr(service_module, "_blob_container_client", factory)
+    associations = service_module.LocalSourceAssociations if kind == "local" else service_module.BlobSourceAssociations
+    monkeypatch.setattr(associations, "discover_verified", lambda _self, **_kwargs: [verified])
+    location = tmp_path if kind == "local" else BlobLocation("https://example.blob.core.windows.net", "releases")
+    service = ReleaseService(ReleaseApiSettings(None, {"destination": location}))
+
+    assert service.source_releases("localuser", "native")["items"] == []
+    if kind == "blob":
+        factory.assert_called_once_with("https://example.blob.core.windows.net", "releases")
+        container.close.assert_called_once_with()
+
+
+def test_given_job_capacity_failure_when_cancelled_then_safe_status(tmp_path: Path) -> None:
+    from physical_ai_curation.release.jobs import CapacityError
+
+    from src.api.services.release_service import ReleaseApiError
+
+    store = MagicMock(spec=ReleaseJobStore)
+    store.request_cancel.side_effect = CapacityError("private capacity detail")
+    service = ReleaseService(ReleaseApiSettings(tmp_path), store_factory=lambda _root: store)
+    with pytest.raises(ReleaseApiError) as error:
+        service.cancel("localuser", "job")
+    assert error.value.status_code == 507
+    assert "private" not in error.value.detail
+
+
+def test_given_inconsistent_execution_destination_when_result_read_then_refused(tmp_path: Path) -> None:
+    from src.api.services.release_service import ReleaseApiError
+
+    store = MagicMock(spec=ReleaseJobStore)
+    store.get.return_value = SimpleNamespace(state="committed")
+    store.storage = MagicMock()
+    store.storage.snapshot.return_value = {
+        "job": {
+            "attempt_key": "package/attempt",
+            "attempt_prefix": "published",
+            "destination": str(tmp_path / "accepted"),
+        }
+    }
+    planner = MagicMock(spec=ViewerReleasePlanner)
+    planner.execution.return_value = SimpleNamespace(destination=tmp_path / "changed")
+    service = ReleaseService(ReleaseApiSettings(tmp_path), store_factory=lambda _root: store, planner=planner)
+
+    with pytest.raises(ReleaseApiError, match="configured_destination_changed") as error:
+        service.result("localuser", "job")
+    assert error.value.status_code == 409
+    assert not (tmp_path / "changed").exists()
+
+
+def test_given_saved_input_verification_failure_when_previewed_then_safe_error(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.saved_input import SavedInputError
+
+    client, spec, _settings, _app, _root = release_api
+    monkeypatch.setattr(ViewerReleasePlanner, "prepare", AsyncMock(side_effect=SavedInputError("private detail")))
+    response = client.get(BASE + "/preview", params={"selection": json.dumps(spec)})
+    assert response.status_code == 422
+    assert "private detail" not in response.text
 
 
 @pytest.fixture
@@ -777,7 +1439,8 @@ class FakeBlobContainer:
             if name.startswith(name_starts_with)
         ]
 
-    def get_blob_client(self, name: str) -> _FakeBlobClient:
+    def get_blob_client(self, name: str, *, version_id: str | None = None) -> _FakeBlobClient:
+        assert version_id is None
         return _FakeBlobClient(self, name)
 
 

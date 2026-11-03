@@ -29,7 +29,7 @@ from physical_ai_curation.release.inputs import (
     SavedSelection,
     freeze_release_inputs,
 )
-from physical_ai_curation.release.jobs import JobRequest
+from physical_ai_curation.release.jobs import AuthorityError, JobRequest, ReleaseJobStore
 from physical_ai_curation.release.media import (
     MediaWindow,
     ObjectPlanRequest,
@@ -39,13 +39,16 @@ from physical_ai_curation.release.media import (
 )
 from physical_ai_curation.release.models import ProducerIdentity, VersionIdentity
 from physical_ai_curation.release.native_worker import _source_spec, native_operation, restore_inputs
-from physical_ai_curation.release.publication import LocalPublisher
+from physical_ai_curation.release.publication import LocalPublisher, PublicationAttempt
 from physical_ai_curation.release.record_storage import BlobLocation
-from physical_ai_curation.release.runner import ConfiguredExecution, execute_job
+from physical_ai_curation.release.runner import ConfiguredExecution, execute_job, run_queue
+from physical_ai_curation.release.runner import main as run_worker
 from physical_ai_curation.release.source_associations import LocalSourceAssociations, source_association_binding
 from physical_ai_curation.release.store import LocalReleaseStore
 from physical_ai_curation.release.verification import verify_published
 from physical_ai_curation.saved_input import SavedResource
+from pydantic import TypeAdapter
+from pytest_mock import MockerFixture
 from test_release_composition import _generation_case
 from test_release_contracts import _producer_dict
 from test_release_inputs import SavedReader, _context, _selection
@@ -286,6 +289,202 @@ def test_given_stale_or_missing_source_when_independent_runner_restores_then_no_
 
     assert not destination.exists()
     assert store.storage.snapshot()[job_id]["diagnostics"]["validation.failed"]["count"] == 1
+
+
+@pytest.mark.parametrize("limit", [0, 101, True, 1.5])
+def test_given_invalid_queue_limit_when_runner_pass_then_no_job_is_resolved(
+    tmp_path: Path, mocker: MockerFixture, limit: object
+) -> None:
+    store = _store(tmp_path / "jobs", OffsetClock())
+    resolve = mocker.Mock()
+
+    with pytest.raises(ValueError, match="between 1 and 100"):
+        asyncio.run(run_queue(store, resolve, limit=limit))
+
+    resolve.assert_not_called()
+
+
+@pytest.mark.parametrize("limit", [1, 2])
+def test_given_leased_and_queued_jobs_when_runner_pass_then_bounded_safe_outcomes(
+    tmp_path: Path, mocker: MockerFixture, limit: int
+) -> None:
+    clock = OffsetClock()
+    store = _store(tmp_path / "jobs", clock)
+    destination = tmp_path / "output"
+    job_ids = [
+        store.accept(
+            _request(destination, key=f"queue-{index}", attempt=PublicationAttempt(f"package-{index}", "attempt-1"))
+        ).job_id
+        for index in range(3)
+    ]
+    store.claim(job_ids[0], "active-worker")
+    configured = ConfiguredExecution(None, SavedReader(), _selection(), _context(), destination)
+    resolve = mocker.Mock(return_value=configured)
+    execute = mocker.patch(
+        "physical_ai_curation.release.runner.execute_job", side_effect=[None, RuntimeError("private worker detail")]
+    )
+
+    outcomes = asyncio.run(run_queue(store, resolve, worker_id="queue-worker", limit=limit))
+
+    queued = sorted(job_ids[1:])
+    assert outcomes == tuple(
+        {"job_id": job_id, "status": "settled" if index == 0 else "recovery_required"}
+        for index, job_id in enumerate(queued[:limit])
+    )
+    assert [call.args for call in resolve.call_args_list] == [(job_id, b'{"request":1}') for job_id in queued[:limit]]
+    assert execute.await_count == limit
+    assert all(call.kwargs == {"worker_id": "queue-worker"} for call in execute.await_args_list)
+
+
+@pytest.mark.parametrize("state", ["committed", "cancelled"])
+def test_given_terminal_job_when_runner_pass_then_not_redispatched(mocker: MockerFixture, state: str) -> None:
+    store = mocker.Mock(spec=ReleaseJobStore)
+    store.storage = mocker.Mock()
+    store.storage.snapshot.return_value = {"terminal-job": {"state": state}}
+    resolve = mocker.Mock()
+
+    assert asyncio.run(run_queue(store, resolve)) == ()
+
+    resolve.assert_not_called()
+    store.frozen_request.assert_not_called()
+
+
+def test_given_cancelled_job_when_runner_retries_then_no_source_or_output_required(tmp_path: Path) -> None:
+    destination = tmp_path / "output"
+    store = _store(tmp_path / "jobs", OffsetClock())
+    request = _request(destination)
+    job_id = store.accept(request).job_id
+    store.request_cancel(job_id, scope=request.scope, principal=request.principal)
+    configured = ConfiguredExecution(None, SavedReader(), _selection(), _context(), destination)
+
+    assert asyncio.run(execute_job(store, job_id, configured)) is None
+    assert asyncio.run(execute_job(store, job_id, configured)) is None
+
+    assert store.storage.snapshot()[job_id]["state"] == "cancelled"
+    assert not destination.exists()
+
+
+def test_given_wrong_destination_when_runner_executes_then_job_remains_unclaimed(tmp_path: Path) -> None:
+    store = _store(tmp_path / "jobs", OffsetClock())
+    job_id = store.accept(_request(tmp_path / "accepted")).job_id
+    configured = ConfiguredExecution(None, SavedReader(), _selection(), _context(), tmp_path / "other")
+
+    with pytest.raises(AuthorityError, match="configured destination differs"):
+        asyncio.run(execute_job(store, job_id, configured))
+
+    assert store.storage.snapshot()[job_id]["state"] == "accepted"
+    assert not configured.destination.exists()
+
+
+def test_given_unsupported_durable_request_when_runner_executes_then_failure_is_recorded(tmp_path: Path) -> None:
+    destination = tmp_path / "output"
+    store = _store(tmp_path / "jobs", OffsetClock())
+    job_id = store.accept(_request(destination)).job_id
+    configured = ConfiguredExecution(None, SavedReader(), _selection(), _context(), destination)
+
+    with pytest.raises(ReleaseInputError, match="unsupported durable generation request"):
+        asyncio.run(execute_job(store, job_id, configured))
+
+    assert store.storage.snapshot()[job_id]["diagnostics"]["validation.failed"]["count"] == 1
+    assert not destination.exists()
+
+
+def _worker_configuration(tmp_path: Path) -> dict[str, object]:
+    return {
+        "schema_version": "curated-release-worker/v1",
+        "job_root": str(tmp_path / "jobs"),
+        "source_root": str(_source_root(tmp_path)),
+        "destination_root": str(tmp_path / "output"),
+        "selection": TypeAdapter(ReleaseSelection).dump_python(_selection(), mode="json"),
+        "context": TypeAdapter(FreezeContext).dump_python(
+            replace(_context(), principal_scope_id="localuser"), mode="json"
+        ),
+        "finalized": True,
+    }
+
+
+@pytest.mark.parametrize("manifest", [None, "a" * 64])
+@pytest.mark.parametrize("judge_authority", [False, True])
+def test_given_valid_worker_configuration_when_cli_executes_then_versioned_safe_result(
+    tmp_path: Path,
+    mocker: MockerFixture,
+    capsys: pytest.CaptureFixture[str],
+    manifest: str | None,
+    judge_authority: bool,
+) -> None:
+    config = _worker_configuration(tmp_path)
+    if judge_authority:
+        config["judge_state_root"] = str(tmp_path / "judge")
+    path = tmp_path / "worker.json"
+    path.write_text(json.dumps(config))
+    result = None if manifest is None else SimpleNamespace(identity=SimpleNamespace(manifest_sha256=manifest))
+    execute = mocker.patch("physical_ai_curation.release.runner.execute_job", return_value=result)
+
+    assert run_worker(["--config", str(path), "--job", "accepted-job"]) == 0
+
+    expected = {"schema_version": "curated-release-worker-result/v1", "job_id": "accepted-job", "status": "settled"}
+    if manifest is not None:
+        expected["manifest_sha256"] = manifest
+    assert json.loads(capsys.readouterr().out) == expected
+    execute.assert_awaited_once()
+    store, job_id, configured = execute.await_args.args
+    assert isinstance(store, ReleaseJobStore)
+    assert job_id == "accepted-job"
+    assert configured.context.principal_scope_id == "localuser"
+    assert configured.source.root == Path(config["source_root"])
+    assert configured.destination == Path(config["destination_root"])
+    assert (configured.reader.judge_evidence is not None) is judge_authority
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schema_version", "future/v2"),
+        ("finalized", False),
+        ("unexpected", "private"),
+        ("judge_state_root", "  "),
+        ("judge_state_root", 123),
+        ("context", TypeAdapter(FreezeContext).dump_python(_context(), mode="json")),
+    ],
+)
+def test_given_invalid_worker_configuration_when_cli_executes_then_no_dispatch_or_private_detail(
+    tmp_path: Path, mocker: MockerFixture, capsys: pytest.CaptureFixture[str], field: str, value: object
+) -> None:
+    config = _worker_configuration(tmp_path)
+    config[field] = value
+    path = tmp_path / "worker.json"
+    path.write_text(json.dumps(config))
+    execute = mocker.patch("physical_ai_curation.release.runner.execute_job")
+
+    assert run_worker(["--config", str(path), "--job", "private-job"]) == 1
+
+    assert json.loads(capsys.readouterr().out) == {
+        "schema_version": "curated-release-worker-result/v1",
+        "status": "recovery_required",
+    }
+    execute.assert_not_awaited()
+
+
+@pytest.mark.parametrize("failure", ["missing", "oversized", "execution"])
+def test_given_worker_failure_when_cli_executes_then_safe_recovery_response(
+    tmp_path: Path, mocker: MockerFixture, capsys: pytest.CaptureFixture[str], failure: str
+) -> None:
+    path = tmp_path / "worker.json"
+    if failure == "oversized":
+        path.write_bytes(b" " * (1024**2 + 1))
+    elif failure == "execution":
+        path.write_text(json.dumps(_worker_configuration(tmp_path)))
+    execute = mocker.patch(
+        "physical_ai_curation.release.runner.execute_job", side_effect=RuntimeError("private execution failure")
+    )
+
+    assert run_worker(["--config", str(path), "--job", "private-job"]) == 1
+
+    assert json.loads(capsys.readouterr().out) == {
+        "schema_version": "curated-release-worker-result/v1",
+        "status": "recovery_required",
+    }
+    assert execute.await_count == (1 if failure == "execution" else 0)
 
 
 def test_given_container_url_when_blob_location_then_container_and_https_account() -> None:

@@ -103,6 +103,7 @@ testpaths = ["tests", "../../curation/tests"]
 [tool.coverage.run]
 source = ["src"]
 branch = true
+patch = ["subprocess"]
 omit = ["src/**/conftest.py", "src/**/__init__.py"]
 
 [tool.coverage.report]

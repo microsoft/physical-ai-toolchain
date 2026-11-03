@@ -6,16 +6,21 @@ curation helpers. Only the dataset source-revision lookup is replaced.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from evaluation.vlm_judge.judge import JudgeResult
 from physical_ai_curation.adapters.job_storage import LocalJobStore
 from physical_ai_curation.evidence import bind_job_evidence
+from physical_ai_curation.models import DatasetLabelsFile
 from physical_ai_curation.release.inputs import SavedSelection
 
+from src.api.services.label_storage import LocalLabelStorage
 from src.api.services.saved_input_service import (
+    AzureJudgeStateReader,
     SavedInputError,
     ScopedJudgeEvidenceAuthority,
     ViewerSavedInputReader,
@@ -176,3 +181,61 @@ async def test_given_bound_evidence_when_read_through_saved_input_reader_then_re
     assert resource.value["job"]["id"] == "run-1"
     assert resource.value["target"]["episode_index"] == 3
     assert resource.etag is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["evidence", "labels", "ledger"])
+async def test_given_unbound_release_storage_when_read_then_refused(
+    kind: Literal["evidence", "labels", "ledger"],
+) -> None:
+    reader = ViewerSavedInputReader(None, None)  # type: ignore[arg-type]
+
+    with pytest.raises(SavedInputError, match=r"authority is not bound|storage is unavailable"):
+        await reader.release_resource("dataset", SavedSelection(kind=kind, episode_index=3, expected_revision="rev-1"))
+
+
+@pytest.mark.asyncio
+async def test_given_non_release_resource_when_read_then_absent() -> None:
+    reader = ViewerSavedInputReader(None, None)  # type: ignore[arg-type]
+
+    resource = await reader.release_resource(
+        "dataset", SavedSelection(kind="annotation", episode_index=3, expected_revision="rev-1")
+    )
+
+    assert resource.value is None
+    assert resource.etag is None
+
+
+@pytest.mark.asyncio
+async def test_given_foreign_label_identity_when_read_then_refused(tmp_path: Path) -> None:
+    storage = LocalLabelStorage(str(tmp_path))
+    await storage.save("dataset", DatasetLabelsFile(dataset_id="another-dataset"), if_none_match=True)
+    reader = ViewerSavedInputReader(None, None, storage)  # type: ignore[arg-type]
+
+    with pytest.raises(SavedInputError, match="dataset identity mismatch"):
+        await reader.release_resource(
+            "dataset", SavedSelection(kind="labels", episode_index=3, expected_revision="rev-1")
+        )
+
+
+@pytest.mark.asyncio
+async def test_given_missing_blob_provider_when_judge_state_read_then_unavailable() -> None:
+    with pytest.raises(SavedInputError, match="Judge evidence storage is unavailable"):
+        await AzureJudgeStateReader(None).read()
+
+
+@pytest.mark.asyncio
+async def test_given_blob_judge_state_when_read_then_persisted_state_is_returned(tmp_path: Path) -> None:
+    state = await (await _store_with(tmp_path, _judge_job("run-1", run_order=1))).read()
+    provider = MagicMock(container_name="datasets")
+    client = MagicMock()
+    provider._get_client = AsyncMock(return_value=client)
+    blob = client.get_container_client.return_value.get_blob_client.return_value
+    download = MagicMock()
+    download.properties.etag = "state-revision"
+    download.readall = AsyncMock(return_value=json.dumps(state).encode())
+    blob.download_blob = AsyncMock(return_value=download)
+
+    assert await AzureJudgeStateReader(provider).read() == state
+    client.get_container_client.assert_called_once_with("datasets")
+    client.get_container_client.return_value.get_blob_client.assert_called_once_with("_curation/judge/state.json")

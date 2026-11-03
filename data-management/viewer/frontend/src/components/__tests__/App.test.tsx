@@ -82,6 +82,10 @@ vi.mock('@/hooks/use-joint-config', () => ({
   useJointConfig: () => undefined,
 }))
 
+vi.mock('@/components/release/ReleaseWorkspace', () => ({
+  ReleaseWorkspace: ({ datasetId }: { datasetId: string }) => <div>Releases for {datasetId}</div>,
+}))
+
 vi.mock('@/hooks/use-vlm-judge-batch', () => ({
   useJudgeDataset: () => ({
     inventory: {},
@@ -156,6 +160,32 @@ vi.mock('@/components/annotation-workspace/AnnotationWorkspace', () => ({
 }))
 
 describe('AppContent', () => {
+  it('stops playback on release navigation and resets to episodes for a new source', async () => {
+    const user = userEvent.setup()
+    render(<AppContent />)
+    const video = document.createElement('video')
+    const pause = vi.fn()
+    video.pause = pause
+    document.body.append(video)
+    try {
+      act(() => useEpisodeStore.setState({ isPlaying: true }))
+      await user.click(screen.getByRole('tab', { name: 'Releases' }))
+      expect(useEpisodeStore.getState().isPlaying).toBe(false)
+      expect(pause).toHaveBeenCalled()
+      expect(screen.getByText('Releases for houston_lerobot_fixed')).toBeVisible()
+      expect(screen.getByRole('tab', { name: 'Releases' })).toHaveAttribute('aria-selected', 'true')
+      await user.click(screen.getByRole('tab', { name: 'Episodes' }))
+      expect(screen.queryByText('Releases for houston_lerobot_fixed')).toBeNull()
+      await user.click(screen.getByRole('tab', { name: 'Releases' }))
+      await user.click(screen.getByRole('button', { name: /^Dataset: / }))
+      await user.click(screen.getByRole('option', { name: /customer_lerobot/ }))
+      expect(screen.getByRole('tab', { name: 'Episodes' })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.queryByText(/Releases for/)).toBeNull()
+    } finally {
+      video.remove()
+    }
+  })
+
   it('filters the header picker by name and group, resets the filter and selects a dataset', async () => {
     const user = userEvent.setup()
     const onSelectDataset = vi.fn()

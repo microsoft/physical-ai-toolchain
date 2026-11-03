@@ -2,7 +2,7 @@ import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ReleasePreview } from '@/api/releases'
+import { type ReleasePreview, ReleaseRequestError } from '@/api/releases'
 import {
   ReleaseDialog,
   type ReleaseDialogProps,
@@ -92,6 +92,105 @@ describe('ReleaseDialog', () => {
     expect(screen.getByText(/Target: v3/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /submit release/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /preview release/i })).toBeDisabled()
+  })
+
+  it('updates destination and description and clears a filtered selection', async () => {
+    const user = userEvent.setup()
+    const props = renderDialog({ destinations: ['local-disk', 'archive'] })
+    await fillRequiredFields(user)
+    await user.selectOptions(screen.getByLabelText('Destination'), 'archive')
+    await user.type(screen.getByLabelText('Description'), ' Saved examples ')
+    await user.selectOptions(screen.getByLabelText('Labels'), 'yes')
+    await user.selectOptions(screen.getByLabelText('Resources'), 'yes')
+    await user.click(screen.getByRole('button', { name: 'Select all' }))
+    await user.click(screen.getByRole('button', { name: 'Clear selection' }))
+    expect(screen.getByRole('button', { name: /preview release/i })).toBeDisabled()
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('button', { name: /preview release/i }))
+    await waitFor(() =>
+      expect(props.onPreview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          destination: 'archive',
+          description: 'Saved examples',
+          episodeIndices: [0],
+        }),
+      ),
+    )
+  })
+
+  it.each([
+    [new Error('private transport detail'), 'Release request failed.'],
+    [
+      new ReleaseRequestError('private provider detail', 'stale_preview', 409),
+      'Release request failed: stale_preview.',
+    ],
+  ])('reports preview failure without exposing provider details', async (error, message) => {
+    const user = userEvent.setup()
+    renderDialog({ onPreview: vi.fn().mockRejectedValue(error) })
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('button', { name: /preview release/i }))
+    expect(await screen.findByText(message)).toBeVisible()
+    expect(screen.queryByText(/private .* detail/)).toBeNull()
+    expect(screen.getByRole('button', { name: /preview release/i })).toBeEnabled()
+  })
+
+  it('allows closing an idle dialog', async () => {
+    const user = userEvent.setup()
+    const props = renderDialog()
+    await user.keyboard('{Escape}')
+    expect(props.onOpenChange).toHaveBeenCalledWith(false)
+    vi.mocked(props.onOpenChange).mockClear()
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(props.onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it.each(['stale_preview', 'invalid_release_selection'])(
+    'requires a fresh preview after definitive submission rejection: %s',
+    async (code) => {
+      const user = userEvent.setup()
+      const props = renderDialog({
+        onPreview: vi.fn().mockResolvedValue(makePreview({ actions: [], destinationKind: 'blob' })),
+        onSubmit: vi.fn().mockRejectedValue(new ReleaseRequestError('private detail', code, 409)),
+      })
+      await fillRequiredFields(user)
+      await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+      await user.click(screen.getByRole('checkbox', { name: /I declare/i }))
+      await user.click(screen.getByRole('button', { name: /preview release/i }))
+      await screen.findByText('Reserved bytes')
+      await user.click(screen.getByRole('button', { name: /submit release/i }))
+      expect(await screen.findByText(`Release request failed: ${code}.`)).toBeVisible()
+      expect(screen.queryByText('Reserved bytes')).toBeNull()
+      expect(screen.queryByText('private detail')).toBeNull()
+      expect(screen.queryByRole('button', { name: /retry submission/i })).toBeNull()
+      expect(screen.getByRole('button', { name: /submit release/i })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /preview release/i })).toBeEnabled()
+      expect(props.onOpenChange).not.toHaveBeenCalled()
+    },
+  )
+
+  it('keeps an uncertain submission open until explicitly discarded', async () => {
+    const user = userEvent.setup()
+    const props = renderDialog({
+      onPreview: vi
+        .fn()
+        .mockResolvedValue(
+          makePreview({ actions: [], destinationKind: 'blob', availableBytes: -1 }),
+        ),
+      onSubmit: vi.fn().mockRejectedValue(new Error('connection lost')),
+    })
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('checkbox', { name: /I declare/i }))
+    await user.click(screen.getByRole('button', { name: /preview release/i }))
+    await screen.findByText('Reserved bytes')
+    await user.click(screen.getByRole('button', { name: /submit release/i }))
+    const discard = await screen.findByRole('button', { name: /discard and start over/i })
+    await user.keyboard('{Escape}')
+    expect(props.onOpenChange).not.toHaveBeenCalled()
+    await user.click(discard)
+    expect(screen.getByLabelText('Release name')).toHaveValue('')
+    expect(screen.queryByRole('button', { name: /retry submission/i })).toBeNull()
   })
 
   it('combines filters and appends shown episodes in selection order', async () => {

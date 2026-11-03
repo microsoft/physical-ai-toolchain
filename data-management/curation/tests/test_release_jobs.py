@@ -6,6 +6,8 @@ import math
 import os
 import select
 import signal
+import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -21,6 +23,7 @@ from unittest.mock import patch
 from urllib.parse import urlsplit
 
 import physical_ai_curation
+import physical_ai_curation.release.supervision as supervision
 import pytest
 from physical_ai_curation.release.blob_source_associations import BlobSourceAssociations
 from physical_ai_curation.release.blob_worker import SourceAssociatedBlobPublisher, SupervisedBlobPublisher, _process
@@ -69,6 +72,7 @@ from physical_ai_curation.release.supervision import (
 )
 from physical_ai_curation.release.verification import build_marker, verify_candidate
 from physical_ai_curation.release.worker import SupervisedOutcome, run_supervised
+from pytest_mock import MockerFixture
 from test_release_contracts import _manifest_for, _payload_files, _write_package
 from test_release_publishers import _association_intent, _FakeBlobClient, _FakeContainer
 
@@ -1122,6 +1126,394 @@ def test_given_silent_controller_when_liveness_expires_then_guardian_stops_tree(
 
     assert proof.leader_exit_code != 0
     assert _reaped(proof.leader)
+
+
+@pytest.mark.parametrize("body", [b"{", b"null", b"[]", b'{"op":1}', b"{}"])
+def test_given_invalid_guardian_frame_when_channel_reads_then_protocol_refused(body: bytes) -> None:
+    reader, writer = socket.socketpair()
+    with reader, writer:
+        channel = supervision._Channel(reader)
+        writer.sendall(struct.pack(">I", len(body)) + body)
+
+        with pytest.raises(ReleaseVerificationError, match="protocol"):
+            channel.fill(0)
+
+
+def test_given_fragmented_guardian_frames_when_channel_reads_then_order_and_eof_preserved() -> None:
+    reader, writer = socket.socketpair()
+    with reader, writer:
+        channel = supervision._Channel(reader)
+        body = b'{"op":"ping"}'
+        frame = struct.pack(">I", len(body)) + body
+        writer.sendall(frame[:2])
+        channel.fill(0)
+        assert not channel.pending()
+        writer.sendall(frame[2:6])
+        channel.fill(0)
+        assert not channel.pending()
+
+        writer.sendall(frame[6:] + frame)
+        channel.fill(0)
+
+        assert channel.pop() == {"op": "ping"}
+        assert channel.next_message(0) == {"op": "ping"}
+        assert channel.next_message(0) is None
+        writer.close()
+        assert channel.next_message(0.1) is None
+        assert channel.closed
+        channel.fill(0)
+
+
+@pytest.mark.parametrize("direction", ["send", "receive"])
+def test_given_oversized_guardian_frame_when_channel_used_then_refused(direction: str) -> None:
+    reader, writer = socket.socketpair()
+    with reader, writer:
+        channel = supervision._Channel(reader)
+
+        with pytest.raises(ReleaseVerificationError, match="protocol"):
+            if direction == "send":
+                channel.send({"op": "x" * (supervision.MAX_FRAME_BYTES + 1)})
+            else:
+                writer.sendall(struct.pack(">I", supervision.MAX_FRAME_BYTES + 1))
+                channel.fill(0)
+
+
+def test_given_closed_guardian_peer_when_channel_sends_then_control_loss_is_recorded() -> None:
+    reader, writer = socket.socketpair()
+    with reader, writer:
+        channel = supervision._Channel(reader)
+        writer.close()
+
+        with pytest.raises(ReleaseVerificationError, match="control channel was lost"):
+            channel.send({"op": "ping"})
+
+        assert channel.closed
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("pid", True), ("start", -1), ("boot_id", ""), ("boot_id", None), ("extra", 1)],
+)
+def test_given_invalid_process_identity_when_decoded_then_protocol_refused(field: str, value: object) -> None:
+    payload = {"pid": 10, "start": 20, "boot_id": "test-boot", field: value}
+
+    with pytest.raises(ReleaseVerificationError, match="protocol"):
+        ProcessIdentity.from_dict(payload)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("v", 2),
+        ("state", "running"),
+        ("leader_exit_code", True),
+        ("members_reaped", -1),
+        ("guardian", {"pid": 10, "start": 20, "boot_id": "other-boot"}),
+        ("leader", {"pid": 99, "start": 21, "boot_id": "test-boot"}),
+        ("extra", 1),
+    ],
+)
+def test_given_invalid_stop_proof_when_decoded_then_never_confirms_stop(field: str, value: object) -> None:
+    runtime = SupervisedRuntime(ProcessIdentity(10, 20, "test-boot"), ProcessIdentity(11, 21, "test-boot"), None)
+    payload = {
+        "v": 1,
+        "state": "stopped",
+        "guardian": runtime.guardian.to_dict(),
+        "leader": runtime.leader.to_dict(),
+        "leader_exit_code": 0,
+        "members_reaped": 0,
+        field: value,
+    }
+
+    with pytest.raises(ReleaseVerificationError, match="unresolved"):
+        supervision.StopProof.from_payload(payload, runtime)
+
+
+@pytest.mark.parametrize("kind", ["none", "missing", "symlink", "fifo", "oversized", "invalid-json"])
+def test_given_unsafe_or_absent_stop_proof_when_recovered_then_stop_remains_unresolved(
+    tmp_path: Path, kind: str
+) -> None:
+    path = tmp_path / "proof.json"
+    if kind == "symlink":
+        target = tmp_path / "target.json"
+        target.write_text("{}")
+        path.symlink_to(target)
+    elif kind == "fifo":
+        os.mkfifo(path)
+    elif kind == "oversized":
+        path.write_bytes(b" " * (supervision.MAX_PROOF_BYTES + 1))
+    elif kind == "invalid-json":
+        path.write_bytes(b"{")
+    identity = ProcessIdentity.of(os.getpid())
+    runtime = SupervisedRuntime(identity, identity, None if kind == "none" else path)
+
+    with pytest.raises(ReleaseVerificationError, match="unresolved"):
+        recover_stop_proof(runtime, timeout_seconds=0)
+
+
+def test_given_reused_pid_identity_when_checked_then_original_process_counts_as_exited() -> None:
+    current = ProcessIdentity.of(os.getpid())
+
+    assert not current.has_exited()
+    assert replace(current, start=current.start + 1).has_exited()
+    assert replace(current, boot_id="previous-boot").has_exited()
+
+
+def test_given_invalid_runtime_proof_path_when_decoded_then_protocol_refused() -> None:
+    identity = ProcessIdentity.of(os.getpid())
+    payload = SupervisedRuntime(identity, identity, None).to_dict()
+    payload["proof_path"] = False
+
+    with pytest.raises(ReleaseVerificationError, match="protocol"):
+        SupervisedRuntime.from_dict(payload)
+
+
+@pytest.mark.parametrize("operation", ["runtime", "output", "stop", "ping", "wait_for_exit"])
+def test_given_unstarted_supervisor_when_used_then_refused(operation: str) -> None:
+    supervisor = ProcessSupervisor([sys.executable, "-c", CHILD_SLEEP], memory_bytes=MEMORY)
+
+    with pytest.raises(ReleaseVerificationError, match="not started"):
+        if operation == "wait_for_exit":
+            supervisor.wait_for_exit(0)
+        else:
+            value = getattr(supervisor, operation)
+            if callable(value):
+                value()
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"argv": ["x" * (supervision.MAX_ARGV_BYTES + 1)]},
+        {"file_bytes": 0},
+        {"inherit_fds": (1, 1)},
+        {"inherit_fds": (-1,)},
+        {"inherit_fds": (True,)},
+        {"inherit_fds": tuple(range(supervision.MAX_INHERITED_FDS + 1))},
+    ],
+)
+def test_given_unsafe_supervisor_bounds_when_constructed_then_refused(options: dict[str, Any]) -> None:
+    arguments = {"argv": [sys.executable, "-c", CHILD_SLEEP], "memory_bytes": MEMORY, **options}
+
+    with pytest.raises(ReleaseVerificationError):
+        ProcessSupervisor(**arguments)
+
+
+def test_given_unavailable_process_launch_when_supervisor_starts_then_descriptors_are_closed(
+    mocker: MockerFixture,
+) -> None:
+    supervisor = ProcessSupervisor([sys.executable, "-c", CHILD_SLEEP], memory_bytes=MEMORY)
+    mocker.patch("physical_ai_curation.release.supervision.subprocess.Popen", side_effect=OSError("unavailable"))
+    descriptors = set(os.listdir("/proc/self/fd"))
+
+    with pytest.raises(ReleaseVerificationError, match="guardian could not start"):
+        supervisor.start()
+
+    assert set(os.listdir("/proc/self/fd")) == descriptors
+
+
+def test_given_missing_worker_directory_when_supervisor_starts_then_guardian_failure_is_reported(
+    tmp_path: Path,
+) -> None:
+    supervisor = ProcessSupervisor([sys.executable, "-c", CHILD_SLEEP], memory_bytes=MEMORY, cwd=tmp_path / "missing")
+
+    with pytest.raises(ReleaseVerificationError, match="supervised start failed"):
+        supervisor.start()
+
+
+@pytest.mark.parametrize("condition", ["not-requested", "stale-fence", "not-stopped", "scratch", "effect"])
+def test_given_unsettled_job_when_cancellation_settles_then_capacity_is_retained(
+    tmp_path: Path, condition: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "destination")).job_id
+    fence = store.claim(job_id, "worker-a")
+    if condition == "scratch":
+        store.reserve_scratch(job_id, fence, 100)
+    if condition == "effect":
+        store.begin_effect(job_id, fence, ATTEMPT, "data/a.bin", 3, DIGEST)
+    if condition != "not-requested":
+        store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+    if condition != "not-stopped":
+        store.confirm_stopped(job_id, fence)
+    before = store.storage.snapshot()[job_id]
+
+    with pytest.raises((AuthorityError, CancellationError)):
+        store.settle_cancellation(job_id, fence + 1 if condition == "stale-fence" else fence, output_removed=True)
+
+    assert store.storage.snapshot()[job_id] == before
+    assert store.get(job_id, scope=SCOPE, principal=OWNER).capacity_state == "reserved"
+
+
+@pytest.mark.parametrize("observation", ["complete", "conflict", "oversized", "absent"])
+def test_given_uncertain_local_output_when_reconciled_then_content_identity_controls_outcome(
+    tmp_path: Path, observation: str
+) -> None:
+    destination = tmp_path / "destination"
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(destination)).job_id
+    fence = store.claim(job_id, "worker-a")
+    digest = sha256_hex(b"abc")
+    store.begin_effect(job_id, fence, ATTEMPT, "data/a.bin", 3, digest)
+    store.finish_effect(job_id, fence, "data/a.bin", ok=False)
+    path = destination / ATTEMPT.prefix / "data/a.bin"
+    if observation != "absent":
+        path.parent.mkdir(parents=True)
+        path.write_bytes({"complete": b"abc", "conflict": b"xyz", "oversized": b"abcd"}[observation])
+    before = store.storage.snapshot()[job_id]
+
+    if observation in ("conflict", "oversized"):
+        with pytest.raises(JobConflictError, match="conflicts"):
+            store.reconcile_local_outputs(job_id, fence)
+        assert store.storage.snapshot()[job_id] == before
+    else:
+        assert store.reconcile_local_outputs(job_id, fence) == 0
+        effects = store.storage.snapshot()[job_id]["effects"]
+        if observation == "absent":
+            assert effects == {}
+        else:
+            assert effects["data/a.bin"]["status"] == "acknowledged"
+            assert path.read_bytes() == b"abc"
+
+
+@pytest.mark.parametrize("condition", ["invalid-observation", "unknown-effect", "identity", "pending", "conflict"])
+def test_given_invalid_effect_observation_when_reconciled_then_journal_is_unchanged(
+    tmp_path: Path, condition: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "destination")).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.begin_effect(job_id, fence, ATTEMPT, "data/a.bin", 3, DIGEST)
+    store.finish_effect(job_id, fence, "data/a.bin", ok=False)
+    before = store.storage.snapshot()[job_id]
+    observed = condition if condition in ("pending", "conflict", "invalid-observation") else "complete"
+
+    with pytest.raises((ReleaseJobError, AuthorityError, JobConflictError)):
+        store.reconcile_effect(
+            job_id,
+            fence,
+            "data/missing.bin" if condition == "unknown-effect" else "data/a.bin",
+            observed=observed,
+            length=4 if condition == "identity" else 3,
+            digest=DIGEST,
+        )
+
+    assert store.storage.snapshot()[job_id] == before
+
+
+@pytest.mark.parametrize("operation", ["scratch-authorize", "scratch-cleanup", "confirm", "seal", "register"])
+def test_given_unproven_runtime_when_cleanup_or_seal_attempted_then_workspace_is_retained(
+    tmp_path: Path, operation: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "destination")).job_id
+    fence = store.claim(job_id, "worker-a")
+    workspace = store.create_scratch_workspace(job_id, fence, 100)
+    payload = workspace / "retained.bin"
+    payload.write_bytes(b"owned")
+    identity = ProcessIdentity.of(os.getpid())
+    runtime = SupervisedRuntime(identity, identity, store.runtime_proof_path(job_id, fence))
+    store.register_runtime(job_id, fence, runtime)
+    before = store.storage.snapshot()[job_id]
+
+    with pytest.raises(AuthorityError, match="runtime"):
+        if operation == "scratch-authorize":
+            store.authorize_scratch_cleanup(job_id, fence)
+        elif operation == "scratch-cleanup":
+            store.cleanup_scratch_workspace(job_id, fence)
+        elif operation == "confirm":
+            store.confirm_stopped(job_id, fence)
+        elif operation == "seal":
+            store.seal(job_id, fence, CONTROLS)
+        else:
+            store.register_runtime(job_id, fence, runtime)
+
+    assert store.storage.snapshot()[job_id] == before
+    assert payload.read_bytes() == b"owned"
+
+
+@pytest.mark.parametrize("condition", ["none", "outside", "invalid-name"])
+def test_given_unconfined_runtime_proof_when_registered_then_ledger_is_unchanged(
+    tmp_path: Path, condition: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "destination")).job_id
+    fence = store.claim(job_id, "worker-a")
+    path = store.runtime_proof_path(job_id, fence)
+    if condition == "outside":
+        path = tmp_path / path.name
+    elif condition == "invalid-name":
+        path = path.with_name("invalid.json")
+    identity = ProcessIdentity.of(os.getpid())
+    runtime = SupervisedRuntime(identity, identity, None if condition == "none" else path)
+    before = store.storage.snapshot()[job_id]
+
+    with pytest.raises(AuthorityError, match="runtime proof"):
+        store.register_runtime(job_id, fence, runtime)
+
+    assert store.storage.snapshot()[job_id] == before
+
+
+@pytest.mark.parametrize("operation", ["confirm", "recover"])
+def test_given_unknown_fence_when_runtime_stop_recorded_then_refused(tmp_path: Path, operation: str) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "destination")).job_id
+    fence = store.claim(job_id, "worker-a")
+    before = store.storage.snapshot()[job_id]
+
+    with pytest.raises(AuthorityError, match="unknown fence"):
+        if operation == "confirm":
+            store.confirm_stopped(job_id, fence + 1)
+        else:
+            store.recover_runtimes(job_id, fence + 1, timeout_seconds=0)
+
+    assert store.storage.snapshot()[job_id] == before
+
+
+@pytest.mark.parametrize("condition", ["live-creator", "foreign-fence", "planned", "changed-inode"])
+def test_given_unresolved_workspace_ownership_when_cleaned_then_files_are_retained(
+    tmp_path: Path, condition: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "destination")).job_id
+    fence = store.claim(job_id, "worker-a")
+    workspace = store.create_scratch_workspace(job_id, fence, 100)
+    payload = workspace / "retained.bin"
+    payload.write_bytes(b"owned")
+    with store.storage.transaction() as records:
+        ownership = records[job_id]["workspace"]
+        if condition == "foreign-fence":
+            ownership["fence"] += 1
+        elif condition == "planned":
+            ownership["status"] = "planned"
+        elif condition == "changed-inode":
+            ownership["inode"] += 1
+    before = store.storage.snapshot()[job_id]
+
+    with pytest.raises(AuthorityError):
+        store.cleanup_scratch_workspace(job_id, fence, recover=condition == "live-creator")
+
+    assert store.storage.snapshot()[job_id] == before
+    assert payload.read_bytes() == b"owned"
+
+
+def test_given_owned_nested_scratch_files_when_cleaned_then_reservation_can_be_released(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "destination")).job_id
+    fence = store.claim(job_id, "worker-a")
+    workspace = store.create_scratch_workspace(job_id, fence, 100)
+    nested = workspace / "nested"
+    nested.mkdir()
+    (nested / "data.bin").write_bytes(b"owned")
+
+    store.cleanup_scratch_workspace(job_id, fence)
+    store.release_scratch(job_id, fence)
+
+    assert not workspace.exists()
+    record = store.storage.snapshot()[job_id]
+    assert record["workspace"]["status"] == "removed"
+    assert record["reservation"]["status"] == "reserved"
+    assert record["scratch_bytes"] == 0
 
 
 def _owned_effect_job(

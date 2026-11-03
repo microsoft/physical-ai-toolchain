@@ -80,6 +80,8 @@ jobs:
           uv run --project ../../.. --all-packages --no-sync --frozen pytest -v
           --junitxml=../../../logs/pytest-dataviewer-results.xml
           --cov=src --cov=evaluation.vlm_judge
+          --cov=../../curation/physical_ai_curation
+          --cov=../../dataset-io/physical_ai_dataset_io
           --cov-report= --cov-fail-under=0
 
       - name: Generate scoped coverage reports and enforce gates
@@ -87,6 +89,8 @@ jobs:
         run: |
           uv run --project ../../.. --all-packages --no-sync coverage xml --include='*/backend/src/*' --fail-under=0 -o ../../../logs/coverage-dataviewer.xml
           uv run --project ../../.. --all-packages --no-sync coverage xml --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' --fail-under=0 -o ../../../logs/coverage-vlm-judge-backend.xml
+          uv run --project ../../.. --all-packages --no-sync coverage xml --include='*/physical_ai_curation/*' --fail-under=0 -o ../../../logs/coverage-curation.xml
+          uv run --project ../../.. --all-packages --no-sync coverage xml --include='*/physical_ai_dataset_io/*' --fail-under=0 -o ../../../logs/coverage-dataset-io.xml
           uv run --project ../../.. --all-packages --no-sync coverage report --include='*/backend/src/*' --fail-under=90
           uv run --project ../../.. --all-packages --no-sync coverage report --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' --fail-under=70
 
@@ -103,6 +107,8 @@ jobs:
           test -s ../../../logs/coverage-dataviewer.xml
           test -s ../../../logs/coverage-vlm-judge-backend.xml
           test -s ../../../logs/coverage-vlm-judge.xml
+          test -s ../../../logs/coverage-curation.xml
+          test -s ../../../logs/coverage-dataset-io.xml
 
       - name: Upload coverage.xml artifact
         id: coverage_upload
@@ -115,6 +121,8 @@ jobs:
             logs/coverage-dataviewer.xml
             logs/coverage-vlm-judge-backend.xml
             logs/coverage-vlm-judge.xml
+            logs/coverage-curation.xml
+            logs/coverage-dataset-io.xml
           retention-days: 30
 
       - name: Upload coverage to Codecov
@@ -123,6 +131,7 @@ jobs:
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: logs/coverage-dataviewer.xml
+          disable_search: true
           use_oidc: true
           fail_ci_if_error: false
           verbose: true
@@ -135,6 +144,7 @@ jobs:
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: logs/coverage-vlm-judge-backend.xml
+          disable_search: true
           use_oidc: true
           fail_ci_if_error: false
           verbose: true
@@ -151,6 +161,28 @@ jobs:
           fail_ci_if_error: false
           flags: pytest-vlm-judge
           name: pytest-vlm-judge-unit-coverage
+
+      - name: Upload curation coverage to Codecov
+        if: ${{ inputs.code-coverage && always() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: logs/coverage-curation.xml
+          disable_search: true
+          use_oidc: true
+          fail_ci_if_error: false
+          flags: pytest-curation
+          name: pytest-curation-coverage
+
+      - name: Upload dataset-I/O coverage to Codecov
+        if: ${{ inputs.code-coverage && always() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: logs/coverage-dataset-io.xml
+          disable_search: true
+          use_oidc: true
+          fail_ci_if_error: false
+          flags: pytest-dataset-io
+          name: pytest-dataset-io-coverage
 
       - name: Publish execution evidence
         id: outcome

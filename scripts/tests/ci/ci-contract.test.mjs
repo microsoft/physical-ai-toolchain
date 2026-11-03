@@ -137,6 +137,33 @@ test('product workspace: judge tests and coverage remain required in the backend
   assert.ok(gates.includes('--fail-under=70'));
 });
 
+test('product workspace: curation and dataset-I/O coverage is collected and uploaded separately', () => {
+  const steps = graph['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer'].steps;
+  const codecov = parseYaml(readFileSync(join(root, 'codecov.yml'), 'utf8'));
+  for (const [directory, packageName] of [
+    ['curation', 'physical_ai_curation'],
+    ['dataset-io', 'physical_ai_dataset_io'],
+  ]) {
+    const report = `logs/coverage-${directory}.xml`;
+    const flag = `pytest-${directory}`;
+    const source = `data-management/${directory}/${packageName}/`;
+    assert.ok(steps.find(step => step.id === 'test').run.includes(`--cov=../../${directory}/${packageName}`));
+    const generation = steps.find(step => step.id === 'coverage_gate').run.split('\n')
+      .find(command => command.includes(`-o ../../../${report}`));
+    assert.ok(generation?.includes(`--include='*/${packageName}/*'`));
+    assert.ok(steps.find(step => step.id === 'coverage_report').run.includes(`test -s ../../../${report}`));
+    assert.ok(steps.find(step => step.id === 'coverage_upload').with.path.split('\n').includes(report));
+    const upload = steps.find(step => step.with?.flags === flag);
+    assert.equal(upload.with.files, report);
+    assert.equal(upload.with.disable_search, true);
+    assert.equal(upload.with.use_oidc, true);
+    assert.deepEqual(codecov.flags[flag].paths, [source]);
+    const component = codecov.component_management.individual_components
+      .find(candidate => candidate.component_id === `data-management-${directory}`);
+    assert.deepEqual(component.paths, [`${source}**`]);
+  }
+});
+
 test('product workspace: independent evaluation keeps its own gate without judge coverage', () => {
   const steps = graph['.github/workflows/evaluation-pytests.yml'].jobs.pytest.steps;
   assert.equal(steps.find(step => step.id === 'install').run, 'uv sync --frozen --only-group dev');

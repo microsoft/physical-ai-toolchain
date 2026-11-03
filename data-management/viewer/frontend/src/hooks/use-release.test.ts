@@ -103,6 +103,66 @@ describe('useRelease', () => {
     expect(result.current.activeJobId).toBeNull()
   })
 
+  it.each(['{', 'null', '[]', '{"idempotencyKey":3}', '{"idempotencyKey":"bad"}'])(
+    'ignores malformed pending submission storage: %s',
+    (value) => {
+      localStorage.setItem(pendingKey(SCOPE_A), value)
+      const { result } = renderHookWithProviders(() => useRelease(DATASET, SCOPE_A))
+      expect(result.current.hasPendingSubmission).toBe(false)
+      expect(releaseApi.lookupAcceptedRelease).not.toHaveBeenCalled()
+    },
+  )
+
+  it('keeps in-memory job controls usable when browser storage cannot be read', () => {
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => {
+        throw new DOMException('Storage denied', 'SecurityError')
+      }),
+      setItem: vi.fn(),
+    })
+    try {
+      const { result } = renderHookWithProviders(() => useRelease(DATASET, SCOPE_A))
+      expect(result.current.activeJobId).toBeNull()
+      expect(result.current.hasPendingSubmission).toBe(false)
+      act(() => result.current.selectJob(JOB_ID))
+      expect(result.current.activeJobId).toBe(JOB_ID)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it.each([
+    [
+      'inventory_total_changed',
+      [
+        inventoryPage({
+          total: 2,
+          items: [{ episodeIndex: 0 } as releaseApi.ReleaseInventoryItem],
+          nextCursor: 1,
+        }),
+        inventoryPage({ total: 3 }),
+      ],
+    ],
+    ['inventory_empty_page', [inventoryPage({ total: 2, nextCursor: 1 })]],
+    [
+      'inventory_overflow',
+      [
+        inventoryPage({
+          total: 0,
+          items: [{ episodeIndex: 0 } as releaseApi.ReleaseInventoryItem],
+        }),
+      ],
+    ],
+    ['inventory_incomplete', [inventoryPage({ total: 1 })]],
+  ] as const)('refuses inconsistent inventory: %s', async (message, pages) => {
+    const inventory = vi.mocked(releaseApi.getReleaseSourceInventory)
+    for (const page of pages) inventory.mockResolvedValueOnce(page)
+    const { result } = renderHookWithProviders(() => useRelease(DATASET, SCOPE_A))
+    await waitFor(() => expect(result.current.inventory.isError).toBe(true))
+    expect(result.current.inventory.error?.message).toBe(message)
+    expect(result.current.inventoryReady).toBe(false)
+  })
+
   it('cancel and recover keep the pointer, while startNew clears it without cancelling', async () => {
     globalThis.localStorage.setItem(pointerKey(SCOPE_A), JOB_ID)
     const { result } = renderHookWithProviders(() => useRelease(DATASET, SCOPE_A))
