@@ -402,45 +402,81 @@ class TestInit:
         }
 
 
+def _all_joint_names_and_positions(positions=None):
+    """Build a complete JointState payload covering JOINT_ORDER."""
+    names = [j.value for j in _inference_robot_types.JOINT_ORDER]
+    if positions is None:
+        positions = [float(i) * 0.1 for i in range(len(names))]
+    return names, positions
+
+
 # ---------------------------------------------------------------------------
 # _on_joint_state
 # ---------------------------------------------------------------------------
 
 
 class TestOnJointState:
-    def test_first_message_creates_observation(self, node):
-        msg = _JointState(
-            names=["shoulder_pan_joint", "elbow_joint"],
-            positions=[0.5, 1.5],
-            sec=2,
-            nanosec=500_000_000,
-        )
+    def test_runner_resets_only_when_readiness_is_lost(self, node: ain_module.ACTInferenceNode) -> None:
+        node._runner.reset.reset_mock()
+        incomplete = _JointState(names=["shoulder_pan_joint"], positions=[0.1])
+        node._on_joint_state(incomplete)
+        node._runner.reset.assert_not_called()
+
+        names, positions = _all_joint_names_and_positions()
+        node._on_joint_state(_JointState(names=names, positions=positions))
+        node._runner.reset.assert_not_called()
+        node._on_joint_state(incomplete)
+        node._runner.reset.assert_called_once_with()
+        node._on_joint_state(incomplete)
+        node._runner.reset.assert_called_once_with()
+
+    def test_first_complete_message_creates_observation(self, node):
+        names, positions = _all_joint_names_and_positions([0.5, 0.0, 1.5, 0.0, 0.0, 0.0])
+        msg = _JointState(names=names, positions=positions, sec=2, nanosec=500_000_000)
         node._on_joint_state(msg)
         obs = node._state.observation
         assert obs is not None
+        assert node._joints_ready is True
         assert obs.joint_positions[0] == pytest.approx(0.5)
         assert obs.joint_positions[2] == pytest.approx(1.5)
         assert obs.timestamp_s == pytest.approx(2.5)
 
-    def test_subsequent_message_updates_existing(self, node):
+    def test_subsequent_complete_message_updates_existing(self, node):
         node._state.observation = _RobotObservation(
             joint_positions=np.zeros(6, dtype=np.float32),
             timestamp_s=0.0,
         )
-        msg = _JointState(
-            names=["wrist_3_joint"],
-            positions=[0.25],
-            sec=1,
-            nanosec=0,
-        )
+        node._joints_ready = True
+        names, positions = _all_joint_names_and_positions([0.0, 0.0, 0.0, 0.0, 0.0, 0.25])
+        msg = _JointState(names=names, positions=positions, sec=1, nanosec=0)
         node._on_joint_state(msg)
         assert node._state.observation.joint_positions[5] == pytest.approx(0.25)
         assert node._state.observation.timestamp_s == pytest.approx(1.0)
+        assert node._joints_ready is True
 
-    def test_unknown_joint_is_ignored(self, node):
+    def test_incomplete_joint_state_does_not_become_ready(self, node):
         msg = _JointState(names=["nonexistent_joint"], positions=[42.0])
         node._on_joint_state(msg)
-        assert np.allclose(node._state.observation.joint_positions, 0.0)
+        assert node._state.observation is None
+        assert node._joints_ready is False
+
+    def test_partial_expected_joints_keeps_not_ready(self, node):
+        msg = _JointState(
+            names=["shoulder_pan_joint", "elbow_joint"],
+            positions=[0.5, 1.5],
+        )
+        node._on_joint_state(msg)
+        assert node._state.observation is None
+        assert node._joints_ready is False
+
+    def test_pending_image_attached_when_joints_arrive(self, node):
+        pending = np.ones((480, 848, 3), dtype=np.uint8)
+        node._pending_image = pending
+        names, positions = _all_joint_names_and_positions()
+        node._on_joint_state(_JointState(names=names, positions=positions))
+        assert node._state.observation is not None
+        assert node._state.observation.color_image is pending
+        assert node._pending_image is None
 
 
 # ---------------------------------------------------------------------------
@@ -449,22 +485,24 @@ class TestOnJointState:
 
 
 class TestOnImage:
-    def test_image_passes_through_when_correct_size(self, node):
+    def test_image_before_joints_is_held_pending(self, node):
         node._bridge.next_image = np.ones((480, 848, 3), dtype=np.uint8)
         node._on_image(MagicMock())
-        assert node._state.observation is not None
-        assert node._state.observation.color_image.shape == (480, 848, 3)
+        assert node._state.observation is None
+        assert node._pending_image is not None
+        assert node._pending_image.shape == (480, 848, 3)
 
-    def test_image_resized_when_wrong_size(self, node):
+    def test_image_resized_when_wrong_size_while_pending(self, node):
         node._bridge.next_image = np.ones((100, 100, 3), dtype=np.uint8)
         node._on_image(MagicMock())
-        assert node._state.observation.color_image.shape == (480, 848, 3)
+        assert node._pending_image.shape == (480, 848, 3)
         _cv2.resize.assert_called()
 
     def test_updates_existing_observation(self, node):
         node._state.observation = _RobotObservation(
             joint_positions=np.full(6, 0.7, dtype=np.float32),
         )
+        node._joints_ready = True
         node._bridge.next_image = np.ones((480, 848, 3), dtype=np.uint8)
         node._on_image(MagicMock())
         assert np.allclose(node._state.observation.joint_positions, 0.7)
@@ -477,6 +515,51 @@ class TestOnImage:
 
 
 class TestControlTick:
+    def test_recovery_generates_fresh_actions(self, node: ain_module.ACTInferenceNode) -> None:
+        import torch
+
+        from evaluation.sil.policy_runner import PolicyRunner
+
+        class QueuedPolicy:
+            def __init__(self) -> None:
+                self.actions = []
+                self.queries = 0
+
+            def reset(self) -> None:
+                self.actions.clear()
+
+            def select_action(self, observation: dict[str, torch.Tensor]) -> torch.Tensor:
+                if not self.actions:
+                    self.queries += 1
+                    positions = observation["observation.state"].unsqueeze(0)
+                    self.actions.extend([positions + 0.01, positions + 0.02])
+                return self.actions.pop(0)
+
+        policy = QueuedPolicy()
+        node._runner = PolicyRunner(policy, lambda obs: obs, lambda action: action, device="cpu")
+        node._action_mode = "delta"
+        node._enable_control = True
+        node._bridge.next_image = np.zeros((480, 848, 3), dtype=np.uint8)
+        node._on_image(_Image())
+        names, positions = _all_joint_names_and_positions([0.1] * 6)
+        node._on_joint_state(_JointState(names=names, positions=positions))
+        node._control_tick()
+        assert policy.queries == 1
+        assert len(policy.actions) == 1
+        assert node._cmd_pub.publish.call_args.args[0].points[0].positions == pytest.approx([0.11] * 6)
+
+        node._on_joint_state(_JointState(names=names[:-1], positions=positions[:-1]))
+        node._control_tick()
+        assert node._joints_ready is False
+        assert node._cmd_pub.publish.call_count == 1
+
+        node._on_joint_state(_JointState(names=names, positions=[0.3] * 6))
+        node._control_tick()
+        assert node._joints_ready is True
+        assert node._cmd_pub.publish.call_count == 2
+        assert node._cmd_pub.publish.call_args.args[0].points[0].positions == pytest.approx([0.31] * 6)
+        assert policy.queries == 2
+
     def test_returns_early_when_no_observation(self, node):
         node._control_tick()
         node._runner.step.assert_not_called()
@@ -489,11 +572,21 @@ class TestControlTick:
         node._control_tick()
         node._runner.step.assert_not_called()
 
+    def test_returns_early_when_joints_not_ready(self, node):
+        node._state.observation = _RobotObservation(
+            joint_positions=np.zeros(6, dtype=np.float32),
+            color_image=np.zeros((480, 848, 3), dtype=np.uint8),
+        )
+        node._joints_ready = False
+        node._control_tick()
+        node._runner.step.assert_not_called()
+
     def test_delta_mode_publishes_status_only(self, node):
         node._state.observation = _RobotObservation(
             joint_positions=np.zeros(6, dtype=np.float32),
             color_image=np.zeros((480, 848, 3), dtype=np.uint8),
         )
+        node._joints_ready = True
         node._action_mode = "delta"
         node._control_tick()
         node._runner.step.assert_called_once()
@@ -530,6 +623,7 @@ class TestControlTick:
             joint_positions=current,
             color_image=np.zeros((480, 848, 3), dtype=np.uint8),
         )
+        node._joints_ready = True
         node._action_mode = "absolute"
         node._enable_control = True
         node._runner.step.return_value = _JointPositionCommand(
@@ -553,6 +647,7 @@ class TestControlTick:
             joint_positions=np.zeros(6, dtype=np.float32),
             color_image=np.zeros((480, 848, 3), dtype=np.uint8),
         )
+        node._joints_ready = True
         node._state.episode_step = 29
         node._control_tick()
         node._logger.info.assert_called()
