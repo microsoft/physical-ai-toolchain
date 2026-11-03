@@ -186,9 +186,9 @@ function describeError(error: unknown): string {
   return 'Release request failed.'
 }
 
-/** A 5xx response or a missing response means the server may have accepted the job. */
+/** Keep the same request when the response does not establish that submission was refused. */
 function isAmbiguousFailure(error: unknown): boolean {
-  if (error instanceof ReleaseRequestError) return error.status >= 500
+  if (error instanceof ReleaseRequestError) return !error.isDefinitiveRejection
   return true
 }
 
@@ -367,7 +367,14 @@ export function ReleaseDialog({
     authMode: principal.data?.authMode ?? null,
   })
   const currentReview = review?.key === draftKey ? review : null
-  const currentNotice = notice?.key === draftKey ? notice.message : null
+  const contextKey = JSON.stringify([
+    datasetId,
+    principal.data?.scopeId,
+    principal.data?.authMode,
+    identity.attemptId,
+  ])
+  const currentNotice =
+    notice?.key === draftKey || notice?.key === contextKey ? notice.message : null
 
   const summary = currentReview?.preview.summary
   const destinationKind = summary ? readDestinationKind(summary) : null
@@ -467,7 +474,13 @@ export function ReleaseDialog({
         setAmbiguous(pending)
       } else {
         setReview(null)
-        setNotice({ key: pending.key, message: describeError(error) })
+        setNotice({
+          key:
+            error instanceof ReleaseRequestError && error.code === 'stale_preview'
+              ? contextKey
+              : pending.key,
+          message: describeError(error),
+        })
       }
     } finally {
       setSubmitting(false)

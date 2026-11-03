@@ -356,16 +356,19 @@ export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: 
         void queryClient.invalidateQueries({ queryKey: ['releases', 'jobs', scopeId] })
         return accepted
       } catch (error) {
-        // A 4xx response is a definitive rejection, so the saved key is no longer needed. Other failures may
-        // hide an accepted job; keep the key so a lookup can recover it.
-        if (error instanceof ReleaseRequestError && error.status >= 400 && error.status < 500) {
+        if (error instanceof ReleaseRequestError && error.isDefinitiveRejection) {
           clearPointer(pendingKey)
           setPending({ key: pendingKey, idempotencyKey: null })
+          if (error.code === 'stale_preview') {
+            void queryClient.invalidateQueries({
+              queryKey: ['releases', 'inventory', scopeId, datasetId, sourceIdentity ?? null],
+            })
+          }
         }
         throw error
       }
     },
-    [storageKey, pendingStorageKey, scopeId, submitAsync, queryClient],
+    [storageKey, pendingStorageKey, scopeId, datasetId, sourceIdentity, submitAsync, queryClient],
   )
 
   /**

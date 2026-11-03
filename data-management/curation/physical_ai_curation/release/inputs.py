@@ -43,6 +43,10 @@ class ReleaseInputError(ReleaseVerificationError):
     """Saved confirmation or finalized source no longer matches the request."""
 
 
+class StaleReleaseInputError(ReleaseInputError):
+    """A selected saved revision changed or disappeared and requires a fresh preview."""
+
+
 class ReleaseSource(Protocol):
     """Return content-bound source objects without creating snapshots or output.
 
@@ -386,7 +390,7 @@ async def _read_saved(
             raise ReleaseInputError("selected saved resource is not supported by this reader")
         value = await extended(selection.dataset_id, item)
     if not item.expected_revision or value.etag != item.expected_revision or value.value is None:
-        raise ReleaseInputError("selected saved resource revision is stale or unavailable")
+        raise StaleReleaseInputError("selected saved resource revision is stale or unavailable")
     return value
 
 

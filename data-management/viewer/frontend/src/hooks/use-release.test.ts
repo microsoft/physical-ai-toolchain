@@ -279,6 +279,16 @@ describe('useRelease', () => {
 
   it.each([
     [new releaseApi.ReleaseRequestError('stale', 'stale_preview', 409), false],
+    [
+      new releaseApi.ReleaseRequestError(
+        'capacity',
+        'insufficient capacity for the reserved estimate',
+        507,
+      ),
+      false,
+    ],
+    [new releaseApi.ReleaseRequestError('unknown capacity failure', 'unknown', 507), true],
+    [new releaseApi.ReleaseRequestError('unavailable', 'unavailable', 503), true],
     [new Error('connection lost'), true],
   ])('retains recovery data only when acceptance is uncertain', async (error, retained) => {
     vi.mocked(releaseApi.submitRelease).mockRejectedValue(error)

@@ -214,6 +214,14 @@ def test_given_saved_labels_when_inventory_read_then_exact_revisions_are_selecta
     assert preview.status_code == 200, preview.json()
     assert preview.json()["summary"]["destination_kind"] == "local"
     assert preview.json()["summary"]["available_bytes"] > 0
+    labels.episodes["1"] = ["changed-after-preview"]
+    (root / "meta/episode_labels.json").write_text(labels.model_dump_json())
+    refused = _submit(
+        test_client, {**spec, "description": "Selected saved labels", "resources": row["resources"]}, preview.json()
+    )
+    assert refused.status_code == 409
+    assert refused.json()["detail"]["code"] == "stale_preview"
+    assert not (_settings.job_root / "jobs").exists()
 
 
 def test_confirmed_acceptance_replays_and_survives_service_restart(release_api: tuple) -> None:

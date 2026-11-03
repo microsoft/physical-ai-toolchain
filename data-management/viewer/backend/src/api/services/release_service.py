@@ -21,7 +21,7 @@ from physical_ai_curation.release.azure_publication import BlobReleaseStore
 from physical_ai_curation.release.blob_source_associations import BlobSourceAssociations, BlobVerifiedAssociation
 from physical_ai_curation.release.canonical import canonical_json_bytes, parse_strict_json
 from physical_ai_curation.release.errors import ReleaseVerificationError
-from physical_ai_curation.release.inputs import SavedSelection
+from physical_ai_curation.release.inputs import SavedSelection, StaleReleaseInputError
 from physical_ai_curation.release.jobs import (
     AcceptedJob,
     CapacityError,
@@ -754,6 +754,8 @@ class ReleaseService:
             raise ReleaseApiError(503, "release planning is not configured")
         try:
             return await self._planner.prepare(scope, spec, destination)
+        except StaleReleaseInputError as error:
+            raise ReleaseApiError(409, "stale_preview") from error
         except (ReleaseVerificationError, SavedInputError) as error:
             raise ReleaseApiError(422, "release selection failed verification") from error
         except (OSError, ValueError, KeyError, TypeError) as error:

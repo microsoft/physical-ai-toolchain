@@ -186,6 +186,14 @@ export class ReleaseRequestError extends Error {
     super(message)
     this.name = 'ReleaseRequestError'
   }
+
+  /** Whether submission was refused rather than possibly accepted with a lost response. */
+  get isDefinitiveRejection(): boolean {
+    return (
+      (this.status >= 400 && this.status < 500) ||
+      (this.status === 507 && this.code === 'insufficient capacity for the reserved estimate')
+    )
+  }
 }
 
 const NO_DIGESTS: ReleaseDigests = {
