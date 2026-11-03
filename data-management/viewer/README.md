@@ -569,15 +569,15 @@ The optional Azure ML path is absent from this workflow.
 
 ### Evidence limits
 
-| Area                                                       | Status                                                                  |
-|------------------------------------------------------------|-------------------------------------------------------------------------|
-| Unit and static checks                                     | Local backend and frontend coverage gates pass                          |
-| Real-browser core, stale, cancel, reflow, and focus checks | Seven isolated real-backend release workflow cases pass                 |
-| Retained browsing                                          | Local episodes/media and immutable evidence-key preservation are tested |
-| Live Blob publication/readback/cancellation                | Not established by SDK fixtures or successful read-only reachability    |
-| Hosted ingress                                             | Unresolved                                                              |
-| GPU validation                                             | Not performed                                                           |
-| Assistive-technology validation                            | Not performed                                                           |
+| Area                                                       | Status                                                                     |
+|------------------------------------------------------------|----------------------------------------------------------------------------|
+| Unit and static checks                                     | Local backend and frontend coverage gates pass                             |
+| Real-browser core, stale, cancel, reflow, and focus checks | Seven isolated real-backend release workflow cases pass                    |
+| Retained browsing                                          | Local episodes/media and immutable evidence-key preservation are tested    |
+| Live Blob publication/readback/cancellation                | Not established by SDK fixtures or successful read-only reachability       |
+| Hosted ingress                                             | Application-principal identity and CSRF checks pass on the test deployment |
+| GPU validation                                             | Not performed                                                              |
+| Assistive-technology validation                            | Not performed                                                              |
 
 This section does not claim full acceptance of the release workflow.
 
@@ -616,6 +616,21 @@ DATAVIEWER_SECURE_COOKIES=true
 ```
 
 These are backend settings; the helper receives only the API UUID and caller client UUID. The deployment script selects frontend `DATAVIEWER_CALLER_MODE=managed_identity` only after verifying Easy Auth and anonymous denial. `pending` denies protected forwarding; `off` is for non-hosted application-auth modes. Empty/unknown modes fail startup, and helper failure never downgrades active mode.
+
+For application clients, configure frontend Easy Auth's
+`identityProviders.azureActiveDirectory.validation.defaultAuthorizationPolicy.allowedApplications`
+with the approved client IDs, retaining the first-party interactive client.
+An explicitly empty list denied app-only tokens on the tested deployment.
+Verify admission after the change; restart the frontend revision if it retains the old policy.
+This frontend policy is separate from the backend workload caller ACL: do not add automation
+identities to that ACL or trust their forwarded principal headers.
+
+The hosted application probe confirmed its own server-derived scope without roles,
+anonymous and invalid-token denial, and rejection of forged identity headers.
+Headless clients must retain the CSRF cookie and echo its token; missing, mismatched, or
+header-only tokens remain denied, including requests claiming to be application clients.
+Verify `Secure` and `SameSite=Strict` on the hosted CSRF cookie.
+This identity/CSRF evidence does not establish live release publication or human browser acceptance.
 
 The Easy Auth login secret remains required. Old Terraform proxy-secret objects are inert migration remnants retained for older revisions, not a fallback or rotation procedure for MI. Remove active `DATAVIEWER_PROXY_KEY`; a nonempty value fails frontend startup. Never log tokens or live principals. The [deployment specification](../specifications/viewer-deployment.specification.md#authentication) defines token claims, principal budgets, cache/propagation limits and trust assumptions.
 
