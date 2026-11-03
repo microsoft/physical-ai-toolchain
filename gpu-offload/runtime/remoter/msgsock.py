@@ -127,11 +127,19 @@ def decryptMessage(msg: bytes, decryptkey: bytes) -> bytes | None:
         return None
 
     now_ms = int(time.time() * 1000)
-    if issued_at_ms < now_ms - (_MAX_MESSAGE_AGE_SECONDS * 1000):
-        logger.error("Encrypted message is stale")
+    age_ms = now_ms - issued_at_ms
+    if age_ms > (_MAX_MESSAGE_AGE_SECONDS * 1000):
+        logger.error(
+            f"Encrypted message is stale (age {age_ms / 1000.0:.1f}s; max {_MAX_MESSAGE_AGE_SECONDS}s). "
+            "Sync peer clocks (NTP).",
+        )
         return None
-    if issued_at_ms > now_ms + (_MAX_FUTURE_SKEW_SECONDS * 1000):
-        logger.error("Encrypted message timestamp is too far in the future")
+    if age_ms < -(_MAX_FUTURE_SKEW_SECONDS * 1000):
+        logger.error(
+            f"Encrypted message timestamp is too far in the future "
+            f"(skew {-age_ms / 1000.0:.1f}s; max {_MAX_FUTURE_SKEW_SECONDS}s). "
+            "Sync peer clocks (NTP).",
+        )
         return None
     if not _replay_window.register(nonce, time.monotonic()):
         logger.error("Encrypted message nonce was already received")
