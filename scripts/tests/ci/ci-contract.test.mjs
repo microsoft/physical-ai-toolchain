@@ -132,9 +132,17 @@ test('product workspace: judge tests and coverage remain required in the backend
   const owner = contract.execution['dataviewer-backend-pytests'].jobs['pytest-dataviewer'];
   assert.ok(owner['required-steps'].includes('judge_unit'));
   assert.ok(owner.reports.some(report => report.path === 'logs/pytest-vlm-judge-results.xml'));
-  const gates = steps.find(step => step.id === 'coverage_gate').run;
-  assert.ok(gates.includes('--fail-under=90'));
-  assert.ok(gates.includes('--fail-under=70'));
+  const backendGate = steps.find(step => step.id === 'backend_coverage_gate');
+  const judgeGate = steps.find(step => step.id === 'judge_backend_coverage_gate');
+
+  assert.ok(backendGate);
+  assert.ok(judgeGate);
+
+  assert.ok(backendGate.run.includes('--fail-under=90'));
+  assert.ok(judgeGate.run.includes('--fail-under=70'));
+
+  assert.match(backendGate.run, /backend_valid/);
+  assert.match(judgeGate.run, /judge_backend_valid/);
 
   const generate = steps.find(step => step.id === 'coverage_generate');
   assert.ok(generate);
@@ -155,9 +163,10 @@ test('product workspace: judge tests and coverage remain required in the backend
   assert.ok(validate.run.includes('line-rate'));
   assert.equal(validate["continue-on-error"], true);
 
-  const gate = steps.find(step => step.id === 'coverage_gate');
-  assert.match(gate.if, /!cancelled\(\)/);
-  assert.match(gate.if, /steps\.install\.outcome == 'success'/);
+  for (const gate of [backendGate, judgeGate]) {
+    assert.match(gate.if, /!cancelled\(\)/);
+    assert.match(gate.if, /steps\.install\.outcome == 'success'/);
+  }
 
   const backendUpload = steps.find(step =>
     step.uses?.startsWith('codecov/codecov-action') &&

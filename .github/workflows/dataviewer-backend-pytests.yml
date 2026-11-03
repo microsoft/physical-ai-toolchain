@@ -147,8 +147,8 @@ jobs:
                       print(f"::warning::Coverage report unavailable or invalid: {path}")
           PY
 
-      - name: Enforce scoped coverage gates
-        id: coverage_gate
+      - name: Enforce backend coverage threshold
+        id: backend_coverage_gate
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |
           set -euo pipefail
@@ -158,13 +158,19 @@ jobs:
             exit 1
           fi
 
+          uv run --project ../../.. --all-packages --no-sync coverage report \
+            --include='*/backend/src/*' --fail-under=90
+
+      - name: Enforce judge backend coverage threshold
+        id: judge_backend_coverage_gate
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+
           if [ "${{ steps.coverage_validate.outputs.judge_backend_valid }}" != "true" ]; then
             echo "::error::Judge backend coverage report is missing or invalid."
             exit 1
           fi
-
-          uv run --project ../../.. --all-packages --no-sync coverage report \
-            --include='*/backend/src/*' --fail-under=90
 
           uv run --project ../../.. --all-packages --no-sync coverage report \
             --include='*/evaluation/vlm_judge/*' --omit='*/__init__.py' --fail-under=70
@@ -241,5 +247,5 @@ jobs:
         with:
           workflow: dataviewer-backend-pytests
           steps-json: ${{ toJSON(steps) }}
-          required-steps: '["system-dependencies","install","test","coverage_gate","judge_unit"]'
+          required-steps: '["system-dependencies","install","test","judge_unit","backend_coverage_gate","judge_backend_coverage_gate"]'
           reports: '[{"path":"logs/pytest-dataviewer-results.xml","kind":"junit"},{"path":"logs/pytest-vlm-judge-results.xml","kind":"junit"}]'
