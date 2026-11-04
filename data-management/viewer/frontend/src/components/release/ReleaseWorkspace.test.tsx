@@ -152,6 +152,42 @@ describe('ReleaseWorkspace', () => {
     expect(screen.getByRole('button', { name: 'Create release' })).toBeDisabled()
   })
 
+  it('explains accepted jobs are waiting for a worker rather than processing bytes', () => {
+    vi.mocked(useRelease).mockReturnValue(
+      makeRelease({ activeJobId: JOB_ID, status: { data: statusOf('accepted') } }),
+    )
+    renderWorkspace()
+    expect(screen.getByText('Accepted. Waiting for a release worker.')).toBeVisible()
+  })
+
+  it('shows stored creation dates next to job and release identities', async () => {
+    const createdAt = '2026-11-04T07:00:00+00:00'
+    vi.mocked(useRelease).mockReturnValue(
+      makeRelease({
+        jobs: { data: { pages: [{ items: [{ ...statusOf('committed'), createdAt }] }] } },
+      }),
+    )
+    vi.mocked(listSourceReleases).mockResolvedValue({
+      items: [
+        {
+          handle: HANDLE,
+          datasetName: 'Dated release',
+          packageId: 'package-1',
+          manifestSha256: HANDLE,
+          createdAt,
+        },
+      ],
+    })
+    renderWorkspace()
+    await screen.findByText('Dated release')
+    for (const name of ['Release jobs', 'Source releases']) {
+      const timestamp = within(screen.getByRole('list', { name })).getByText(/^Created /)
+      expect(timestamp.tagName).toBe('TIME')
+      expect(timestamp).toHaveAttribute('datetime', createdAt)
+      expect(timestamp).toHaveTextContent('2026')
+    }
+  })
+
   it('passes the full inventory to the dialog only once it is ready', () => {
     const inventoryItem = {
       episodeIndex: 0,
@@ -182,6 +218,21 @@ describe('ReleaseWorkspace', () => {
     expect(dialogSpy.props?.items).toEqual([])
     expect(dialogSpy.props?.inventoryReady).toBe(false)
     expect(screen.getByText('Loading source inventory...')).toBeVisible()
+  })
+
+  it('retains dialog rows while a background inventory refresh blocks preview', () => {
+    const item = { episodeIndex: 6, resources: [], annotation: false, edits: false }
+    vi.mocked(useRelease).mockReturnValue(
+      makeRelease({
+        inventoryReady: false,
+        inventory: { isError: false, isFetching: true, data: { items: [item], total: 1 } },
+      }),
+    )
+
+    renderWorkspace()
+
+    expect(dialogSpy.props?.items).toEqual([expect.objectContaining({ episodeIndex: 6 })])
+    expect(dialogSpy.props?.inventoryReady).toBe(false)
   })
 
   it('routes dialog submission through the hook and waits for it', async () => {
@@ -343,6 +394,80 @@ describe('ReleaseWorkspace', () => {
     expect(fetchNextPage).toHaveBeenCalledOnce()
   })
 
+  it('collapses and reopens job panes without cancelling or forgetting the job', async () => {
+    const user = userEvent.setup()
+    const release = makeRelease({
+      activeJobId: JOB_ID,
+      status: { data: statusOf('committed') },
+      result: { data: { schema: 'v1', result: {}, artifacts: ['manifest'] } },
+      jobs: { data: { pages: [{ items: [{ jobId: JOB_ID, state: 'committed' }] }] } },
+    })
+    vi.mocked(useRelease).mockReturnValue(release)
+    renderWorkspace()
+
+    await user.click(screen.getByRole('button', { name: 'Close job aaaaaaaa' }))
+    expect(screen.queryByRole('heading', { name: 'Active job' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Download manifest' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Open job aaaaaaaa' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Open job aaaaaaaa' }))
+    expect(screen.getByRole('button', { name: 'Download manifest' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Close job details' }))
+    expect(screen.getByRole('button', { name: 'Open job aaaaaaaa' })).toHaveFocus()
+    expect(release.cancel).not.toHaveBeenCalled()
+    expect(release.startNew).not.toHaveBeenCalled()
+  })
+
+  it('keeps running-job safeguards when collapsed and opens a different job without accumulating panes', async () => {
+    const user = userEvent.setup()
+    const otherJob = 'd'.repeat(32)
+    const release = makeRelease({
+      activeJobId: JOB_ID,
+      status: { data: statusOf('running') },
+      jobs: {
+        data: {
+          pages: [
+            {
+              items: [
+                { jobId: JOB_ID, state: 'running' },
+                { jobId: otherJob, state: 'running' },
+              ],
+            },
+          ],
+        },
+      },
+    })
+    vi.mocked(useRelease).mockReturnValue(release)
+    const { rerender } = renderWithQuery(<ReleaseWorkspace datasetId="dataset-1" />)
+    await user.click(screen.getByRole('button', { name: 'Close job aaaaaaaa' }))
+    expect(screen.getByRole('button', { name: 'Create release' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Open job dddddddd' }))
+    expect(release.selectJob).toHaveBeenCalledWith(otherJob)
+
+    vi.mocked(useRelease).mockReturnValue(
+      makeRelease({
+        ...release,
+        activeJobId: otherJob,
+        status: { ...release.status, data: statusOf('running', { jobId: otherJob }) },
+      }),
+    )
+    rerender(<ReleaseWorkspace datasetId="dataset-1" />)
+    expect(screen.getAllByRole('heading', { name: 'Active job' })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Close job dddddddd' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    expect(screen.getByRole('button', { name: 'Open job aaaaaaaa' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    expect(release.cancel).not.toHaveBeenCalled()
+    expect(release.startNew).not.toHaveBeenCalled()
+  })
+
   it('offers lookup and discard for a pending submission and blocks creation', async () => {
     const user = userEvent.setup()
     const refetch = vi.fn()
@@ -417,6 +542,8 @@ describe('ReleaseWorkspace', () => {
 
   it.each([
     ['manifest', { source_revision: 'r1' }, 'json'],
+    ['inventory', { objects: [] }, 'json'],
+    ['receipt', { verified: true }, 'json'],
     ['report', 'verified', 'txt'],
   ])(
     'downloads verified %s content and releases its object URL',
@@ -433,11 +560,12 @@ describe('ReleaseWorkspace', () => {
         makeRelease({
           activeJobId: JOB_ID,
           status: { data: statusOf('committed') },
-          result: { data: { jobId: JOB_ID, artifacts: [name] } },
+          result: { data: { schema: 'curated-release-api/v1', result: {}, artifacts: [name] } },
         }),
       )
       renderWorkspace()
       await userEvent.setup().click(screen.getByRole('button', { name: `Download ${name}` }))
+      expect(getReleaseArtifact).toHaveBeenCalledWith(JOB_ID, name)
       await waitFor(() => expect(click).toHaveBeenCalledOnce())
       const anchor = click.mock.instances[0] as HTMLAnchorElement
       expect(anchor.download).toBe(`${name}.${extension}`)
@@ -588,6 +716,38 @@ describe('ReleaseWorkspace', () => {
       })
       unmount()
       expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+    })
+
+    it('toggles release and episode panes and restores focus from close controls', async () => {
+      const user = userEvent.setup()
+      vi.mocked(fetchSourceEpisodeMedia).mockResolvedValue(new Blob(['video']))
+      renderWorkspace()
+      const releaseButton = await screen.findByRole('button', { name: /Release A/ })
+      await user.click(releaseButton)
+      const episodeButton = await screen.findByRole('button', { name: /Episode 0/ })
+      await user.click(episodeButton)
+      expect(await screen.findByLabelText('Camera wrist for episode 0')).toBeVisible()
+
+      await user.click(episodeButton)
+      expect(screen.queryByLabelText('Camera wrist for episode 0')).toBeNull()
+      expect(episodeButton).toHaveAttribute('aria-expanded', 'false')
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:camera')
+      await user.click(episodeButton)
+      expect(await screen.findByLabelText('Camera wrist for episode 0')).toBeVisible()
+      await user.click(screen.getByRole('button', { name: 'Close episode details' }))
+      expect(episodeButton).toHaveFocus()
+      expect(screen.queryByLabelText('Camera wrist for episode 0')).toBeNull()
+
+      await user.click(releaseButton)
+      expect(screen.queryByRole('heading', { name: 'Release details (read-only)' })).toBeNull()
+      expect(releaseButton).toHaveAttribute('aria-expanded', 'false')
+      await user.click(releaseButton)
+      expect(
+        await screen.findByRole('heading', { name: 'Release details (read-only)' }),
+      ).toBeVisible()
+      await user.click(screen.getByRole('button', { name: 'Close release details' }))
+      expect(releaseButton).toHaveFocus()
+      expect(screen.queryByRole('heading', { name: 'Release details (read-only)' })).toBeNull()
     })
 
     it('reports media failure without displaying provider details', async () => {

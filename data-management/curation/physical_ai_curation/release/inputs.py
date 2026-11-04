@@ -394,23 +394,33 @@ async def _read_saved(
     return value
 
 
+def _portable_author(author: str, labels: dict[str, str]) -> str:
+    """Assign a release-local alias without exposing private identity or merging authors."""
+    if not isinstance(author, str) or not author:
+        raise ReleaseInputError("saved contributor identity must be a nonempty string")
+    if author not in labels:
+        number = len(labels) + 1
+        alias = f"contributor-{number}"
+        while alias in labels.values():
+            number += 1
+            alias = f"contributor-{number}"
+        labels[author] = alias
+    return labels[author]
+
+
 def _portable_value(value: Any, labels: dict[str, str]) -> Any:
     if isinstance(value, dict):
         result = {}
-        for key, child in value.items():
+        for key, child in sorted(value.items()):
             if key in {"principal_scope_id", "source_id", "source_revision", "endpoint", "api_key", "token"}:
                 continue
             if key in {"author_id", "annotator_id"} and child is not None:
-                if child not in labels:
-                    raise ReleaseInputError("selected authors require configured portable contributor labels")
-                result[key] = labels[child]
+                result[key] = _portable_author(child, labels)
             elif key == "acceptances":
-                try:
-                    result[key] = {
-                        identity: [labels[author] for author in authors] for identity, authors in child.items()
-                    }
-                except KeyError as exc:
-                    raise ReleaseInputError("selected acceptances require portable contributor labels") from exc
+                result[key] = {
+                    identity: [_portable_author(author, labels) for author in authors]
+                    for identity, authors in sorted(child.items())
+                }
             elif key == "machine" and child is not None:
                 result[key] = MachineOrigin.model_validate(child).model_dump(mode="json")
             else:

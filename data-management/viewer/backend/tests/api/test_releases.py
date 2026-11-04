@@ -94,6 +94,53 @@ def test_given_worker_api_failure_when_run_then_safe_configuration_exit(
     assert "private provider detail" not in caplog.text
 
 
+@pytest.mark.parametrize("escalate", [False, True])
+def test_given_active_worker_when_supervisor_cancelled_then_process_reaped(
+    monkeypatch: pytest.MonkeyPatch, escalate: bool
+) -> None:
+    from src.api import release_worker
+
+    process = MagicMock(returncode=None)
+    process.wait = AsyncMock(
+        side_effect=[asyncio.CancelledError(), TimeoutError(), 0] if escalate else [asyncio.CancelledError(), 0]
+    )
+    spawn = AsyncMock(return_value=process)
+    monkeypatch.setattr(release_worker.asyncio, "create_subprocess_exec", spawn)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(release_worker._supervise_worker(3, 10))
+
+    process.terminate.assert_called_once()
+    assert process.kill.call_count == int(escalate)
+    assert process.wait.await_count == (3 if escalate else 2)
+
+
+def test_given_worker_spawn_failure_when_supervised_then_retries_after_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.api import release_worker
+
+    process = MagicMock(returncode=0)
+    process.wait = AsyncMock(side_effect=asyncio.CancelledError())
+    spawn = AsyncMock(side_effect=[OSError("unavailable"), process])
+    delay = AsyncMock()
+    monkeypatch.setattr(release_worker.asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(release_worker.asyncio, "sleep", delay)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(release_worker._supervise_worker(3, 10))
+
+    assert spawn.await_count == 2
+    delay.assert_awaited_once_with(3)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "301", "invalid"])
+def test_given_invalid_worker_timing_when_starting_then_rejected(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    from src.api.release_worker import _worker_seconds
+
+    monkeypatch.setenv("RELEASE_WORKER_POLL_SECONDS", value)
+    with pytest.raises(ValueError):
+        _worker_seconds("RELEASE_WORKER_POLL_SECONDS", "3")
+
+
 def test_given_worker_module_when_disabled_then_process_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RELEASE_JOB_ROOT", "")
     monkeypatch.delenv("RELEASE_DESTINATIONS", raising=False)
@@ -886,6 +933,39 @@ def test_given_saved_labels_when_inventory_read_then_exact_revisions_are_selecta
     assert not (_settings.job_root / "jobs").exists()
 
 
+@pytest.mark.parametrize("author", ["private-author", "another-private-author"])
+def test_given_other_saved_author_when_previewed_then_automatically_attributes(release_api: tuple, author: str) -> None:
+    client, spec, settings, _app, root = release_api
+    labels = DatasetLabelsFile(
+        dataset_id="native",
+        episodes={"1": ["success"]},
+        provenance={
+            "1": {
+                "schema_version": "1.0.0",
+                "contributions": [
+                    {
+                        "id": "saved-contribution",
+                        "field": "labels/success",
+                        "origin": "human",
+                        "author_id": author,
+                        "value": True,
+                        "sequence": 0,
+                        "timestamp": "2026-11-03T00:00:00Z",
+                    }
+                ],
+            }
+        },
+    )
+    (root / "meta/episode_labels.json").write_text(labels.model_dump_json())
+    inventory = client.get(BASE + "/inventory/native?limit=1&cursor=1").json()
+
+    response = client.post(BASE + "/preview", json={**spec, "resources": inventory["items"][0]["resources"]})
+
+    assert response.status_code == 200, response.json()
+    assert author not in response.text
+    assert not settings.job_root.exists()
+
+
 def test_confirmed_acceptance_replays_and_survives_service_restart(release_api: tuple) -> None:
     test_client, spec, settings, app, _root = release_api
     preview = _preview(test_client, spec)
@@ -1032,8 +1112,12 @@ def test_given_lost_acceptance_when_source_removed_then_replay_uses_accepted_req
 
 
 def test_given_accepted_request_when_lookup_then_only_owner_can_resolve(release_api: tuple) -> None:
-    test_client, spec, _settings, app, _root = release_api
+    test_client, spec, settings, app, _root = release_api
     accepted = _submit(test_client, spec, _preview(test_client, spec)).json()
+    intent = ReleaseJobStore(settings.job_root).source_association(accepted["job_id"])
+    assert intent is not None
+    jobs = test_client.get(BASE + "/jobs?dataset_id=native").json()["items"]
+    assert jobs[0]["created_at"] == intent.accepted_at
     response = test_client.get(BASE + "/requests", headers={"Idempotency-Key": "release-key-1"})
     assert response.status_code == 200
     assert response.json()["job_id"] == accepted["job_id"]
@@ -1142,6 +1226,26 @@ def test_given_accepted_viewer_job_when_runner_executes_then_association_is_reta
     ]
 
 
+def test_given_backend_lifecycle_when_job_accepted_then_worker_publishes(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.api import main as main_mod
+
+    test_client, spec, _settings, _app, _source_root = release_api
+    monkeypatch.setattr(main_mod, "_job_router", None)
+    monkeypatch.setenv("RELEASE_WORKER_POLL_SECONDS", "0.1")
+
+    async def run_backend() -> None:
+        async with main_mod.lifespan(FastAPI()):
+            job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
+            async with asyncio.timeout(30):
+                while test_client.get(BASE + "/jobs/" + job).json()["state"] != "committed":
+                    await asyncio.sleep(0.1)
+            assert test_client.get(BASE + "/jobs/" + job + "/result").status_code == 200
+
+    asyncio.run(run_backend())
+
+
 def test_fresh_process_worker_publishes_and_artifacts_reverify(release_api: tuple) -> None:
     test_client, spec, settings, _app, source_root = release_api
     job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
@@ -1223,6 +1327,9 @@ def test_source_release_is_listed_and_read_after_job_and_source_removal(release_
     items = listing.json()["items"]
     assert [item["dataset_name"] for item in items] == [spec["dataset_name"]]
     assert items[0]["manifest_sha256"] == _sha256(published / "release/manifest.json")
+    intent = ReleaseJobStore(settings.job_root).source_association(_job)
+    assert intent is not None
+    assert items[0]["created_at"] == intent.accepted_at
     assert test_client.get(BASE + "/sources/other/releases").json()["items"] == []
     handle = items[0]["handle"]
 

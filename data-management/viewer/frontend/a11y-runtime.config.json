@@ -26,7 +26,9 @@
         "V16",
         "V17",
         "V18",
-        "V19"
+        "V19",
+        "V20",
+        "V21"
       ]
     }
   ],
@@ -276,6 +278,37 @@
         { "state": "portrait" },
         { "state": "landscape" }
       ]
+    },
+    {
+      "id": "V20",
+      "type": "component",
+      "route": "/",
+      "selector": "section[aria-label='Releases']",
+      "states": [
+        { "state": "default" },
+        { "state": "loading" },
+        { "state": "empty" },
+        { "state": "error" },
+        { "state": "denied" },
+        { "state": "open" },
+        { "state": "focus" }
+      ]
+    },
+    {
+      "id": "V21",
+      "type": "widget",
+      "route": "/",
+      "selector": "[role='dialog']:has(#release-name)",
+      "states": [
+        { "state": "open" },
+        { "state": "filtered" },
+        { "state": "mixed" },
+        { "state": "empty" },
+        { "state": "focus" },
+        { "state": "reflow-320" },
+        { "state": "resize-200" },
+        { "state": "text-spacing" }
+      ]
     }
   ],
   "probeScoping": [
@@ -298,13 +331,29 @@
         "V15",
         "V16",
         "V17",
-        "V18"
+        "V18",
+        "V20",
+        "V21"
       ],
       "states": ["default", "open", "error", "empty"]
     },
     {
       "probe": "probe-aria-tree",
-      "surfaces": ["V02", "V03", "V05", "V08", "V09", "V10", "V11", "V12", "V13", "V14", "V18"],
+      "surfaces": [
+        "V02",
+        "V03",
+        "V05",
+        "V08",
+        "V09",
+        "V10",
+        "V11",
+        "V12",
+        "V13",
+        "V14",
+        "V18",
+        "V20",
+        "V21"
+      ],
       "states": ["default", "focus", "open", "error", "empty"]
     },
     {
@@ -326,14 +375,16 @@
         "V13",
         "V14",
         "V18",
-        "V19"
+        "V19",
+        "V20",
+        "V21"
       ],
       "states": ["default", "focus", "forced-colors"]
     },
     {
       "probe": "probe-reflow-resize",
-      "surfaces": ["V02", "V03", "V05", "V06", "V08", "V13", "V14", "V18", "V19"],
-      "states": ["default", "reflow-320", "resize-200"]
+      "surfaces": ["V02", "V03", "V05", "V06", "V08", "V13", "V14", "V18", "V19", "V20", "V21"],
+      "states": ["default", "reflow-320", "resize-200", "text-spacing"]
     },
     {
       "probe": "probe-target-size",
@@ -356,7 +407,21 @@
     },
     {
       "probe": "probe-console-errors",
-      "surfaces": ["V01", "V02", "V03", "V04", "V05", "V06", "V08", "V13", "V14", "V18", "V19"],
+      "surfaces": [
+        "V01",
+        "V02",
+        "V03",
+        "V04",
+        "V05",
+        "V06",
+        "V08",
+        "V13",
+        "V14",
+        "V18",
+        "V19",
+        "V20",
+        "V21"
+      ],
       "states": ["default", "error"]
     },
     { "probe": "probe-broken-links", "surfaces": ["V02", "V17"], "states": ["default", "open"] },

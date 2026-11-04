@@ -304,7 +304,14 @@ class ReleaseService:
             binding = parse_strict_json(content) if content else {}
             source = binding.get("selection", {}).get("dataset_id")
             if dataset_id is None or source == dataset_id:
-                items.append({**_status_body(item), "dataset_id": source})
+                association = store.source_association(item.job_id)
+                items.append(
+                    {
+                        **_status_body(item),
+                        "dataset_id": source,
+                        "created_at": association.accepted_at if association else None,
+                    }
+                )
         return {
             "items": items,
             "next_cursor": page.next_cursor,
@@ -579,6 +586,7 @@ class ReleaseService:
                         "dataset_name": item.dataset_name,
                         "package_id": item.package_id,
                         "manifest_sha256": item.manifest_sha256,
+                        "created_at": item.created_at,
                     }
                     for item in items
                 ],
@@ -708,6 +716,7 @@ class ReleaseService:
                             manifest_sha256=verified.manifest_sha256,
                             store=LocalReleaseStore(verified.root),
                             local_root=verified.root,
+                            created_at=verified.accepted_at,
                         )
                     )
                 continue
@@ -731,6 +740,7 @@ class ReleaseService:
                         manifest_sha256=verified.manifest_sha256,
                         store=BlobReleaseStore(container, verified.root),
                         local_root=None,
+                        created_at=verified.accepted_at,
                     )
                 )
         return found
@@ -772,6 +782,7 @@ class _SourceRelease:
     manifest_sha256: str
     store: LocalReleaseStore | BlobReleaseStore
     local_root: Path | None
+    created_at: str | None = None
 
 
 def _source_handle(
@@ -808,6 +819,7 @@ def _source_release(
     manifest_sha256: str,
     store: LocalReleaseStore | BlobReleaseStore,
     local_root: Path | None,
+    created_at: str | None = None,
 ) -> _SourceRelease:
     handle = _source_handle(
         alias=alias,
@@ -817,7 +829,7 @@ def _source_release(
         package_id=package_id,
         manifest_sha256=manifest_sha256,
     )
-    return _SourceRelease(handle, dataset_name, package_id, manifest_sha256, store, local_root)
+    return _SourceRelease(handle, dataset_name, package_id, manifest_sha256, store, local_root, created_at)
 
 
 def _intent_matches(

@@ -99,7 +99,7 @@ function DatasetWorkspaceContent({
   const [jobOffset, setJobOffset] = useState(0)
   const [views, setViews] = useState<string[]>([])
   const availableCameras = useEpisodeStore((state) => state.currentEpisode?.cameras) ?? []
-  const workspace = useJudgeDataset(datasetId, enabled, reviewId, snapshotId, jobOffset)
+  const workspace = useJudgeDataset(datasetId, enabled && open, reviewId, snapshotId, jobOffset)
   const batch = useVlmJudgeBatch(datasetId)
   const inventoryItems = workspace.inventory.data?.items
   const known = useMemo(

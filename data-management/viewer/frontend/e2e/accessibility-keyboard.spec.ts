@@ -1,9 +1,93 @@
 import type { Page, TestInfo } from '@playwright/test'
 import { expect, test } from '@playwright/test'
 
-import { attachJson, openEmptyViewer, openViewer } from './accessibility-fixture'
+import { attachJson, openEmptyViewer, openReleaseDialog, openViewer } from './accessibility-fixture'
 
 // cspell:words describedby keyshortcuts spinbutton
+
+test('V21 release selection preserves keyboard focus and announces filter states', async ({
+  page,
+}, testInfo) => {
+  const { dialog, opener, consoleErrors, pageErrors } = await openReleaseDialog(page, testInfo)
+  const episode = dialog.getByRole('checkbox', { name: 'Episode 0', exact: true })
+  const bulk = dialog.getByRole('checkbox', { name: 'Select shown', exact: true })
+  const label = dialog.getByRole('checkbox', { name: 'REVIEWED (1)', exact: true })
+  const selectedOnly = dialog.getByRole('checkbox', { name: 'Selected only', exact: true })
+  const status = dialog.locator('#release-selection-status')
+  await expect(status).toHaveAttribute('aria-live', 'polite')
+  await expect(status).toHaveAttribute('aria-atomic', 'true')
+  await episode.focus()
+  await page.keyboard.press('Space')
+  await expect(bulk).toMatchAriaSnapshot('- checkbox "Select shown" [checked=mixed]')
+  await bulk.focus()
+  await page.keyboard.press('Space')
+  await expect(bulk).toBeChecked()
+  await page.keyboard.press('Space')
+  await expect(bulk).not.toBeChecked()
+  await episode.focus()
+  await page.keyboard.press('Space')
+  await label.focus()
+  await page.keyboard.press('Space')
+  await expect(label).toMatchAriaSnapshot('- checkbox "REVIEWED (1)" [checked]')
+  await expect(status).toHaveText('1 of 2 selected; 1 shown; 1 selected outside this view.')
+  expect(await status.ariaSnapshot()).toContain('1 selected outside this view.')
+  await bulk.focus()
+  await page.keyboard.press('Space')
+  await expect(status).toHaveText('2 of 2 selected; 1 shown; 1 selected outside this view.')
+  await page.keyboard.press('Space')
+  await selectedOnly.focus()
+  await page.keyboard.press('Space')
+  await expect(status).toContainText('No selected episodes match these filters.')
+  expect(await status.ariaSnapshot()).toContain('No selected episodes match these filters.')
+  await expect(bulk).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Reset filters' }).focus()
+  await page.keyboard.press('Enter')
+  await episode.focus()
+  await page.keyboard.press('Space')
+  await expect(selectedOnly).toBeFocused()
+  await page.keyboard.press('Space')
+  for (let stop = 0; stop < 30; stop++) {
+    await page.keyboard.press('Tab')
+    expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true)
+  }
+  await attachJson(testInfo, 'release-selection-tree', {
+    journeyIds: ['V21'],
+    tree: await dialog.ariaSnapshot(),
+  })
+  await page.keyboard.press('Escape')
+  await expect(dialog).not.toBeVisible()
+  await expect(opener).toBeFocused()
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
+})
+
+test('V21 mobile release filters expose disclosure state and keyboard controls', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 900 })
+  const { dialog } = await openReleaseDialog(page, testInfo)
+  const disclosure = dialog.getByRole('button', { name: /^Filters/ })
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+  await expect(dialog.getByRole('searchbox', { name: 'Search episodes' })).toHaveCount(0)
+  await disclosure.focus()
+  await page.keyboard.press('Space')
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
+  const controlled = await disclosure.getAttribute('aria-controls')
+  await expect(dialog.locator(`[id="${controlled}"]`)).toBeVisible()
+  await page.keyboard.press('Tab')
+  await expect(dialog.getByRole('searchbox', { name: 'Search episodes' })).toBeFocused()
+  await page.keyboard.press('Tab')
+  const label = dialog.getByRole('checkbox', { name: 'REVIEWED (1)' })
+  await expect(label).toBeFocused()
+  await page.keyboard.press('Space')
+  await expect(label).toBeChecked()
+  await disclosure.focus()
+  await page.keyboard.press('Space')
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+  expect(await dialog.ariaSnapshot()).not.toContain('checkbox "REVIEWED (1)"')
+  await page.keyboard.press('Tab')
+  await expect(dialog.getByRole('checkbox', { name: 'Selected only' })).toBeFocused()
+})
 
 interface FocusExpectation {
   scope: string

@@ -123,6 +123,11 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         _app.state.judge_jobs = jobs
         workers = [asyncio.create_task(jobs.run_forever()) for _ in range(_config.vlm_judge_capacity)]
     try:
+        from .release_worker import start_release_worker
+
+        release_worker = start_release_worker()
+        if release_worker is not None:
+            workers.append(release_worker)
         yield
     finally:
         for worker in workers:

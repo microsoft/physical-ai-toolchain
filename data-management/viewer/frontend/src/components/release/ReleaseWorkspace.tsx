@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronDown, ChevronRight, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import {
@@ -148,6 +149,7 @@ function describeJobStatus(status: ReleaseJobStatus | undefined, failed: boolean
   if (!status) return 'Loading job status...'
   const parts = [`${STATE_LABELS[status.state]}.`]
   if (status.cancelRequested) parts.push('Cancellation requested.')
+  else if (status.state === 'accepted') parts.push('Waiting for a release worker.')
   if (status.state === 'committed') parts.push('Verified result is available below.')
   return parts.join(' ')
 }
@@ -237,13 +239,16 @@ function ReleaseDetail({
   datasetId,
   scopeId,
   release,
+  onClose,
 }: {
   datasetId: string
   scopeId: string
   release: SourceRelease
+  onClose: () => void
 }) {
   const [selected, setSelected] = useState<SourceEpisode | null>(null)
   const [camera, setCamera] = useState<string | null>(null)
+  const episodeButton = useRef<HTMLButtonElement>(null)
   const episodes = useInfiniteQuery({
     queryKey: ['releases', 'source-episodes', scopeId, datasetId, release.handle],
     queryFn: ({ pageParam }) =>
@@ -259,10 +264,25 @@ function ReleaseDetail({
   const activeCamera = camera !== null && cameras.includes(camera) ? camera : (cameras[0] ?? null)
 
   return (
-    <section aria-labelledby="release-detail-heading" className="grid gap-4">
-      <h3 id="release-detail-heading" className="text-sm font-medium">
-        Release details (read-only)
-      </h3>
+    <section
+      id="release-detail-panel"
+      aria-labelledby="release-detail-heading"
+      className="grid gap-4"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h3 id="release-detail-heading" className="text-sm font-medium">
+          Release details (read-only)
+        </h3>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Close release details"
+          title="Close release details"
+          onClick={onClose}
+        >
+          <X className="size-4" aria-hidden="true" />
+        </Button>
+      </div>
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-muted-foreground">Episodes</dt>
         <dd>{release.totalEpisodes}</dd>
@@ -296,15 +316,24 @@ function ReleaseDetail({
           {rows.map((episode) => (
             <li key={episode.episodeIndex}>
               <button
+                ref={selected?.episodeIndex === episode.episodeIndex ? episodeButton : null}
                 type="button"
-                aria-pressed={selected?.episodeIndex === episode.episodeIndex}
+                aria-expanded={selected?.episodeIndex === episode.episodeIndex}
+                aria-controls="release-episode-panel"
                 onClick={() => {
-                  setSelected(episode)
+                  setSelected(selected?.episodeIndex === episode.episodeIndex ? null : episode)
                   setCamera(null)
                 }}
                 className="hover:bg-muted flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm"
               >
-                <span>Episode {episode.episodeIndex}</span>
+                <span className="flex shrink-0 items-center gap-2">
+                  {selected?.episodeIndex === episode.episodeIndex ? (
+                    <ChevronDown className="size-4" aria-hidden="true" />
+                  ) : (
+                    <ChevronRight className="size-4" aria-hidden="true" />
+                  )}
+                  Episode {episode.episodeIndex}
+                </span>
                 <span className="text-muted-foreground truncate text-xs">
                   {episode.instruction}
                 </span>
@@ -326,7 +355,29 @@ function ReleaseDetail({
       </div>
 
       {selected && (
-        <div className="grid gap-3">
+        <section
+          id="release-episode-panel"
+          aria-labelledby="release-episode-heading"
+          className="grid gap-3"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <h4 id="release-episode-heading" className="text-sm font-medium">
+              Episode {selected.episodeIndex} details
+            </h4>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Close episode details"
+              title="Close episode details"
+              onClick={() => {
+                setSelected(null)
+                setCamera(null)
+                episodeButton.current?.focus()
+              }}
+            >
+              <X className="size-4" aria-hidden="true" />
+            </Button>
+          </div>
           <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
             <dt className="text-muted-foreground">Instruction</dt>
             <dd>{selected.instruction}</dd>
@@ -358,7 +409,7 @@ function ReleaseDetail({
               camera={activeCamera}
             />
           )}
-        </div>
+        </section>
       )}
     </section>
   )
@@ -380,6 +431,10 @@ function ReleaseWorkspaceContent({
   const workspaceRegion = useRef<HTMLElement>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [selectedHandle, setSelectedHandle] = useState<string | null>(null)
+  const [collapsedJobId, setCollapsedJobId] = useState<string | null>(null)
+  const jobButton = useRef<HTMLButtonElement>(null)
+  const releaseButton = useRef<HTMLButtonElement>(null)
+  const jobExpanded = release.activeJobId !== null && collapsedJobId !== release.activeJobId
 
   const capabilities = release.capabilities.data
   const capabilityError = release.capabilities.error
@@ -422,9 +477,7 @@ function ReleaseWorkspaceContent({
   }, [activeState, queryClient, scopeId, datasetId])
 
   const result: ReleaseResult | undefined = release.result.data
-  const dialogItems: ReleaseItem[] = release.inventoryReady
-    ? (release.inventory.data?.items ?? []).map(toReleaseItem)
-    : []
+  const dialogItems: ReleaseItem[] = (release.inventory.data?.items ?? []).map(toReleaseItem)
 
   const capabilityMessage =
     capabilityError instanceof ReleaseRequestError &&
@@ -521,8 +574,12 @@ function ReleaseWorkspaceContent({
         </Alert>
       )}
 
-      {release.activeJobId && (
-        <section aria-labelledby="release-job-heading" className="grid gap-3 rounded-md border p-3">
+      {jobExpanded && (
+        <section
+          id="release-job-panel"
+          aria-labelledby="release-job-heading"
+          className="grid gap-3 rounded-md border p-3"
+        >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 id="release-job-heading" className="text-sm font-medium">
               Active job
@@ -559,6 +616,18 @@ function ReleaseWorkspaceContent({
                   Clear saved job
                 </Button>
               )}
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Close job details"
+                title="Close job details"
+                onClick={() => {
+                  setCollapsedJobId(release.activeJobId)
+                  ;(jobButton.current ?? workspaceRegion.current)?.focus()
+                }}
+              >
+                <X className="size-4" aria-hidden="true" />
+              </Button>
             </div>
           </div>
           <p role="status" aria-live="polite" className="text-sm">
@@ -568,7 +637,7 @@ function ReleaseWorkspaceContent({
         </section>
       )}
 
-      {status?.state === 'committed' && (
+      {jobExpanded && status?.state === 'committed' && (
         <section
           aria-labelledby="release-result-heading"
           className="grid gap-3 rounded-md border p-3"
@@ -589,7 +658,7 @@ function ReleaseWorkspaceContent({
                     variant="outline"
                     size="sm"
                     aria-label={`Download ${name}`}
-                    onClick={() => void runAction(() => downloadArtifact(result.jobId, name))}
+                    onClick={() => void runAction(() => downloadArtifact(status.jobId, name))}
                   >
                     Download {name}
                   </Button>
@@ -615,16 +684,26 @@ function ReleaseWorkspaceContent({
                     key={job.jobId}
                     className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 text-sm"
                   >
-                    <span className="font-mono text-xs">{job.jobId.slice(0, 8)}</span>
+                    <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+                      <span className="font-mono text-xs">{job.jobId.slice(0, 8)}</span>
+                      <CreationDate value={job.createdAt} />
+                    </span>
                     <span>{STATE_LABELS[job.state]}</span>
                     <Button
+                      ref={release.activeJobId === job.jobId ? jobButton : null}
                       variant="outline"
                       size="sm"
-                      aria-label={`Open job ${job.jobId.slice(0, 8)}`}
-                      aria-pressed={release.activeJobId === job.jobId}
-                      onClick={() => release.selectJob(job.jobId)}
+                      aria-label={`${jobExpanded && release.activeJobId === job.jobId ? 'Close' : 'Open'} job ${job.jobId.slice(0, 8)}`}
+                      aria-expanded={jobExpanded && release.activeJobId === job.jobId}
+                      aria-controls="release-job-panel"
+                      onClick={() => {
+                        setCollapsedJobId(
+                          jobExpanded && release.activeJobId === job.jobId ? job.jobId : null,
+                        )
+                        if (release.activeJobId !== job.jobId) release.selectJob(job.jobId)
+                      }}
                     >
-                      Open job
+                      {jobExpanded && release.activeJobId === job.jobId ? 'Close job' : 'Open job'}
                     </Button>
                   </li>
                 ))}
@@ -667,24 +746,51 @@ function ReleaseWorkspaceContent({
           {(sourceReleases.data?.items ?? []).map((item) => (
             <li key={item.handle}>
               <button
+                ref={selectedHandle === item.handle ? releaseButton : null}
                 type="button"
-                aria-pressed={selectedHandle === item.handle}
-                onClick={() => setSelectedHandle(item.handle)}
-                className="hover:bg-muted flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm"
+                aria-expanded={selectedHandle === item.handle}
+                aria-controls="release-detail-panel"
+                onClick={() =>
+                  setSelectedHandle(selectedHandle === item.handle ? null : item.handle)
+                }
+                className="hover:bg-muted flex w-full flex-wrap items-center justify-between gap-3 px-3 py-2 text-left text-sm"
               >
-                <span>{item.datasetName ?? 'Unnamed release'}</span>
-                <span className="text-muted-foreground font-mono text-xs">{item.packageId}</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  {selectedHandle === item.handle ? (
+                    <ChevronDown className="size-4 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
+                  )}
+                  <span className="min-w-0 [overflow-wrap:anywhere]">
+                    {item.datasetName ?? 'Unnamed release'}
+                  </span>
+                </span>
+                <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <CreationDate value={item.createdAt} />
+                  <span className="text-muted-foreground font-mono text-xs break-all">
+                    {item.packageId}
+                  </span>
+                </span>
               </button>
             </li>
           ))}
         </ul>
-        {detail.isError && (
+        {selectedHandle && detail.isError && (
           <Alert variant="destructive">
             <AlertDescription>The selected release could not be loaded.</AlertDescription>
           </Alert>
         )}
-        {detail.data && (
-          <ReleaseDetail datasetId={datasetId} scopeId={scopeId} release={detail.data} />
+        {selectedHandle && detail.data && (
+          <ReleaseDetail
+            key={selectedHandle}
+            datasetId={datasetId}
+            scopeId={scopeId}
+            release={detail.data}
+            onClose={() => {
+              setSelectedHandle(null)
+              ;(releaseButton.current ?? workspaceRegion.current)?.focus()
+            }}
+          />
         )}
       </section>
 
@@ -708,12 +814,38 @@ function ReleaseWorkspaceContent({
   )
 }
 
+/** Displays durable creation time in the browser's locale and timezone, without inventing legacy dates. */
+function CreationDate({ value }: { value?: string | null }) {
+  const date = value ? new Date(value) : null
+  if (!date || Number.isNaN(date.getTime())) {
+    return <span className="text-muted-foreground text-xs">Date unavailable</span>
+  }
+  return (
+    <time
+      dateTime={value ?? undefined}
+      title={value ?? undefined}
+      className="text-muted-foreground text-xs"
+    >
+      Created{' '}
+      {new Intl.DateTimeFormat(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZoneName: 'short',
+      }).format(date)}
+    </time>
+  )
+}
+
 /**
  * Releases tab for one source dataset: create a release from the full inventory, follow the active job,
  * browse verified source releases, and download committed artifacts.
  *
  * Cancel, recover, and clearing the saved job happen only on explicit clicks. Verified results are shown
  * only after the job commits. The workspace resets when the dataset, principal scope, or source identity changes.
+ * Pane toggles only change visibility; closing a job pane preserves its saved reference and execution.
  *
  * @param props - Source dataset identifier.
  * @returns Release workspace element.

@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 
 import { DatasetCatalog } from '@/components/app-shell/DatasetCatalog'
 import { DatasetWorkspace } from '@/components/app-shell/DatasetWorkspace'
@@ -25,6 +25,7 @@ export function AppContent() {
   const [catalogOpen, setCatalogOpen] = useState(!datasetId)
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const [sourceTab, setSourceTab] = useState<SourceTab>('episodes')
+  const sourceTabsId = useId()
   const switchSourceTab = (tab: SourceTab) => {
     if (tab === sourceTab) return
     const playback = useEpisodeStore.getState()
@@ -36,7 +37,12 @@ export function AppContent() {
     const playback = useEpisodeStore.getState()
     if (playback.isPlaying) playback.togglePlayback()
     document.querySelectorAll('video').forEach((video) => video.pause())
-    setWorkspaceOpen((open) => !open)
+    if (sourceTab === 'releases') {
+      setSourceTab('episodes')
+      setWorkspaceOpen(true)
+    } else {
+      setWorkspaceOpen((open) => !open)
+    }
     document.getElementById('dataset-workspace-toggle')?.focus()
   }
   const openCatalog = () => {
@@ -110,10 +116,24 @@ export function AppContent() {
           value={sourceTab}
           onValueChange={(value) => switchSourceTab(value as SourceTab)}
           className="border-b px-4 pt-2"
+          role="navigation"
+          aria-label="Source navigation"
         >
-          <TabsList aria-label="Source views">
-            <TabsTrigger value="episodes">Episodes</TabsTrigger>
-            <TabsTrigger value="releases">Releases</TabsTrigger>
+          <TabsList aria-label="Source views" className="text-foreground">
+            <TabsTrigger
+              value="episodes"
+              id={`${sourceTabsId}-episodes-tab`}
+              aria-controls={`${sourceTabsId}-episodes-panel`}
+            >
+              Episodes
+            </TabsTrigger>
+            <TabsTrigger
+              value="releases"
+              id={`${sourceTabsId}-releases-tab`}
+              aria-controls={`${sourceTabsId}-releases-panel`}
+            >
+              Releases
+            </TabsTrigger>
           </TabsList>
         </Tabs>
       )}
@@ -132,16 +152,27 @@ export function AppContent() {
           <DatasetWorkspace
             key={datasetId}
             datasetId={datasetId}
-            open={workspaceOpen}
+            open={workspaceOpen && !catalogOpen && sourceTab === 'episodes'}
             enabled={!!capabilities?.vlmJudgeEnabled}
             onToggle={toggleWorkspace}
           />
         </div>
       )}
-      {datasetId && !catalogOpen && sourceTab === 'releases' && (
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <ReleaseWorkspace datasetId={datasetId} />
-        </div>
+      {datasetId && (
+        <main
+          hidden={catalogOpen || sourceTab !== 'releases'}
+          className={
+            catalogOpen || sourceTab !== 'releases' ? 'hidden' : 'min-h-0 flex-1 overflow-y-auto'
+          }
+        >
+          <div
+            role="tabpanel"
+            id={`${sourceTabsId}-releases-panel`}
+            aria-labelledby={`${sourceTabsId}-releases-tab`}
+          >
+            {!catalogOpen && sourceTab === 'releases' && <ReleaseWorkspace datasetId={datasetId} />}
+          </div>
+        </main>
       )}
       {datasetId && (
         <KeyboardShortcutsContext.Provider value={!episodesHidden}>
@@ -159,16 +190,24 @@ export function AppContent() {
             </aside>
 
             <main className="bg-background min-w-0 flex-1 overflow-hidden">
-              <DataviewerEpisodeViewer
-                datasetId={datasetId}
-                episodeIndex={selectedEpisode}
-                diagnosticsVisible={diagnosticsVisible}
-                canGoPreviousEpisode={canGoPreviousEpisode}
-                onPreviousEpisode={handlePreviousEpisode}
-                canGoNextEpisode={canGoNextEpisode}
-                onNextEpisode={handleNextEpisode}
-                onSaveAndNextEpisode={handleNextEpisode}
-              />
+              <div
+                role="tabpanel"
+                id={`${sourceTabsId}-episodes-panel`}
+                aria-labelledby={`${sourceTabsId}-episodes-tab`}
+                className="h-full"
+              >
+                <DataviewerEpisodeViewer
+                  visible={!episodesHidden}
+                  datasetId={datasetId}
+                  episodeIndex={selectedEpisode}
+                  diagnosticsVisible={diagnosticsVisible}
+                  canGoPreviousEpisode={canGoPreviousEpisode}
+                  onPreviousEpisode={handlePreviousEpisode}
+                  canGoNextEpisode={canGoNextEpisode}
+                  onNextEpisode={handleNextEpisode}
+                  onSaveAndNextEpisode={handleNextEpisode}
+                />
+              </div>
             </main>
           </div>
         </KeyboardShortcutsContext.Provider>

@@ -90,6 +90,42 @@ def test_given_localuser_when_no_contributor_configuration_then_author_and_initi
     }
 
 
+@pytest.mark.parametrize("field", ["author_id", "annotator_id", "acceptances"])
+def test_given_unmapped_author_when_freezing_then_assigns_portable_aliases(
+    local_source: LocalReleaseSource, field: str
+) -> None:
+    reader = SavedReader()
+    value = {"contribution": ["unmapped-author"]} if field == "acceptances" else "unmapped-author"
+    reader.annotations = SavedResource({"annotations": [{field: value}]}, "annotation-v1")
+    selection = _selection(SavedSelection(kind="annotation", episode_index=0, expected_revision="annotation-v1"))
+
+    frozen = asyncio.run(freeze_release_inputs(local_source, reader, selection, _context()))
+    repeated = asyncio.run(freeze_release_inputs(local_source, reader, selection, _context()))
+
+    assert b"unmapped-author" not in serialize_model(frozen.content)
+    assert b"private-" not in serialize_model(frozen.content)
+    assert "contributor-" in frozen.content.saved_resources[0].value_json
+    assert serialize_model(frozen.content) == serialize_model(repeated.content)
+    assert reader.annotations.value == {"annotations": [{field: value}]}
+
+
+def test_given_distinct_saved_authors_when_freezing_then_preserves_distinct_attribution(
+    local_source: LocalReleaseSource,
+) -> None:
+    reader = SavedReader()
+    reader.annotations = SavedResource(
+        {"annotations": [{"annotator_id": "first-private", "author_id": "second-private"}]}, "annotation-v1"
+    )
+    selection = _selection(SavedSelection(kind="annotation", episode_index=0, expected_revision="annotation-v1"))
+
+    frozen = asyncio.run(freeze_release_inputs(local_source, reader, selection, _context()))
+
+    projected = json.loads(frozen.content.saved_resources[0].value_json)["annotations"][0]
+    assert projected["annotator_id"] != projected["author_id"]
+    assert "first-private" not in serialize_model(frozen.content).decode()
+    assert "second-private" not in serialize_model(frozen.content).decode()
+
+
 def test_given_no_judge_or_instruction_when_freeze_then_saved_selection_succeeds(
     local_source: LocalReleaseSource,
 ) -> None:

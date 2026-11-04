@@ -94,6 +94,96 @@ describe('ReleaseDialog', () => {
     expect(screen.getByRole('button', { name: /preview release/i })).toBeDisabled()
   })
 
+  it('preserves keyboard focus when selected-only rows disappear', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 1' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 3' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Selected only' }))
+    screen.getByRole('checkbox', { name: 'Episode 1' }).focus()
+    await user.keyboard(' ')
+    expect(screen.getByRole('checkbox', { name: 'Episode 3' })).toHaveFocus()
+    await user.keyboard(' ')
+    expect(screen.getByRole('checkbox', { name: 'Episode 0' })).toHaveFocus()
+    await user.keyboard(' ')
+    expect(screen.getByRole('checkbox', { name: 'Selected only' })).toHaveFocus()
+    expect(screen.getByText('No selected episodes match these filters.')).toBeVisible()
+  })
+
+  it('filters actual labels with checkboxes and reports selections hidden by filters', async () => {
+    const user = userEvent.setup()
+    const props = renderDialog()
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 1' }))
+    await user.click(screen.getByRole('checkbox', { name: 'pick (1)' }))
+    expect(within(episodeList()).getAllByRole('listitem')).toHaveLength(1)
+    expect(
+      screen.getByText('1 of 4 selected; 1 shown; 1 selected outside this view.'),
+    ).toBeVisible()
+    await user.click(screen.getByRole('checkbox', { name: 'Select shown' }))
+    expect(
+      screen.getByText('2 of 4 selected; 1 shown; 1 selected outside this view.'),
+    ).toBeVisible()
+    await user.click(screen.getByRole('checkbox', { name: 'place (1)' }))
+    expect(within(episodeList()).getAllByRole('listitem')).toHaveLength(2)
+    expect(screen.getByRole('checkbox', { name: 'Select shown' })).toBePartiallyChecked()
+    await user.click(screen.getByRole('checkbox', { name: 'Select shown' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Select shown' }))
+    await user.click(screen.getByRole('button', { name: /preview release/i }))
+    await waitFor(() =>
+      expect(props.onPreview).toHaveBeenCalledWith(
+        expect.objectContaining({ episodeIndices: [1] }),
+      ),
+    )
+  })
+
+  it('makes selected-only and empty filter states explicit without changing selection', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+    await user.click(screen.getByRole('checkbox', { name: 'Selected only' }))
+    expect(screen.getByText('No selected episodes match these filters.')).toBeVisible()
+    await user.click(screen.getByRole('checkbox', { name: 'Selected only' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.type(screen.getByRole('searchbox', { name: 'Search episodes' }), 'place')
+    await user.click(screen.getByRole('checkbox', { name: 'Selected only' }))
+    expect(screen.getByText('No selected episodes match these filters.')).toBeVisible()
+    expect(
+      screen.getByText('1 of 4 selected; 0 shown; 1 selected outside this view.'),
+    ).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }))
+    expect(screen.getByRole('checkbox', { name: 'Episode 0' })).toBeChecked()
+    expect(within(episodeList()).getAllByRole('listitem')).toHaveLength(1)
+  })
+
+  it('counts unique available episodes after inventory refresh and submits only those rows', async () => {
+    const user = userEvent.setup()
+    const props = {
+      datasetId: 'dataset-1',
+      open: true,
+      onOpenChange: vi.fn(),
+      items,
+      inventoryReady: true,
+      destinations: ['local'],
+      onPreview: vi.fn().mockResolvedValue(makePreview()),
+      onSubmit: vi.fn(),
+    }
+    const { rerender } = renderWithQuery(<ReleaseDialog {...props} />)
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('button', { name: 'Select all' }))
+    rerender(<ReleaseDialog {...props} items={[items[0], items[0], items[3]]} />)
+    expect(
+      screen.getByText('2 of 2 selected; 2 shown; 0 selected outside this view.'),
+    ).toBeVisible()
+    expect(within(episodeList()).getAllByRole('listitem')).toHaveLength(2)
+    await user.click(screen.getByRole('button', { name: /preview release/i }))
+    await waitFor(() =>
+      expect(props.onPreview).toHaveBeenCalledWith(
+        expect.objectContaining({ episodeIndices: [0, 3] }),
+      ),
+    )
+  })
+
   it('updates destination and description and clears a filtered selection', async () => {
     const user = userEvent.setup()
     const props = renderDialog({ destinations: ['local-disk', 'archive'] })
@@ -116,6 +206,28 @@ describe('ReleaseDialog', () => {
         }),
       ),
     )
+  })
+
+  it('emphasizes the current action and announces the remaining submission requirement', async () => {
+    const user = userEvent.setup()
+    renderDialog({
+      onPreview: vi.fn().mockResolvedValue(makePreview({ actions: [], destinationKind: 'blob' })),
+    })
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('checkbox', { name: /I declare/i }))
+    const preview = screen.getByRole('button', { name: /preview release/i })
+    const submit = screen.getByRole('button', { name: /submit release/i })
+    expect(preview).toHaveClass('bg-primary')
+    expect(submit).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Preview required before submission.')
+
+    await user.click(preview)
+
+    await waitFor(() => expect(submit).toBeEnabled())
+    expect(submit).toHaveClass('bg-primary')
+    expect(preview).not.toHaveClass('bg-primary')
+    expect(screen.getByRole('status')).toHaveTextContent('Ready to submit.')
   })
 
   it.each([
@@ -198,15 +310,16 @@ describe('ReleaseDialog', () => {
     renderDialog()
 
     await user.selectOptions(screen.getByLabelText('Annotation'), 'yes')
-    await user.click(screen.getByRole('button', { name: 'Select shown' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Select shown' }))
     await user.selectOptions(screen.getByLabelText('Annotation'), 'any')
     await user.selectOptions(screen.getByLabelText('Edits'), 'yes')
-    await user.click(screen.getByRole('button', { name: 'Select shown' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Select shown' }))
 
     expect(screen.getByRole('checkbox', { name: 'Episode 1' })).toBeChecked()
     expect(screen.getByText('#4')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Review selected' }))
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Selected only' }))
     const rows = within(episodeList()).getAllByRole('listitem')
     expect(rows).toHaveLength(4)
     expect(rows[0]).toHaveTextContent('Episode 0')

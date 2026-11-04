@@ -142,6 +142,7 @@ class VerifiedAssociation:
     source_relative_path: str
     destination_alias: str
     scope_sha256: str
+    accepted_at: str
 
 
 class LocalSourceAssociations:
@@ -324,6 +325,7 @@ class LocalSourceAssociations:
                     intent.source_relative_path,
                     intent.destination_alias,
                     intent.scope_sha256,
+                    intent.accepted_at,
                 )
         except (OSError, ReleaseVerificationError):
             return None

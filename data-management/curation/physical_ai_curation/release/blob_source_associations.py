@@ -68,6 +68,7 @@ class BlobVerifiedAssociation:
     source_relative_path: str
     destination_alias: str
     scope_sha256: str
+    accepted_at: str
 
 
 def _bounded_content(chunks: Iterable[bytes], limit: int) -> bytes:
@@ -240,6 +241,7 @@ class BlobSourceAssociations:
             source_relative_path=intent.source_relative_path,
             destination_alias=intent.destination_alias,
             scope_sha256=intent.scope_sha256,
+            accepted_at=intent.accepted_at,
         )
 
     def _check_destination(self, intent: SourceAssociationIntent) -> None:

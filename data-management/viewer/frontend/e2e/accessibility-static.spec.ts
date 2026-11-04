@@ -8,6 +8,7 @@ import { expect, test } from '@playwright/test'
 import {
   attachJson,
   openEmptyViewer,
+  openReleaseDialog,
   openViewer,
   riskComponentRegistry,
 } from './accessibility-fixture'
@@ -41,6 +42,24 @@ test('V02 through V18 loaded workspace has no axe violations', async ({ page }, 
   ])
   expect(errors.consoleErrors).toEqual([])
   expect(errors.pageErrors).toEqual([])
+})
+
+test('V20 and V21 release workspace and selection states have no axe violations', async ({
+  page,
+}, testInfo) => {
+  const { dialog, opener, consoleErrors, pageErrors } = await openReleaseDialog(page, testInfo)
+  await expectNoAxeViolations(page, testInfo, 'release-open', ['V21'])
+  await dialog.getByRole('checkbox', { name: 'Episode 0', exact: true }).click()
+  await dialog.getByRole('checkbox', { name: 'REVIEWED (1)' }).click()
+  await expectNoAxeViolations(page, testInfo, 'release-filtered', ['V21'])
+  await dialog.getByRole('checkbox', { name: 'Selected only' }).click()
+  await expect(dialog.locator('#release-selection-status')).toContainText('No selected episodes')
+  await expectNoAxeViolations(page, testInfo, 'release-empty', ['V21'])
+  await page.keyboard.press('Escape')
+  await expect(opener).toBeFocused()
+  await expectNoAxeViolations(page, testInfo, 'release-workspace', ['V20'])
+  expect(consoleErrors).toEqual([])
+  expect(pageErrors).toEqual([])
 })
 
 test('V02 V03 and V04 empty shell has no axe violations', async ({ page }, testInfo) => {

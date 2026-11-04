@@ -96,6 +96,8 @@ export interface ReleaseJobStatus {
 /** Job status as listed for one source. The list endpoint adds the source dataset identifier. */
 export interface ReleaseJobListItem extends ReleaseJobStatus {
   datasetId: string | null
+  /** Durable acceptance time, or null when an older job has no source association. */
+  createdAt?: string | null
 }
 
 /** One page of release jobs owned by the caller, ordered by acceptance. */
@@ -104,10 +106,9 @@ export interface ReleaseJobPage {
   nextCursor: number | null
 }
 
-/** Result of a committed release job. */
+/** Result of a committed release job; job identity comes from its status, not this response. */
 export interface ReleaseResult {
   schema: string
-  jobId: string
   result: Record<string, unknown>
   artifacts: string[]
 }
@@ -125,6 +126,8 @@ export interface SourceReleaseSummary {
   datasetName: string | null
   packageId: string
   manifestSha256: string
+  /** Creation time recorded when the release request was accepted. */
+  createdAt?: string | null
 }
 
 /** Verified local release with its saved annotations, labels and original frozen evidence. */

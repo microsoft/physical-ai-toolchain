@@ -134,6 +134,8 @@ def generate_task_table(source: pa.Table) -> pa.Table:
     tasks = source.to_pandas()
     if tasks.index.name == "task":
         tasks = tasks.reset_index()
+    elif "task" not in tasks.columns and tasks.index.name is None and tasks.index.nlevels == 1:
+        tasks = tasks.rename_axis("task").reset_index()
     if not {"task", "task_index"} <= set(tasks.columns) or tasks.empty:
         raise ReleasePlanError("task table requires names and indices")
     tasks = tasks.sort_values("task_index")

@@ -21,6 +21,50 @@ const entry = (
 
 export const viewerAccessibilityManifest: ViewerAccessibilityCase[] = [
   entry(
+    'viewer-release-selection-keyboard',
+    'V21 release selection preserves keyboard focus and announces filter states',
+    [
+      'release-label-filters',
+      'select-shown',
+      'selected-only',
+      'release-selection-status',
+      'release-dialog',
+    ],
+    ['open', 'filtered', 'mixed', 'hidden-selection', 'empty', 'deselected', 'closed'],
+    ['WCAG22-2.1.1', 'WCAG22-2.1.2', 'WCAG22-2.4.3', 'WCAG22-4.1.2', 'WCAG22-4.1.3'],
+    ['PLAYWRIGHT_KEYBOARD', 'PLAYWRIGHT_TREE', 'PLAYWRIGHT_LIVE_REGION'],
+  ),
+  entry(
+    'viewer-release-mobile-filters',
+    'V21 mobile release filters expose disclosure state and keyboard controls',
+    ['release-filter-disclosure', 'release-label-filters', 'selected-only'],
+    ['reflow-320', 'collapsed', 'expanded', 'filtered'],
+    ['WCAG22-2.1.1', 'WCAG22-2.4.3', 'WCAG22-4.1.2'],
+    ['PLAYWRIGHT_KEYBOARD', 'PLAYWRIGHT_TREE'],
+  ),
+  entry(
+    'viewer-release-adaptive',
+    'V21 release dialog preserves reflow text spacing and unclipped focus',
+    ['release-dialog', 'release-name', 'release-actions'],
+    ['open', 'reflow-320', 'resize-200', 'text-spacing', 'focus'],
+    ['WCAG22-1.4.4', 'WCAG22-1.4.10', 'WCAG22-1.4.12', 'WCAG22-2.4.7', 'WCAG22-2.4.11'],
+    ['PLAYWRIGHT_KEYBOARD', 'PLAYWRIGHT_VISUAL'],
+  ),
+  entry(
+    'viewer-release-axe',
+    'V20 and V21 release workspace and selection states have no axe violations',
+    [
+      'source-tabs',
+      'release-workspace',
+      'release-dialog',
+      'release-label-filters',
+      'selected-only',
+    ],
+    ['open', 'filtered', 'empty', 'closed'],
+    ['WCAG22-1.3.1', 'WCAG22-1.4.3', 'WCAG22-4.1.2'],
+    ['AXE'],
+  ),
+  entry(
     'viewer-job-control-recovery',
     'P06 job controls retain progress through refresh failure and keyboard cancel retry',
     ['durable-jobs', 'cancel-job', 'retry-job', 'refresh-jobs'],

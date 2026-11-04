@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { SlidersHorizontal } from 'lucide-react'
+import { useRef, useState } from 'react'
 
 import {
   type ReleasePreview,
@@ -71,6 +72,8 @@ type ReleaseRequestDraft = ReleaseRequest & { description?: string }
 type Tristate = 'any' | 'yes' | 'no'
 
 interface Filters {
+  search: string
+  labelValues: string[]
   annotation: Tristate
   edits: Tristate
   labels: Tristate
@@ -81,6 +84,8 @@ interface Filters {
 }
 
 const ANY_FILTERS: Filters = {
+  search: '',
+  labelValues: [],
   annotation: 'any',
   edits: 'any',
   labels: 'any',
@@ -126,6 +131,11 @@ function matchesTristate(value: boolean, filter: Tristate): boolean {
 /** Cross-filter: an item must satisfy every active filter. */
 function matchesFilters(item: ReleaseItem, filters: Filters): boolean {
   return (
+    `episode ${item.episodeIndex} ${(item.labels ?? []).join(' ')}`
+      .toLowerCase()
+      .includes(filters.search.trim().toLowerCase()) &&
+    (filters.labelValues.length === 0 ||
+      filters.labelValues.some((label) => item.labels?.includes(label))) &&
     matchesTristate(item.annotation === true, filters.annotation) &&
     matchesTristate(item.edits === true, filters.edits) &&
     matchesTristate((item.labels?.length ?? 0) > 0, filters.labels) &&
@@ -206,7 +216,7 @@ function describeRow(item: ReleaseItem): string {
   const parts = [
     item.annotation ? 'annotated' : null,
     item.edits ? 'edited' : null,
-    item.labels?.length ? `${item.labels.length} label(s)` : null,
+    item.labels?.length ? `labels: ${item.labels.join(', ')}` : null,
     item.resources?.length ? `${item.resources.length} resource(s)` : null,
     item.provenance?.origins.length ? `origin: ${item.provenance.origins.join(', ')}` : null,
     item.judge ? describeJudge(item.judge) : null,
@@ -281,7 +291,7 @@ function SummaryList({ title, items, empty }: { title: string; items: string[]; 
       {items.length === 0 ? (
         <p className="text-muted-foreground text-sm">{empty}</p>
       ) : (
-        <ul className="list-disc pl-5 text-sm">
+        <ul className="list-disc pl-5 text-sm [overflow-wrap:anywhere]">
           {items.map((item, index) => (
             <li key={`${index}-${item}`}>{item}</li>
           ))}
@@ -318,7 +328,10 @@ export function ReleaseDialog({
   const [description, setDescription] = useState('')
   const [finalized, setFinalized] = useState(false)
   const [filters, setFilters] = useState<Filters>(ANY_FILTERS)
+  const [filtersExpanded, setFiltersExpanded] = useState(false)
   const [reviewSelected, setReviewSelected] = useState(false)
+  const selectedOnlyRef = useRef<HTMLButtonElement>(null)
+  const episodeCheckboxes = useRef(new Map<number, HTMLButtonElement>())
   const [identity, setIdentity] = useState<DraftIdentity>(createDraftIdentity)
   const [review, setReview] = useState<ReviewState | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -327,14 +340,35 @@ export function ReleaseDialog({
   const [submitting, setSubmitting] = useState(false)
 
   const itemByIndex = new Map(items.map((item) => [item.episodeIndex, item]))
+  const availableRows = [...itemByIndex.values()]
   const liveSelected = selected.filter((index) => itemByIndex.has(index))
   const selectedRows = liveSelected.flatMap((index) => {
     const item = itemByIndex.get(index)
     return item ? [item] : []
   })
   const orderByIndex = new Map(liveSelected.map((index, position) => [index, position + 1]))
-  const filteredRows = items.filter((item) => matchesFilters(item, filters))
-  const shownRows = reviewSelected ? selectedRows : filteredRows
+  const shownRows = (reviewSelected ? selectedRows : availableRows).filter((item) =>
+    matchesFilters(item, filters),
+  )
+  const shownSelectedCount = shownRows.filter((item) => orderByIndex.has(item.episodeIndex)).length
+  const labelCounts = new Map<string, number>()
+  for (const item of availableRows) {
+    for (const label of new Set(item.labels ?? [])) {
+      labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1)
+    }
+  }
+  const labelOptions = [...labelCounts].sort(([left], [right]) => left.localeCompare(right))
+  const activeFilterCount =
+    Number(filters.search.trim() !== '') +
+    filters.labelValues.length +
+    [
+      filters.annotation,
+      filters.edits,
+      filters.labels,
+      filters.resources,
+      filters.provenance,
+      filters.judge,
+    ].filter((value) => value !== 'any').length
   const provenanceOrigins = [
     ...new Set(items.flatMap((item) => item.provenance?.origins ?? [])),
   ].sort()
@@ -399,6 +433,27 @@ export function ReleaseDialog({
     blocking.length === 0 &&
     acknowledgmentsReady
 
+  function describeActionStatus(): string {
+    if (ambiguous) return 'Submission outcome unknown.'
+    if (submitting) return 'Submitting release...'
+    if (previewing) return 'Preparing preview...'
+    if (disabled) return 'Release creation is unavailable.'
+    if (!inventoryReady) return 'Waiting for source inventory.'
+    if (liveSelected.length === 0) return 'No episodes selected.'
+    if (!readiness.ready)
+      return `Not ready: ${readiness.reason ?? 'saved episode context is loading.'}`
+    if (!destination) return 'Destination required.'
+    if (!name.trim()) return 'Release name required.'
+    if (!currentReview) return 'Preview required before submission.'
+    if (blocking.length > 0) return 'Preview has blocking issues.'
+    if (!finalized) return 'Finalization declaration required.'
+    if (requiresProcessingAck && !currentReview.processingAcknowledged)
+      return 'Processing acknowledgment required.'
+    if (requiresLocalDiskAck && !currentReview.localDiskAcknowledged)
+      return 'Local disk acknowledgment required.'
+    return 'Ready to submit.'
+  }
+
   function resetDraft() {
     setSelected([])
     setDestinationChoice('')
@@ -406,6 +461,7 @@ export function ReleaseDialog({
     setDescription('')
     setFinalized(false)
     setFilters(ANY_FILTERS)
+    setFiltersExpanded(false)
     setReviewSelected(false)
     setIdentity(createDraftIdentity())
     setReview(null)
@@ -508,10 +564,10 @@ export function ReleaseDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="max-h-[90vh] overflow-y-auto sm:max-w-[720px]"
+        className="flex h-[92dvh] max-h-[980px] w-[calc(100%-2rem)] max-w-[1120px] flex-col overflow-hidden p-4 sm:p-6"
         onCloseAutoFocus={onCloseAutoFocus}
       >
-        <DialogHeader>
+        <DialogHeader className="shrink-0">
           <DialogTitle>Release curated dataset</DialogTitle>
           <DialogDescription>
             Select source episodes, preview the release, then submit. Target: {RELEASE_TARGET}{' '}
@@ -519,7 +575,10 @@ export function ReleaseDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <fieldset disabled={formLocked} className="m-0 grid min-w-0 gap-4 border-0 p-0">
+        <fieldset
+          disabled={formLocked}
+          className="m-0 grid min-h-0 min-w-0 flex-1 grid-cols-1 content-start gap-4 overflow-y-auto border-0 p-1.5"
+        >
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="release-name">Release name</Label>
@@ -550,6 +609,8 @@ export function ReleaseDialog({
               <Label htmlFor="release-description">Description</Label>
               <Textarea
                 id="release-description"
+                rows={2}
+                className="min-h-16"
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
               />
@@ -567,148 +628,286 @@ export function ReleaseDialog({
             </Label>
           </div>
 
-          <section aria-labelledby="release-selection-heading" className="grid gap-3">
-            <h3 id="release-selection-heading" className="text-sm font-medium">
-              Episodes
-            </h3>
-
-            <div className="grid gap-3 sm:grid-cols-3">
-              <TristateSelect
-                id="filter-annotation"
-                label="Annotation"
-                value={filters.annotation}
-                onChange={(value) => setFilters((previous) => ({ ...previous, annotation: value }))}
-              />
-              <TristateSelect
-                id="filter-edits"
-                label="Edits"
-                value={filters.edits}
-                onChange={(value) => setFilters((previous) => ({ ...previous, edits: value }))}
-              />
-              <TristateSelect
-                id="filter-labels"
-                label="Labels"
-                value={filters.labels}
-                onChange={(value) => setFilters((previous) => ({ ...previous, labels: value }))}
-              />
-              <TristateSelect
-                id="filter-resources"
-                label="Resources"
-                value={filters.resources}
-                onChange={(value) => setFilters((previous) => ({ ...previous, resources: value }))}
-              />
-              <div className="grid gap-1">
-                <Label htmlFor="filter-provenance">Provenance origin</Label>
-                <select
-                  id="filter-provenance"
-                  value={filters.provenance}
-                  onChange={(event) =>
-                    setFilters((previous) => ({ ...previous, provenance: event.target.value }))
-                  }
-                  className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                >
-                  <option value="any">Any</option>
-                  {provenanceOrigins.map((origin) => (
-                    <option key={origin} value={origin}>
-                      {origin}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <TristateSelect
-                id="filter-judge"
-                label="Judge analysis"
-                value={filters.judge}
-                onChange={(value) => setFilters((previous) => ({ ...previous, judge: value }))}
-              />
+          <section aria-labelledby="release-selection-heading" className="grid min-w-0 gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <h3 id="release-selection-heading" className="text-sm font-medium">
+                Episodes
+              </h3>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="sm:hidden"
+                aria-expanded={filtersExpanded}
+                aria-controls="release-episode-filters"
+                onClick={() => setFiltersExpanded((previous) => !previous)}
+              >
+                <SlidersHorizontal className="mr-2 size-4" aria-hidden="true" />
+                Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+              </Button>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!inventoryReady}
-                onClick={() => appendSelection(items.map((item) => item.episodeIndex))}
+            <div className="grid min-w-0 gap-4 sm:grid-cols-[180px_minmax(0,1fr)] lg:grid-cols-[220px_minmax(0,1fr)]">
+              <div
+                id="release-episode-filters"
+                className={`${filtersExpanded ? 'grid' : 'hidden'} min-w-0 content-start gap-3 sm:grid`}
               >
-                Select all
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={shownRows.length === 0}
-                onClick={() => appendSelection(shownRows.map((item) => item.episodeIndex))}
-              >
-                Select shown
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={selected.length === 0}
-                onClick={() => setSelected([])}
-              >
-                Clear selection
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                aria-pressed={reviewSelected}
-                onClick={() => setReviewSelected((previous) => !previous)}
-              >
-                Review selected
-              </Button>
-              <span className="text-muted-foreground text-sm">
-                Selected {liveSelected.length} of {items.length}; {shownRows.length} shown.
-              </span>
-            </div>
-
-            {!inventoryReady && (
-              <p className="text-muted-foreground text-sm">
-                The full source inventory is still loading. Select all and release are disabled.
-              </p>
-            )}
-
-            <ol
-              aria-label="Episodes"
-              className="divide-border max-h-64 divide-y overflow-y-auto rounded-md border"
-            >
-              {shownRows.map((item) => {
-                const order = orderByIndex.get(item.episodeIndex)
-                const checkboxId = `release-episode-${item.episodeIndex}`
-                return (
-                  <li key={item.episodeIndex} className="flex items-center gap-3 px-3 py-2">
-                    <Checkbox
-                      id={checkboxId}
-                      checked={order !== undefined}
-                      onCheckedChange={() => toggleIndex(item.episodeIndex)}
-                    />
-                    <Label htmlFor={checkboxId} className="flex-1">
-                      Episode {item.episodeIndex}
-                    </Label>
-                    <span className="text-muted-foreground text-xs">{describeRow(item)}</span>
-                    {order !== undefined && (
-                      <span className="text-sm font-medium tabular-nums">#{order}</span>
+                <div className="grid gap-2">
+                  <Label htmlFor="release-search">Search episodes</Label>
+                  <Input
+                    id="release-search"
+                    type="search"
+                    value={filters.search}
+                    onChange={(event) =>
+                      setFilters((previous) => ({ ...previous, search: event.target.value }))
+                    }
+                  />
+                </div>
+                <fieldset className="grid min-w-0 gap-2">
+                  <legend className="mb-2 text-sm font-medium">Match any label</legend>
+                  <div className="grid max-h-40 gap-2 overflow-y-auto p-1">
+                    {labelOptions.map(([label, count], position) => (
+                      <div key={label} className="flex items-start gap-2">
+                        <Checkbox
+                          id={`release-label-${position}`}
+                          checked={filters.labelValues.includes(label)}
+                          onCheckedChange={(checked) =>
+                            setFilters((previous) => ({
+                              ...previous,
+                              labelValues:
+                                checked === true
+                                  ? [...previous.labelValues, label]
+                                  : previous.labelValues.filter((value) => value !== label),
+                            }))
+                          }
+                        />
+                        <Label
+                          htmlFor={`release-label-${position}`}
+                          className="min-w-0 leading-5 [overflow-wrap:anywhere]"
+                        >
+                          {label} ({count})
+                        </Label>
+                      </div>
+                    ))}
+                    {labelOptions.length === 0 && (
+                      <p className="text-muted-foreground text-sm">No saved labels.</p>
                     )}
-                  </li>
-                )
-              })}
-            </ol>
-
-            {liveSelected.length > 0 && (
-              <div className="text-muted-foreground grid gap-1 text-sm">
-                <p>{selectedEvidence.provenance}</p>
-                <p>{selectedEvidence.judge}</p>
+                  </div>
+                </fieldset>
+                <details>
+                  <summary className="cursor-pointer text-sm font-medium">More filters</summary>
+                  <div className="mt-3 grid gap-3">
+                    <TristateSelect
+                      id="filter-annotation"
+                      label="Annotation"
+                      value={filters.annotation}
+                      onChange={(value) =>
+                        setFilters((previous) => ({ ...previous, annotation: value }))
+                      }
+                    />
+                    <TristateSelect
+                      id="filter-edits"
+                      label="Edits"
+                      value={filters.edits}
+                      onChange={(value) =>
+                        setFilters((previous) => ({ ...previous, edits: value }))
+                      }
+                    />
+                    <TristateSelect
+                      id="filter-labels"
+                      label="Labels"
+                      value={filters.labels}
+                      onChange={(value) =>
+                        setFilters((previous) => ({ ...previous, labels: value }))
+                      }
+                    />
+                    <TristateSelect
+                      id="filter-resources"
+                      label="Resources"
+                      value={filters.resources}
+                      onChange={(value) =>
+                        setFilters((previous) => ({ ...previous, resources: value }))
+                      }
+                    />
+                    <div className="grid gap-1">
+                      <Label htmlFor="filter-provenance">Provenance origin</Label>
+                      <select
+                        id="filter-provenance"
+                        value={filters.provenance}
+                        onChange={(event) =>
+                          setFilters((previous) => ({
+                            ...previous,
+                            provenance: event.target.value,
+                          }))
+                        }
+                        className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                      >
+                        <option value="any">Any</option>
+                        {provenanceOrigins.map((origin) => (
+                          <option key={origin} value={origin}>
+                            {origin}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <TristateSelect
+                      id="filter-judge"
+                      label="Judge analysis"
+                      value={filters.judge}
+                      onChange={(value) =>
+                        setFilters((previous) => ({ ...previous, judge: value }))
+                      }
+                    />
+                  </div>
+                </details>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setFilters(ANY_FILTERS)}
+                >
+                  Reset filters
+                </Button>
               </div>
-            )}
 
-            {liveSelected.length > 0 && !readiness.ready && (
-              <p role="status" className="text-sm text-amber-700 dark:text-amber-400">
-                {readiness.reason}
-              </p>
-            )}
+              <div className="grid min-w-0 content-start gap-3">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="release-selected-only"
+                      ref={selectedOnlyRef}
+                      checked={reviewSelected}
+                      onCheckedChange={(checked) => setReviewSelected(checked === true)}
+                    />
+                    <Label htmlFor="release-selected-only">Selected only</Label>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!inventoryReady}
+                    onClick={() => appendSelection(availableRows.map((item) => item.episodeIndex))}
+                  >
+                    Select all
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={liveSelected.length === 0}
+                    onClick={() => setSelected([])}
+                  >
+                    Clear selection
+                  </Button>
+                </div>
+                <p
+                  id="release-selection-status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                  className="text-muted-foreground text-sm"
+                >
+                  {liveSelected.length} of {availableRows.length}
+                  {!inventoryReady ? ' loaded' : ''} selected; {shownRows.length} shown;{' '}
+                  {liveSelected.length - shownSelectedCount} selected outside this view.
+                  {shownRows.length === 0 && (
+                    <span className="block">
+                      {reviewSelected
+                        ? 'No selected episodes match these filters.'
+                        : 'No episodes match these filters.'}
+                    </span>
+                  )}
+                </p>
+
+                {!inventoryReady && (
+                  <p className="text-muted-foreground text-sm">
+                    The full source inventory is still loading. Select all and release are disabled.
+                  </p>
+                )}
+
+                <div className="overflow-hidden rounded-md border">
+                  <div className="bg-muted/40 flex items-center gap-3 border-b px-3 py-3">
+                    <Checkbox
+                      id="release-select-shown"
+                      disabled={shownRows.length === 0}
+                      checked={
+                        shownSelectedCount === 0
+                          ? false
+                          : shownSelectedCount === shownRows.length
+                            ? true
+                            : 'indeterminate'
+                      }
+                      onCheckedChange={(checked) => {
+                        const shownIndices = new Set(shownRows.map((item) => item.episodeIndex))
+                        if (checked === true) appendSelection([...shownIndices])
+                        else
+                          setSelected((previous) =>
+                            previous.filter((index) => !shownIndices.has(index)),
+                          )
+                      }}
+                    />
+                    <Label htmlFor="release-select-shown">Select shown</Label>
+                  </div>
+                  <ol
+                    aria-label="Episodes"
+                    className="divide-border max-h-[420px] min-h-32 divide-y overflow-y-auto"
+                  >
+                    {shownRows.map((item, rowIndex) => {
+                      const order = orderByIndex.get(item.episodeIndex)
+                      const checkboxId = `release-episode-${item.episodeIndex}`
+                      return (
+                        <li
+                          key={item.episodeIndex}
+                          className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 px-3 py-3 ${order !== undefined ? 'bg-accent/50' : ''}`}
+                        >
+                          <Checkbox
+                            id={checkboxId}
+                            ref={(element) => {
+                              if (element) episodeCheckboxes.current.set(item.episodeIndex, element)
+                              else episodeCheckboxes.current.delete(item.episodeIndex)
+                            }}
+                            checked={order !== undefined}
+                            onCheckedChange={() => {
+                              if (reviewSelected && order !== undefined) {
+                                const neighbor = shownRows[rowIndex + 1] ?? shownRows[rowIndex - 1]
+                                const target = neighbor
+                                  ? episodeCheckboxes.current.get(neighbor.episodeIndex)
+                                  : selectedOnlyRef.current
+                                target?.focus()
+                              }
+                              toggleIndex(item.episodeIndex)
+                            }}
+                          />
+                          <div className="grid min-w-0 gap-1">
+                            <Label htmlFor={checkboxId} className="leading-4">
+                              Episode {item.episodeIndex}
+                            </Label>
+                            <span className="text-muted-foreground text-xs [overflow-wrap:anywhere]">
+                              {describeRow(item)}
+                            </span>
+                          </div>
+                          {order !== undefined && (
+                            <span className="text-sm font-medium tabular-nums">#{order}</span>
+                          )}
+                        </li>
+                      )
+                    })}
+                  </ol>
+                </div>
+
+                {liveSelected.length > 0 && (
+                  <div className="text-muted-foreground grid gap-1 text-sm">
+                    <p>{selectedEvidence.provenance}</p>
+                    <p>{selectedEvidence.judge}</p>
+                  </div>
+                )}
+
+                {liveSelected.length > 0 && !readiness.ready && (
+                  <p role="status" className="text-sm text-amber-700 dark:text-amber-400">
+                    {readiness.reason}
+                  </p>
+                )}
+              </div>
+            </div>
           </section>
 
           {currentReview && (
@@ -793,7 +992,20 @@ export function ReleaseDialog({
           </Alert>
         )}
 
-        <DialogFooter>
+        <p
+          id="release-action-status"
+          role="status"
+          className="text-muted-foreground shrink-0 text-sm"
+        >
+          {describeActionStatus()}
+        </p>
+        <DialogFooter
+          className={
+            ambiguous
+              ? 'shrink-0 gap-2'
+              : 'shrink-0 flex-row flex-wrap justify-end gap-2 sm:space-x-0'
+          }
+        >
           {ambiguous ? (
             <>
               <Button variant="outline" onClick={resetDraft} disabled={submitting}>
@@ -809,14 +1021,28 @@ export function ReleaseDialog({
                 Cancel
               </Button>
               <Button
-                variant="secondary"
+                variant={currentReview ? 'outline' : 'default'}
+                aria-label={previewing ? 'Previewing...' : 'Preview release'}
+                aria-describedby="release-action-status"
                 onClick={() => void handlePreview()}
                 disabled={!canPreview}
               >
-                {previewing ? 'Previewing...' : 'Preview release'}
+                <span className="sm:hidden">{previewing ? 'Previewing...' : 'Preview'}</span>
+                <span className="hidden sm:inline">
+                  {previewing ? 'Previewing...' : 'Preview release'}
+                </span>
               </Button>
-              <Button onClick={handleSubmit} disabled={!canSubmit}>
-                {submitting ? 'Submitting...' : 'Submit release'}
+              <Button
+                variant={currentReview ? 'default' : 'outline'}
+                aria-label={submitting ? 'Submitting...' : 'Submit release'}
+                aria-describedby="release-action-status"
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+              >
+                <span className="sm:hidden">{submitting ? 'Submitting...' : 'Submit'}</span>
+                <span className="hidden sm:inline">
+                  {submitting ? 'Submitting...' : 'Submit release'}
+                </span>
               </Button>
             </>
           )}

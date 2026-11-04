@@ -298,12 +298,18 @@ def test_native_episode_table_rebuilds_indices_without_changing_recorded_values(
     assert table.column("timestamp").to_pylist() == pytest.approx([0.0, 0.1, 0.2])
 
 
-def test_native_task_table_has_named_task_index() -> None:
+@pytest.mark.parametrize("layout", ["columns", "named-index", "unnamed-index"])
+def test_native_task_table_has_named_task_index(layout: str) -> None:
     import pyarrow as pa
     import pyarrow.parquet as pq
     from physical_ai_curation.release.tables import generate_task_table
 
     source = pa.table({"task_index": [0, 1], "task": ["pick the part", "place the part"]})
+    if layout != "columns":
+        frame = source.to_pandas().set_index("task")
+        if layout == "unnamed-index":
+            frame.index.name = None
+        source = pa.Table.from_pandas(frame, preserve_index=True)
 
     tasks = generate_task_table(source)
     buffer = pa.BufferOutputStream()
