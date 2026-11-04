@@ -39,10 +39,18 @@
       "route": "/",
       "selector": "body",
       "states": [
-        { "state": "default" },
-        { "state": "auth-resolving" },
-        { "state": "denied" },
-        { "state": "expired" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "auth-resolving"
+        },
+        {
+          "state": "denied"
+        },
+        {
+          "state": "expired"
+        }
       ]
     },
     {
@@ -51,11 +59,21 @@
       "route": "/",
       "selector": "header",
       "states": [
-        { "state": "default" },
-        { "state": "empty" },
-        { "state": "warming" },
-        { "state": "open" },
-        { "state": "filtered" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "empty"
+        },
+        {
+          "state": "warming"
+        },
+        {
+          "state": "open"
+        },
+        {
+          "state": "filtered"
+        }
       ]
     },
     {
@@ -64,11 +82,21 @@
       "route": "/",
       "selector": "[aria-label*='episode' i]",
       "states": [
-        { "state": "default" },
-        { "state": "loading" },
-        { "state": "error" },
-        { "state": "empty" },
-        { "state": "filtered" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "loading"
+        },
+        {
+          "state": "error"
+        },
+        {
+          "state": "empty"
+        },
+        {
+          "state": "filtered"
+        }
       ]
     },
     {
@@ -77,10 +105,18 @@
       "route": "/",
       "selector": "main",
       "states": [
-        { "state": "loading" },
-        { "state": "error" },
-        { "state": "empty" },
-        { "state": "loaded" }
+        {
+          "state": "loading"
+        },
+        {
+          "state": "error"
+        },
+        {
+          "state": "empty"
+        },
+        {
+          "state": "loaded"
+        }
       ]
     },
     {
@@ -89,11 +125,21 @@
       "route": "/",
       "selector": "[role^='tab']",
       "states": [
-        { "state": "default" },
-        { "state": "dirty" },
-        { "state": "saving" },
-        { "state": "error" },
-        { "state": "confirm" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "dirty"
+        },
+        {
+          "state": "saving"
+        },
+        {
+          "state": "error"
+        },
+        {
+          "state": "confirm"
+        }
       ]
     },
     {
@@ -102,11 +148,21 @@
       "route": "/",
       "selector": "video, img",
       "states": [
-        { "state": "default" },
-        { "state": "loading" },
-        { "state": "error" },
-        { "state": "playing" },
-        { "state": "ended" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "loading"
+        },
+        {
+          "state": "error"
+        },
+        {
+          "state": "playing"
+        },
+        {
+          "state": "ended"
+        }
       ]
     },
     {
@@ -114,7 +170,17 @@
       "type": "widget",
       "route": "/",
       "selector": "[aria-label*='display' i]",
-      "states": [{ "state": "default" }, { "state": "open" }, { "state": "adjusted" }]
+      "states": [
+        {
+          "state": "default"
+        },
+        {
+          "state": "open"
+        },
+        {
+          "state": "adjusted"
+        }
+      ]
     },
     {
       "id": "V08",
@@ -122,11 +188,21 @@
       "route": "/",
       "selector": "[aria-label*='trajectory' i]",
       "states": [
-        { "state": "default" },
-        { "state": "empty" },
-        { "state": "focus" },
-        { "state": "range" },
-        { "state": "cancelled" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "empty"
+        },
+        {
+          "state": "focus"
+        },
+        {
+          "state": "range"
+        },
+        {
+          "state": "cancelled"
+        }
       ]
     },
     {
@@ -135,11 +211,21 @@
       "route": "/",
       "selector": "[aria-label*='joint' i]",
       "states": [
-        { "state": "default" },
-        { "state": "focus" },
-        { "state": "open" },
-        { "state": "reordered" },
-        { "state": "error" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "focus"
+        },
+        {
+          "state": "open"
+        },
+        {
+          "state": "reordered"
+        },
+        {
+          "state": "error"
+        }
       ]
     },
     {
@@ -148,11 +234,21 @@
       "route": "/",
       "selector": "[aria-label*='subtask' i]",
       "states": [
-        { "state": "default" },
-        { "state": "empty" },
-        { "state": "selected" },
-        { "state": "reordered" },
-        { "state": "error" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "empty"
+        },
+        {
+          "state": "selected"
+        },
+        {
+          "state": "reordered"
+        },
+        {
+          "state": "error"
+        }
       ]
     },
     {
@@ -161,11 +257,21 @@
       "route": "/",
       "selector": "[aria-label*='label' i]",
       "states": [
-        { "state": "default" },
-        { "state": "loading" },
-        { "state": "empty" },
-        { "state": "confirm" },
-        { "state": "error" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "loading"
+        },
+        {
+          "state": "empty"
+        },
+        {
+          "state": "confirm"
+        },
+        {
+          "state": "error"
+        }
       ]
     },
     {
@@ -174,11 +280,21 @@
       "route": "/",
       "selector": "[aria-label*='instruction' i]",
       "states": [
-        { "state": "default" },
-        { "state": "dirty" },
-        { "state": "invalid" },
-        { "state": "saved" },
-        { "state": "error" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "dirty"
+        },
+        {
+          "state": "invalid"
+        },
+        {
+          "state": "saved"
+        },
+        {
+          "state": "error"
+        }
       ]
     },
     {
@@ -187,12 +303,24 @@
       "route": "/",
       "selector": "[aria-label*='judge' i]",
       "states": [
-        { "state": "default" },
-        { "state": "loading" },
-        { "state": "running" },
-        { "state": "partial" },
-        { "state": "complete" },
-        { "state": "error" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "loading"
+        },
+        {
+          "state": "running"
+        },
+        {
+          "state": "partial"
+        },
+        {
+          "state": "complete"
+        },
+        {
+          "state": "error"
+        }
       ]
     },
     {
@@ -201,12 +329,24 @@
       "route": "/",
       "selector": "[aria-label*='detection' i]",
       "states": [
-        { "state": "default" },
-        { "state": "running" },
-        { "state": "empty" },
-        { "state": "results" },
-        { "state": "confirm" },
-        { "state": "error" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "running"
+        },
+        {
+          "state": "empty"
+        },
+        {
+          "state": "results"
+        },
+        {
+          "state": "confirm"
+        },
+        {
+          "state": "error"
+        }
       ]
     },
     {
@@ -215,11 +355,21 @@
       "route": "/",
       "selector": "[aria-label*='analysis' i]",
       "states": [
-        { "state": "default" },
-        { "state": "loading" },
-        { "state": "empty" },
-        { "state": "results" },
-        { "state": "error" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "loading"
+        },
+        {
+          "state": "empty"
+        },
+        {
+          "state": "results"
+        },
+        {
+          "state": "error"
+        }
       ]
     },
     {
@@ -228,12 +378,24 @@
       "route": "/",
       "selector": "[aria-label*='edit' i]",
       "states": [
-        { "state": "default" },
-        { "state": "open" },
-        { "state": "preview" },
-        { "state": "applied" },
-        { "state": "confirm" },
-        { "state": "error" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "open"
+        },
+        {
+          "state": "preview"
+        },
+        {
+          "state": "applied"
+        },
+        {
+          "state": "confirm"
+        },
+        {
+          "state": "error"
+        }
       ]
     },
     {
@@ -242,11 +404,21 @@
       "route": "/",
       "selector": "[aria-label*='diagnostic' i]",
       "states": [
-        { "state": "default" },
-        { "state": "open" },
-        { "state": "empty" },
-        { "state": "copied" },
-        { "state": "error" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "open"
+        },
+        {
+          "state": "empty"
+        },
+        {
+          "state": "copied"
+        },
+        {
+          "state": "error"
+        }
       ]
     },
     {
@@ -255,12 +427,24 @@
       "route": "/",
       "selector": "[role='dialog']",
       "states": [
-        { "state": "open" },
-        { "state": "preparing" },
-        { "state": "progress" },
-        { "state": "cancelled" },
-        { "state": "complete" },
-        { "state": "error" }
+        {
+          "state": "open"
+        },
+        {
+          "state": "preparing"
+        },
+        {
+          "state": "progress"
+        },
+        {
+          "state": "cancelled"
+        },
+        {
+          "state": "complete"
+        },
+        {
+          "state": "error"
+        }
       ]
     },
     {
@@ -269,14 +453,30 @@
       "route": "/",
       "selector": "body",
       "states": [
-        { "state": "default" },
-        { "state": "resize-200" },
-        { "state": "reflow-320" },
-        { "state": "text-spacing" },
-        { "state": "forced-colors" },
-        { "state": "reduced-motion" },
-        { "state": "portrait" },
-        { "state": "landscape" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "resize-200"
+        },
+        {
+          "state": "reflow-320"
+        },
+        {
+          "state": "text-spacing"
+        },
+        {
+          "state": "forced-colors"
+        },
+        {
+          "state": "reduced-motion"
+        },
+        {
+          "state": "portrait"
+        },
+        {
+          "state": "landscape"
+        }
       ]
     },
     {
@@ -285,13 +485,27 @@
       "route": "/",
       "selector": "section[aria-label='Releases']",
       "states": [
-        { "state": "default" },
-        { "state": "loading" },
-        { "state": "empty" },
-        { "state": "error" },
-        { "state": "denied" },
-        { "state": "open" },
-        { "state": "focus" }
+        {
+          "state": "default"
+        },
+        {
+          "state": "loading"
+        },
+        {
+          "state": "empty"
+        },
+        {
+          "state": "error"
+        },
+        {
+          "state": "denied"
+        },
+        {
+          "state": "open"
+        },
+        {
+          "state": "focus"
+        }
       ]
     },
     {
@@ -300,14 +514,30 @@
       "route": "/",
       "selector": "[role='dialog']:has(#release-name)",
       "states": [
-        { "state": "open" },
-        { "state": "filtered" },
-        { "state": "mixed" },
-        { "state": "empty" },
-        { "state": "focus" },
-        { "state": "reflow-320" },
-        { "state": "resize-200" },
-        { "state": "text-spacing" }
+        {
+          "state": "open"
+        },
+        {
+          "state": "filtered"
+        },
+        {
+          "state": "mixed"
+        },
+        {
+          "state": "empty"
+        },
+        {
+          "state": "focus"
+        },
+        {
+          "state": "reflow-320"
+        },
+        {
+          "state": "resize-200"
+        },
+        {
+          "state": "text-spacing"
+        }
       ]
     }
   ],
@@ -424,13 +654,21 @@
       ],
       "states": ["default", "error"]
     },
-    { "probe": "probe-broken-links", "surfaces": ["V02", "V17"], "states": ["default", "open"] },
+    {
+      "probe": "probe-broken-links",
+      "surfaces": ["V02", "V17"],
+      "states": ["default", "open"]
+    },
     {
       "probe": "probe-dom-hygiene",
       "surfaces": ["V01", "V02", "V03", "V04", "V05", "V19"],
       "states": ["default"]
     },
-    { "probe": "probe-title-lang", "surfaces": ["V01", "V19"], "states": ["default"] }
+    {
+      "probe": "probe-title-lang",
+      "surfaces": ["V01", "V19"],
+      "states": ["default"]
+    }
   ],
   "visualReview": {
     "enabled": true,
@@ -440,7 +678,13 @@
     "operatorConfirmedNoPersonalData": true,
     "fullPage": true,
     "traceSnapshots": true,
-    "routes": [{ "path": "/", "state": "default", "surfaceId": "V19" }],
+    "routes": [
+      {
+        "path": "/",
+        "state": "default",
+        "surfaceId": "V19"
+      }
+    ],
     "states": ["default", "reflow-320", "forced-colors", "reduced-motion"]
   }
 }
