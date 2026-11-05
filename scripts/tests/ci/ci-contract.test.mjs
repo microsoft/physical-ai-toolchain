@@ -4,7 +4,17 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import fs, { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import fs, {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, matchesGlob } from 'node:path';
@@ -132,9 +142,191 @@ test('product workspace: judge tests and coverage remain required in the backend
   const owner = contract.execution['dataviewer-backend-pytests'].jobs['pytest-dataviewer'];
   assert.ok(owner['required-steps'].includes('judge_unit'));
   assert.ok(owner.reports.some(report => report.path === 'logs/pytest-vlm-judge-results.xml'));
-  const gates = steps.find(step => step.id === 'coverage_gate').run;
-  assert.ok(gates.includes('--fail-under=90'));
-  assert.ok(gates.includes('--fail-under=70'));
+  const backendGate = steps.find(step => step.id === 'backend_coverage_gate');
+  const judgeGate = steps.find(step => step.id === 'judge_backend_coverage_gate');
+
+  assert.ok(backendGate);
+  assert.ok(judgeGate);
+
+  assert.ok(backendGate.run.includes('--fail-under=90'));
+  assert.ok(judgeGate.run.includes('--fail-under=70'));
+
+  assert.match(backendGate.run, /backend_valid/);
+  assert.match(judgeGate.run, /judge_backend_valid/);
+
+  const generate = steps.find(step => step.id === 'coverage_generate');
+  assert.ok(generate);
+  assert.match(generate.if, /!cancelled\(\)/);
+  assert.match(generate.if, /steps\.install\.outcome == 'success'/);
+  assert.ok(generate.run.includes('coverage xml'));
+  assert.ok(generate.run.includes('backend_status=$?'));
+  assert.ok(generate.run.includes('judge_status=$?'));
+  assert.ok(generate.run.includes('rm -f'));
+  assert.ok(generate.run.includes('coverage-dataviewer.xml'));
+  assert.ok(generate.run.includes('coverage-vlm-judge-backend.xml'));
+  assert.equal(generate["continue-on-error"], true);
+
+  const validate = steps.find(step => step.id === 'coverage_validate');
+  assert.ok(validate);
+  assert.ok(validate.run.includes('ET.parse'));
+  assert.ok(validate.run.includes('lines-valid'));
+  assert.ok(validate.run.includes('line-rate'));
+  assert.equal(validate["continue-on-error"], true);
+
+  for (const gate of [backendGate, judgeGate]) {
+    assert.match(gate.if, /!cancelled\(\)/);
+    assert.match(gate.if, /steps\.install\.outcome == 'success'/);
+  }
+
+  const backendUpload = steps.find(step =>
+    step.uses?.startsWith('codecov/codecov-action') &&
+    step.with?.name === 'pytest-dataviewer-coverage'
+  );
+  assert.ok(backendUpload);
+  assert.equal(backendUpload.with.disable_search, true);
+  assert.equal(backendUpload.with.files, 'logs/coverage-dataviewer.xml');
+  assert.match(backendUpload.if, /backend_valid == 'true'/);
+
+  const judgeBackendUpload = steps.find(step =>
+    step.uses?.startsWith('codecov/codecov-action') &&
+    step.with?.name === 'pytest-vlm-judge-backend-coverage'
+  );
+  assert.ok(judgeBackendUpload);
+  assert.equal(judgeBackendUpload.with.disable_search, true);
+  assert.equal(judgeBackendUpload.with.files, 'logs/coverage-vlm-judge-backend.xml');
+  assert.match(judgeBackendUpload.if, /judge_backend_valid == 'true'/);
+});
+
+
+test('backend coverage: invalid backend XML does not reject valid judge XML', t => {
+  const workspace = temporaryDirectory(t);
+  const cwd = join(workspace, 'data-management/viewer/backend');
+
+  mkdirSync(cwd, { recursive: true });
+  writeFixture(cwd, '.coverage', 'fixture');
+  writeFixture(workspace, 'logs/coverage-dataviewer.xml', '<coverage');
+  writeFixture(
+    workspace,
+    'logs/coverage-vlm-judge-backend.xml',
+    '<coverage lines-valid="1" line-rate="1"/>'
+  );
+
+  const output = join(workspace, 'outputs');
+  const steps = graph['.github/workflows/dataviewer-backend-pytests.yml']
+    .jobs['pytest-dataviewer'].steps;
+  const validate = steps.find(step => step.id === 'coverage_validate');
+
+  const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', validate.run], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 10_000,
+    env: { ...process.env, GITHUB_OUTPUT: output },
+  });
+
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+
+  const outputs = Object.fromEntries(
+    readFileSync(output, 'utf8')
+      .trim()
+      .split('\n')
+      .map(line => line.split('='))
+  );
+
+  assert.deepEqual(outputs, {
+    backend_valid: 'false',
+    judge_backend_valid: 'true',
+  });
+
+  assert.match(result.stdout, /::warning::Coverage report unavailable or invalid/);
+});
+
+test('backend coverage: judge report generation runs after backend generation fails', t => {
+  const workspace = temporaryDirectory(t);
+  const cwd = join(workspace, 'data-management/viewer/backend');
+  const bin = join(workspace, 'bin');
+
+  mkdirSync(cwd, { recursive: true });
+  mkdirSync(bin, { recursive: true });
+  writeFixture(cwd, '.coverage', 'fixture');
+
+  const uv = join(bin, 'uv');
+  const log = join(workspace, 'uv.log');
+
+  writeFileSync(uv, `#!/bin/bash
+printf '%s\\n' "$*" >> "$UV_LOG"
+
+output=""
+previous=""
+
+for arg in "$@"; do
+  if [ "$previous" = "-o" ]; then
+    output="$arg"
+    break
+  fi
+  previous="$arg"
+done
+
+case "$*" in
+  *backend/src*)
+    exit 7
+    ;;
+  *evaluation/vlm_judge*|*physical_ai_curation*|*physical_ai_dataset_io*)
+    mkdir -p "$(dirname "$output")"
+    printf '<coverage lines-valid="1" line-rate="1"/>\\n' > "$output"
+    exit 0
+    ;;
+esac
+
+exit 99
+`);
+
+  chmodSync(uv, 0o755);
+
+  const steps = graph['.github/workflows/dataviewer-backend-pytests.yml']
+    .jobs['pytest-dataviewer'].steps;
+  const generate = steps.find(step => step.id === 'coverage_generate');
+
+  const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', generate.run], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 10_000,
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      UV_LOG: log,
+    },
+  });
+
+  assert.ifError(result.error);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+
+  const calls = readFileSync(log, 'utf8').trim().split('\n');
+
+  assert.equal(calls.length, 4);
+  assert.match(calls[0], /backend\/src/);
+  assert.match(calls[1], /evaluation\/vlm_judge/);
+  assert.match(calls[2], /physical_ai_curation/);
+  assert.match(calls[3], /physical_ai_dataset_io/);
+
+  assert.equal(
+    existsSync(join(workspace, 'logs/coverage-dataviewer.xml')),
+    false
+  );
+
+  assert.equal(
+    existsSync(join(workspace, 'logs/coverage-vlm-judge-backend.xml')),
+    true
+  );
+
+  for (const report of ['coverage-curation.xml', 'coverage-dataset-io.xml']) {
+    assert.equal(existsSync(join(workspace, 'logs', report)), true);
+  }
+
+  assert.match(
+    result.stdout,
+    /One or more scoped coverage reports could not be generated/
+  );
 });
 
 test('product workspace: curation and dataset-I/O coverage is collected and uploaded separately', () => {
@@ -148,9 +340,9 @@ test('product workspace: curation and dataset-I/O coverage is collected and uplo
     const flag = `pytest-${directory}`;
     const source = `data-management/${directory}/${packageName}/`;
     assert.ok(steps.find(step => step.id === 'test').run.includes(`--cov=../../${directory}/${packageName}`));
-    const generation = steps.find(step => step.id === 'coverage_gate').run.split('\n')
-      .find(command => command.includes(`-o ../../../${report}`));
-    assert.ok(generation?.includes(`--include='*/${packageName}/*'`));
+    const generation = steps.find(step => step.id === 'coverage_generate').run;
+    assert.ok(generation.includes(`--include='*/${packageName}/*' --fail-under=0`));
+    assert.ok(generation.includes(`-o ../../../${report}`));
     assert.ok(steps.find(step => step.id === 'coverage_report').run.includes(`test -s ../../../${report}`));
     assert.ok(steps.find(step => step.id === 'coverage_upload').with.path.split('\n').includes(report));
     const upload = steps.find(step => step.with?.flags === flag);

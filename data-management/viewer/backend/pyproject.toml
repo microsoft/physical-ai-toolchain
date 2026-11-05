@@ -7,7 +7,7 @@ license = "MIT"
 dependencies = [
     "physical-ai-curation==0.1.0",
     "physical-ai-dataset-io==0.1.0",
-    "fastapi==0.156.8",
+    "fastapi==0.159.1",
     "uvicorn[standard]==0.54.0",
     "pydantic==2.14.1",
     "python-multipart==0.0.32",
@@ -15,9 +15,9 @@ dependencies = [
     "slowapi==0.1.10",
     "aiofiles==25.1.0",
     "numpy==2.5.4",
-    "pyarrow==25.0.1",
+    "pyarrow==26.0.0",
     "Pillow==13.0.0",
-    "av==18.1.0",
+    "av==19.0.1",
     "cachetools==7.2.4",
 ]
 
@@ -62,7 +62,7 @@ dev = [
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
     "httpx==0.28.1",
-    "hypothesis==6.170.5",
+    "hypothesis==6.170.11",
     "schemathesis==4.32.2",
 ]
 
