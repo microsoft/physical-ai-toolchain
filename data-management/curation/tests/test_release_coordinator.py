@@ -10,6 +10,7 @@ import threading
 import time
 from contextlib import suppress
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -375,7 +376,7 @@ def test_given_identity_check_raises_when_child_opened_then_descriptor_closed(
         entry.mkdir()
         open_child = store_module._open_child_directory
     opened = mocker.spy(os, "open")
-    with store_module.DescriptorHandle(lambda: os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)) as root:
+    with store_module.DescriptorHandle(partial(os.open, tmp_path, os.O_RDONLY | os.O_DIRECTORY)) as root:
         identity = mocker.patch.object(os, "fstat", side_effect=OSError("identity unavailable"))
         with pytest.raises(OSError, match="identity unavailable"):
             open_child(root.descriptor, "entry")
