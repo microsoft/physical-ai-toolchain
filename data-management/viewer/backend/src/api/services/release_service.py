@@ -1349,12 +1349,13 @@ class _ReleaseFiles:
         if entry.length > self._budget:
             raise ReleaseVerificationError("release metadata exceeds bound")
         check_cancelled()
+        store = self._store
         if entry.assurance != "content_sha256":
-            if not isinstance(self._store, BlobReleaseStore):
+            if not isinstance(store, BlobReleaseStore):
                 raise ReleaseVerificationError("release storage revision evidence unavailable")
-            data = self._store.read_control_bytes(relative, max_bytes=self._budget, expected_revision=entry.revision)
+            data = store.read_control_bytes(relative, max_bytes=self._budget, expected_revision=entry.revision)
         else:
-            data = self._store.read_control_bytes(relative, max_bytes=self._budget)
+            data = store.read_control_bytes(relative, max_bytes=self._budget)
         self._budget -= len(data)
         if len(data) != entry.length or (
             not isinstance(entry, StorageRevisionEntry) and hashlib.sha256(data).hexdigest() != entry.sha256
@@ -1390,12 +1391,13 @@ class _ReleaseFiles:
         entry = self._objects[relative]
         digest = hashlib.sha256()
         total = 0
+        store = self._store
         if entry.assurance != "content_sha256":
-            if not isinstance(self._store, BlobReleaseStore):
+            if not isinstance(store, BlobReleaseStore):
                 raise ReleaseVerificationError("release storage revision evidence unavailable")
-            chunks = self._store.iter_bytes(relative, chunk_size=CHUNK_BYTES, expected_revision=entry.revision)
+            chunks = store.iter_bytes(relative, chunk_size=CHUNK_BYTES, expected_revision=entry.revision)
         else:
-            chunks = self._store.iter_bytes(relative, chunk_size=CHUNK_BYTES)
+            chunks = store.iter_bytes(relative, chunk_size=CHUNK_BYTES)
         for chunk in chunks:
             check_cancelled()
             digest.update(chunk)

@@ -494,12 +494,12 @@ Source header
                  Return to source Episodes
 ```
 
-| Surface   | Behavior                                                                                                  |
-|-----------|-----------------------------------------------------------------------------------------------------------|
-| Selection | In Releases, choose Create release, then filter and order source episodes in the dialog                   |
-| Preview   | Advisory and quick. Shows the selection, known estimates and blockers without freezing or reserving       |
-| Submit    | Records the selected intent and required acknowledgments; the worker captures source state later          |
-| Releases  | Lists verified releases for the source, their episodes, and camera media, with job status                 |
+| Surface   | Behavior                                                                                            |
+|-----------|-----------------------------------------------------------------------------------------------------|
+| Selection | In Releases, choose Create release, then filter and order source episodes in the dialog             |
+| Preview   | Advisory and quick. Shows the selection, known estimates and blockers without freezing or reserving |
+| Submit    | Records the selected intent and required acknowledgments; the worker captures source state later    |
+| Releases  | Lists verified releases for the source, their episodes, and camera media, with job status           |
 
 Episode indices and labels load first. Annotation, edit and judge details load
 only for visible or selected episodes, in bounded sequential batches. Preview

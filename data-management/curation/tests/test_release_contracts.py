@@ -1314,7 +1314,7 @@ class TestStreamingAndBounds:
         os.mkfifo(tmp_path / "pipe")
         real_open = os.open
 
-        def guarded_open(path: object, flags: int, mode: int = 0o777, *, dir_fd: int | None = None) -> int:
+        def guarded_open(path: object, flags: int, mode: int = 0o600, *, dir_fd: int | None = None) -> int:
             if path == "pipe":
                 assert flags & os.O_NONBLOCK, "opening an untrusted FIFO must not block"
             return real_open(path, flags, mode, dir_fd=dir_fd)
@@ -1365,7 +1365,7 @@ class TestStreamingAndBounds:
         real_open = os.open
         swapped: list[bool] = []
 
-        def swapping_open(path: object, flags: int, mode: int = 0o777, *, dir_fd: int | None = None) -> int:
+        def swapping_open(path: object, flags: int, mode: int = 0o600, *, dir_fd: int | None = None) -> int:
             descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
             if path == "media" and not swapped:
                 swapped.append(True)

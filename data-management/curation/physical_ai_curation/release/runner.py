@@ -85,8 +85,9 @@ class _LifecycleMonitor:
             self._thread.join()
 
     def check(self) -> None:
-        if self._reason is not None:
-            raise self._reason
+        reason = self._reason
+        if reason is not None:
+            raise reason
 
     def _run(self) -> None:
         while not self._stop.wait(self._interval):
