@@ -392,6 +392,7 @@ async def list_source_episodes(
 
 @router.get("/sources/{dataset_id}/releases/{handle}/episodes/{episode_index}/media/{camera}")
 async def get_source_episode_media(
+    request: Request,
     dataset_id: str,
     handle: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")],
     episode_index: Annotated[int, Path(ge=0)],
@@ -401,14 +402,17 @@ async def get_source_episode_media(
 ) -> Response:
     """Return the MP4 container holding one episode's camera stream from a verified local release."""
     try:
-        content = await service.read(
-            service.source_episode_media,
-            _scope(principal),
-            dataset_id.replace("\r", "").replace("\n", ""),
-            handle,
-            episode_index=int(episode_index),
-            camera=camera,
-            response_bytes=service.media_bytes,
+        content = await _while_connected(
+            request,
+            service.read(
+                service.source_episode_media,
+                _scope(principal),
+                dataset_id.replace("\r", "").replace("\n", ""),
+                handle,
+                episode_index=int(episode_index),
+                camera=camera,
+                response_bytes=service.media_bytes,
+            ),
         )
     except ReleaseApiError as error:
         _raise(error)

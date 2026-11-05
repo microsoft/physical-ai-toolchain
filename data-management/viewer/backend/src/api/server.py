@@ -10,9 +10,12 @@ import subprocess
 import sys
 import threading
 from contextlib import suppress
+from pathlib import Path
 from types import FrameType
 
 from dotenv import load_dotenv
+
+from .logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +25,7 @@ def shutdown_limits() -> tuple[int, int]:
     values = []
     for name, default in (
         ("DATAVIEWER_GRACEFUL_SHUTDOWN_SECONDS", 10),
-        ("DATAVIEWER_SHUTDOWN_TIMEOUT_SECONDS", 25),
+        ("DATAVIEWER_SHUTDOWN_TIMEOUT_SECONDS", 35),
     ):
         try:
             value = int(os.environ.get(name, str(default)))
@@ -82,7 +85,8 @@ def supervise_server(command: list[str], *, shutdown_seconds: float) -> int:
 
 def main() -> int:
     """Start the configured server after loading the same environment as the application."""
-    load_dotenv()
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+    configure_logging()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reload", action="store_true")
     parser.add_argument("--host", default=os.environ.get("BACKEND_HOST", "127.0.0.1"))

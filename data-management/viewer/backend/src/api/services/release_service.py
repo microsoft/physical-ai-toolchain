@@ -10,6 +10,7 @@ import asyncio
 import fnmatch
 import functools
 import hashlib
+import io
 import json
 import math
 import os
@@ -698,7 +699,7 @@ class ReleaseService:
             raise _map_job_error(error) from error
         items = []
         for item in page.items:
-            content = store.execution_binding(item.job_id)
+            content = page.execution_bindings[item.job_id]
             binding = parse_strict_json(content) if content else {}
             source = binding.get("selection", {}).get("dataset_id")
             if dataset_id is None or source == dataset_id:
@@ -706,7 +707,7 @@ class ReleaseService:
                     {
                         **_status_body(item),
                         "dataset_id": source,
-                        "created_at": store.accepted_at(item.job_id),
+                        "created_at": page.accepted_times[item.job_id],
                     }
                 )
         return {
@@ -1361,6 +1362,9 @@ class _ReleaseFiles:
             raise ReleaseVerificationError("release metadata changed after admission")
         return data
 
+    def open_text(self, relative: str) -> io.StringIO:
+        return io.StringIO(self.read_bytes(relative).decode("utf-8"))
+
     def paths(self) -> set[str]:
         return set(self._objects)
 
@@ -1436,6 +1440,7 @@ def _release_media(files: _ReleaseFiles, relative: str, *, media_max_bytes: int)
     data = bytearray()
     try:
         for chunk in files.stream(relative):
+            check_cancelled()
             data.extend(chunk)
             if len(data) > size:
                 raise ReleaseVerificationError(f"{relative} exceeds its published length")
@@ -1465,6 +1470,7 @@ def _episode_body(record: EpisodeRecord) -> dict[str, Any]:
         "from_timestamp": record.from_timestamp,
         "to_timestamp": record.to_timestamp,
         "cameras": sorted(record.video_paths),
+        "video_windows": record.video_windows,
     }
 
 
@@ -1506,6 +1512,7 @@ def _status_body(status: JobStatus) -> dict[str, Any]:
         "io_counters": dict(status.io_counters),
         "diagnostics": dict(status.diagnostics),
         "recovery_required": status.recovery_required,
+        "refusal_code": status.refusal_code,
     }
 
 

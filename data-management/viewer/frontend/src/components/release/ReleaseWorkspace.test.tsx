@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -355,6 +355,21 @@ describe('ReleaseWorkspace', () => {
     expect(cancel).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Cancel job' }))
     expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it('shows a safe refusal without offering to repeat unchanged input', () => {
+    vi.mocked(useRelease).mockReturnValue(
+      makeRelease({
+        activeJobId: JOB_ID,
+        status: {
+          data: statusOf('needs_input', { refusalCode: 'processing_confirmation_required' }),
+        },
+      }),
+    )
+    renderWorkspace()
+    expect(screen.getByText(/Needs input: processing_confirmation_required/)).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Cancel job' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Recover job' })).toBeDisabled()
   })
 
   it('offers verified artifacts only after the job commits', () => {
@@ -802,6 +817,7 @@ describe('ReleaseWorkspace', () => {
               fps: 30,
               length: 90,
               cameras: ['wrist', 'front'],
+              videoWindows: { wrist: [4, 7], front: [8, 11] },
             },
           ],
           total: 2,
@@ -835,9 +851,28 @@ describe('ReleaseWorkspace', () => {
         'src',
         'blob:camera',
       )
-      expect(fetchSourceEpisodeMedia).toHaveBeenCalledWith('dataset-1', HANDLE, 0, 'wrist')
+      expect(fetchSourceEpisodeMedia).toHaveBeenCalledWith(
+        'dataset-1',
+        HANDLE,
+        0,
+        'wrist',
+        expect.any(AbortSignal),
+      )
+      const signal = vi.mocked(fetchSourceEpisodeMedia).mock.calls[0][4]
+      const video = screen.getByLabelText('Camera wrist for episode 0') as HTMLVideoElement
+      const pause = vi.spyOn(video, 'pause').mockImplementation(() => undefined)
+      fireEvent.loadedMetadata(video)
+      expect(video.currentTime).toBe(4)
+      video.currentTime = 0
+      fireEvent.seeking(video)
+      expect(video.currentTime).toBe(4)
+      video.currentTime = 9
+      fireEvent.timeUpdate(video)
+      expect(video.currentTime).toBe(7)
+      expect(pause).toHaveBeenCalledOnce()
       await user.click(screen.getByRole('button', { name: 'front' }))
       expect(await screen.findByLabelText('Camera front for episode 0')).toBeVisible()
+      expect(signal?.aborted).toBe(true)
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:camera')
       await user.click(screen.getByRole('button', { name: 'Load more episodes' }))
       await user.click(await screen.findByRole('button', { name: /Episode 1/ }))

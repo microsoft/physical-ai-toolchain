@@ -19,11 +19,12 @@ from physical_ai_curation.release.inputs import (
     FrozenReleaseInputs,
     LocalReleaseSource,
     ReleaseSelection,
+    SourceReadBoundsError,
     _join_owned,
     capture_saved_selection,
     freeze_release_inputs,
 )
-from physical_ai_curation.release.jobs import ReleaseRuntimeSettings
+from physical_ai_curation.release.jobs import CapacityError, ReleaseRefusal, ReleaseRuntimeSettings
 from physical_ai_curation.release.media import StorageEndpoint, load_media_limits
 from physical_ai_curation.release.models import ProducerIdentity, VersionIdentity
 from physical_ai_curation.release.projections import materialize_saved_projections
@@ -428,11 +429,24 @@ class ViewerReleasePlanner:
                 raise ReleaseApiError(409, "release intent binding is unsupported")
 
             async def capture(checkpoint: Callable[[], None]) -> tuple[bytes, bytes, int, ConfiguredExecution]:
-                prepared, execution = await self._capture(scope, spec, destination, checkpoint, payload["source_kind"])
+                try:
+                    prepared, execution = await self._capture(
+                        scope, spec, destination, checkpoint, payload["source_kind"]
+                    )
+                except ReleaseApiError as error:
+                    if error.status_code == 404:
+                        raise ReleaseRefusal("source_unavailable") from error
+                    if error.status_code == 507:
+                        raise ReleaseRefusal("insufficient_capacity") from error
+                    raise
+                except CapacityError as error:
+                    raise ReleaseRefusal("insufficient_capacity") from error
+                except SourceReadBoundsError as error:
+                    raise ReleaseRefusal("selection_exceeds_bounds") from error
                 if not payload["processing_confirmed"] and any(
                     action["confirmation_required"] for action in prepared.summary["actions"]
                 ):
-                    raise ReleaseApiError(409, "processing_confirmation_required")
+                    raise ReleaseRefusal("processing_confirmation_required")
                 return prepared.frozen_request, prepared.execution_binding, prepared.reserved_bytes, execution
 
             return ConfiguredExecution(

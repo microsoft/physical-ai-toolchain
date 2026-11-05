@@ -17,7 +17,12 @@ from pydantic import TypeAdapter
 from physical_ai_curation.release.composition import NativeGenerationPlan
 from physical_ai_curation.release.encoding import EncodeOptions, EncodingWindow, VideoOutput, encode_windows
 from physical_ai_curation.release.jobs import CapacityError, ReleaseJobStore
-from physical_ai_curation.release.media import ObjectPlan, ReleaseExecutionError, validate_processing_confirmation
+from physical_ai_curation.release.media import (
+    ObjectPlan,
+    ReleaseExecutionError,
+    ReleaseMediaLimits,
+    validate_processing_confirmation,
+)
 from physical_ai_curation.release.store import CHUNK_BYTES
 from physical_ai_curation.release.worker import run_supervised
 
@@ -90,6 +95,7 @@ def encode_planned_object(
     confirmed_digest: str | None,
     scratch_bytes: int,
     output_bytes: int,
+    limits: ReleaseMediaLimits | None = None,
     checkpoint: Callable[[], None] | None = None,
 ) -> Iterator[EncodedObject]:
     """Encode a current confirmed object under supervision, exposing bytes only after proven stop.
@@ -128,6 +134,7 @@ def encode_planned_object(
             "options": TypeAdapter(EncodeOptions).dump_python(prepared.encode_options, mode="json"),
             "fps": prepared.episodes[0].fps,
             "output_bytes": output_bytes,
+            "limits": TypeAdapter(ReleaseMediaLimits).dump_python(limits or ReleaseMediaLimits(), mode="json"),
         }
         request = json.dumps(spec, separators=(",", ":"), allow_nan=False).encode()
         if len(request) > MAX_SPEC_BYTES:
@@ -139,7 +146,7 @@ def encode_planned_object(
             job_id,
             fence,
             [sys.executable, "-m", "physical_ai_curation.release.execution", "encode", str(request_path)],
-            memory_bytes=store.settings.memory_bytes,
+            memory_bytes=min(store.settings.memory_bytes, (limits or ReleaseMediaLimits()).processing_memory_bytes),
             file_bytes=max(output_bytes, MAX_RESULT_BYTES),
             heartbeat_seconds=min(5.0, store.settings.lease_seconds / 4),
             grace_seconds=store.settings.grace_seconds,
@@ -184,10 +191,11 @@ def _encode(request_path: Path) -> None:
         raise ReleaseExecutionError("unsupported native protocol")
     windows = TypeAdapter(tuple[EncodingWindow, ...]).validate_python(spec["windows"])
     options = TypeAdapter(EncodeOptions).validate_python(spec["options"])
+    limits = TypeAdapter(ReleaseMediaLimits).validate_python(spec["limits"])
     directory = request_path.parent
     with (directory / "source.bin").open("rb") as source, (directory / "encoded.mp4").open("x+b") as output:
         sink = BoundedSink(output, spec["output_bytes"])
-        media = encode_windows(source, sink, windows, fps=spec["fps"], options=options)
+        media = encode_windows(source, sink, windows, fps=spec["fps"], options=options, limits=limits)
     result = {"media": TypeAdapter(VideoOutput).dump_python(media, mode="json"), "peak_output_bytes": sink.peak_bytes}
     content = json.dumps(result, separators=(",", ":"), allow_nan=False).encode()
     if len(content) > MAX_RESULT_BYTES:

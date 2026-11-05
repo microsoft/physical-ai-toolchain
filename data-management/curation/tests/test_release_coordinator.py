@@ -40,6 +40,7 @@ from physical_ai_curation.release.jobs import (
     CancellationError,
     JobRequest,
     ReleaseJobStore,
+    ReleaseRefusal,
     ReleaseRuntimeSettings,
 )
 from physical_ai_curation.release.media import (
@@ -292,6 +293,22 @@ def test_given_cancel_requested_during_blocking_inventory_when_executed_then_no_
     assert not any(thread.name == f"release-lease-{job_id}" for thread in threading.enumerate())
 
 
+def test_given_transient_heartbeat_error_when_lease_valid_then_monitor_retries(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    store = _store(tmp_path / "jobs", OffsetClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "worker-a")
+    monitor = _LifecycleMonitor(store, job_id, fence)
+    heartbeat = mocker.patch.object(store, "heartbeat", side_effect=[TimeoutError("contention"), False])
+    mocker.patch.object(monitor._stop, "wait", side_effect=[False, False, True])
+
+    monitor._run()
+
+    monitor.check()
+    assert heartbeat.call_count == 2
+
+
 def test_given_cancellation_recorded_when_monitor_still_running_then_lease_keeps_renewing() -> None:
     beats: list[str] = []
 
@@ -299,7 +316,7 @@ def test_given_cancellation_recorded_when_monitor_still_running_then_lease_keeps
         beats.append(job_id)
         return True
 
-    store = SimpleNamespace(settings=SimpleNamespace(lease_seconds=20), heartbeat=heartbeat)
+    store = SimpleNamespace(settings=SimpleNamespace(lease_seconds=20), heartbeat=heartbeat, now=time.monotonic)
     monitor = _LifecycleMonitor(store, "job-1", 1)
     monitor._interval = 0.01
     monitor.start()
@@ -835,6 +852,124 @@ def test_given_own_claim_when_worker_fails_then_failure_is_recorded_with_backoff
     assert row["failed_attempts"] == 1
     assert row["last_failure"] == "worker_failed"
     assert row["retry_not_before"] is not None
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["processing_confirmation_required", "insufficient_capacity", "source_unavailable", "selection_exceeds_bounds"],
+)
+def test_given_capture_refusal_when_queue_runs_then_needs_input_is_not_recaptured(tmp_path: Path, code: str) -> None:
+    clock = OffsetClock()
+    store = _store(tmp_path / "jobs", clock)
+    destination = tmp_path / "output"
+    request = replace(_request(destination), frozen_request=b'{"schema_version":"curated-release-intent/v1"}')
+    job_id = store.accept(request).job_id
+    captures = []
+
+    async def capture(checkpoint: object) -> tuple[bytes, bytes, int, ConfiguredExecution]:
+        captures.append(checkpoint)
+        raise ReleaseRefusal(code)
+
+    configured = ConfiguredExecution(None, SavedReader(), _selection(), None, destination, capture)
+    asyncio.run(run_queue(store, lambda *_args: configured))
+    clock.advance(7200)
+    assert asyncio.run(run_queue(store, lambda *_args: configured)) == ()
+
+    status = store.get(job_id, scope=SCOPE, principal=OWNER)
+    assert len(captures) == 1
+    assert status.state == "needs_input"
+    assert status.refusal_code == code
+    assert not status.recovery_required
+    store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+    asyncio.run(run_queue(store, lambda *_args: configured))
+    assert job_id not in store.storage.snapshot()
+
+
+def test_given_job_page_when_projected_then_binding_and_acceptance_use_one_snapshot(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    store = _store(tmp_path / "jobs", OffsetClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    snapshot = mocker.spy(store.storage, "snapshot")
+
+    page = store.page(scope=SCOPE, principal=OWNER)
+
+    assert page.items[0].job_id == job_id
+    assert page.execution_bindings[job_id] == b""
+    assert page.accepted_times[job_id]
+    assert snapshot.call_count == 1
+
+
+def test_given_cancel_during_capture_when_queue_runs_then_next_pass_cleans_without_backoff(tmp_path: Path) -> None:
+    store = _store(tmp_path / "jobs", OffsetClock())
+    destination = tmp_path / "output"
+    request = replace(_request(destination), frozen_request=b'{"schema_version":"curated-release-intent/v1"}')
+    job_id = store.accept(request).job_id
+
+    async def capture(checkpoint: object) -> tuple[bytes, bytes, int, ConfiguredExecution]:
+        store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+        raise CancellationError("cancellation requested")
+
+    configured = ConfiguredExecution(None, SavedReader(), _selection(), None, destination, capture)
+    asyncio.run(run_queue(store, lambda *_args: configured))
+
+    row = store.storage.snapshot()[job_id]
+    assert row["last_failure"] is None
+    assert row["failed_attempts"] == 0
+    assert row["lease_expires"] is None
+    assert not any(event["event"] == "dispatch.failed" for event in row["events"])
+    asyncio.run(run_queue(store, lambda *_args: configured))
+    assert job_id not in store.storage.snapshot()
+
+
+def test_given_large_local_jsonl_when_limited_then_episode_metadata_is_streamed(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    from physical_ai_dataset_io.lerobot import LocalLeRobotFiles, iter_episodes
+
+    (tmp_path / "meta").mkdir()
+    (tmp_path / "meta/info.json").write_text(
+        json.dumps(
+            {
+                "codebase_version": "v2.1",
+                "total_episodes": 100000,
+                "fps": 30,
+                "data_path": "data/episode_{episode_index:06d}.parquet",
+                "video_path": "videos/{video_key}/episode_{episode_index:06d}.mp4",
+                "features": {"front": {"dtype": "video"}},
+            }
+        )
+    )
+    (tmp_path / "meta/episodes.jsonl").write_bytes(
+        b'{"episode_index":0,"tasks":["pick"],"length":2}\n' + b"invalid-json\n" * 100000
+    )
+    files = LocalLeRobotFiles(tmp_path)
+    read = mocker.spy(files, "read_bytes")
+
+    records = list(iter_episodes(files, limit=1))
+
+    assert [record.episode_index for record in records] == [0]
+    assert "meta/episodes.jsonl" not in [call.args[0] for call in read.call_args_list]
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "data/{episode_index:>9999999999}.parquet",
+        "{episode_index!r}",
+        "{episode_index.real}",
+        "{episode_index:{episode_chunk}}",
+    ],
+)
+def test_given_unsafe_v21_template_when_resolving_then_refused_before_formatting(template: str) -> None:
+    from physical_ai_curation.release.source_format import object_path
+
+    with pytest.raises(ReleaseInputError, match="template is invalid"):
+        object_path(
+            {"codebase_version": "v2.1", "chunks_size": 1000, "data_path": template},
+            {"episode_index": 0},
+            "data",
+        )
 
 
 def test_given_cancelling_job_under_retry_backoff_without_stop_obligation_when_queue_pass_then_backoff_applies(

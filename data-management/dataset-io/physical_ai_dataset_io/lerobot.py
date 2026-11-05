@@ -19,9 +19,10 @@ import logging
 import math
 from bisect import bisect_left
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TextIO
 
 _LOGGER = logging.getLogger("evaluation.vlm_judge")
 
@@ -61,6 +62,8 @@ class LeRobotFiles(Protocol):
 
     def read_bytes(self, relative: str) -> bytes: ...
 
+    def open_text(self, relative: str) -> AbstractContextManager[TextIO]: ...
+
     def exists(self, relative: str) -> bool: ...
 
     def find(self, directory: str, pattern: str) -> list[str]:
@@ -78,6 +81,9 @@ class LocalLeRobotFiles:
 
     def read_bytes(self, relative: str) -> bytes:
         return (self.root / relative).read_bytes()
+
+    def open_text(self, relative: str) -> AbstractContextManager[TextIO]:
+        return (self.root / relative).open(encoding="utf-8")
 
     def exists(self, relative: str) -> bool:
         return (self.root / relative).exists()
@@ -230,7 +236,7 @@ def _resolve_views(spec: DatasetSpec, views: tuple[str, ...] | None) -> tuple[st
 def _iter_v21(spec: DatasetSpec, views: tuple[str, ...]) -> Iterator[EpisodeRecord]:
     tasks_by_index = _load_tasks_jsonl(spec.files, "meta/tasks.jsonl")
 
-    with io.StringIO(spec.files.read_bytes("meta/episodes.jsonl").decode()) as fh:
+    with spec.files.open_text("meta/episodes.jsonl") as fh:
         for line in fh:
             payload = json.loads(line)
             ep_idx = int(payload["episode_index"])
@@ -353,7 +359,7 @@ def _iter_v3_jsonl(
     tasks_by_index = _load_tasks_jsonl(spec.files, "meta/tasks.jsonl")
 
     for ep_file in ep_files:
-        with io.StringIO(spec.files.read_bytes(ep_file).decode()) as fh:
+        with spec.files.open_text(ep_file) as fh:
             for line in fh:
                 line = line.strip()
                 if not line:

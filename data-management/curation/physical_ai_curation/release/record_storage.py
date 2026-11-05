@@ -434,7 +434,7 @@ class BlobRecordStorage:
         self._coordinator = _child(self._prefix, _COORDINATOR)
         self._jobs_prefix = _child(self._prefix, f"{_JOBS_DIR}/")
         self._limits = RecordLimits(timeout_seconds, max_record_bytes, max_total_bytes, max_jobs)
-        self._record_cache = {}
+        self._record_cache: dict[str, tuple[str, bytes, str]] = {}
         self._coordinator_ready = False
 
     def configuration(self) -> dict[str, Any]:

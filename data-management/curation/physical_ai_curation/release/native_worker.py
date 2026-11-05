@@ -316,6 +316,7 @@ def _process(request: Path, *, container_factory: Callable[[str, str], Any] | No
             TypeAdapter(dict[str, VideoOutput]).validate_python(spec["media"]),
             confirmed_digest=inputs.confirmed_digest,
             preserved_dataset_statistics=inputs.preserved_dataset_statistics,
+            limits=inputs.request.limits,
         )
         for index, table in enumerate(result.data_tables):
             write(_data_path(index), table=table)

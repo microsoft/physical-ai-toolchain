@@ -86,7 +86,14 @@ export interface ReleaseInventoryPage {
 
 /** Lifecycle state of a release job as reported by the status endpoint. */
 export type ReleaseJobState =
-  'accepted' | 'running' | 'cancelling' | 'sealed' | 'committing' | 'committed' | 'cancelled'
+  | 'accepted'
+  | 'running'
+  | 'needs_input'
+  | 'cancelling'
+  | 'sealed'
+  | 'committing'
+  | 'committed'
+  | 'cancelled'
 
 /** Client-safe status of one release job. Paths and frozen requests are never returned. */
 export interface ReleaseJobStatus {
@@ -105,6 +112,7 @@ export interface ReleaseJobStatus {
   diagnostics: Record<string, unknown>
   /** The latest execution attempt failed and is awaiting a worker retry. */
   recoveryRequired: boolean
+  refusalCode?: string | null
 }
 
 /** Job status as listed for one source. The list endpoint adds the source dataset identifier. */
@@ -170,6 +178,7 @@ export interface SourceEpisode {
   fromTimestamp: number
   toTimestamp: number
   cameras: string[]
+  videoWindows?: Record<string, [number, number]>
 }
 
 /** One page of native episode metadata. */
@@ -557,11 +566,12 @@ export async function fetchSourceEpisodeMedia(
   handle: string,
   episodeIndex: number,
   camera: string,
+  signal?: AbortSignal,
 ): Promise<Blob> {
   const path =
     `/releases/v1/sources/${encodeURIComponent(datasetId)}/releases/${encodeURIComponent(handle)}` +
     `/episodes/${episodeIndex}/media/${encodeURIComponent(camera)}`
-  const response = await apiFetch(path)
+  const response = await apiFetch(path, { signal })
   if (!response.ok) {
     throw await releaseFailure(response)
   }

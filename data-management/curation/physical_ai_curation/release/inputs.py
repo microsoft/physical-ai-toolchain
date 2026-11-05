@@ -63,6 +63,10 @@ class StaleReleaseInputError(ReleaseInputError):
     """A selected saved revision changed or disappeared and requires a fresh preview."""
 
 
+class SourceReadBoundsError(ReleaseInputError):
+    """The selected source cannot fit the configured read bounds."""
+
+
 def _checkpoint(checkpoint: Checkpoint | None) -> None:
     if checkpoint is not None:
         checkpoint()
@@ -259,10 +263,10 @@ class BlobReleaseSource:
             while True:
                 _checkpoint(checkpoint)
                 if monotonic() >= deadline:
-                    raise ReleaseInputError("source listing exceeds its count or elapsed bound")
+                    raise SourceReadBoundsError("source listing exceeds its count or elapsed bound")
                 if pages_read >= self._max_pages:
                     if getattr(pager, "continuation_token", None):
-                        raise ReleaseInputError("source listing exceeds its page bound")
+                        raise SourceReadBoundsError("source listing exceeds its page bound")
                     break
                 try:
                     page = next(pager)
@@ -272,14 +276,14 @@ class BlobReleaseSource:
                 for item in page:
                     _checkpoint(checkpoint)
                     if len(listed) >= self._max_objects or monotonic() >= deadline:
-                        raise ReleaseInputError("source listing exceeds its count or elapsed bound")
+                        raise SourceReadBoundsError("source listing exceeds its count or elapsed bound")
                     metadata = {name: getattr(item, name, None) for name in ("name", "size", "etag", "version_id")}
                     try:
                         observed_bytes += len(canonical_json_bytes(metadata))
                     except (TypeError, ValueError) as exc:
                         raise ReleaseInputError("source listing metadata is invalid") from exc
                     if observed_bytes > self._listing_bytes:
-                        raise ReleaseInputError("source listing exceeds its metadata byte bound")
+                        raise SourceReadBoundsError("source listing exceeds its metadata byte bound")
                     listed.append(item)
         except AzureError as exc:
             raise ReleaseInputError("source listing unavailable") from exc
@@ -363,7 +367,7 @@ class BlobReleaseSource:
             raise ReleaseInputError("source scope requires an explicit collection of paths")
         requested = tuple(paths)
         if not requested or len(requested) > self._max_objects:
-            raise ReleaseInputError("source scope must be nonempty and within the object count bound")
+            raise SourceReadBoundsError("source scope must be nonempty and within the object count bound")
         for path in requested:
             try:
                 normalize_release_path(path)
@@ -410,7 +414,7 @@ class BlobReleaseSource:
         def read(path: str) -> tuple[RevisionSourceObject, int]:
             _checkpoint(checkpoint)
             if monotonic() >= deadline:
-                raise ReleaseInputError("scoped read exceeds its elapsed bound")
+                raise SourceReadBoundsError("scoped read exceeds its elapsed bound")
             name = self._prefix + path
             try:
                 properties = self._client.get_blob_client(name).get_blob_properties()
@@ -418,7 +422,7 @@ class BlobReleaseSource:
                 raise ReleaseInputError("source object is missing or unavailable") from exc
             _checkpoint(checkpoint)
             if monotonic() >= deadline:
-                raise ReleaseInputError("scoped read exceeds its elapsed bound")
+                raise SourceReadBoundsError("scoped read exceeds its elapsed bound")
             size = getattr(properties, "size", None)
             etag = getattr(properties, "etag", None)
             version_id = getattr(properties, "version_id", None)
@@ -441,10 +445,10 @@ class BlobReleaseSource:
                 item, size = future.result()
                 _checkpoint(checkpoint)
                 if monotonic() >= deadline:
-                    raise ReleaseInputError("scoped read exceeds its elapsed bound")
+                    raise SourceReadBoundsError("scoped read exceeds its elapsed bound")
                 observed_bytes += size
                 if observed_bytes > self._listing_bytes:
-                    raise ReleaseInputError("scoped read exceeds its metadata byte bound")
+                    raise SourceReadBoundsError("scoped read exceeds its metadata byte bound")
                 objects.append(item)
         finally:
             executor.shutdown(wait=True, cancel_futures=True)

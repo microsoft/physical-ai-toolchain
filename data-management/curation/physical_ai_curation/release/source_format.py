@@ -8,8 +8,10 @@ parquet metadata. Both normalize to the same planning rows; output is always v3.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable, Mapping
 from io import BytesIO
+from string import Formatter
 
 import pyarrow as pa
 
@@ -70,7 +72,16 @@ def _v21_object_path(info: Mapping[str, object], row: Mapping[str, object], pref
         values = {"episode_chunk": chunk, "episode_index": episode, "video_key": prefix.removeprefix("videos/")}
     if not isinstance(template, str):
         raise ReleaseInputError("v2.1 path template is missing")
+    if len(template) > 1024:
+        raise ReleaseInputError("v2.1 path template exceeds its bound")
     try:
+        for _literal, field, spec, conversion in Formatter().parse(template):
+            if field is None:
+                continue
+            if field not in values or conversion is not None:
+                raise ValueError("unsupported template field")
+            if (field == "video_key" and spec) or (field != "video_key" and not re.fullmatch(r"(?:0?[1-9])?d?", spec)):
+                raise ValueError("unsupported template format")
         path = template.format(**values)
     except (KeyError, IndexError, ValueError) as error:
         raise ReleaseInputError("v2.1 path template is invalid") from error

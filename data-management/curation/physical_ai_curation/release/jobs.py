@@ -17,7 +17,7 @@ from stat import S_ISDIR, S_ISREG
 from typing import Any
 from uuid import uuid4
 
-from physical_ai_curation.release.canonical import normalize_release_path
+from physical_ai_curation.release.canonical import normalize_release_path, parse_strict_json
 from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.models import MARKER_PATH, RECEIPT_PATH, REPORT_PATH
 from physical_ai_curation.release.publication import PublicationAttempt, ownership_bytes, ownership_path
@@ -40,6 +40,9 @@ MAX_REQUEST_BYTES = 256 * 1024
 MIN_LEASE_SECONDS = 5
 MAX_LEASE_SECONDS = 3600
 DISPATCH_FAILURES = frozenset({"resolver_failed", "worker_failed"})
+INPUT_REFUSALS = frozenset(
+    {"processing_confirmation_required", "insufficient_capacity", "source_unavailable", "selection_exceeds_bounds"}
+)
 MIN_MEMORY_BYTES = 64 * 1024 * 1024
 MAX_BYTES = 1 << 42
 LEASE_ENV = "CURATION_RELEASE_LEASE_SECONDS"
@@ -128,6 +131,16 @@ class LedgerClosedError(ReleaseJobError):
 
 class CancellationError(ReleaseJobError):
     """Cancellation blocks the requested step, or the step is too late to cancel."""
+
+
+class ReleaseRefusal(ReleaseJobError):
+    """A deterministic capture refusal requiring a corrected submission, never an automatic retry."""
+
+    def __init__(self, code: str) -> None:
+        if code not in INPUT_REFUSALS:
+            raise ValueError("unsupported release refusal")
+        self.code = code
+        super().__init__(code)
 
 
 class EffectPending(Exception):
@@ -264,17 +277,18 @@ class JobStatus:
     destination_peak_bytes: int = 0
     diagnostics: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
     recovery_required: bool = False
+    refusal_code: str | None = None
 
 
 @dataclass(frozen=True)
 class JobPage:
     items: tuple[JobStatus, ...]
     next_cursor: int | None
+    execution_bindings: Mapping[str, bytes] = field(default_factory=dict)
+    accepted_times: Mapping[str, str] = field(default_factory=dict)
 
 
-def _runtime_scope(
-    effect_path: str | None, effect_paths: Sequence[str] | None, reconciliation: bool
-) -> str | tuple[str, ...] | None:
+def _runtime_scope(effect_path: str | None, effect_paths: Sequence[str] | None) -> str | tuple[str, ...] | None:
     """Return the single effect or the exact effect set a runtime may name."""
     if effect_paths is None:
         return effect_path
@@ -436,8 +450,8 @@ class ReleaseJobStore:
         """Record an authorized retry, clearing backoff without changing leases, attempts or stop obligations."""
         with self._transaction() as conn:
             row = self._owned(conn, job_id, scope, principal)
-            if row["state"] in TERMINAL_STATES:
-                raise JobConflictError("terminal jobs cannot be retried")
+            if row["state"] in TERMINAL_STATES or row["state"] == "needs_input":
+                raise JobConflictError("job requires a new submission")
             row["retry_not_before"] = None
             self._emit(conn, job_id, "recovery.requested", "info", {})
             return _status(conn, row)
@@ -471,6 +485,8 @@ class ReleaseJobStore:
         return JobPage(
             tuple(_status(conn, row) for row in selected),
             selected[-1]["events"][0]["seq"] if len(rows) > limit else None,
+            {row["job_id"]: base64.b64decode(row["execution_binding"], validate=True) for row in selected},
+            {row["job_id"]: _iso(self._acceptance_time(row)) for row in selected},
         )
 
     def frozen_request(self, job_id: str) -> bytes:
@@ -501,8 +517,6 @@ class ReleaseJobStore:
                 or row["runtimes"]
             ):
                 raise AuthorityError("execution capture is already bound or effects have started")
-            from physical_ai_curation.release.canonical import parse_strict_json
-
             if parse_strict_json(intent_request).get("schema_version") != "curated-release-intent/v1":
                 raise AuthorityError("only an accepted intent can be captured")
             if parse_strict_json(frozen_request).get("schema_version") != "curated-release-generation/v1":
@@ -606,8 +620,8 @@ class ReleaseJobStore:
             raise ReleaseJobError("invalid worker identity")
         with self._transaction() as conn:
             row = self._job(conn, job_id)
-            if row["state"] in TERMINAL_STATES:
-                raise AuthorityError("job is terminal")
+            if row["state"] in TERMINAL_STATES or row["state"] == "needs_input":
+                raise AuthorityError("job cannot be claimed")
             now = self._clock()
             if row["lease_expires"] is not None and row["lease_expires"] > now:
                 raise AuthorityError("lease is held")
@@ -638,6 +652,35 @@ class ReleaseJobStore:
     def now(self) -> float:
         """Return the store clock used for leases and retry eligibility."""
         return self._clock()
+
+    def require_input(self, job_id: str, fence: int, code: str) -> None:
+        """Pause a capture-only job without dropping ownership or cancellation obligations."""
+        if code not in INPUT_REFUSALS:
+            raise ReleaseJobError("invalid refusal category")
+        with self._transaction() as conn:
+            row = self._lease(conn, job_id, fence)
+            if row["cancel_requested"]:
+                raise CancellationError("cancellation requested")
+            if (
+                row["state"] != "running"
+                or row["effects"]
+                or row["scratch_bytes"]
+                or self._active_runtimes(conn, job_id, fence)
+            ):
+                raise AuthorityError("capture refusal has unresolved work")
+            row.update(
+                state="needs_input", last_failure=code, retry_not_before=None, lease_expires=None, lease_owner=None
+            )
+
+    def yield_cancellation(self, job_id: str, fence: int) -> None:
+        """Relinquish an unwound cancelling claim so the next pass can reconcile it immediately."""
+        with self._transaction() as conn:
+            row = self._lease(conn, job_id, fence)
+            if not row["cancel_requested"]:
+                raise AuthorityError("cancellation was not requested")
+            row.update(
+                lease_expires=None, lease_owner=None, failed_attempts=0, retry_not_before=None, last_failure=None
+            )
 
     def record_dispatch_failure(self, job_id: str, category: str, *, expected_fence: int, worker_id: str) -> bool:
         """Schedule retry backoff only if the observed claim is still current; return True when recorded.
@@ -858,7 +901,7 @@ class ReleaseJobStore:
         reconciliation: bool = False,
     ) -> Path:
         """Allocate a unique internal proof name for one authorized runtime."""
-        scope = _runtime_scope(effect_path, effect_paths, reconciliation)
+        scope = _runtime_scope(effect_path, effect_paths)
         conn = self._snapshot()
         if reconciliation:
             self._authorize_reconciliation_runtime(conn, job_id, fence, scope)
@@ -891,7 +934,7 @@ class ReleaseJobStore:
         if not re.fullmatch(rf"{fence}-[0-9a-f]{{32}}\.json", runtime.proof_path.name):
             raise AuthorityError("runtime proof identity is invalid")
         encoded = json.dumps(runtime.to_dict(), sort_keys=True, separators=(",", ":"))
-        scope = _runtime_scope(effect_path, effect_paths, reconciliation)
+        scope = _runtime_scope(effect_path, effect_paths)
         with self._transaction() as conn:
             row = (
                 self._authorize_reconciliation_runtime(conn, job_id, fence, scope)
@@ -1418,8 +1461,10 @@ class ReleaseJobStore:
         copy_ids: Sequence[str | None] | None = None,
     ) -> None:
         """Re-check a batch of dispatched Blob copies inside one registered child before any remote mutation."""
-        if not items or len(items) > self.settings.blob_batch_size:
+        if not items:
             raise ReleaseJobError("blob writer batch is empty")
+        if len(items) > self.settings.blob_batch_size:
+            raise ReleaseJobError("blob writer batch exceeds configured size")
         if reconciliation and (copy_ids is None or len(copy_ids) != len(items)):
             raise AuthorityError("cleanup copy identities are missing")
         names = [normalize_release_path(path) for path, _, _ in items]
@@ -2106,7 +2151,8 @@ def _status(conn: Mapping[str, dict[str, Any]], row: Mapping[str, Any]) -> JobSt
         destination_current_bytes=_destination_bytes(row),
         destination_peak_bytes=row["destination_peak_bytes"],
         diagnostics={key: dict(value) for key, value in sorted(row["diagnostics"].items())},
-        recovery_required=row["last_failure"] is not None and row["state"] not in TERMINAL_STATES,
+        recovery_required=row["last_failure"] in DISPATCH_FAILURES and row["state"] not in TERMINAL_STATES,
+        refusal_code=row["last_failure"] if row["state"] == "needs_input" else None,
     )
 
 

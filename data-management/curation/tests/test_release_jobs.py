@@ -4085,22 +4085,28 @@ def test_given_registered_runtime_when_reopened_then_stop_requires_guardian_proo
     assert reopened.get(job_id, scope=SCOPE, principal=OWNER).effects_stopped is True
 
 
-def test_given_planned_encoding_when_executed_then_native_result_has_stop_proof(tmp_path: Path) -> None:
+@pytest.mark.parametrize("processing_memory", [512 * 1024**2, 3 * 1024**3])
+def test_given_planned_encoding_when_executed_then_native_result_has_stop_proof(
+    tmp_path: Path, processing_memory: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import numpy as np
     from physical_ai_curation.release.composition import NativeGenerationPlan, PreparedMediaWindow
     from physical_ai_curation.release.encoding import EncodeOptions, EncodingWindow
     from physical_ai_curation.release.execution import encode_planned_object
-    from physical_ai_curation.release.media import SubsetEpisodeInput, plan_release_objects
+    from physical_ai_curation.release.media import ReleaseMediaLimits, SubsetEpisodeInput, plan_release_objects
     from physical_ai_curation.release.models import SourceObject
     from test_release_media import LOCAL_SCRATCH_SAME, VIDEO, _encode_source, _request, _window
 
+    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "1")
     content = _encode_source([np.full((24, 32, 3), value, dtype=np.uint8) for value in (30, 80)])
     source = SourceObject(path=VIDEO, revision="frozen", length=len(content), sha256=sha256_hex(content))
+    limits = ReleaseMediaLimits(processing_memory_bytes=processing_memory, reserve_bytes=0)
     plan = plan_release_objects(
         _request(
             selected_episode_ids=("ep-0",),
             windows=(_window(source=source, end=0.2, duration=0.2, reasons=("invert",)),),
             scratch=LOCAL_SCRATCH_SAME,
+            limits=limits,
         )
     )
     window = EncodingWindow("ep-0", 0, 2, (0, 1), "invert")
@@ -4123,6 +4129,7 @@ def test_given_planned_encoding_when_executed_then_native_result_has_stop_proof(
         confirmed_digest=plan.digest,
         scratch_bytes=8 * 1024**2,
         output_bytes=1024**2,
+        limits=limits,
     ) as encoded:
         assert encoded.media.windows[0].output_to_frame == 2
         assert encoded.length == encoded.path.stat().st_size

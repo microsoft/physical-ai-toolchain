@@ -331,11 +331,19 @@ describe('retained release routes', () => {
     mockApiFetch.mockResolvedValue(
       new Response('video-bytes', { headers: { 'Content-Type': 'video/mp4' } }),
     )
-    const blob = await fetchSourceEpisodeMedia('source/a', 'handle/a', 7, 'camera/wrist')
+    const controller = new AbortController()
+    const blob = await fetchSourceEpisodeMedia(
+      'source/a',
+      'handle/a',
+      7,
+      'camera/wrist',
+      controller.signal,
+    )
     expect(blob.type).toBe('video/mp4')
     expect(await blob.text()).toBe('video-bytes')
     expect(mockApiFetch).toHaveBeenCalledWith(
       '/releases/v1/sources/source%2Fa/releases/handle%2Fa/episodes/7/media/camera%2Fwrist',
+      { signal: controller.signal },
     )
   })
 

@@ -33,6 +33,7 @@ const TERMINAL_STATES: ReadonlySet<ReleaseJobState> = new Set<ReleaseJobState>([
 const CANCELLABLE_STATES: ReadonlySet<ReleaseJobState> = new Set<ReleaseJobState>([
   'accepted',
   'running',
+  'needs_input',
 ])
 const RECOVERABLE_STATES: ReadonlySet<ReleaseJobState> = new Set<ReleaseJobState>([
   'sealed',
@@ -43,6 +44,7 @@ const RECOVERABLE_STATES: ReadonlySet<ReleaseJobState> = new Set<ReleaseJobState
 const STATE_LABELS: Record<ReleaseJobState, string> = {
   accepted: 'Accepted',
   running: 'Running',
+  needs_input: 'Needs input',
   cancelling: 'Cancelling',
   sealed: 'Sealed',
   committing: 'Committing',
@@ -148,14 +150,14 @@ function WorkspaceNotice({ message }: { message: string }) {
 function describeJobStatus(status: ReleaseJobStatus | undefined, failed: boolean): string {
   if (failed) return 'Job status could not be loaded.'
   if (!status) return 'Loading job status...'
+  if (status.state === 'needs_input') {
+    return `Needs input: ${status.refusalCode ?? 'submission_refused'}. Cancel this job and submit a corrected request.`
+  }
   if (status.recoveryRequired && !status.cancelRequested) {
     return 'Stalled. Recovery required. Cancel job to remove partial output, or Recover job to retry.'
   }
   const parts = [`${STATE_LABELS[status.state]}.`]
-  if (
-    status.state === 'cancelling' &&
-    (status.cleanupState === 'failed' || status.recoveryRequired)
-  ) {
+  if (status.state === 'cancelling' && status.cleanupState === 'failed') {
     parts.push('Cleanup failed. Retry cleanup to remove the remaining output.')
   }
   if (status.cancelRequested) parts.push('Cancellation requested.')
@@ -211,21 +213,24 @@ function EpisodeMedia({
   handle,
   episodeIndex,
   camera,
+  window,
 }: {
   datasetId: string
   handle: string
   episodeIndex: number
   camera: string
+  window?: [number, number]
 }) {
   const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
 
   useEffect(() => {
     let active = true
+    const controller = new AbortController()
     let objectUrl: string | null = null
     setUrl(null)
     setFailed(false)
-    fetchSourceEpisodeMedia(datasetId, handle, episodeIndex, camera)
+    fetchSourceEpisodeMedia(datasetId, handle, episodeIndex, camera, controller.signal)
       .then((blob) => {
         if (!active) return
         objectUrl = URL.createObjectURL(blob)
@@ -236,6 +241,7 @@ function EpisodeMedia({
       })
     return () => {
       active = false
+      controller.abort()
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [datasetId, handle, episodeIndex, camera])
@@ -248,6 +254,24 @@ function EpisodeMedia({
       src={url}
       controls
       muted
+      onLoadedMetadata={(event) => {
+        if (window) event.currentTarget.currentTime = window[0]
+      }}
+      onSeeking={(event) => {
+        if (!window) return
+        const video = event.currentTarget
+        if (video.currentTime < window[0]) video.currentTime = window[0]
+        else if (video.currentTime > window[1]) video.currentTime = window[1]
+      }}
+      onTimeUpdate={(event) => {
+        if (!window) return
+        const video = event.currentTarget
+        if (video.currentTime < window[0]) video.currentTime = window[0]
+        if (video.currentTime >= window[1]) {
+          video.pause()
+          if (video.currentTime > window[1]) video.currentTime = window[1]
+        }
+      }}
       className="bg-muted w-full max-w-2xl rounded-md"
     />
   )
@@ -425,6 +449,7 @@ function ReleaseDetail({
               handle={release.handle}
               episodeIndex={selected.episodeIndex}
               camera={activeCamera}
+              window={selected.videoWindows?.[activeCamera]}
             />
           )}
         </section>
@@ -473,8 +498,7 @@ function ReleaseWorkspaceContent({
     status !== undefined &&
     (RECOVERABLE_STATES.has(status.state) || status.recoveryRequired) &&
     !release.isRecovering
-  const cleanupFailed =
-    status?.state === 'cancelling' && (status.cleanupState === 'failed' || status.recoveryRequired)
+  const cleanupFailed = status?.state === 'cancelling' && status.cleanupState === 'failed'
   const canClearJob = release.activeJobId !== null && (activeTerminal || release.status.isError)
 
   const sourceReleases = useQuery({

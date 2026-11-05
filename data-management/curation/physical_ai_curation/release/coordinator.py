@@ -591,6 +591,7 @@ def _encoded_files(
             confirmed_digest=inputs.confirmed_digest,
             scratch_bytes=inputs.scratch_bytes,
             output_bytes=inputs.output_bytes,
+            limits=inputs.request.limits,
             checkpoint=checkpoint,
         ) as encoded:
             if isinstance(source, BlobReleaseSource):

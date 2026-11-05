@@ -29,8 +29,10 @@ from physical_ai_curation.release.inputs import (
 from physical_ai_curation.release.jobs import (
     AuthorityError,
     CancellationError,
+    CapacityError,
     ReleaseJobError,
     ReleaseJobStore,
+    ReleaseRefusal,
     ReleaseRuntimeSettings,
     has_recovery_obligation,
 )
@@ -65,6 +67,7 @@ class _LifecycleMonitor:
         self._job_id = job_id
         self._fence = fence
         self._interval = min(5.0, store.settings.lease_seconds / 4)
+        self._valid_until = store.now() + store.settings.lease_seconds / 2
         self._stop = threading.Event()
         self._reason: Exception | None = None
         self._thread = threading.Thread(target=self._run, name=f"release-lease-{job_id}", daemon=True)
@@ -88,10 +91,17 @@ class _LifecycleMonitor:
     def _run(self) -> None:
         while not self._stop.wait(self._interval):
             try:
+                started = self._store.now()
                 cancelled = self._store.heartbeat(self._job_id, self._fence)
-            except Exception as error:
+            except AuthorityError as error:
                 self.request_stop(error)
                 return
+            except Exception as error:
+                if self._store.now() + self._interval >= self._valid_until:
+                    self.request_stop(error)
+                    return
+                continue
+            self._valid_until = started + self._store.settings.lease_seconds / 2
             if cancelled:
                 self.request_stop(CancellationError("cancellation requested"))
 
@@ -186,14 +196,17 @@ async def execute_job(
                 raise ReleaseInputError("release intent requires configured execution capture")
             captured, binding, reservation, execution = await configured.capture(monitor.check)
             monitor.check()
-            store.capture_execution(
-                job_id,
-                fence,
-                intent_request=raw,
-                frozen_request=captured,
-                execution_binding=binding,
-                reserved_bytes=reservation,
-            )
+            try:
+                store.capture_execution(
+                    job_id,
+                    fence,
+                    intent_request=raw,
+                    frozen_request=captured,
+                    execution_binding=binding,
+                    reserved_bytes=reservation,
+                )
+            except CapacityError as error:
+                raise ReleaseRefusal("insufficient_capacity") from error
             configured = execution
             raw = store.frozen_request(job_id)
             payload = parse_strict_json(raw)
@@ -270,6 +283,15 @@ async def execute_job(
                 duration_ms=min(86_400_000, int((time.monotonic() - started) * 1000)),
             )
         return result
+    except ReleaseRefusal as error:
+        monitor.stop()
+        store.require_input(job_id, fence, error.code)
+        return None
+    except CancellationError:
+        monitor.stop()
+        with suppress(AuthorityError):
+            store.yield_cancellation(job_id, fence)
+        raise
     except Exception:
         with suppress(AuthorityError):
             store.record_diagnostic(
@@ -298,6 +320,8 @@ async def _dispatch(
         return "resolver_failed"
     try:
         await execute_job(store, job_id, configured, worker_id=worker_id)
+    except CancellationError:
+        return None
     except Exception:
         return "worker_failed"
     return None
@@ -324,7 +348,7 @@ async def run_queue(
         store.storage.snapshot().items(), key=lambda item: (item[1].get("retry_not_before") or 0, item[0])
     )
     for job_id, row in candidates:
-        if row["state"] in ("committed", "cancelled"):
+        if row["state"] in ("committed", "cancelled", "needs_input"):
             continue
         if (row["lease_expires"] or 0) > store.now():
             continue

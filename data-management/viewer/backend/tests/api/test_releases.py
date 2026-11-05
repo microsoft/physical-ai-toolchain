@@ -539,6 +539,9 @@ def test_given_required_saved_processing_without_consent_when_captured_then_no_v
     release_api: tuple,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from physical_ai_curation.release.jobs import ReleaseRefusal
+    from physical_ai_curation.release.runner import run_queue
+
     from src.api.models.episode_edits import EpisodeEditOperations
 
     client, spec, settings, _app, _root = release_api
@@ -574,11 +577,17 @@ def test_given_required_saved_processing_without_consent_when_captured_then_no_v
     monkeypatch.setattr("physical_ai_curation.release.coordinator._encoded_files", forbidden)
     capture = planner.execution(job, store.frozen_request(job)).capture
     assert capture is not None
-    with pytest.raises(ReleaseApiError, match="processing_confirmation_required"):
+    with pytest.raises(ReleaseRefusal, match="processing_confirmation_required"):
         asyncio.run(capture(lambda: None))
     forbidden.assert_not_called()
     assert store.storage.snapshot()[job]["effects"] == {}
     assert parse_strict_json(store.frozen_request(job))["schema_version"] == "curated-release-intent/v1"
+    asyncio.run(run_queue(store, planner.execution))
+    status = client.get(BASE + "/jobs/" + job).json()
+    assert status["state"] == "needs_input"
+    assert status["refusal_code"] == "processing_confirmation_required"
+    assert not status["recovery_required"]
+    assert asyncio.run(run_queue(store, planner.execution)) == ()
 
 
 @pytest.mark.parametrize("failure", ["oversized", "unreadable"])
