@@ -671,11 +671,11 @@ describe('useRelease', () => {
 
   it('persists the pending key before submission and retains only the accepted pointer', async () => {
     const request = { datasetId: DATASET } as releaseApi.ReleaseRequest
-    const submission = { idempotencyKey: 'idempotency-1234' } as releaseApi.ReleaseSubmission
+    const submission = { idempotencyKey: 'test-key' } as releaseApi.ReleaseSubmission
     vi.mocked(releaseApi.previewRelease).mockResolvedValue({ digest: 'preview' } as never)
     vi.mocked(releaseApi.submitRelease).mockImplementation(async () => {
       expect(JSON.parse(localStorage.getItem(pendingKey(SCOPE_A))!)).toEqual({
-        idempotencyKey: 'idempotency-1234',
+        idempotencyKey: 'test-key',
       })
       return { jobId: JOB_ID, replayed: false }
     })
@@ -706,7 +706,7 @@ describe('useRelease', () => {
     const pending = result.current
       .submit(
         { datasetId: DATASET } as releaseApi.ReleaseRequest,
-        { idempotencyKey: 'idempotency-1234' } as releaseApi.ReleaseSubmission,
+        { idempotencyKey: 'test-key' } as releaseApi.ReleaseSubmission,
       )
       .catch((error: unknown) => {
         failure = error
@@ -746,7 +746,7 @@ describe('useRelease', () => {
       await expect(
         result.current.submit(
           { datasetId: DATASET } as releaseApi.ReleaseRequest,
-          { idempotencyKey: 'idempotency-1234' } as releaseApi.ReleaseSubmission,
+          { idempotencyKey: 'test-key' } as releaseApi.ReleaseSubmission,
         ),
       ).rejects.toBe(error)
     })
