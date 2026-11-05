@@ -1583,8 +1583,9 @@
             "system-dependencies",
             "install",
             "test",
-            "coverage_gate",
-            "judge_unit"
+            "judge_unit",
+            "backend_coverage_gate",
+            "judge_backend_coverage_gate"
           ],
           "reports": [
             {
@@ -1609,11 +1610,16 @@
             "test": {
               "run-sha256": "3e34d539de1f384e58b36e0a15d7e7716962b8acafc4c408014d518ea844353d"
             },
-            "coverage_gate": {
-              "run-sha256": "a3bdc15b1babee2b05fe1d4dcb92c200908adf7dc742648fc7c3175d2e93e79c"
-            },
             "judge_unit": {
               "run-sha256": "fb9ad8b81e9fe71d8b4d8b964f73246f4e5dc2aef6cb0e808d3a05e991497769"
+            },
+            "backend_coverage_gate": {
+              "run-sha256": "049c215e1b7e2ef542014b20a39ea8b66caccf86339aa92a90b2617049c182d3",
+              "if": "${{ !cancelled() && steps.install.outcome == 'success' }}"
+            },
+            "judge_backend_coverage_gate": {
+              "run-sha256": "715aaff67148e4a88206e6de14295780b82d07e9587fdcc32fc33d5991b5d547",
+              "if": "${{ !cancelled() && steps.install.outcome == 'success' }}"
             }
           }
         }
@@ -1702,10 +1708,10 @@
           ],
           "bindings": {
             "ruff-check": {
-              "run-sha256": "a0677ad3334242d0f5acf763d2fadb4a87e65efb4d50f8c9b0a3a162c7ed6356"
+              "run-sha256": "e387a9a623711807bbb8b338b5a68ad276d0f3434e4556bd7273787a4bd3b4df"
             },
             "ruff-format": {
-              "run-sha256": "214aa3e4f519c49893efbc5baeacda35a6ab7b2f0b18648084e24839ef0021e0"
+              "run-sha256": "8b7a7ef74230e2d4aa5d693539ff354bd87ca798fec0629f061c1e3f58de931b"
             },
             "hf-pins": {
               "run-sha256": "468794c7629300a830b5cf6f36718735c8f8ca59c0bd98ebcb0be0eee6dbf335"
