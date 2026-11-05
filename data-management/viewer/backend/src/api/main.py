@@ -281,7 +281,7 @@ async def health_check():
     return JSONResponse(content={"status": overall, "checks": checks}, status_code=status_code)
 
 
-@app.get("/api/csrf-token", tags=["auth"])
+@app.get("/api/csrf-token", tags=["auth"], responses=error_responses(401, 403))
 async def get_csrf_token() -> JSONResponse:
     """Return a CSRF token and set it as a ``csrf_token`` cookie.
 

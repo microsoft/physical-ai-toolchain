@@ -501,6 +501,8 @@ The Easy Auth login secret remains required. Old Terraform proxy-secret objects 
 
 Only exact GET/HEAD `/health` is exempt at the hosted backend; docs, CSRF bootstrap, OPTIONS and unknown routes require caller and user authentication. Frontend static liveness is independent of Entra. Active `/health` privately checks usable helper proof and backend storage health; pending health is not security acceptance. Duplicate proof/principal headers, ambiguous subjects and over-budget claims are denied. Existing normalized user scopes and nonempty roles remain unchanged.
 
+The CSRF bootstrap schema includes hosted-auth HTTP 401 and 403 responses. Contract regressions exercise missing caller proof, unauthorized callers, missing users, and authorized requests with signed tokens and a local key server.
+
 ### Other Authentication Modes
 
 The same images support API key, Auth0, and direct Entra JWT deployments. With `DATAVIEWER_CALLER_MODE=off` (the unset default), nginx strips inbound proof, preserves the browser's `Authorization` header and never calls the helper. Storage mode or running on an Azure host does not select caller proof. Direct Entra JWT deployments can configure the optional MSAL frontend at build time:

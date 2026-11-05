@@ -18,7 +18,42 @@ from src.api.main import api_http_exception_handler
 from src.api.models.episode_edits import SaveEpisodeEditsRequest
 from src.api.validation import path_int_param, query_int_param, range_header_param
 
+from .conftest import DEFAULT_PRINCIPAL, HostedCaller
 from .lerobot_sources import write_source
+
+
+@pytest.mark.parametrize("path", ["/api/csrf-token", "/api/auth/context", "/api/datasets"])
+@pytest.mark.parametrize(
+    ("identity", "expected_status"),
+    [("missing-caller", 401), ("forbidden-caller", 403), ("missing-user", 401), ("authorized", 200)],
+)
+def test_hosted_auth_responses_match_schema(
+    client: TestClient, hosted_caller: HostedCaller, path: str, identity: str, expected_status: int
+) -> None:
+    schema_response = client.get("/openapi.json", headers=hosted_caller.request_headers())
+    assert schema_response.status_code == 200
+    document = schema_response.json()
+    token = (
+        hosted_caller.token({"oid": "00000000-0000-0000-0000-0000000000ff"}) if identity == "forbidden-caller" else None
+    )
+    response = client.get(
+        path,
+        headers=hosted_caller.request_headers(
+            include_caller=identity != "missing-caller",
+            caller_token=token,
+            principal=None if identity == "missing-user" else DEFAULT_PRINCIPAL,
+        ),
+    )
+    assert response.status_code == expected_status
+    responses = document["paths"][path]["get"]["responses"]
+    assert str(expected_status) in responses
+    response_schema = responses[str(expected_status)]["content"]["application/json"]["schema"]
+    Draft202012Validator({**response_schema, "components": document["components"]}).validate(response.json())
+    if path == "/api/csrf-token":
+        if expected_status == 200:
+            assert response.cookies["csrf_token"] == response.json()["csrf_token"]
+        else:
+            assert "csrf_token" not in response.cookies
 
 
 @pytest.mark.parametrize(
