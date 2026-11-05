@@ -126,6 +126,7 @@ test('skill packages: CLI reports invalid repositories', t => {
 });
 
 test('product workspace: judge tests and coverage remain required in the backend owner', () => {
+  assert.equal(graph['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer']['timeout-minutes'], 40);
   const steps = graph['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer'].steps;
   const install = steps.find(step => step.id === 'install').run;
   assert.match(install, /--project \.\.\/\.\.\/\.\. --all-packages --frozen/);
@@ -1619,6 +1620,13 @@ for (const [name, mutate, diagnostic] of graphMutations) {
     assert.ok(errors.some(error => error.includes(diagnostic)), `Expected ${diagnostic}; received ${JSON.stringify(errors)}`);
   });
 }
+
+test('execution graph: backend suite timeout remains bounded', () => {
+  const candidate = structuredClone(graph);
+  candidate['.github/workflows/dataviewer-backend-pytests.yml'].jobs['pytest-dataviewer']['timeout-minutes'] = 41;
+  const errors = validateWorkflows(candidate, contract);
+  assert.ok(errors.some(error => error.includes('dataviewer-backend-pytests:pytest-dataviewer: timeout must be within the execution budget')));
+});
 
 const executionMutations = [
   ['missing reusable output', ({ workflow }) => { delete workflow.on.workflow_call.outputs['work-status']; }, 'broken reusable output work-status'],
