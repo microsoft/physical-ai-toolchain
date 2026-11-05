@@ -2,7 +2,7 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-10-26
+ms.date: 2026-11-05
 ms.topic: overview
 ---
 
@@ -470,6 +470,10 @@ LeRobot v3 dataset. The viewer exposes it through the source Episodes and Releas
 tabs and a scoped API under `/api/releases/v1`. Releases are available only when
 `RELEASE_JOB_ROOT` and `RELEASE_DESTINATIONS` are configured.
 
+LeRobot v2.1 and v3.0 source datasets produce v3.0 releases. The v2.1 path uses
+bounded JSONL metadata and selected Parquet reads; unchanged Azure videos are
+copied storage-side to their v3.0 output paths without downloading them.
+
 ### Viewer workflow
 
 The source header remains above the Episodes and Releases tabs. Releases are not
@@ -493,24 +497,63 @@ Source header
 | Surface   | Behavior                                                                                                  |
 |-----------|-----------------------------------------------------------------------------------------------------------|
 | Selection | In Releases, choose Create release, then filter and order source episodes in the dialog                   |
-| Preview   | Read-only. Computes the release plan and digests without persisting a job or reserving capacity           |
-| Submit    | Requires the matching preview digests and any shown acknowledgments; a changed selection invalidates them |
+| Preview   | Advisory and quick. Shows the selection, known estimates and blockers without freezing or reserving       |
+| Submit    | Records the selected intent and required acknowledgments; the worker captures source state later          |
 | Releases  | Lists verified releases for the source, their episodes, and camera media, with job status                 |
 
+Episode indices and labels load first. Annotation, edit and judge details load
+only for visible or selected episodes, in bounded sequential batches. Preview
+waits for selected details and saved-input readiness, not unrelated episode details.
+Unloaded details remain unknown. Detail filters announce incomplete results and
+offer **Load remaining episode details** to complete coverage; label filters do
+not require those reads. Failed detail reads can be retried without clearing the
+selection or draft.
+
 The dialog requires a declaration that the local source dataset is finalized and
-will not change during release. Confirm any processing actions shown by the preview.
+will not change during release. Video processing consent is optional at submission;
+required processing without consent fails before any video is processed.
 A local-disk acknowledgment is shown
 for local destinations, or when the preview does not report a destination kind, and
-states the reserved bytes. Submission is blocked while the preview reports blocking
-entries. Selection, filter, or finalized-source declaration changes discard the preview.
+shows the byte estimate as unknown until execution. Submission is blocked while the preview reports blocking
+entries, limited to structural, authorization and known capacity refusals. Preview marks statistics as unchecked; the worker records discovered omissions as warnings, never as completeness gates. Changing the selection, filter, or finalized-source declaration discards the displayed preview; refresh it before submitting.
+
+Closing the dialog preserves its draft and stops browser requests; it does not
+cancel an accepted release. After an uncertain submission, reopen to look up the
+original request key before retrying. Reloads and matching cross-tab updates
+rediscover the accepted job without resubmitting it. Use the job's explicit cancel
+action to request server-side cancellation.
+
+### Azure Data Movement
+
+The Azure workflow is the same on a workstation, in a dev container or on an Azure
+host. Preview reads no source metadata and does not verify source revisions. Acceptance
+persists the job before the independent backend worker captures source revisions and starts native generation.
+Unchanged payloads use same-account storage-side copies, without host downloads for
+verification or source staging on disk.
+
+The worker may read necessary metadata and selected Parquet row groups into bounded
+memory using revision-conditional ranges. Missing Parquet row-group statistics or exceeded
+footer, transfer, row or decoded-memory limits cause a refusal, not a whole-file
+download fallback. Only confirmed video encoding permits affected video download
+and staging; generated output scratch has its own capacity accounting.
+
+Verification reports distinguish content-digest checks, write-time hashes of
+generated uploads and revision-bound Azure copy evidence. A copied object's ETag
+or version is not presented as a content hash. See the
+[release specification](../specifications/curated-dataset-release.specification.md)
+for the assurance and schema-version contracts, and
+[backend configuration](backend/.env.example) for source and worker limits.
+
+Feature statistics are optional for copy-only or unchanged-camera releases. A release with missing or partial camera summaries publishes with a visible completeness warning that lists the omitted coverage. Package integrity and training readiness are reported separately; an intact release can still need normalization statistics before training.
 
 ### Refusal and Recovery
 
-A changed saved revision returns `409 stale_preview`. The dialog refreshes the
-source inventory and keeps the refusal visible; review the new selection and
-create a fresh preview. The known insufficient-capacity `507` is a definite
-refusal, not an accepted job. Release or increase the relevant capacity before
-previewing and submitting again.
+A submission that does not match the selection and processing intent confirmed in the dialog
+is refused, and the dialog keeps the refusal visible. Review the selection and create a fresh
+preview. A source revision that changes after preview is not a refusal; the worker captures the
+revision it executes. An admission-time insufficient-capacity `507` is a definite
+refusal. Capacity shortages discovered by the worker fail the accepted job before
+output effects. Release or increase the relevant capacity before retrying.
 
 A transport failure or other ambiguous server failure can occur after acceptance.
 Retain the idempotency key and use accepted-request lookup; do not submit a new
@@ -760,8 +803,26 @@ Available options:
 ```bash
 cd backend
 source .venv/bin/activate
-uvicorn src.api.main:app --log-config logging.json --log-level "${LOG_LEVEL:-info}" --reload --port 8000
+python -m src.api.server --reload --port 8000
 ```
+
+The container and development launchers use this supervised entrypoint. Shutdown allows
+10 seconds for requests to finish, then cancels pending requests and cleans up workers.
+An independent 25-second total deadline terminates an unresponsive server process group.
+Configure these limits through `DATAVIEWER_GRACEFUL_SHUTDOWN_SECONDS` and
+`DATAVIEWER_SHUTDOWN_TIMEOUT_SECONDS` in [backend/.env.example](backend/.env.example).
+Keep the total deadline below the deployment's termination grace period. Forced termination
+does not mark durable release jobs complete or cancelled; their existing recovery rules apply.
+
+Release preview is an advisory request through `POST /api/releases/v1/preview`, bounded by
+`RELEASE_OPERATION_TIMEOUT_SECONDS` (default 30 seconds). It reads bounded metadata, does not
+verify source revisions and never accepts a release. Submission through `POST /api/releases/v1/jobs`
+durably records the selected intent, confirmations and an idempotency key before expensive source
+work. The independent worker captures the source and performs integrity verification.
+If submission acceptance races with a lost response, use the existing accepted-request lookup
+before retrying with the same key.
+No payload-download fallback is used. Copied objects are recorded with storage revision evidence,
+not content hashes.
 
 #### Start Frontend
 

@@ -6,16 +6,23 @@ operator-owned configuration and never returned to, or accepted from, clients.
 
 from __future__ import annotations
 
+import asyncio
 import fnmatch
+import functools
 import hashlib
 import json
+import math
 import os
 import re
-from collections.abc import Callable, Iterator, Mapping
+import threading
+import time
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import ExitStack
-from dataclasses import asdict, dataclass, field
+from contextvars import ContextVar
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 from physical_ai_curation.release.azure_publication import BlobReleaseStore
 from physical_ai_curation.release.blob_source_associations import BlobSourceAssociations, BlobVerifiedAssociation
@@ -33,7 +40,7 @@ from physical_ai_curation.release.jobs import (
     ReleaseJobStore,
     ReleaseRuntimeSettings,
 )
-from physical_ai_curation.release.models import INVENTORY_PATH, MANIFEST_PATH, Inventory
+from physical_ai_curation.release.models import INVENTORY_PATH, MANIFEST_PATH, Inventory, StorageRevisionEntry
 from physical_ai_curation.release.projections import LABELS_PATH
 from physical_ai_curation.release.publication import PublicationAttempt
 from physical_ai_curation.release.record_storage import (
@@ -73,8 +80,15 @@ _DATASET_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _DATASET_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._\- ]{0,254}")
 _IDEMPOTENCY_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 _MAX_EPISODES = 10_000
+_MAX_DETAIL_EPISODES = 100
 _MAX_MEDIA_BYTES = 512 * 1024**2
 _MAX_METADATA_BYTES = 64 * 1024**2
+_T = TypeVar("_T")
+_DEFAULT_LANE_CONCURRENCY = 4
+_MAX_LANE_CONCURRENCY = 64
+_DEFAULT_READ_INFLIGHT_BYTES = 1024**3
+_DEFAULT_OPERATION_SECONDS = 30.0
+_MAX_OPERATION_SECONDS = 600.0
 
 
 class ReleaseApiError(Exception):
@@ -87,6 +101,330 @@ class ReleaseApiError(Exception):
 
 
 @dataclass(frozen=True)
+class ReleaseOffloadSettings:
+    """Bounds for synchronous release work run off the event loop."""
+
+    read_concurrency: int = _DEFAULT_LANE_CONCURRENCY
+    control_concurrency: int = _DEFAULT_LANE_CONCURRENCY
+    read_inflight_bytes: int = _DEFAULT_READ_INFLIGHT_BYTES
+    operation_timeout_seconds: float = _DEFAULT_OPERATION_SECONDS
+    preparation_concurrency: int = 2
+
+
+_SHUTDOWN_SETTLE_SECONDS = 5.0
+
+
+class _OperationCancelled(Exception):
+    """Raised at a checkpoint when the caller gave up or the operation deadline passed."""
+
+
+class _CancelToken:
+    """Cooperative stop signal shared by one release operation and the request awaiting it."""
+
+    def __init__(self, deadline: float) -> None:
+        self._deadline = deadline
+        self._cancelled = threading.Event()
+        self.on_cancel: Callable[[], None] | None = None
+
+    def cancel(self) -> None:
+        already_cancelled = self._cancelled.is_set()
+        self._cancelled.set()
+        if not already_cancelled and self.on_cancel is not None:
+            self.on_cancel()
+
+    def check(self) -> None:
+        if self._cancelled.is_set() or time.monotonic() >= self._deadline:
+            self._cancelled.set()
+            raise _OperationCancelled
+
+
+_ACTIVE_TOKEN = threading.local()
+
+
+def check_cancelled() -> None:
+    """Checkpoint for release work: stop when the owning request was abandoned or timed out."""
+    token = getattr(_ACTIVE_TOKEN, "token", None)
+    if token is not None:
+        token.check()
+
+
+def _run_with_token[Result](
+    token: _CancelToken, operation: Callable[..., Result], args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Result:
+    previous = getattr(_ACTIVE_TOKEN, "token", None)
+    _ACTIVE_TOKEN.token = token
+    try:
+        token.check()
+        return operation(*args, **kwargs)
+    finally:
+        _ACTIVE_TOKEN.token = previous
+
+
+class _Admission:
+    """Process-wide admission for one lane name, shared by every offload generation.
+
+    Slots, bytes, and tokens stay charged until their thread settles, so replacing the offload
+    cannot reset capacity that running work still holds.
+    """
+
+    def __init__(self) -> None:
+        self.condition = threading.Condition()
+        self.admitted = 0
+        self.charged_bytes = 0
+        self.tokens: set[_CancelToken] = set()
+
+    def release_locked(self, response_bytes: int, token: _CancelToken) -> None:
+        self.admitted -= 1
+        self.charged_bytes -= response_bytes
+        self.tokens.discard(token)
+
+    def release(self, response_bytes: int, token: _CancelToken) -> None:
+        with self.condition:
+            self.release_locked(response_bytes, token)
+            self.condition.notify_all()
+
+    def cancel_all(self) -> None:
+        with self.condition:
+            for token in self.tokens:
+                token.cancel()
+
+    def wait_idle(self, timeout: float) -> bool:
+        with self.condition:
+            return self.condition.wait_for(lambda: self.admitted == 0, timeout)
+
+
+_ADMISSIONS: dict[str, _Admission] = {name: _Admission() for name in ("read", "control", "preparation")}
+
+
+@dataclass(frozen=True)
+class PreparationWork:
+    """Owned preparation threads with a cooperative deadline and settlement before release."""
+
+    token: _CancelToken
+    executor: ThreadPoolExecutor
+
+    def check(self) -> None:
+        """Stop at a safe boundary when the owning preparation is cancelled or expired."""
+        self.token.check()
+
+    async def run(self, operation: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:
+        """Run a blocking step without abandoning its thread on task cancellation."""
+        self.check()
+        try:
+            future = asyncio.get_running_loop().run_in_executor(
+                self.executor, functools.partial(_run_with_token, self.token, operation, args, kwargs)
+            )
+        except RuntimeError as error:
+            raise ReleaseApiError(503, "release_unavailable") from error
+        try:
+            result = await asyncio.shield(future)
+            self.check()
+            return result
+        except asyncio.CancelledError:
+            self.token.cancel()
+            while not future.done():
+                try:
+                    await asyncio.wait({future})
+                except asyncio.CancelledError:
+                    continue
+            if not future.cancelled():
+                future.exception()
+            raise
+
+
+_PREPARATION_WORK: ContextVar[PreparationWork | None] = ContextVar("release_preparation", default=None)
+
+
+def current_preparation_work() -> PreparationWork | None:
+    """Return the preparation owner in this async request, if any."""
+    return _PREPARATION_WORK.get()
+
+
+class _Lane:
+    """Admission gate and dedicated worker threads for one class of release work.
+
+    Capacity is charged when a thread is submitted and released only when that thread settles,
+    so an awaiting request that times out or disconnects never frees work still running.
+    """
+
+    def __init__(self, name: str, slots: int, byte_budget: int | None) -> None:
+        self._slots = slots
+        self._byte_budget = byte_budget
+        self._admission = _ADMISSIONS[name]
+        self._executor = ThreadPoolExecutor(max_workers=slots, thread_name_prefix=f"release-{name}")
+        self._closed = False
+
+    def submit(self, task: Callable[[], Any], response_bytes: int, token: _CancelToken) -> Future[Any]:
+        admission = self._admission
+        with admission.condition:
+            if self._closed:
+                raise ReleaseApiError(503, "release_unavailable")
+            over_bytes = self._byte_budget is not None and admission.charged_bytes + response_bytes > self._byte_budget
+            if admission.admitted >= self._slots or over_bytes:
+                raise ReleaseApiError(503, "release_busy")
+            admission.admitted += 1
+            admission.charged_bytes += response_bytes
+            admission.tokens.add(token)
+            try:
+                future = self._executor.submit(task)
+            except RuntimeError as error:
+                admission.release_locked(response_bytes, token)
+                raise ReleaseApiError(503, "release_unavailable") from error
+        future.add_done_callback(lambda _settled: admission.release(response_bytes, token))
+        return future
+
+    def close(self) -> None:
+        with self._admission.condition:
+            self._closed = True
+        self._executor.shutdown(wait=False, cancel_futures=True)
+
+
+class ReleaseOffload:
+    """Runs release operations on bounded lanes; reads and control work never share admission."""
+
+    def __init__(self, settings: ReleaseOffloadSettings) -> None:
+        self.settings = settings
+        self._preparation_closed = False
+        self._preparation_count = 0
+        self._preparation_executor = ThreadPoolExecutor(
+            max_workers=settings.preparation_concurrency, thread_name_prefix="release-preparation"
+        )
+        self._lanes = {
+            "read": _Lane("read", settings.read_concurrency, settings.read_inflight_bytes),
+            "control": _Lane("control", settings.control_concurrency, None),
+        }
+
+    async def run(
+        self, lane: str, operation: Callable[..., _T], /, *args: Any, response_bytes: int = 0, **kwargs: Any
+    ) -> _T:
+        token = _CancelToken(time.monotonic() + self.settings.operation_timeout_seconds)
+        future = self._lanes[lane].submit(
+            functools.partial(_run_with_token, token, operation, args, kwargs), response_bytes, token
+        )
+        awaited = asyncio.wrap_future(future)
+        # Retrieve late exceptions from abandoned work so they are not reported as unhandled.
+        awaited.add_done_callback(lambda settled: settled.cancelled() or settled.exception())
+        try:
+            done, _pending = await asyncio.wait({awaited}, timeout=self.settings.operation_timeout_seconds)
+        except asyncio.CancelledError:
+            token.cancel()
+            raise
+        if not done:
+            token.cancel()
+            raise ReleaseApiError(504, "release_operation_timed_out")
+        if awaited.cancelled():
+            raise ReleaseApiError(503, "release_unavailable")
+        try:
+            return awaited.result()
+        except _OperationCancelled as error:
+            raise ReleaseApiError(503, "release_unavailable") from error
+
+    async def prepare(self, operation: Callable[..., Awaitable[_T]], /, *args: Any) -> _T:
+        """Bound an async preparation, retaining admission through all owned thread cleanup."""
+        admission = _ADMISSIONS["preparation"]
+        timeout_seconds = self.settings.operation_timeout_seconds
+        token = _CancelToken(time.monotonic() + timeout_seconds)
+        with admission.condition:
+            if self._preparation_closed:
+                raise ReleaseApiError(503, "release_unavailable")
+            if admission.admitted >= self.settings.preparation_concurrency:
+                raise ReleaseApiError(503, "release_busy")
+            admission.admitted += 1
+            admission.tokens.add(token)
+            self._preparation_count += 1
+
+        async def execute() -> _T:
+            context = _PREPARATION_WORK.set(PreparationWork(token, self._preparation_executor))
+            try:
+                token.check()
+                return await operation(*args)
+            finally:
+                _PREPARATION_WORK.reset(context)
+
+        task = asyncio.create_task(execute())
+        loop = asyncio.get_running_loop()
+        with admission.condition:
+            token.on_cancel = lambda: loop.call_soon_threadsafe(task.cancel)
+            if token._cancelled.is_set():
+                token.on_cancel()
+
+        def settled(completed: asyncio.Task[_T]) -> None:
+            token.on_cancel = None
+            if not completed.cancelled():
+                completed.exception()
+            with admission.condition:
+                self._preparation_count -= 1
+                admission.release_locked(0, token)
+                admission.condition.notify_all()
+                if self._preparation_closed and self._preparation_count == 0:
+                    self._preparation_executor.shutdown(wait=False, cancel_futures=True)
+
+        task.add_done_callback(settled)
+        try:
+            done, _ = await asyncio.wait({task}, timeout=timeout_seconds)
+        except asyncio.CancelledError:
+            token.cancel()
+            raise
+        if not done:
+            token.cancel()
+            raise ReleaseApiError(504, "release_operation_timed_out")
+        if task.cancelled():
+            raise ReleaseApiError(503, "release_unavailable")
+        try:
+            return task.result()
+        except _OperationCancelled as error:
+            if time.monotonic() >= token._deadline:
+                raise ReleaseApiError(504, "release_operation_timed_out") from error
+            raise ReleaseApiError(503, "release_unavailable") from error
+
+    def close(self) -> None:
+        with _ADMISSIONS["preparation"].condition:
+            self._preparation_closed = True
+            if self._preparation_count == 0:
+                self._preparation_executor.shutdown(wait=False, cancel_futures=True)
+        for lane in self._lanes.values():
+            lane.close()
+
+
+_OFFLOAD_LOCK = threading.Lock()
+_offload: ReleaseOffload | None = None
+
+
+def get_release_offload(settings: ReleaseOffloadSettings) -> ReleaseOffload:
+    """Return the process-wide offload for these settings, replacing a stale one.
+
+    The replaced offload stops admitting new work; its running threads stay charged to the shared ledger.
+    """
+    global _offload
+    with _OFFLOAD_LOCK:
+        if _offload is None or _offload.settings != settings:
+            if _offload is not None:
+                _offload.close()
+            _offload = ReleaseOffload(settings)
+        return _offload
+
+
+def close_release_offload(settle_seconds: float = _SHUTDOWN_SETTLE_SECONDS) -> bool:
+    """Refuse new admissions, cancel running release work, and wait for threads to settle.
+
+    Returns False when work is still running after the wait; its capacity stays charged until it settles.
+    """
+    global _offload
+    with _OFFLOAD_LOCK:
+        offload = _offload
+        _offload = None
+    if offload is not None:
+        offload.close()
+    for admission in _ADMISSIONS.values():
+        admission.cancel_all()
+    deadline = time.monotonic() + settle_seconds
+    settled = True
+    for admission in _ADMISSIONS.values():
+        settled = admission.wait_idle(max(0.0, deadline - time.monotonic())) and settled
+    return settled
+
+
+@dataclass(frozen=True)
 class ReleaseApiSettings:
     """Validated release API configuration read from the process environment."""
 
@@ -95,6 +433,7 @@ class ReleaseApiSettings:
     metadata_max_bytes: int = _MAX_METADATA_BYTES
     media_max_bytes: int = _MAX_MEDIA_BYTES
     job_storage: BlobLocation | None = None
+    offload: ReleaseOffloadSettings = field(default_factory=ReleaseOffloadSettings)
 
     @property
     def enabled(self) -> bool:
@@ -149,13 +488,55 @@ def load_release_api_settings(environ: Mapping[str, str]) -> ReleaseApiSettings:
         if value <= 0:
             raise ValueError(f"{name} must be a positive integer")
         limits[name] = value
+    metadata_max_bytes = limits["CURATION_RELEASE_READ_METADATA_BYTES"]
+    media_max_bytes = limits["CURATION_RELEASE_READ_MEDIA_BYTES"]
+    offload = ReleaseOffloadSettings(
+        preparation_concurrency=_bounded_int(environ, "RELEASE_PREPARATION_CONCURRENCY", 2, 1, _MAX_LANE_CONCURRENCY),
+        read_concurrency=_bounded_int(
+            environ, "RELEASE_READ_CONCURRENCY", _DEFAULT_LANE_CONCURRENCY, 1, _MAX_LANE_CONCURRENCY
+        ),
+        control_concurrency=_bounded_int(
+            environ, "RELEASE_CONTROL_CONCURRENCY", _DEFAULT_LANE_CONCURRENCY, 1, _MAX_LANE_CONCURRENCY
+        ),
+        read_inflight_bytes=_bounded_int(
+            environ, "RELEASE_READ_INFLIGHT_BYTES", _DEFAULT_READ_INFLIGHT_BYTES, 1, 2**63 - 1
+        ),
+        operation_timeout_seconds=_bounded_seconds(
+            environ, "RELEASE_OPERATION_TIMEOUT_SECONDS", _DEFAULT_OPERATION_SECONDS, _MAX_OPERATION_SECONDS
+        ),
+    )
+    if offload.read_inflight_bytes < max(metadata_max_bytes, media_max_bytes):
+        raise ValueError("RELEASE_READ_INFLIGHT_BYTES must cover the largest retained read bound")
     return ReleaseApiSettings(
         job_root=job_root,
         destinations=destinations,
-        metadata_max_bytes=limits["CURATION_RELEASE_READ_METADATA_BYTES"],
-        media_max_bytes=limits["CURATION_RELEASE_READ_MEDIA_BYTES"],
+        metadata_max_bytes=metadata_max_bytes,
+        media_max_bytes=media_max_bytes,
         job_storage=job_storage,
+        offload=offload,
     )
+
+
+def _bounded_int(environ: Mapping[str, str], name: str, default: int, minimum: int, maximum: int) -> int:
+    raw = environ.get(name, "").strip() or str(default)
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise ValueError(f"{name} must be an integer from {minimum} to {maximum}") from error
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be an integer from {minimum} to {maximum}")
+    return value
+
+
+def _bounded_seconds(environ: Mapping[str, str], name: str, default: float, maximum: float) -> float:
+    raw = environ.get(name, "").strip() or str(default)
+    try:
+        value = float(raw)
+    except ValueError as error:
+        raise ValueError(f"{name} must be a number of seconds above 0 and at most {maximum:g}") from error
+    if not math.isfinite(value) or not 0 < value <= maximum:
+        raise ValueError(f"{name} must be a number of seconds above 0 and at most {maximum:g}")
+    return value
 
 
 def open_release_job_store(settings: ReleaseApiSettings) -> ReleaseJobStore:
@@ -215,7 +596,7 @@ class ReleaseSpec:
 
 @dataclass(frozen=True)
 class PreparedRelease:
-    """Planner output: frozen request bytes, reserved estimate, and a client-safe summary."""
+    """Advisory intent or captured generation, capacity estimate and client-safe summary."""
 
     frozen_request: bytes
     reserved_bytes: int
@@ -260,10 +641,27 @@ class ReleaseService:
         self._store_factory = store_factory or (lambda _root: open_release_job_store(settings))
         self._planner = planner
         self._blob_container_factory = blob_container_factory or _default_blob_container
+        self._offload = get_release_offload(settings.offload)
 
     @property
     def planner_configured(self) -> bool:
         return self._planner is not None
+
+    @property
+    def metadata_bytes(self) -> int:
+        return self._settings.metadata_max_bytes
+
+    @property
+    def media_bytes(self) -> int:
+        return self._settings.media_max_bytes
+
+    async def control(self, operation: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:
+        """Run job-state work on the control lane so status and cancel stay responsive."""
+        return await self._offload.run("control", operation, *args, **kwargs)
+
+    async def read(self, operation: Callable[..., _T], /, *args: Any, response_bytes: int = 0, **kwargs: Any) -> _T:
+        """Run retained-artifact reads on the read lane, charging the bytes they may return."""
+        return await self._offload.run("read", operation, *args, response_bytes=response_bytes, **kwargs)
 
     def capabilities(self) -> dict[str, Any]:
         return {
@@ -304,12 +702,11 @@ class ReleaseService:
             binding = parse_strict_json(content) if content else {}
             source = binding.get("selection", {}).get("dataset_id")
             if dataset_id is None or source == dataset_id:
-                association = store.source_association(item.job_id)
                 items.append(
                     {
                         **_status_body(item),
                         "dataset_id": source,
-                        "created_at": association.accepted_at if association else None,
+                        "created_at": store.accepted_at(item.job_id),
                     }
                 )
         return {
@@ -344,8 +741,8 @@ class ReleaseService:
             raise _map_job_error(error) from error
 
     async def preview(self, scope: str, spec: ReleaseSpec) -> dict[str, Any]:
-        """Describe the frozen request without persisting anything."""
-        destination = self._destination(spec.destination, spec.dataset_id)
+        """Describe selected intent without persisting or freezing source data."""
+        destination = await self.control(self._destination, spec.destination, spec.dataset_id)
         prepared = await self._prepare(scope, spec, destination)
         return {
             "schema": CAPABILITY_SCHEMA,
@@ -366,7 +763,7 @@ class ReleaseService:
     ) -> AcceptedJob:
         if not _IDEMPOTENCY_KEY.fullmatch(idempotency_key):
             raise ReleaseApiError(422, "Idempotency-Key is invalid")
-        store = self._store()
+        store = await self.control(self._store)
         client_request_digest = hashlib.sha256(
             canonical_json_bytes(
                 {
@@ -378,7 +775,8 @@ class ReleaseService:
             )
         ).hexdigest()
         try:
-            accepted = store.accepted_request(
+            accepted = await self.control(
+                store.accepted_request,
                 scope=scope,
                 principal=scope,
                 idempotency_key=idempotency_key,
@@ -388,14 +786,18 @@ class ReleaseService:
             raise _map_job_error(error) from error
         if accepted is not None:
             return accepted
-        destination = self._destination(spec.destination, spec.dataset_id)
+        destination = await self.control(self._destination, spec.destination, spec.dataset_id)
         prepared = await self._prepare(scope, spec, destination)
         if _preview_digest(spec, prepared) != preview_digest:
             raise ReleaseApiError(409, "stale_preview")
-        if prepared.summary.get("processing_digest") != processing_digest:
+        if processing_digest and prepared.summary.get("processing_digest") != processing_digest:
             raise ReleaseApiError(409, "processing_confirmation_required")
         if isinstance(destination, Path) and not local_disk_acknowledged:
             raise ReleaseApiError(422, "local_disk_acknowledgment_required")
+        payload = parse_strict_json(prepared.frozen_request)
+        if payload.get("schema_version") == "curated-release-intent/v1":
+            payload["processing_confirmed"] = bool(processing_digest)
+            prepared = replace(prepared, frozen_request=canonical_json_bytes(payload))
         request = JobRequest(
             scope=scope,
             principal=scope,
@@ -407,13 +809,13 @@ class ReleaseService:
             ),
             destination=destination,
             frozen_request=prepared.frozen_request,
-            reserved_bytes=prepared.reserved_bytes,
+            reserved_bytes=max(1, prepared.reserved_bytes),
             route="blob" if isinstance(destination, BlobLocation) else "local",
             execution_binding=prepared.execution_binding,
             client_request_digest=client_request_digest,
         )
         try:
-            return store.accept(request)
+            return await self.control(store.accept, request)
         except CapacityError as error:
             raise ReleaseApiError(507, "insufficient capacity for the reserved estimate") from error
         except JobConflictError as error:
@@ -422,34 +824,74 @@ class ReleaseService:
             raise ReleaseApiError(422, "release request was rejected") from error
 
     async def inventory(self, dataset_id: str, *, cursor: int, limit: int, scope: str = "localuser") -> dict[str, Any]:
-        if not cursor >= 0 or not 1 <= limit <= 100:
+        """Return a bounded page, cancelling unfinished reads on failure or deadline."""
+        try:
+            async with asyncio.timeout(self._offload.settings.operation_timeout_seconds):
+                return await self._inventory_page(dataset_id, cursor=cursor, limit=limit, scope=scope)
+        except TimeoutError as error:
+            raise ReleaseApiError(504, "release_operation_timed_out") from error
+
+    async def inventory_details(self, dataset_id: str, *, episodes: list[int], scope: str) -> dict[str, Any]:
+        """Return bounded episode evidence; cancel unfinished reads on failure or deadline."""
+        if not 1 <= len(episodes) <= _MAX_DETAIL_EPISODES or len(set(episodes)) != len(episodes):
+            raise ReleaseApiError(422, "invalid_inventory_details")
+        try:
+            async with asyncio.timeout(self._offload.settings.operation_timeout_seconds):
+                page = await self._inventory_page(
+                    dataset_id, cursor=0, limit=len(episodes), scope=scope, episodes=episodes, detail=True
+                )
+        except TimeoutError as error:
+            raise ReleaseApiError(504, "release_operation_timed_out") from error
+        return {"schema": CAPABILITY_SCHEMA, "items": page["items"]}
+
+    async def _inventory_page(
+        self,
+        dataset_id: str,
+        *,
+        cursor: int,
+        limit: int,
+        scope: str,
+        episodes: list[int] | None = None,
+        detail: bool = False,
+    ) -> dict[str, Any]:
+        """Return labels and provenance for a population page, or full evidence when ``detail`` is set."""
+        if episodes is None and (not cursor >= 0 or not 1 <= limit <= 100):
             raise ReleaseApiError(422, "invalid_inventory_page")
         datasets = getattr(self._planner, "datasets", None)
         if datasets is None or await datasets.get_dataset(dataset_id) is None:
             raise ReleaseApiError(404, "release source is unavailable")
-        episodes = await datasets.list_episodes(dataset_id, limit=_MAX_EPISODES + 1, require_actual=True)
-        if len(episodes) > _MAX_EPISODES:
+        source_episodes = await datasets.list_episodes(dataset_id, limit=_MAX_EPISODES + 1, require_actual=True)
+        if len(source_episodes) > _MAX_EPISODES:
             raise ReleaseApiError(422, "source_inventory_limit_exceeded")
-        indices = sorted({episode.index for episode in episodes})
-        selected = indices[cursor : cursor + limit]
+        indices = sorted({episode.index for episode in source_episodes})
+        if episodes is None:
+            selected = indices[cursor : cursor + limit]
+        else:
+            population = set(indices)
+            if any(index not in population for index in episodes):
+                raise ReleaseApiError(422, "invalid_inventory_details")
+            selected = list(episodes)
         reader_factory = getattr(self._planner, "reader_for_scope", None)
-        reader = reader_factory(scope) if reader_factory else getattr(self._planner, "reader", None)
-        items = []
-        for index in selected:
-            item = {
+        reader = reader_factory(scope, inventory=True) if reader_factory else getattr(self._planner, "reader", None)
+
+        async def read_item(index: int) -> dict[str, Any]:
+            item: dict[str, Any] = {
                 "episode_index": index,
+                "detailed": detail,
                 "resources": [],
-                "annotation": False,
-                "edits": False,
+                "annotation": None,
+                "edits": None,
                 "labels": None,
                 "provenance": None,
                 "judge": None,
             }
             if reader is not None:
                 try:
-                    annotation = await reader.annotation(dataset_id, index)
-                    source = await reader.source_revision(dataset_id, index)
-                    edits = await reader.edits(dataset_id, index, scope, source)
+                    annotation = await reader.annotation(dataset_id, index) if detail else None
+                    edits = None
+                    if detail:
+                        source = await reader.source_revision(dataset_id, index)
+                        edits = await reader.edits(dataset_id, index, scope, source)
                     labels = await reader.release_resource(dataset_id, SavedSelection("labels", index, "inventory"))
                     ledger_resource = await reader.release_resource(
                         dataset_id, SavedSelection("ledger", index, "inventory")
@@ -460,12 +902,14 @@ class ReleaseService:
                         ("labels", labels),
                         ("ledger", ledger_resource),
                     ):
-                        if resource.value is not None and resource.etag:
+                        if resource is not None and resource.value is not None and resource.etag:
                             item["resources"].append(
                                 {"kind": kind, "episode_index": index, "expected_revision": resource.etag}
                             )
-                    item["annotation"] = annotation.value is not None
-                    item["edits"] = edits.value is not None
+                    if annotation is not None:
+                        item["annotation"] = annotation.value is not None
+                    if edits is not None:
+                        item["edits"] = edits.value is not None
                     values = labels.value or {}
                     item["labels"] = values.get("episodes", {}).get(str(index))
                     ledger = values.get("provenance", {}).get(str(index))
@@ -480,6 +924,8 @@ class ReleaseService:
                     )
                 except (SavedInputError, *_release_read_errors()) as error:
                     raise ReleaseApiError(409, "saved_inventory_unavailable") from error
+                if not detail:
+                    return item
                 try:
                     evidence = await reader.release_resource(dataset_id, SavedSelection("evidence", index, "inventory"))
                     if evidence.value is not None and evidence.etag:
@@ -501,7 +947,21 @@ class ReleaseService:
                         "confidence": None,
                         "outcome": None,
                     }
-            items.append(item)
+            return item
+
+        semaphore = asyncio.Semaphore(self._offload.settings.read_concurrency)
+
+        async def bounded_item(index: int) -> dict[str, Any]:
+            async with semaphore:
+                return await read_item(index)
+
+        tasks = [asyncio.create_task(bounded_item(index)) for index in selected]
+        try:
+            items = await asyncio.gather(*tasks)
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
         return {
             "schema": CAPABILITY_SCHEMA,
             "items": items,
@@ -697,6 +1157,7 @@ class ReleaseService:
         scope_sha256 = hashlib.sha256(scope.encode()).hexdigest()
         found: list[_SourceRelease] = []
         for alias, location in sorted(self._settings.destinations.items()):
+            check_cancelled()
             try:
                 collection = release_collection_location(location, source_path)
             except (OSError, ValueError, ReleaseVerificationError):
@@ -704,6 +1165,7 @@ class ReleaseService:
             if isinstance(collection, Path):
                 local = LocalSourceAssociations(collection, limits=RecordLimits())
                 for verified in local.discover_verified(scope_sha256=scope_sha256):
+                    check_cancelled()
                     if not _intent_matches(verified, source_path, alias):
                         continue
                     found.append(
@@ -728,6 +1190,7 @@ class ReleaseService:
             except ReleaseVerificationError as error:
                 raise ReleaseApiError(409, "release_verification_failed") from error
             for verified in verified_blobs:
+                check_cancelled()
                 if not _intent_matches(verified, source_path, alias):
                     continue
                 found.append(
@@ -763,7 +1226,7 @@ class ReleaseService:
         if self._planner is None:
             raise ReleaseApiError(503, "release planning is not configured")
         try:
-            return await self._planner.prepare(scope, spec, destination)
+            return await self._offload.prepare(self._planner.prepare, scope, spec, destination)
         except StaleReleaseInputError as error:
             raise ReleaseApiError(409, "stale_preview") from error
         except (ReleaseVerificationError, SavedInputError) as error:
@@ -853,8 +1316,8 @@ def _close_container(container: Any) -> None:
 class _ReleaseFiles:
     """Dataset-relative LeRobot view over one verified release store.
 
-    The accepted manifest's inventory binds membership, length and content, even
-    if storage changes after admission. Metadata reads share one byte budget.
+    The accepted inventory binds membership, length and the declared content or
+    storage-revision assurance. Metadata reads share one byte budget.
     """
 
     def __init__(
@@ -884,9 +1347,17 @@ class _ReleaseFiles:
         entry = self._objects[relative]
         if entry.length > self._budget:
             raise ReleaseVerificationError("release metadata exceeds bound")
-        data = self._store.read_control_bytes(relative, max_bytes=self._budget)
+        check_cancelled()
+        if entry.assurance != "content_sha256":
+            if not isinstance(self._store, BlobReleaseStore):
+                raise ReleaseVerificationError("release storage revision evidence unavailable")
+            data = self._store.read_control_bytes(relative, max_bytes=self._budget, expected_revision=entry.revision)
+        else:
+            data = self._store.read_control_bytes(relative, max_bytes=self._budget)
         self._budget -= len(data)
-        if len(data) != entry.length or hashlib.sha256(data).hexdigest() != entry.sha256:
+        if len(data) != entry.length or (
+            not isinstance(entry, StorageRevisionEntry) and hashlib.sha256(data).hexdigest() != entry.sha256
+        ):
             raise ReleaseVerificationError("release metadata changed after admission")
         return data
 
@@ -915,13 +1386,22 @@ class _ReleaseFiles:
         entry = self._objects[relative]
         digest = hashlib.sha256()
         total = 0
-        for chunk in self._store.iter_bytes(relative, chunk_size=CHUNK_BYTES):
+        if entry.assurance != "content_sha256":
+            if not isinstance(self._store, BlobReleaseStore):
+                raise ReleaseVerificationError("release storage revision evidence unavailable")
+            chunks = self._store.iter_bytes(relative, chunk_size=CHUNK_BYTES, expected_revision=entry.revision)
+        else:
+            chunks = self._store.iter_bytes(relative, chunk_size=CHUNK_BYTES)
+        for chunk in chunks:
+            check_cancelled()
             digest.update(chunk)
             total += len(chunk)
             if total > entry.length:
                 raise ReleaseVerificationError("release media exceeds inventoried length")
             yield chunk
-        if total != entry.length or digest.hexdigest() != entry.sha256:
+        if total != entry.length or (
+            not isinstance(entry, StorageRevisionEntry) and digest.hexdigest() != entry.sha256
+        ):
             raise ReleaseVerificationError("release media changed after admission")
 
 

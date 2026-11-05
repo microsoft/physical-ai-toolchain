@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -25,14 +25,29 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const items: ReleaseItem[] = [
   {
     episodeIndex: 0,
+    detailed: true,
     annotation: true,
     edits: false,
     labels: ['pick'],
     resources: [{ resourceId: 'cam-a', revisionNo: 1 }],
   },
-  { episodeIndex: 1, annotation: false, edits: true, labels: null, resources: [] },
-  { episodeIndex: 2, annotation: true, edits: false, labels: null, resources: null },
-  { episodeIndex: 3, annotation: true, edits: true, labels: ['place'], resources: [] },
+  { episodeIndex: 1, detailed: true, annotation: false, edits: true, labels: null, resources: [] },
+  {
+    episodeIndex: 2,
+    detailed: true,
+    annotation: true,
+    edits: false,
+    labels: null,
+    resources: null,
+  },
+  {
+    episodeIndex: 3,
+    detailed: true,
+    annotation: true,
+    edits: true,
+    labels: ['place'],
+    resources: [],
+  },
 ]
 
 function makePreview(overrides: Partial<ReleasePreview['summary']> = {}): ReleasePreview {
@@ -41,11 +56,16 @@ function makePreview(overrides: Partial<ReleasePreview['summary']> = {}): Releas
     digest: 'digest-1',
     reservedBytes: 2048,
     summary: {
+      advisory: true,
       processingDigest: 'proc-1',
+      selectedCount: 1,
+      destinationKind: 'local',
+      availableBytes: null,
+      route: 'copy',
+      capacity: null,
       blocking: [],
       warnings: [],
-      actions: ['encode'],
-      destinationKind: 'local',
+      actions: [],
       ...overrides,
     },
   }
@@ -94,6 +114,40 @@ describe('ReleaseDialog', () => {
     expect(screen.getByRole('button', { name: /preview release/i })).toBeDisabled()
   })
 
+  it('closes a busy preview without clearing the draft or submitting work', async () => {
+    const user = userEvent.setup()
+    let finish!: () => void
+    const props = renderDialog({
+      onPreview: vi.fn(
+        () =>
+          new Promise<ReleasePreview>((_resolve, reject) => {
+            finish = () => reject(new DOMException('Preview aborted', 'AbortError'))
+          }),
+      ),
+      onCancelPreparation: vi.fn(),
+    })
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('button', { name: /preview release/i }))
+    screen.getByRole('button', { name: 'Stop preview' }).focus()
+    await user.keyboard('{Enter}')
+    expect(props.onCancelPreparation).toHaveBeenCalledOnce()
+    expect(props.onOpenChange).toHaveBeenCalledWith(false)
+    expect(screen.getByRole('status')).toHaveTextContent('Stopping preview')
+    expect(
+      screen.getByText('Only the browser request is stopping. The server may still finish it.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /submit release/i })).toBeDisabled()
+    await act(async () => finish())
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Preview stopped in the browser. No release was submitted.',
+    )
+    expect(screen.getByLabelText('Release name')).toHaveValue('Release A')
+    expect(screen.getByRole('checkbox', { name: 'Episode 0' })).toBeChecked()
+    expect(screen.getByRole('button', { name: /preview release/i })).toBeEnabled()
+    expect(props.onSubmit).not.toHaveBeenCalled()
+  })
+
   it('preserves keyboard focus when selected-only rows disappear', async () => {
     const user = userEvent.setup()
     renderDialog()
@@ -109,6 +163,47 @@ describe('ReleaseDialog', () => {
     await user.keyboard(' ')
     expect(screen.getByRole('checkbox', { name: 'Selected only' })).toHaveFocus()
     expect(screen.getByText('No selected episodes match these filters.')).toBeVisible()
+  })
+
+  it('announces partial inventory and preserves the draft through failure and retry', async () => {
+    const user = userEvent.setup()
+    const props: ReleaseDialogProps = {
+      datasetId: 'dataset-1',
+      open: true,
+      onOpenChange: vi.fn(),
+      items,
+      inventoryReady: false,
+      inventoryMessage: 'Loading source inventory: 4 of 20 episodes loaded.',
+      destinations: ['local-disk'],
+      onPreview: vi.fn(),
+      onSubmit: vi.fn(),
+      onRetryInventory: vi.fn(),
+    }
+    const { rerender } = renderWithQuery(<ReleaseDialog {...props} />)
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    expect(screen.getByText('Loading source inventory: 4 of 20 episodes loaded.')).toHaveAttribute(
+      'role',
+      'status',
+    )
+    expect(screen.getByRole('button', { name: /preview release/i })).toBeDisabled()
+
+    rerender(
+      <ReleaseDialog
+        {...props}
+        inventoryFailed
+        inventoryMessage="Source inventory could not be loaded."
+      />,
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('Source inventory could not be loaded.')
+    screen.getByRole('button', { name: 'Retry inventory' }).focus()
+    await user.keyboard('{Enter}')
+    expect(props.onRetryInventory).toHaveBeenCalledOnce()
+    rerender(<ReleaseDialog {...props} />)
+    expect(screen.getByLabelText('Release name')).toHaveValue('Release A')
+    expect(screen.getByRole('checkbox', { name: 'Episode 0' })).toBeChecked()
+    expect(props.onPreview).not.toHaveBeenCalled()
+    expect(props.onSubmit).not.toHaveBeenCalled()
   })
 
   it('filters actual labels with checkboxes and reports selections hidden by filters', async () => {
@@ -136,6 +231,20 @@ describe('ReleaseDialog', () => {
         expect.objectContaining({ episodeIndices: [1] }),
       ),
     )
+  })
+
+  it('announces incomplete detail filters and explicitly loads excluded unknown rows', async () => {
+    const user = userEvent.setup()
+    const props = renderDialog({
+      items: items.map((item) => ({ ...item, detailed: false, annotation: undefined })),
+      onRequestDetails: vi.fn(),
+    })
+    await user.selectOptions(screen.getByLabelText('Annotation'), 'yes')
+    expect(screen.getByText(/Filter results are incomplete/)).toBeVisible()
+    expect(screen.queryByText('No episodes match these filters.')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Load remaining episode details' }))
+    expect(props.onRequestDetails).toHaveBeenLastCalledWith([0, 1, 2, 3])
+    expect(screen.getByRole('button', { name: /preview release/i })).toBeDisabled()
   })
 
   it('makes selected-only and empty filter states explicit without changing selection', async () => {
@@ -247,6 +356,46 @@ describe('ReleaseDialog', () => {
     expect(screen.getByRole('button', { name: /preview release/i })).toBeEnabled()
   })
 
+  it('shows selected count and elapsed preview time without submitting or inventing progress', async () => {
+    const user = userEvent.setup()
+    let resolvePreview!: (preview: ReleasePreview) => void
+    const props = renderDialog({
+      onPreview: vi.fn(
+        () =>
+          new Promise<ReleasePreview>((resolve) => {
+            resolvePreview = resolve
+          }),
+      ),
+    })
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 1' }))
+
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+    try {
+      await user.click(screen.getByRole('button', { name: /preview release/i }))
+      expect(screen.getByRole('status')).toHaveTextContent('Preparing preview for 2 episodes.')
+      const timer = screen.getByRole('timer', { name: 'Preview elapsed time' })
+      expect(timer).toHaveAttribute('aria-live', 'off')
+      expect(timer).toHaveTextContent('Elapsed: 0m 0s')
+      expect(screen.getByRole('button', { name: /previewing/i })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /submit release/i })).toBeDisabled()
+
+      await act(async () => {
+        vi.advanceTimersByTime(65_000)
+      })
+      expect(timer).toHaveTextContent('Elapsed: 1m 5s')
+      expect(screen.getByText(/No release has been submitted/)).toBeVisible()
+      await act(async () => {
+        resolvePreview(makePreview())
+      })
+      expect(screen.queryByRole('timer')).toBeNull()
+      expect(props.onSubmit).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('allows closing an idle dialog', async () => {
     const user = userEvent.setup()
     const props = renderDialog()
@@ -281,7 +430,7 @@ describe('ReleaseDialog', () => {
     },
   )
 
-  it('keeps an uncertain submission open until explicitly discarded', async () => {
+  it('allows closing an uncertain submission without discarding its draft', async () => {
     const user = userEvent.setup()
     const props = renderDialog({
       onPreview: vi
@@ -290,6 +439,7 @@ describe('ReleaseDialog', () => {
           makePreview({ actions: [], destinationKind: 'blob', availableBytes: -1 }),
         ),
       onSubmit: vi.fn().mockRejectedValue(new Error('connection lost')),
+      onDiscardSubmission: vi.fn(),
     })
     await fillRequiredFields(user)
     await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
@@ -299,8 +449,11 @@ describe('ReleaseDialog', () => {
     await user.click(screen.getByRole('button', { name: /submit release/i }))
     const discard = await screen.findByRole('button', { name: /discard and start over/i })
     await user.keyboard('{Escape}')
-    expect(props.onOpenChange).not.toHaveBeenCalled()
+    expect(props.onOpenChange).toHaveBeenCalledWith(false)
+    expect(props.onDiscardSubmission).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Release name')).toHaveValue('Release A')
     await user.click(discard)
+    expect(props.onDiscardSubmission).toHaveBeenCalledOnce()
     expect(screen.getByLabelText('Release name')).toHaveValue('')
     expect(screen.queryByRole('button', { name: /retry submission/i })).toBeNull()
   })
@@ -377,6 +530,78 @@ describe('ReleaseDialog', () => {
     expect(screen.getByRole('button', { name: /submit release/i })).toBeDisabled()
   })
 
+  it('offers optional processing consent and sends an empty processing digest when unchecked', async () => {
+    const user = userEvent.setup()
+    const props = renderDialog({
+      onPreview: vi.fn().mockResolvedValue(makePreview({ destinationKind: 'blob' })),
+    })
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('checkbox', { name: /I declare/i }))
+    await user.click(screen.getByRole('button', { name: /preview release/i }))
+    await screen.findByText('Reserved bytes')
+    expect(screen.getByRole('checkbox', { name: /allow video processing/i })).not.toBeChecked()
+
+    await user.click(screen.getByRole('button', { name: /submit release/i }))
+
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledOnce())
+    expect(vi.mocked(props.onSubmit).mock.calls[0][1]).toEqual(
+      expect.objectContaining({ processingDigest: '' }),
+    )
+  })
+
+  it('sends the summary processing digest only after explicit processing consent', async () => {
+    const user = userEvent.setup()
+    const props = renderDialog({
+      onPreview: vi.fn().mockResolvedValue(makePreview({ destinationKind: 'blob' })),
+    })
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('checkbox', { name: /I declare/i }))
+    await user.click(screen.getByRole('button', { name: /preview release/i }))
+    await user.click(await screen.findByRole('checkbox', { name: /allow video processing/i }))
+    await user.click(screen.getByRole('button', { name: /submit release/i }))
+
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledOnce())
+    expect(vi.mocked(props.onSubmit).mock.calls[0][1]).toEqual(
+      expect.objectContaining({ processingDigest: 'proc-1' }),
+    )
+  })
+
+  it('does not gate submission on advisory warnings', async () => {
+    const user = userEvent.setup()
+    renderDialog({
+      onPreview: vi
+        .fn()
+        .mockResolvedValue(
+          makePreview({ destinationKind: 'blob', warnings: ['Statistics not checked'] }),
+        ),
+    })
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('checkbox', { name: /I declare/i }))
+    await user.click(screen.getByRole('button', { name: /preview release/i }))
+
+    expect(await screen.findByText('Statistics not checked')).toBeVisible()
+    expect(screen.getByRole('button', { name: /submit release/i })).toBeEnabled()
+  })
+
+  it('shows zero reserved bytes as unknown rather than as an estimate of zero', async () => {
+    const user = userEvent.setup()
+    renderDialog({
+      onPreview: vi
+        .fn()
+        .mockResolvedValue({ ...makePreview({ destinationKind: 'blob' }), reservedBytes: 0 }),
+    })
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('button', { name: /preview release/i }))
+
+    await screen.findByText('Reserved bytes')
+    expect(screen.getByText('Unknown')).toBeVisible()
+    expect(screen.queryByText('0 B')).toBeNull()
+  })
+
   it.each(['local', 'blob'])(
     'shows backend capacity and scopes disk acknowledgment for %s',
     async (destinationKind) => {
@@ -411,7 +636,7 @@ describe('ReleaseDialog', () => {
     await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
     await user.click(screen.getByRole('checkbox', { name: /I declare/i }))
     await user.click(screen.getByRole('button', { name: /preview release/i }))
-    await user.click(await screen.findByRole('checkbox', { name: /processing action/i }))
+    await user.click(await screen.findByRole('checkbox', { name: /allow video processing/i }))
     await user.click(screen.getByRole('checkbox', { name: /local disk/i }))
     await user.click(screen.getByRole('button', { name: /submit release/i }))
 
@@ -447,6 +672,7 @@ describe('ReleaseDialog selection evidence', () => {
   const evidenceItems: ReleaseItem[] = [
     {
       episodeIndex: 10,
+      detailed: true,
       annotation: true,
       edits: false,
       labels: null,
@@ -456,6 +682,7 @@ describe('ReleaseDialog selection evidence', () => {
     },
     {
       episodeIndex: 11,
+      detailed: true,
       annotation: false,
       edits: false,
       labels: ['pick'],
@@ -465,6 +692,7 @@ describe('ReleaseDialog selection evidence', () => {
     },
     {
       episodeIndex: 12,
+      detailed: true,
       annotation: false,
       edits: false,
       labels: null,

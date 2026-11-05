@@ -184,7 +184,10 @@ def native_operation(
             raise ReleaseInputError("native inputs are not condition-bound or exceed supported processing bounds")
         if restored is not None:
             restored.update(result.get("restored", {}))
-        store.record_io(job_id, fence, directory.name, {"source_verification_bytes": result["source_verified_bytes"]})
+        counter = (
+            "affected_download_bytes" if isinstance(inputs.source_root, BlobLocation) else "source_verification_bytes"
+        )
+        store.record_io(job_id, fence, directory.name, {counter: result["source_verified_bytes"]})
         outputs = []
         observed = len(content) + result_path.stat().st_size
         for item in result["objects"]:

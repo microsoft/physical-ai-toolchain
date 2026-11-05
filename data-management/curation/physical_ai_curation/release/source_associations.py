@@ -99,6 +99,8 @@ def restore_source_association(binding: bytes, *, accepted_at: float) -> SourceA
         raw = parse_strict_json(binding)
         if not isinstance(raw, dict):
             raise ValueError("association binding must be an object")
+        if raw.get("schema") == "curated-release-intent/v1":
+            return None
         if raw.get("schema_version") == _SCHEMA:
             record = _AssociationRecord.model_validate(raw)
             if record.checkpoint is not None:

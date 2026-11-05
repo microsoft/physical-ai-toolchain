@@ -5,16 +5,22 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import runpy
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Iterator
+from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -33,12 +39,136 @@ from src.api.routers.releases import router
 from src.api.services.annotation_service import AnnotationService
 from src.api.services.dataset_service import DatasetService
 from src.api.services.label_storage import LocalLabelStorage
-from src.api.services.release_service import ReleaseApiSettings, ReleaseService, _source_release, get_release_service
+from src.api.services.release_service import (
+    ReleaseApiError,
+    ReleaseApiSettings,
+    ReleaseService,
+    _source_release,
+    get_release_service,
+    load_release_api_settings,
+)
 from src.api.services.viewer_release_planner import ViewerReleasePlanner
+from src.api.storage import VersionedValue
 from src.api.storage.local_revision import write_conditional
 from tests.lerobot_sources import CAMERA, write_source
 
 BASE = "/api/releases/v1"
+
+
+async def test_given_selected_intent_when_previewed_and_admitted_then_no_source_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.api.services.release_service import ReleaseSpec
+
+    settings = ReleaseApiSettings(tmp_path / "jobs", destinations={"output": tmp_path / "output"})
+    planner = ViewerReleasePlanner(settings)
+    forbidden = AsyncMock(side_effect=AssertionError("preview/admission read the source"))
+    monkeypatch.setattr(planner.datasets, "get_dataset", forbidden)
+    monkeypatch.setattr("src.api.services.viewer_release_planner.freeze_release_inputs", forbidden)
+    service = ReleaseService(settings, planner=planner)
+    spec = ReleaseSpec("output", "package", "attempt", "release", "dataset", (0,), finalized=True)
+
+    preview = await service.preview("localuser", spec)
+    accepted = await service.submit(
+        "localuser",
+        spec,
+        "intent-key",
+        preview_digest=preview["digest"],
+        processing_digest="",
+        local_disk_acknowledged=True,
+    )
+    reopened = ReleaseJobStore(settings.job_root)
+    payload = parse_strict_json(reopened.frozen_request(accepted.job_id))
+    assert preview["summary"]["advisory"] is True
+    assert preview["reserved_bytes"] == 0
+    assert payload["schema_version"] == "curated-release-intent/v1"
+    assert "frozen" not in payload
+    forbidden.assert_not_called()
+
+
+@pytest.mark.parametrize("entrypoint", ["api", "worker"])
+@pytest.mark.parametrize(
+    ("settings", "app_info", "azure_info", "azure_debug", "invalid"),
+    [
+        ({}, True, False, False, False),
+        ({"LOG_LEVEL": "warning", "AZURE_LOG_LEVEL": "info"}, False, True, False, False),
+        ({"LOG_LEVEL": "debug", "AZURE_LOG_LEVEL": "debug"}, True, True, True, False),
+        ({"LOG_LEVEL": "trace"}, True, False, False, False),
+        ({"LOG_LEVEL": "invalid-private-value"}, False, False, False, True),
+        ({"AZURE_LOG_LEVEL": "invalid-private-value"}, False, False, False, True),
+    ],
+)
+def test_given_logging_settings_when_process_starts_then_levels_apply_after_dotenv(
+    entrypoint: str,
+    settings: dict[str, str],
+    app_info: bool,
+    azure_info: bool,
+    azure_debug: bool,
+    invalid: bool,
+) -> None:
+    environment = {
+        **os.environ,
+        "PYTHON_DOTENV_DISABLED": "1",
+        "STORAGE_BACKEND": "local",
+        "VLM_JUDGE_ENABLED": "false",
+        "RELEASE_JOB_ROOT": "",
+        "RELEASE_JOB_STORAGE": "",
+        "RELEASE_DESTINATIONS": "",
+    }
+    environment.pop("LOG_LEVEL", None)
+    environment.pop("AZURE_LOG_LEVEL", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import json
+import logging
+import os
+import sys
+import dotenv
+
+dotenv.load_dotenv = lambda *args, **kwargs: os.environ.update(json.loads(sys.argv[2]))
+logging.basicConfig(level=logging.WARNING)
+original_handlers = tuple(logging.getLogger().handlers)
+try:
+    if sys.argv[1] == "worker":
+        from src.api.release_worker import main
+        assert main(["--once"]) == 2
+        app_logger = logging.getLogger("release_worker")
+    else:
+        import src.api.main
+        app_logger = logging.getLogger("src.api.main")
+except ValueError as error:
+    print(str(error), file=sys.stderr)
+    sys.exit(2)
+assert tuple(logging.getLogger().handlers) == original_handlers
+app_logger.info("APP_INFO_MARKER")
+azure_logger = logging.getLogger("azure.core.pipeline.policies.http_logging_policy")
+azure_logger.info("AZURE_INFO_MARKER")
+azure_logger.debug("AZURE_DEBUG_MARKER")
+azure_logger.warning("AZURE_WARNING_MARKER")
+""",
+            entrypoint,
+            json.dumps(settings),
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert "invalid-private-value" not in result.stderr
+    if invalid:
+        assert result.returncode == 2
+        assert "AZURE_WARNING_MARKER" not in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert ("APP_INFO_MARKER" in result.stderr) is app_info
+        assert ("AZURE_INFO_MARKER" in result.stderr) is azure_info
+        assert ("AZURE_DEBUG_MARKER" in result.stderr) is azure_debug
+        assert "AZURE_WARNING_MARKER" in result.stderr
 
 
 @pytest.mark.parametrize("arguments", [[], ["--once", "--limit", "0"], ["--once", "--limit", "101"]])
@@ -82,7 +212,6 @@ def test_given_worker_api_failure_when_run_then_safe_configuration_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     from src.api import release_worker
-    from src.api.services.release_service import ReleaseApiError
 
     async def fail_queue(*args: object, **kwargs: object) -> tuple:
         raise ReleaseApiError(503, "private provider detail")
@@ -187,7 +316,7 @@ def test_given_invalid_release_configuration_when_loaded_then_refused(environ: d
     ],
 )
 def test_given_invalid_selection_when_constructed_then_safe_refusal(field: str, value: object) -> None:
-    from src.api.services.release_service import ReleaseApiError, ReleaseSpec
+    from src.api.services.release_service import ReleaseSpec
 
     selection = dict(
         destination="local",
@@ -205,7 +334,6 @@ def test_given_invalid_selection_when_constructed_then_safe_refusal(field: str, 
 
 @pytest.mark.parametrize("operation", ["status", "cancel", "recover", "result"])
 def test_given_unknown_job_when_operated_then_not_found(tmp_path: Path, operation: str) -> None:
-    from src.api.services.release_service import ReleaseApiError
 
     service = ReleaseService(ReleaseApiSettings(tmp_path / "jobs"))
     with pytest.raises(ReleaseApiError) as error:
@@ -215,7 +343,6 @@ def test_given_unknown_job_when_operated_then_not_found(tmp_path: Path, operatio
 
 @pytest.mark.parametrize("cursor,limit", [(-1, 10), (0, 0), (0, 101)])
 def test_given_invalid_inventory_page_when_requested_then_refused(cursor: int, limit: int) -> None:
-    from src.api.services.release_service import ReleaseApiError
 
     service = ReleaseService(ReleaseApiSettings(None))
     with pytest.raises(ReleaseApiError) as error:
@@ -224,7 +351,7 @@ def test_given_invalid_inventory_page_when_requested_then_refused(cursor: int, l
 
 
 def test_given_unconfigured_service_when_operated_then_safe_unavailability(tmp_path: Path) -> None:
-    from src.api.services.release_service import ReleaseApiError, ReleaseSpec, open_release_job_store
+    from src.api.services.release_service import ReleaseSpec, open_release_job_store
 
     spec = ReleaseSpec("local", "package", "attempt", "output", "native", (0,))
     disabled = ReleaseApiSettings(None)
@@ -320,7 +447,6 @@ def test_given_invalid_job_lookup_when_called_then_safe_rejection(
     assert test_client.get(BASE + "/requests", headers={"Idempotency-Key": "bad/key"}).status_code == 422
     assert test_client.post(BASE + "/jobs", headers={"Idempotency-Key": "bad/key"}, json=spec).status_code == 422
     service = ReleaseService(settings)
-    from src.api.services.release_service import ReleaseApiError
 
     with pytest.raises(ReleaseApiError):
         service.jobs("localuser", cursor=-1, limit=1)
@@ -343,11 +469,24 @@ def test_given_tampered_execution_binding_when_restored_then_refused(
     release_api: tuple, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
     from src.api.services import viewer_release_planner as planner_module
-    from src.api.services.release_service import ReleaseApiError
 
     test_client, spec, settings, _app, _root = release_api
     job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
     store = ReleaseJobStore(settings.job_root)
+    intent = store.frozen_request(job)
+    capture = ViewerReleasePlanner(settings).execution(job, intent).capture
+    assert capture is not None
+    generated, binding_bytes, reserved, _execution = asyncio.run(capture(lambda: None))
+    fence = store.claim(job, "binding-test")
+    store.confirm_stopped(job, fence)
+    store.capture_execution(
+        job,
+        fence,
+        intent_request=intent,
+        frozen_request=generated,
+        execution_binding=binding_bytes,
+        reserved_bytes=reserved,
+    )
     binding = parse_strict_json(store.execution_binding(job))
     if change == "schema":
         binding["schema"] = "unsupported"
@@ -373,6 +512,75 @@ def test_given_tampered_execution_binding_when_restored_then_refused(
     assert error.value.status_code == 409
 
 
+@pytest.mark.parametrize("change", ["scope", "selection", "destination", "relative", "kind", "source", "consent"])
+def test_given_tampered_intent_when_restored_then_refused(release_api: tuple, change: str) -> None:
+    client, spec, settings, _app, _root = release_api
+    job = _submit(client, spec, _preview(client, spec)).json()["job_id"]
+    store = ReleaseJobStore(settings.job_root)
+    intent = parse_strict_json(store.frozen_request(job))
+    if change == "scope":
+        intent["scope"] = "foreign"
+    elif change == "selection":
+        intent["spec"]["episode_indices"] = [0]
+    elif change in {"destination", "relative"}:
+        intent["effective_destination"]["path"] = "relative" if change == "relative" else str(settings.job_root)
+    elif change == "kind":
+        intent["effective_destination"]["kind"] = "unsupported"
+    elif change == "source":
+        intent["source_kind"] = "unsupported"
+    else:
+        intent["processing_confirmed"] = "true"
+    with pytest.raises(ReleaseApiError) as error:
+        ViewerReleasePlanner(settings).execution(job, canonical_json_bytes(intent))
+    assert error.value.status_code == 409
+
+
+def test_given_required_saved_processing_without_consent_when_captured_then_no_video_effects(
+    release_api: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.api.models.episode_edits import EpisodeEditOperations
+
+    client, spec, settings, _app, _root = release_api
+    planner = ViewerReleasePlanner(settings)
+    source_id, revision = asyncio.run(planner.datasets.get_source_revision("native", 0))
+    saved = asyncio.run(
+        planner._annotations.save_edits(
+            "native",
+            0,
+            EpisodeEditOperations.model_validate(
+                {
+                    "datasetId": "native",
+                    "episodeIndex": 0,
+                    "globalTransform": {"colorFilter": "invert"},
+                }
+            ),
+            author_id="localuser",
+            source_id=source_id,
+            source_revision=revision,
+            frame_count=2,
+            cameras={"observation.images.front"},
+            if_none_match=True,
+        )
+    )
+    selected = {**spec, "resources": [{"kind": "edits", "episode_index": 0, "expected_revision": saved.etag}]}
+    preview = _preview(client, selected)
+    preview["summary"]["processing_digest"] = ""
+    accepted = _submit(client, selected, preview)
+    assert accepted.status_code == 202
+    job = accepted.json()["job_id"]
+    store = ReleaseJobStore(settings.job_root)
+    forbidden = MagicMock(side_effect=AssertionError("unapproved video processing"))
+    monkeypatch.setattr("physical_ai_curation.release.coordinator._encoded_files", forbidden)
+    capture = planner.execution(job, store.frozen_request(job)).capture
+    assert capture is not None
+    with pytest.raises(ReleaseApiError, match="processing_confirmation_required"):
+        asyncio.run(capture(lambda: None))
+    forbidden.assert_not_called()
+    assert store.storage.snapshot()[job]["effects"] == {}
+    assert parse_strict_json(store.frozen_request(job))["schema_version"] == "curated-release-intent/v1"
+
+
 @pytest.mark.parametrize("failure", ["oversized", "unreadable"])
 def test_given_invalid_source_inventory_when_read_then_safe_refusal(
     release_api: tuple, monkeypatch: pytest.MonkeyPatch, failure: str
@@ -387,15 +595,48 @@ def test_given_invalid_source_inventory_when_read_then_safe_refusal(
     else:
         reader = planner.reader_for_scope("localuser")
         monkeypatch.setattr(reader, "annotation", AsyncMock(side_effect=SavedInputError("private detail")))
-        monkeypatch.setattr(planner, "reader_for_scope", lambda _scope: reader)
+        monkeypatch.setattr(planner, "reader_for_scope", lambda _scope, **_options: reader)
         expected = (409, "saved_inventory_unavailable")
     app.dependency_overrides[get_release_service] = lambda: ReleaseService(settings, planner=planner)
 
-    response = test_client.get(BASE + "/inventory/native")
+    url = BASE + ("/inventory/native" if failure == "oversized" else "/inventory/native/details?episodes=0")
+    response = test_client.get(url)
 
     assert response.status_code == expected[0]
     assert response.json()["detail"]["code"] == expected[1]
     assert "private detail" not in response.text
+
+
+def test_given_population_page_when_read_then_detail_evidence_is_not_loaded(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    test_client, _spec, settings, app, _root = release_api
+    planner = ViewerReleasePlanner(settings)
+    reader = planner.reader_for_scope("localuser", inventory=True)
+
+    async def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("detail evidence read on population page")
+
+    monkeypatch.setattr(reader, "annotation", forbidden)
+    monkeypatch.setattr(reader, "edits", forbidden)
+    monkeypatch.setattr(reader, "source_revision", forbidden)
+    monkeypatch.setattr(planner, "reader_for_scope", lambda _scope, **_options: reader)
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(settings, planner=planner)
+
+    page = test_client.get(BASE + "/inventory/native?limit=2").json()
+
+    assert [item["detailed"] for item in page["items"]] == [False, False]
+    assert all(item["annotation"] is None and item["judge"] is None for item in page["items"])
+
+
+@pytest.mark.parametrize("episodes", ["", "x", "0,0", "-1", "999"])
+def test_given_invalid_detail_request_when_read_then_refused(release_api: tuple, episodes: str) -> None:
+    test_client, _spec, _settings, _app, _root = release_api
+
+    response = test_client.get(BASE + "/inventory/native/details", params={"episodes": episodes})
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "invalid_inventory_details"
 
 
 @pytest.mark.parametrize("failure", ["missing_planner", "invalid_binding"])
@@ -433,7 +674,6 @@ def test_given_unavailable_destination_when_previewed_then_safe_refusal(
 
 
 def test_given_invalid_retained_source_request_when_read_then_refused() -> None:
-    from src.api.services.release_service import ReleaseApiError
 
     service = ReleaseService(ReleaseApiSettings(None))
     with pytest.raises(ReleaseApiError, match="dataset id is invalid"):
@@ -470,7 +710,7 @@ def _inventoried_store(root: Path, contents: dict[str, bytes]) -> tuple[LocalRel
 def test_given_changed_control_after_admission_when_files_opened_then_refused(tmp_path: Path, control: str) -> None:
     from physical_ai_curation.release.models import INVENTORY_PATH, MANIFEST_PATH
 
-    from src.api.services.release_service import ReleaseApiError, _release_files
+    from src.api.services.release_service import _release_files
 
     store, digest = _inventoried_store(tmp_path, {"meta/info.json": b"{}"})
     item = _source_release(
@@ -515,11 +755,56 @@ def test_given_invalid_inventoried_read_when_consumed_then_refused(tmp_path: Pat
             list(files.stream("videos/camera.mp4"))
 
 
+@pytest.mark.parametrize("assurance", ["storage_revision", "uploaded_content"])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("replaced", [False, True])
+def test_given_retained_blob_when_read_then_uses_admitted_revision(
+    tmp_path: Path, assurance: str, stream: bool, replaced: bool
+) -> None:
+    from physical_ai_curation.release.azure_publication import BlobReleaseStore
+    from physical_ai_curation.release.errors import ReleaseVerificationError
+    from physical_ai_curation.release.models import INVENTORY_PATH, MANIFEST_PATH, Inventory
+    from test_release_publishers import _FakeContainer
+
+    from src.api.services.release_service import _ReleaseFiles
+
+    path = "meta/info.json"
+    _inventoried_store(tmp_path, {path: b"{}"})
+    container = _FakeContainer("fixture", "releases", {})
+    container.put("package/" + path, b"{}")
+    store = BlobReleaseStore(container, "package")
+    revision = store.list_objects()[0].revision
+    entry = {"assurance": assurance, "path": path, "length": 2, "revision": revision}
+    if assurance == "storage_revision":
+        entry["copy_operation_sha256"] = "a" * 64
+    else:
+        entry.update(sha256=hashlib.sha256(b"{}").hexdigest(), operation_sha256="a" * 64)
+    inventory_bytes = canonical_json_bytes(Inventory.model_validate({"entries": [entry]}).model_dump(mode="json"))
+    manifest_bytes = canonical_json_bytes({"inventory_sha256": hashlib.sha256(inventory_bytes).hexdigest()})
+    container.put("package/" + INVENTORY_PATH, inventory_bytes)
+    container.put("package/" + MANIFEST_PATH, manifest_bytes)
+    files = _ReleaseFiles(
+        store, name="package", manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(), metadata_max_bytes=100
+    )
+    if replaced:
+        container.put("package/" + path, b"[]")
+        container.forbid_downloads = True
+
+    def read() -> bytes:
+        return b"".join(files.stream(path)) if stream else files.read_bytes(path)
+
+    if replaced:
+        with pytest.raises(ReleaseVerificationError, match="revision changed"):
+            read()
+    else:
+        assert read() == b"{}"
+
+
 @pytest.mark.parametrize("failure", ["missing", "budget", "long", "short"])
 def test_given_invalid_media_response_when_buffered_then_safe_refusal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
-    from src.api.services.release_service import ReleaseApiError, _release_media, _ReleaseFiles
+    from src.api.services.release_service import _release_media, _ReleaseFiles
 
     store, digest = _inventoried_store(tmp_path, {"videos/camera.mp4": b"video"})
     files = _ReleaseFiles(store, name="published", manifest_sha256=digest, metadata_max_bytes=100)
@@ -581,7 +866,7 @@ def test_given_invalid_retained_detail_when_read_then_safe_refusal(
 
 
 def test_given_invalid_episode_metadata_when_read_then_safe_refusal(tmp_path: Path) -> None:
-    from src.api.services.release_service import ReleaseApiError, _episode_records, _ReleaseFiles
+    from src.api.services.release_service import _episode_records, _ReleaseFiles
 
     store, digest = _inventoried_store(tmp_path, {"meta/info.json": b"invalid json"})
     files = _ReleaseFiles(store, name="published", manifest_sha256=digest, metadata_max_bytes=100)
@@ -602,7 +887,7 @@ def test_given_optional_azure_sdk_missing_when_errors_resolved_then_local_errors
 def test_given_missing_planner_dependency_when_used_then_refused(
     release_api: tuple, monkeypatch: pytest.MonkeyPatch, missing: str
 ) -> None:
-    from src.api.services.release_service import ReleaseApiError, ReleaseSpec
+    from src.api.services.release_service import ReleaseSpec
 
     _client, body, settings, _app, _root = release_api
     spec = ReleaseSpec(**{**body, "episode_indices": tuple(body["episode_indices"])})
@@ -612,13 +897,43 @@ def test_given_missing_planner_dependency_when_used_then_refused(
     if missing == "blob_provider":
         with pytest.raises(ReleaseApiError, match="release source is unavailable"):
             planner._source("native", finalized=True, kind="blob")
+    elif missing == "dataset":
+        assert asyncio.run(planner.prepare("localuser", spec, settings.destinations["local"])).summary["advisory"]
+        with pytest.raises(ReleaseApiError) as error:
+            asyncio.run(planner._capture("localuser", spec, settings.destinations["local"], lambda: None, "local"))
+        assert error.value.status_code == 404
     else:
         with pytest.raises(ReleaseApiError) as error:
             asyncio.run(planner.prepare("localuser", spec, settings.destinations["local"]))
-        assert error.value.status_code == (404 if missing == "dataset" else 503)
+        assert error.value.status_code == 503
     if missing == "worker":
         with pytest.raises(ReleaseApiError, match="release worker is not configured"):
             planner.execution("job", b"{}")
+
+
+def test_given_blob_source_local_destination_when_prepare_then_refused_before_freeze(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.release.inputs import BlobReleaseSource
+
+    from src.api.services import viewer_release_planner as planner_module
+    from src.api.services.release_service import ReleaseSpec
+
+    _client, body, settings, _app, _root = release_api
+    planner = ViewerReleasePlanner(settings)
+    container = FakeBlobContainer()
+    container.url = "https://example.blob.core.windows.net/datasets"
+    source = BlobReleaseSource(container, prefix="native")
+    monkeypatch.setattr(planner.datasets, "has_blob_provider", lambda: True)
+    monkeypatch.setattr(planner, "_source", lambda *_args, **_kwargs: source)
+    monkeypatch.setattr(
+        planner_module, "freeze_release_inputs", AsyncMock(side_effect=AssertionError("freeze reached"))
+    )
+    spec = ReleaseSpec(**{**body, "episode_indices": tuple(body["episode_indices"])})
+
+    with pytest.raises(ReleaseApiError, match="azure_to_local_unsupported") as error:
+        asyncio.run(planner.prepare("localuser", spec, settings.destinations["local"]))
+    assert error.value.status_code == 422
 
 
 def test_given_blob_source_and_destination_when_planned_then_configured_binding_is_retained(
@@ -651,7 +966,7 @@ def test_given_blob_source_and_destination_when_planned_then_configured_binding_
     assert isinstance(planner._label_storage(), BlobLabelStorage)
     monkeypatch.setattr(planner, "reader_for_scope", lambda _scope: local_reader)
     credential = object()
-    monkeypatch.setattr(azure.identity, "DefaultAzureCredential", lambda: credential)
+    monkeypatch.setattr(azure.identity, "DefaultAzureCredential", lambda **_kwargs: credential)
     client = MagicMock()
     client.get_container_client.return_value = container
     factory = MagicMock(return_value=client)
@@ -659,7 +974,7 @@ def test_given_blob_source_and_destination_when_planned_then_configured_binding_
     destination = BlobLocation("https://example.blob.core.windows.net", "output", "native/releases")
     spec = ReleaseSpec(**{**body, "episode_indices": tuple(body["episode_indices"])})
 
-    prepared = asyncio.run(planner.prepare("localuser", spec, destination))
+    prepared, _execution = asyncio.run(planner._capture("localuser", spec, destination, lambda: None, "blob"))
 
     binding = parse_strict_json(prepared.execution_binding)
     assert binding["source_kind"] == "blob"
@@ -671,6 +986,30 @@ def test_given_blob_source_and_destination_when_planned_then_configured_binding_
     assert factory.call_args.kwargs["credential"] is credential
     assert factory.call_args.kwargs["retry_total"] == 0
     client.get_container_client.assert_called_once_with("datasets")
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("native execution must not run before admission")
+
+    monkeypatch.setattr("physical_ai_curation.release.native_worker.restore_inputs", forbidden)
+    monkeypatch.setattr("physical_ai_curation.release.coordinator.run_release_generation", forbidden)
+    cloud_settings = replace(settings, destinations={"cloud": BlobLocation(destination.account_url, "output", "")})
+    planner.settings = cloud_settings
+    service = ReleaseService(cloud_settings, planner=planner)
+    _app.dependency_overrides[get_release_service] = lambda: service
+    cloud_body = {**body, "destination": "cloud"}
+    preview = _preview(_client, cloud_body)
+
+    accepted = _submit(_client, cloud_body, preview)
+
+    assert accepted.status_code == 202, accepted.text
+    job_id = accepted.json()["job_id"]
+    reopened = ReleaseService(cloud_settings)
+    assert reopened.accepted_request("localuser", "release-key-1")["job_id"] == job_id
+    assert reopened.status("localuser", job_id)["state"] == "accepted"
+    monkeypatch.setattr(planner, "prepare", AsyncMock(side_effect=AssertionError("replay must not plan")))
+    replay = _submit(_client, cloud_body, preview)
+    assert replay.status_code == 202
+    assert replay.json() == {"job_id": job_id, "replayed": True}
 
 
 @pytest.mark.parametrize("kind", ["local", "blob"])
@@ -701,8 +1040,6 @@ def test_given_foreign_association_when_listed_then_hidden(
 def test_given_job_capacity_failure_when_cancelled_then_safe_status(tmp_path: Path) -> None:
     from physical_ai_curation.release.jobs import CapacityError
 
-    from src.api.services.release_service import ReleaseApiError
-
     store = MagicMock(spec=ReleaseJobStore)
     store.request_cancel.side_effect = CapacityError("private capacity detail")
     service = ReleaseService(ReleaseApiSettings(tmp_path), store_factory=lambda _root: store)
@@ -713,7 +1050,6 @@ def test_given_job_capacity_failure_when_cancelled_then_safe_status(tmp_path: Pa
 
 
 def test_given_inconsistent_execution_destination_when_result_read_then_refused(tmp_path: Path) -> None:
-    from src.api.services.release_service import ReleaseApiError
 
     store = MagicMock(spec=ReleaseJobStore)
     store.get.return_value = SimpleNamespace(state="committed")
@@ -789,6 +1125,14 @@ def _preview(test_client: TestClient, spec: dict) -> dict:
     response = test_client.get(BASE + "/preview", params={"selection": json.dumps(spec)})
     assert response.status_code == 200, response.json()
     return response.json()
+
+
+def test_retired_preparation_lifecycle_is_not_published(release_api: tuple) -> None:
+    _client, _spec, _settings, app, _root = release_api
+    paths = app.openapi()["paths"]
+    assert not [path for path in paths if path.startswith(BASE + "/preparations")]
+    assert BASE + "/preview" in paths
+    assert BASE + "/jobs" in paths
 
 
 def _submit(test_client: TestClient, spec: dict, preview: dict, *, key: str = "release-key-1"):
@@ -872,9 +1216,9 @@ def test_preview_is_read_only_and_inventory_is_paged(release_api: tuple) -> None
     test_client, spec, settings, _app, _root = release_api
     preview = _preview(test_client, spec)
     assert preview["summary"]["selected_count"] == 2
-    assert preview["reserved_bytes"] >= (
-        preview["summary"]["native_scratch_bytes"] + preview["summary"]["destination_budget_bytes"]
-    )
+    assert preview["reserved_bytes"] == 0
+    assert preview["summary"]["advisory"] is True
+    assert preview["summary"]["capacity"] is None
     assert not settings.job_root.exists()
     assert not settings.destinations["local"].exists()
     first = test_client.get(BASE + "/inventory/native?limit=1").json()
@@ -922,15 +1266,135 @@ def test_given_saved_labels_when_inventory_read_then_exact_revisions_are_selecta
     )
     assert preview.status_code == 200, preview.json()
     assert preview.json()["summary"]["destination_kind"] == "local"
-    assert preview.json()["summary"]["available_bytes"] > 0
+    assert preview.json()["summary"]["available_bytes"] is None
     labels.episodes["1"] = ["changed-after-preview"]
     (root / "meta/episode_labels.json").write_text(labels.model_dump_json())
-    refused = _submit(
+    accepted = _submit(
         test_client, {**spec, "description": "Selected saved labels", "resources": row["resources"]}, preview.json()
     )
-    assert refused.status_code == 409
-    assert refused.json()["detail"]["code"] == "stale_preview"
-    assert not (_settings.job_root / "jobs").exists()
+    assert accepted.status_code == 202
+    job_id = accepted.json()["job_id"]
+    store = ReleaseJobStore(_settings.job_root)
+    execution = ViewerReleasePlanner(_settings).execution(job_id, store.frozen_request(job_id))
+    result = asyncio.run(execute_job(store, job_id, execution))
+    assert result.publication_state == "published"
+    handle = test_client.get(SOURCE).json()["items"][0]["handle"]
+    assert test_client.get(f"{SOURCE}/{handle}").json()["labels"]["episodes"] == {"1": ["changed-after-preview"]}
+
+
+def test_given_inventory_page_when_labels_shared_then_next_page_reads_fresh_labels(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    test_client, _spec, _settings, _app, root = release_api
+    labels = DatasetLabelsFile(dataset_id="native", episodes={"0": ["first"], "1": ["first"]})
+    path = root / "meta/episode_labels.json"
+    path.write_text(labels.model_dump_json())
+    original = LocalLabelStorage.load_versioned
+    reads = []
+
+    async def counted_load(storage: LocalLabelStorage, dataset_id: str) -> VersionedValue[DatasetLabelsFile]:
+        reads.append(dataset_id)
+        return await original(storage, dataset_id)
+
+    monkeypatch.setattr(LocalLabelStorage, "load_versioned", counted_load)
+    first = test_client.get(BASE + "/inventory/native?limit=2")
+    assert first.status_code == 200
+    assert [item["labels"] for item in first.json()["items"]] == [["first"], ["first"]]
+    assert reads == ["native"]
+
+    labels.episodes["1"] = ["updated"]
+    path.write_text(labels.model_dump_json())
+    second = test_client.get(BASE + "/inventory/native?cursor=1&limit=1")
+    assert second.status_code == 200
+    assert second.json()["items"][0]["labels"] == ["updated"]
+    assert reads == ["native", "native"]
+    assert first.json()["items"][1]["resources"] != second.json()["items"][0]["resources"]
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "timeout", "cancelled"])
+def test_given_concurrent_inventory_when_page_finishes_then_reads_settle_in_order(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    from dataclasses import replace
+
+    from physical_ai_curation.saved_input import SavedInputError, SavedResource
+
+    from src.api.services.release_service import ReleaseOffloadSettings
+
+    _client, _spec, settings, _app, _root = release_api
+    settings = replace(
+        settings,
+        offload=ReleaseOffloadSettings(
+            read_concurrency=2, operation_timeout_seconds=0.1 if outcome == "timeout" else 5
+        ),
+    )
+    planner = ViewerReleasePlanner(settings)
+    reader = planner.reader_for_scope("localuser", inventory=True)
+    original = reader.annotation
+    monkeypatch.setattr(planner, "reader_for_scope", lambda _scope, **_options: reader)
+
+    async def exercise() -> None:
+        started = asyncio.Event()
+        finish = asyncio.Event()
+        active = 0
+        peak = 0
+
+        async def annotation(dataset_id: str, episode_index: int) -> SavedResource:
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            if active == 2:
+                started.set()
+            try:
+                await finish.wait()
+                if outcome == "failure" and episode_index == 0:
+                    raise SavedInputError("private storage detail")
+                return await original(dataset_id, episode_index)
+            finally:
+                active -= 1
+
+        monkeypatch.setattr(reader, "annotation", annotation)
+        task = asyncio.create_task(
+            ReleaseService(settings, planner=planner).inventory_details("native", episodes=[0, 1], scope="localuser")
+        )
+        await asyncio.wait_for(started.wait(), timeout=2)
+        if outcome == "cancelled":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        elif outcome == "success":
+            finish.set()
+            page = await task
+            assert [item["episode_index"] for item in page["items"]] == [0, 1]
+        else:
+            if outcome == "failure":
+                finish.set()
+            with pytest.raises(ReleaseApiError) as error:
+                await task
+            assert error.value.status_code == (504 if outcome == "timeout" else 409)
+            assert "private" not in error.value.detail
+        assert peak == 2
+        assert active == 0
+
+    asyncio.run(exercise())
+
+
+def test_given_inventory_reader_when_source_reused_then_only_current_batch_is_cached(release_api: tuple) -> None:
+    _client, _spec, settings, _app, root = release_api
+    planner = ViewerReleasePlanner(settings)
+
+    async def exercise() -> None:
+        reader = planner.reader_for_scope("localuser", inventory=True)
+        original = await reader.source_revision("native", 0)
+        info = root / "meta/info.json"
+        info.write_text(info.read_text() + "\n")
+        assert await reader.source_revision("native", 0) == original
+        fresh = planner.reader_for_scope("localuser", inventory=True)
+        assert await fresh.source_revision("native", 0) != original
+        authoritative = planner.reader_for_scope("localuser")
+        assert await authoritative.source_revision("native", 0) != original
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize("author", ["private-author", "another-private-author"])
@@ -1013,7 +1477,7 @@ def test_given_bound_judge_evidence_when_inventory_read_then_revision_is_selecta
     monkeypatch.setattr(ViewerReleasePlanner, "_judge_state", lambda _self: store)
     reader = LocalSavedInputReader(root)
     reader.judge_evidence = ScopedJudgeEvidenceAuthority(store, reader.source_revision, principal_scope_id="localuser")
-    row = test_client.get(BASE + "/inventory/native?limit=1&cursor=1").json()["items"][0]
+    row = test_client.get(BASE + "/inventory/native/details?episodes=1").json()["items"][0]
     assert row["judge"] == {"status": "succeeded", "freshness": "current", "confidence": 1.0, "outcome": "success"}
     assert any(resource["kind"] == "evidence" for resource in row["resources"])
     selected = SavedSelection(**next(item for item in row["resources"] if item["kind"] == "evidence"))
@@ -1026,24 +1490,9 @@ def test_given_bound_judge_evidence_when_inventory_read_then_revision_is_selecta
     accepted = _submit(test_client, selected_spec, preview.json())
     assert accepted.status_code == 202
     job_id = accepted.json()["job_id"]
-    execution = parse_strict_json(ReleaseJobStore(settings.job_root).execution_binding(job_id))
-    config = settings.job_root.parent / "worker.json"
-    config.write_text(
-        json.dumps(
-            {
-                "schema_version": "curated-release-worker/v1",
-                "job_root": str(settings.job_root),
-                "source_root": str(root),
-                "destination_root": execution["effective_destination"]["path"],
-                "selection": execution["selection"],
-                "context": execution["context"],
-                "finalized": True,
-                "judge_state_root": str(store.root),
-            }
-        )
-    )
     completed = subprocess.run(
-        [sys.executable, "-m", "physical_ai_curation.release.runner", "--config", str(config), "--job", job_id],
+        [sys.executable, "-m", "src.api.release_worker", "--once"],
+        env={**os.environ, "VLM_JUDGE_JOB_DIR": str(store.root)},
         capture_output=True,
         timeout=90,
         check=False,
@@ -1057,7 +1506,7 @@ def test_given_bound_judge_evidence_when_inventory_read_then_revision_is_selecta
     asyncio.run(persist())
     with pytest.raises(SavedInputError, match="source revision changed"):
         asyncio.run(reader.release_resource("native", selected))
-    row = test_client.get(BASE + "/inventory/native?limit=1&cursor=1").json()["items"][0]
+    row = test_client.get(BASE + "/inventory/native/details?episodes=1").json()["items"][0]
     assert row["judge"]["status"] == "unavailable"
     assert not any(resource["kind"] == "evidence" for resource in row["resources"])
     assert test_client.post(BASE + "/preview", json=spec).status_code == 200
@@ -1114,10 +1563,16 @@ def test_given_lost_acceptance_when_source_removed_then_replay_uses_accepted_req
 def test_given_accepted_request_when_lookup_then_only_owner_can_resolve(release_api: tuple) -> None:
     test_client, spec, settings, app, _root = release_api
     accepted = _submit(test_client, spec, _preview(test_client, spec)).json()
-    intent = ReleaseJobStore(settings.job_root).source_association(accepted["job_id"])
-    assert intent is not None
+    store = ReleaseJobStore(settings.job_root)
+    assert store.source_association(accepted["job_id"]) is None
     jobs = test_client.get(BASE + "/jobs?dataset_id=native").json()["items"]
-    assert jobs[0]["created_at"] == intent.accepted_at
+    accepted_event = next(
+        event for event in store.storage.snapshot()[accepted["job_id"]]["events"] if event["event"] == "job.accepted"
+    )
+    assert isinstance(jobs[0]["created_at"], str)
+    created_at = datetime.fromisoformat(jobs[0]["created_at"])
+    assert created_at.tzinfo == UTC
+    assert created_at.timestamp() == pytest.approx(accepted_event["occurred_at"], abs=0.001, rel=0)
     response = test_client.get(BASE + "/requests", headers={"Idempotency-Key": "release-key-1"})
     assert response.status_code == 200
     assert response.json()["job_id"] == accepted["job_id"]
@@ -1139,17 +1594,10 @@ def test_nested_source_acceptance_binds_collection_and_survives_alias_change(rel
 
     assert record["destination"] == str(expected.resolve())
     binding = json.loads(store.execution_binding(job))
-    assert binding["schema"] == "curated-release-execution/v3"
-    assert binding["effective_destination"] == {"kind": "local", "path": str(expected.resolve())}
-    intent = store.source_association(job)
-    assert intent is not None
-    assert intent.source_relative_path == "group-a/native"
-    assert intent.source_identity == binding["context"]["source"][0]
-    assert intent.source_revision == binding["context"]["source"][1]
-    assert intent.scope_sha256 == record["principal_digest"]
-    assert intent.effective_destination == str(expected.resolve())
-    assert intent.attempt.package_id == spec["package_id"]
-    assert "accepted_at" not in binding["association"]
+    assert binding["schema"] == "curated-release-intent/v1"
+    payload = parse_strict_json(store.frozen_request(job))
+    assert payload["effective_destination"] == {"kind": "local", "path": str(expected.resolve())}
+    assert store.source_association(job) is None
     changed = ReleaseApiSettings(settings.job_root, {"local": root.parent / "different-output"})
     execution = ViewerReleasePlanner(changed).execution(job, store.frozen_request(job))
     assert execution.destination == expected.resolve()
@@ -1183,9 +1631,9 @@ def test_stale_or_unconfirmed_submission_never_accepts(release_api: tuple, chang
         )
     else:
         response = _submit(test_client, spec, preview)
-    assert response.status_code in {409, 422}
+    assert response.status_code == 202 if change == "source" else response.status_code in {409, 422}
     assert not settings.destinations["local"].exists()
-    assert test_client.get(BASE + "/jobs").json()["items"] == []
+    assert len(test_client.get(BASE + "/jobs").json()["items"]) == int(change == "source")
 
 
 def test_cancel_is_owned_and_csrf_protected(release_api: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1207,14 +1655,24 @@ def test_cancel_is_owned_and_csrf_protected(release_api: tuple, monkeypatch: pyt
 
 def test_given_accepted_viewer_job_when_runner_executes_then_association_is_retained(release_api: tuple) -> None:
     test_client, spec, settings, _app, root = release_api
-    job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
+    preview = _preview(test_client, spec)
+    job = _submit(test_client, spec, preview).json()["job_id"]
     store = ReleaseJobStore(settings.job_root)
+    assert parse_strict_json(store.frozen_request(job))["schema_version"] == "curated-release-intent/v1"
+    source_info = json.loads((root / "meta/info.json").read_bytes())
+    source_info["robot_type"] = "changed-at-release"
+    (root / "meta/info.json").write_text(json.dumps(source_info))
     execution = ViewerReleasePlanner(settings).execution(job, store.frozen_request(job))
 
     result = asyncio.run(execute_job(store, job, execution))
 
     assert result is not None
     assert result.publication_state == "published"
+    reopened = ReleaseJobStore(settings.job_root)
+    assert parse_strict_json(reopened.frozen_request(job))["schema_version"] == "curated-release-generation/v1"
+    output_info = json.loads((execution.destination / spec["dataset_name"] / "meta/info.json").read_bytes())
+    assert output_info["robot_type"] == "changed-at-release"
+    assert _submit(test_client, spec, preview).json() == {"job_id": job, "replayed": True}
     root.rename(root.parent / "source-unavailable")
     from physical_ai_curation.release.record_storage import RecordLimits
     from physical_ai_curation.release.source_associations import LocalSourceAssociations
@@ -1462,11 +1920,16 @@ def test_given_verified_projection_when_browsed_then_output_coordinates_not_froz
     (root / "evidence").mkdir()
     (root / "evidence/frozen-input.json").write_bytes(canonical_json_bytes(frozen))
     entries = [
-        {"path": path.relative_to(root).as_posix(), "length": path.stat().st_size, "sha256": _sha256(path)}
+        {
+            "assurance": "content_sha256",
+            "path": path.relative_to(root).as_posix(),
+            "length": path.stat().st_size,
+            "sha256": _sha256(path),
+        }
         for path in sorted(root.rglob("*.json"))
     ]
     (root / "release").mkdir()
-    inventory = canonical_json_bytes({"schema_version": "1.0.0", "entries": entries})
+    inventory = canonical_json_bytes({"schema_version": "2.0.0", "entries": entries})
     (root / "release/inventory.json").write_bytes(inventory)
     manifest = canonical_json_bytes(
         {"inventory_sha256": hashlib.sha256(inventory).hexdigest(), "frozen_input_path": "evidence/frozen-input.json"}
@@ -1533,18 +1996,30 @@ class _FakeBlobClient:
         return _FakeBlobDownload(self._container.objects[self._name])
 
 
+class _FakeBlobPages(list):
+    """Blob listing that also exposes the Azure `by_page()` protocol as one final page."""
+
+    def by_page(self, continuation_token: str | None = None) -> Iterator[Iterator[_FakeBlobItem]]:
+        yield iter(list(self))
+
+
 class FakeBlobContainer:
     """In-memory container exposing only the read operations used by release association and store reads."""
 
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
 
-    def list_blobs(self, name_starts_with: str = "", include: list[str] | None = None) -> list[_FakeBlobItem]:
-        return [
+    def list_blobs(
+        self,
+        name_starts_with: str = "",
+        include: list[str] | None = None,
+        results_per_page: int | None = None,
+    ) -> _FakeBlobPages:
+        return _FakeBlobPages(
             _FakeBlobItem(name, data)
             for name, data in sorted(self.objects.items())
             if name.startswith(name_starts_with)
-        ]
+        )
 
     def get_blob_client(self, name: str, *, version_id: str | None = None) -> _FakeBlobClient:
         assert version_id is None
@@ -1684,15 +2159,11 @@ def test_given_selected_curation_when_released_then_retained_output_projections_
             {"kind": "annotation", "episode_index": 1, "expected_revision": annotation_etag},
         ],
     }
-    baseline = _preview(test_client, {**spec, "episode_indices": [1]})
     preview = _preview(test_client, selected)
     summary = preview["summary"]
-    assert summary["projection_objects"] == 2
-    assert summary["projection_bytes"] > 0
-    assert summary["capacity"]["generated_bytes"] == (
-        baseline["summary"]["capacity"]["generated_bytes"] + summary["projection_bytes"]
-    )
-    assert preview["reserved_bytes"] >= summary["destination_budget_bytes"] + summary["native_scratch_bytes"]
+    assert summary["advisory"] is True
+    assert summary["capacity"] is None
+    assert preview["reserved_bytes"] == 0
     _job, published = _publish_local(test_client, selected, settings)
     frozen_bytes = (published / "evidence/frozen-input.json").read_bytes()
     assert b"labels/episode_000001" in frozen_bytes
@@ -1793,3 +2264,631 @@ def test_blob_tampered_publication_is_hidden_and_listing_failure_is_explicit(blo
     unavailable = test_client.get(SOURCE)
     assert unavailable.status_code == 409
     assert unavailable.json()["detail"]["code"] == "release_verification_failed"
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("RELEASE_READ_CONCURRENCY", "0"),
+        ("RELEASE_READ_CONCURRENCY", "65"),
+        ("RELEASE_CONTROL_CONCURRENCY", "-1"),
+        ("RELEASE_CONTROL_CONCURRENCY", "invalid"),
+        ("RELEASE_PREPARATION_CONCURRENCY", "0"),
+        ("RELEASE_PREPARATION_CONCURRENCY", "65"),
+        ("RELEASE_READ_INFLIGHT_BYTES", "0"),
+        ("RELEASE_OPERATION_TIMEOUT_SECONDS", "0"),
+        ("RELEASE_OPERATION_TIMEOUT_SECONDS", "nan"),
+        ("RELEASE_OPERATION_TIMEOUT_SECONDS", "601"),
+    ],
+)
+def test_given_invalid_offload_setting_when_loading_settings_then_refused(name: str, value: str) -> None:
+    from src.api.services.release_service import load_release_api_settings
+
+    with pytest.raises(ValueError):
+        load_release_api_settings({name: value})
+
+
+def test_given_budget_below_retained_read_bound_when_loading_settings_then_refused() -> None:
+    from src.api.services.release_service import load_release_api_settings
+
+    environ = {
+        "CURATION_RELEASE_READ_MEDIA_BYTES": "2048",
+        "RELEASE_READ_INFLIGHT_BYTES": "1024",
+    }
+    with pytest.raises(ValueError):
+        load_release_api_settings(environ)
+
+
+def _async_client(app: FastAPI) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver")
+
+
+def _stalled_source_releases(monkeypatch: pytest.MonkeyPatch) -> tuple[threading.Event, threading.Event, dict]:
+    entered = threading.Event()
+    release = threading.Event()
+    observed: dict[str, bool] = {}
+
+    def stalled(self: ReleaseService, scope: str, dataset_id: str) -> dict:
+        entered.set()
+        observed["released_by_test"] = release.wait(timeout=5)
+        return {"schema_version": "curated-release-api/v1", "items": [], "next_cursor": None}
+
+    monkeypatch.setattr(ReleaseService, "source_releases", stalled)
+    return entered, release, observed
+
+
+def test_given_stalled_retained_read_when_status_requested_then_status_completes(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _test_client, _spec, settings, app, _root = release_api
+    entered, release, observed = _stalled_source_releases(monkeypatch)
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(settings)
+
+    async def scenario() -> tuple[int, int]:
+        async with _async_client(app) as client:
+            read = asyncio.create_task(client.get(BASE + "/sources/native/releases"))
+            await asyncio.to_thread(entered.wait, 5)
+            status = await asyncio.wait_for(client.get(BASE + "/jobs/" + "0" * 32), timeout=3)
+            release.set()
+            return status.status_code, (await read).status_code
+
+    status_code, read_status = asyncio.run(scenario())
+    assert status_code == 404
+    assert observed.get("released_by_test") is True
+    assert read_status == 200
+
+
+def test_given_saturated_read_lane_when_second_read_requested_then_busy_until_thread_settles(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _test_client, _spec, _settings, app, _root = release_api
+    monkeypatch.setenv("RELEASE_READ_CONCURRENCY", "1")
+    settings = load_release_api_settings(os.environ)
+    entered, release, _observed = _stalled_source_releases(monkeypatch)
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(settings)
+
+    async def scenario() -> tuple[int, int, int]:
+        async with _async_client(app) as client:
+            first = asyncio.create_task(client.get(BASE + "/sources/native/releases"))
+            await asyncio.to_thread(entered.wait, 5)
+            second = await client.get(BASE + "/sources/native/releases")
+            release.set()
+            first_status = (await first).status_code
+            third = await client.get(BASE + "/sources/native/releases")
+            return second.status_code, first_status, third.status_code
+
+    second_status, first_status, third_status = asyncio.run(scenario())
+    assert second_status == 503
+    assert first_status == 200
+    assert third_status == 200
+
+
+def test_given_byte_budget_exhausted_when_second_read_requested_then_refused(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _test_client, _spec, _settings, app, _root = release_api
+    monkeypatch.setenv("CURATION_RELEASE_READ_METADATA_BYTES", "1024")
+    monkeypatch.setenv("CURATION_RELEASE_READ_MEDIA_BYTES", "1024")
+    monkeypatch.setenv("RELEASE_READ_INFLIGHT_BYTES", "1024")
+    settings = load_release_api_settings(os.environ)
+    entered, release, _observed = _stalled_source_releases(monkeypatch)
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(settings)
+
+    async def scenario() -> int:
+        async with _async_client(app) as client:
+            first = asyncio.create_task(client.get(BASE + "/sources/native/releases"))
+            await asyncio.to_thread(entered.wait, 5)
+            second = await client.get(BASE + "/sources/native/releases")
+            release.set()
+            await first
+            return second.status_code
+
+    assert asyncio.run(scenario()) == 503
+
+
+def test_given_timed_out_read_when_thread_still_running_then_capacity_held_until_settled(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _test_client, _spec, _settings, app, _root = release_api
+    monkeypatch.setenv("RELEASE_READ_CONCURRENCY", "1")
+    monkeypatch.setenv("RELEASE_OPERATION_TIMEOUT_SECONDS", "0.2")
+    settings = load_release_api_settings(os.environ)
+    _entered, release, _observed = _stalled_source_releases(monkeypatch)
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(settings)
+
+    async def scenario() -> tuple[int, int, int]:
+        async with _async_client(app) as client:
+            first = await client.get(BASE + "/sources/native/releases")
+            second = await client.get(BASE + "/sources/native/releases")
+            release.set()
+            recovered = 503
+            for _ in range(100):
+                recovered = (await client.get(BASE + "/sources/native/releases")).status_code
+                if recovered == 200:
+                    break
+                await asyncio.sleep(0.05)
+            return first.status_code, second.status_code, recovered
+
+    assert asyncio.run(scenario()) == (504, 503, 200)
+
+
+def test_given_disconnected_read_when_thread_still_running_then_capacity_held_until_settled(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _test_client, _spec, _settings, app, _root = release_api
+    monkeypatch.setenv("RELEASE_READ_CONCURRENCY", "1")
+    settings = load_release_api_settings(os.environ)
+    entered, release, _observed = _stalled_source_releases(monkeypatch)
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(settings)
+
+    async def scenario() -> tuple[int, int]:
+        async with _async_client(app) as client:
+            read = asyncio.create_task(client.get(BASE + "/sources/native/releases"))
+            await asyncio.to_thread(entered.wait, 5)
+            read.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await read
+            second = await client.get(BASE + "/sources/native/releases")
+            release.set()
+            recovered = 503
+            for _ in range(100):
+                recovered = (await client.get(BASE + "/sources/native/releases")).status_code
+                if recovered == 200:
+                    break
+                await asyncio.sleep(0.05)
+            return second.status_code, recovered
+
+    assert asyncio.run(scenario()) == (503, 200)
+
+
+def test_given_shutdown_offload_when_service_operates_then_refused_without_work(tmp_path: Path) -> None:
+    from src.api.services.release_service import close_release_offload
+
+    service = ReleaseService(ReleaseApiSettings(tmp_path / "jobs"))
+    close_release_offload()
+    with pytest.raises(ReleaseApiError) as error:
+        asyncio.run(service.control(service.status, "localuser", "0" * 32))
+    assert error.value.status_code == 503
+
+
+def _cooperative_operation(entered: threading.Event, stopped: threading.Event) -> str:
+    from src.api.services.release_service import check_cancelled
+
+    entered.set()
+    try:
+        for _ in range(500):
+            check_cancelled()
+            time.sleep(0.01)
+        return "completed"
+    finally:
+        stopped.set()
+
+
+def test_given_stalled_preparation_when_deadline_expires_then_request_returns_and_capacity_is_held(
+    tmp_path: Path,
+) -> None:
+    from src.api.services.release_service import ReleaseOffloadSettings
+
+    async def scenario() -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def prepare(*args: object) -> object:
+            entered.set()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                await release.wait()
+            return "prepared"
+
+        settings = ReleaseApiSettings(
+            tmp_path / "jobs", offload=ReleaseOffloadSettings(operation_timeout_seconds=0.05, preparation_concurrency=1)
+        )
+        service = ReleaseService(settings, planner=SimpleNamespace(prepare=prepare))
+        pending = asyncio.create_task(service._prepare("localuser", None, tmp_path))
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            done, _ = await asyncio.wait({pending}, timeout=0.5)
+            assert done, "Preparation must return a timeout without waiting for stalled cleanup"
+            with pytest.raises(ReleaseApiError) as error:
+                pending.result()
+            assert error.value.status_code == 504
+            with pytest.raises(ReleaseApiError) as busy:
+                await service._prepare("localuser", None, tmp_path)
+            assert busy.value.detail == "release_busy"
+            assert await service.control(lambda: "responsive") == "responsive"
+        finally:
+            release.set()
+            await asyncio.gather(pending, return_exceptions=True)
+            await asyncio.sleep(0)
+        async with asyncio.timeout(1):
+            while True:
+                try:
+                    assert await service._prepare("localuser", None, tmp_path) == "prepared"
+                    break
+                except ReleaseApiError as busy:
+                    assert busy.detail == "release_busy"
+                    await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def _stalled_operation(entered: threading.Event, release: threading.Event) -> str:
+    entered.set()
+    release.wait(timeout=5)
+    return "done"
+
+
+def test_given_replaced_preparation_executor_when_work_is_admitted_then_capacity_and_remaining_steps_survive() -> None:
+    from src.api.services.release_service import ReleaseOffload, ReleaseOffloadSettings, current_preparation_work
+
+    async def scenario() -> None:
+        settings = ReleaseOffloadSettings(preparation_concurrency=1)
+        first = ReleaseOffload(settings)
+        second = ReleaseOffload(settings)
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def prepare() -> str:
+            work = current_preparation_work()
+            assert work is not None
+            assert await work.run(lambda: "first") == "first"
+            entered.set()
+            await release.wait()
+            return await work.run(lambda: "second")
+
+        pending = asyncio.create_task(first.prepare(prepare))
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            first.close()
+            with pytest.raises(ReleaseApiError) as busy:
+                await second.prepare(prepare)
+            assert busy.value.detail == "release_busy"
+            release.set()
+            assert await asyncio.wait_for(pending, 1) == "second"
+            assert await second.prepare(prepare) == "second"
+        finally:
+            release.set()
+            await asyncio.gather(pending, return_exceptions=True)
+            first.close()
+            second.close()
+
+    asyncio.run(scenario())
+
+
+def _eventually_admitted(offload: object, timeout: float = 5.0) -> object:
+    from src.api.services.release_service import ReleaseOffload
+
+    assert isinstance(offload, ReleaseOffload)
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return asyncio.run(offload.run("read", lambda: "free"))
+        except ReleaseApiError as error:
+            if error.status_code != 503 or time.monotonic() > deadline:
+                raise
+            time.sleep(0.05)
+
+
+def test_given_timed_out_operation_when_it_checks_cancellation_then_work_stops_and_capacity_frees() -> None:
+    from src.api.services.release_service import ReleaseOffload, ReleaseOffloadSettings
+
+    offload = ReleaseOffload(ReleaseOffloadSettings(read_concurrency=1, operation_timeout_seconds=0.2))
+    entered = threading.Event()
+    stopped = threading.Event()
+    try:
+        with pytest.raises(ReleaseApiError) as error:
+            asyncio.run(offload.run("read", _cooperative_operation, entered, stopped, response_bytes=1))
+        assert error.value.status_code == 504
+        assert stopped.wait(timeout=5)
+        assert _eventually_admitted(offload) == "free"
+    finally:
+        offload.close()
+
+
+def test_given_repeatedly_cancelled_awaiter_when_operation_checks_cancellation_then_work_stops_once() -> None:
+    from src.api.services.release_service import ReleaseOffload, ReleaseOffloadSettings
+
+    offload = ReleaseOffload(ReleaseOffloadSettings(read_concurrency=1, operation_timeout_seconds=30))
+    entered = threading.Event()
+    stopped = threading.Event()
+
+    async def scenario() -> None:
+        task = asyncio.create_task(offload.run("read", _cooperative_operation, entered, stopped, response_bytes=1))
+        await asyncio.to_thread(entered.wait, 5)
+        for _ in range(3):
+            task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    try:
+        asyncio.run(scenario())
+        assert stopped.wait(timeout=5)
+        assert _eventually_admitted(offload) == "free"
+    finally:
+        offload.close()
+
+
+def test_given_running_operation_when_shutdown_closes_offload_then_settlement_is_reported() -> None:
+    from src.api.services.release_service import ReleaseOffloadSettings, close_release_offload, get_release_offload
+
+    offload = get_release_offload(ReleaseOffloadSettings(read_concurrency=1, operation_timeout_seconds=30))
+    entered = threading.Event()
+    stopped = threading.Event()
+
+    async def scenario() -> tuple[bool, ReleaseApiError]:
+        task = asyncio.create_task(offload.run("read", _cooperative_operation, entered, stopped, response_bytes=1))
+        await asyncio.to_thread(entered.wait, 5)
+        settled = await asyncio.to_thread(close_release_offload, 5.0)
+        with pytest.raises(ReleaseApiError) as error:
+            await task
+        return settled, error.value
+
+    settled, error = asyncio.run(scenario())
+    assert settled is True
+    assert stopped.is_set()
+    assert error.status_code == 503
+
+
+def test_given_closed_offload_with_running_work_when_new_generation_admits_then_process_cap_holds() -> None:
+    from src.api.services.release_service import ReleaseOffload, ReleaseOffloadSettings
+
+    settings = ReleaseOffloadSettings(read_concurrency=1, operation_timeout_seconds=30)
+    first = ReleaseOffload(settings)
+    entered = threading.Event()
+    release = threading.Event()
+
+    async def scenario() -> int:
+        task = asyncio.create_task(first.run("read", _stalled_operation, entered, release, response_bytes=1))
+        await asyncio.to_thread(entered.wait, 5)
+        first.close()
+        second = ReleaseOffload(settings)
+        try:
+            with pytest.raises(ReleaseApiError) as error:
+                await second.run("read", lambda: "admitted")
+            return error.value.status_code
+        finally:
+            second.close()
+            release.set()
+            assert await task == "done"
+
+    assert asyncio.run(scenario()) == 503
+
+
+def test_given_lower_read_limit_when_older_work_running_then_new_limit_counts_it() -> None:
+    from dataclasses import replace
+
+    from src.api.services.release_service import ReleaseOffloadSettings, close_release_offload, get_release_offload
+
+    base = ReleaseOffloadSettings(read_concurrency=2, operation_timeout_seconds=30)
+    first = get_release_offload(base)
+    entered = threading.Event()
+    release = threading.Event()
+
+    async def scenario() -> int:
+        task = asyncio.create_task(first.run("read", _stalled_operation, entered, release, response_bytes=1))
+        await asyncio.to_thread(entered.wait, 5)
+        second = get_release_offload(replace(base, read_concurrency=1))
+        assert second is not first
+        try:
+            with pytest.raises(ReleaseApiError) as error:
+                await second.run("read", lambda: "admitted")
+            return error.value.status_code
+        finally:
+            release.set()
+            assert await task == "done"
+
+    try:
+        assert asyncio.run(scenario()) == 503
+    finally:
+        close_release_offload()
+
+
+def test_given_submit_when_store_opened_then_blocking_setup_runs_off_the_event_loop(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _test_client, spec, settings, _app, _root = release_api
+    service = ReleaseService(settings, planner=ViewerReleasePlanner(settings))
+    seen: dict[str, int] = {}
+
+    def store(self: ReleaseService) -> None:
+        seen["store_thread"] = threading.get_ident()
+        raise ReleaseApiError(503, "release_unavailable")
+
+    monkeypatch.setattr(ReleaseService, "_store", store)
+
+    async def scenario() -> None:
+        seen["loop_thread"] = threading.get_ident()
+        with pytest.raises(ReleaseApiError):
+            await service.submit(
+                "localuser",
+                spec,
+                "thread-probe-key",
+                preview_digest="",
+                processing_digest="",
+                local_disk_acknowledged=False,
+            )
+
+    asyncio.run(scenario())
+    assert seen["store_thread"] != seen["loop_thread"]
+
+
+def test_real_http_stalled_read_leaves_status_and_admission_responsive(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import socket
+
+    import uvicorn
+
+    _test_client, _spec, _settings, app, _root = release_api
+    monkeypatch.setenv("RELEASE_READ_CONCURRENCY", "1")
+    settings = load_release_api_settings(os.environ)
+    entered, release, _observed = _stalled_source_releases(monkeypatch)
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(settings)
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    original_log_level = logging.getLogger("uvicorn.error").level
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_config=None, lifespan="off"))
+    assert logging.getLogger("uvicorn.error").level == original_log_level
+    server_thread = threading.Thread(target=server.run, daemon=True)
+    server_thread.start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        deadline = time.monotonic() + 10
+        while not server.started:
+            if time.monotonic() > deadline:
+                raise AssertionError("loopback server did not start")
+            time.sleep(0.05)
+
+        read_status: dict[str, int] = {}
+
+        def read() -> None:
+            with httpx.Client(timeout=10) as reader:
+                read_status["code"] = reader.get(base + BASE + "/sources/native/releases").status_code
+
+        reader_thread = threading.Thread(target=read)
+        reader_thread.start()
+        assert entered.wait(timeout=5)
+
+        with httpx.Client(timeout=10) as client:
+            started = time.monotonic()
+            status = client.get(base + BASE + "/jobs/" + "0" * 32)
+            status_elapsed = time.monotonic() - started
+            refused = client.get(base + BASE + "/sources/native/releases")
+
+        release.set()
+        reader_thread.join(timeout=10)
+        assert status.status_code == 404
+        assert status_elapsed < 3
+        assert refused.status_code == 503
+        assert read_status["code"] == 200
+    finally:
+        release.set()
+        server.should_exit = True
+        server_thread.join(timeout=10)
+        assert not server_thread.is_alive()
+
+
+def test_given_unavailable_source_io_when_previewed_then_real_http_stays_responsive(
+    release_api: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import socket
+    from dataclasses import replace
+
+    import uvicorn
+
+    from src.api.services.release_service import ReleaseOffloadSettings
+
+    _client, spec, original, app, _root = release_api
+    settings = replace(
+        original,
+        offload=ReleaseOffloadSettings(preparation_concurrency=1, operation_timeout_seconds=1),
+    )
+    forbidden = MagicMock(side_effect=AssertionError("preview must not access source storage"))
+    monkeypatch.setattr(ViewerReleasePlanner, "_source", forbidden)
+    app.dependency_overrides[get_release_service] = lambda: ReleaseService(
+        settings, planner=ViewerReleasePlanner(settings)
+    )
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    original_log_level = logging.getLogger("uvicorn.error").level
+    server = uvicorn.Server(uvicorn.Config(app, log_config=None, lifespan="off", timeout_graceful_shutdown=0.1))
+    assert logging.getLogger("uvicorn.error").level == original_log_level
+    server_thread = threading.Thread(target=lambda: server.run(sockets=[listener]), daemon=True)
+    server_thread.start()
+    try:
+        deadline = time.monotonic() + 5
+        while not server.started:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=2) as client:
+            preview = client.post(BASE + "/preview", json=spec)
+            assert preview.status_code == 200
+            assert preview.json()["summary"]["advisory"] is True
+            assert client.get(BASE + "/jobs/" + "0" * 32).status_code == 404
+        forbidden.assert_not_called()
+    finally:
+        server.should_exit = True
+        server_thread.join(5)
+        listener.close()
+        assert not server_thread.is_alive()
+    assert ReleaseService(settings).jobs("localuser", cursor=0, limit=20)["items"] == []
+
+
+@pytest.mark.parametrize("cooperative", [True, False])
+def test_given_server_process_when_shutdown_requested_then_exit_is_bounded(cooperative: bool) -> None:
+    import selectors
+    import signal
+
+    descendant = "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
+    child = (
+        "import signal,time; "
+        + (
+            "signal.signal(signal.SIGTERM, lambda *args: exit(0)); "
+            if cooperative
+            else "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        )
+        + ("" if cooperative else f"import subprocess,sys; subprocess.Popen([sys.executable, '-c', {descendant!r}]); ")
+        + "print('ready', flush=True); time.sleep(60)"
+    )
+    script = (
+        "import sys; from src.api.server import supervise_server; "
+        "sys.exit(supervise_server([sys.executable, '-c', sys.argv[1]], shutdown_seconds=0.2))"
+    )
+    process = subprocess.Popen([sys.executable, "-c", script, child], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            assert selector.select(5), "Supervisor did not start its child"
+            assert process.stdout.readline() == b"ready\n"
+        started = time.monotonic()
+        process.send_signal(signal.SIGTERM)
+        _, stderr = process.communicate(timeout=3)
+        assert time.monotonic() - started < 3
+        assert process.returncode == (0 if cooperative else 137), stderr.decode()
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=3)
+
+
+@pytest.mark.parametrize("grace,total", [("0", "25"), ("nan", "25"), ("10", "10"), ("10", "601")])
+def test_given_invalid_server_shutdown_limits_when_loaded_then_refused(
+    monkeypatch: pytest.MonkeyPatch, grace: str, total: str
+) -> None:
+    from src.api.server import shutdown_limits
+
+    monkeypatch.setenv("DATAVIEWER_GRACEFUL_SHUTDOWN_SECONDS", grace)
+    monkeypatch.setenv("DATAVIEWER_SHUTDOWN_TIMEOUT_SECONDS", total)
+    with pytest.raises(ValueError):
+        shutdown_limits()
+
+
+def test_given_server_entrypoint_when_launched_then_shutdown_and_network_settings_are_forwarded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.api import server
+
+    observed = []
+
+    def supervise(command: list[str], *, shutdown_seconds: float) -> int:
+        observed.append((command, shutdown_seconds))
+        return 0
+
+    monkeypatch.setenv("DATAVIEWER_GRACEFUL_SHUTDOWN_SECONDS", "3")
+    monkeypatch.setenv("DATAVIEWER_SHUTDOWN_TIMEOUT_SECONDS", "9")
+    monkeypatch.setenv("BACKEND_HOST", "127.0.0.1")
+    monkeypatch.setenv("BACKEND_PORT", "18000")
+    monkeypatch.setattr(server, "supervise_server", supervise)
+    monkeypatch.setattr(sys, "argv", ["server", "--reload"])
+    assert server.main() == 0
+    command, total = observed[0]
+    assert total == 9
+    assert command[command.index("--timeout-graceful-shutdown") + 1] == "3"
+    assert command[command.index("--host") + 1] == "127.0.0.1"
+    assert command[command.index("--port") + 1] == "18000"
+    assert "--reload" in command

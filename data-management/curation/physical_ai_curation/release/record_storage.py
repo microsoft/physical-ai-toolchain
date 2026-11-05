@@ -110,14 +110,13 @@ def _plan_commit(
     records: Mapping[str, dict[str, Any]],
     sizes: Mapping[str, int],
     working: Mapping[str, Any],
-) -> tuple[str, bytes] | None:
-    """Return the single changed record as (job_id, canonical bytes), or None when unchanged."""
-    if not records.keys() <= working.keys():
-        raise ReleaseVerificationError("job record deletion is not supported")
+) -> tuple[str, bytes | None] | None:
+    """Return the single changed record as (job_id, canonical bytes), (job_id, None) for deletion, or None."""
     changed = [
         key
-        for key, document in working.items()
-        if key not in records or canonical_json_bytes(document) != canonical_json_bytes(records[key])
+        for key in sorted(records.keys() | working.keys())
+        if (key in working) != (key in records)
+        or (key in working and canonical_json_bytes(working[key]) != canonical_json_bytes(records[key]))
     ]
     if len(changed) > 1:
         raise ReleaseVerificationError("a transaction may change at most one job record")
@@ -126,6 +125,8 @@ def _plan_commit(
     key = changed[0]
     if not isinstance(key, str) or not _JOB_ID.fullmatch(key):
         raise ReleaseVerificationError(f"job ID must be 32 lowercase hex characters: {key!r}")
+    if key not in working:
+        return key, None
     document = working[key]
     if (
         not isinstance(document, dict)
@@ -167,6 +168,13 @@ def _read_bounded(descriptor: int, limit: int, name: str) -> bytes:
             raise ReleaseVerificationError(f"job record exceeds max_record_bytes: {name}")
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+def _delete_local(directory: int, key: str) -> None:
+    """Remove one job record under the collection lock; an absent record is already deleted."""
+    with suppress(FileNotFoundError):
+        os.unlink(f"{key}.json", dir_fd=directory)
+    os.fsync(directory)
 
 
 def _write_local(directory: int, key: str, body: bytes) -> None:
@@ -225,7 +233,11 @@ class LocalRecordStorage:
             yield working
             planned = _plan_commit(self._limits, records, sizes, working)
             if planned is not None:
-                _write_local(directory, *planned)
+                key, body = planned
+                if body is None:
+                    _delete_local(directory, key)
+                else:
+                    _write_local(directory, key, body)
         finally:
             os.close(directory)
 
@@ -396,6 +408,10 @@ class _LeaseMonitor:
             self._valid_until = started + _LEASE_SECONDS
 
 
+class _RecordReadConflict(ReleaseVerificationError):
+    """A mutable job record changed after its revision was listed."""
+
+
 class BlobRecordStorage:
     """Records under an Azure prefix; only the coordinator blob is leased."""
 
@@ -418,6 +434,8 @@ class BlobRecordStorage:
         self._coordinator = _child(self._prefix, _COORDINATOR)
         self._jobs_prefix = _child(self._prefix, f"{_JOBS_DIR}/")
         self._limits = RecordLimits(timeout_seconds, max_record_bytes, max_total_bytes, max_jobs)
+        self._record_cache = {}
+        self._coordinator_ready = False
 
     def configuration(self) -> dict[str, Any]:
         return {
@@ -429,8 +447,16 @@ class BlobRecordStorage:
         }
 
     def snapshot(self) -> dict[str, dict[str, Any]]:
-        records, _, _ = self._load()
-        return records
+        deadline = time.monotonic() + self._limits.timeout_seconds
+        while True:
+            try:
+                records, _, _ = self._load()
+                return records
+            except _RecordReadConflict as error:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("job record snapshot contention exceeded timeout") from error
+                time.sleep(min(_BLOB_POLL_SECONDS, remaining))
 
     @contextmanager
     def transaction(self) -> Iterator[dict[str, dict[str, Any]]]:
@@ -448,11 +474,11 @@ class BlobRecordStorage:
                     {
                         "schema_version": "curated-release-transaction/v1",
                         "job_id": key,
-                        "record": _decode_record(body, key),
+                        "record": None if body is None else _decode_record(body, key),
                         "revision": revisions.get(key),
                     },
                 )
-                self._write(key, body, revisions.get(key))
+                self._apply(key, body, revisions.get(key))
                 self._checkpoint(lease, None)
 
     def _checkpoint(self, lease: _LeaseMonitor, pending: dict[str, Any] | None) -> None:
@@ -484,23 +510,37 @@ class BlobRecordStorage:
             or (pending["revision"] is not None and not isinstance(pending["revision"], str))
         ):
             raise ReleaseVerificationError("invalid pending job transaction")
-        body = canonical_json_bytes(pending["record"])
-        if len(body) > self._limits.max_record_bytes:
-            raise ReleaseVerificationError("pending job record exceeds its bound")
-        _decode_record(body, pending["job_id"])
+        if pending["record"] is None:
+            body = None
+        else:
+            body = canonical_json_bytes(pending["record"])
+            if len(body) > self._limits.max_record_bytes:
+                raise ReleaseVerificationError("pending job record exceeds its bound")
+            _decode_record(body, pending["job_id"])
         lease.check()
-        self._write(pending["job_id"], body, pending["revision"])
+        self._apply(pending["job_id"], body, pending["revision"])
         self._checkpoint(lease, None)
 
     @contextmanager
     def _coordinator_lease(self) -> Iterator[_LeaseMonitor]:
-        from azure.core.exceptions import ResourceExistsError
+        from azure.core.exceptions import HttpResponseError, ResourceExistsError, ResourceNotFoundError
 
         timeout = self._limits.timeout_seconds
         blob = self._container.get_blob_client(self._coordinator)
-        with suppress(ResourceExistsError):
-            blob.upload_blob(b"", overwrite=False, timeout=timeout)
-        monitor = self._acquire(blob)
+        if not self._coordinator_ready:
+            try:
+                blob.upload_blob(b"", overwrite=False, timeout=timeout)
+            except ResourceExistsError:
+                pass
+            except HttpResponseError as error:
+                if error.status_code != 412 or getattr(error, "error_code", None) != "LeaseIdMissing":
+                    raise
+            self._coordinator_ready = True
+        try:
+            monitor = self._acquire(blob)
+        except ResourceNotFoundError:
+            self._coordinator_ready = False
+            raise
         monitor.start()
         try:
             yield monitor
@@ -530,6 +570,7 @@ class BlobRecordStorage:
         records = {}
         sizes = {}
         revisions = {}
+        fresh_cache = {}
         total = 0
         listing = self._container.list_blobs(name_starts_with=self._jobs_prefix, timeout=self._limits.timeout_seconds)
         for item in listing:
@@ -538,10 +579,16 @@ class BlobRecordStorage:
                 continue
             key = match.group(1)
             total = _admit(self._limits, len(records), total, item.size)
-            raw, revision = self._read(item.name, item.etag)
+            cached = self._record_cache.get(key)
+            if cached is not None and cached[0] == item.etag:
+                _, raw, revision = cached
+            else:
+                raw, revision = self._read(item.name, item.etag)
             records[key] = _decode_record(raw, key)
             sizes[key] = len(raw)
             revisions[key] = revision
+            fresh_cache[key] = (item.etag, raw, revision)
+        self._record_cache = fresh_cache
         return records, sizes, revisions
 
     def _read(self, name: str, etag: str) -> tuple[bytes, str]:
@@ -552,11 +599,34 @@ class BlobRecordStorage:
             stream = self._container.get_blob_client(name).download_blob(
                 etag=etag, match_condition=MatchConditions.IfNotModified, timeout=self._limits.timeout_seconds
             )
+            if stream.size > self._limits.max_record_bytes:
+                raise ReleaseVerificationError(f"job record exceeds max_record_bytes: {name}")
+            return stream.readall(), stream.properties.etag
         except ResourceModifiedError as error:
-            raise ReleaseVerificationError(f"job record changed during read: {name}") from error
-        if stream.size > self._limits.max_record_bytes:
-            raise ReleaseVerificationError(f"job record exceeds max_record_bytes: {name}")
-        return stream.readall(), stream.properties.etag
+            raise _RecordReadConflict(f"job record changed during read: {name}") from error
+
+    def _apply(self, key: str, body: bytes | None, revision: str | None) -> None:
+        if body is None:
+            self._delete(key, revision)
+        else:
+            self._write(key, body, revision)
+
+    def _delete(self, key: str, revision: str | None) -> None:
+        """Delete one job record only at the revision it was read; an already absent record is complete."""
+        from azure.core import MatchConditions
+        from azure.core.exceptions import ResourceModifiedError, ResourceNotFoundError
+
+        if revision is None:
+            raise ReleaseVerificationError(f"job record deletion requires a revision: {key}")
+        blob = self._container.get_blob_client(f"{self._jobs_prefix}{key}.json")
+        try:
+            blob.delete_blob(
+                etag=revision, match_condition=MatchConditions.IfNotModified, timeout=self._limits.timeout_seconds
+            )
+        except ResourceNotFoundError:
+            return
+        except ResourceModifiedError as error:
+            raise ReleaseVerificationError(f"job record changed concurrently; delete refused: {key}") from error
 
     def _write(self, key: str, body: bytes, revision: str | None) -> None:
         from azure.core import MatchConditions

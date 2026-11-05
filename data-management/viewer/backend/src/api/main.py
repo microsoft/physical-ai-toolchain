@@ -29,30 +29,21 @@ from .auth import (
     validate_hosted_auth_configuration,
 )
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token, require_csrf_token
+from .logging_config import configure_logging
 from .middleware import ContentSizeLimitMiddleware, EpisodeCompressionMiddleware, SecurityHeadersMiddleware
 from .rate_limiter import limiter
 from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, releases, vlm_judge
 from .routes import ai_analysis
 from .services.dataset_service import EpisodeLoadError
+from .services.release_service import close_release_offload
 from .storage import RevisionConflictError
 from .swagger_ui import install_responsive_swagger_ui
-
-# Match application verbosity to uvicorn's effective CLI level without replacing its handlers.
-_log_level = logging.getLogger("uvicorn.error").level or logging.INFO
-logging.basicConfig(
-    level=_log_level,
-    format="%(asctime)s - %(levelname)s %(name)s - %(message)s",
-)
-logging.getLogger("src.api").setLevel(_log_level)
-
-# Suppress verbose Azure SDK HTTP request logging
-logging.getLogger("azure").setLevel(logging.WARNING)
-logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 
 # Load .env before any config or service singletons are initialized so that
 # all env vars are available to get_app_config() on first access.
 env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(env_path)
+configure_logging(logging.getLogger("uvicorn.error").level or logging.INFO)
 
 # Read config once at module load. CORS origins must be known before the app object
 # is created, and all service singletons share this same config instance.
@@ -135,6 +126,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         for worker in workers:
             with suppress(asyncio.CancelledError):
                 _ = await worker
+        await asyncio.to_thread(close_release_offload)
 
     try:
         service = get_dataset_service()

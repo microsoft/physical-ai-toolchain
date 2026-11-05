@@ -8,7 +8,7 @@ import json
 import os
 import sys
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import asdict
 from pathlib import Path
@@ -18,20 +18,22 @@ from urllib.parse import unquote, urlsplit
 from pydantic import TypeAdapter
 
 from physical_ai_curation.release.azure_publication import (
+    OWNER_EFFECT,
     OWNER_LENGTH,
     OWNER_OPERATION,
-    OWNER_SHA256,
     BlobPublisher,
     BlobReleaseStore,
     CopyProgress,
     _azure_errors,
-    _content_matches,
     _copy_id,
     _copy_status,
+    _CopyPending,
     _is_owned,
     _match_conditions,
+    _operation_id,
     _properties,
     _verified_stream,
+    source_effect_digest,
 )
 from physical_ai_curation.release.blob_source_associations import BlobSourceAssociations
 from physical_ai_curation.release.canonical import normalize_release_path, parse_strict_json, sha256_hex
@@ -52,7 +54,7 @@ from physical_ai_curation.release.local_worker import (
     LINUX_F_SEAL_WRITE,
     MAX_PROTOCOL_BYTES,
 )
-from physical_ai_curation.release.models import MANIFEST_PATH, MARKER_PATH, ReleaseResult, SourceObject
+from physical_ai_curation.release.models import MANIFEST_PATH, MARKER_PATH, ReleaseResult, SourceObjectRecord
 from physical_ai_curation.release.publication import PublicationAttempt, ownership_bytes, ownership_path
 from physical_ai_curation.release.record_storage import BlobLocation, RecordLimits, storage_from_configuration
 from physical_ai_curation.release.source_associations import SourceAssociationIntent, source_association_binding
@@ -71,8 +73,8 @@ class _ObservedBlobStore(BlobReleaseStore):
         super().__init__(container, prefix)
         self.observed_bytes = 0
 
-    def iter_bytes(self, path: str, *, chunk_size: int) -> Iterator[bytes]:
-        for chunk in super().iter_bytes(path, chunk_size=chunk_size):
+    def iter_bytes(self, path: str, *, chunk_size: int, expected_revision: str | None = None) -> Iterator[bytes]:
+        for chunk in super().iter_bytes(path, chunk_size=chunk_size, expected_revision=expected_revision):
             self.observed_bytes += len(chunk)
             yield chunk
 
@@ -93,16 +95,20 @@ class SupervisedBlobPublisher(BlobPublisher):
         self.location = location
         self.jobs, self.job_id, self.fence = jobs, job_id, fence
         self.store = _ObservedBlobStore(container, self.root)
-        self._active: SourceObject | None = None
+        self._active: SourceObjectRecord | None = None
         self._active_write: dict[str, Any] | None = None
         self._cleanup_deadline: float | None = None
+        self._deferred: list[tuple[SourceObjectRecord, str, str]] | None = None
+        self._generated: list[dict[str, Any]] | None = None
+        self._generated_bytes = 0
+        self._batch_root_checked = False
 
     @property
     def destination_read_bytes(self) -> int:
         return self.store.observed_bytes
 
     def copy(
-        self, source_container: Any, source: SourceObject, source_etag: str, *, source_path: str | None = None
+        self, source_container: Any, source: SourceObjectRecord, source_etag: str, *, source_path: str | None = None
     ) -> CopyProgress:
         self.jobs.validate_execution_binding(self.job_id, self.fence, self.location, self.attempt, route="blob")
         self._active = source
@@ -114,22 +120,146 @@ class SupervisedBlobPublisher(BlobPublisher):
         finally:
             self._active = None
 
+    def copy_batch(
+        self, source_container: Any, items: Sequence[tuple[SourceObjectRecord, str, str]]
+    ) -> list[CopyProgress]:
+        """Copy in bounded groups; each group shares one ledger transaction and one registered child."""
+        self.recover_outputs({source.path: (source, etag) for source, etag, _ in items})
+        progress: list[CopyProgress] = []
+        size = self.jobs.settings.blob_batch_size
+        for start in range(0, len(items), size):
+            self._claim_root()
+            self._batch_root_checked = True
+            try:
+                progress.extend(self._copy_group(source_container, items[start : start + size]))
+            finally:
+                self._batch_root_checked = False
+        return progress
+
+    def recover_outputs(self, copies: dict[str, tuple[SourceObjectRecord, str]]) -> None:
+        """Reconcile a stopped batch before dispatch, retaining pending or conflicting output."""
+        effects = self.jobs.recovery_effects(self.job_id, self.fence)
+        if not effects:
+            return
+        self.jobs.validate_execution_binding(
+            self.job_id, self.fence, self.location, self.attempt, route="blob", recovery=True
+        )
+        self._claim_root()
+        for effect in effects:
+            path = effect["path"]
+            if path in copies:
+                source, etag = copies[path]
+                self.reconcile_copy(source, etag)
+                continue
+            item = {"path": path, "length": effect["length"], "sha256": effect["digest"]}
+            properties = _properties(self.container.get_blob_client(self.root + path))
+            if properties is not None:
+                self._verify_generated(item)
+            self.jobs.reconcile_effect(
+                self.job_id,
+                self.fence,
+                path,
+                observed="absent" if properties is None else "complete",
+                length=effect["length"],
+                digest=effect["digest"],
+            )
+            if properties is not None:
+                self.jobs.record_io(
+                    self.job_id,
+                    self.fence,
+                    _operation_id(self.attempt, path, effect["length"], effect["digest"]),
+                    {"generated_upload_bytes": effect["length"]},
+                )
+
+    def _copy_group(
+        self, source_container: Any, group: Sequence[tuple[SourceObjectRecord, str, str]]
+    ) -> list[CopyProgress]:
+        self.jobs.validate_execution_binding(self.job_id, self.fence, self.location, self.attempt, route="blob")
+        paths = [normalize_release_path(source.path) for source, _, _ in group]
+        intents = [
+            (path, source.length, source_effect_digest(source))
+            for path, (source, _, _) in zip(paths, group, strict=True)
+        ]
+        replays = self.jobs.begin_effects(self.job_id, self.fence, self.attempt, intents)
+        known = dict(zip(paths, replays, strict=True))
+        fresh = [path for path in paths if not known[path]]
+        outcome: dict[str, CopyProgress] = {}
+        try:
+            self._deferred = []
+            intake = _GroupControl(known)
+            for (source, etag, name), path in zip(group, paths, strict=True):
+                if not known[path]:
+                    self._copy_under(intake, source_container, source, etag, name)
+            deferred, self._deferred = self._deferred, None
+            if deferred:
+                self._dispatch_group(deferred)
+            settled = _GroupControl(dict.fromkeys(paths, True))
+            for (source, etag, name), path in zip(group, paths, strict=True):
+                outcome[path] = self._copy_under(settled, source_container, source, etag, name)
+        except BaseException:
+            self._deferred = None
+            if fresh:
+                self.jobs.finish_effects(self.job_id, self.fence, fresh, ok=False)
+            raise
+        complete = [path for path in fresh if outcome[path].state == "complete"]
+        uncertain = [path for path in fresh if outcome[path].state != "complete"]
+        if complete:
+            self.jobs.finish_effects(self.job_id, self.fence, complete, ok=True)
+        if uncertain:
+            self.jobs.finish_effects(self.job_id, self.fence, uncertain, ok=False)
+        observations = [
+            (
+                sha256_hex(f"blob-copy:{self.attempt.key}:{source.path}:{source.revision}".encode()),
+                {"storage_copy_bytes": source.length},
+                0,
+            )
+            for source, _, _ in group
+            if outcome[normalize_release_path(source.path)].state == "complete"
+        ]
+        if observations:
+            self.jobs.record_ios(self.job_id, self.fence, observations)
+        return [outcome[path] for path in paths]
+
+    def _copy_under(
+        self, control: Any, source_container: Any, source: SourceObjectRecord, etag: str, name: str
+    ) -> CopyProgress:
+        original, self.control = self.control, control
+        self._active = source
+        try:
+            return BlobPublisher.copy(self, source_container, source, etag, source_path=name)
+        finally:
+            self.control = original
+            self._active = None
+
     def _claim_root(self) -> None:
         """Inspect ownership without mutation; only the registered child may create it."""
-        _inspect_root_ownership(self)
+        if not self._batch_root_checked:
+            _inspect_root_ownership(self)
+
+    @contextmanager
+    def write_batch(self) -> Iterator[None]:
+        """Queue generated uploads and flush them in bounded groups before the context exits."""
+        if self._generated is not None:
+            raise ReleaseVerificationError("generated upload batch is already open")
+        self._generated, self._generated_bytes = [], 0
+        try:
+            yield
+            self._flush_generated()
+        finally:
+            self._generated, self._generated_bytes = None, 0
 
     def write(self, path: str, chunks: Iterable[bytes], *, length: int, sha256: str) -> None:
         if path == MARKER_PATH:
             raise ReleaseVerificationError("marker requires publication arbitration")
         content = bytearray()
         for chunk in chunks:
-            if len(chunk) > CHUNK_BYTES or len(content) + len(chunk) > MAX_PROTOCOL_BYTES // 2:
+            if len(chunk) > CHUNK_BYTES or len(content) + len(chunk) > _UPLOAD_BATCH_BYTES:
                 raise ReleaseVerificationError("inline blob payload exceeds its protocol bound")
             content.extend(chunk)
-        self._write(path, length, sha256, {"mode": "inline", "content": base64.b64encode(content).decode("ascii")})
+        self._generate(path, length, sha256, {"mode": "inline", "content": base64.b64encode(content).decode("ascii")})
 
     def write_from_path(self, path: str, source: Path, *, length: int, sha256: str) -> None:
-        self._write(
+        self._generate(
             path,
             length,
             sha256,
@@ -137,12 +267,82 @@ class SupervisedBlobPublisher(BlobPublisher):
         )
 
     def write_lineage(self, path: str, prepared: NativeGenerationPlan, *, length: int, sha256: str) -> None:
-        self._write(
+        self._generate(
             path,
             length,
             sha256,
             {"mode": "lineage", "prepared": TypeAdapter(NativeGenerationPlan).dump_python(prepared, mode="json")},
         )
+
+    def _generate(self, path: str, length: int, digest: str, spec: dict[str, Any]) -> None:
+        """Queue one generated upload while a batch is open; otherwise run one supervised child."""
+        if self._generated is None:
+            self._write(path, length, digest, spec)
+            return
+        item = {"path": normalize_release_path(path), "length": length, "sha256": digest, **spec}
+        size = len(json.dumps(item, separators=(",", ":"), allow_nan=False).encode())
+        if size > _UPLOAD_BATCH_BYTES:
+            self._flush_generated()
+            self._write(path, length, digest, spec)
+            return
+        full = len(self._generated) >= self.jobs.settings.blob_batch_size
+        if full or self._generated_bytes + size > _UPLOAD_BATCH_BYTES:
+            self._flush_generated()
+        self._generated.append(item)
+        self._generated_bytes += size
+
+    def _flush_generated(self) -> None:
+        """Upload queued items through one registered child; only the fresh items are dispatched."""
+        if not self._generated:
+            return
+        items = self._generated
+        self._generated, self._generated_bytes = [], 0
+        self.jobs.validate_execution_binding(self.job_id, self.fence, self.location, self.attempt, route="blob")
+        self._claim_root()
+        replays = self.jobs.begin_effects(
+            self.job_id, self.fence, self.attempt, [(item["path"], item["length"], item["sha256"]) for item in items]
+        )
+        fresh = [item for item, replay in zip(items, replays, strict=True) if not replay]
+        for item, replay in zip(items, replays, strict=True):
+            if replay:
+                self._verify_generated(item)
+        if not fresh:
+            return
+        paths = [item["path"] for item in fresh]
+        try:
+            first = fresh[0]
+            content = self._protocol(
+                first["path"], first["length"], first["sha256"], {"mode": "upload_batch", "items": fresh}
+            )
+            self._execute_batch(paths, max(item["length"] for item in fresh), content)
+            for item in fresh:
+                self._verify_generated(item)
+        except BaseException:
+            self.jobs.finish_effects(self.job_id, self.fence, paths, ok=False)
+            raise
+        self.jobs.finish_effects(self.job_id, self.fence, paths, ok=True)
+        self.jobs.record_ios(
+            self.job_id,
+            self.fence,
+            [
+                (
+                    _operation_id(self.attempt, item["path"], item["length"], item["sha256"]),
+                    {"generated_upload_bytes": item["length"]},
+                    0,
+                )
+                for item in fresh
+            ],
+        )
+
+    def _verify_generated(self, item: dict[str, Any]) -> None:
+        operation = _operation_id(self.attempt, item["path"], item["length"], item["sha256"])
+        properties = _properties(self.container.get_blob_client(self.root + item["path"]))
+        if (
+            properties is None
+            or properties.size != item["length"]
+            or not _is_owned(properties.metadata, self.attempt, operation)
+        ):
+            raise ReleaseVerificationError("uploaded output ownership conflict")
 
     def _write(self, path: str, length: int, digest: str, spec: dict[str, Any]) -> None:
         self.jobs.validate_execution_binding(self.job_id, self.fence, self.location, self.attempt, route="blob")
@@ -156,14 +356,21 @@ class SupervisedBlobPublisher(BlobPublisher):
         if self._active_write is None:
             raise ReleaseVerificationError("blob upload lacks a supervised request")
         self._execute(path, length, self._protocol(path, length, sha256, self._active_write))
-        if not _content_matches(self.store, path, length, sha256):
-            raise ReleaseVerificationError("uploaded content conflict")
+        properties = _properties(self.container.get_blob_client(self.root + path))
+        if (
+            properties is None
+            or properties.size != length
+            or not _is_owned(properties.metadata, self.attempt, operation)
+        ):
+            raise ReleaseVerificationError("uploaded output ownership conflict")
         self.jobs.record_io(self.job_id, self.fence, operation, {"generated_upload_bytes": length})
 
     def abort(self, path: str, copy_id: str) -> None:
         raise ReleaseVerificationError("blob copy abort is not yet supervised")
 
-    def reconcile_copy(self, source: SourceObject, source_etag: str, *, cancel: bool = False) -> CopyProgress | None:
+    def reconcile_copy(
+        self, source: SourceObjectRecord, source_etag: str, *, cancel: bool = False
+    ) -> CopyProgress | None:
         self.jobs.validate_execution_binding(
             self.job_id,
             self.fence,
@@ -175,13 +382,14 @@ class SupervisedBlobPublisher(BlobPublisher):
         )
         self._claim_root()
         if cancel:
+            digest = source_effect_digest(source)
             properties = _properties(self.container.get_blob_client(self.root + source.path))
             copy_id = _copy_id(properties) if properties is not None else None
             with self.control.reconciliation(
                 self.attempt,
                 source.path,
                 source.length,
-                source.sha256,
+                digest,
                 copy_id=copy_id,
                 cancel=True,
             ) as observed:
@@ -191,7 +399,7 @@ class SupervisedBlobPublisher(BlobPublisher):
                     self._protocol(
                         source.path,
                         source.length,
-                        source.sha256,
+                        digest,
                         {
                             "mode": "blob_cleanup",
                             "source": source.model_dump(mode="json"),
@@ -252,44 +460,43 @@ class SupervisedBlobPublisher(BlobPublisher):
             properties = _properties(self.container.get_blob_client(self.root + path))
             if properties is None or not _cleanup_identity(properties, self.attempt, effect):
                 raise ReleaseVerificationError("output ownership prevents cleanup")
-            if _copy_status(properties) not in ("pending", "aborted", "failed"):
-                for _chunk in _verified_stream(
-                    self.store.iter_bytes(path, chunk_size=CHUNK_BYTES),
-                    effect["length"],
-                    effect["digest"],
-                ):
-                    bounded()
-        for path, effect in effects.items():
-            if path == BLOB_OWNER_CLEANUP_PATH:
-                continue
+        pending = [effect for path, effect in effects.items() if path != BLOB_OWNER_CLEANUP_PATH]
+        for start in range(0, len(pending), self.jobs.settings.blob_batch_size):
             bounded()
-            properties = _properties(self.container.get_blob_client(self.root + path))
-            copy_id = _copy_id(properties) if properties is not None else None
-            with self.control.reconciliation(
-                self.attempt,
-                path,
-                effect["length"],
-                effect["digest"],
-                copy_id=copy_id,
-                cancel=True,
-            ) as observed:
-                self._execute(
-                    path,
-                    effect["length"],
-                    self._protocol(
-                        path,
-                        effect["length"],
-                        effect["digest"],
-                        {
-                            "mode": "blob_remove",
-                            "copy_id": copy_id,
-                            "operation": properties.metadata.get(OWNER_OPERATION) if properties is not None else None,
-                        },
-                    ),
+            items = []
+            for effect in pending[start : start + self.jobs.settings.blob_batch_size]:
+                properties = _properties(self.container.get_blob_client(self.root + effect["path"]))
+                items.append(
+                    {
+                        "path": effect["path"],
+                        "length": effect["length"],
+                        "sha256": effect["digest"],
+                        "copy_id": _copy_id(properties) if properties is not None else effect["copy_id"],
+                        "operation": properties.metadata.get(OWNER_OPERATION) if properties is not None else None,
+                    }
                 )
-                if _properties(self.container.get_blob_client(self.root + path)) is not None:
+            self.jobs.begin_reconciliations(
+                self.job_id,
+                self.fence,
+                self.attempt,
+                [(item["path"], item["length"], item["sha256"], item["copy_id"]) for item in items],
+                cancel=True,
+            )
+            first = items[0]
+            self._execute(
+                first["path"],
+                max(item["length"] for item in items),
+                self._protocol(
+                    first["path"],
+                    first["length"],
+                    first["sha256"],
+                    {"mode": "blob_remove_batch", "items": items},
+                ),
+            )
+            for item in items:
+                if _properties(self.container.get_blob_client(self.root + item["path"])) is not None:
                     raise ReleaseVerificationError("blob cleanup outcome remains unresolved")
-                observed("absent")
+            self.jobs.finish_blob_removals(self.job_id, self.fence, [item["path"] for item in items])
         bounded()
         length, digest = self.jobs.begin_blob_owner_cleanup(self.job_id, self.fence, self.attempt)
         self._execute(
@@ -325,7 +532,7 @@ class SupervisedBlobPublisher(BlobPublisher):
     def _retire_association(self) -> None:
         """Hook for removing a pending association after outputs are gone and before settlement."""
 
-    def _record_copy(self, source: SourceObject) -> None:
+    def _record_copy(self, source: SourceObjectRecord) -> None:
         operation = sha256_hex(f"blob-copy:{self.attempt.key}:{source.path}:{source.revision}".encode())
         self.jobs.record_io(self.job_id, self.fence, operation, {"storage_copy_bytes": source.length})
 
@@ -379,16 +586,41 @@ class SupervisedBlobPublisher(BlobPublisher):
         source = self._active
         if source is None:
             raise ReleaseVerificationError("blob copy dispatched without an active source")
+        if self._deferred is not None:
+            self._deferred.append((source, source_etag, source_url))
+            raise _CopyPending(CopyProgress("pending", None))
         content = self._copy_protocol(source, source_url, metadata, source_etag)
         self._execute(source.path, source.length, content)
 
+    def _dispatch_group(self, deferred: Sequence[tuple[SourceObjectRecord, str, str]]) -> None:
+        paths = [normalize_release_path(source.path) for source, _, _ in deferred]
+        length = max(source.length for source, _, _ in deferred)
+        self._execute_batch(paths, length, self._batch_protocol(deferred))
+
+    def _batch_protocol(self, entries: Sequence[tuple[SourceObjectRecord, str, str]]) -> bytes:
+        items = [
+            {
+                "path": normalize_release_path(source.path),
+                "length": source.length,
+                "sha256": source_effect_digest(source),
+                "source": source.model_dump(mode="json"),
+                "source_url": source_url,
+                "source_etag": source_etag,
+            }
+            for source, source_etag, source_url in entries
+        ]
+        first = items[0]
+        return self._protocol(
+            first["path"], first["length"], first["sha256"], {"mode": "blob_copy_batch", "items": items}
+        )
+
     def _copy_protocol(
-        self, source: SourceObject, source_url: str, metadata: dict[str, str], source_etag: str
+        self, source: SourceObjectRecord, source_url: str, metadata: dict[str, str], source_etag: str
     ) -> bytes:
         return self._protocol(
             source.path,
             source.length,
-            source.sha256,
+            source_effect_digest(source),
             {
                 "mode": "blob_copy",
                 "source_url": source_url,
@@ -428,6 +660,24 @@ class SupervisedBlobPublisher(BlobPublisher):
 
     def _execute(self, path: str, length: int, content: bytes) -> None:
         """Run one sealed copy protocol in a registered child; the child alone issues the copy."""
+        spec = json.loads(content)
+        if spec["mode"] == "blob_remove_batch":
+            self._execute_batch([item["path"] for item in spec["items"]], length, content)
+            return
+        self._run_child(content, length, effect_path=path)
+
+    def _execute_batch(self, paths: Sequence[str], length: int, content: bytes) -> None:
+        """Run one sealed copy group in a single registered child, authorized as an exact effect set."""
+        self._run_child(content, length, effect_paths=paths)
+
+    def _run_child(
+        self,
+        content: bytes,
+        length: int,
+        *,
+        effect_path: str | None = None,
+        effect_paths: Sequence[str] | None = None,
+    ) -> None:
         descriptor = os.memfd_create("release-blob-effect", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
         try:
             with os.fdopen(os.dup(descriptor), "wb") as stream:
@@ -439,7 +689,12 @@ class SupervisedBlobPublisher(BlobPublisher):
                 LINUX_F_ADD_SEALS,
                 LINUX_F_SEAL_WRITE | LINUX_F_SEAL_GROW | LINUX_F_SEAL_SHRINK | LINUX_F_SEAL_SEAL,
             )
-            reconciliation = json.loads(content)["mode"] in ("blob_cleanup", "blob_remove", "blob_owner_cleanup")
+            reconciliation = json.loads(content)["mode"] in (
+                "blob_cleanup",
+                "blob_remove",
+                "blob_remove_batch",
+                "blob_owner_cleanup",
+            )
             timeout = self.jobs.settings.cleanup_seconds if reconciliation else None
             if timeout is not None and self._cleanup_deadline is not None:
                 timeout = min(timeout, self._cleanup_deadline - time.monotonic())
@@ -456,12 +711,15 @@ class SupervisedBlobPublisher(BlobPublisher):
                 grace_seconds=self.jobs.settings.grace_seconds,
                 liveness_seconds=self.jobs.settings.guardian_seconds,
                 inherit_fds=(descriptor,),
-                effect_path=path,
+                effect_path=effect_path,
+                effect_paths=effect_paths,
                 reconciliation=reconciliation,
                 timeout_seconds=timeout,
             )
             if outcome.reason != "exited" or outcome.returncode != 0:
-                raise ReleaseVerificationError("supervised blob copy did not complete")
+                raise ReleaseVerificationError(
+                    f"supervised blob copy did not complete ({outcome.reason}, {outcome.returncode})"
+                )
         finally:
             os.close(descriptor)
 
@@ -504,6 +762,8 @@ class SourceAssociatedBlobPublisher(SupervisedBlobPublisher):
         )
 
     def _claim_root(self) -> None:
+        if self._batch_root_checked:
+            return
         self._validate_association()
         self.associations.ensure_intent(self.intent)
         super()._claim_root()
@@ -535,6 +795,25 @@ class SourceAssociatedBlobPublisher(SupervisedBlobPublisher):
             self.intent, expected_manifest_sha256, job_id=self.job_id, fence=self.fence
         )
         return result
+
+
+class _GroupControl:
+    """Group control: intents were recorded once per group, so each copy only reports its replay state."""
+
+    def __init__(self, replays: Mapping[str, bool]) -> None:
+        self.replays = replays
+
+    @contextmanager
+    def effect(self, attempt: PublicationAttempt, path: str, length: int, digest: str) -> Iterator[bool]:
+        yield self.replays[normalize_release_path(path)]
+
+
+class _BatchChildControl:
+    """Batch children authorize the exact effect set once before any remote mutation."""
+
+    @contextmanager
+    def effect(self, attempt: PublicationAttempt, path: str, length: int, digest: str) -> Iterator[bool]:
+        yield False
 
 
 class _RegisteredCopyControl:
@@ -623,7 +902,7 @@ def _cleanup_identity(properties: Any, attempt: PublicationAttempt, effect: dict
     return (
         bool(operation)
         and _is_owned(properties.metadata, attempt, operation)
-        and (properties.metadata.get(OWNER_LENGTH), properties.metadata.get(OWNER_SHA256))
+        and (properties.metadata.get(OWNER_LENGTH), properties.metadata.get(OWNER_EFFECT))
         == (str(effect["length"]), effect["digest"])
     )
 
@@ -687,6 +966,120 @@ def _remove_blob(publisher: BlobPublisher, jobs: ReleaseJobStore, spec: dict[str
     publisher._delete_owned_residue(blob, spec["copy_id"], spec["operation"])
 
 
+def _remove_blobs(publisher: BlobPublisher, jobs: ReleaseJobStore, spec: dict[str, Any]) -> None:
+    if publisher._marker_exists():
+        raise ReleaseVerificationError("marked package cleanup is refused")
+    _inspect_root_ownership(publisher)
+    deletions = []
+    for item in spec["items"]:
+        blob = publisher.container.get_blob_client(publisher.root + normalize_release_path(item["path"]))
+        properties = _properties(blob)
+        if properties is None:
+            continue
+        if not _cleanup_identity(
+            properties, publisher.attempt, {"length": item["length"], "digest": item["sha256"]}
+        ) or (properties.metadata.get(OWNER_OPERATION), _copy_id(properties)) != (item["operation"], item["copy_id"]):
+            raise ReleaseVerificationError("output ownership prevents cleanup")
+        if _copy_status(properties) == "pending":
+            try:
+                blob.abort_copy(item["copy_id"])
+            except _azure_errors().HttpResponseError as error:
+                if error.status_code != 409:
+                    raise
+            properties = _properties(blob)
+            if properties is None:
+                continue
+            if (
+                not _cleanup_identity(
+                    properties, publisher.attempt, {"length": item["length"], "digest": item["sha256"]}
+                )
+                or _copy_id(properties) != item["copy_id"]
+                or properties.metadata.get(OWNER_OPERATION) != item["operation"]
+                or _copy_status(properties) == "pending"
+            ):
+                raise ReleaseVerificationError("copy abort outcome remains unresolved")
+        deletions.append(
+            {
+                "name": publisher.root + item["path"],
+                "etag": properties.etag,
+                "match_condition": _match_conditions().IfNotModified,
+            }
+        )
+    jobs.authorize_blob_writers(
+        spec["job_id"],
+        spec["fence"],
+        publisher.attempt,
+        _batch_entries(spec, jobs),
+        destination=spec["destination"],
+        reconciliation=True,
+        copy_ids=[item["copy_id"] for item in spec["items"]],
+    )
+    if publisher._marker_exists():
+        raise ReleaseVerificationError("marked package cleanup is refused")
+    if deletions:
+        responses = list(publisher.container.delete_blobs(*deletions, raise_on_any_failure=False))
+        if len(responses) != len(deletions) or any(response.status_code not in (202, 404) for response in responses):
+            raise ReleaseVerificationError("blob cleanup batch was only partially applied")
+
+
+_UPLOAD_BATCH_BYTES = MAX_PROTOCOL_BYTES // 2
+
+
+def _generated_chunks(spec: dict[str, Any]) -> Iterator[bytes]:
+    """Yield the payload of one generated upload from its sealed inline, file, or lineage description."""
+    if spec["mode"] == "inline":
+        content = base64.b64decode(spec["content"], validate=True)
+        return (content[offset : offset + CHUNK_BYTES] for offset in range(0, len(content), CHUNK_BYTES))
+    if spec["mode"] == "file":
+        return LocalReleaseStore(Path(spec["source_root"])).iter_bytes(spec["source_path"], chunk_size=CHUNK_BYTES)
+    if spec["mode"] != "lineage":
+        raise ReleaseVerificationError("unsupported generated upload mode")
+    from physical_ai_curation.release.coordinator import _lineage
+
+    return _lineage(TypeAdapter(NativeGenerationPlan).validate_python(spec["prepared"]))
+
+
+def _batch_entries(spec: dict[str, Any], jobs: ReleaseJobStore) -> list[tuple[str, int, str]]:
+    items = spec["items"]
+    if not isinstance(items, list) or not 1 <= len(items) <= jobs.settings.blob_batch_size:
+        raise ReleaseVerificationError("blob copy group exceeds its bound")
+    return [(normalize_release_path(item["path"]), item["length"], item["sha256"]) for item in items]
+
+
+def _copy_item(
+    publisher: BlobPublisher,
+    container_factory: Callable[[str, str], Any],
+    location: BlobLocation,
+    source_record: dict[str, Any],
+    source_url: str,
+    source_etag: str,
+    path: str,
+    length: int,
+    digest: str,
+) -> None:
+    source = TypeAdapter(SourceObjectRecord).validate_python(source_record)
+    if (source.path, source.length, source_effect_digest(source)) != (path, length, digest):
+        raise ReleaseVerificationError("source identity does not match the authorized effect")
+    address, origin = urlsplit(source_url), urlsplit(location.account_url)
+    if (
+        (address.scheme, address.netloc) != (origin.scheme, origin.netloc)
+        or address.query
+        or address.fragment
+        or address.username is not None
+    ):
+        raise ReleaseVerificationError("source URL must be a query-free same-account address")
+    source_container, separator, source_name = unquote(address.path).lstrip("/").partition("/")
+    if not separator:
+        raise ReleaseVerificationError("source URL does not identify a blob")
+    source_location = BlobLocation(location.account_url, source_container)
+    publisher.copy(
+        container_factory(source_location.account_url, source_location.container),
+        source,
+        source_etag,
+        source_path=normalize_release_path(source_name),
+    )
+
+
 def _process(
     descriptor: int,
     *,
@@ -701,6 +1094,9 @@ def _process(
     spec = json.loads(content)
     if spec["version"] != 1 or spec["mode"] not in (
         "blob_copy",
+        "blob_copy_batch",
+        "upload_batch",
+        "blob_remove_batch",
         "blob_cleanup",
         "blob_remove",
         "blob_owner_cleanup",
@@ -720,17 +1116,28 @@ def _process(
         settings=ReleaseRuntimeSettings(**spec["settings"]),
         storage=storage_from_configuration(spec["storage"]),
     )
-    jobs.authorize_blob_writer(
-        spec["job_id"],
-        spec["fence"],
-        attempt,
-        path,
-        spec["length"],
-        spec["sha256"],
-        destination=spec["destination"],
-        reconciliation=spec["mode"] in ("blob_cleanup", "blob_remove", "blob_owner_cleanup"),
-        copy_id=spec.get("copy_id"),
-    )
+    if spec["mode"] in ("blob_copy_batch", "upload_batch", "blob_remove_batch"):
+        jobs.authorize_blob_writers(
+            spec["job_id"],
+            spec["fence"],
+            attempt,
+            _batch_entries(spec, jobs),
+            destination=spec["destination"],
+            reconciliation=spec["mode"] == "blob_remove_batch",
+            copy_ids=[item.get("copy_id") for item in spec["items"]],
+        )
+    else:
+        jobs.authorize_blob_writer(
+            spec["job_id"],
+            spec["fence"],
+            attempt,
+            path,
+            spec["length"],
+            spec["sha256"],
+            destination=spec["destination"],
+            reconciliation=spec["mode"] in ("blob_cleanup", "blob_remove", "blob_owner_cleanup"),
+            copy_id=spec.get("copy_id"),
+        )
 
     with ExitStack() as stack:
         if container_factory is None:
@@ -738,71 +1145,85 @@ def _process(
             from azure.storage.blob import ContainerClient
 
             credential = stack.enter_context(DefaultAzureCredential())
-            if spec["mode"] == "blob_copy":
+            containers = {}
+            if spec["mode"] in ("blob_copy", "blob_copy_batch"):
                 source_authorization = "Bearer " + credential.get_token("https://storage.azure.com/.default").token
 
             def container_factory(account_url: str, name: str) -> Any:
-                return stack.enter_context(
-                    ContainerClient(
-                        account_url,
-                        name,
-                        credential=credential,
-                        connection_timeout=jobs.settings.recovery_seconds,
-                        read_timeout=jobs.settings.recovery_seconds,
-                        retry_total=0,
+                key = (account_url, name)
+                if key not in containers:
+                    containers[key] = stack.enter_context(
+                        ContainerClient(
+                            account_url,
+                            name,
+                            credential=credential,
+                            connection_timeout=jobs.settings.recovery_seconds,
+                            read_timeout=jobs.settings.recovery_seconds,
+                            retry_total=0,
+                        )
                     )
-                )
+                return containers[key]
 
         publisher = BlobPublisher(
             container_factory(location.account_url, location.container),
             attempt,
-            _RegisteredCopyControl(jobs, spec),
+            (
+                _BatchChildControl()
+                if spec["mode"] in ("blob_copy_batch", "upload_batch")
+                else _RegisteredCopyControl(jobs, spec)
+            ),
             root_prefix=location.prefix,
             source_authorization=source_authorization,
         )
+        if spec["mode"] == "blob_copy_batch":
+            for item in spec["items"]:
+                _copy_item(
+                    publisher,
+                    container_factory,
+                    location,
+                    item["source"],
+                    item["source_url"],
+                    item["source_etag"],
+                    normalize_release_path(item["path"]),
+                    item["length"],
+                    item["sha256"],
+                )
+            return
+        if spec["mode"] == "upload_batch":
+            for item in spec["items"]:
+                publisher.write(
+                    normalize_release_path(item["path"]),
+                    _generated_chunks(item),
+                    length=item["length"],
+                    sha256=item["sha256"],
+                )
+            return
+        if spec["mode"] == "blob_remove_batch":
+            _remove_blobs(publisher, jobs, spec)
+            return
         if spec["mode"] in ("blob_remove", "blob_owner_cleanup"):
             _remove_blob(publisher, jobs, spec)
             return
         if spec["mode"] == "blob_cleanup":
-            source = SourceObject.model_validate(spec["source"])
-            if (source.path, source.length, source.sha256) != (path, spec["length"], spec["sha256"]):
+            source = TypeAdapter(SourceObjectRecord).validate_python(spec["source"])
+            if (source.path, source.length, source_effect_digest(source)) != (path, spec["length"], spec["sha256"]):
                 raise ReleaseVerificationError("cleanup identity does not match the authorized effect")
             publisher.reconcile_copy(source, spec["source_etag"], cancel=True)
             return
         if spec["mode"] == "blob_copy":
-            source = SourceObject.model_validate(spec["source"])
-            if (source.path, source.length, source.sha256) != (path, spec["length"], spec["sha256"]):
-                raise ReleaseVerificationError("source identity does not match the authorized effect")
-            address, origin = urlsplit(spec["source_url"]), urlsplit(location.account_url)
-            if (
-                (address.scheme, address.netloc) != (origin.scheme, origin.netloc)
-                or address.query
-                or address.fragment
-                or address.username is not None
-            ):
-                raise ReleaseVerificationError("source URL must be a query-free same-account address")
-            source_container, separator, source_name = unquote(address.path).lstrip("/").partition("/")
-            if not separator:
-                raise ReleaseVerificationError("source URL does not identify a blob")
-            source_location = BlobLocation(location.account_url, source_container)
-            publisher.copy(
-                container_factory(source_location.account_url, source_location.container),
-                source,
+            _copy_item(
+                publisher,
+                container_factory,
+                location,
+                spec["source"],
+                spec["source_url"],
                 spec["source_etag"],
-                source_path=normalize_release_path(source_name),
+                path,
+                spec["length"],
+                spec["sha256"],
             )
             return
-        if spec["mode"] == "inline":
-            content = base64.b64decode(spec["content"], validate=True)
-            chunks = (content[offset : offset + CHUNK_BYTES] for offset in range(0, len(content), CHUNK_BYTES))
-        elif spec["mode"] == "file":
-            chunks = LocalReleaseStore(Path(spec["source_root"])).iter_bytes(
-                spec["source_path"], chunk_size=CHUNK_BYTES
-            )
-        else:
-            from physical_ai_curation.release.coordinator import _lineage
-
-            chunks = _lineage(TypeAdapter(NativeGenerationPlan).validate_python(spec["prepared"]))
+        chunks = _generated_chunks(spec)
         if spec.get("marker") is True:
             marker = b"".join(_verified_stream(chunks, spec["length"], spec["sha256"]))
             candidate = verify_candidate(publisher.store, spec["manifest_digest"])

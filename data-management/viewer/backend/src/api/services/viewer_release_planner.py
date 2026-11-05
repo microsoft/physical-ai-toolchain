@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import os
 import shutil
+from collections.abc import Callable
 from dataclasses import asdict, replace
 from importlib.metadata import version
 from pathlib import Path
@@ -14,8 +16,11 @@ from physical_ai_curation.release.canonical import canonical_json_bytes, parse_s
 from physical_ai_curation.release.inputs import (
     BlobReleaseSource,
     FreezeContext,
+    FrozenReleaseInputs,
     LocalReleaseSource,
     ReleaseSelection,
+    _join_owned,
+    capture_saved_selection,
     freeze_release_inputs,
 )
 from physical_ai_curation.release.jobs import ReleaseRuntimeSettings
@@ -36,7 +41,14 @@ from ..config import get_app_config
 from .annotation_service import get_annotation_service
 from .dataset_service import get_dataset_service
 from .label_storage import BlobLabelStorage, LabelStorage, LocalLabelStorage
-from .release_service import PreparedRelease, ReleaseApiError, ReleaseApiSettings, ReleaseSpec, open_release_job_store
+from .release_service import (
+    PreparedRelease,
+    ReleaseApiError,
+    ReleaseApiSettings,
+    ReleaseSpec,
+    check_cancelled,
+    open_release_job_store,
+)
 from .saved_input_service import (
     AzureJudgeStateReader,
     JudgeStateReader,
@@ -54,13 +66,18 @@ class ViewerReleasePlanner:
         self._annotations = get_annotation_service()
         self.reader = ViewerSavedInputReader(self.datasets, self._annotations, label_storage=self._label_storage())
 
-    def reader_for_scope(self, scope: str) -> ViewerSavedInputReader:
-        """Return a reader whose judge evidence is bound to the principal scope."""
+    def reader_for_scope(self, scope: str, *, inventory: bool = False) -> ViewerSavedInputReader:
+        """Bind evidence to the principal; inventory readers share labels only within one page."""
         authority = ScopedJudgeEvidenceAuthority(
             self._judge_state(), self.datasets.get_source_revision, principal_scope_id=scope
         )
         return ViewerSavedInputReader(
-            self.datasets, self._annotations, label_storage=self._label_storage(), judge_evidence=authority
+            self.datasets,
+            self._annotations,
+            label_storage=self._label_storage(),
+            judge_evidence=authority,
+            cache_release_labels=inventory,
+            cache_source_revisions=inventory,
         )
 
     def _judge_state(self) -> JudgeStateReader:
@@ -92,7 +109,12 @@ class ViewerReleasePlanner:
         runtime = ReleaseRuntimeSettings.from_environment(os.environ)
         client = BlobServiceClient(
             account_url=f"https://{provider.account_name}.blob.core.windows.net",
-            credential=DefaultAzureCredential(),
+            credential=DefaultAzureCredential(
+                process_timeout=runtime.state_timeout_seconds,
+                connection_timeout=runtime.state_timeout_seconds,
+                read_timeout=runtime.state_timeout_seconds,
+                retry_total=0,
+            ),
             connection_timeout=runtime.state_timeout_seconds,
             read_timeout=runtime.state_timeout_seconds,
             retry_total=0,
@@ -102,24 +124,132 @@ class ViewerReleasePlanner:
         )
 
     async def prepare(self, scope: str, spec: ReleaseSpec, destination: Path | BlobLocation) -> PreparedRelease:
-        from physical_ai_curation.release.composition import prepare_saved_generation
-        from physical_ai_curation.release.coordinator import generation_request_bytes, plan_generation_inputs
-        from physical_ai_curation.release.execution import MAX_RESULT_BYTES as ENCODE_RESULT_BYTES
-        from physical_ai_curation.release.execution import MAX_SPEC_BYTES as ENCODE_SPEC_BYTES
-        from physical_ai_curation.release.native_worker import MAX_RESULT_BYTES, MAX_SPEC_BYTES
+        """Describe selected intent without inspecting or freezing the source."""
+        if self.settings.job_root is None:
+            raise ReleaseApiError(503, "release worker is not configured")
+        source_kind = "blob" if self.datasets.has_blob_provider() else "local"
+        if source_kind == "blob" and isinstance(destination, Path):
+            raise ReleaseApiError(422, "azure_to_local_unsupported")
+        location = (
+            {"kind": "local", "path": str(destination.resolve())}
+            if isinstance(destination, Path)
+            else {"kind": "blob", **asdict(destination)}
+        )
+        payload = {
+            "schema_version": "curated-release-intent/v1",
+            "scope": scope,
+            "spec": asdict(spec),
+            "effective_destination": location,
+            "source_kind": source_kind,
+            "processing_confirmed": False,
+        }
+        content = canonical_json_bytes(payload)
+        return PreparedRelease(
+            content,
+            0,
+            {
+                "advisory": True,
+                "processing_digest": sha256_hex(content),
+                "selected_count": len(spec.episode_indices),
+                "destination_kind": location["kind"],
+                "available_bytes": None,
+                "route": "blob-same-account" if source_kind == "blob" else "local-to-local",
+                "capacity": None,
+                "blocking": [],
+                "warnings": [
+                    "Statistics and analysis completeness have not been checked; omissions do not prevent release.",
+                    "Source identity, integrity evidence and capacity are established during release execution.",
+                    "Video processing requires explicit consent; source changes do not invalidate this preview.",
+                ],
+                "actions": [],
+            },
+            canonical_json_bytes(
+                {
+                    "schema": "curated-release-intent/v1",
+                    "selection": asdict(ReleaseSelection(spec.dataset_id, spec.episode_indices, spec.resources)),
+                }
+            ),
+        )
 
+    async def _capture(
+        self,
+        scope: str,
+        spec: ReleaseSpec,
+        destination: Path | BlobLocation,
+        checkpoint: Callable[[], None],
+        source_kind: str,
+    ) -> tuple[PreparedRelease, ConfiguredExecution]:
+        async def run[Result](operation: Callable[..., Result], *args: object, **kwargs: object) -> Result:
+            checkpoint()
+            future = asyncio.get_running_loop().run_in_executor(None, functools.partial(operation, *args, **kwargs))
+            try:
+                result = await asyncio.shield(future)
+            except asyncio.CancelledError:
+                await _join_owned(future)
+                raise
+            checkpoint()
+            return result
+
+        checkpoint()
         if await self.datasets.get_dataset(spec.dataset_id) is None:
             raise ReleaseApiError(404, "release source is unavailable")
-        source = self._source(spec.dataset_id, finalized=spec.finalized)
+        source = await run(self._source, spec.dataset_id, finalized=spec.finalized, kind=source_kind)
+        if isinstance(source, BlobReleaseSource) and isinstance(destination, Path):
+            raise ReleaseApiError(422, "azure_to_local_unsupported")
+        if isinstance(source, BlobReleaseSource):
+            from physical_ai_curation.release.coordinator import select_blob_dependencies
+
+            runtime = ReleaseRuntimeSettings.from_environment(os.environ)
+            source = await run(
+                select_blob_dependencies,
+                source,
+                spec.episode_indices,
+                metadata_budget=min(runtime.memory_bytes, 16 * 1024**2),
+                checkpoint=checkpoint,
+            )
         selection = ReleaseSelection(spec.dataset_id, spec.episode_indices, spec.resources)
         context = FreezeContext(
             scope,
             await self.datasets.get_source_revision(spec.dataset_id, spec.episode_indices[0]),
             ((scope, "localuser" if scope == "localuser" else "curator"),),
         )
-        frozen = await freeze_release_inputs(source, self.reader_for_scope(scope), selection, context)
+        reader = self.reader_for_scope(scope)
+        selection = await capture_saved_selection(reader, selection, context, checkpoint)
+        frozen = await freeze_release_inputs(source, reader, selection, context, checkpoint=checkpoint)
+        prepared = await run(
+            self._build_prepared,
+            scope,
+            spec,
+            destination,
+            source,
+            selection,
+            context,
+            frozen,
+            checkpoint=checkpoint,
+        )
+        return prepared, ConfiguredExecution(source, reader, selection, context, destination)
+
+    def _build_prepared(
+        self,
+        scope: str,
+        spec: ReleaseSpec,
+        destination: Path | BlobLocation,
+        source: LocalReleaseSource | BlobReleaseSource,
+        selection: ReleaseSelection,
+        context: FreezeContext,
+        frozen: FrozenReleaseInputs,
+        *,
+        checkpoint: Callable[[], None] = check_cancelled,
+    ) -> PreparedRelease:
+        from physical_ai_curation.release.composition import prepare_saved_generation
+        from physical_ai_curation.release.coordinator import generation_request_bytes, plan_generation_inputs
+        from physical_ai_curation.release.execution import MAX_RESULT_BYTES as ENCODE_RESULT_BYTES
+        from physical_ai_curation.release.execution import MAX_SPEC_BYTES as ENCODE_SPEC_BYTES
+        from physical_ai_curation.release.native_worker import MAX_RESULT_BYTES, MAX_SPEC_BYTES
+
         runtime = ReleaseRuntimeSettings.from_environment(os.environ)
         limits = load_media_limits(os.environ)
+        checkpoint()
         if isinstance(source, LocalReleaseSource):
             source_endpoint = StorageEndpoint("source", "local", volume=str(source.root.stat().st_dev))
         else:
@@ -147,8 +277,7 @@ class ViewerReleasePlanner:
             tools=(identity,),
             settings_json="{}",
         )
-        inputs = await asyncio.to_thread(
-            plan_generation_inputs,
+        inputs = plan_generation_inputs(
             source,
             frozen,
             source_endpoint=source_endpoint,
@@ -160,11 +289,14 @@ class ViewerReleasePlanner:
             output_bytes=1,
             limits=limits,
             metadata_budget=min(runtime.memory_bytes, 16 * 1024**2),
+            checkpoint=checkpoint,
         )
+        checkpoint()
         prepared = prepare_saved_generation(
             frozen.content, inputs.request, inputs.sources, camera_statistics=inputs.camera_statistics
         )
         capacity = prepared.plan.capacity
+        checkpoint()
         attempt = PublicationAttempt(spec.package_id, spec.attempt_id, spec.dataset_name)
         projections = materialize_saved_projections(
             frozen.content, prepared.episodes, release_dataset_id=attempt.prefix
@@ -261,6 +393,56 @@ class ViewerReleasePlanner:
     def execution(self, job_id: str, frozen_request: bytes) -> ConfiguredExecution:
         if self.settings.job_root is None:
             raise ReleaseApiError(503, "release worker is not configured")
+        payload = parse_strict_json(frozen_request)
+        if payload.get("schema_version") == "curated-release-intent/v1":
+            spec = TypeAdapter(ReleaseSpec).validate_python(payload["spec"])
+            if spec.destination not in self.settings.destinations:
+                raise ReleaseApiError(409, "configured destination is unavailable")
+            location = payload["effective_destination"]
+            if location["kind"] == "local" and set(location) == {"kind", "path"}:
+                destination = Path(location["path"])
+                if not destination.is_absolute() or destination.resolve() != destination:
+                    raise ReleaseApiError(409, "accepted destination is unavailable")
+            elif location["kind"] == "blob" and set(location) == {"kind", "account_url", "container", "prefix"}:
+                destination = BlobLocation(location["account_url"], location["container"], location["prefix"])
+            else:
+                raise ReleaseApiError(409, "release destination binding is unsupported")
+            scope = payload["scope"]
+            selection = ReleaseSelection(spec.dataset_id, spec.episode_indices, spec.resources)
+            store = open_release_job_store(self.settings)
+            record = store.storage.snapshot()[job_id]
+            expected_destination = str(destination) if isinstance(destination, Path) else destination.as_text()
+            if (
+                store.execution_binding(job_id)
+                != canonical_json_bytes(
+                    {
+                        "schema": "curated-release-intent/v1",
+                        "selection": asdict(selection),
+                    }
+                )
+                or record["destination"] != expected_destination
+                or record["principal_digest"] != sha256_hex(scope.encode())
+                or payload["source_kind"] not in {"local", "blob"}
+                or not isinstance(payload["processing_confirmed"], bool)
+            ):
+                raise ReleaseApiError(409, "release intent binding is unsupported")
+
+            async def capture(checkpoint: Callable[[], None]) -> tuple[bytes, bytes, int, ConfiguredExecution]:
+                prepared, execution = await self._capture(scope, spec, destination, checkpoint, payload["source_kind"])
+                if not payload["processing_confirmed"] and any(
+                    action["confirmation_required"] for action in prepared.summary["actions"]
+                ):
+                    raise ReleaseApiError(409, "processing_confirmation_required")
+                return prepared.frozen_request, prepared.execution_binding, prepared.reserved_bytes, execution
+
+            return ConfiguredExecution(
+                None,
+                self.reader_for_scope(scope),
+                selection,
+                None,
+                destination,
+                capture,
+            )
         store = open_release_job_store(self.settings)
         raw = parse_strict_json(store.execution_binding(job_id))
         if raw["schema"] != "curated-release-execution/v3":

@@ -177,14 +177,14 @@ class LocalPublisher:
                 return
             self.store.write_verified_object(path, chunks, length=length, sha256=sha256)
 
-    def copy(self, source_root: Path, source: SourceObject) -> None:
+    def copy(self, source_root: Path, source: SourceObject, *, output_path: str | None = None) -> None:
         """Copy a frozen object independently while refusing source/destination overlap."""
         original = source_root.resolve()
         destination = self.root.resolve()
         if original == destination or original in destination.parents or destination in original.parents:
             raise ReleaseVerificationError("source and destination roots overlap")
         self.write(
-            source.path,
+            output_path or source.path,
             LocalReleaseStore(source_root).iter_bytes(source.path, chunk_size=CHUNK_BYTES),
             length=source.length,
             sha256=source.sha256,

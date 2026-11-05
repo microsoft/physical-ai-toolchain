@@ -48,12 +48,18 @@ export interface ReleaseCapabilities {
   capacity: string
 }
 
-/** Per-episode evidence reported by the source inventory. */
+/**
+ * Per-episode evidence reported by the source inventory. The population page carries only
+ * `episodeIndex` and `labels` (`detailed` is false). Annotation, edits, resources, provenance and judge
+ * fields are null or empty until the episode's details are loaded (`detailed` is true).
+ */
 export interface ReleaseInventoryItem {
   episodeIndex: number
-  resources: Record<string, unknown>[]
-  annotation: boolean
-  edits: boolean
+  /** True when the annotation, edit, resource, provenance and judge fields were loaded for this episode. */
+  detailed: boolean
+  resources: Record<string, unknown>[] | null
+  annotation: boolean | null
+  edits: boolean | null
   labels: string[] | null
   provenance: { origins: string[] } | null
   judge: {
@@ -62,6 +68,12 @@ export interface ReleaseInventoryItem {
     confidence?: number | null
     outcome?: string | null
   } | null
+}
+
+/** Details for a set of episodes from the source inventory details endpoint. */
+export interface ReleaseInventoryDetailsPage {
+  schema: string
+  items: ReleaseInventoryItem[]
 }
 
 /** One page of the full source population. */
@@ -165,7 +177,7 @@ export interface SourceEpisodePage {
   nextCursor: number | null
 }
 
-/** Bounded description of a release body. Nothing is persisted or reserved. */
+/** Verified description of a release body. No destination output is reserved or published. */
 export interface ReleasePreview {
   schema: string
   digest: string
@@ -283,11 +295,13 @@ export function getReleaseCapabilities(): Promise<ReleaseCapabilities> {
  *
  * @param datasetId - Source dataset identifier.
  * @param page - Cursor and page size (1 to 100).
+ * @param signal - Cancels the request when its source or principal is no longer active.
  * @returns Page of episode indices with the total population size.
  */
 export function getReleaseSourceInventory(
   datasetId: string,
   page: { cursor: number; limit: number },
+  signal?: AbortSignal,
 ): Promise<ReleaseInventoryPage> {
   const query = new URLSearchParams({
     cursor: String(page.cursor),
@@ -295,6 +309,27 @@ export function getReleaseSourceInventory(
   })
   return releaseRequest<ReleaseInventoryPage>(
     `/releases/v1/inventory/${encodeURIComponent(datasetId)}?${query.toString()}`,
+    signal ? { signal } : undefined,
+  )
+}
+
+/**
+ * Read full evidence for specific episodes of the source population. Requests are capped by the backend.
+ *
+ * @param datasetId - Source dataset identifier.
+ * @param episodes - Distinct episode indices from the population.
+ * @param signal - Cancels the request when its source or principal is no longer active.
+ * @returns Detailed items for the requested episodes.
+ */
+export function getReleaseSourceInventoryDetails(
+  datasetId: string,
+  episodes: number[],
+  signal?: AbortSignal,
+): Promise<ReleaseInventoryDetailsPage> {
+  const query = new URLSearchParams({ episodes: episodes.join(',') })
+  return releaseRequest<ReleaseInventoryDetailsPage>(
+    `/releases/v1/inventory/${encodeURIComponent(datasetId)}/details?${query.toString()}`,
+    signal ? { signal } : undefined,
   )
 }
 
@@ -302,20 +337,27 @@ export function getReleaseSourceInventory(
  * Describe a release selection without accepting a job or reserving output.
  *
  * @param request - Selection to describe.
+ * @param signal - Aborts the transport only. Aborting sends no cancellation; no job is accepted or output reserved.
  * @returns Digest, reserved bytes, and summary to confirm before submission.
  */
-export function previewRelease(request: ReleaseRequest): Promise<ReleasePreview> {
+export function previewRelease(
+  request: ReleaseRequest,
+  signal?: AbortSignal,
+): Promise<ReleasePreview> {
   return releaseRequest<ReleasePreview>('/releases/v1/preview', {
     method: 'POST',
     body: toReleaseBody(request, NO_DIGESTS),
+    signal,
   })
 }
 
 /**
- * Accept a release job bound to a confirmed preview.
+ * Accept a release job bound to a confirmed preview. Aborting only stops observation: the request may
+ * still be accepted, so the caller must retain the idempotency key and resolve it by lookup.
  *
  * @param request - Selection that was previewed.
  * @param submission - Confirmed digests and the caller idempotency key.
+ * @param signal - Aborts the transport only. Sends no cancellation.
  * @returns Accepted job identifier and whether the request replayed an existing job.
  * @throws {Error} When the idempotency key is empty.
  * @throws {@link ReleaseRequestError} for rejected submissions, such as `stale_preview`.
@@ -323,6 +365,7 @@ export function previewRelease(request: ReleaseRequest): Promise<ReleasePreview>
 export async function submitRelease(
   request: ReleaseRequest,
   submission: ReleaseSubmission,
+  signal?: AbortSignal,
 ): Promise<AcceptedRelease> {
   if (!submission.idempotencyKey) {
     throw new Error('An idempotency key is required to submit a release')
@@ -331,6 +374,7 @@ export async function submitRelease(
     method: 'POST',
     headers: { 'Idempotency-Key': submission.idempotencyKey },
     body: toReleaseBody(request, submission),
+    signal,
   })
 }
 

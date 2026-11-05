@@ -8,7 +8,7 @@ manifest, inventory, receipt, and report bytes.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from pydantic import BaseModel, ValidationError
@@ -34,6 +34,7 @@ from physical_ai_curation.release.models import (
     FrozenInput,
     Inventory,
     InventoryEntry,
+    InventoryObject,
     LineageStream,
     PackageIdentity,
     ReleaseManifest,
@@ -41,6 +42,9 @@ from physical_ai_curation.release.models import (
     ReleasePreview,
     ReleaseReport,
     ReleaseResult,
+    RevisionSourceObject,
+    StorageRevisionEntry,
+    UploadedContentEntry,
     VerificationReceipt,
     render_report,
 )
@@ -48,10 +52,13 @@ from physical_ai_curation.release.store import CHUNK_BYTES, ObjectStat, ReleaseS
 
 MAX_CONTROL_BYTES = 1024 * 1024
 MAX_LINEAGE_RECORD_BYTES = 64 * 1024
+ContentEntry = InventoryEntry | UploadedContentEntry
 
 RECEIPT_CHECKS = (
     "inventory_closure",
-    "object_digests",
+    "content_digests",
+    "storage_revision_bindings",
+    "uploaded_content_bindings",
     "provenance_mappings",
     "frozen_input_binding",
     "preview_binding",
@@ -86,9 +93,14 @@ class CandidateVerification:
     report_bytes: bytes
 
 
-def verify_candidate(store: ReleaseStore, expected_manifest_sha256: str | None = None) -> CandidateVerification:
+def verify_candidate(
+    store: ReleaseStore,
+    expected_manifest_sha256: str | None = None,
+    *,
+    checkpoint: Callable[[], None] | None = None,
+) -> CandidateVerification:
     """Verify a candidate package; a final marker is rejected."""
-    package = _load(store, CANDIDATE_CONTROL_PATHS)
+    package = _load(store, CANDIDATE_CONTROL_PATHS, checkpoint)
     if expected_manifest_sha256 is not None and sha256_hex(package.manifest_bytes) != expected_manifest_sha256:
         raise ReleaseVerificationError("manifest digest does not match expected value")
     candidate = _build_candidate(package)
@@ -98,9 +110,14 @@ def verify_candidate(store: ReleaseStore, expected_manifest_sha256: str | None =
     return candidate
 
 
-def verify_published(store: ReleaseStore, expected_manifest_sha256: str | None = None) -> ReleaseResult:
+def verify_published(
+    store: ReleaseStore,
+    expected_manifest_sha256: str | None = None,
+    *,
+    checkpoint: Callable[[], None] | None = None,
+) -> ReleaseResult:
     """Verify a finalized package and return a published result."""
-    package = _load(store, CONTROL_PATHS)
+    package = _load(store, CONTROL_PATHS, checkpoint)
     if expected_manifest_sha256 is not None and sha256_hex(package.manifest_bytes) != expected_manifest_sha256:
         raise ReleaseVerificationError("manifest digest does not match expected value")
     missing = sorted({MARKER_PATH, RECEIPT_PATH, REPORT_PATH} - package.present)
@@ -145,9 +162,9 @@ def _list_stable(store: ReleaseStore) -> list[ObjectStat]:
     return first
 
 
-def _load(store: ReleaseStore, control_paths: frozenset[str]) -> _Package:
+def _load(store: ReleaseStore, control_paths: frozenset[str], checkpoint: Callable[[], None] | None = None) -> _Package:
     listed = _list_stable(store)
-    index = {item.path: item.length for item in listed}
+    index = {item.path: item for item in listed}
     if len(index) != len(listed):
         raise ReleaseVerificationError("duplicate release object path")
     for required in (MANIFEST_PATH, INVENTORY_PATH):
@@ -172,7 +189,7 @@ def _load(store: ReleaseStore, control_paths: frozenset[str]) -> _Package:
     for entry in inventory.entries:
         if entry.path not in index:
             raise ReleaseVerificationError(f"missing inventory object: {entry.path}")
-        if index[entry.path] != entry.length:
+        if index[entry.path].length != entry.length:
             raise ReleaseVerificationError(f"length mismatch: {entry.path}")
 
     entries = {entry.path: entry for entry in inventory.entries}
@@ -180,10 +197,11 @@ def _load(store: ReleaseStore, control_paths: frozenset[str]) -> _Package:
     for path in (manifest.frozen_input_path, manifest.preview_path):
         if path not in entries:
             raise ReleaseVerificationError("manifest references an object outside the inventory")
-        entry = entries[path]
+        entry = _require_content(entries[path])
         if entry.length > MAX_CONTROL_BYTES:
             raise ReleaseVerificationError("frozen input or preview exceeds control byte limit")
-        contents[path] = b"".join(_verified_chunks(store, entry))
+        _checkpoint(checkpoint)
+        contents[path] = b"".join(_verified_chunks(store, entry, checkpoint))
 
     frozen = _check_bindings(manifest, contents, declared)
     episode_count = len(manifest.episode_mappings)
@@ -191,9 +209,19 @@ def _load(store: ReleaseStore, control_paths: frozenset[str]) -> _Package:
     for entry in inventory.entries:
         if entry.path in contents:
             continue
-        chunks = _verified_chunks(store, entry)
-        if manifest.lineage_stream is not None and entry.path == manifest.lineage_stream.path:
-            if entry.sha256 != manifest.lineage_stream.sha256:
+        is_lineage = manifest.lineage_stream is not None and entry.path == manifest.lineage_stream.path
+        if isinstance(entry, StorageRevisionEntry) and not is_lineage:
+            _require_storage_revision(index[entry.path], entry)
+            _require_revision_provenance(index[entry.path], entry, manifest, frozen)
+            continue
+        if isinstance(entry, UploadedContentEntry) and not is_lineage:
+            _require_uploaded_content(index[entry.path], entry)
+            continue
+        content = _require_content(entry)
+        _checkpoint(checkpoint)
+        chunks = _verified_chunks(store, content, checkpoint)
+        if manifest.lineage_stream is not None and is_lineage:
+            if content.sha256 != manifest.lineage_stream.sha256:
                 raise ReleaseVerificationError("lineage digest does not match inventory binding")
             episode_count, frame_count = _check_lineage(chunks, frozen, manifest.lineage_stream)
         else:
@@ -213,10 +241,59 @@ def _load(store: ReleaseStore, control_paths: frozenset[str]) -> _Package:
     )
 
 
-def _verified_chunks(store: ReleaseStore, entry: InventoryEntry) -> Iterator[bytes]:
+def _checkpoint(checkpoint: Callable[[], None] | None) -> None:
+    if checkpoint is not None:
+        checkpoint()
+
+
+def _require_content(entry: InventoryObject) -> ContentEntry:
+    if not isinstance(entry, InventoryEntry | UploadedContentEntry):
+        raise ReleaseVerificationError(f"control-bound object requires a content digest: {entry.path}")
+    return entry
+
+
+def _require_uploaded_content(stat: ObjectStat, entry: UploadedContentEntry) -> None:
+    if stat.revision is None or stat.copy_operation_sha256 is None or stat.uploaded_sha256 is None:
+        raise ReleaseVerificationError(f"uploaded content evidence unavailable: {entry.path}")
+    if stat.revision != entry.revision or stat.length != entry.length:
+        raise ReleaseVerificationError(f"uploaded content revision changed: {entry.path}")
+    if stat.copy_operation_sha256 != entry.operation_sha256 or stat.uploaded_sha256 != entry.sha256:
+        raise ReleaseVerificationError(f"uploaded content evidence changed: {entry.path}")
+
+
+def _require_storage_revision(stat: ObjectStat, entry: StorageRevisionEntry) -> None:
+    if stat.revision is None or stat.copy_operation_sha256 is None:
+        raise ReleaseVerificationError(f"storage revision evidence unavailable: {entry.path}")
+    if stat.revision != entry.revision:
+        raise ReleaseVerificationError(f"storage revision changed: {entry.path}")
+    if stat.length != entry.length or stat.copy_operation_sha256 != entry.copy_operation_sha256:
+        raise ReleaseVerificationError(f"storage copy evidence changed: {entry.path}")
+
+
+def _require_revision_provenance(
+    stat: ObjectStat, entry: StorageRevisionEntry, manifest: ReleaseManifest, frozen: FrozenInput
+) -> None:
+    mappings = [mapping for mapping in manifest.mappings if mapping.target == entry.path]
+    if len(mappings) != 1:
+        raise ReleaseVerificationError(f"storage revision object requires one provenance mapping: {entry.path}")
+    source = {item.path: item for item in frozen.source_objects}[mappings[0].source]
+    if not isinstance(source, RevisionSourceObject):
+        raise ReleaseVerificationError(f"storage revision object requires a revision-bound source: {entry.path}")
+    if (
+        stat.source_revision != source.revision
+        or stat.source_identity != source.storage_identity
+        or entry.length != source.length
+    ):
+        raise ReleaseVerificationError(f"storage revision provenance changed: {entry.path}")
+
+
+def _verified_chunks(
+    store: ReleaseStore, entry: ContentEntry, checkpoint: Callable[[], None] | None = None
+) -> Iterator[bytes]:
     digest = hashlib.sha256()
     length = 0
     for chunk in store.iter_bytes(entry.path, chunk_size=CHUNK_BYTES):
+        _checkpoint(checkpoint)
         length += len(chunk)
         if length > entry.length:
             raise ReleaseVerificationError(f"length mismatch: {entry.path}")
@@ -328,12 +405,21 @@ def _build_candidate(package: _Package) -> CandidateVerification:
         manifest_sha256=manifest_sha,
         inventory_sha256=inventory_sha,
         object_count=len(package.inventory.entries),
+        content_digest_count=sum(isinstance(entry, InventoryEntry) for entry in package.inventory.entries),
+        uploaded_content_count=sum(isinstance(entry, UploadedContentEntry) for entry in package.inventory.entries),
+        storage_revision_count=sum(isinstance(entry, StorageRevisionEntry) for entry in package.inventory.entries),
         payload_byte_count=sum(entry.length for entry in package.inventory.entries),
         episode_mapping_count=package.episode_mapping_count,
         frame_mapping_count=package.frame_mapping_count,
         checks=RECEIPT_CHECKS,
     )
-    report = ReleaseReport(package_id=package_id, manifest_sha256=manifest_sha)
+    report = ReleaseReport(
+        package_id=package_id,
+        manifest_sha256=manifest_sha,
+        content_digest_count=receipt.content_digest_count,
+        uploaded_content_count=receipt.uploaded_content_count,
+        storage_revision_count=receipt.storage_revision_count,
+    )
     result = ReleaseResult(
         identity=PackageIdentity(package_id=package_id, manifest_sha256=manifest_sha),
         publication_state="candidate",

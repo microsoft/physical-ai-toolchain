@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
-import { expect, type Locator, type Page, test } from '@playwright/test'
+import { expect, type Locator, type Page, type Response, test } from '@playwright/test'
 
 const execFileAsync = promisify(execFile)
 const repositoryRoot = fileURLToPath(new URL('../../../../', import.meta.url))
@@ -319,19 +319,38 @@ async function startReleaseDraft(
   return dialog
 }
 
-/** Submits the current dialog and returns the durably accepted job identity. */
+/** Submits the current dialog and returns the job identity from the accepted POST response. */
 async function submitDraft(page: Page, dialog: Locator): Promise<string> {
-  const accepted = page.waitForResponse(
-    (response) =>
-      new URL(response.url()).pathname === '/api/releases/v1/jobs' &&
-      response.request().method() === 'POST',
-  )
+  const accepted = submissionOutcome(page)
   await dialog.getByRole('button', { name: 'Submit release' }).click()
   const response = await accepted
   expect(response.status(), await response.text()).toBe(202)
   const body = (await response.json()) as { job_id: string }
   await expect(dialog).toBeHidden({ timeout: 30_000 })
   return body.job_id
+}
+
+/** Waits for the dialog's direct POST to the job submission endpoint. */
+function submissionOutcome(page: Page): Promise<Response> {
+  return page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/releases/v1/jobs' &&
+      response.request().method() === 'POST',
+  )
+}
+
+/** Counts direct job submissions issued by the dialog. */
+function countSubmissions(page: Page): () => number {
+  let submissions = 0
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/releases/v1/jobs'
+    ) {
+      submissions += 1
+    }
+  })
+  return () => submissions
 }
 
 /**
@@ -459,15 +478,13 @@ test.describe('release capacity and catalog boundaries through the real API', ()
     const outputBefore = await listOutput()
     const holdingJobId = await reserveAllAdmissibleCapacity(spec.attempt_id)
     try {
-      const response = page.waitForResponse(
-        (reply) =>
-          new URL(reply.url()).pathname === '/api/releases/v1/jobs' &&
-          reply.request().method() === 'POST',
-      )
+      const response = submissionOutcome(page)
       await dialog.getByRole('button', { name: 'Submit release' }).click()
       const refused = await response
       expect(refused.status()).toBe(507)
-      expect((await refused.json()).job_id).toBeUndefined()
+      expect(await refused.json()).toMatchObject({
+        detail: { code: 'insufficient capacity for the reserved estimate' },
+      })
       await expect(dialog.getByRole('alert')).toContainText('insufficient capacity')
       expect(await listOutput()).toEqual(outputBefore)
     } finally {
@@ -610,14 +627,7 @@ test.describe('release dialog and job panel through the real API', () => {
     page,
   }) => {
     test.setTimeout(180_000)
-    let submissions = 0
-    page.on('request', (request) => {
-      if (
-        request.method() === 'POST' &&
-        new URL(request.url()).pathname === '/api/releases/v1/jobs'
-      )
-        submissions += 1
-    })
+    const submissionCount = countSubmissions(page)
     const dialog = await startReleaseDraft(page, `e2e-denied-${Date.now()}`, [0])
     await previewAndAcknowledge(dialog)
     const ownJobId = await submitDraft(page, dialog)
@@ -665,7 +675,7 @@ test.describe('release dialog and job panel through the real API', () => {
       await page.keyboard.press('Enter')
       await expect(panel).toBeHidden()
       await expect(page.getByRole('button', { name: 'Create release' })).toBeEnabled()
-      expect(submissions).toBe(1)
+      expect(submissionCount()).toBe(1)
     } finally {
       await cancelFixtureJob(foreignJobId, 'foreign-scope')
     }
@@ -728,15 +738,7 @@ test.describe('release dialog and job panel through the real API', () => {
     page,
   }) => {
     test.setTimeout(300_000)
-    let submissions = 0
-    page.on('request', (request) => {
-      if (
-        request.method() === 'POST' &&
-        new URL(request.url()).pathname === '/api/releases/v1/jobs'
-      ) {
-        submissions += 1
-      }
-    })
+    const submissionCount = countSubmissions(page)
     const dialog = await startReleaseDraft(page, `e2e-reload-${Date.now()}`, [0])
     const jobs = page.getByRole('list', { name: 'Release jobs' })
     await previewAndAcknowledge(dialog)
@@ -750,7 +752,7 @@ test.describe('release dialog and job panel through the real API', () => {
     await expect(page.getByRole('button', { name: 'Create release' })).toBeDisabled()
     await expect(jobButton).toBeVisible()
     expect(await jobStateViaApi(page, jobId)).toBe('accepted')
-    expect(submissions).toBe(1)
+    expect(submissionCount()).toBe(1)
 
     await drainReleaseWorker()
     const verified = page.getByRole('region', { name: 'Verified result' })
@@ -759,7 +761,7 @@ test.describe('release dialog and job panel through the real API', () => {
     })
     await expect(jobButton).toBeVisible()
     expect(await jobStateViaApi(page, jobId)).toBe('committed')
-    expect(submissions).toBe(1)
+    expect(submissionCount()).toBe(1)
   })
 
   test('cancelling from the active job panel stops the job and leaves no output', async ({
@@ -781,5 +783,30 @@ test.describe('release dialog and job panel through the real API', () => {
     await drainReleaseWorker()
     await expect(page.getByRole('button', { name: 'Refresh status' })).toHaveCount(0)
     expect(await listOutput()).toEqual(before)
+  })
+})
+
+test.describe('release read and control admission through the real HTTP service', () => {
+  test('concurrent source reads are admitted or refused with bounded status and the control lane stays responsive', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000)
+    const readUrl = `/api/releases/v1/sources/${encodeURIComponent(datasetId)}/releases`
+    const statusUrl = `/api/releases/v1/jobs/${'0'.repeat(32)}`
+
+    const reads = Array.from({ length: 12 }, () =>
+      page.request.get(readUrl, { failOnStatusCode: false }),
+    )
+    const startedAt = Date.now()
+    const status = await page.request.get(statusUrl, { failOnStatusCode: false })
+    const statusElapsedMs = Date.now() - startedAt
+    const readStatuses = (await Promise.all(reads)).map((response) => response.status())
+
+    expect(status.status()).toBe(404)
+    expect(statusElapsedMs).toBeLessThan(10_000)
+    for (const code of readStatuses) {
+      expect([200, 503, 504]).toContain(code)
+    }
+    expect(readStatuses).toContain(200)
   })
 })

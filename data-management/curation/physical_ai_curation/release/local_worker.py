@@ -221,12 +221,12 @@ class SupervisedLocalPublisher(LocalPublisher):
             {"mode": "lineage", "prepared": TypeAdapter(NativeGenerationPlan).dump_python(prepared, mode="json")},
         )
 
-    def copy(self, source_root: Path, source: SourceObject) -> None:
+    def copy(self, source_root: Path, source: SourceObject, *, output_path: str | None = None) -> None:
         original, destination = source_root.resolve(), self.root.resolve()
         if original == destination or original in destination.parents or destination in original.parents:
             raise ReleaseVerificationError("source and destination roots overlap")
         self._run(
-            source.path,
+            output_path or source.path,
             source.length,
             source.sha256,
             {"mode": "file", "source_root": str(original), "source_path": source.path, "copy": True},

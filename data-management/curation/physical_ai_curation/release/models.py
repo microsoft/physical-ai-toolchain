@@ -14,8 +14,9 @@ Closure rules:
   with no marker. Public closure is inventory plus all five control artifacts,
   with the marker required.
 
-Each artifact carries its own `schema_version`. Only major version 1 is
-supported.
+Each artifact carries its own `schema_version`. Only major version 2 is
+supported; major version 1 inventories lack assurance discriminators and are
+rejected.
 """
 
 from __future__ import annotations
@@ -24,14 +25,14 @@ import re
 from itertools import pairwise
 from typing import Annotated, Literal, Self
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from physical_ai_curation.release.canonical import canonical_json_bytes, normalize_release_path, parse_strict_json
 from physical_ai_curation.release.errors import ReleaseVerificationError
 
-SUPPORTED_MAJOR = 1
-SCHEMA_VERSION = "1.0.0"
-VERIFIER_VERSION = "1.0.0"
+SUPPORTED_MAJOR = 2
+SCHEMA_VERSION = "2.0.0"
+VERIFIER_VERSION = "2.0.0"
 CANDIDATE_ASSURANCE = "candidate_internal_consistency"
 
 MANIFEST_PATH = "release/manifest.json"
@@ -73,12 +74,29 @@ class ReleaseModel(BaseModel):
 
 
 class SourceObject(ReleaseModel):
-    """Source object identity bound by a frozen input at a specific revision."""
+    """Source object bound by a content SHA-256 digest at a specific revision."""
 
+    assurance: Literal["content_sha256"] = "content_sha256"
     path: ReleasePath
     revision: NonEmptyStr
     length: NonNegativeInt
     sha256: Sha256Hex
+
+
+class RevisionSourceObject(ReleaseModel):
+    """Source object bound only by storage revision evidence; carries no content digest.
+
+    Reads are conditioned on the listed revision. Content is never hashed to admit it.
+    """
+
+    assurance: Literal["storage_revision"] = "storage_revision"
+    path: ReleasePath
+    revision: NonEmptyStr
+    length: NonNegativeInt
+    storage_identity: Sha256Hex
+
+
+SourceObjectRecord = Annotated[SourceObject | RevisionSourceObject, Field(discriminator="assurance")]
 
 
 class SavedResource(ReleaseModel):
@@ -131,7 +149,7 @@ class FrozenInput(ReleaseModel):
     schema_version: SchemaVersion = SCHEMA_VERSION
     selected_episode_ids: tuple[NonEmptyStr, ...] = Field(min_length=1)
     source_admission: Literal["unknown", "finalized_quiescent", "immutable_revision", "revision_bound"] = "unknown"
-    source_objects: tuple[SourceObject, ...] = ()
+    source_objects: tuple[SourceObjectRecord, ...] = ()
     saved_resources: tuple[SavedResource, ...] = ()
     evidence_references: tuple[Sha256Hex, ...] = ()
     ledger_contribution_ids: tuple[NonEmptyStr, ...] = ()
@@ -181,18 +199,53 @@ class ReleasePreview(ReleaseModel):
 
 
 class InventoryEntry(ReleaseModel):
-    """One closed payload or evidence object."""
+    """Closed object bound by a content SHA-256 digest; required for control-bound objects."""
 
+    assurance: Literal["content_sha256"] = "content_sha256"
     path: ReleasePath
     length: NonNegativeInt
     sha256: Sha256Hex
+
+
+class StorageRevisionEntry(ReleaseModel):
+    """Payload bound by storage revision evidence for an unchanged storage-side copy.
+
+    Carries no content digest. Verification compares the listed revision instead of streaming bytes.
+    """
+
+    assurance: Literal["storage_revision"] = "storage_revision"
+    path: ReleasePath
+    length: NonNegativeInt
+    revision: NonEmptyStr
+    copy_operation_sha256: Sha256Hex
+
+
+class UploadedContentEntry(ReleaseModel):
+    """Payload written by this release; its digest was verified against the streamed bytes at write time.
+
+    Verification does not re-read the payload. It checks the listed revision, length, digest, and
+    ownership operation. This is revision and ownership evidence, not independent readback.
+    """
+
+    assurance: Literal["uploaded_content"] = "uploaded_content"
+    path: ReleasePath
+    length: NonNegativeInt
+    revision: NonEmptyStr
+    sha256: Sha256Hex
+    operation_sha256: Sha256Hex
+
+
+InventoryObject = Annotated[
+    InventoryEntry | StorageRevisionEntry | UploadedContentEntry,
+    Field(discriminator="assurance"),
+]
 
 
 class Inventory(ReleaseModel):
     """Sorted, closed inventory of payload and evidence objects."""
 
     schema_version: SchemaVersion = SCHEMA_VERSION
-    entries: tuple[InventoryEntry, ...]
+    entries: tuple[InventoryObject, ...]
 
     @model_validator(mode="after")
     def validate_entries(self) -> Self:
@@ -336,6 +389,9 @@ class VerificationReceipt(ReleaseModel):
     manifest_sha256: Sha256Hex
     inventory_sha256: Sha256Hex
     object_count: NonNegativeInt
+    content_digest_count: NonNegativeInt
+    uploaded_content_count: NonNegativeInt
+    storage_revision_count: NonNegativeInt
     payload_byte_count: NonNegativeInt
     episode_mapping_count: NonNegativeInt
     frame_mapping_count: NonNegativeInt
@@ -349,6 +405,9 @@ class ReleaseReport(ReleaseModel):
     package_id: NonEmptyStr
     verification_mode: Literal["candidate"] = "candidate"
     manifest_sha256: Sha256Hex
+    content_digest_count: NonNegativeInt = 0
+    uploaded_content_count: NonNegativeInt = 0
+    storage_revision_count: NonNegativeInt = 0
 
 
 class ReleaseMarker(ReleaseModel):
@@ -414,6 +473,9 @@ def render_report(report: ReleaseReport) -> bytes:
         f"- package_id: {report.package_id}",
         f"- verification_mode: {report.verification_mode}",
         f"- manifest_sha256: {report.manifest_sha256}",
+        f"- content_digest_count: {report.content_digest_count}",
+        f"- uploaded_content_count: {report.uploaded_content_count}",
+        f"- storage_revision_count: {report.storage_revision_count}",
         "",
     ]
     return "\n".join(lines).encode("utf-8")
@@ -432,6 +494,9 @@ def parse_report(content: bytes) -> ReleaseReport:
             package_id=fields.get("package_id", ""),
             verification_mode=fields.get("verification_mode", ""),
             manifest_sha256=fields.get("manifest_sha256", ""),
+            content_digest_count=int(fields.get("content_digest_count", "-1")),
+            uploaded_content_count=int(fields.get("uploaded_content_count", "-1")),
+            storage_revision_count=int(fields.get("storage_revision_count", "-1")),
         )
-    except ValidationError as exc:
-        raise ReleaseVerificationError(f"invalid release report: {exc.errors(include_url=False)[0]['msg']}") from exc
+    except ValueError as exc:
+        raise ReleaseVerificationError("invalid release report") from exc

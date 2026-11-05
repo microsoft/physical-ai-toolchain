@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
-from physical_ai_curation.release.jobs import AuthorityError
+from physical_ai_curation.release.jobs import AuthorityError, CancellationError
 from physical_ai_curation.release.supervision import (
     DEFAULT_FILE_BYTES,
     DEFAULT_GRACE_SECONDS,
@@ -31,7 +31,13 @@ class _LeaseStore(Protocol):
     def confirm_stopped(self, job_id: str, fence: int) -> None: ...
 
     def runtime_proof_path(
-        self, job_id: str, fence: int, *, effect_path: str | None = None, reconciliation: bool = False
+        self,
+        job_id: str,
+        fence: int,
+        *,
+        effect_path: str | None = None,
+        effect_paths: Sequence[str] | None = None,
+        reconciliation: bool = False,
     ) -> Path: ...
 
     def register_runtime(
@@ -41,6 +47,7 @@ class _LeaseStore(Protocol):
         runtime: SupervisedRuntime,
         *,
         effect_path: str | None = None,
+        effect_paths: Sequence[str] | None = None,
         reconciliation: bool = False,
     ) -> None: ...
 
@@ -69,6 +76,7 @@ def run_supervised(
     grace_seconds: float = DEFAULT_GRACE_SECONDS,
     liveness_seconds: float | None = None,
     effect_path: str | None = None,
+    effect_paths: Sequence[str] | None = None,
     inherit_fds: Sequence[int] = (),
     proof_path: Path | None = None,
     register_runtime: Callable[[SupervisedRuntime], None] | None = None,
@@ -99,9 +107,13 @@ def run_supervised(
         else bounded_seconds(liveness_seconds, low=4 * heartbeat, high=MAX_LIVENESS_SECONDS, name="guardian liveness")
     )
 
+    scope: dict[str, Sequence[str]] = {} if effect_paths is None else {"effect_paths": effect_paths}
+
     def register(runtime: SupervisedRuntime) -> None:
         if reconciliation:
-            store.register_runtime(job_id, fence, runtime, effect_path=effect_path, reconciliation=True)
+            store.register_runtime(job_id, fence, runtime, effect_path=effect_path, reconciliation=True, **scope)
+        elif effect_paths is not None:
+            store.register_runtime(job_id, fence, runtime, **scope)
         elif effect_path is None:
             store.register_runtime(job_id, fence, runtime)
         else:
@@ -109,7 +121,9 @@ def run_supervised(
         if register_runtime is not None:
             register_runtime(runtime)
 
-    store.heartbeat(job_id, fence)
+    if store.heartbeat(job_id, fence) and not reconciliation:
+        store.confirm_stopped(job_id, fence)
+        raise CancellationError("cancellation requested")
     supervisor = ProcessSupervisor(
         argv,
         memory_bytes=memory_bytes,
@@ -120,9 +134,9 @@ def run_supervised(
         inherit_fds=inherit_fds,
         proof_path=proof_path
         or (
-            store.runtime_proof_path(job_id, fence, effect_path=effect_path, reconciliation=True)
+            store.runtime_proof_path(job_id, fence, effect_path=effect_path, reconciliation=True, **scope)
             if reconciliation
-            else store.runtime_proof_path(job_id, fence, effect_path=effect_path)
+            else store.runtime_proof_path(job_id, fence, effect_path=effect_path, **scope)
         ),
         on_started=register,
     )

@@ -493,7 +493,10 @@ class _FakeBlobClient:
             raise _azure_errors().ResourceNotFoundError("source missing")
         if "source_etag" in kwargs and kwargs["source_etag"] != source.etag:
             raise _azure_errors().ResourceModifiedError("source changed")
-        data = source.data + (b"x" if container.corrupt_copy else b"")
+        if container.corrupt_copy == "same_length":
+            data = bytes([source.data[0] ^ 1]) + source.data[1:]
+        else:
+            data = source.data + (b"x" if container.corrupt_copy else b"")
         container.copy_count += 1
         copy_id = f"copy-{container.copy_count}"
         status = container.copy_outcome
@@ -533,6 +536,8 @@ class _FakeBlobClient:
         return _FakeLease(self.container, self.name)
 
     def download_blob(self, etag: str | None = None, match_condition: Any = None, **kwargs: Any) -> _FakeDownload:
+        if self.container.forbid_downloads:
+            raise AssertionError("payload read during copy settlement")
         record = self._record()
         if etag is not None and etag != record.etag:
             raise _azure_errors().ResourceModifiedError("changed")
@@ -579,7 +584,8 @@ class _FakeContainer:
         self.faults: dict[str, tuple[bool, Exception]] = {}
         self.copy_outcome = "success"
         self.complete_during_abort = False
-        self.corrupt_copy = False
+        self.corrupt_copy: bool | str = False
+        self.forbid_downloads = False
         self.pending_data: dict[str, bytes] = {}
         self.copy_count = 0
         self.leases: set[str] = set()
@@ -645,6 +651,67 @@ def _source(
     etag = source_container.get_blob_client(PATH).get_blob_properties().etag
     revision = sha256_hex(canonical_json_bytes({"etag": etag, "version_id": None}))
     return SourceObject(path=PATH, revision=revision, length=len(data), sha256=sha256_hex(data)), etag
+
+
+def test_given_blob_listing_when_list_objects_then_reports_revision_identity(
+    destination: _FakeContainer,
+) -> None:
+    # Arrange
+    destination.put(f"attempt-1/{PATH}", PAYLOAD)
+    etag = destination.get_blob_client(f"attempt-1/{PATH}").get_blob_properties().etag
+    expected = sha256_hex(canonical_json_bytes({"etag": etag, "version_id": None}))
+    store = BlobReleaseStore(destination, "attempt-1")
+
+    # Act
+    objects = store.list_objects()
+
+    # Assert
+    assert [(item.path, item.length, item.revision) for item in objects] == [(PATH, len(PAYLOAD), expected)]
+
+
+@pytest.mark.parametrize("bounded", [False, True])
+def test_given_admitted_revision_replaced_when_read_then_refused_before_download(
+    destination: _FakeContainer, bounded: bool
+) -> None:
+    destination.put(f"attempt-1/{PATH}", PAYLOAD)
+    store = BlobReleaseStore(destination, "attempt-1")
+    revision = store.list_objects()[0].revision
+    destination.put(f"attempt-1/{PATH}", b"x" * len(PAYLOAD))
+    destination.forbid_downloads = True
+
+    with pytest.raises(ReleaseVerificationError, match="revision changed"):
+        if bounded:
+            store.read_control_bytes(PATH, max_bytes=len(PAYLOAD), expected_revision=revision)
+        else:
+            list(store.iter_bytes(PATH, chunk_size=1024, expected_revision=revision))
+
+
+@pytest.mark.parametrize("wrong_source", [False, True])
+def test_given_revision_copy_when_dispatched_then_exact_source_and_no_fake_content_hash(
+    destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl, wrong_source: bool
+) -> None:
+    from physical_ai_curation.release.models import RevisionSourceObject
+
+    source, etag = _source(source_container)
+    revision_source = RevisionSourceObject(
+        path=source.path,
+        length=source.length,
+        revision=source.revision,
+        storage_identity=sha256_hex(canonical_json_bytes({"container": source_container.url, "path": PATH})),
+    )
+    original = "other/video.mp4" if wrong_source else PATH
+    if wrong_source:
+        source_container.blobs[original] = source_container.blobs[PATH]
+    publisher = _publisher(destination, control)
+    if wrong_source:
+        with pytest.raises(ReleaseVerificationError, match="source identity"):
+            publisher.copy(source_container, revision_source, etag, source_path=original)
+        assert destination.copy_count == 0
+    else:
+        publisher.copy(source_container, revision_source, etag)
+        metadata = destination.blobs[publisher.root + PATH].metadata
+        assert "curation_sha256" not in metadata
+        assert metadata["curation_source_identity"] == revision_source.storage_identity
 
 
 @pytest.mark.parametrize("changed_field", ["etag", "version_id"])
@@ -906,15 +973,56 @@ def test_given_reserved_source_metadata_when_copy_then_refused_before_effect(
     assert destination.copy_count == 0
 
 
-def test_given_corrupted_copy_when_copy_then_independent_verification_refuses(
+def test_given_copy_length_mismatch_when_copy_then_revision_evidence_refuses(
     destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl, registry: dict
 ) -> None:
     source, etag = _source(source_container)
     publisher = _publisher(destination, control)
     destination.corrupt_copy = True
 
-    with pytest.raises(ReleaseVerificationError, match="copied content"):
+    with pytest.raises(ReleaseVerificationError, match="copy evidence conflict"):
         publisher.copy(source_container, source, etag)
+
+
+def test_given_completed_copy_when_settled_then_payload_is_not_read(
+    destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl, registry: dict
+) -> None:
+    source, etag = _source(source_container)
+    publisher = _publisher(destination, control)
+    destination.forbid_downloads = True
+
+    progress = publisher.copy(source_container, source, etag)
+
+    assert progress.state == "complete"
+
+
+def test_given_same_length_corruption_when_copy_then_accepted_only_on_storage_revision_evidence(
+    destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl, registry: dict
+) -> None:
+    source, etag = _source(source_container)
+    publisher = _publisher(destination, control)
+    destination.corrupt_copy = "same_length"
+
+    progress = publisher.copy(source_container, source, etag)
+
+    # Weaker assurance: same-length content changes are not detected without a payload read.
+    assert progress.state == "complete"
+    copied = next(record for name, record in destination.blobs.items() if name.endswith(source.path))
+    assert copied.data != source_container.blobs[source.path].data
+    assert len(copied.data) == source.length
+
+
+def test_given_copied_object_when_list_objects_then_reports_copy_operation_evidence(
+    destination: _FakeContainer, source_container: _FakeContainer, control: OwnedControl, registry: dict
+) -> None:
+    source, etag = _source(source_container)
+    publisher = _publisher(destination, control)
+    publisher.copy(source_container, source, etag)
+
+    stats = {stat.path: stat for stat in publisher.store.list_objects()}
+
+    assert stats[source.path].copy_operation_sha256 is not None
+    assert stats[source.path].revision is not None
 
 
 def test_given_cross_account_source_when_copy_then_refused_before_effect(

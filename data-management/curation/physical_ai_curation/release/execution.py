@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import sys
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -90,6 +90,7 @@ def encode_planned_object(
     confirmed_digest: str | None,
     scratch_bytes: int,
     output_bytes: int,
+    checkpoint: Callable[[], None] | None = None,
 ) -> Iterator[EncodedObject]:
     """Encode a current confirmed object under supervision, exposing bytes only after proven stop.
 
@@ -98,7 +99,7 @@ def encode_planned_object(
     """
     validate_processing_confirmation(prepared.plan, confirmed_digest=confirmed_digest)
     windows = prepared.encoding_windows(obj)
-    if obj.source_length is None or obj.source_sha256 is None:
+    if obj.source_length is None:
         raise ReleaseExecutionError("encoding source identity is missing")
     if type(output_bytes) is not int or output_bytes < max(1, obj.estimated_output_bytes):
         raise CapacityError("native output estimate exceeds its admitted bound")
@@ -112,12 +113,14 @@ def encode_planned_object(
         observed = 0
         with source_path.open("xb") as stream:
             for chunk in source_chunks:
+                if checkpoint is not None:
+                    checkpoint()
                 if len(chunk) > CHUNK_BYTES or observed + len(chunk) > obj.source_length:
                     raise ReleaseExecutionError("encoding source exceeds its frozen length")
                 observed += len(chunk)
                 digest.update(chunk)
                 stream.write(chunk)
-        if observed != obj.source_length or digest.hexdigest() != obj.source_sha256:
+        if observed != obj.source_length or (obj.source_sha256 is not None and digest.hexdigest() != obj.source_sha256):
             raise ReleaseExecutionError("encoding source does not match frozen content")
         spec = {
             "version": 1,
@@ -155,6 +158,8 @@ def encode_planned_object(
         length = 0
         with output.open("rb") as stream:
             while chunk := stream.read(CHUNK_BYTES):
+                if checkpoint is not None:
+                    checkpoint()
                 length += len(chunk)
                 if length > output_bytes:
                     raise CapacityError("native output exceeds its admitted bound")
@@ -162,7 +167,8 @@ def encode_planned_object(
         peak = observed + len(request) + int(result["peak_output_bytes"]) + result_path.stat().st_size
         if peak > scratch_bytes:
             raise CapacityError("native scratch exceeds its admitted bound")
-        store.record_io(job_id, fence, directory.name, {"source_verification_bytes": observed})
+        if obj.source_sha256 is not None:
+            store.record_io(job_id, fence, directory.name, {"source_verification_bytes": observed})
         store.record_scratch_usage(job_id, fence, peak)
         yield EncodedObject(output, length, output_digest.hexdigest(), media, observed, peak)
     finally:

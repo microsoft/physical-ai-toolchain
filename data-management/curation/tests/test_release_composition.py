@@ -353,7 +353,7 @@ def test_given_unknown_saved_camera_when_prepare_then_refused() -> None:
         prepare_saved_generation(frozen, request, sources)
 
 
-def test_given_copy_camera_without_statistics_when_prepare_then_preview_is_blocked() -> None:
+def test_given_copy_camera_without_statistics_when_prepare_then_warned_and_submittable() -> None:
     from dataclasses import replace
 
     from physical_ai_curation.release.canonical import serialize_model, sha256_hex
@@ -365,8 +365,10 @@ def test_given_copy_camera_without_statistics_when_prepare_then_preview_is_block
 
     prepared = prepare_saved_generation(frozen, request, sources)
 
-    assert not prepared.plan.submittable
-    assert any("statistics required: front" in reason for reason in prepared.plan.blocking)
+    assert prepared.plan.submittable
+    assert prepared.plan.blocking == ()
+    assert any("statistics unavailable for front" in warning for warning in prepared.plan.warnings)
+    assert all(obj.action == "copy" for obj in prepared.plan.objects)
 
 
 def test_given_unconfirmed_generation_when_assemble_then_refused_before_optional_runtime() -> None:

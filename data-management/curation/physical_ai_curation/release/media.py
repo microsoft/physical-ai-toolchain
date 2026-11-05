@@ -22,7 +22,12 @@ from physical_ai_curation.release.canonical import (
     sha256_hex,
 )
 from physical_ai_curation.release.errors import ReleaseVerificationError
-from physical_ai_curation.release.models import PreviewAction, SourceObject, VersionIdentity
+from physical_ai_curation.release.models import (
+    PreviewAction,
+    SourceObject,
+    SourceObjectRecord,
+    VersionIdentity,
+)
 from physical_ai_curation.release.store import CHUNK_BYTES, LocalReleaseStore
 
 TARGET_FORMAT_NAME = "lerobot"
@@ -152,7 +157,7 @@ def _require_target(target: VersionIdentity) -> None:
 class MediaWindow:
     episode_id: str
     camera: str
-    source: SourceObject
+    source: SourceObjectRecord
     from_timestamp: float
     to_timestamp: float
     object_duration_s: float
@@ -186,8 +191,9 @@ class ObjectPlanRequest:
     tool: VersionIdentity
     tool_settings_json: str = "{}"
     metadata: tuple[MetadataSpec, ...] = ()
-    source_objects: tuple[SourceObject, ...] = ()
+    source_objects: tuple[SourceObjectRecord, ...] = ()
     copy_paths: tuple[str, ...] = ()
+    output_paths: tuple[tuple[str, str], ...] = ()
     limits: ReleaseMediaLimits = field(default_factory=ReleaseMediaLimits)
     destination_available_bytes: int | None = None
     scratch_available_bytes: int | None = None
@@ -237,7 +243,7 @@ class ReleaseObjectPlan:
     destination_alias: str
     destination_prefix: str
     target: VersionIdentity
-    source_objects: tuple[SourceObject, ...]
+    source_objects: tuple[SourceObjectRecord, ...]
     objects: tuple[ObjectPlan, ...]
     capacity: CapacityPlan
     blocking: tuple[str, ...]
@@ -287,7 +293,14 @@ def _check_window_values(window: MediaWindow) -> None:
         raise ReleasePlanError("processing reasons must be non-empty")
 
 
-def _source_identities(windows: Sequence[MediaWindow], objects: Sequence[SourceObject]) -> dict[str, SourceObject]:
+def _source_sha256(source: SourceObjectRecord) -> str | None:
+    """Return the content digest for content-bound sources; revision-bound sources carry none."""
+    return source.sha256 if isinstance(source, SourceObject) else None
+
+
+def _source_identities(
+    windows: Sequence[MediaWindow], objects: Sequence[SourceObjectRecord]
+) -> dict[str, SourceObjectRecord]:
     identities = {}
     for source in (*objects, *(window.source for window in windows)):
         path = _check_object_path(source.path, "source path")
@@ -342,7 +355,7 @@ def _tool_label(tool: VersionIdentity) -> str:
 def _plan_media_object(
     path: str,
     windows: Sequence[MediaWindow],
-    source: SourceObject,
+    source: SourceObjectRecord,
     duration: float,
     request: ObjectPlanRequest,
 ) -> ObjectPlan:
@@ -365,7 +378,7 @@ def _plan_media_object(
         "source_path": source.path,
         "source_revision": source.revision,
         "source_length": source.length,
-        "source_sha256": source.sha256,
+        "source_sha256": _source_sha256(source),
         "affected_cameras": cameras,
         "windows": refs,
         "dependencies": (source.path,),
@@ -395,7 +408,7 @@ def _plan_media_object(
     )
 
 
-def _plan_copy(path: str, sources: Mapping[str, SourceObject]) -> ObjectPlan:
+def _plan_copy(path: str, sources: Mapping[str, SourceObjectRecord]) -> ObjectPlan:
     output = _check_output_path(path, "copy output path")
     if output.startswith("videos/"):
         raise ReleasePlanError("native media copies require explicit camera windows")
@@ -409,7 +422,7 @@ def _plan_copy(path: str, sources: Mapping[str, SourceObject]) -> ObjectPlan:
         source_path=path,
         source_revision=source.revision,
         source_length=source.length,
-        source_sha256=source.sha256,
+        source_sha256=_source_sha256(source),
         reasons=("explicit_full_object_copy",),
         affected_cameras=(),
         windows=(),
@@ -420,7 +433,7 @@ def _plan_copy(path: str, sources: Mapping[str, SourceObject]) -> ObjectPlan:
     )
 
 
-def _plan_metadata(spec: MetadataSpec, sources: Mapping[str, SourceObject]) -> ObjectPlan:
+def _plan_metadata(spec: MetadataSpec, sources: Mapping[str, SourceObjectRecord]) -> ObjectPlan:
     output = _check_output_path(spec.output_path, "metadata output path")
     if type(spec.estimated_bytes) is not int or spec.estimated_bytes < 0:
         raise ReleasePlanError("metadata estimate must not be negative")
@@ -516,7 +529,7 @@ def _capacity(
 
 
 def _plan_digest(
-    request: ObjectPlanRequest, route: str, objects: Sequence[ObjectPlan], sources: Mapping[str, SourceObject]
+    request: ObjectPlanRequest, route: str, objects: Sequence[ObjectPlan], sources: Mapping[str, SourceObjectRecord]
 ) -> str:
     payload: dict[str, object] = {
         "schema_version": PLAN_SCHEMA_VERSION,
@@ -557,6 +570,18 @@ def _plan_digest(
     return sha256_hex(canonical_json_bytes(payload))
 
 
+def _output_mapping(pairs: Sequence[tuple[str, str]], groups: Mapping[str, object]) -> dict[str, str]:
+    """Map planned source media objects to their native output paths; identity when unmapped."""
+    mapping: dict[str, str] = {}
+    for source_path, output in pairs:
+        if source_path not in groups:
+            raise ReleasePlanError("output mapping references an unplanned source object")
+        if source_path in mapping:
+            raise ReleasePlanError("duplicate output mapping for a source object")
+        mapping[source_path] = _check_output_path(output, "mapped output path")
+    return mapping
+
+
 def plan_release_objects(request: ObjectPlanRequest) -> ReleaseObjectPlan:
     route = resolve_route(request.source, request.destination)
     _require_target(request.target_format)
@@ -578,10 +603,11 @@ def plan_release_objects(request: ObjectPlanRequest) -> ReleaseObjectPlan:
     sources = _source_identities(request.windows, request.source_objects)
     groups = _group_windows(request.windows, selected)
     objects: list[ObjectPlan] = []
+    outputs = _output_mapping(request.output_paths, groups)
     for path in sorted(groups):
         windows = groups[path]
         duration = windows[0].object_duration_s
-        objects.append(_plan_media_object(path, windows, sources[path], duration, request))
+        objects.append(_plan_media_object(outputs.get(path, path), windows, sources[path], duration, request))
     objects.extend(_plan_metadata(spec, sources) for spec in request.metadata)
     objects.extend(_plan_copy(path, sources) for path in request.copy_paths)
     objects.sort(key=lambda obj: obj.output_path)
@@ -591,7 +617,10 @@ def plan_release_objects(request: ObjectPlanRequest) -> ReleaseObjectPlan:
             raise ReleasePlanError("duplicate output destination")
         seen.add(obj.output_path)
     capacity, blocking, warnings = _capacity(objects, request)
-    blocking += tuple(f"statistics required: {feature}" for feature in sorted(set(request.statistics_requirements)))
+    warnings += tuple(
+        f"statistics unavailable for {feature}; published metadata omits that summary"
+        for feature in sorted(set(request.statistics_requirements))
+    )
     return ReleaseObjectPlan(
         route=route,
         source_alias=request.source.alias,

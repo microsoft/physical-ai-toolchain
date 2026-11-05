@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, LoaderCircle, RefreshCw, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import {
@@ -93,12 +93,13 @@ function describeError(error: unknown): string {
 function toReleaseItem(item: ReleaseInventoryItem): ReleaseItem {
   return {
     episodeIndex: item.episodeIndex,
-    annotation: item.annotation,
-    edits: item.edits,
+    detailed: item.detailed,
+    annotation: item.annotation ?? undefined,
+    edits: item.edits ?? undefined,
     labels: item.labels ?? [],
-    provenance: item.provenance,
-    judge: item.judge,
-    resources: item.resources,
+    provenance: item.provenance ?? null,
+    judge: item.judge ?? null,
+    resources: item.resources ?? null,
   }
 }
 
@@ -148,10 +149,21 @@ function describeJobStatus(status: ReleaseJobStatus | undefined, failed: boolean
   if (failed) return 'Job status could not be loaded.'
   if (!status) return 'Loading job status...'
   const parts = [`${STATE_LABELS[status.state]}.`]
+  if (status.state === 'cancelling' && status.cleanupState === 'failed') {
+    parts.push('Cleanup failed. Retry cleanup to remove the remaining output.')
+  }
   if (status.cancelRequested) parts.push('Cancellation requested.')
   else if (status.state === 'accepted') parts.push('Waiting for a release worker.')
   if (status.state === 'committed') parts.push('Verified result is available below.')
   return parts.join(' ')
+}
+
+const IO_COUNTER_LABELS: Record<string, string> = {
+  affectedDownloadBytes: 'Affected input read',
+  sourceVerificationBytes: 'Source verification read',
+  storageCopyBytes: 'Copied within storage',
+  generatedUploadBytes: 'Generated output uploaded',
+  destinationVerificationBytes: 'Destination verification read',
 }
 
 function JobDetails({ status }: { status: ReleaseJobStatus }) {
@@ -178,8 +190,8 @@ function JobDetails({ status }: { status: ReleaseJobStatus }) {
         <ul aria-label="I/O counters" className="grid gap-1">
           {counters.map(([name, value]) => (
             <li key={name} className="flex justify-between gap-4">
-              <span className="text-muted-foreground">{name}</span>
-              <span className="tabular-nums">{value}</span>
+              <span className="text-muted-foreground">{IO_COUNTER_LABELS[name] ?? name}</span>
+              <span className="shrink-0 tabular-nums">{formatBytes(value)}</span>
             </li>
           ))}
         </ul>
@@ -453,6 +465,7 @@ function ReleaseWorkspaceContent({
     !release.isCancelling
   const canRecover =
     status !== undefined && RECOVERABLE_STATES.has(status.state) && !release.isRecovering
+  const cleanupFailed = status?.state === 'cancelling' && status.cleanupState === 'failed'
   const canClearJob = release.activeJobId !== null && (activeTerminal || release.status.isError)
 
   const sourceReleases = useQuery({
@@ -477,7 +490,15 @@ function ReleaseWorkspaceContent({
   }, [activeState, queryClient, scopeId, datasetId])
 
   const result: ReleaseResult | undefined = release.result.data
-  const dialogItems: ReleaseItem[] = (release.inventory.data?.items ?? []).map(toReleaseItem)
+  const dialogItems: ReleaseItem[] = release.inventoryItems.map(toReleaseItem)
+  const inventoryMessage = release.inventory.isError
+    ? 'Source inventory could not be loaded. Release selection is unavailable.'
+    : release.inventoryProgress.total === null
+      ? 'Loading source inventory...'
+      : `Loading source inventory: ${release.inventoryProgress.loaded} of ${release.inventoryProgress.total} episodes loaded.`
+  const retryInventory = () => {
+    void release.inventory.refetch()
+  }
 
   const capabilityMessage =
     capabilityError instanceof ReleaseRequestError &&
@@ -530,13 +551,23 @@ function ReleaseWorkspaceContent({
       )}
       {release.inventory.isError && (
         <Alert variant="destructive">
-          <AlertDescription>
-            Source inventory could not be loaded. Release selection is unavailable.
+          <AlertDescription className="grid gap-2">
+            <span>{inventoryMessage}</span>
+            <Button variant="outline" size="sm" onClick={retryInventory}>
+              <RefreshCw className="mr-2 size-4" aria-hidden="true" />
+              Retry inventory
+            </Button>
           </AlertDescription>
         </Alert>
       )}
       {releaseAvailable && !release.inventoryReady && !release.inventory.isError && (
-        <p className="text-muted-foreground text-sm">Loading source inventory...</p>
+        <p role="status" className="text-muted-foreground flex items-center gap-2 text-sm">
+          <LoaderCircle
+            className="size-4 shrink-0 animate-spin motion-reduce:animate-none"
+            aria-hidden="true"
+          />
+          {inventoryMessage}
+        </p>
       )}
 
       {notice && (
@@ -582,7 +613,10 @@ function ReleaseWorkspaceContent({
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 id="release-job-heading" className="text-sm font-medium">
-              Active job
+              Job{' '}
+              <span className="font-mono" title={release.activeJobId ?? undefined}>
+                {release.activeJobId?.slice(0, 8)}
+              </span>
             </h3>
             <div className="flex flex-wrap gap-2">
               {status && !TERMINAL_STATES.has(status.state) && (
@@ -609,7 +643,12 @@ function ReleaseWorkspaceContent({
                 disabled={!canRecover}
                 onClick={() => void runAction(() => release.recover())}
               >
-                Recover job
+                {release.isRecovering ? (
+                  <LoaderCircle aria-hidden="true" className="mr-2 size-4 animate-spin" />
+                ) : (
+                  <RefreshCw aria-hidden="true" className="mr-2 size-4" />
+                )}
+                {cleanupFailed ? 'Retry cleanup' : 'Recover job'}
               </Button>
               {canClearJob && (
                 <Button variant="ghost" size="sm" onClick={() => release.startNew()}>
@@ -805,9 +844,16 @@ function ReleaseWorkspaceContent({
         }}
         items={dialogItems}
         inventoryReady={release.inventoryReady}
+        inventoryMessage={inventoryMessage}
+        inventoryFailed={release.inventory.isError}
+        onRetryInventory={retryInventory}
+        onRequestDetails={release.requestDetails}
+        detailError={release.detailError}
         destinations={destinations}
         onPreview={release.preview}
+        onCancelPreparation={release.cancelPreparation}
         onSubmit={submitFromDialog}
+        onDiscardSubmission={() => release.startNew()}
         disabled={!releaseAvailable || createBlocked}
       />
     </section>

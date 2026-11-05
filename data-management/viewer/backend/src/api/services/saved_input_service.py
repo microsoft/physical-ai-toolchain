@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
@@ -27,9 +28,11 @@ from .annotation_service import AnnotationService
 from .dataset_service import DatasetService
 
 if TYPE_CHECKING:
+    from physical_ai_curation.models import DatasetLabelsFile
     from physical_ai_curation.release.inputs import SavedSelection
     from physical_ai_dataset_io.lerobot import EpisodeRecord
 
+    from ..storage import VersionedValue
     from .label_storage import LabelStorage
 
 
@@ -55,11 +58,18 @@ class ViewerSavedInputReader:
         label_storage: LabelStorage | None = None,
         *,
         judge_evidence: JudgeEvidenceAuthority | None = None,
+        cache_release_labels: bool = False,
+        cache_source_revisions: bool = False,
     ) -> None:
         self.datasets = datasets
         self.annotations = annotations
         self.label_storage = label_storage
         self.judge_evidence = judge_evidence
+        self._cache_release_labels = cache_release_labels
+        self._cache_source_revisions = cache_source_revisions
+        self._source_revisions: dict[tuple[str, int], tuple[str, str]] = {}
+        self._release_labels: dict[str, VersionedValue[DatasetLabelsFile]] = {}
+        self._labels_lock = asyncio.Lock()
 
     async def annotation(self, dataset_id: str, episode_index: int) -> SavedResource:
         resource = await self.annotations.get_annotation_versioned(dataset_id, episode_index)
@@ -84,7 +94,13 @@ class ViewerSavedInputReader:
             return SavedResource(None, None)
         if self.label_storage is None:
             raise SavedInputError("Labels storage is unavailable", 503)
-        resource = await self.label_storage.load_versioned(dataset_id)
+        if self._cache_release_labels:
+            async with self._labels_lock:
+                if dataset_id not in self._release_labels:
+                    self._release_labels[dataset_id] = await self.label_storage.load_versioned(dataset_id)
+                resource = self._release_labels[dataset_id]
+        else:
+            resource = await self.label_storage.load_versioned(dataset_id)
         if resource.value is not None and resource.value.dataset_id != dataset_id:
             raise SavedInputError("Curation dataset identity mismatch")
         if selection.kind == "labels":
@@ -96,7 +112,13 @@ class ViewerSavedInputReader:
         return SavedResource(value, content_etag(value))
 
     async def source_revision(self, dataset_id: str, episode_index: int) -> tuple[str, str]:
-        return await self.datasets.get_source_revision(dataset_id, episode_index)
+        key = (dataset_id, episode_index)
+        if self._cache_source_revisions and key in self._source_revisions:
+            return self._source_revisions[key]
+        revision = await self.datasets.get_source_revision(dataset_id, episode_index)
+        if self._cache_source_revisions:
+            self._source_revisions[key] = revision
+        return revision
 
 
 class ViewerDatasetResolver:

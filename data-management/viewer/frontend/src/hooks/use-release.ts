@@ -1,5 +1,11 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useState } from 'react'
+import {
+  type InfiniteData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   type AcceptedRelease,
@@ -8,11 +14,13 @@ import {
   getReleaseJob,
   getReleaseResult,
   getReleaseSourceInventory,
+  getReleaseSourceInventoryDetails,
   listReleaseJobs,
   lookupAcceptedRelease,
   previewRelease,
   recoverReleaseJob,
   type ReleaseInventoryItem,
+  type ReleaseJobPage,
   type ReleaseJobState,
   type ReleaseRequest,
   ReleaseRequestError,
@@ -21,6 +29,8 @@ import {
 } from '@/api/releases'
 
 const INVENTORY_PAGE_SIZE = 100
+const DETAIL_CHUNK_SIZE = 20
+const EMPTY_DETAILS: Record<number, ReleaseInventoryItem> = {}
 const JOB_PAGE_SIZE = 20
 const ACTIVE_JOB_PREFIX = 'release-active-job:v2'
 const PENDING_SUBMISSION_PREFIX = 'release-pending-submission:v1'
@@ -29,6 +39,19 @@ const MAX_INVENTORY_ITEMS = 10000
 const POLL_INTERVAL_MS = 2000
 const MAX_STATUS_POLLS = 900
 const JOB_ID_PATTERN = /^[0-9a-f]{32}$/
+/** Owns serial detail requests for one source/principal lifetime. */
+function createDetailTransport(key: string) {
+  let tail = Promise.resolve()
+  return {
+    key,
+    controller: new AbortController(),
+    inFlight: new Set<number>(),
+    enqueue(work: () => Promise<void>) {
+      tail = tail.then(work)
+    },
+  }
+}
+
 const TERMINAL_STATES: ReadonlySet<ReleaseJobState> = new Set<ReleaseJobState>([
   'committed',
   'cancelled',
@@ -174,17 +197,29 @@ function clearPointer(key: string): void {
  * Load every inventory page sequentially and validate the population before returning it.
  *
  * @param datasetId - Source dataset identifier.
+ * @param signal - Stops paging when the query loses its observers or changes scope.
+ * @param onProgress - Receives validated partial pages; partial results do not authorize a release.
  * @returns All items with the reported total.
  * @throws {Error} When the cursor does not advance, the total changes between pages, the population exceeds
  * the client limit, or the collected items do not match the total.
  */
-async function fetchFullInventory(datasetId: string): Promise<ReleaseInventory> {
+async function fetchFullInventory(
+  datasetId: string,
+  signal: AbortSignal,
+  onProgress: (inventory: ReleaseInventory) => void,
+): Promise<ReleaseInventory> {
   const items: ReleaseInventoryItem[] = []
   const seenEpisodes = new Set<number>()
   let cursor = 0
   let total: number | null = null
   for (;;) {
-    const page = await getReleaseSourceInventory(datasetId, { cursor, limit: INVENTORY_PAGE_SIZE })
+    signal.throwIfAborted()
+    const page = await getReleaseSourceInventory(
+      datasetId,
+      { cursor, limit: INVENTORY_PAGE_SIZE },
+      signal,
+    )
+    signal.throwIfAborted()
     if (total !== null && page.total !== total) {
       throw new Error('inventory_total_changed')
     }
@@ -211,6 +246,7 @@ async function fetchFullInventory(datasetId: string): Promise<ReleaseInventory> 
     if (page.nextCursor <= cursor) {
       throw new Error('inventory_cursor_not_advancing')
     }
+    onProgress({ items: [...items], total })
     cursor = page.nextCursor
   }
   if (items.length !== total) {
@@ -235,6 +271,8 @@ async function fetchFullInventory(datasetId: string): Promise<ReleaseInventory> 
 export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: string) {
   const queryClient = useQueryClient()
   const storageKey = activeJobStorageKey(datasetId, scopeId, sourceIdentity)
+  const transportController = useRef<AbortController | null>(null)
+  useEffect(() => () => transportController.current?.abort(), [storageKey])
   const pendingStorageKey = pendingSubmissionStorageKey(datasetId, scopeId, sourceIdentity)
   const [pointer, setPointer] = useState<{ key: string; jobId: string | null }>({
     key: '',
@@ -248,12 +286,117 @@ export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: 
   const pendingIdempotencyKey =
     pending.key === pendingStorageKey ? pending.idempotencyKey : readPendingKey(pendingStorageKey)
 
+  useEffect(() => {
+    function observeStorage(event: StorageEvent) {
+      if (event.key === null || event.key === storageKey) {
+        setPointer({ key: storageKey, jobId: readPointer(storageKey) })
+      }
+      if (event.key === null || event.key === pendingStorageKey) {
+        setPending({ key: pendingStorageKey, idempotencyKey: readPendingKey(pendingStorageKey) })
+      }
+    }
+    window.addEventListener('storage', observeStorage)
+    return () => window.removeEventListener('storage', observeStorage)
+  }, [storageKey, pendingStorageKey, setPointer, setPending])
+
+  const [inventoryProgress, setInventoryProgress] = useState<{
+    key: string
+    data: ReleaseInventory | null
+  }>({ key: '', data: null })
+  const [detailState, setDetailState] = useState<{
+    key: string
+    items: Record<number, ReleaseInventoryItem>
+  }>({ key: '', items: EMPTY_DETAILS })
+  const [detailFailure, setDetailFailure] = useState<{ key: string; message: string } | null>(null)
+  const detailTransport = useRef<ReturnType<typeof createDetailTransport> | null>(null)
+  useEffect(
+    () => () => {
+      if (detailTransport.current?.key === storageKey) {
+        detailTransport.current.controller.abort()
+        detailTransport.current = null
+      }
+    },
+    [storageKey],
+  )
+  const invalidateDetails = useCallback((key: string) => {
+    detailTransport.current?.controller.abort()
+    detailTransport.current = null
+    setDetailState({ key, items: EMPTY_DETAILS })
+    setDetailFailure(null)
+  }, [])
   const inventory = useQuery({
     queryKey: ['releases', 'inventory', scopeId, datasetId, sourceIdentity ?? null],
-    queryFn: () => fetchFullInventory(datasetId),
+    queryFn: ({ signal }) => {
+      const progressKey = activeJobStorageKey(datasetId, scopeId, sourceIdentity)
+      setInventoryProgress({ key: progressKey, data: null })
+      invalidateDetails(progressKey)
+      return fetchFullInventory(datasetId, signal, (data) => {
+        setInventoryProgress({ key: progressKey, data })
+      })
+    },
     enabled: Boolean(datasetId && scopeId),
     staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
   })
+  const partialInventory = inventoryProgress.key === storageKey ? inventoryProgress.data : null
+  const visibleInventory = inventory.data ?? partialInventory
+  const loadingInventory =
+    inventory.isFetching || inventory.isError ? partialInventory : inventory.data
+  const detailItems = detailState.key === storageKey ? detailState.items : EMPTY_DETAILS
+  const inventoryItems = useMemo(
+    () => (visibleInventory?.items ?? []).map((item) => detailItems[item.episodeIndex] ?? item),
+    [visibleInventory, detailItems],
+  )
+  const detailError = detailFailure?.key === storageKey ? detailFailure.message : null
+
+  /**
+   * Load full evidence for the given episodes that are neither loaded nor already in flight. Requests run
+   * sequentially in bounded chunks. Results replace population rows for the same episodes only.
+   *
+   * @param indices - Episode indices from the source population.
+   */
+  const requestDetails = useCallback(
+    (indices: number[]) => {
+      let transport = detailTransport.current
+      if (!transport || transport.key !== storageKey) {
+        transport?.controller.abort()
+        transport = createDetailTransport(storageKey)
+        detailTransport.current = transport
+      }
+      const active = transport
+      const missing = [...new Set(indices)].filter(
+        (index) => !(index in detailItems) && !active.inFlight.has(index),
+      )
+      for (let start = 0; start < missing.length; start += DETAIL_CHUNK_SIZE) {
+        const chunk = missing.slice(start, start + DETAIL_CHUNK_SIZE)
+        chunk.forEach((index) => active.inFlight.add(index))
+        active.enqueue(() =>
+          Promise.resolve()
+            .then(() => {
+              if (active.controller.signal.aborted) return
+              return getReleaseSourceInventoryDetails(datasetId, chunk, active.controller.signal)
+            })
+            .then((page) => {
+              if (!page || active.controller.signal.aborted) return
+              setDetailFailure((previous) => (previous?.key === storageKey ? null : previous))
+              setDetailState((previous) => {
+                const base = previous.key === storageKey ? previous.items : EMPTY_DETAILS
+                const next = { ...base }
+                for (const item of page.items) next[item.episodeIndex] = item
+                return { key: storageKey, items: next }
+              })
+            })
+            .catch(() => {
+              if (active.controller.signal.aborted) return
+              setDetailFailure({ key: storageKey, message: 'Episode details could not be loaded.' })
+            })
+            .finally(() => chunk.forEach((index) => active.inFlight.delete(index))),
+        )
+      }
+    },
+    [datasetId, storageKey, detailItems],
+  )
 
   const capabilities = useQuery({
     queryKey: ['releases', 'capabilities', scopeId],
@@ -263,8 +406,41 @@ export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: 
   })
 
   const status = useQuery({
-    queryKey: ['releases', 'job', scopeId, jobId],
-    queryFn: () => getReleaseJob(jobId as string),
+    queryKey: ['releases', 'job', scopeId, jobId, storageKey, datasetId],
+    queryFn: async () => {
+      try {
+        return await getReleaseJob(jobId as string)
+      } catch (error) {
+        if (
+          error instanceof ReleaseRequestError &&
+          error.status === 404 &&
+          error.code === 'release job was not found'
+        ) {
+          if (readPointer(storageKey) === jobId) clearPointer(storageKey)
+          setPointer((current) =>
+            current.key === storageKey && current.jobId === jobId
+              ? { key: storageKey, jobId: null }
+              : current,
+          )
+          const historyKey = ['releases', 'jobs', scopeId, datasetId]
+          await queryClient.cancelQueries({ queryKey: historyKey })
+          queryClient.setQueriesData<InfiniteData<ReleaseJobPage>>(
+            { queryKey: historyKey },
+            (history) =>
+              history && {
+                ...history,
+                pages: history.pages.map((page) => ({
+                  ...page,
+                  items: page.items.filter((item) => item.jobId !== jobId),
+                })),
+              },
+          )
+          void queryClient.invalidateQueries({ queryKey: historyKey })
+        }
+        throw error
+      }
+    },
+    retry: false,
     enabled: Boolean(jobId && scopeId),
     refetchInterval: (query) => {
       const state = query.state.data?.state
@@ -290,8 +466,38 @@ export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: 
     enabled: Boolean(datasetId && scopeId),
   })
 
+  useEffect(() => {
+    const current = status.data
+    if (!current || current.jobId !== jobId) return
+    queryClient.setQueryData<InfiniteData<ReleaseJobPage>>(
+      ['releases', 'jobs', scopeId, datasetId],
+      (history) => {
+        if (
+          !history?.pages.some((page) =>
+            page.items.some((item) => item.jobId === current.jobId && item.state !== current.state),
+          )
+        )
+          return history
+        return {
+          ...history,
+          pages: history.pages.map((page) => ({
+            ...page,
+            items: page.items.map((item) =>
+              item.jobId === current.jobId ? { ...item, state: current.state } : item,
+            ),
+          })),
+        }
+      },
+    )
+  }, [status.data, jobId, jobs.data, scopeId, datasetId, queryClient])
+
   const previewMutation = useMutation({
-    mutationFn: (request: ReleaseRequest) => previewRelease(request),
+    mutationFn: (request: ReleaseRequest) => {
+      transportController.current?.abort()
+      const controller = new AbortController()
+      transportController.current = controller
+      return previewRelease(request, controller.signal)
+    },
   })
 
   const submitMutation = useMutation({
@@ -301,7 +507,12 @@ export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: 
     }: {
       request: ReleaseRequest
       submission: ReleaseSubmission
-    }) => submitRelease(request, submission),
+    }) => {
+      transportController.current?.abort()
+      const controller = new AbortController()
+      transportController.current = controller
+      return submitRelease(request, submission, controller.signal)
+    },
   })
 
   const pendingLookup = useQuery({
@@ -368,7 +579,17 @@ export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: 
         throw error
       }
     },
-    [storageKey, pendingStorageKey, scopeId, datasetId, sourceIdentity, submitAsync, queryClient],
+    [
+      storageKey,
+      pendingStorageKey,
+      scopeId,
+      datasetId,
+      sourceIdentity,
+      submitAsync,
+      queryClient,
+      setPointer,
+      setPending,
+    ],
   )
 
   /**
@@ -406,7 +627,7 @@ export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: 
     clearPointer(pendingStorageKey)
     setPointer({ key: storageKey, jobId: null })
     setPending({ key: pendingStorageKey, idempotencyKey: null })
-  }, [storageKey, pendingStorageKey])
+  }, [storageKey, pendingStorageKey, setPointer, setPending])
 
   /**
    * Make a job from the source job list the active job. Does not cancel or submit anything.
@@ -422,11 +643,18 @@ export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: 
       writePointer(storageKey, selectedJobId)
       setPointer({ key: storageKey, jobId: selectedJobId })
     },
-    [storageKey],
+    [storageKey, setPointer],
   )
 
   return {
     inventory,
+    inventoryItems,
+    requestDetails,
+    detailError,
+    inventoryProgress: {
+      loaded: loadingInventory?.items.length ?? 0,
+      total: loadingInventory?.total ?? inventory.data?.total ?? null,
+    },
     inventoryReady: inventory.isSuccess && !inventory.isFetching,
     capabilities,
     activeJobId: jobId,
@@ -437,6 +665,11 @@ export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: 
     status,
     result,
     preview: previewMutation.mutateAsync,
+    cancelPreparation: () => {
+      transportController.current?.abort()
+      detailTransport.current?.controller.abort()
+      detailTransport.current = null
+    },
     isPreviewing: previewMutation.isPending,
     submit,
     isSubmitting: submitMutation.isPending,

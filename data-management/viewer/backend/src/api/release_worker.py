@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from physical_ai_curation.release.jobs import ReleaseJobStore
 from physical_ai_curation.release.runner import run_queue
 
+from .logging_config import configure_logging
 from .services.release_service import (
     ReleaseApiError,
     get_release_planner,
@@ -100,9 +101,9 @@ async def _watch_queue(
 
 def main(argv: list[str] | None = None) -> int:
     """Run the worker; return a process exit code. Logs only safe, versioned summaries."""
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
     args = _parse_args(argv)
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+    configure_logging()
 
     try:
         settings = load_release_api_settings(os.environ)

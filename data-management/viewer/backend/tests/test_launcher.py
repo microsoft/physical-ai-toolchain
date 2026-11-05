@@ -61,6 +61,7 @@ def launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
         encoding="utf-8",
     )
     uvicorn.chmod(0o755)
+    shutil.copy2(uvicorn, backend_bin / "python")
     (backend / ".env").write_text(f"DATA_DIR={root}\n", encoding="utf-8")
 
     for name in ("DATA_DIR", "VLM_JUDGE_ENABLED", "VLM_JUDGE_BACKEND", "LOG_LEVEL"):
@@ -210,8 +211,8 @@ def test_backend_runs_on_loopback_with_logging_config(
         assert args[:5] == ["run", "--no-sync", "--frozen", "--directory", "backend"]
         assert _option_value(args, "--project") == str(launcher.parents[2])
         assert _option_value(args, "--package") == "lerobot-annotation-api"
-        args = args[args.index("uvicorn") + 1 :]
-    assert args[0] == "src.api.main:app"
+        args = args[args.index("python") + 1 :]
+    assert args[:2] == ["-m", "src.api.server"]
     assert _option_value(args, "--log-config") == "logging.json"
     assert _option_value(args, "--log-level") == expected_level
     assert _option_value(args, "--host") == "127.0.0.1"

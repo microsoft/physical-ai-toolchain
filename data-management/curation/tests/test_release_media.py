@@ -140,11 +140,12 @@ def test_partial_shared_object_requires_necessary_transcode() -> None:
     assert obj.estimated_scratch_bytes == 1500
 
 
-def test_missing_subset_statistics_blocks_an_otherwise_copy_only_preview() -> None:
+def test_missing_subset_statistics_warns_without_blocking_a_copy_only_preview() -> None:
     plan = plan_release_objects(_request(statistics_requirements=("observation.images.front",)))
 
-    assert not plan.submittable
-    assert plan.blocking == ("statistics required: observation.images.front",)
+    assert plan.submittable
+    assert plan.blocking == ()
+    assert "statistics unavailable for observation.images.front; published metadata omits that summary" in plan.warnings
     assert plan.objects[0].action == "copy"
 
 
@@ -168,32 +169,34 @@ def test_processing_confirmation_rejects_missing_or_stale_preview() -> None:
     validate_processing_confirmation(preview, confirmed_digest=preview.digest)
 
 
-def test_processing_confirmation_cannot_override_missing_statistics() -> None:
+def test_missing_statistics_do_not_block_processing_confirmation() -> None:
     from physical_ai_curation.release.media import validate_processing_confirmation
 
     plan = plan_release_objects(_partial_request(statistics_requirements=("observation.images.front",)))
 
-    with pytest.raises(ReleasePlanError, match="blocked"):
-        validate_processing_confirmation(plan, confirmed_digest=plan.digest)
+    assert plan.blocking == ()
+    validate_processing_confirmation(plan, confirmed_digest=plan.digest)
 
 
-def test_generated_episode_metadata_refuses_missing_video_summaries() -> None:
+def test_generated_episode_metadata_omits_missing_video_summaries() -> None:
     import pyarrow as pa
     from physical_ai_curation.release.tables import NativeVideoReference, generate_episode_metadata
 
     table = pa.table({"episode_index": [0], "index": [0], "task_index": [0]})
 
-    with pytest.raises(ReleasePlanError, match="statistics required"):
-        generate_episode_metadata(
-            table,
-            {"observation.images.front": {"dtype": "video"}},
-            output_episode_index=0,
-            output_from_index=0,
-            fps=10,
-            task_names=["pick"],
-            video_references={"observation.images.front": NativeVideoReference(VIDEO, 0.0, 0.1)},
-            preserved_statistics={},
-        )
+    row = generate_episode_metadata(
+        table,
+        {"observation.images.front": {"dtype": "video"}},
+        output_episode_index=0,
+        output_from_index=0,
+        fps=10,
+        task_names=["pick"],
+        video_references={"observation.images.front": NativeVideoReference(VIDEO, 0.0, 0.1)},
+        preserved_statistics={},
+    )
+
+    assert "videos/observation.images.front/file_index" in row
+    assert not any(key.startswith("stats/observation.images.front/") for key in row)
 
 
 def test_constant_fraction_statistics_allow_float_roundoff() -> None:
@@ -268,6 +271,80 @@ def test_aggregate_metadata_rejects_missing_declared_feature_statistics() -> Non
 
     with pytest.raises(ReleasePlanError, match="statistics required"):
         assemble_native_metadata(info, [row], task_count=1)
+
+
+def _video_episode_rows(camera_episodes: tuple[bool, ...]) -> tuple[dict, list[dict]]:
+    camera = "observation.images.front"
+    info = {
+        "codebase_version": "v3.0",
+        "features": {"observation.state": {"dtype": "float32"}, camera: {"dtype": "video"}},
+    }
+    rows = []
+    offset = 0
+    for index, has_camera in enumerate(camera_episodes):
+        row = {"episode_index": index, "length": 2, "dataset_from_index": offset, "dataset_to_index": offset + 2}
+        row.update(
+            {f"stats/observation.state/{key}": value for key, value in numeric_feature_statistics([1.0, 2.0]).items()}
+        )
+        if has_camera:
+            row.update(
+                {f"stats/{camera}/{key}": value for key, value in numeric_feature_statistics([0.1, 0.2]).items()}
+            )
+        rows.append(row)
+        offset += 2
+    return info, rows
+
+
+@pytest.mark.parametrize("coverage", [(True, False), (False, True)])
+def test_partial_video_statistics_are_omitted_from_dataset_metadata_and_disclosed(
+    coverage: tuple[bool, ...],
+) -> None:
+    from physical_ai_curation.release.tables import assemble_native_metadata
+
+    info, rows = _video_episode_rows(coverage)
+
+    result = assemble_native_metadata(info, rows, task_count=1)
+
+    assert "observation.images.front" not in result.statistics
+    assert "observation.state" in result.statistics
+    assert result.statistics_approximation is not None
+    assert "observation.images.front" in result.statistics_approximation
+    assert "1 of 2 episodes" in result.statistics_approximation
+    output_rows = result.episodes.to_pylist()
+    for index, present in enumerate(coverage):
+        assert (output_rows[index].get("stats/observation.images.front/mean") is not None) == present
+
+
+def test_complete_video_statistics_aggregate_into_dataset_metadata() -> None:
+    from physical_ai_curation.release.tables import assemble_native_metadata
+
+    info, rows = _video_episode_rows((True, True))
+
+    result = assemble_native_metadata(info, rows, task_count=1)
+
+    assert "observation.images.front" in result.statistics
+    assert "partial coverage" not in (result.statistics_approximation or "")
+
+
+def test_absent_video_statistics_are_omitted_without_refusal() -> None:
+    from physical_ai_curation.release.tables import assemble_native_metadata
+
+    info, rows = _video_episode_rows((False, False))
+
+    result = assemble_native_metadata(info, rows, task_count=1)
+
+    assert "observation.images.front" not in result.statistics
+    assert "observation.state" in result.statistics
+
+
+def test_malformed_partial_video_statistics_still_refused() -> None:
+    from physical_ai_curation.release.tables import assemble_native_metadata
+
+    info, rows = _video_episode_rows((True, False))
+    rows[0]["stats/observation.images.front/min"] = "not-a-number"
+
+    with pytest.raises(ReleasePlanError):
+        assemble_native_metadata(info, rows, task_count=1)
 
 
 def test_native_episode_table_rebuilds_indices_without_changing_recorded_values() -> None:

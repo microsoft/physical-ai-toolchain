@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Awaitable
 from typing import Annotated, Any, NoReturn
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response
 from physical_ai_curation.release.inputs import SavedSelection
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -83,6 +85,27 @@ def _scope(principal: PrincipalContext) -> str:
     return principal.scope_id
 
 
+async def _while_connected[Result](request: Request, operation: Awaitable[Result]) -> Result:
+    """Cancel request work on disconnect after FastAPI has consumed the request body."""
+
+    async def disconnected() -> None:
+        while (await request.receive())["type"] != "http.disconnect":
+            pass
+
+    pending = asyncio.ensure_future(operation)
+    disconnect = asyncio.create_task(disconnected())
+    try:
+        done, _ = await asyncio.wait({pending, disconnect}, return_when=asyncio.FIRST_COMPLETED)
+        if pending in done:
+            return pending.result()
+        disconnect.result()
+        raise ReleaseApiError(499, "request_disconnected")
+    finally:
+        pending.cancel()
+        disconnect.cancel()
+        await asyncio.gather(pending, disconnect, return_exceptions=True)
+
+
 @router.get("/capabilities")
 async def get_capabilities(
     principal: PrincipalContext = Depends(require_principal_context),
@@ -111,7 +134,14 @@ async def list_jobs(
 ) -> dict[str, Any]:
     """List release jobs owned by the caller, ordered by acceptance."""
     try:
-        return service.jobs(_scope(principal), cursor=int(cursor), limit=int(limit), dataset_id=_sanitized(dataset_id))
+        return await service.read(
+            service.jobs,
+            _scope(principal),
+            cursor=int(cursor),
+            limit=int(limit),
+            dataset_id=_sanitized(dataset_id),
+            response_bytes=service.metadata_bytes,
+        )
     except ReleaseApiError as error:
         _raise(error)
 
@@ -124,7 +154,9 @@ async def lookup_request(
 ) -> dict[str, Any]:
     """Resolve a previously accepted request without repeating selection or source access."""
     try:
-        return service.accepted_request(_scope(principal), idempotency_key.replace("\r", "").replace("\n", ""))
+        return await service.control(
+            service.accepted_request, _scope(principal), idempotency_key.replace("\r", "").replace("\n", "")
+        )
     except ReleaseApiError as error:
         _raise(error)
 
@@ -137,7 +169,7 @@ async def get_job(
 ) -> dict[str, Any]:
     """Return the status of one caller-owned release job."""
     try:
-        return service.status(_scope(principal), job_id.replace("\r", "").replace("\n", ""))
+        return await service.control(service.status, _scope(principal), job_id.replace("\r", "").replace("\n", ""))
     except ReleaseApiError as error:
         _raise(error)
 
@@ -146,6 +178,7 @@ async def get_job(
 async def submit_job(
     body: ReleaseSpecBody,
     response: Response,
+    request: Request,
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -156,13 +189,16 @@ async def submit_job(
     try:
         body = ReleaseSpecBody.model_validate(_sanitized(body.model_dump()))
         body.episode_indices = [int(index) for index in body.episode_indices]
-        accepted = await service.submit(
-            _scope(principal),
-            body.to_spec(),
-            idempotency_key.replace("\r", "").replace("\n", ""),
-            preview_digest=body.preview_digest,
-            processing_digest=body.processing_digest,
-            local_disk_acknowledged=bool(body.local_disk_acknowledged),
+        accepted = await _while_connected(
+            request,
+            service.submit(
+                _scope(principal),
+                body.to_spec(),
+                idempotency_key.replace("\r", "").replace("\n", ""),
+                preview_digest=body.preview_digest,
+                processing_digest=body.processing_digest,
+                local_disk_acknowledged=bool(body.local_disk_acknowledged),
+            ),
         )
     except ReleaseApiError as error:
         _raise(error)
@@ -176,6 +212,7 @@ async def submit_job(
 @router.post("/preview", dependencies=[Depends(require_csrf_token)])
 async def preview_release_body(
     body: ReleaseSpecBody,
+    request: Request,
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
 ) -> dict[str, Any]:
@@ -183,7 +220,7 @@ async def preview_release_body(
     try:
         body = ReleaseSpecBody.model_validate(_sanitized(body.model_dump()))
         body.episode_indices = [int(index) for index in body.episode_indices]
-        return await service.preview(_scope(principal), body.to_spec())
+        return await _while_connected(request, service.preview(_scope(principal), body.to_spec()))
     except ReleaseApiError as error:
         _raise(error)
     except (ValueError, TypeError):
@@ -192,6 +229,7 @@ async def preview_release_body(
 
 @router.get("/preview")
 async def preview_release(
+    request: Request,
     selection: str = Query(max_length=1024 * 1024),
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
@@ -200,7 +238,7 @@ async def preview_release(
     try:
         body = ReleaseSpecBody.model_validate(_sanitized(json.loads(selection.replace("\r", "").replace("\n", ""))))
         body.episode_indices = [int(index) for index in body.episode_indices]
-        return await service.preview(_scope(principal), body.to_spec())
+        return await _while_connected(request, service.preview(_scope(principal), body.to_spec()))
     except ReleaseApiError as error:
         _raise(error)
     except (ValueError, TypeError):
@@ -215,7 +253,7 @@ async def cancel_job(
 ) -> dict[str, Any]:
     """Request cancellation of a caller-owned release job."""
     try:
-        return service.cancel(_scope(principal), job_id.replace("\r", "").replace("\n", ""))
+        return await service.control(service.cancel, _scope(principal), job_id.replace("\r", "").replace("\n", ""))
     except ReleaseApiError as error:
         _raise(error)
 
@@ -239,6 +277,28 @@ async def source_inventory(
         _raise(error)
 
 
+@router.get("/inventory/{dataset_id}/details")
+async def source_inventory_details(
+    dataset_id: str,
+    episodes: str = Query(max_length=1024),
+    principal: PrincipalContext = Depends(require_principal_context),
+    service: ReleaseService = Depends(get_release_service),
+) -> dict[str, Any]:
+    """Return full saved evidence for up to 100 explicitly listed episode indices."""
+    try:
+        indices = [int(part) for part in episodes.split(",")]
+    except ValueError:
+        _raise(ReleaseApiError(422, "invalid_inventory_details"))
+    try:
+        return await service.inventory_details(
+            dataset_id.replace("\r", "").replace("\n", ""),
+            episodes=indices,
+            scope=_scope(principal),
+        )
+    except ReleaseApiError as error:
+        _raise(error)
+
+
 @router.post("/jobs/{job_id}/recover", status_code=202, dependencies=[Depends(require_csrf_token)])
 async def recover_job(
     job_id: JobId,
@@ -246,7 +306,7 @@ async def recover_job(
     service: ReleaseService = Depends(get_release_service),
 ) -> dict[str, Any]:
     try:
-        return service.recover(_scope(principal), job_id.replace("\r", "").replace("\n", ""))
+        return await service.control(service.recover, _scope(principal), job_id.replace("\r", "").replace("\n", ""))
     except ReleaseApiError as error:
         _raise(error)
 
@@ -258,7 +318,12 @@ async def get_result(
     service: ReleaseService = Depends(get_release_service),
 ) -> dict[str, Any]:
     try:
-        return service.result(_scope(principal), job_id.replace("\r", "").replace("\n", ""))
+        return await service.read(
+            service.result,
+            _scope(principal),
+            job_id.replace("\r", "").replace("\n", ""),
+            response_bytes=service.metadata_bytes,
+        )
     except ReleaseApiError as error:
         _raise(error)
 
@@ -271,7 +336,12 @@ async def list_source_releases(
 ) -> dict[str, Any]:
     """List verified releases of a source visible to the caller. Read-only; no paths in output."""
     try:
-        return service.source_releases(_scope(principal), dataset_id.replace("\r", "").replace("\n", ""))
+        return await service.read(
+            service.source_releases,
+            _scope(principal),
+            dataset_id.replace("\r", "").replace("\n", ""),
+            response_bytes=service.metadata_bytes,
+        )
     except ReleaseApiError as error:
         _raise(error)
 
@@ -285,7 +355,13 @@ async def get_source_release(
 ) -> dict[str, Any]:
     """Read one verified source release by opaque handle. Read-only; 404 when not visible."""
     try:
-        return service.source_release(_scope(principal), dataset_id.replace("\r", "").replace("\n", ""), handle)
+        return await service.read(
+            service.source_release,
+            _scope(principal),
+            dataset_id.replace("\r", "").replace("\n", ""),
+            handle,
+            response_bytes=service.metadata_bytes,
+        )
     except ReleaseApiError as error:
         _raise(error)
 
@@ -301,12 +377,14 @@ async def list_source_episodes(
 ) -> dict[str, Any]:
     """Page native episode metadata of a verified local release. Paths are never returned."""
     try:
-        return service.source_episodes(
+        return await service.read(
+            service.source_episodes,
             _scope(principal),
             dataset_id.replace("\r", "").replace("\n", ""),
             handle,
             cursor=int(cursor),
             limit=int(limit),
+            response_bytes=service.metadata_bytes,
         )
     except ReleaseApiError as error:
         _raise(error)
@@ -323,12 +401,14 @@ async def get_source_episode_media(
 ) -> Response:
     """Return the MP4 container holding one episode's camera stream from a verified local release."""
     try:
-        content = service.source_episode_media(
+        content = await service.read(
+            service.source_episode_media,
             _scope(principal),
             dataset_id.replace("\r", "").replace("\n", ""),
             handle,
             episode_index=int(episode_index),
             camera=camera,
+            response_bytes=service.media_bytes,
         )
     except ReleaseApiError as error:
         _raise(error)
@@ -343,8 +423,12 @@ async def get_artifact(
     service: ReleaseService = Depends(get_release_service),
 ) -> dict[str, Any]:
     try:
-        return service.result(
-            _scope(principal), job_id.replace("\r", "").replace("\n", ""), artifact.replace("\r", "").replace("\n", "")
+        return await service.read(
+            service.result,
+            _scope(principal),
+            job_id.replace("\r", "").replace("\n", ""),
+            artifact.replace("\r", "").replace("\n", ""),
+            response_bytes=service.metadata_bytes,
         )
     except ReleaseApiError as error:
         _raise(error)

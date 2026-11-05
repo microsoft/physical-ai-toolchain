@@ -10,6 +10,7 @@ import {
   getReleaseJob,
   getReleaseResult,
   getReleaseSourceInventory,
+  getReleaseSourceInventoryDetails,
   getSourceRelease,
   listReleaseJobs,
   listSourceEpisodes,
@@ -104,10 +105,26 @@ describe('getReleaseSourceInventory', () => {
   })
 })
 
+describe('getReleaseSourceInventoryDetails', () => {
+  it('requests details only for the given episodes with an encoded dataset id', async () => {
+    mockApiFetch.mockResolvedValueOnce(
+      jsonResponse({ schema: 'v1', items: [{ episode_index: 4 }, { episode_index: 9 }] }),
+    )
+
+    const page = await getReleaseSourceInventoryDetails('group a/source-a', [4, 9])
+
+    expect(mockApiFetch.mock.calls[0][0]).toBe(
+      '/releases/v1/inventory/group%20a%2Fsource-a/details?episodes=4%2C9',
+    )
+    expect(page).toMatchObject({ items: [{ episodeIndex: 4 }, { episodeIndex: 9 }] })
+  })
+})
+
 describe('previewRelease', () => {
-  it('POSTs the selection body in the backend snake_case contract and returns the digest', async () => {
+  it('POSTs the selection once to the preview route and returns the digest', async () => {
     mockApiFetch.mockResolvedValueOnce(
       jsonResponse({
+        schema: 'curated-release-api/v1',
         digest: 'preview-digest',
         reserved_bytes: 1024,
         summary: { processing_digest: 'processing-digest', route: 'copy' },
@@ -117,6 +134,7 @@ describe('previewRelease', () => {
     const preview = await previewRelease(request)
 
     const [path, init] = mockApiFetch.mock.calls[0]
+    expect(mockApiFetch).toHaveBeenCalledTimes(1)
     expect(path).toBe('/releases/v1/preview')
     expect(init).toMatchObject({ method: 'POST' })
     expect(sentBody()).toMatchObject({
@@ -128,11 +146,32 @@ describe('previewRelease', () => {
       episode_indices: [7, 2],
       finalized: true,
     })
+    expect(sentBody()).not.toHaveProperty('kind')
     expect(preview).toMatchObject({
       digest: 'preview-digest',
       reservedBytes: 1024,
       summary: { processingDigest: 'processing-digest', route: 'copy' },
     })
+  })
+
+  it('aborts only the transport and sends no cancellation request', async () => {
+    const controller = new AbortController()
+    mockApiFetch.mockImplementationOnce(
+      (_path, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('Aborted', 'AbortError')),
+          )
+          controller.abort()
+        }),
+    )
+
+    const failure = await previewRelease(request, controller.signal).catch(
+      (error: unknown) => error,
+    )
+
+    expect(failure).toMatchObject({ name: 'AbortError' })
+    expect(mockApiFetch.mock.calls.map(([path]) => path)).toEqual(['/releases/v1/preview'])
   })
 })
 
@@ -173,6 +212,7 @@ describe('submitRelease', () => {
     const accepted = await submitRelease(request, confirmation)
 
     const [path, init] = mockApiFetch.mock.calls[0]
+    expect(mockApiFetch).toHaveBeenCalledTimes(1)
     expect(path).toBe('/releases/v1/jobs')
     expect(init).toMatchObject({ method: 'POST' })
     expect((init?.headers as Record<string, string>)['Idempotency-Key']).toBe('key-1')
@@ -181,7 +221,29 @@ describe('submitRelease', () => {
       processing_digest: 'processing-digest',
       local_disk_acknowledged: true,
     })
+    expect(sentBody()).not.toHaveProperty('kind')
     expect(accepted).toEqual({ jobId: 'a'.repeat(32), replayed: false })
+  })
+
+  it('aborts only the transport on submit and sends no cancellation request', async () => {
+    const controller = new AbortController()
+    mockApiFetch.mockImplementationOnce(
+      (_path, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('Aborted', 'AbortError')),
+          )
+          controller.abort()
+        }),
+    )
+
+    const failure = await submitRelease(request, confirmation, controller.signal).catch(
+      (error: unknown) => error,
+    )
+
+    expect(failure).toMatchObject({ name: 'AbortError' })
+    expect(failure).not.toBeInstanceOf(ReleaseRequestError)
+    expect(mockApiFetch.mock.calls.map(([path]) => path)).toEqual(['/releases/v1/jobs'])
   })
 
   it('refuses to submit without an idempotency key', async () => {

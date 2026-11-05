@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { SlidersHorizontal } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { LoaderCircle, RefreshCw, SlidersHorizontal } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
   type ReleasePreview,
@@ -38,9 +38,13 @@ export interface ReleaseJudge {
   outcome?: string | null
 }
 
-/** Episode row shown in the release selection list. */
+/**
+ * Episode row shown in the release selection list. Rows from the population carry `detailed: false`
+ * until their evidence is loaded; detail-dependent fields are not evidence of absence before then.
+ */
 export interface ReleaseItem {
   episodeIndex: number
+  detailed?: boolean
   annotation?: boolean
   edits?: boolean
   labels?: string[] | null
@@ -59,11 +63,24 @@ export interface ReleaseDialogProps {
   items: ReleaseItem[]
   /** Whether `items` holds the complete source inventory. Gates select-all and release. */
   inventoryReady: boolean
+  /** Progress or failure text for the current source and principal, never a readiness signal. */
+  inventoryMessage?: string
+  inventoryFailed?: boolean
+  /** Restarts inventory loading without clearing the release draft. */
+  onRetryInventory?: () => void
+  /** Loads full evidence for the given episode indices. Called for visible and selected rows. */
+  onRequestDetails?: (episodes: number[]) => void
+  /** Message when selected episode details failed to load. */
+  detailError?: string | null
   /** Destination aliases from the release capabilities response. */
   destinations: string[]
   onPreview: (request: ReleaseRequest) => Promise<ReleasePreview>
+  /** Aborts the browser request only; the server is not asked to cancel. The pending promise then settles. */
+  onCancelPreparation?: () => void
   /** Rejects on failure. Transport errors and 5xx responses freeze the draft for retry. */
   onSubmit: (request: ReleaseRequest, submission: ReleaseSubmission) => Promise<void>
+  /** Forgets the saved pending submission. Makes no API call and does not cancel any job. */
+  onDiscardSubmission?: () => void
   disabled?: boolean
 }
 
@@ -103,7 +120,7 @@ interface ReviewState {
   key: string
   request: ReleaseRequestDraft
   preview: ReleasePreview
-  processingAcknowledged: boolean
+  processingConsent: boolean
   localDiskAcknowledged: boolean
 }
 
@@ -119,6 +136,8 @@ interface Notice {
 }
 
 const RELEASE_TARGET = 'v3'
+/** Rows rendered per page of the selection list. */
+const ROW_PAGE_SIZE = 50
 
 function createDraftIdentity(): DraftIdentity {
   return { packageId: crypto.randomUUID(), attemptId: crypto.randomUUID() }
@@ -128,8 +147,13 @@ function matchesTristate(value: boolean, filter: Tristate): boolean {
   return filter === 'any' || (filter === 'yes') === value
 }
 
-/** Cross-filter: an item must satisfy every active filter. */
+/**
+ * Cross-filter: an item must satisfy every active filter. Filters on detail-only evidence never match
+ * a row whose details are still loading.
+ */
 function matchesFilters(item: ReleaseItem, filters: Filters): boolean {
+  const detailFilterActive = hasDetailFilter(filters)
+  if (detailFilterActive && item.detailed !== true) return false
   return (
     `episode ${item.episodeIndex} ${(item.labels ?? []).join(' ')}`
       .toLowerCase()
@@ -143,6 +167,17 @@ function matchesFilters(item: ReleaseItem, filters: Filters): boolean {
     (filters.provenance === 'any' ||
       (item.provenance?.origins ?? []).includes(filters.provenance)) &&
     matchesTristate(item.judge != null, filters.judge)
+  )
+}
+
+/** True when a filter reads evidence that is only available after details load. */
+function hasDetailFilter(filters: Filters): boolean {
+  return (
+    filters.annotation !== 'any' ||
+    filters.edits !== 'any' ||
+    filters.resources !== 'any' ||
+    filters.provenance !== 'any' ||
+    filters.judge !== 'any'
   )
 }
 
@@ -191,6 +226,11 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`
 }
 
+/** Reserved bytes of 0 mean the backend did not estimate them, so they are shown as unknown. */
+function formatReservedBytes(bytes: number): string {
+  return bytes > 0 ? formatBytes(bytes) : 'Unknown'
+}
+
 function describeError(error: unknown): string {
   if (error instanceof ReleaseRequestError) return `Release request failed: ${error.code}.`
   return 'Release request failed.'
@@ -212,7 +252,18 @@ function describeJudge(judge: ReleaseJudge): string {
   return `judge ${parts.filter((part): part is string => part !== null).join(', ')}`
 }
 
+/**
+ * Describes a row from loaded evidence. Undetailed rows report that details are loading rather than
+ * implying that annotation, edits, resources, provenance, or judge analysis are absent.
+ *
+ * @param item - Dialog row.
+ * @returns Single-line description for the row.
+ */
 function describeRow(item: ReleaseItem): string {
+  if (item.detailed !== true) {
+    const labels = item.labels?.length ? `labels: ${item.labels.join(', ')}` : null
+    return ['details loading', labels].filter((part): part is string => part !== null).join(', ')
+  }
   const parts = [
     item.annotation ? 'annotated' : null,
     item.edits ? 'edited' : null,
@@ -301,6 +352,59 @@ function SummaryList({ title, items, empty }: { title: string; items: string[]; 
   )
 }
 
+/** Shows elapsed request time, not an inferred backend stage or completion percentage. */
+function PreviewProgress({
+  episodeCount,
+  submitting = false,
+  cancelling = false,
+}: {
+  episodeCount: number
+  submitting?: boolean
+  cancelling?: boolean
+}) {
+  const stopLabel = submitting ? 'Detaching from submission...' : 'Stopping preview...'
+  const [startedAt] = useState(Date.now)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+
+  useEffect(() => {
+    const timer = globalThis.setInterval(() => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
+    }, 1000)
+    return () => globalThis.clearInterval(timer)
+  }, [startedAt])
+
+  return (
+    <div className="text-muted-foreground grid shrink-0 gap-1 text-sm">
+      <p role="status" className="flex items-center gap-2">
+        <LoaderCircle
+          className="size-4 shrink-0 animate-spin motion-reduce:animate-none"
+          aria-hidden="true"
+        />
+        {cancelling
+          ? stopLabel
+          : submitting
+            ? 'Preparing release submission...'
+            : `Preparing preview for ${episodeCount} ${episodeCount === 1 ? 'episode' : 'episodes'}.`}
+      </p>
+      <p>
+        {cancelling
+          ? 'Only the browser request is stopping. The server may still finish it.'
+          : submitting
+            ? 'Revalidating source inputs before release acceptance.'
+            : 'Checking the selection and preparing an advisory preview. No release has been submitted.'}
+      </p>
+      <p
+        role="timer"
+        aria-label={submitting ? 'Submission elapsed time' : 'Preview elapsed time'}
+        aria-live="off"
+        className="tabular-nums"
+      >
+        Elapsed: {Math.floor(elapsedSeconds / 60)}m {elapsedSeconds % 60}s
+      </p>
+    </div>
+  )
+}
+
 /**
  * Dialog for selecting source episodes, previewing a curated dataset release, and submitting it
  * with an idempotency key. Selection is ordered by click sequence.
@@ -312,9 +416,16 @@ export function ReleaseDialog({
   onCloseAutoFocus,
   items,
   inventoryReady,
+  inventoryMessage = 'The full source inventory is still loading. Select all and release are disabled.',
+  inventoryFailed = false,
+  onRetryInventory,
+  onRequestDetails,
+  detailError = null,
   destinations,
   onPreview,
+  onCancelPreparation,
   onSubmit,
+  onDiscardSubmission,
   disabled = false,
 }: ReleaseDialogProps) {
   const principal = useQuery({
@@ -330,6 +441,7 @@ export function ReleaseDialog({
   const [filters, setFilters] = useState<Filters>(ANY_FILTERS)
   const [filtersExpanded, setFiltersExpanded] = useState(false)
   const [reviewSelected, setReviewSelected] = useState(false)
+  const [rowLimit, setRowLimit] = useState(ROW_PAGE_SIZE)
   const selectedOnlyRef = useRef<HTMLButtonElement>(null)
   const episodeCheckboxes = useRef(new Map<number, HTMLButtonElement>())
   const [identity, setIdentity] = useState<DraftIdentity>(createDraftIdentity)
@@ -338,6 +450,7 @@ export function ReleaseDialog({
   const [ambiguous, setAmbiguous] = useState<PendingSubmit | null>(null)
   const [previewing, setPreviewing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
 
   const itemByIndex = new Map(items.map((item) => [item.episodeIndex, item]))
   const availableRows = [...itemByIndex.values()]
@@ -347,9 +460,14 @@ export function ReleaseDialog({
     return item ? [item] : []
   })
   const orderByIndex = new Map(liveSelected.map((index, position) => [index, position + 1]))
-  const shownRows = (reviewSelected ? selectedRows : availableRows).filter((item) =>
+  const matchingRows = (reviewSelected ? selectedRows : availableRows).filter((item) =>
     matchesFilters(item, filters),
   )
+  const shownRows = matchingRows.slice(0, rowLimit)
+  const pendingSelected = liveSelected.filter((index) => itemByIndex.get(index)?.detailed !== true)
+  const detailsReady = pendingSelected.length === 0
+  const detailFilterActive = hasDetailFilter(filters)
+  const undetailedCount = availableRows.filter((item) => item.detailed !== true).length
   const shownSelectedCount = shownRows.filter((item) => orderByIndex.has(item.episodeIndex)).length
   const labelCounts = new Map<string, number>()
   for (const item of availableRows) {
@@ -378,6 +496,19 @@ export function ReleaseDialog({
     : (destinations[0] ?? '')
 
   const readiness = useEpisodeReadiness(datasetId, liveSelected, open && liveSelected.length > 0)
+
+  // Selected rows need details for preview and release; visible rows need them for detail filters.
+  const detailTargets = [
+    ...new Set([
+      ...pendingSelected,
+      ...shownRows.filter((item) => item.detailed !== true).map((item) => item.episodeIndex),
+    ]),
+  ].sort((left, right) => left - right)
+  const detailTargetKey = detailTargets.join(',')
+  useEffect(() => {
+    if (!open || !onRequestDetails || detailTargetKey === '') return
+    onRequestDetails(detailTargetKey.split(',').map(Number))
+  }, [open, onRequestDetails, detailTargetKey])
 
   const request: ReleaseRequestDraft = {
     destination,
@@ -415,15 +546,18 @@ export function ReleaseDialog({
   const actions = summary ? readList(summary, 'actions') : []
   const blocking = summary ? readList(summary, 'blocking') : []
   const warnings = summary ? readList(summary, 'warnings') : []
-  const requiresProcessingAck = actions.length > 0
   const requiresLocalDiskAck = destinationKind !== 'blob'
   const acknowledgmentsReady =
-    (!requiresProcessingAck || currentReview?.processingAcknowledged === true) &&
-    (!requiresLocalDiskAck || currentReview?.localDiskAcknowledged === true)
+    !requiresLocalDiskAck || currentReview?.localDiskAcknowledged === true
 
   const formLocked = disabled || ambiguous !== null || previewing || submitting
   const baseReady =
-    !disabled && inventoryReady && readiness.ready && liveSelected.length > 0 && destination !== ''
+    !disabled &&
+    inventoryReady &&
+    detailsReady &&
+    readiness.ready &&
+    liveSelected.length > 0 &&
+    destination !== ''
   const canPreview = !formLocked && baseReady && name.trim() !== '' && !previewing
   const canSubmit =
     !formLocked &&
@@ -438,8 +572,15 @@ export function ReleaseDialog({
     if (submitting) return 'Submitting release...'
     if (previewing) return 'Preparing preview...'
     if (disabled) return 'Release creation is unavailable.'
-    if (!inventoryReady) return 'Waiting for source inventory.'
+    if (!inventoryReady)
+      return inventoryFailed
+        ? 'Source inventory unavailable. Retry loading.'
+        : 'Waiting for source inventory.'
     if (liveSelected.length === 0) return 'No episodes selected.'
+    if (!detailsReady)
+      return detailError
+        ? 'Selected episode details unavailable. Retry loading details.'
+        : 'Loading selected episode details.'
     if (!readiness.ready)
       return `Not ready: ${readiness.reason ?? 'saved episode context is loading.'}`
     if (!destination) return 'Destination required.'
@@ -447,8 +588,6 @@ export function ReleaseDialog({
     if (!currentReview) return 'Preview required before submission.'
     if (blocking.length > 0) return 'Preview has blocking issues.'
     if (!finalized) return 'Finalization declaration required.'
-    if (requiresProcessingAck && !currentReview.processingAcknowledged)
-      return 'Processing acknowledgment required.'
     if (requiresLocalDiskAck && !currentReview.localDiskAcknowledged)
       return 'Local disk acknowledgment required.'
     return 'Ready to submit.'
@@ -463,6 +602,7 @@ export function ReleaseDialog({
     setFilters(ANY_FILTERS)
     setFiltersExpanded(false)
     setReviewSelected(false)
+    setRowLimit(ROW_PAGE_SIZE)
     setIdentity(createDraftIdentity())
     setReview(null)
     setNotice(null)
@@ -470,7 +610,10 @@ export function ReleaseDialog({
   }
 
   function handleOpenChange(next: boolean) {
-    if (!next && (ambiguous !== null || submitting)) return
+    if (!next && onCancelPreparation && !cancelling) {
+      if (previewing || submitting) setCancelling(true)
+      onCancelPreparation()
+    }
     onOpenChange(next)
   }
 
@@ -489,7 +632,7 @@ export function ReleaseDialog({
   }
 
   function updateAcknowledgment(
-    field: 'processingAcknowledged' | 'localDiskAcknowledged',
+    field: 'processingConsent' | 'localDiskAcknowledged',
     value: boolean,
   ) {
     setReview((previous) =>
@@ -508,13 +651,20 @@ export function ReleaseDialog({
         key,
         request,
         preview,
-        processingAcknowledged: false,
+        processingConsent: false,
         localDiskAcknowledged: false,
       })
     } catch (error) {
-      setNotice({ key, message: describeError(error) })
+      setNotice({
+        key,
+        message:
+          error instanceof Error && error.name === 'AbortError'
+            ? 'Preview stopped in the browser. No release was submitted.'
+            : describeError(error),
+      })
     } finally {
       setPreviewing(false)
+      setCancelling(false)
     }
   }
 
@@ -524,7 +674,7 @@ export function ReleaseDialog({
     try {
       await onSubmit(pending.request, pending.submission)
       resetDraft()
-      onOpenChange(false)
+      handleOpenChange(false)
     } catch (error) {
       if (isAmbiguousFailure(error)) {
         setAmbiguous(pending)
@@ -540,6 +690,7 @@ export function ReleaseDialog({
       }
     } finally {
       setSubmitting(false)
+      setCancelling(false)
     }
   }
 
@@ -550,7 +701,9 @@ export function ReleaseDialog({
       request: currentReview.request,
       submission: {
         previewDigest: currentReview.preview.digest,
-        processingDigest: currentReview.preview.summary.processingDigest ?? '',
+        processingDigest: currentReview.processingConsent
+          ? (currentReview.preview.summary.processingDigest ?? '')
+          : '',
         localDiskAcknowledged: requiresLocalDiskAck && currentReview.localDiskAcknowledged,
         idempotencyKey: crypto.randomUUID(),
       },
@@ -559,6 +712,11 @@ export function ReleaseDialog({
 
   function handleRetry() {
     if (ambiguous) void submitPending(ambiguous)
+  }
+
+  function handleDiscardAmbiguous() {
+    resetDraft()
+    onDiscardSubmission?.()
   }
 
   return (
@@ -809,19 +967,68 @@ export function ReleaseDialog({
                   {liveSelected.length} of {availableRows.length}
                   {!inventoryReady ? ' loaded' : ''} selected; {shownRows.length} shown;{' '}
                   {liveSelected.length - shownSelectedCount} selected outside this view.
-                  {shownRows.length === 0 && (
+                  {liveSelected.length > 0 && (
                     <span className="block">
-                      {reviewSelected
-                        ? 'No selected episodes match these filters.'
-                        : 'No episodes match these filters.'}
+                      {liveSelected.length - pendingSelected.length} of {liveSelected.length}{' '}
+                      selected episode details loaded.
                     </span>
                   )}
+                  {detailFilterActive && undetailedCount > 0 && (
+                    <span className="block">
+                      Details for {undetailedCount} episode(s) are not loaded. Filter results are
+                      incomplete.
+                    </span>
+                  )}
+                  {shownRows.length === 0 &&
+                    inventoryReady &&
+                    !(detailFilterActive && undetailedCount > 0) && (
+                      <span className="block">
+                        {reviewSelected
+                          ? 'No selected episodes match these filters.'
+                          : 'No episodes match these filters.'}
+                      </span>
+                    )}
                 </p>
 
+                {detailFilterActive && undetailedCount > 0 && onRequestDetails && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      onRequestDetails(
+                        availableRows
+                          .filter((item) => item.detailed !== true)
+                          .map((item) => item.episodeIndex),
+                      )
+                    }
+                  >
+                    <RefreshCw className="mr-2 size-4" aria-hidden="true" />
+                    Load remaining episode details
+                  </Button>
+                )}
+
                 {!inventoryReady && (
-                  <p className="text-muted-foreground text-sm">
-                    The full source inventory is still loading. Select all and release are disabled.
-                  </p>
+                  <div className="grid gap-2">
+                    <p
+                      role={inventoryFailed ? 'alert' : 'status'}
+                      className="text-muted-foreground flex items-center gap-2 text-sm"
+                    >
+                      {!inventoryFailed && (
+                        <LoaderCircle
+                          className="size-4 shrink-0 animate-spin motion-reduce:animate-none"
+                          aria-hidden="true"
+                        />
+                      )}
+                      {inventoryMessage}
+                    </p>
+                    {inventoryFailed && onRetryInventory && (
+                      <Button type="button" variant="outline" size="sm" onClick={onRetryInventory}>
+                        <RefreshCw className="mr-2 size-4" aria-hidden="true" />
+                        Retry inventory
+                      </Button>
+                    )}
+                  </div>
                 )}
 
                 <div className="overflow-hidden rounded-md border">
@@ -892,6 +1099,38 @@ export function ReleaseDialog({
                       )
                     })}
                   </ol>
+                  {matchingRows.length > shownRows.length && (
+                    <div className="text-muted-foreground flex flex-wrap items-center gap-3 border-t px-3 py-2 text-sm">
+                      <span>
+                        Showing {shownRows.length} of {matchingRows.length} matching episodes.
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRowLimit((previous) => previous + ROW_PAGE_SIZE)}
+                      >
+                        Show more
+                      </Button>
+                    </div>
+                  )}
+                  {detailError && (
+                    <div className="flex flex-wrap items-center gap-3 border-t px-3 py-2 text-sm">
+                      <span role="alert" className="text-destructive">
+                        {detailError}
+                      </span>
+                      {onRequestDetails && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onRequestDetails(detailTargets)}
+                        >
+                          Retry details
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {liveSelected.length > 0 && (
@@ -923,7 +1162,7 @@ export function ReleaseDialog({
                 <dt className="text-muted-foreground">Episodes</dt>
                 <dd>{currentReview.request.episodeIndices.length}</dd>
                 <dt className="text-muted-foreground">Reserved bytes</dt>
-                <dd>{formatBytes(currentReview.preview.reservedBytes)}</dd>
+                <dd>{formatReservedBytes(currentReview.preview.reservedBytes)}</dd>
                 {destinationKind === 'local' && (
                   <>
                     <dt className="text-muted-foreground">Backend available space</dt>
@@ -941,20 +1180,18 @@ export function ReleaseDialog({
               <SummaryList title="Warnings" items={warnings} empty="None" />
               <SummaryList title="Processing actions" items={actions} empty="None" />
 
-              {requiresProcessingAck && (
-                <div className="flex items-start gap-2">
-                  <Checkbox
-                    id="release-ack-processing"
-                    checked={currentReview.processingAcknowledged}
-                    onCheckedChange={(checked) =>
-                      updateAcknowledgment('processingAcknowledged', checked === true)
-                    }
-                  />
-                  <Label htmlFor="release-ack-processing">
-                    I acknowledge the {actions.length} processing action(s) listed above.
-                  </Label>
-                </div>
-              )}
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id="release-consent-processing"
+                  checked={currentReview.processingConsent}
+                  onCheckedChange={(checked) =>
+                    updateAcknowledgment('processingConsent', checked === true)
+                  }
+                />
+                <Label htmlFor="release-consent-processing">
+                  Allow video processing when required by this selection.
+                </Label>
+              </div>
 
               {requiresLocalDiskAck && (
                 <div className="flex items-start gap-2">
@@ -992,13 +1229,19 @@ export function ReleaseDialog({
           </Alert>
         )}
 
-        <p
-          id="release-action-status"
-          role="status"
-          className="text-muted-foreground shrink-0 text-sm"
-        >
-          {describeActionStatus()}
-        </p>
+        <div id="release-action-status" className="shrink-0">
+          {previewing || submitting ? (
+            <PreviewProgress
+              episodeCount={request.episodeIndices.length}
+              submitting={submitting}
+              cancelling={cancelling}
+            />
+          ) : (
+            <p role="status" className="text-muted-foreground text-sm">
+              {describeActionStatus()}
+            </p>
+          )}
+        </div>
         <DialogFooter
           className={
             ambiguous
@@ -1008,7 +1251,10 @@ export function ReleaseDialog({
         >
           {ambiguous ? (
             <>
-              <Button variant="outline" onClick={resetDraft} disabled={submitting}>
+              <Button variant="outline" onClick={() => handleOpenChange(false)}>
+                Close
+              </Button>
+              <Button variant="outline" onClick={handleDiscardAmbiguous} disabled={submitting}>
                 Discard and start over
               </Button>
               <Button onClick={handleRetry} disabled={submitting}>
@@ -1017,8 +1263,18 @@ export function ReleaseDialog({
             </>
           ) : (
             <>
-              <Button variant="outline" onClick={() => handleOpenChange(false)}>
-                Cancel
+              <Button
+                variant="outline"
+                onClick={() => handleOpenChange(false)}
+                disabled={cancelling}
+              >
+                {cancelling
+                  ? 'Stopping...'
+                  : previewing
+                    ? 'Stop preview'
+                    : submitting
+                      ? 'Detach from submission'
+                      : 'Cancel'}
               </Button>
               <Button
                 variant={currentReview ? 'outline' : 'default'}
@@ -1027,6 +1283,12 @@ export function ReleaseDialog({
                 onClick={() => void handlePreview()}
                 disabled={!canPreview}
               >
+                {previewing && (
+                  <LoaderCircle
+                    className="mr-2 size-4 shrink-0 animate-spin motion-reduce:animate-none"
+                    aria-hidden="true"
+                  />
+                )}
                 <span className="sm:hidden">{previewing ? 'Previewing...' : 'Preview'}</span>
                 <span className="hidden sm:inline">
                   {previewing ? 'Previewing...' : 'Preview release'}

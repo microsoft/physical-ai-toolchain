@@ -2,7 +2,7 @@
 
 Azure SDK types are imported inside functions, so importing this module needs no
 cloud package, credential, or configuration. Copies are create-only, conditioned
-on the source revision, and admitted only after independent content verification.
+on the source revision, and admitted using explicit storage-side copy evidence.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from physical_ai_curation.release.models import (
     REPORT_PATH,
     ReleaseResult,
     SourceObject,
+    SourceObjectRecord,
 )
 from physical_ai_curation.release.publication import (
     PublicationAttempt,
@@ -32,7 +33,7 @@ from physical_ai_curation.release.publication import (
     ownership_path,
     parse_ownership,
 )
-from physical_ai_curation.release.store import CHUNK_BYTES, ObjectStat
+from physical_ai_curation.release.store import CHUNK_BYTES, ObjectStat, blob_revision, blob_source_identity
 from physical_ai_curation.release.verification import (
     CandidateVerification,
     build_marker,
@@ -45,7 +46,10 @@ OWNER_PACKAGE = "curation_package"
 OWNER_ATTEMPT = "curation_attempt"
 OWNER_OPERATION = "curation_operation"
 OWNER_SHA256 = "curation_sha256"
+OWNER_EFFECT = "curation_effect_digest"
 OWNER_LENGTH = "curation_length"
+OWNER_SOURCE_REVISION = "curation_source_revision"
+OWNER_SOURCE_IDENTITY = "curation_source_identity"
 
 _BEARER = re.compile(r"Bearer \S+")
 
@@ -97,20 +101,50 @@ def _operation_id(attempt: PublicationAttempt, path: str, length: int, digest: s
         "attempt": attempt.attempt_id,
         "path": path,
         "length": length,
-        "sha256": digest,
+        "effect_digest": digest,
         "source_etag": source_etag,
     }
     return sha256_hex(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode())
 
 
-def _ownership(attempt: PublicationAttempt, length: int, digest: str, operation: str) -> dict[str, str]:
-    return {
+def source_effect_digest(source: SourceObjectRecord) -> str:
+    """Return the journaled identity for a source.
+
+    Content-bound sources use their byte SHA-256. Revision-bound sources use a fingerprint of
+    the storage revision, which is never presented as a content digest.
+    """
+    if isinstance(source, SourceObject):
+        return source.sha256
+    return sha256_hex(
+        canonical_json_bytes(
+            {"assurance": source.assurance, "revision": source.revision, "storage_identity": source.storage_identity}
+        )
+    )
+
+
+def _ownership(
+    attempt: PublicationAttempt,
+    length: int,
+    digest: str,
+    operation: str,
+    *,
+    source_revision: str | None = None,
+    source_identity: str | None = None,
+) -> dict[str, str]:
+    metadata = {
         OWNER_PACKAGE: attempt.package_id,
         OWNER_ATTEMPT: attempt.attempt_id,
         OWNER_OPERATION: operation,
-        OWNER_SHA256: digest,
+        OWNER_EFFECT: digest,
         OWNER_LENGTH: str(length),
     }
+    if source_revision is not None:
+        metadata[OWNER_SOURCE_REVISION] = source_revision
+        if source_identity is not None:
+            metadata[OWNER_SOURCE_IDENTITY] = source_identity
+    else:
+        metadata[OWNER_SHA256] = digest
+    return metadata
 
 
 def _is_attempt_owned(metadata: dict[str, str], attempt: PublicationAttempt) -> bool:
@@ -140,13 +174,43 @@ def _verified_stream(chunks: Iterable[bytes], length: int, sha256: str) -> Itera
         yield pending
 
 
-def _content_matches(store: BlobReleaseStore, path: str, length: int, sha256: str) -> bool:
-    digest = hashlib.sha256()
-    total = 0
-    for chunk in store.iter_bytes(path, chunk_size=CHUNK_BYTES):
-        total += len(chunk)
-        digest.update(chunk)
-    return total == length and digest.hexdigest() == sha256
+def _copy_operation_digest(properties: Any) -> str | None:
+    """Bind a listed destination to its ownership operation and server copy ID without reading payload."""
+    metadata = getattr(properties, "metadata", None) or {}
+    operation = metadata.get(OWNER_OPERATION)
+    if not all(
+        metadata.get(key) for key in (OWNER_OPERATION, OWNER_PACKAGE, OWNER_ATTEMPT, OWNER_LENGTH, OWNER_EFFECT)
+    ):
+        return None
+    identity = {
+        "copy_id": _copy_id(properties),
+        "operation": operation,
+        "package": metadata.get(OWNER_PACKAGE),
+        "attempt": metadata.get(OWNER_ATTEMPT),
+        "length": metadata.get(OWNER_LENGTH),
+        "sha256": metadata.get(OWNER_SHA256),
+        "effect_digest": metadata.get(OWNER_EFFECT),
+    }
+    if OWNER_SOURCE_REVISION in metadata:
+        identity["source_revision"] = metadata[OWNER_SOURCE_REVISION]
+        identity["source_identity"] = metadata.get(OWNER_SOURCE_IDENTITY)
+    return sha256_hex(canonical_json_bytes(identity))
+
+
+def _copy_evidence_matches(properties: Any, source: SourceObjectRecord) -> bool:
+    """Accept a completed copy on revision-bound properties; payload bytes are not re-read."""
+    metadata = properties.metadata
+    expected_revision = None if isinstance(source, SourceObject) else source.revision
+    return (
+        properties.size == source.length
+        and metadata.get(OWNER_LENGTH) == str(source.length)
+        and metadata.get(OWNER_EFFECT) == source_effect_digest(source)
+        and metadata.get(OWNER_SHA256) == (source.sha256 if isinstance(source, SourceObject) else None)
+        and metadata.get(OWNER_SOURCE_REVISION) == expected_revision
+        and metadata.get(OWNER_SOURCE_IDENTITY)
+        == (None if isinstance(source, SourceObject) else source.storage_identity)
+        and _copy_id(properties) is not None
+    )
 
 
 class BlobReleaseStore:
@@ -159,15 +223,27 @@ class BlobReleaseStore:
     def list_objects(self) -> list[ObjectStat]:
         """List the closed object set, refusing incomplete copies rather than hiding them."""
         objects = []
-        for item in self.container.list_blobs(name_starts_with=self.root, include=["copy"]):
+        for item in self.container.list_blobs(name_starts_with=self.root, include=["copy", "metadata"]):
             if not item.name.startswith(self.root):
                 raise ReleaseVerificationError("listing escaped the attempt root")
             if _copy_status(item) not in (None, "success"):
                 raise ReleaseVerificationError("release object copy is not complete")
-            objects.append(ObjectStat(path=normalize_release_path(item.name[len(self.root) :]), length=item.size))
+            metadata = getattr(item, "metadata", None) or {}
+            uploaded = _copy_id(item) is None and OWNER_OPERATION in metadata and OWNER_SOURCE_REVISION not in metadata
+            objects.append(
+                ObjectStat(
+                    path=normalize_release_path(item.name[len(self.root) :]),
+                    length=item.size,
+                    revision=blob_revision(item.etag, getattr(item, "version_id", None)),
+                    copy_operation_sha256=_copy_operation_digest(item),
+                    source_revision=metadata.get(OWNER_SOURCE_REVISION),
+                    uploaded_sha256=metadata.get(OWNER_SHA256) if uploaded else None,
+                    source_identity=metadata.get(OWNER_SOURCE_IDENTITY),
+                )
+            )
         return objects
 
-    def iter_bytes(self, path: str, *, chunk_size: int) -> Iterator[bytes]:
+    def iter_bytes(self, path: str, *, chunk_size: int, expected_revision: str | None = None) -> Iterator[bytes]:
         path = normalize_release_path(path)
         if not 0 < chunk_size <= CHUNK_BYTES:
             raise ReleaseVerificationError("invalid streaming buffer size")
@@ -175,6 +251,11 @@ class BlobReleaseStore:
         properties = _properties(blob)
         if properties is None:
             raise ReleaseVerificationError("release object is missing")
+        if (
+            expected_revision is not None
+            and blob_revision(properties.etag, getattr(properties, "version_id", None)) != expected_revision
+        ):
+            raise ReleaseVerificationError("release object revision changed after admission")
         if _copy_status(properties) not in (None, "success"):
             raise ReleaseVerificationError("release object copy is not complete")
         download = blob.download_blob(
@@ -189,9 +270,9 @@ class BlobReleaseStore:
         if total != properties.size:
             raise ReleaseVerificationError("release object changed during read")
 
-    def read_control_bytes(self, path: str, *, max_bytes: int) -> bytes:
+    def read_control_bytes(self, path: str, *, max_bytes: int, expected_revision: str | None = None) -> bytes:
         data = bytearray()
-        for chunk in self.iter_bytes(path, chunk_size=CHUNK_BYTES):
+        for chunk in self.iter_bytes(path, chunk_size=CHUNK_BYTES, expected_revision=expected_revision):
             data.extend(chunk)
             if len(data) > max_bytes:
                 raise ReleaseVerificationError("control artifact exceeds bound")
@@ -260,20 +341,22 @@ class BlobPublisher:
             if existing is not None:
                 if not replay or existing.size != length or not _is_owned(existing.metadata, self.attempt, operation):
                     raise ReleaseVerificationError("output collision or ownership conflict")
-                if not _content_matches(self.store, path, length, sha256):
-                    raise ReleaseVerificationError("owned output content conflict")
                 return
             self._create(blob, path, _verified_stream(chunks, length, sha256), length, sha256, operation)
 
     def copy(
-        self, source_container: Any, source: SourceObject, source_etag: str, *, source_path: str | None = None
+        self, source_container: Any, source: SourceObjectRecord, source_etag: str, *, source_path: str | None = None
     ) -> CopyProgress:
-        """Server-side copy conditioned on the source revision, then independently verified."""
+        """Copy against the source revision and verify storage-side completion evidence."""
         path = normalize_release_path(source.path)
         if path in CONTROL_PATHS:
             raise ReleaseVerificationError("control artifacts are not copied")
         original = normalize_release_path(source_path) if source_path is not None else path
         source_url = self._source_url(source_container, original)
+        if not isinstance(source, SourceObject) and source.storage_identity != blob_source_identity(
+            source_container.url, original
+        ):
+            raise ReleaseVerificationError("source identity changed")
         source_properties = _properties(source_container.get_blob_client(original))
         if (
             source_properties is None
@@ -287,10 +370,11 @@ class BlobPublisher:
             != source.revision
         ):
             raise ReleaseVerificationError("source revision changed or is missing")
-        operation = _operation_id(self.attempt, path, source.length, source.sha256, source_etag)
+        digest = source_effect_digest(source)
+        operation = _operation_id(self.attempt, path, source.length, digest, source_etag)
         metadata = self._destination_metadata(source_properties.metadata, source, operation)
         try:
-            with self.control.effect(self.attempt, path, source.length, source.sha256) as replay:
+            with self.control.effect(self.attempt, path, source.length, digest) as replay:
                 self._claim_root()
                 if self._marker_exists():
                     raise ReleaseVerificationError("published package is immutable")
@@ -306,14 +390,17 @@ class BlobPublisher:
         except _CopyPending as pending:
             return pending.progress
 
-    def reconcile_copy(self, source: SourceObject, source_etag: str, *, cancel: bool = False) -> CopyProgress | None:
+    def reconcile_copy(
+        self, source: SourceObjectRecord, source_etag: str, *, cancel: bool = False
+    ) -> CopyProgress | None:
         """Observe an exact journaled copy; durably record its ID before cancellation effects."""
         path = normalize_release_path(source.path)
         if path in CONTROL_PATHS or self._marker_exists():
             raise ReleaseVerificationError("published or control objects are not reconciled as payload")
         blob = self.container.get_blob_client(self.root + path)
         properties = _properties(blob)
-        operation = _operation_id(self.attempt, path, source.length, source.sha256, source_etag)
+        digest = source_effect_digest(source)
+        operation = _operation_id(self.attempt, path, source.length, digest, source_etag)
         if properties is not None and not _is_owned(properties.metadata, self.attempt, operation):
             raise ReleaseVerificationError("output collision or ownership conflict")
         copy_id = _copy_id(properties) if properties is not None else None
@@ -321,7 +408,7 @@ class BlobPublisher:
             self.attempt,
             path,
             source.length,
-            source.sha256,
+            digest,
             copy_id=copy_id,
             cancel=cancel,
         ) as observed:
@@ -357,7 +444,7 @@ class BlobPublisher:
             raise ReleaseVerificationError("copy id does not match the pending copy")
         if not _is_attempt_owned(properties.metadata, self.attempt):
             raise ReleaseVerificationError("output collision or ownership conflict")
-        digest = properties.metadata.get(OWNER_SHA256)
+        digest = properties.metadata.get(OWNER_EFFECT)
         length_text = properties.metadata.get(OWNER_LENGTH, "")
         if digest is None or not length_text.isdigit():
             raise ReleaseVerificationError("owned copy identity is incomplete")
@@ -455,11 +542,22 @@ class BlobPublisher:
         return source_url
 
     def _destination_metadata(
-        self, source_metadata: dict[str, str], source: SourceObject, operation: str
+        self, source_metadata: dict[str, str], source: SourceObjectRecord, operation: str
     ) -> dict[str, str]:
         if any(key.casefold().startswith(OWNER_PREFIX) for key in source_metadata):
             raise ReleaseVerificationError("source metadata uses reserved ownership keys")
-        return {**source_metadata, **_ownership(self.attempt, source.length, source.sha256, operation)}
+        source_revision = None if isinstance(source, SourceObject) else source.revision
+        return {
+            **source_metadata,
+            **_ownership(
+                self.attempt,
+                source.length,
+                source_effect_digest(source),
+                operation,
+                source_revision=source_revision,
+                source_identity=None if isinstance(source, SourceObject) else source.storage_identity,
+            ),
+        }
 
     def _create(self, blob: Any, path: str, stream: Iterator[bytes], length: int, sha256: str, operation: str) -> None:
         errors = _azure_errors()
@@ -476,8 +574,8 @@ class BlobPublisher:
             properties = _properties(blob)
             if (
                 properties is not None
+                and properties.size == length
                 and _is_owned(properties.metadata, self.attempt, operation)
-                and _content_matches(self.store, path, length, sha256)
             ):
                 return
             raise ReleaseVerificationError("write outcome unknown; retry after inspection") from error
@@ -497,7 +595,7 @@ class BlobPublisher:
         except _azure_errors().ResourceExistsError:
             return
 
-    def _settle(self, blob: Any, path: str, source: SourceObject, operation: str) -> CopyProgress:
+    def _settle(self, blob: Any, path: str, source: SourceObjectRecord, operation: str) -> CopyProgress:
         properties = _properties(blob)
         if properties is None or not _is_owned(properties.metadata, self.attempt, operation):
             raise ReleaseVerificationError("output collision or ownership conflict")
@@ -506,8 +604,8 @@ class BlobPublisher:
             return CopyProgress("pending", _copy_id(properties))
         if status != "success":
             raise ReleaseVerificationError("copy did not complete")
-        if not _content_matches(self.store, path, source.length, source.sha256):
-            raise ReleaseVerificationError("copied content conflict")
+        if not _copy_evidence_matches(properties, source):
+            raise ReleaseVerificationError(f"copy evidence conflict: {path}")
         return CopyProgress("complete", _copy_id(properties))
 
     def _delete_owned_residue(self, blob: Any, copy_id: str, operation: str) -> None:

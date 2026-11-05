@@ -6,8 +6,9 @@ import argparse
 import asyncio
 import json
 import os
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +27,14 @@ from physical_ai_curation.release.inputs import (
     ReleaseSelection,
     revalidate_release_inputs,
 )
-from physical_ai_curation.release.jobs import AuthorityError, ReleaseJobStore, ReleaseRuntimeSettings
+from physical_ai_curation.release.jobs import (
+    AuthorityError,
+    CancellationError,
+    ReleaseJobError,
+    ReleaseJobStore,
+    ReleaseRuntimeSettings,
+    has_recovery_obligation,
+)
 from physical_ai_curation.release.publication import PublicationAttempt
 from physical_ai_curation.release.record_storage import BlobLocation
 from physical_ai_curation.saved_input import SavedInputReader
@@ -42,8 +50,51 @@ class ConfiguredExecution:
     source: LocalReleaseSource | BlobReleaseSource | None
     reader: SavedInputReader
     selection: ReleaseSelection
-    context: FreezeContext
+    context: FreezeContext | None
     destination: Path | BlobLocation
+    capture: Callable[[Callable[[], None]], Awaitable[tuple[bytes, bytes, int, ConfiguredExecution]]] | None = None
+
+
+class _LifecycleMonitor:
+    """Renew a claimed lease from a thread while blocking controller phases hold the event loop.
+
+    Cancellation and authority loss are recorded as the first stop reason; later signals are ignored.
+    """
+
+    def __init__(self, store: ReleaseJobStore, job_id: str, fence: int) -> None:
+        self._store = store
+        self._job_id = job_id
+        self._fence = fence
+        self._interval = min(5.0, store.settings.lease_seconds / 4)
+        self._stop = threading.Event()
+        self._reason: Exception | None = None
+        self._thread = threading.Thread(target=self._run, name=f"release-lease-{job_id}", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def request_stop(self, error: Exception) -> None:
+        if self._reason is None:
+            self._reason = error
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread.is_alive() and threading.current_thread() is not self._thread:
+            self._thread.join()
+
+    def check(self) -> None:
+        if self._reason is not None:
+            raise self._reason
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                cancelled = self._store.heartbeat(self._job_id, self._fence)
+            except Exception as error:
+                self.request_stop(error)
+                return
+            if cancelled:
+                self.request_stop(CancellationError("cancellation requested"))
 
 
 async def execute_job(
@@ -76,7 +127,9 @@ async def execute_job(
     from physical_ai_curation.release.native_worker import restore_inputs
     from physical_ai_curation.release.verification import verify_published
 
-    record = store.storage.snapshot()[job_id]
+    record = store.storage.snapshot().get(job_id)
+    if record is None:
+        return None
     package_id, attempt_id = record["attempt_key"].split("/", 1)
     attempt = PublicationAttempt(package_id, attempt_id, record["attempt_prefix"])
     destination = configured.destination
@@ -97,6 +150,9 @@ async def execute_job(
             return verify_published(publisher.store, record["commit_digest"])
 
     fence = store.claim(job_id, worker_id)
+    record = store.storage.snapshot()[job_id]
+    monitor = _LifecycleMonitor(store, job_id, fence)
+    monitor.start()
     started = time.monotonic()
     operation = uuid4().hex
     try:
@@ -110,12 +166,16 @@ async def execute_job(
                 with _publication_runtime(destination, attempt, store, job_id, fence, None) as publisher:
                     assert isinstance(publisher, SupervisedBlobPublisher)
                     publisher.cleanup_cancelled()
+                monitor.stop()
+                store.purge_cancelled(job_id, fence)
             else:
                 store.reconcile_local_outputs(job_id, fence)
                 removed = store.cleanup_owned_outputs(job_id, fence, destination / attempt.prefix)
                 store.settle_cancellation(job_id, fence, output_removed=removed)
                 if not removed:
                     raise ReleaseInputError("owned output cleanup remains unresolved")
+                monitor.stop()
+                store.purge_cancelled(job_id, fence)
             return None
         if record["state"] in ("sealed", "committing"):
             digest = record["commit_digest"] or record["effects"][MANIFEST_PATH]["digest"]
@@ -123,9 +183,25 @@ async def execute_job(
                 return publisher.publish(digest)
         raw = store.frozen_request(job_id)
         payload = parse_strict_json(raw)
+        if payload.get("schema_version") == "curated-release-intent/v1":
+            if configured.capture is None:
+                raise ReleaseInputError("release intent requires configured execution capture")
+            captured, binding, reservation, execution = await configured.capture(monitor.check)
+            monitor.check()
+            store.capture_execution(
+                job_id,
+                fence,
+                intent_request=raw,
+                frozen_request=captured,
+                execution_binding=binding,
+                reserved_bytes=reservation,
+            )
+            configured = execution
+            raw = store.frozen_request(job_id)
+            payload = parse_strict_json(raw)
         if payload.get("schema_version") != "curated-release-generation/v1":
             raise ReleaseInputError("unsupported durable generation request")
-        if configured.source is None:
+        if configured.source is None or configured.context is None:
             raise ReleaseInputError("generation requires the accepted source")
         frozen = TypeAdapter(FrozenReleaseInputs).validate_python(payload["frozen"])
         await revalidate_release_inputs(
@@ -134,7 +210,9 @@ async def execute_job(
             configured.reader,
             configured.selection,
             configured.context,
+            checkpoint=monitor.check,
         )
+        monitor.check()
         import pyarrow as pa
 
         source_root = (
@@ -165,8 +243,20 @@ async def execute_job(
             camera_statistics=inputs.camera_statistics,
         )
         validate_processing_confirmation(prepared.plan, confirmed_digest=inputs.confirmed_digest)
+        if isinstance(destination, BlobLocation) and isinstance(configured.source, BlobReleaseSource):
+            identities = {item.path: item for item in frozen.content.source_objects}
+            copies = {}
+            for item in prepared.plan.objects:
+                if item.action == "copy":
+                    identity = identities[item.source_path]
+                    bound = configured.source.binding(identity)
+                    copies[item.output_path] = (identity.model_copy(update={"path": item.output_path}), bound.etag)
+            with _publication_runtime(destination, attempt, store, job_id, fence, None) as publisher:
+                assert isinstance(publisher, SupervisedBlobPublisher)
+                publisher.recover_outputs(copies)
         store.validate_execution_binding(job_id, fence, destination, attempt, route=record["route"])
         inputs = restore_inputs(store, job_id, fence, frozen, prepared, inputs)
+        monitor.check()
         result = await run_release_generation(
             store=store,
             job_id=job_id,
@@ -179,15 +269,17 @@ async def execute_job(
             selection=configured.selection,
             context=configured.context,
             inputs=inputs,
+            checkpoint=monitor.check,
         )
-        store.record_diagnostic(
-            job_id,
-            fence,
-            operation,
-            "validation",
-            "succeeded",
-            duration_ms=min(86_400_000, int((time.monotonic() - started) * 1000)),
-        )
+        with suppress(AuthorityError):
+            store.record_diagnostic(
+                job_id,
+                fence,
+                operation,
+                "validation",
+                "succeeded",
+                duration_ms=min(86_400_000, int((time.monotonic() - started) * 1000)),
+            )
         return result
     except Exception:
         with suppress(AuthorityError):
@@ -200,6 +292,26 @@ async def execute_job(
                 duration_ms=min(86_400_000, int((time.monotonic() - started) * 1000)),
             )
         raise
+    finally:
+        monitor.stop()
+
+
+async def _dispatch(
+    store: ReleaseJobStore,
+    resolve: Callable[[str, bytes], ConfiguredExecution],
+    job_id: str,
+    worker_id: str,
+) -> str | None:
+    """Run one job and return a fixed failure category, or None when the worker settled it."""
+    try:
+        configured = resolve(job_id, store.frozen_request(job_id))
+    except Exception:
+        return "resolver_failed"
+    try:
+        await execute_job(store, job_id, configured, worker_id=worker_id)
+    except Exception:
+        return "worker_failed"
+    return None
 
 
 async def run_queue(
@@ -209,19 +321,39 @@ async def run_queue(
     worker_id: str = "release-worker",
     limit: int = 1,
 ) -> tuple[dict[str, str], ...]:
-    """Perform one bounded queue pass with a trusted resolver; never busy-poll or redispatch uncertainty."""
+    """Perform one bounded queue pass with a trusted resolver; never busy-poll or redispatch uncertainty.
+
+    Only settled dispatches count toward ``limit``. Failures are recorded with exponential backoff, so a
+    permanently failing job neither starves healthy jobs nor is retried until its backoff elapses.
+    """
     if type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError("worker queue limit must be between 1 and 100")
-    outcomes = []
-    for job_id, row in sorted(store.storage.snapshot().items()):
-        if row["state"] in ("committed", "cancelled") or (row["lease_expires"] or 0) > time.time():
+    outcomes: list[dict[str, str]] = []
+    settled = 0
+    failed = 0
+    candidates = sorted(
+        store.storage.snapshot().items(), key=lambda item: (item[1].get("retry_not_before") or 0, item[0])
+    )
+    for job_id, row in candidates:
+        if row["state"] in ("committed", "cancelled"):
             continue
-        try:
-            await execute_job(store, job_id, resolve(job_id, store.frozen_request(job_id)), worker_id=worker_id)
+        if (row["lease_expires"] or 0) > store.now():
+            continue
+        if not has_recovery_obligation(row) and (row["retry_not_before"] or 0) > store.now():
+            continue
+        observed_fence = row["fence"]
+        category = await _dispatch(store, resolve, job_id, worker_id)
+        if category is None:
             outcomes.append({"job_id": job_id, "status": "settled"})
-        except Exception:
-            outcomes.append({"job_id": job_id, "status": "recovery_required"})
-        if len(outcomes) >= limit:
+            settled += 1
+            if settled >= limit:
+                break
+            continue
+        with suppress(ReleaseJobError):
+            store.record_dispatch_failure(job_id, category, expected_fence=observed_fence, worker_id=worker_id)
+        outcomes.append({"job_id": job_id, "status": "recovery_required"})
+        failed += 1
+        if failed >= store.settings.max_failed_dispatches:
             break
     return tuple(outcomes)
 

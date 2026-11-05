@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 from uuid import uuid4
@@ -12,8 +12,16 @@ import pyarrow.parquet as pq
 from pydantic import TypeAdapter
 
 from physical_ai_curation.release.blob_worker import SupervisedBlobPublisher
-from physical_ai_curation.release.canonical import canonical_json_bytes, parse_strict_json, serialize_model, sha256_hex
-from physical_ai_curation.release.composition import NativeGenerationPlan, prepare_saved_generation
+from physical_ai_curation.release.canonical import (
+    canonical_json_bytes,
+    parse_strict_json,
+    serialize_model,
+    sha256_hex,
+)
+from physical_ai_curation.release.composition import (
+    NativeGenerationPlan,
+    prepare_saved_generation,
+)
 from physical_ai_curation.release.encoding import EncodeOptions, VideoOutput
 from physical_ai_curation.release.execution import encode_planned_object
 from physical_ai_curation.release.inputs import (
@@ -52,11 +60,23 @@ from physical_ai_curation.release.models import (
     ReleasePreview,
     ReleaseResult,
     SourceObject,
+    SourceObjectRecord,
+    StorageRevisionEntry,
+    UploadedContentEntry,
     VersionIdentity,
 )
 from physical_ai_curation.release.projections import materialize_saved_projections
 from physical_ai_curation.release.publication import PublicationAttempt
+from physical_ai_curation.release.range_reader import RangeReadError, read_selected_rows
 from physical_ai_curation.release.record_storage import BlobLocation
+from physical_ai_curation.release.source_format import (
+    V21_EPISODE_STATS_PATH,
+    control_paths,
+    object_path,
+    source_version,
+    v21_episode_rows,
+    v21_tasks_table,
+)
 from physical_ai_curation.release.store import LocalReleaseStore, ReleaseStore
 from physical_ai_curation.release.verification import verify_candidate, verify_published
 from physical_ai_curation.saved_input import SavedInputReader
@@ -93,6 +113,102 @@ class GenerationInputs:
     native_task_identity: str | None = None
 
 
+def _planning_metadata(
+    source: LocalReleaseSource | BlobReleaseSource,
+    objects: tuple[SourceObjectRecord, ...],
+    metadata_budget: int,
+    checkpoint: Callable[[], None] | None,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    if type(metadata_budget) is not int or metadata_budget <= 0:
+        raise ReleaseInputError("native metadata budget must be positive")
+    identities = {item.path: item for item in objects}
+    remaining = (
+        min(metadata_budget, source.metadata_max_bytes) if isinstance(source, BlobReleaseSource) else metadata_budget
+    )
+    row_limit = source.metadata_max_rows if isinstance(source, BlobReleaseSource) else 10000
+
+    def read(path: str) -> bytes:
+        nonlocal remaining
+        _checkpoint(checkpoint)
+        identity = identities.get(path)
+        if identity is None or identity.length > remaining:
+            raise ReleaseInputError("native planning metadata exceeds its budget or is missing")
+        chunks = (
+            source.iter_bytes(identity, chunk_size=CHUNK_BYTES, checkpoint=checkpoint)
+            if isinstance(source, BlobReleaseSource)
+            else LocalReleaseStore(source.root).iter_bytes(path, chunk_size=CHUNK_BYTES)
+        )
+        content = bytearray()
+        for chunk in chunks:
+            _checkpoint(checkpoint)
+            if len(content) + len(chunk) > identity.length:
+                raise ReleaseInputError("native planning metadata changed")
+            content.extend(chunk)
+        remaining -= len(content)
+        if len(content) != identity.length or (
+            isinstance(identity, SourceObject) and sha256_hex(bytes(content)) != identity.sha256
+        ):
+            raise ReleaseInputError("native planning metadata changed")
+        return bytes(content)
+
+    info = parse_strict_json(read(INFO_PATH))
+    if not isinstance(info, dict):
+        raise ReleaseInputError("native dataset info must be an object")
+    if source_version(info) == "v2.1":
+        rows = v21_episode_rows(info, read, max_rows=row_limit, has_statistics=V21_EPISODE_STATS_PATH in identities)
+        if len(rows) > row_limit:
+            raise ReleaseInputError("native planning metadata exceeds its row budget")
+        return info, rows
+    rows = []
+    for path in sorted(identities):
+        _checkpoint(checkpoint)
+        if not path.startswith("meta/episodes/") or not path.endswith(".parquet"):
+            continue
+        parquet = pq.ParquetFile(pa.BufferReader(read(path)))
+        if parquet.metadata.num_rows > row_limit - len(rows):
+            raise ReleaseInputError("native planning metadata exceeds its row budget")
+        decoded_bytes = sum(
+            parquet.metadata.row_group(index).total_byte_size for index in range(parquet.metadata.num_row_groups)
+        )
+        if decoded_bytes * 3 > remaining:
+            raise ReleaseInputError("native planning metadata exceeds its decoded byte budget")
+        table = parquet.read()
+        if table.nbytes * 3 > remaining:
+            raise ReleaseInputError("native planning tables exceed their budget")
+        remaining -= table.nbytes * 3
+        rows.extend(table.to_pylist())
+    return info, rows
+
+
+def select_blob_dependencies(
+    source: BlobReleaseSource,
+    episode_indices: tuple[int, ...],
+    *,
+    metadata_budget: int = 16 * 1024**2,
+    checkpoint: Callable[[], None] | None = None,
+) -> BlobReleaseSource:
+    """Discover selected shared objects from bounded metadata, without payload listing or reads."""
+    metadata = source.metadata_inventory(checkpoint)
+    info, rows = _planning_metadata(source, metadata, metadata_budget, checkpoint)
+    by_episode = {row["episode_index"]: row for row in rows}
+    if len(by_episode) != len(rows) or not episode_indices or any(index not in by_episode for index in episode_indices):
+        raise ReleaseInputError("native selected episode metadata is missing or ambiguous")
+    paths = {INFO_PATH, *control_paths(info, tuple(item.path for item in metadata))}
+    prefixes = [
+        "data",
+        *(f"videos/{name}" for name, feature in info["features"].items() if feature.get("dtype") == "video"),
+    ]
+    for index in episode_indices:
+        row = by_episode[index]
+        for prefix in prefixes:
+            paths.add(object_path(info, row, prefix))
+    selected = source.scoped(sorted(paths))
+    observed = {item.path: item for item in selected.inventory(checkpoint)}
+    if any(observed[item.path] != item for item in metadata if item.path in paths):
+        raise ReleaseInputError("native planning metadata changed during selection")
+    return selected
+
+
 def plan_generation_inputs(
     source: LocalReleaseSource | BlobReleaseSource,
     frozen: FrozenReleaseInputs,
@@ -107,73 +223,27 @@ def plan_generation_inputs(
     limits: ReleaseMediaLimits | None = None,
     encode_options: EncodeOptions | None = None,
     metadata_budget: int = 16 * 1024**2,
+    checkpoint: Callable[[], None] | None = None,
 ) -> GenerationInputs:
-    """Plan from frozen v3 metadata without decoding media or reserving output.
-
-    Source/destination endpoints and budgets come from trusted configuration.
-    Returned native frame buffers are empty: use ``restore_inputs`` in a claimed
-    worker before execution. Fresh native validation still checks these derived
-    descriptors, windows and statistics against the frozen bytes.
-    """
-    if type(metadata_budget) is not int or metadata_budget <= 0:
-        raise ReleaseInputError("native metadata budget must be positive")
+    """Plan from bounded frozen metadata; only a claimed worker restores native frame buffers."""
+    info, rows = _planning_metadata(source, frozen.content.source_objects, metadata_budget, checkpoint)
     identities = {item.path: item for item in frozen.content.source_objects}
-    remaining = metadata_budget
-
-    def read(path: str) -> bytes:
-        nonlocal remaining
-        identity = identities.get(path)
-        if identity is None or identity.length > remaining:
-            raise ReleaseInputError("native planning metadata exceeds its budget or is missing")
-        chunks = (
-            source.iter_bytes(identity, chunk_size=CHUNK_BYTES)
-            if isinstance(source, BlobReleaseSource)
-            else LocalReleaseStore(source.root).iter_bytes(path, chunk_size=CHUNK_BYTES)
-        )
-        content = bytearray()
-        for chunk in chunks:
-            if len(content) + len(chunk) > identity.length:
-                raise ReleaseInputError("native planning metadata changed")
-            content.extend(chunk)
-        remaining -= len(content)
-        if len(content) != identity.length or sha256_hex(bytes(content)) != identity.sha256:
-            raise ReleaseInputError("native planning metadata changed")
-        return bytes(content)
-
-    info = parse_strict_json(read(INFO_PATH))
-    if not isinstance(info, dict) or info.get("codebase_version") != "v3.0":
-        raise ReleaseInputError("only native LeRobot v3.0 planning is supported")
     cameras = sorted(name for name, feature in info["features"].items() if feature.get("dtype") == "video")
-    rows = []
-    for path in sorted(identities):
-        if not path.startswith("meta/episodes/") or not path.endswith(".parquet"):
-            continue
-        parquet = pq.ParquetFile(pa.BufferReader(read(path)))
-        if parquet.metadata.num_rows > 10000 - len(rows):
-            raise ReleaseInputError("native planning supports at most 10000 source episodes")
-        table = parquet.read()
-        if table.nbytes * 3 > remaining:
-            raise ReleaseInputError("native planning tables exceed their budget")
-        remaining -= table.nbytes * 3
-        rows.extend(table.to_pylist())
     by_episode = {row["episode_index"]: row for row in rows}
     if len(by_episode) != len(rows):
         raise ReleaseInputError("native episode metadata is ambiguous")
     durations = {}
 
     def video_path(camera: str, row: Mapping[str, object]) -> str:
-        prefix = f"videos/{camera}"
-        chunk, file = row.get(f"{prefix}/chunk_index"), row.get(f"{prefix}/file_index")
-        if type(chunk) is not int or chunk < 0 or type(file) is not int or file < 0:
-            raise ReleaseInputError("native media index is invalid")
-        return f"{prefix}/chunk-{chunk:03d}/file-{file:03d}.mp4"
+        return object_path(info, row, f"videos/{camera}")
 
     for row in rows:
         for camera in cameras:
             path = video_path(camera, row)
             durations[path] = max(durations.get(path, 0), row[f"videos/{camera}/to_timestamp"])
     sources, summaries, windows = {}, {}, []
-    for episode in frozen.content.selected_episode_ids:
+    output_paths: dict[str, str] = {}
+    for output_index, episode in enumerate(frozen.content.selected_episode_ids):
         suffix = episode.rsplit("/episode_", 1)
         if len(suffix) != 2 or not suffix[1].isdigit():
             raise ReleaseInputError("native selected episode identity is invalid")
@@ -188,6 +258,10 @@ def plan_generation_inputs(
             identity = identities.get(path)
             if identity is None:
                 raise ReleaseInputError("native camera object is missing")
+            if info["codebase_version"] == "v2.1":
+                output_paths[path] = (
+                    f"videos/{camera}/chunk-{output_index // 1000:03d}/file-{output_index % 1000:03d}.mp4"
+                )
             windows.append(
                 MediaWindow(
                     episode,
@@ -201,7 +275,7 @@ def plan_generation_inputs(
             summary = {
                 name: row[f"stats/{camera}/{name}"]
                 for name in ("min", "max", "mean", "std", "count")
-                if f"stats/{camera}/{name}" in row
+                if row.get(f"stats/{camera}/{name}") is not None
             }
             if summary:
                 summaries[episode][camera] = summary
@@ -216,9 +290,14 @@ def plan_generation_inputs(
         tool=tool,
         source_objects=frozen.content.source_objects,
         limits=limits if limits is not None else ReleaseMediaLimits(),
+        output_paths=tuple(sorted(output_paths.items())),
     )
     prepared = prepare_saved_generation(
-        frozen.content, request, sources, encode_options=encode_options, camera_statistics=summaries
+        frozen.content,
+        request,
+        sources,
+        encode_options=encode_options,
+        camera_statistics=summaries,
     )
     return GenerationInputs(
         request=request,
@@ -230,7 +309,9 @@ def plan_generation_inputs(
         camera_statistics=summaries,
         preserved_dataset_statistics=None,
         encode_options=encode_options,
-        producer=producer,
+        producer=producer.model_copy(
+            update={"source_format": VersionIdentity(name="lerobot", version=source_version(info))}
+        ),
         confirmed_digest=prepared.plan.digest,
         scratch_bytes=scratch_bytes,
         output_bytes=output_bytes,
@@ -286,8 +367,9 @@ def _validate_native_inputs(
     identities = {item.path: item for item in frozen.content.source_objects}
     charged = 0
     verified_bytes = 0
+    metadata_rows = 0
 
-    def fetch(identity: SourceObject) -> bytes:
+    def fetch(identity: SourceObjectRecord) -> bytes:
         if local_store is not None:
             return local_store.read_control_bytes(identity.path, max_bytes=budget - charged)
         assert isinstance(source, BlobReleaseSource)
@@ -296,36 +378,86 @@ def _validate_native_inputs(
     def read(path: str) -> bytes:
         nonlocal charged, verified_bytes
         identity = identities.get(path)
-        if identity is None or identity.length > budget - charged:
+        available = budget - charged
+        if isinstance(source, BlobReleaseSource):
+            available = min(available, source.metadata_max_bytes)
+        if identity is None or identity.length > available:
             raise ReleaseInputError("condition-bound native inputs exceed the memory budget")
         content = fetch(identity)
         charged += len(content)
-        if len(content) != identity.length or sha256_hex(content) != identity.sha256:
+        if len(content) != identity.length or (
+            isinstance(identity, SourceObject) and sha256_hex(content) != identity.sha256
+        ):
             raise ReleaseInputError("condition-bound native input changed")
         verified_bytes += len(content)
         return content
 
     def table(path: str) -> pa.Table:
-        nonlocal charged
-        result = pq.read_table(pa.BufferReader(read(path)))
+        nonlocal charged, metadata_rows
+        content = read(path)
+        metadata_limit = source.metadata_max_bytes if isinstance(source, BlobReleaseSource) else budget
+        parquet = pq.ParquetFile(
+            pa.BufferReader(content),
+            thrift_string_size_limit=metadata_limit,
+            thrift_container_size_limit=metadata_limit,
+        )
+        metadata = parquet.metadata
+        metadata_rows += metadata.num_rows
+        if isinstance(source, BlobReleaseSource) and metadata_rows > source.metadata_max_rows:
+            raise ReleaseInputError("condition-bound native metadata exceeds the row budget")
+        decoded_estimate = sum(metadata.row_group(index).total_byte_size for index in range(metadata.num_row_groups))
+        if charged + decoded_estimate * 3 > budget:
+            raise ReleaseInputError("condition-bound native tables exceed the memory budget")
+        result = parquet.read()
         charged += result.nbytes * 3
         if charged > budget:
             raise ReleaseInputError("condition-bound native tables exceed the memory budget")
         return result
 
+    def data_table(path: str, episodes: set[int]) -> pa.Table:
+        nonlocal charged, verified_bytes
+        if local_store is not None:
+            return table(path)
+        assert isinstance(source, BlobReleaseSource)
+        identity = identities.get(path)
+        remaining = budget - charged
+        if identity is None or remaining <= 0:
+            raise ReleaseInputError("condition-bound native inputs exceed the memory budget")
+        try:
+            with source.range_file(identity) as file:
+                result = read_selected_rows(
+                    file,
+                    "episode_index",
+                    episodes,
+                    max_footer_bytes=min(remaining // 4, source.metadata_max_bytes),
+                    max_decoded_bytes=remaining // 4,
+                )
+        except (RangeReadError, OSError, pa.ArrowException) as exc:
+            raise ReleaseInputError("condition-bound native rows could not be range-verified") from exc
+        verified_bytes += file.transferred
+        charged += file.transferred + result.nbytes * 3
+        if charged > budget:
+            raise ReleaseInputError("condition-bound native tables exceed the memory budget")
+        return result
+
     def native_path(prefix: str, row: Mapping[str, object]) -> str:
-        chunk, file = row.get(f"{prefix}/chunk_index"), row.get(f"{prefix}/file_index")
-        if type(chunk) is not int or chunk < 0 or type(file) is not int or file < 0:
-            raise ReleaseInputError("condition-bound native object index is invalid")
-        extension = "mp4" if prefix.startswith("videos/") else "parquet"
-        return f"{prefix}/chunk-{chunk:03d}/file-{file:03d}.{extension}"
+        return object_path(info, row, prefix)
 
     info = parse_strict_json(read(INFO_PATH))
-    tasks = table(TASKS_PATH)
+    if not isinstance(info, dict):
+        raise ReleaseInputError("native dataset info must be an object")
+    legacy = source_version(info) == "v2.1"
+    row_limit = source.metadata_max_rows if isinstance(source, BlobReleaseSource) else 10000
+    tasks = v21_tasks_table(read, max_rows=row_limit) if legacy else table(TASKS_PATH)
     rows = []
-    for path in sorted(identities):
-        if path.startswith("meta/episodes/") and path.endswith(".parquet"):
-            rows.extend(table(path).to_pylist())
+    if legacy:
+        rows = v21_episode_rows(info, read, max_rows=row_limit, has_statistics=V21_EPISODE_STATS_PATH in identities)
+    else:
+        for path in sorted(identities):
+            if path.startswith("meta/episodes/") and path.endswith(".parquet"):
+                rows.extend(table(path).to_pylist())
+    if isinstance(source, BlobReleaseSource) and len(rows) > source.metadata_max_rows:
+        raise ReleaseInputError("condition-bound native metadata exceeds the row budget")
     by_episode = {row["episode_index"]: row for row in rows}
     if len(by_episode) != len(rows):
         raise ReleaseInputError("condition-bound native episode metadata is ambiguous")
@@ -340,10 +472,8 @@ def _validate_native_inputs(
         for camera in cameras:
             path = native_path(f"videos/{camera}", row)
             durations[path] = max(durations.get(path, 0), row[f"videos/{camera}/to_timestamp"])
-    expected_windows = []
-    summaries = {}
-    loaded = {}
-    selected_tables = {}
+    resolved = {}
+    wanted: dict[str, set[int]] = {}
     for episode in frozen.content.selected_episode_ids:
         descriptor = inputs.sources.get(episode)
         if descriptor is None:
@@ -357,8 +487,14 @@ def _validate_native_inputs(
         ):
             raise ReleaseInputError("source descriptor is not condition-bound to native metadata")
         path = native_path("data", row)
-        if path not in loaded:
-            loaded[path] = table(path)
+        resolved[episode] = (descriptor, row, path)
+        wanted.setdefault(path, set()).add(descriptor.original_episode_index)
+    loaded = {path: data_table(path, episodes) for path, episodes in wanted.items()}
+    expected_windows = []
+    summaries = {}
+    selected_tables = {}
+    for episode in frozen.content.selected_episode_ids:
+        descriptor, row, path = resolved[episode]
         native = loaded[path]
         indices = pa.compute.equal(native["episode_index"], descriptor.original_episode_index)
         selected = native.filter(indices)
@@ -390,7 +526,7 @@ def _validate_native_inputs(
             summary = {
                 name: row[f"stats/{camera}/{name}"]
                 for name in ("min", "max", "mean", "std", "count")
-                if f"stats/{camera}/{name}" in row
+                if row.get(f"stats/{camera}/{name}") is not None
             }
             if summary:
                 summaries[episode][camera] = summary
@@ -431,6 +567,7 @@ def _encoded_files(
     prepared: NativeGenerationPlan,
     inputs: GenerationInputs,
     source: LocalReleaseSource | BlobReleaseSource,
+    checkpoint: Callable[[], None] | None = None,
 ) -> dict[str, VideoOutput]:
     """Encode each planned transcode, write its bytes privately, and return the media results."""
     media: dict[str, VideoOutput] = {}
@@ -454,6 +591,7 @@ def _encoded_files(
             confirmed_digest=inputs.confirmed_digest,
             scratch_bytes=inputs.scratch_bytes,
             output_bytes=inputs.output_bytes,
+            checkpoint=checkpoint,
         ) as encoded:
             if isinstance(source, BlobReleaseSource):
                 effects.store.record_io(
@@ -463,7 +601,10 @@ def _encoded_files(
                     {"affected_download_bytes": encoded.source_verification_bytes},
                 )
             effects.publisher.write_from_path(
-                obj.output_path, encoded.path, length=encoded.length, sha256=encoded.sha256
+                obj.output_path,
+                encoded.path,
+                length=encoded.length,
+                sha256=encoded.sha256,
             )
             media[obj.output_path] = encoded.media
     return media
@@ -495,13 +636,45 @@ def _lineage_identity(prepared: NativeGenerationPlan) -> tuple[int, str, int]:
     return length, digest.hexdigest(), count
 
 
-def _inventory(store: ReleaseStore) -> Inventory:
+def _checkpoint(checkpoint: Callable[[], None] | None) -> None:
+    if checkpoint is not None:
+        checkpoint()
+
+
+def _inventory(store: ReleaseStore, *, checkpoint: Callable[[], None] | None = None) -> Inventory:
     entries = []
     for stat in sorted(store.list_objects(), key=lambda item: item.path):
         if stat.path in CONTROL_PATHS:
             continue
+        _checkpoint(checkpoint)
+        if stat.source_revision is not None:
+            if stat.revision is None or stat.copy_operation_sha256 is None:
+                raise ReleaseInputError("storage revision evidence unavailable")
+            entries.append(
+                StorageRevisionEntry(
+                    path=stat.path,
+                    length=stat.length,
+                    revision=stat.revision,
+                    copy_operation_sha256=stat.copy_operation_sha256,
+                )
+            )
+            continue
+        if stat.uploaded_sha256 is not None:
+            if stat.revision is None or stat.copy_operation_sha256 is None:
+                raise ReleaseInputError("upload revision evidence unavailable")
+            entries.append(
+                UploadedContentEntry(
+                    path=stat.path,
+                    length=stat.length,
+                    revision=stat.revision,
+                    sha256=stat.uploaded_sha256,
+                    operation_sha256=stat.copy_operation_sha256,
+                )
+            )
+            continue
         digest = hashlib.sha256()
         for chunk in store.iter_bytes(stat.path, chunk_size=CHUNK_BYTES):
+            _checkpoint(checkpoint)
             digest.update(chunk)
         entries.append(InventoryEntry(path=stat.path, length=stat.length, sha256=digest.hexdigest()))
     return Inventory(entries=tuple(entries))
@@ -572,12 +745,16 @@ async def run_release_generation(
     context: FreezeContext,
     inputs: GenerationInputs,
     publisher: SupervisedLocalPublisher | SupervisedBlobPublisher | None = None,
+    checkpoint: Callable[[], None] | None = None,
 ) -> ReleaseResult:
     """Publish one confirmed saved selection; every effect follows revalidation and confirmation."""
     route = "blob" if isinstance(destination, BlobLocation) else "local"
     store.validate_execution_binding(job_id, fence, destination, attempt, route=route)
     if isinstance(source, LocalReleaseSource) and isinstance(destination, Path):
-        source_root, release_root = source.root.resolve(), (destination / attempt.prefix).resolve()
+        source_root, release_root = (
+            source.root.resolve(),
+            (destination / attempt.prefix).resolve(),
+        )
         if source_root == release_root or source_root in release_root.parents or release_root in source_root.parents:
             raise ReleaseInputError("source and release destination overlap")
     elif isinstance(source, BlobReleaseSource) and isinstance(destination, BlobLocation):
@@ -601,11 +778,11 @@ async def run_release_generation(
     observed_source = (
         LocalReleaseSource(source.root, finalized=source.finalized, on_verified=verified)
         if isinstance(source, LocalReleaseSource)
-        else source
+        else source.scoped(item.path for item in expected.content.source_objects)
     )
-    frozen = await revalidate_release_inputs(expected, observed_source, reader, selection, context)
-    if isinstance(source, BlobReleaseSource):
-        source_read_bytes = sum(item.length for item in frozen.content.source_objects)
+    frozen = await revalidate_release_inputs(
+        expected, observed_source, reader, selection, context, checkpoint=checkpoint
+    )
     store.record_io(job_id, fence, uuid4().hex, {"source_verification_bytes": source_read_bytes})
     if store.frozen_request(job_id) != generation_request_bytes(frozen, inputs):
         raise ReleaseInputError("generation does not match the durably accepted frozen request")
@@ -629,8 +806,27 @@ async def run_release_generation(
 
     with _publication_runtime(destination, attempt, store, job_id, fence, publisher) as selected:
         return _publish_generation(
-            store, job_id, fence, attempt, frozen, prepared, inputs, source, selected, projections
+            store,
+            job_id,
+            fence,
+            attempt,
+            frozen,
+            prepared,
+            inputs,
+            source,
+            selected,
+            projections,
+            checkpoint,
         )
+
+
+def _generated_batch(
+    publisher: SupervisedLocalPublisher | SupervisedBlobPublisher,
+) -> AbstractContextManager[object]:
+    """Group generated blob writes for one bounded batch dispatch; local publishers write directly."""
+    if isinstance(publisher, SupervisedBlobPublisher):
+        return publisher.write_batch()
+    return nullcontext()
 
 
 def _publish_generation(
@@ -644,53 +840,86 @@ def _publish_generation(
     source: LocalReleaseSource | BlobReleaseSource,
     publisher: SupervisedLocalPublisher | SupervisedBlobPublisher,
     projections: Mapping[str, bytes],
+    checkpoint: Callable[[], None] | None = None,
 ) -> ReleaseResult:
     from physical_ai_curation.release.native_worker import native_operation
 
     effects = _Effects(publisher=publisher, store=store, job_id=job_id, fence=fence)
     source_objects = {obj.path: obj for obj in frozen.content.source_objects}
 
-    media = _encoded_files(effects, prepared, inputs, source)
-    for obj in prepared.plan.objects:
-        if obj.action == "copy":
+    media = _encoded_files(effects, prepared, inputs, source, checkpoint)
+    copies = [obj for obj in prepared.plan.objects if obj.action == "copy"]
+    if isinstance(source, BlobReleaseSource) and isinstance(publisher, SupervisedBlobPublisher):
+        blob_items = []
+        for obj in copies:
             assert obj.source_path is not None
             identity = source_objects[obj.source_path]
-            if isinstance(source, BlobReleaseSource) and isinstance(publisher, SupervisedBlobPublisher):
-                bound = source.binding(identity)
-                publisher.copy(source.container_client, identity, bound.etag, source_path=bound.name)
-            elif isinstance(source, LocalReleaseSource) and isinstance(publisher, SupervisedLocalPublisher):
-                publisher.copy(source.root, identity)
+            bound = source.binding(identity)
+            blob_items.append((identity.model_copy(update={"path": obj.output_path}), bound.etag, bound.name))
+        publisher.copy_batch(source.container_client, blob_items)
+    else:
+        for obj in copies:
+            assert obj.source_path is not None
+            identity = source_objects[obj.source_path]
+            if (
+                isinstance(source, LocalReleaseSource)
+                and isinstance(publisher, SupervisedLocalPublisher)
+                and isinstance(identity, SourceObject)
+            ):
+                publisher.copy(source.root, identity, output_path=obj.output_path)
             else:
                 raise ReleaseInputError("copy route does not match the accepted execution")
-    with native_operation(store, job_id, fence, frozen, prepared, inputs, mode="assemble", media=media) as objects:
+    with (
+        native_operation(store, job_id, fence, frozen, prepared, inputs, mode="assemble", media=media) as objects,
+        _generated_batch(publisher),
+    ):
         for path, output, length, digest in objects:
             publisher.write_from_path(path, output, length=length, sha256=digest)
 
-    frozen_payload = serialize_model(frozen.content)
-    publisher.write(FROZEN_INPUT_PATH, [frozen_payload], length=len(frozen_payload), sha256=sha256_hex(frozen_payload))
-    preview = ReleasePreview(
-        frozen_input_sha256=frozen.sha256,
-        episode_count=len(prepared.episodes),
-        warnings=prepared.plan.warnings,
-        actions=prepared.plan.to_preview_actions(),
-        capacity=CapacityEstimate(
-            estimated_object_count=len(prepared.plan.objects) + len(projections),
-            estimated_output_bytes=sum(obj.estimated_output_bytes for obj in prepared.plan.objects)
-            + sum(len(payload) for payload in projections.values()),
-        ),
-    )
-    preview_payload = serialize_model(preview)
-    publisher.write(PREVIEW_PATH, [preview_payload], length=len(preview_payload), sha256=sha256_hex(preview_payload))
-    lineage_length, lineage_digest, record_count = _lineage_identity(prepared)
-    publisher.write_lineage(LINEAGE_PATH, prepared, length=lineage_length, sha256=lineage_digest)
-    for projection_path, projection in projections.items():
-        publisher.write(projection_path, [projection], length=len(projection), sha256=sha256_hex(projection))
+    with _generated_batch(publisher):
+        frozen_payload = serialize_model(frozen.content)
+        publisher.write(
+            FROZEN_INPUT_PATH,
+            [frozen_payload],
+            length=len(frozen_payload),
+            sha256=sha256_hex(frozen_payload),
+        )
+        preview = ReleasePreview(
+            frozen_input_sha256=frozen.sha256,
+            episode_count=len(prepared.episodes),
+            warnings=prepared.plan.warnings,
+            actions=prepared.plan.to_preview_actions(),
+            capacity=CapacityEstimate(
+                estimated_object_count=len(prepared.plan.objects) + len(projections),
+                estimated_output_bytes=sum(obj.estimated_output_bytes for obj in prepared.plan.objects)
+                + sum(len(payload) for payload in projections.values()),
+            ),
+        )
+        preview_payload = serialize_model(preview)
+        publisher.write(
+            PREVIEW_PATH,
+            [preview_payload],
+            length=len(preview_payload),
+            sha256=sha256_hex(preview_payload),
+        )
+        lineage_length, lineage_digest, record_count = _lineage_identity(prepared)
+        publisher.write_lineage(LINEAGE_PATH, prepared, length=lineage_length, sha256=lineage_digest)
+        for projection_path, projection in projections.items():
+            publisher.write(
+                projection_path,
+                [projection],
+                length=len(projection),
+                sha256=sha256_hex(projection),
+            )
 
     local_store = publisher.store
-    inventory = _inventory(local_store)
+    inventory = _inventory(local_store, checkpoint=checkpoint)
     inventory_payload = serialize_model(inventory)
     publisher.write(
-        INVENTORY_PATH, [inventory_payload], length=len(inventory_payload), sha256=sha256_hex(inventory_payload)
+        INVENTORY_PATH,
+        [inventory_payload],
+        length=len(inventory_payload),
+        sha256=sha256_hex(inventory_payload),
     )
     mappings = tuple(
         ProvenanceMapping(source=obj.source_path, target=obj.output_path)
@@ -716,19 +945,33 @@ def _publish_generation(
     )
     manifest_payload = serialize_model(manifest)
     publisher.write(
-        MANIFEST_PATH, [manifest_payload], length=len(manifest_payload), sha256=sha256_hex(manifest_payload)
+        MANIFEST_PATH,
+        [manifest_payload],
+        length=len(manifest_payload),
+        sha256=sha256_hex(manifest_payload),
     )
 
-    candidate = verify_candidate(local_store, sha256_hex(manifest_payload))
+    candidate = verify_candidate(local_store, sha256_hex(manifest_payload), checkpoint=checkpoint)
     store.seal(
         job_id,
         fence,
         {
-            RECEIPT_PATH: (len(candidate.receipt_bytes), sha256_hex(candidate.receipt_bytes)),
-            REPORT_PATH: (len(candidate.report_bytes), sha256_hex(candidate.report_bytes)),
+            RECEIPT_PATH: (
+                len(candidate.receipt_bytes),
+                sha256_hex(candidate.receipt_bytes),
+            ),
+            REPORT_PATH: (
+                len(candidate.report_bytes),
+                sha256_hex(candidate.report_bytes),
+            ),
         },
     )
     publisher.publish(candidate.manifest_sha256)
-    result = verify_published(publisher.store, candidate.manifest_sha256)
-    store.record_io(job_id, fence, uuid4().hex, {"destination_verification_bytes": publisher.destination_read_bytes})
+    result = verify_published(publisher.store, candidate.manifest_sha256, checkpoint=checkpoint)
+    store.record_io(
+        job_id,
+        fence,
+        uuid4().hex,
+        {"destination_verification_bytes": publisher.destination_read_bytes},
+    )
     return result

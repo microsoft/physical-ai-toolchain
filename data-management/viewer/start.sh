@@ -309,7 +309,7 @@ start_backend() {
         cd "${BACKEND_DIR}"
         # shellcheck source=/dev/null
         source .venv/bin/activate
-        exec uvicorn src.api.main:app --log-config logging.json --log-level "${LOG_LEVEL}" --reload --host 127.0.0.1 --port "${BACKEND_PORT}" 2>&1
+        exec python -m src.api.server --log-config logging.json --log-level "${LOG_LEVEL}" --reload --host 127.0.0.1 --port "${BACKEND_PORT}" 2>&1
     ) &
     BACKEND_PID=$!
 

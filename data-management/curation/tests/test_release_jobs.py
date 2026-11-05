@@ -13,8 +13,11 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import replace
+from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -47,7 +50,14 @@ from physical_ai_curation.release.jobs import (
     ReleaseRuntimeSettings,
 )
 from physical_ai_curation.release.local_worker import SourceAssociatedLocalPublisher, SupervisedLocalPublisher
-from physical_ai_curation.release.models import MANIFEST_PATH, MARKER_PATH, RECEIPT_PATH, REPORT_PATH, SourceObject
+from physical_ai_curation.release.models import (
+    MANIFEST_PATH,
+    MARKER_PATH,
+    RECEIPT_PATH,
+    REPORT_PATH,
+    SourceObject,
+    SourceObjectRecord,
+)
 from physical_ai_curation.release.publication import (
     LocalPublisher,
     PublicationAttempt,
@@ -74,6 +84,7 @@ from physical_ai_curation.release.verification import build_marker, verify_candi
 from physical_ai_curation.release.worker import SupervisedOutcome, run_supervised
 from pytest_mock import MockerFixture
 from test_release_contracts import _manifest_for, _payload_files, _write_package
+from test_release_inputs import FakePages
 from test_release_publishers import _association_intent, _FakeBlobClient, _FakeContainer
 
 ATTEMPT = PublicationAttempt("pkg-001", "attempt-1")
@@ -85,6 +96,54 @@ OWNER = "user-a"
 CONTROLS = {RECEIPT_PATH: (10, "b" * 64), REPORT_PATH: (20, "c" * 64)}
 MEMORY = 512 * 1024**2
 SETTINGS = ReleaseRuntimeSettings(lease_seconds=30, reserve_bytes=0)
+
+
+@pytest.mark.parametrize("failure", [None, "fence", "cancel", "capacity", "effects"])
+def test_given_accepted_intent_when_captured_then_binding_is_atomic_and_fenced(
+    tmp_path: Path,
+    failure: str | None,
+) -> None:
+    store = ReleaseJobStore(tmp_path / "jobs", settings=SETTINGS, free_bytes=lambda _path: 1000)
+    intent = canonical_json_bytes({"schema_version": "curated-release-intent/v1"})
+    generated = canonical_json_bytes({"schema_version": "curated-release-generation/v1"})
+    request = JobRequest(SCOPE, OWNER, "capture-key", ATTEMPT, tmp_path / "output", intent, 1)
+    accepted = store.accept(request)
+    timestamp = store.storage.snapshot()[accepted.job_id]["events"][0]["occurred_at"]
+    created_at = store.accepted_at(accepted.job_id)
+    assert isinstance(created_at, str)
+    parsed = datetime.fromisoformat(created_at)
+    assert parsed.tzinfo == UTC
+    assert parsed.timestamp() == pytest.approx(timestamp, abs=0.001, rel=0)
+    fence = store.claim(accepted.job_id, "worker")
+    store.confirm_stopped(accepted.job_id, fence)
+    if failure == "cancel":
+        store.request_cancel(accepted.job_id, scope=SCOPE, principal=OWNER)
+    elif failure == "effects":
+        store.begin_effect(accepted.job_id, fence, ATTEMPT, "data/a.bin", 1, DIGEST)
+    arguments = dict(
+        intent_request=intent,
+        frozen_request=generated,
+        execution_binding=b"{}",
+        reserved_bytes=1001 if failure == "capacity" else 100,
+    )
+    if failure:
+        with pytest.raises((AuthorityError, CancellationError, CapacityError, EffectPending)):
+            store.capture_execution(accepted.job_id, fence + int(failure == "fence"), **arguments)
+        assert store.frozen_request(accepted.job_id) == intent
+        assert store.execution_binding(accepted.job_id) == b""
+        assert store.storage.snapshot()[accepted.job_id]["reserved_bytes"] == 1
+    else:
+        store.capture_execution(accepted.job_id, fence, **arguments)
+        reopened = ReleaseJobStore(tmp_path / "jobs", settings=SETTINGS)
+        assert reopened.accepted_at(accepted.job_id) == created_at
+        assert reopened.frozen_request(accepted.job_id) == generated
+        assert reopened.execution_binding(accepted.job_id) == b"{}"
+        assert reopened.storage.snapshot()[accepted.job_id]["reserved_bytes"] == 100
+        assert store.accept(request).replayed is True
+        with pytest.raises(AuthorityError):
+            store.capture_execution(accepted.job_id, fence, **arguments)
+
+
 CHILD_SLEEP = "import sys\nsys.stdin.read()\n"
 FILE_LIMIT = 1024 * 1024
 FAST_GRACE = 0.2
@@ -124,6 +183,237 @@ CONTROLLER_CODE = (
 )
 
 
+@pytest.mark.parametrize(
+    "read", ["get", "page", "execution_binding", "frozen_request", "source_association", "accepted_request"]
+)
+def test_given_read_only_job_operation_when_polled_then_no_write_transaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, read: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    accepted = store.accept(_request(tmp_path / "output"))
+    before = store.storage.snapshot()
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("read-only polling must not acquire write authority")
+
+    monkeypatch.setattr(store.storage, "transaction", forbidden)
+    if read == "get":
+        assert store.get(accepted.job_id, scope=SCOPE, principal=OWNER).state == "accepted"
+    elif read == "page":
+        assert store.page(scope=SCOPE, principal=OWNER).items[0].job_id == accepted.job_id
+    elif read == "accepted_request":
+        assert store.accepted_request(scope=SCOPE, principal=OWNER, idempotency_key="key-1").job_id == accepted.job_id
+    else:
+        getattr(store, read)(accepted.job_id)
+    assert store.storage.snapshot() == before
+
+
+def _batch_store(root: Path, clock: FakeClock, batch_size: int, *, free: int = 10**12) -> ReleaseJobStore:
+    settings = replace(SETTINGS, blob_batch_size=batch_size)
+    return ReleaseJobStore(root, settings=settings, clock=clock, free_bytes=lambda _path: free)
+
+
+def _batch(count: int) -> list[tuple[str, int, str]]:
+    return [(f"data/part-{index:02d}.bin", 8, DIGEST) for index in range(count)]
+
+
+def test_given_blob_batch_size_when_configured_then_only_bounded_values_load() -> None:
+    settings = ReleaseRuntimeSettings.from_environment({"CURATION_RELEASE_BLOB_BATCH_SIZE": "12"})
+    assert settings.blob_batch_size == 12
+    for value in ("0", "65", "many"):
+        with pytest.raises(ReleaseVerificationError):
+            ReleaseRuntimeSettings.from_environment({"CURATION_RELEASE_BLOB_BATCH_SIZE": value})
+
+
+def test_given_twelve_intents_when_begun_then_one_transaction_records_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _batch_store(tmp_path / "ledger", FakeClock(), 12)
+    job_id = store.accept(_request(tmp_path / "dest")).job_id
+    fence = store.claim(job_id, "worker-a")
+    batch = _batch(12)
+    calls: list[None] = []
+    original = store.storage.transaction
+
+    def counted(*args: object, **kwargs: object) -> object:
+        calls.append(None)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(store.storage, "transaction", counted)
+    assert store.begin_effects(job_id, fence, ATTEMPT, batch) == [False] * 12
+    assert len(calls) == 1
+    assert set(store._snapshot()[job_id]["effects"]) == {path for path, _, _ in batch}
+
+
+def test_given_batch_over_configured_size_when_begun_then_refused_without_records(tmp_path: Path) -> None:
+    store = _batch_store(tmp_path / "ledger", FakeClock(), 4)
+    job_id = store.accept(_request(tmp_path / "dest")).job_id
+    fence = store.claim(job_id, "worker-a")
+    before = store.storage.snapshot()
+
+    with pytest.raises(CapacityError):
+        store.begin_effects(job_id, fence, ATTEMPT, _batch(5))
+    assert store.storage.snapshot() == before
+
+
+def test_given_batch_exceeding_reserved_estimate_when_begun_then_whole_batch_refused(tmp_path: Path) -> None:
+    store = _batch_store(tmp_path / "ledger", FakeClock(), 16)
+    job_id = store.accept(_request(tmp_path / "dest", reserved=16)).job_id
+    fence = store.claim(job_id, "worker-a")
+    before = store.storage.snapshot()
+
+    with pytest.raises(CapacityError):
+        store.begin_effects(job_id, fence, ATTEMPT, _batch(3))
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize(
+    ("batch", "error"),
+    [
+        ([], ReleaseJobError),
+        ([("data/a.bin", 8, DIGEST), ("data/a.bin", 8, DIGEST)], ReleaseJobError),
+        ([("data/a.bin", 8, DIGEST), (MARKER_PATH, 8, DIGEST)], LedgerClosedError),
+    ],
+    ids=["empty", "duplicate", "marker"],
+)
+def test_given_invalid_batch_when_begun_then_refused_without_records(
+    tmp_path: Path, batch: list[tuple[str, int, str]], error: type[Exception]
+) -> None:
+    store = _batch_store(tmp_path / "ledger", FakeClock(), 16)
+    job_id = store.accept(_request(tmp_path / "dest")).job_id
+    fence = store.claim(job_id, "worker-a")
+    before = store.storage.snapshot()
+
+    with pytest.raises(error):
+        store.begin_effects(job_id, fence, ATTEMPT, batch)
+    assert store.storage.snapshot() == before
+
+
+@pytest.mark.parametrize("case", ["stale", "cancelled"])
+def test_given_stale_or_cancelled_job_when_batch_begun_then_refused_without_records(tmp_path: Path, case: str) -> None:
+    store = _batch_store(tmp_path / "ledger", FakeClock(), 16)
+    job_id = store.accept(_request(tmp_path / "dest")).job_id
+    fence = store.claim(job_id, "worker-a")
+    if case == "cancelled":
+        store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+        error: type[Exception] = CancellationError
+        call_fence = fence
+    else:
+        error = AuthorityError
+        call_fence = fence + 1
+    before = store.storage.snapshot()
+
+    with pytest.raises(error):
+        store.begin_effects(job_id, call_fence, ATTEMPT, _batch(2))
+    assert store.storage.snapshot() == before
+
+
+def test_given_conflicting_identity_in_batch_when_begun_then_no_intent_recorded(tmp_path: Path) -> None:
+    store = _batch_store(tmp_path / "ledger", FakeClock(), 16)
+    job_id = store.accept(_request(tmp_path / "dest")).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.begin_effects(job_id, fence, ATTEMPT, [("data/a.bin", 8, DIGEST)])
+    store.finish_effects(job_id, fence, ["data/a.bin"], ok=True)
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError):
+        store.begin_effects(job_id, fence, ATTEMPT, [("data/b.bin", 8, DIGEST), ("data/a.bin", 8, "d" * 64)])
+    assert store.storage.snapshot() == before
+
+
+def test_given_acknowledged_batch_when_replayed_then_only_new_items_dispatch(tmp_path: Path) -> None:
+    store = _batch_store(tmp_path / "ledger", FakeClock(), 16)
+    job_id = store.accept(_request(tmp_path / "dest")).job_id
+    fence = store.claim(job_id, "worker-a")
+    batch = _batch(2)
+    store.begin_effects(job_id, fence, ATTEMPT, batch)
+    store.finish_effects(job_id, fence, [path for path, _, _ in batch], ok=True)
+
+    assert store.begin_effects(job_id, fence, ATTEMPT, [*batch, ("data/part-02.bin", 8, DIGEST)]) == [True, True, False]
+
+
+def test_given_unknown_path_in_finish_batch_when_finished_then_no_outcome_changes(tmp_path: Path) -> None:
+    store = _batch_store(tmp_path / "ledger", FakeClock(), 16)
+    job_id = store.accept(_request(tmp_path / "dest")).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.begin_effects(job_id, fence, ATTEMPT, _batch(2))
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError):
+        store.finish_effects(job_id, fence, ["data/part-00.bin", "data/unknown.bin"], ok=True)
+    assert store.storage.snapshot() == before
+
+
+def test_given_conflicting_io_in_batch_when_recorded_then_counters_stay_unchanged(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "dest")).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.record_io(job_id, fence, "1" * 32, {"storage_copy_bytes": 5})
+    before = store.storage.snapshot()
+
+    with pytest.raises(JobConflictError):
+        store.record_ios(
+            job_id,
+            fence,
+            [("2" * 32, {"storage_copy_bytes": 7}, 1), ("1" * 32, {"storage_copy_bytes": 9}, 0)],
+        )
+    assert store.storage.snapshot() == before
+
+
+def test_given_identical_io_repeated_in_batch_when_recorded_then_counted_once(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "dest")).job_id
+    fence = store.claim(job_id, "worker-a")
+    observation = ("2" * 32, {"storage_copy_bytes": 7}, 1)
+
+    store.record_ios(job_id, fence, [observation, observation])
+    assert store._snapshot()[job_id]["io_counters"].get("storage_copy_bytes") == 7
+
+
+def test_given_effect_set_when_runtime_proof_requested_then_only_exact_set_authorized(tmp_path: Path) -> None:
+    store = _batch_store(tmp_path / "ledger", FakeClock(), 16)
+    job_id = store.accept(_request(tmp_path / "dest")).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.begin_effects(job_id, fence, ATTEMPT, _batch(2))
+    paths = ["data/part-00.bin", "data/part-01.bin"]
+
+    with pytest.raises(AuthorityError):
+        store.runtime_proof_path(job_id, fence, effect_paths=paths[:1])
+    with pytest.raises(AuthorityError):
+        store.runtime_proof_path(job_id, fence, effect_paths=[*paths, "data/extra.bin"])
+    assert store.runtime_proof_path(job_id, fence, effect_paths=paths).parent.name == job_id
+
+
+def test_given_execution_binding_when_validated_then_no_write_transaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    destination = tmp_path / "dest"
+    job_id = store.accept(_request(destination)).job_id
+    fence = store.claim(job_id, "worker-a")
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("binding validation must not acquire write authority")
+
+    monkeypatch.setattr(store.storage, "transaction", forbidden)
+    store.validate_execution_binding(job_id, fence, destination, ATTEMPT, route="local")
+    with pytest.raises(AuthorityError):
+        store.validate_execution_binding(job_id, fence, destination, ATTEMPT, route="blob")
+
+
+def test_given_blob_batch_without_registered_runtime_when_authorized_then_refused(tmp_path: Path) -> None:
+    store = _batch_store(tmp_path / "ledger", FakeClock(), 16)
+    job_id = store.accept(_blob_request(key="batch-blob")).job_id
+    fence = store.claim(job_id, "worker-a")
+    batch = _batch(2)
+    store.begin_effects(job_id, fence, ATTEMPT, batch)
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError):
+        store.authorize_blob_writers(job_id, fence, ATTEMPT, batch, destination="unbound")
+    assert store.storage.snapshot() == before
+
+
 class FakeClock:
     def __init__(self) -> None:
         self.now = 1_000.0
@@ -137,6 +427,43 @@ class FakeClock:
 
 def _store(root: Path, clock: FakeClock, *, free: int = 10**12) -> ReleaseJobStore:
     return ReleaseJobStore(root, settings=SETTINGS, clock=clock, free_bytes=lambda _path: free)
+
+
+def test_given_fresh_lease_when_heartbeats_repeat_then_only_due_renewal_writes(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _store(tmp_path / "ledger", clock)
+    job = store.accept(_request(tmp_path / "output"))
+    fence = store.claim(job.job_id, "worker")
+    with patch.object(store, "_transaction", wraps=store._transaction) as writes:
+        for _ in range(5):
+            clock.advance(1)
+            assert store.heartbeat(job.job_id, fence) is False
+        assert writes.call_count == 0
+        clock.advance(11)
+        assert store.heartbeat(job.job_id, fence) is False
+        assert writes.call_count == 1
+    store.request_cancel(job.job_id, scope=SCOPE, principal=OWNER)
+    with patch.object(store, "_transaction", wraps=store._transaction) as writes:
+        assert store.heartbeat(job.job_id, fence) is True
+        assert writes.call_count == 0
+    with pytest.raises(AuthorityError):
+        store.heartbeat(job.job_id, fence + 1)
+    clock.advance(31)
+    with pytest.raises(AuthorityError):
+        store.heartbeat(job.job_id, fence)
+
+
+def test_given_settled_cancelled_job_when_lease_expired_then_explicit_purge_is_allowed(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _store(tmp_path / "ledger", clock)
+    job = store.accept(_request(tmp_path / "output"))
+    fence = store.claim(job.job_id, "worker")
+    store.confirm_stopped(job.job_id, fence)
+    store.request_cancel(job.job_id, scope=SCOPE, principal=OWNER)
+    store.settle_cancellation(job.job_id, fence, output_removed=True)
+    clock.advance(31)
+    store.purge_cancelled(job.job_id, fence)
+    assert store.storage.snapshot() == {}
 
 
 def _request(
@@ -551,6 +878,15 @@ class _RecordBlob(_FakeBlobClient):
 
     def upload_blob(self, data: Any, overwrite: bool = False, **kwargs: Any) -> dict:
         lease = kwargs.get("lease")
+        if self.name.endswith("/coordinator.lock") and self.container.leased and lease is None:
+            from azure.core.exceptions import HttpResponseError
+
+            error = HttpResponseError(
+                "lease ID required",
+                response=SimpleNamespace(status_code=412, reason="Precondition Failed", headers={}),
+            )
+            error.error_code = "LeaseIdMissing"
+            raise error
         if lease is not None:
             lease.check()
         if kwargs.get("etag") is not None and kwargs["etag"] != self._record().etag:
@@ -603,6 +939,259 @@ def _blob_record_store(container: _RecordContainer) -> BlobRecordStorage:
         container_name="release-state",
         prefix="selected/subfolder",
     )
+
+
+@pytest.mark.parametrize("backend", ["local", "blob"])
+def test_given_job_record_when_deleted_then_reopen_preserves_other_records(tmp_path: Path, backend: str) -> None:
+    container = _RecordContainer()
+    storage = LocalRecordStorage(tmp_path) if backend == "local" else _blob_record_store(container)
+    keys = ["a" * 32, "b" * 32]
+    for key in keys:
+        with storage.transaction() as records:
+            records[key] = {"schema_version": "curated-release-job/v1", "job_id": key}
+    with storage.transaction() as records:
+        del records[keys[0]]
+    reopened = LocalRecordStorage(tmp_path) if backend == "local" else _blob_record_store(container)
+    assert set(reopened.snapshot()) == {keys[1]}
+    if backend == "blob":
+        assert container.blobs["selected/subfolder/coordinator.lock"].data == b""
+
+
+@pytest.mark.parametrize("after", [False, True])
+def test_given_lost_record_delete_response_when_reopened_then_pending_delete_finishes(after: bool) -> None:
+    container = _RecordContainer()
+    storage = _blob_record_store(container)
+    key = "a" * 32
+    with storage.transaction() as records:
+        records[key] = {"schema_version": "curated-release-job/v1", "job_id": key}
+    container.faults["delete_blob"] = (after, OSError("response lost"))
+    with pytest.raises(OSError, match="response lost"), storage.transaction() as records:
+        del records[key]
+    with _blob_record_store(container).transaction() as records:
+        assert records == {}
+    assert container.blobs["selected/subfolder/coordinator.lock"].data == b""
+
+
+def test_given_changed_record_revision_when_delete_recovered_then_foreign_record_is_preserved() -> None:
+    container = _RecordContainer()
+    storage = _blob_record_store(container)
+    key = "a" * 32
+    blob = container.get_blob_client(f"selected/subfolder/jobs/{key}.json")
+    with storage.transaction() as records:
+        records[key] = {"schema_version": "curated-release-job/v1", "job_id": key}
+    revision = blob.get_blob_properties().etag
+    replacement = canonical_json_bytes({"schema_version": "curated-release-job/v1", "job_id": key, "other": True})
+    blob.upload_blob(replacement, overwrite=True)
+    with pytest.raises(ReleaseVerificationError, match="delete refused"):
+        storage._delete(key, revision)
+    assert blob.download_blob().readall() == replacement
+
+
+def test_given_unchanged_blob_records_when_read_again_then_only_listing_is_repeated() -> None:
+    container = _RecordContainer()
+    storage = _blob_record_store(container)
+    key = "a" * 32
+    with storage.transaction() as records:
+        records[key] = {"schema_version": "curated-release-job/v1", "job_id": key}
+    storage.snapshot()
+    with patch.object(storage, "_read", wraps=storage._read) as reads:
+        first = storage.snapshot()
+        first[key]["untrusted"] = True
+        assert "untrusted" not in storage.snapshot()[key]
+        assert reads.call_count == 0
+        container.get_blob_client(f"selected/subfolder/jobs/{key}.json").upload_blob(
+            canonical_json_bytes({"schema_version": "curated-release-job/v1", "job_id": key, "fresh": True}),
+            overwrite=True,
+        )
+        assert storage.snapshot()[key]["fresh"] is True
+        assert reads.call_count == 1
+
+
+@pytest.mark.parametrize("phase", ["request", "body"])
+def test_given_blob_snapshot_race_when_record_changes_then_returns_fresh_record(
+    monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    exceptions = pytest.importorskip("azure.core.exceptions")
+    container = _RecordContainer()
+    storage = _blob_record_store(container)
+    key = "a" * 32
+    original = {"schema_version": "curated-release-job/v1", "job_id": key, "state": "accepted"}
+    updated = {**original, "state": "running"}
+    with storage.transaction() as records:
+        records[key] = original
+    download = _RecordBlob.download_blob
+    reads = []
+
+    def conflict() -> bytes:
+        raise exceptions.ResourceModifiedError("job record updated")
+
+    def racing_download(blob: _RecordBlob, **kwargs: Any) -> Any:
+        reads.append(kwargs["etag"])
+        if len(reads) == 1:
+            stream = download(blob, **kwargs)
+            blob.upload_blob(canonical_json_bytes(updated), overwrite=True)
+            if phase == "request":
+                conflict()
+            stream.readall = conflict
+            return stream
+        return download(blob, **kwargs)
+
+    monkeypatch.setattr(_RecordBlob, "download_blob", racing_download)
+
+    assert storage.snapshot() == {key: updated}
+    assert len(reads) == 2
+    assert reads[0] != reads[1]
+    assert not container.leased
+
+
+def test_given_blob_snapshot_contention_when_timeout_expires_then_stops_retrying(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exceptions = pytest.importorskip("azure.core.exceptions")
+    container = _RecordContainer()
+    storage = _blob_record_store(container)
+    key = "a" * 32
+    with storage.transaction() as records:
+        records[key] = {"schema_version": "curated-release-job/v1", "job_id": key}
+    clock = SimpleNamespace(value=0.0)
+    reads = []
+
+    def conflicting_download(blob: _RecordBlob, **kwargs: Any) -> Any:
+        reads.append(kwargs["etag"])
+        raise exceptions.ResourceModifiedError("job record updated")
+
+    def advance(delay: float) -> None:
+        clock.value += delay
+
+    monkeypatch.setattr(_RecordBlob, "download_blob", conflicting_download)
+    monkeypatch.setattr("physical_ai_curation.release.record_storage.time.monotonic", lambda: clock.value)
+    monkeypatch.setattr("physical_ai_curation.release.record_storage.time.sleep", advance)
+
+    with pytest.raises(TimeoutError, match="snapshot contention exceeded timeout"):
+        storage.snapshot()
+
+    assert clock.value == storage.configuration()["timeout_seconds"]
+    assert len(reads) == 61
+    assert not container.leased
+
+
+@pytest.mark.parametrize("failure", ["permission", "invalid", "oversized"])
+def test_given_blob_snapshot_failure_when_not_revision_conflict_then_does_not_retry(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    exceptions = pytest.importorskip("azure.core.exceptions")
+    container = _RecordContainer()
+    storage = _blob_record_store(container)
+    key = "a" * 32
+    with storage.transaction() as records:
+        records[key] = {"schema_version": "curated-release-job/v1", "job_id": key}
+    reads = []
+    denied = exceptions.HttpResponseError("permission denied")
+
+    def failed_download(blob: _RecordBlob, **kwargs: Any) -> Any:
+        reads.append(kwargs["etag"])
+        if failure == "permission":
+            raise denied
+        return SimpleNamespace(
+            size=storage.configuration()["max_record_bytes"] + 1 if failure == "oversized" else 2,
+            properties=SimpleNamespace(etag=kwargs["etag"]),
+            readall=lambda: b"{}",
+        )
+
+    monkeypatch.setattr(_RecordBlob, "download_blob", failed_download)
+    expected_error = exceptions.HttpResponseError if failure == "permission" else ReleaseVerificationError
+    with pytest.raises(expected_error):
+        storage.snapshot()
+
+    assert len(reads) == 1
+    assert not container.leased
+
+
+def test_given_blob_transaction_read_conflict_when_loading_then_does_not_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exceptions = pytest.importorskip("azure.core.exceptions")
+    container = _RecordContainer()
+    storage = _blob_record_store(container)
+    key = "a" * 32
+    with storage.transaction() as records:
+        records[key] = {"schema_version": "curated-release-job/v1", "job_id": key}
+    download = _RecordBlob.download_blob
+    reads = []
+
+    def conflicting_download(blob: _RecordBlob, **kwargs: Any) -> Any:
+        if "/jobs/" in blob.name:
+            reads.append(kwargs["etag"])
+            raise exceptions.ResourceModifiedError("unexpected concurrent writer")
+        return download(blob, **kwargs)
+
+    monkeypatch.setattr(_RecordBlob, "download_blob", conflicting_download)
+    with pytest.raises(ReleaseVerificationError, match="job record changed during read"), storage.transaction():
+        pytest.fail("a conflicting transaction must not proceed")
+
+    assert len(reads) == 1
+    assert not container.leased
+
+
+def test_given_leased_coordinator_when_second_owner_reads_then_waits_without_overwriting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("azure.core.exceptions")
+    container = _RecordContainer()
+    storage = _blob_record_store(container)
+    store = ReleaseJobStore(tmp_path / "runtime", settings=SETTINGS, storage=storage)
+    accepted = store.accept(_request(tmp_path / "datasets"))
+    expected = storage.snapshot()
+    contended = threading.Event()
+    acquire = _RecordBlob.acquire_lease
+
+    def observe_acquisition(blob: _RecordBlob, **kwargs: Any) -> _RecordLease:
+        if blob.container.leased:
+            contended.set()
+        return acquire(blob, **kwargs)
+
+    def read_from_other_owner() -> dict[str, Any]:
+        with _blob_record_store(container).transaction() as records:
+            return records
+
+    monkeypatch.setattr(_RecordBlob, "acquire_lease", observe_acquisition)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with storage.transaction():
+            pending = executor.submit(read_from_other_owner)
+            assert contended.wait(2), "second owner must reach bounded lease acquisition"
+            assert not pending.done()
+            assert container.leased
+        actual = pending.result(timeout=3)
+
+    assert actual == expected
+    assert accepted.job_id in actual
+    assert container.blobs["selected/subfolder/coordinator.lock"].data == b""
+    assert not container.leased
+
+
+@pytest.mark.parametrize(
+    "status,code",
+    [(403, "AuthorizationFailure"), (412, "ConditionNotMet"), (409, "ContainerBeingDeleted"), (500, "LeaseIdMissing")],
+)
+def test_given_coordinator_creation_error_when_not_lease_contention_then_propagates(
+    status: int, code: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exceptions = pytest.importorskip("azure.core.exceptions")
+    error = exceptions.HttpResponseError(
+        "coordinator unavailable", response=SimpleNamespace(status_code=status, reason="Failed", headers={})
+    )
+    error.error_code = code
+    container = _RecordContainer()
+
+    def reject_creation(blob: _RecordBlob, *args: Any, **kwargs: Any) -> None:
+        raise error
+
+    monkeypatch.setattr(_RecordBlob, "upload_blob", reject_creation)
+    with pytest.raises(exceptions.HttpResponseError) as raised, _blob_record_store(container).transaction():
+        pytest.fail("failed creation must not admit a transaction")
+
+    assert raised.value is error
+    assert not container.leased
 
 
 @pytest.mark.parametrize("failure", ["before", "after"])
@@ -1736,11 +2325,25 @@ class FsContainer:
             raise ValueError("filesystem fixture supports only current unversioned blobs")
         return FsBlob(self, name)
 
-    def list_blobs(self, name_starts_with: str | None = None, include: Any = None) -> Iterator[SimpleNamespace]:
+    def delete_blobs(self, *blobs: dict[str, Any], raise_on_any_failure: bool) -> list[SimpleNamespace]:
+        results = []
+        for blob in blobs:
+            self.get_blob_client(blob["name"]).delete_blob(etag=blob["etag"], match_condition=blob["match_condition"])
+            results.append(SimpleNamespace(status_code=202))
+        return results
+
+    def list_blobs(
+        self,
+        name_starts_with: str | None = None,
+        include: Any = None,
+        results_per_page: int | None = None,
+    ) -> FakePages:
+        items = []
         for path in sorted(self.objects.glob("*.json")):
             record = json.loads(path.read_bytes())
             if name_starts_with is None or record["name"].startswith(name_starts_with):
-                yield _fs_properties(record)
+                items.append(_fs_properties(record))
+        return FakePages([items])
 
     def put(self, name: str, data: bytes, metadata: dict[str, str] | None = None) -> None:
         """Seed an object without logging a call."""
@@ -1817,11 +2420,26 @@ class FsBlob:
     def get_blob_properties(self) -> SimpleNamespace:
         return _fs_properties(self.container.load(self.name))
 
-    def download_blob(self, etag: str | None = None, match_condition: Any = None, **kwargs: Any) -> SimpleNamespace:
+    def download_blob(
+        self,
+        etag: str | None = None,
+        match_condition: Any = None,
+        *,
+        offset: int | None = None,
+        length: int | None = None,
+        **kwargs: Any,
+    ) -> SimpleNamespace:
         self.container.log("download_blob", self.name)
+        faults = self.container._read_faults()
+        if faults.get("forbid_video_downloads") and "/videos/" in self.name:
+            raise AssertionError("copy-only release must not download video payloads")
+        if faults.get("forbid_destination_tables") and self.container.name == "release" and "/data/" in self.name:
+            raise AssertionError("release verification must not download destination tables")
         record = self.container.load(self.name)
         _check_etag(etag, record)
         data = _payload(record)
+        if offset is not None:
+            data = data[offset:] if length is None else data[offset : offset + length]
         return SimpleNamespace(chunks=lambda: iter([data]))
 
     def upload_blob(
@@ -1919,11 +2537,21 @@ def _source_object(source: FsContainer, path: str, data: bytes) -> tuple[SourceO
     return SourceObject(path=path, revision=revision, length=len(data), sha256=sha256_hex(data)), etag
 
 
-def _child_copy_fixture(tmp_path: Path) -> SimpleNamespace:
+def _child_copy_fixture(tmp_path: Path, *, revision_only: bool = False) -> SimpleNamespace:
+    from physical_ai_curation.release.models import RevisionSourceObject
+    from physical_ai_curation.release.store import blob_source_identity
+
     sdk = tmp_path / "sdk"
     source = FsContainer(sdk, "example", "source")
     source.put("data/a.bin", b"abc", {"kind": "frame"})
     source_object, source_etag = _source_object(source, "data/a.bin", b"abc")
+    if revision_only:
+        source_object = RevisionSourceObject(
+            path=source_object.path,
+            revision=source_object.revision,
+            length=source_object.length,
+            storage_identity=blob_source_identity(source.url, source_object.path),
+        )
     store = ReleaseJobStore(tmp_path / "ledger", settings=SETTINGS, clock=OffsetClock(), free_bytes=_no_local_disk)
     job = store.accept(_blob_request(key="blob-copy", reserved=1024))
     fence = store.claim(job.job_id, "worker-a")
@@ -1940,6 +2568,181 @@ def _child_copy_fixture(tmp_path: Path) -> SimpleNamespace:
         destination=destination,
         publisher=publisher,
     )
+
+
+def _multi_copy_fixture(tmp_path: Path, count: int, *, batch_size: int = 16) -> SimpleNamespace:
+    sdk = tmp_path / "sdk"
+    source = FsContainer(sdk, "example", "source")
+    items: list[tuple[Any, str, str]] = []
+    for index in range(count):
+        path = f"data/part-{index:02d}.bin"
+        source.put(path, b"abc", {"kind": "frame"})
+        source_object, etag = _source_object(source, path, b"abc")
+        items.append((source_object, etag, path))
+    store = _batch_store(tmp_path / "ledger", OffsetClock(), batch_size)
+    job = store.accept(_blob_request(key="blob-batch", reserved=1024))
+    fence = store.claim(job.job_id, "worker-a")
+    destination = FsContainer(sdk, "example", "release")
+    publisher = _ChildBlobPublisher(destination, BLOB, ATTEMPT, store, job.job_id, fence, sdk_root=sdk)
+    return SimpleNamespace(
+        sdk=sdk, source=source, items=items, store=store, job_id=job.job_id, fence=fence, publisher=publisher
+    )
+
+
+def test_given_twelve_copies_when_batched_then_one_child_issues_every_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _multi_copy_fixture(tmp_path, 12)
+    dispatched: list[list[str]] = []
+    original = fixture.publisher._execute_batch
+
+    def counted(paths: list[str], length: int, content: bytes) -> None:
+        dispatched.append(list(paths))
+        original(paths, length, content)
+
+    monkeypatch.setattr(fixture.publisher, "_execute_batch", counted)
+    progress = fixture.publisher.copy_batch(fixture.source, fixture.items)
+
+    assert [item.state for item in progress] == ["complete"] * 12
+    assert [len(paths) for paths in dispatched] == [12]
+    assert len(_sdk_calls(fixture.sdk, "start_copy_from_url")) == 12
+    assert len([call for call in _sdk_calls(fixture.sdk, "download_blob") if call["name"] == COMPANION]) < 12
+    effects = fixture.store._snapshot()[fixture.job_id]["effects"]
+    assert {effect["status"] for effect in effects.values()} == {"acknowledged"}
+
+
+def test_given_nine_copies_and_batch_size_four_when_copied_then_bounded_groups_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _multi_copy_fixture(tmp_path, 9, batch_size=4)
+    dispatched: list[list[str]] = []
+    original = fixture.publisher._execute_batch
+
+    def counted(paths: list[str], length: int, content: bytes) -> None:
+        dispatched.append(list(paths))
+        original(paths, length, content)
+
+    monkeypatch.setattr(fixture.publisher, "_execute_batch", counted)
+    progress = fixture.publisher.copy_batch(fixture.source, fixture.items)
+
+    assert [item.state for item in progress] == ["complete"] * 9
+    assert [len(paths) for paths in dispatched] == [4, 4, 1]
+
+
+def test_given_acknowledged_copy_in_batch_when_replayed_then_not_recopied_and_counted_once(tmp_path: Path) -> None:
+    fixture = _multi_copy_fixture(tmp_path, 3)
+    first, first_etag, first_path = fixture.items[0]
+    assert fixture.publisher.copy(fixture.source, first, first_etag, source_path=first_path).state == "complete"
+
+    progress = fixture.publisher.copy_batch(fixture.source, fixture.items)
+
+    assert [item.state for item in progress] == ["complete"] * 3
+    assert len(_sdk_calls(fixture.sdk, "start_copy_from_url")) == 3
+    assert fixture.store._snapshot()[fixture.job_id]["io_counters"]["storage_copy_bytes"] == 9
+
+
+def test_given_child_fails_after_one_copy_when_reconciled_and_replayed_then_no_recopy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _multi_copy_fixture(tmp_path, 3)
+    publisher = fixture.publisher
+
+    build_batch_protocol = publisher._batch_protocol
+
+    def corrupt_second_item(entries: list[tuple[SourceObjectRecord, str, str]]) -> bytes:
+        # The real child copies item one, then refuses item two before any Azure call.
+        spec = json.loads(build_batch_protocol(entries))
+        spec["items"][1]["source_url"] = "https://other.blob.core.windows.net/source/data/b.bin"
+        return json.dumps(spec, separators=(",", ":")).encode()
+
+    monkeypatch.setattr(publisher, "_batch_protocol", corrupt_second_item)
+    with pytest.raises(ReleaseVerificationError, match="supervised blob copy did not complete"):
+        publisher.copy_batch(fixture.source, fixture.items)
+    monkeypatch.undo()
+
+    progress = publisher.copy_batch(fixture.source, fixture.items)
+
+    assert [item.state for item in progress] == ["complete"] * 3
+    assert len(_sdk_calls(fixture.sdk, "start_copy_from_url")) == 3
+    assert fixture.store._snapshot()[fixture.job_id]["io_counters"]["storage_copy_bytes"] == 9
+
+
+def _generated_fixture(tmp_path: Path, *, batch_size: int = 16) -> SimpleNamespace:
+    sdk = tmp_path / "sdk"
+    destination = FsContainer(sdk, "example", "release")
+    store = _batch_store(tmp_path / "ledger", OffsetClock(), batch_size)
+    job = store.accept(_blob_request(key="blob-generated", reserved=1024))
+    fence = store.claim(job.job_id, "worker-a")
+    publisher = _ChildBlobPublisher(destination, BLOB, ATTEMPT, store, job.job_id, fence, sdk_root=sdk)
+    out = tmp_path / "out"
+    out.mkdir()
+    return SimpleNamespace(
+        sdk=sdk, destination=destination, store=store, job_id=job.job_id, fence=fence, publisher=publisher, out=out
+    )
+
+
+def _write_mixed_generated(fixture: SimpleNamespace) -> None:
+    publisher = fixture.publisher
+    payload = fixture.out / "a.bin"
+    payload.write_bytes(b"abc")
+    digest = sha256(b"abc").hexdigest()
+    publisher.write_from_path("data/a.bin", payload, length=3, sha256=digest)
+    publisher.write("data/b.json", [b"abc"], length=3, sha256=digest)
+    publisher.write_from_path("data/c.bin", payload, length=3, sha256=digest)
+
+
+def test_given_mixed_generated_writes_when_batched_then_bounded_groups_dispatch_once_each(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _generated_fixture(tmp_path, batch_size=2)
+    dispatched: list[list[str]] = []
+    original = fixture.publisher._execute_batch
+
+    def counted(paths: list[str], length: int, content: bytes) -> None:
+        dispatched.append(list(paths))
+        original(paths, length, content)
+
+    monkeypatch.setattr(fixture.publisher, "_execute_batch", counted)
+    with fixture.publisher.write_batch():
+        _write_mixed_generated(fixture)
+        assert [len(paths) for paths in dispatched] == [2]
+
+    assert [len(paths) for paths in dispatched] == [2, 1]
+    root = fixture.publisher.root
+    assert fixture.destination.read(root + "data/a.bin") == b"abc"
+    assert fixture.destination.read(root + "data/b.json") == b"abc"
+    assert fixture.destination.read(root + "data/c.bin") == b"abc"
+    effects = fixture.store._snapshot()[fixture.job_id]["effects"]
+    assert {effect["status"] for effect in effects.values()} == {"acknowledged"}
+
+
+def test_given_generated_group_when_dispatch_fails_then_effects_are_not_acknowledged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _generated_fixture(tmp_path, batch_size=4)
+
+    def refused(paths: list[str], length: int, content: bytes) -> None:
+        raise ReleaseVerificationError("supervised blob upload did not complete")
+
+    monkeypatch.setattr(fixture.publisher, "_execute_batch", refused)
+    with pytest.raises(ReleaseVerificationError, match="did not complete"), fixture.publisher.write_batch():
+        _write_mixed_generated(fixture)
+
+    effects = fixture.store._snapshot()[fixture.job_id]["effects"]
+    assert effects
+    assert "acknowledged" not in {effect["status"] for effect in effects.values()}
+
+
+def test_given_batch_item_without_begun_effect_when_child_authorizes_then_refused_before_azure(tmp_path: Path) -> None:
+    fixture = _multi_copy_fixture(tmp_path, 2)
+    second, second_etag, second_path = fixture.items[1]
+    content = fixture.publisher._batch_protocol(
+        [(second, second_etag, fixture.source.get_blob_client(second_path).url)]
+    )
+
+    with pytest.raises(AuthorityError):
+        _process(_spec_fd(json.loads(content)))
+    assert _sdk_calls(fixture.sdk, "start_copy_from_url") == []
 
 
 def test_given_supervised_copy_when_child_issues_server_side_copy_then_destination_verified_and_acknowledged(
@@ -2025,11 +2828,44 @@ def test_given_cancelled_copy_with_foreign_ownership_when_cleanup_then_foreign_b
     assert _sdk_calls(fixture.sdk, "abort_copy") == []
 
 
-@pytest.mark.parametrize("loss", [None, "payload", "companion"])
-def test_given_cancelled_blob_root_when_cleaned_then_companion_last_and_capacity_released(
-    tmp_path: Path, loss: str | None
+def test_given_twelve_owned_blobs_when_cancelled_then_cleanup_batches_payload_children(tmp_path: Path) -> None:
+    fixture = _multi_copy_fixture(tmp_path, 12)
+    fixture.publisher.copy_batch(fixture.source, fixture.items)
+    fixture.store.request_cancel(fixture.job_id, scope=SCOPE, principal=OWNER)
+    with patch.object(fixture.publisher, "_run_child", wraps=fixture.publisher._run_child) as children:
+        fixture.publisher.cleanup_cancelled()
+    assert children.call_count == 2
+    assert list(fixture.publisher.container.list_blobs()) == []
+    assert _sdk_calls(fixture.sdk, "delete_blob")[-1]["name"] == COMPANION
+    fixture.store.purge_cancelled(fixture.job_id, fixture.fence)
+    assert fixture.job_id not in fixture.store.storage.snapshot()
+    assert not (fixture.store.root / "runtimes" / fixture.job_id).exists()
+
+
+@pytest.mark.parametrize("parent", ["runtimes", "scratch"])
+def test_given_unowned_runtime_file_when_cancelled_job_purged_then_record_and_file_retained(
+    tmp_path: Path, parent: str
 ) -> None:
-    fixture = _child_copy_fixture(tmp_path)
+    store = ReleaseJobStore(tmp_path / "ledger", settings=SETTINGS)
+    job = store.accept(_request(tmp_path / "datasets"))
+    store.request_cancel(job.job_id, scope=SCOPE, principal=OWNER)
+    store.settle_cancellation(job.job_id, 0, output_removed=True)
+    directory = store.root / parent / job.job_id
+    directory.mkdir(parents=True)
+    foreign = directory / "unowned.json"
+    foreign.write_text("unrelated")
+    with pytest.raises(AuthorityError):
+        store.purge_cancelled(job.job_id, 0)
+    assert job.job_id in store.storage.snapshot()
+    assert foreign.read_text() == "unrelated"
+
+
+@pytest.mark.parametrize("loss", [None, "payload", "companion"])
+@pytest.mark.parametrize("revision_only", [False, True])
+def test_given_cancelled_blob_root_when_cleaned_then_companion_last_and_capacity_released(
+    tmp_path: Path, loss: str | None, revision_only: bool
+) -> None:
+    fixture = _child_copy_fixture(tmp_path, revision_only=revision_only)
     publisher = fixture.publisher
     publisher.copy(fixture.source, fixture.source_object, fixture.source_etag)
     publisher.write("meta/info.json", [b"{}"], length=2, sha256=sha256_hex(b"{}"))
@@ -2079,6 +2915,7 @@ def test_given_cancelled_blob_root_when_cleaned_then_companion_last_and_capacity
     assert state.capacity_state == "released"
     assert _sdk_calls(fixture.sdk, "delete_blob")[-1]["name"] == COMPANION
     assert fixture.store.storage.snapshot()[fixture.job_id]["effects"] == {}
+    assert not [call for call in _sdk_calls(fixture.sdk, "download_blob") if call["name"] == DEST_NAME]
 
 
 def test_given_companion_replaced_after_preflight_when_child_cleans_then_no_delete(tmp_path: Path) -> None:
@@ -3028,7 +3865,56 @@ def test_given_cancel_while_running_when_supervised_then_tree_stopped_and_record
     assert not runner.is_alive()
     assert outcomes[0].reason == "cancelled"
     assert _reaped(grandchild)
+
+
+def test_given_cancel_requested_before_dispatch_when_supervised_then_child_never_started(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _store(tmp_path / "ledger", clock)
+    job_id = store.accept(_request(tmp_path / "dest")).job_id
+    fence = store.claim(job_id, "worker-a")
+    store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+    marker = tmp_path / "started"
+    code = f"from pathlib import Path; Path({str(marker)!r}).write_text('started')"
+
+    with pytest.raises(CancellationError):
+        run_supervised(
+            store,
+            job_id,
+            fence,
+            [sys.executable, "-c", code],
+            memory_bytes=MEMORY,
+            heartbeat_seconds=5,
+            grace_seconds=FAST_GRACE,
+        )
+
+    assert not marker.exists()
     assert store.get(job_id, scope=SCOPE, principal=OWNER).effects_stopped is True
+
+
+def test_given_unresolved_runtime_when_cancel_precedes_dispatch_then_stop_not_recorded(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request(tmp_path / "dest")).job_id
+    fence = store.claim(job_id, "worker-a")
+    identity = ProcessIdentity.of(os.getpid())
+    proof = store.runtime_proof_path(job_id, fence)
+    store.register_runtime(job_id, fence, SupervisedRuntime(identity, identity, proof))
+    store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+    marker = tmp_path / "started"
+    code = f"from pathlib import Path; Path({str(marker)!r}).write_text('started')"
+
+    with pytest.raises(AuthorityError, match="runtime"):
+        run_supervised(
+            store,
+            job_id,
+            fence,
+            [sys.executable, "-c", code],
+            memory_bytes=MEMORY,
+            heartbeat_seconds=5,
+            grace_seconds=FAST_GRACE,
+        )
+
+    assert not marker.exists()
+    assert store.get(job_id, scope=SCOPE, principal=OWNER).effects_stopped is not True
 
 
 def test_given_lease_lost_while_running_when_supervised_then_tree_stopped_and_successor_proceeds(
@@ -3243,6 +4129,61 @@ def test_given_planned_encoding_when_executed_then_native_result_has_stop_proof(
         assert sha256_hex(encoded.path.read_bytes()) == encoded.sha256
         assert store.get(job_id, scope=SCOPE, principal=OWNER).effects_stopped
     assert not encoded.path.exists()
+
+
+def test_given_checkpoint_raises_during_source_spool_when_encoding_then_no_native_child_started(
+    tmp_path: Path,
+) -> None:
+    import numpy as np
+    from physical_ai_curation.release.composition import NativeGenerationPlan, PreparedMediaWindow
+    from physical_ai_curation.release.encoding import EncodeOptions, EncodingWindow
+    from physical_ai_curation.release.execution import encode_planned_object
+    from physical_ai_curation.release.media import SubsetEpisodeInput, plan_release_objects
+    from physical_ai_curation.release.models import SourceObject
+    from test_release_media import LOCAL_SCRATCH_SAME, VIDEO, _encode_source, _request, _window
+
+    content = _encode_source([np.full((24, 32, 3), value, dtype=np.uint8) for value in (30, 80)])
+    source = SourceObject(path=VIDEO, revision="frozen", length=len(content), sha256=sha256_hex(content))
+    plan = plan_release_objects(
+        _request(
+            selected_episode_ids=("ep-0",),
+            windows=(_window(source=source, end=0.2, duration=0.2, reasons=("invert",)),),
+            scratch=LOCAL_SCRATCH_SAME,
+        )
+    )
+    window = EncodingWindow("ep-0", 0, 2, (0, 1), "invert")
+    prepared = NativeGenerationPlan(
+        plan,
+        (SubsetEpisodeInput("ep-0", 0, 2, 10),),
+        (PreparedMediaWindow(VIDEO, "front", window),),
+        EncodeOptions(),
+    )
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id = store.accept(_request_for_encoding(tmp_path)).job_id
+    fence = store.claim(job_id, "worker")
+    chunks = (content[index : index + 4096] for index in range(0, len(content), 4096))
+
+    def checkpoint() -> None:
+        raise CancellationError("cancellation requested")
+
+    with (
+        patch("physical_ai_curation.release.execution.run_supervised") as supervised,
+        pytest.raises(CancellationError),
+        encode_planned_object(
+            store,
+            job_id,
+            fence,
+            prepared,
+            plan.objects[0],
+            chunks,
+            confirmed_digest=plan.digest,
+            scratch_bytes=8 * 1024**2,
+            output_bytes=1024**2,
+            checkpoint=checkpoint,
+        ),
+    ):
+        pass
+    supervised.assert_not_called()
 
 
 def _request_for_encoding(tmp_path: Path) -> JobRequest:

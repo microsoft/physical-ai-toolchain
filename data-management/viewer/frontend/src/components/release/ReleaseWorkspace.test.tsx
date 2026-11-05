@@ -72,8 +72,12 @@ function statusOf(state: ReleaseJobStatus['state'], overrides: Partial<ReleaseJo
 /** Build a release hook double. Fields not supplied get idle defaults. */
 function makeRelease(patch: Record<string, unknown> = {}) {
   const base = {
-    inventory: { isError: false, isSuccess: true, data: { items: [], total: 0 } },
+    inventory: { isError: false, isSuccess: true, data: { items: [], total: 0 }, refetch: vi.fn() },
+    inventoryItems: [],
+    inventoryProgress: { loaded: 0, total: null },
     inventoryReady: true,
+    requestDetails: vi.fn(),
+    detailError: null,
     capabilities: {
       data: {
         schema: 'v1',
@@ -152,12 +156,41 @@ describe('ReleaseWorkspace', () => {
     expect(screen.getByRole('button', { name: 'Create release' })).toBeDisabled()
   })
 
+  it('formats I/O progress counters with readable labels and byte units', () => {
+    vi.mocked(useRelease).mockReturnValue(
+      makeRelease({
+        activeJobId: JOB_ID,
+        status: {
+          data: statusOf('running', {
+            ioCounters: {
+              affectedDownloadBytes: 2458922,
+              sourceVerificationBytes: 0,
+              storageCopyBytes: 8207783,
+              generatedUploadBytes: 2048,
+            },
+          }),
+        },
+      }),
+    )
+    renderWorkspace()
+    const counters = within(screen.getByRole('list', { name: 'I/O counters' }))
+    expect(counters.getByText('Affected input read').closest('li')).toHaveTextContent('2.3 MiB')
+    expect(counters.getByText('Source verification read').closest('li')).toHaveTextContent('0 B')
+    expect(counters.getByText('Copied within storage').closest('li')).toHaveTextContent('7.8 MiB')
+    expect(counters.getByText('Generated output uploaded').closest('li')).toHaveTextContent(
+      '2.0 KiB',
+    )
+    expect(counters.queryByText('2458922')).not.toBeInTheDocument()
+  })
+
   it('explains accepted jobs are waiting for a worker rather than processing bytes', () => {
     vi.mocked(useRelease).mockReturnValue(
       makeRelease({ activeJobId: JOB_ID, status: { data: statusOf('accepted') } }),
     )
     renderWorkspace()
     expect(screen.getByText('Accepted. Waiting for a release worker.')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Job aaaaaaaa' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Create release' })).toBeDisabled()
   })
 
   it('shows stored creation dates next to job and release identities', async () => {
@@ -191,6 +224,7 @@ describe('ReleaseWorkspace', () => {
   it('passes the full inventory to the dialog only once it is ready', () => {
     const inventoryItem = {
       episodeIndex: 0,
+      detailed: true,
       resources: [],
       annotation: false,
       edits: true,
@@ -204,7 +238,7 @@ describe('ReleaseWorkspace', () => {
       },
     }
     vi.mocked(useRelease).mockReturnValue(
-      makeRelease({ inventory: { isError: false, data: { items: [inventoryItem], total: 1 } } }),
+      makeRelease({ inventoryItems: [inventoryItem], inventoryProgress: { loaded: 1, total: 1 } }),
     )
     const { unmount } = renderWithQuery(<ReleaseWorkspace datasetId="dataset-1" />)
     expect(dialogSpy.props?.items).toEqual([inventoryItem])
@@ -221,10 +255,11 @@ describe('ReleaseWorkspace', () => {
   })
 
   it('retains dialog rows while a background inventory refresh blocks preview', () => {
-    const item = { episodeIndex: 6, resources: [], annotation: false, edits: false }
+    const item = { episodeIndex: 6, detailed: true, resources: [], annotation: false, edits: false }
     vi.mocked(useRelease).mockReturnValue(
       makeRelease({
         inventoryReady: false,
+        inventoryItems: [item],
         inventory: { isError: false, isFetching: true, data: { items: [item], total: 1 } },
       }),
     )
@@ -255,6 +290,27 @@ describe('ReleaseWorkspace', () => {
     const onSubmit = dialogSpy.props?.onSubmit as (r: unknown, s: unknown) => Promise<void>
     await onSubmit(request, submission)
     expect(submit).toHaveBeenCalledWith(request, submission)
+  })
+
+  it('announces inventory progress and offers a keyboard-operable retry after failure', async () => {
+    const user = userEvent.setup()
+    const refetch = vi.fn()
+    vi.mocked(useRelease).mockReturnValue(
+      makeRelease({ inventoryReady: false, inventoryProgress: { loaded: 20, total: 296 } }),
+    )
+    const { rerender } = renderWithQuery(<ReleaseWorkspace datasetId="dataset-1" />)
+    expect(screen.getByRole('status')).toHaveTextContent('20 of 296 episodes loaded')
+    expect(dialogSpy.props?.inventoryMessage).toContain('20 of 296')
+
+    vi.mocked(useRelease).mockReturnValue(
+      makeRelease({ inventoryReady: false, inventory: { isError: true, refetch } }),
+    )
+    rerender(<ReleaseWorkspace datasetId="dataset-1" />)
+    const retry = screen.getByRole('button', { name: 'Retry inventory' })
+    retry.focus()
+    await user.keyboard('{Enter}')
+    expect(refetch).toHaveBeenCalledOnce()
+    expect(dialogSpy.props?.inventoryFailed).toBe(true)
   })
 
   it('cancels the active job only after an explicit click', async () => {
@@ -406,7 +462,7 @@ describe('ReleaseWorkspace', () => {
     renderWorkspace()
 
     await user.click(screen.getByRole('button', { name: 'Close job aaaaaaaa' }))
-    expect(screen.queryByRole('heading', { name: 'Active job' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Job aaaaaaaa' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Download manifest' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Open job aaaaaaaa' })).toHaveAttribute(
       'aria-expanded',
@@ -455,7 +511,8 @@ describe('ReleaseWorkspace', () => {
       }),
     )
     rerender(<ReleaseWorkspace datasetId="dataset-1" />)
-    expect(screen.getAllByRole('heading', { name: 'Active job' })).toHaveLength(1)
+    expect(screen.getByRole('heading', { name: 'Job dddddddd' })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Job aaaaaaaa' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Close job dddddddd' })).toHaveAttribute(
       'aria-expanded',
       'true',
@@ -519,6 +576,59 @@ describe('ReleaseWorkspace', () => {
       expect(hook.recover).toHaveBeenCalledOnce()
     },
   )
+
+  it('offers a cleanup retry for a failed cancellation and disables it while recovering', async () => {
+    const user = userEvent.setup()
+    const recover = vi.fn().mockResolvedValue(undefined)
+    const status = {
+      data: statusOf('cancelling', { cancelRequested: true, cleanupState: 'failed' }),
+      isError: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    }
+    vi.mocked(useRelease).mockReturnValue(makeRelease({ activeJobId: JOB_ID, status, recover }))
+    const { rerender } = renderWithQuery(<ReleaseWorkspace datasetId="dataset-1" />)
+    const retry = screen.getByRole('button', { name: 'Retry cleanup' })
+    expect(screen.getByText(/Cleanup failed\./)).toBeVisible()
+    await user.click(retry)
+    expect(recover).toHaveBeenCalledOnce()
+
+    vi.mocked(useRelease).mockReturnValue(
+      makeRelease({ activeJobId: JOB_ID, status, recover, isRecovering: true }),
+    )
+    rerender(<ReleaseWorkspace datasetId="dataset-1" />)
+    expect(screen.getByRole('button', { name: 'Retry cleanup' })).toBeDisabled()
+  })
+
+  it('shows a fixed safe error when recovery is denied and keeps the job', async () => {
+    const user = userEvent.setup()
+    const startNew = vi.fn()
+    const recover = vi
+      .fn()
+      .mockRejectedValue(new ReleaseRequestError('private provider detail', 'forbidden', 403))
+    vi.mocked(useRelease).mockReturnValue(
+      makeRelease({
+        activeJobId: JOB_ID,
+        status: {
+          data: statusOf('cancelling', { cancelRequested: true, cleanupState: 'failed' }),
+          isError: false,
+          isFetching: false,
+          error: null,
+          refetch: vi.fn(),
+        },
+        recover,
+        startNew,
+      }),
+    )
+    renderWorkspace()
+    await user.click(screen.getByRole('button', { name: 'Retry cleanup' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Release request failed: forbidden.')
+    expect(alert).not.toHaveTextContent('private provider detail')
+    expect(screen.getByRole('heading', { name: 'Job aaaaaaaa' })).toBeVisible()
+    expect(startNew).not.toHaveBeenCalled()
+  })
 
   it.each([
     [new Error('private provider detail'), 'Release request failed.'],

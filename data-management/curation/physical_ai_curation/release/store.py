@@ -16,18 +16,44 @@ from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
 
-from physical_ai_curation.release.canonical import normalize_release_path
+from physical_ai_curation.release.canonical import canonical_json_bytes, normalize_release_path, sha256_hex
 from physical_ai_curation.release.errors import ReleaseVerificationError
 
 CHUNK_BYTES = 1024 * 1024
 
 
+def blob_revision(etag: str, version_id: str | None) -> str:
+    """Bind a storage revision, normalizing unquoted Azure listing ETags to property-response form."""
+    if not etag.startswith(('"', 'W/"')):
+        etag = f'"{etag}"'
+    return sha256_hex(canonical_json_bytes({"etag": etag, "version_id": version_id}))
+
+
+def blob_source_identity(container_url: str, path: str) -> str:
+    """Bind the credential-free source container and object path without exposing either."""
+    return sha256_hex(
+        canonical_json_bytes({"container": container_url.rstrip("/"), "path": normalize_release_path(path)})
+    )
+
+
 @dataclass(frozen=True)
 class ObjectStat:
-    """Listed object with its declared byte length."""
+    """Listed object with its declared byte length and optional storage revision evidence.
+
+    ``copy_operation_sha256`` binds a revision to the ownership operation and server copy ID that
+    produced it. ``source_revision`` is set when the copy was conditioned on a source storage revision
+    rather than a content digest. ``uploaded_sha256`` is set only for payloads written by this release,
+    whose digest was verified against the streamed bytes at write time. Both are revision-bound evidence,
+    not independent content digests.
+    """
 
     path: str
     length: int
+    revision: str | None = None
+    copy_operation_sha256: str | None = None
+    source_revision: str | None = None
+    uploaded_sha256: str | None = None
+    source_identity: str | None = None
 
 
 class ReleaseStore(Protocol):

@@ -287,10 +287,9 @@ def generate_native_selection(
             else:
                 result = observed[obj.output_path, episode.episode_id]
                 start, end, summary = result.output_from_s, result.output_to_s, result.statistics
-            if summary is None:
-                raise ReleasePlanError(f"statistics required: {camera}")
             references[camera] = NativeVideoReference(obj.output_path, start, end)
-            summaries[camera] = summary
+            if summary is not None:
+                summaries[camera] = summary
         rows.append(
             generate_episode_metadata(
                 table,
@@ -329,7 +328,7 @@ def generate_episode_metadata(
 
     Preserved summaries must describe this exact unchanged feature selection.
     Video counts are sample counts, not necessarily episode frame counts.
-    Missing camera summaries are unsupported here, never a request to decode.
+    Missing media summaries are omitted, never recomputed from video.
     """
     if not table.num_rows or not math.isfinite(fps) or fps <= 0:
         raise ReleasePlanError("episode metadata requires frames and a positive finite frame rate")
@@ -382,7 +381,7 @@ def generate_episode_metadata(
             summary = copy.deepcopy(dict(preserved_statistics[name]))
             validate_feature_statistics(summary, expected_count=None if name in cameras else table.num_rows)
         elif dtype in {"video", "image"}:
-            raise ReleasePlanError(f"statistics required: {name}")
+            continue
         elif dtype in _NUMERIC_DTYPES:
             if name not in table.column_names:
                 raise ReleasePlanError("declared numeric feature is missing from the generated table")
@@ -413,16 +412,14 @@ def assemble_native_metadata(
 
     if not episode_rows or type(task_count) is not int or task_count < 1:
         raise ReleasePlanError("native metadata requires episodes and a positive task count")
-    if source_info.get("codebase_version") != "v3.0":
-        raise ReleasePlanError("native metadata generation currently requires v3.0 input")
+    if source_info.get("codebase_version") not in ("v2.1", "v3.0"):
+        raise ReleasePlanError("native metadata generation requires LeRobot v2.1 or v3.0 input")
     features = source_info.get("features")
     if not isinstance(features, dict) or not features:
         raise ReleasePlanError("native metadata requires feature descriptors")
     if not all(isinstance(feature, Mapping) for feature in features.values()):
         raise ReleasePlanError("native features require descriptor mappings")
-    required_statistics = {
-        name for name, feature in features.items() if feature.get("dtype") in _NUMERIC_DTYPES | {"video", "image"}
-    }
+    required_statistics = {name for name, feature in features.items() if feature.get("dtype") in _NUMERIC_DTYPES}
     offset = 0
     summaries = {}
     for index, row in enumerate(episode_rows):
@@ -444,9 +441,7 @@ def assemble_native_metadata(
                     raise ReleasePlanError("episode statistics reference an undeclared feature")
                 episode_summaries.setdefault(feature, {})[statistic] = value
         if not required_statistics <= set(episode_summaries):
-            raise ReleasePlanError("statistics required for every declared numeric and media feature")
-        if summaries and set(episode_summaries) != set(summaries):
-            raise ReleasePlanError("episodes must share one statistic feature set")
+            raise ReleasePlanError("statistics required for every declared numeric feature")
         for feature, summary in episode_summaries.items():
             media = features[feature].get("dtype") in {"video", "image"}
             validate_feature_statistics(summary, expected_count=None if media else length)
@@ -456,6 +451,12 @@ def assemble_native_metadata(
     statistics = {}
     approximations = set()
     for feature, values in summaries.items():
+        if len(values) < len(episode_rows):
+            approximations.add(
+                f"partial coverage: {feature} in {len(values)} of {len(episode_rows)} episodes; "
+                "omitted from dataset statistics"
+            )
+            continue
         result = aggregate_feature_statistics(values, expected_counts=[value["count"][0] for value in values])
         statistics[feature] = result.values
         if result.approximation:
@@ -471,6 +472,7 @@ def assemble_native_metadata(
     for stale in ("total_chunks", "total_videos", "total_size", "download_size"):
         info.pop(stale, None)
     info.update(
+        codebase_version="v3.0",
         total_episodes=len(episode_rows),
         total_frames=offset,
         total_tasks=task_count,
@@ -479,9 +481,10 @@ def assemble_native_metadata(
         data_path="data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet",
         video_path="videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4",
     )
+    episode_fields = dict.fromkeys(name for row in episode_rows for name in row)
     return NativeMetadata(
         info=info,
-        episodes=pa.Table.from_pylist([dict(row) for row in episode_rows]),
+        episodes=pa.Table.from_pylist([episode_fields | dict(row) for row in episode_rows]),
         statistics=statistics,
         statistics_algorithm=algorithm,
         statistics_approximation="; ".join(sorted(approximations)) or None,
@@ -493,9 +496,11 @@ def _preserve_dataset_statistics(
 ) -> dict[str, object]:
     import numpy as np
 
-    if set(source) != set(generated):
+    if not set(generated) <= set(source):
         raise ReleasePlanError("source-wide statistics must cover the generated feature set")
     for feature, values in source.items():
+        if feature not in generated:
+            continue
         expected = generated[feature]
         validate_feature_statistics(values, expected_count=int(expected["count"][0]))
         for statistic in ("min", "max", "mean", "std"):

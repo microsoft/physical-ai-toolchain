@@ -33,6 +33,10 @@ from physical_ai_curation.release.models import (
     ReleasePreview,
     ReleaseReport,
     ReleaseResult,
+    RevisionSourceObject,
+    SourceObject,
+    StorageRevisionEntry,
+    UploadedContentEntry,
     parse_report,
     render_report,
 )
@@ -84,6 +88,7 @@ def _payload_files() -> dict[str, bytes]:
             selected_episode_ids=["ep-000"],
             source_objects=[
                 {
+                    "assurance": "content_sha256",
                     "path": "data/episode-000.jsonl",
                     "revision": "fixture-v1",
                     "length": len(source_bytes),
@@ -183,10 +188,11 @@ class TestSchemaRoundTrip:
         assert parsed == report
         assert render_report(parsed) == content
 
-    def test_given_unsupported_major_when_validate_then_rejected(self) -> None:
+    @pytest.mark.parametrize("version", ["1.0.0", "3.0.0"])
+    def test_given_unsupported_major_when_validate_then_rejected(self, version: str) -> None:
         # Arrange / Act / Assert
         with pytest.raises(ValidationError):
-            _valid_manifest(schema_version="2.0.0")
+            _valid_manifest(schema_version=version)
 
     @pytest.mark.parametrize("version", ["1", "1.0", "v1.0.0", "01.0.0", "1.0.0-rc1"])
     def test_given_malformed_version_when_validate_then_rejected(self, version: str) -> None:
@@ -310,7 +316,13 @@ class TestCandidateAndPublicVerification:
             FrozenInput(
                 selected_episode_ids=["ep-000"],
                 source_objects=[
-                    {"path": "original/shared.parquet", "revision": "source-v1", "length": 9000, "sha256": DIGEST}
+                    {
+                        "assurance": "content_sha256",
+                        "path": "original/shared.parquet",
+                        "revision": "source-v1",
+                        "length": 9000,
+                        "sha256": DIGEST,
+                    }
                 ],
             )
         )
@@ -368,6 +380,41 @@ class TestCandidateAndPublicVerification:
         assert candidate.result.publication_state == "candidate"
         assert candidate.result.discoverable is False
         assert candidate.result.identity.manifest_sha256 == miniature.manifest_sha256
+
+    def test_given_checkpoint_raises_when_verify_candidate_then_error_propagates_mid_payload(
+        self, miniature: MiniaturePackage
+    ) -> None:
+        # Arrange
+        store = LocalReleaseStore(miniature.root)
+        calls: list[int] = []
+
+        def checkpoint() -> None:
+            calls.append(1)
+            if len(calls) == 2:
+                raise RuntimeError("stop")
+
+        # Act / Assert
+        with pytest.raises(RuntimeError, match="stop"):
+            verify_candidate(store, checkpoint=checkpoint)
+        assert len(calls) == 2
+
+    def test_given_checkpoint_raises_when_verify_published_then_error_propagates_mid_payload(
+        self, miniature: MiniaturePackage
+    ) -> None:
+        # Arrange
+        _finalize(miniature.root)
+        store = LocalReleaseStore(miniature.root)
+        calls: list[int] = []
+
+        def checkpoint() -> None:
+            calls.append(1)
+            if len(calls) == 2:
+                raise RuntimeError("stop")
+
+        # Act / Assert
+        with pytest.raises(RuntimeError, match="stop"):
+            verify_published(store, checkpoint=checkpoint)
+        assert len(calls) == 2
 
     def test_given_candidate_without_marker_when_verify_published_then_incomplete(
         self, miniature: MiniaturePackage
@@ -651,7 +698,7 @@ class TestProducerIdentity:
 
 def _frame_row(output_frame: int = 0, **changes: object) -> bytes:
     values = {
-        "schema_version": "1.0.0",
+        "schema_version": "2.0.0",
         "kind": "frame",
         "output_episode_index": 0,
         "source_episode_id": "ep-000",
@@ -735,7 +782,7 @@ class TestStreamedLineage:
             _frame_row().rstrip(b"\n"),
             _frame_row(1),
             _frame_row(source_episode_id="unselected"),
-            _frame_row(schema_version="2.0.0"),
+            _frame_row(schema_version="3.0.0"),
             _frame_row(output_frame_index=True),
             _frame_row() + _frame_row(1, source_frame_index=3),
             _frame_row() + _frame_row(0),
@@ -750,7 +797,7 @@ class TestStreamedLineage:
 
     @pytest.mark.parametrize(
         "changes",
-        [{"record_count": 2}, {"episode_count": 2}, {"sha256": "0" * 64}, {"record_schema_version": "1.1.0"}],
+        [{"record_count": 2}, {"episode_count": 2}, {"sha256": "0" * 64}, {"record_schema_version": "2.1.0"}],
     )
     def test_given_mismatched_lineage_binding_when_verify_then_rejected(
         self, tmp_path: Path, changes: dict[str, object]
@@ -803,7 +850,13 @@ class TestFrozenInputContract:
             _frozen_dict(
                 saved_resources=[{"resource_id": "crop-1", "revision": "rev-7", "value_json": '{"x":1}'}],
                 source_objects=[
-                    {"path": "data/episode-000.jsonl", "revision": "rev-1", "length": 12, "sha256": DIGEST}
+                    {
+                        "assurance": "content_sha256",
+                        "path": "data/episode-000.jsonl",
+                        "revision": "rev-1",
+                        "length": 12,
+                        "sha256": DIGEST,
+                    }
                 ],
                 contributors=[{"contributor_label": "contributor-a", "role": "author"}],
                 recording_claims=[
@@ -896,6 +949,269 @@ class TestEpisodeMappings:
         # Act / Assert
         with pytest.raises(ValidationError):
             ReleaseManifest.model_validate(_manifest_dict(_episode_mapping(), second))
+
+
+MEDIA_REVISION = "c" * 64
+
+
+class _RevisionStore:
+    """Reports storage revisions for listed objects and refuses to stream revision-bound payloads."""
+
+    def __init__(
+        self,
+        root: Path,
+        revisions: dict[str, str],
+        copy_digest: str | None = DIGEST,
+        source_revision: str | None = MEDIA_REVISION,
+    ) -> None:
+        self._inner = LocalReleaseStore(root)
+        self._revisions = revisions
+        self._copy_digest = copy_digest
+        self._source_revision = source_revision
+        self.uploaded_sha256 = None
+
+    def list_objects(self) -> list[ObjectStat]:
+        return [
+            ObjectStat(
+                path=item.path,
+                length=item.length,
+                revision=self._revisions.get(item.path),
+                copy_operation_sha256=self._copy_digest if item.path in self._revisions else None,
+                source_revision=self._source_revision if item.path in self._revisions else None,
+                source_identity=DIGEST if item.path in self._revisions else None,
+                uploaded_sha256=self.uploaded_sha256 if item.path in self._revisions else None,
+            )
+            for item in self._inner.list_objects()
+        ]
+
+    def iter_bytes(self, path: str, *, chunk_size: int) -> Iterator[bytes]:
+        if path in self._revisions:
+            raise AssertionError(f"revision-bound payload streamed: {path}")
+        return self._inner.iter_bytes(path, chunk_size=chunk_size)
+
+    def read_control_bytes(self, path: str, *, max_bytes: int) -> bytes:
+        return self._inner.read_control_bytes(path, max_bytes=max_bytes)
+
+
+def _mixed_inventory(files: dict[str, bytes], revision_paths: frozenset[str]) -> Inventory:
+    entries: list[InventoryEntry | StorageRevisionEntry] = []
+    for path in sorted(files):
+        content = files[path]
+        if path in revision_paths:
+            entries.append(
+                StorageRevisionEntry(
+                    path=path, length=len(content), revision=MEDIA_REVISION, copy_operation_sha256=DIGEST
+                )
+            )
+        else:
+            entries.append(InventoryEntry(path=path, length=len(content), sha256=sha256_hex(content)))
+    return Inventory(entries=entries)
+
+
+def _write_mixed_package(root: Path, revision_paths: frozenset[str]) -> None:
+    files = _payload_files()
+    media = files["media/front/episode-000.mp4"]
+    source = files["data/episode-000.jsonl"]
+    frozen = serialize_model(
+        FrozenInput(
+            selected_episode_ids=["ep-000"],
+            source_objects=[
+                SourceObject(
+                    assurance="content_sha256",
+                    path="data/episode-000.jsonl",
+                    revision="fixture-v1",
+                    length=len(source),
+                    sha256=sha256_hex(source),
+                ),
+                RevisionSourceObject(
+                    assurance="storage_revision",
+                    path="videos/front/episode-000.mp4",
+                    revision=MEDIA_REVISION,
+                    length=len(media),
+                    storage_identity=DIGEST,
+                ),
+            ],
+        )
+    )
+    files[FROZEN_PATH] = frozen
+    files[PREVIEW_PATH] = serialize_model(ReleasePreview(frozen_input_sha256=sha256_hex(frozen), episode_count=1))
+    inventory_bytes = serialize_model(_mixed_inventory(files, revision_paths))
+    manifest = _manifest_for(files).model_copy(
+        update={
+            "frozen_input_sha256": sha256_hex(frozen),
+            "preview_sha256": sha256_hex(files[PREVIEW_PATH]),
+            "inventory_sha256": sha256_hex(inventory_bytes),
+            "mappings": (
+                ProvenanceMapping(source="videos/front/episode-000.mp4", target="media/front/episode-000.mp4"),
+            ),
+        }
+    )
+    _write_tree(root, {**files, INVENTORY_PATH: inventory_bytes, MANIFEST_PATH: serialize_model(manifest)})
+
+
+class TestStorageRevisionEvidence:
+    @pytest.mark.parametrize("source_revision", [None, "e" * 64])
+    def test_given_wrong_source_revision_when_verify_then_refused(
+        self, tmp_path: Path, source_revision: str | None
+    ) -> None:
+        _write_mixed_package(tmp_path, frozenset({"media/front/episode-000.mp4"}))
+        store = _RevisionStore(
+            tmp_path,
+            {"media/front/episode-000.mp4": MEDIA_REVISION},
+            source_revision=source_revision,
+        )
+
+        with pytest.raises(ReleaseVerificationError, match="storage revision provenance changed"):
+            verify_candidate(store)
+
+    def test_given_missing_copy_provenance_when_verify_then_refused(self, tmp_path: Path) -> None:
+        _write_mixed_package(tmp_path, frozenset({"media/front/episode-000.mp4"}))
+        manifest_path = tmp_path / MANIFEST_PATH
+        manifest = ReleaseManifest.model_validate_json(manifest_path.read_bytes())
+        manifest_path.write_bytes(serialize_model(manifest.model_copy(update={"mappings": ()})))
+        store = _RevisionStore(tmp_path, {"media/front/episode-000.mp4": MEDIA_REVISION})
+
+        with pytest.raises(ReleaseVerificationError, match="requires one provenance mapping"):
+            verify_candidate(store)
+
+    def test_given_revision_entry_when_serialized_then_no_content_digest_field(self) -> None:
+        # Arrange / Act
+        entry = StorageRevisionEntry(
+            path="media/front/episode-000.mp4", length=1, revision=MEDIA_REVISION, copy_operation_sha256=DIGEST
+        )
+
+        # Assert
+        assert entry.assurance == "storage_revision"
+        assert "sha256" not in entry.model_dump()
+
+    def test_given_etag_as_content_digest_when_validate_then_rejected(self) -> None:
+        # Arrange / Act / Assert
+        with pytest.raises(ValidationError):
+            InventoryEntry(path="data/a.jsonl", length=1, sha256='"0x8DC1"')
+
+    def test_given_legacy_entry_without_assurance_when_validate_then_rejected(self) -> None:
+        # Arrange
+        entries = [{"path": "data/a.jsonl", "length": 1, "sha256": DIGEST}]
+
+        # Act / Assert
+        with pytest.raises(ValidationError):
+            Inventory.model_validate({"schema_version": "2.0.0", "entries": entries})
+
+    def test_given_revision_entry_without_revision_when_validate_then_rejected(self) -> None:
+        # Arrange
+        entries = [
+            {
+                "assurance": "storage_revision",
+                "path": "media/front/episode-000.mp4",
+                "length": 1,
+                "copy_operation_sha256": DIGEST,
+            }
+        ]
+
+        # Act / Assert
+        with pytest.raises(ValidationError):
+            Inventory.model_validate({"schema_version": "2.0.0", "entries": entries})
+
+    def test_given_matching_revision_when_verify_then_payload_not_streamed(self, tmp_path: Path) -> None:
+        # Arrange
+        _write_mixed_package(tmp_path, frozenset({"media/front/episode-000.mp4"}))
+        store = _RevisionStore(tmp_path, {"media/front/episode-000.mp4": MEDIA_REVISION})
+
+        # Act
+        receipt = json.loads(verify_candidate(store).receipt_bytes)
+
+        # Assert
+        assert receipt["content_digest_count"] == 3
+        assert receipt["storage_revision_count"] == 1
+
+    def test_given_replaced_revision_when_verify_candidate_then_same_length_change_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        # Arrange
+        _write_mixed_package(tmp_path, frozenset({"media/front/episode-000.mp4"}))
+        store = _RevisionStore(tmp_path, {"media/front/episode-000.mp4": "d" * 64})
+
+        # Act / Assert
+        with pytest.raises(ReleaseVerificationError, match="revision changed"):
+            verify_candidate(store)
+
+    def test_given_replaced_copy_operation_when_verify_candidate_then_copy_evidence_change_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        # Arrange
+        _write_mixed_package(tmp_path, frozenset({"media/front/episode-000.mp4"}))
+        store = _RevisionStore(tmp_path, {"media/front/episode-000.mp4": MEDIA_REVISION}, copy_digest="e" * 64)
+
+        # Act / Assert
+        with pytest.raises(ReleaseVerificationError, match="copy evidence changed"):
+            verify_candidate(store)
+
+    def test_given_revision_without_copy_operation_when_verify_then_fails_closed(self, tmp_path: Path) -> None:
+        # Arrange
+        _write_mixed_package(tmp_path, frozenset({"media/front/episode-000.mp4"}))
+        store = _RevisionStore(tmp_path, {"media/front/episode-000.mp4": MEDIA_REVISION}, copy_digest=None)
+
+        # Act / Assert
+        with pytest.raises(ReleaseVerificationError, match="evidence unavailable"):
+            verify_candidate(store)
+
+    def test_given_no_listed_revision_when_verify_candidate_then_fails_closed(self, tmp_path: Path) -> None:
+        # Arrange
+        _write_mixed_package(tmp_path, frozenset({"media/front/episode-000.mp4"}))
+
+        # Act / Assert
+        with pytest.raises(ReleaseVerificationError, match="evidence unavailable"):
+            verify_candidate(LocalReleaseStore(tmp_path))
+
+    def test_given_revision_only_control_input_when_verify_candidate_then_rejected(self, tmp_path: Path) -> None:
+        # Arrange
+        _write_mixed_package(tmp_path, frozenset({FROZEN_PATH}))
+
+        # Act / Assert
+        with pytest.raises(ReleaseVerificationError, match="content digest"):
+            verify_candidate(LocalReleaseStore(tmp_path))
+
+
+@pytest.mark.parametrize("changed", [None, "revision", "operation", "digest", "missing"])
+def test_given_uploaded_content_when_verify_then_checks_evidence_without_readback(
+    tmp_path: Path, changed: str | None
+) -> None:
+    path = "media/front/episode-000.mp4"
+    _write_mixed_package(tmp_path, frozenset())
+    inventory = Inventory.model_validate_json((tmp_path / INVENTORY_PATH).read_bytes())
+    content = (tmp_path / path).read_bytes()
+    entry = UploadedContentEntry(
+        path=path, length=len(content), revision=MEDIA_REVISION, sha256=sha256_hex(content), operation_sha256=DIGEST
+    )
+    inventory = inventory.model_copy(
+        update={"entries": tuple(entry if item.path == path else item for item in inventory.entries)}
+    )
+    inventory_bytes = serialize_model(inventory)
+    (tmp_path / INVENTORY_PATH).write_bytes(inventory_bytes)
+    manifest = ReleaseManifest.model_validate_json((tmp_path / MANIFEST_PATH).read_bytes())
+    (tmp_path / MANIFEST_PATH).write_bytes(
+        serialize_model(manifest.model_copy(update={"inventory_sha256": sha256_hex(inventory_bytes)}))
+    )
+    store = _RevisionStore(
+        tmp_path,
+        {path: "d" * 64 if changed == "revision" else MEDIA_REVISION},
+        copy_digest="e" * 64 if changed == "operation" else DIGEST,
+        source_revision=None,
+    )
+    store.uploaded_sha256 = None if changed == "missing" else "f" * 64 if changed == "digest" else entry.sha256
+
+    if changed is not None:
+        with pytest.raises(ReleaseVerificationError, match="uploaded content"):
+            verify_candidate(store)
+    else:
+        receipt = json.loads(verify_candidate(store).receipt_bytes)
+        assert receipt["uploaded_content_count"] == 1
+        assert receipt["storage_revision_count"] == 0
+        assert receipt["content_digest_count"] == 3
+        report = parse_report(verify_candidate(store).report_bytes)
+        assert report.uploaded_content_count == 1
+        assert report.storage_revision_count == 0
+        assert report.content_digest_count == 3
 
 
 class _ChangingListingStore(LocalReleaseStore):
