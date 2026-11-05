@@ -81,7 +81,8 @@ class ReleaseSource(Protocol):
 
     admission: Literal["finalized_quiescent", "immutable_revision", "revision_bound"]
 
-    def inventory(self, checkpoint: Checkpoint | None = None) -> tuple[SourceObjectRecord, ...]: ...
+    def inventory(self, checkpoint: Checkpoint | None = None) -> tuple[SourceObjectRecord, ...]:
+        raise NotImplementedError
 
 
 def _stat_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:

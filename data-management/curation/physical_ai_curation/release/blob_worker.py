@@ -82,6 +82,8 @@ class _ObservedBlobStore(BlobReleaseStore):
 class SupervisedBlobPublisher(BlobPublisher):
     """Issue each server-side copy from a registered guardian child; refuse unsupervised mutations."""
 
+    _store_type = _ObservedBlobStore
+
     def __init__(
         self,
         container: Any,
@@ -94,7 +96,6 @@ class SupervisedBlobPublisher(BlobPublisher):
         super().__init__(container, attempt, ReleaseJobControl(jobs, job_id, fence), root_prefix=location.prefix)
         self.location = location
         self.jobs, self.job_id, self.fence = jobs, job_id, fence
-        self.store = _ObservedBlobStore(container, self.root)
         self._active: SourceObjectRecord | None = None
         self._active_write: dict[str, Any] | None = None
         self._cleanup_deadline: float | None = None
@@ -573,7 +574,7 @@ class SupervisedBlobPublisher(BlobPublisher):
                         verify_published(self.store, expected_manifest_sha256)
                         observed = "complete"
                 except ReleaseVerificationError:
-                    pass
+                    observed = "conflict"
             self.jobs.resolve_marker_effect(
                 self.job_id, self.fence, observed=observed, length=intent["length"], digest=intent["digest"]
             )

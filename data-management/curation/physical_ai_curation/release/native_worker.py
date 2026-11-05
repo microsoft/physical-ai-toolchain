@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import sys
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -29,54 +28,18 @@ from physical_ai_curation.release.inputs import (
 from physical_ai_curation.release.jobs import CapacityError, ReleaseJobStore
 from physical_ai_curation.release.media import ObjectPlanRequest, ReleasePlanError, SubsetEpisodeInput
 from physical_ai_curation.release.models import ProducerIdentity
+from physical_ai_curation.release.native_inputs import (
+    EPISODES_PATH,
+    INFO_PATH,
+    STATS_PATH,
+    TASKS_PATH,
+    GenerationInputs,
+    _data_path,
+    _validate_native_inputs,
+    table_identity,
+)
 from physical_ai_curation.release.record_storage import BlobLocation
 from physical_ai_curation.release.worker import run_supervised
-
-if TYPE_CHECKING:
-    from physical_ai_curation.release.coordinator import GenerationInputs
-
-
-class _IdentitySink(io.RawIOBase):
-    def __init__(self) -> None:
-        self.digest = hashlib.sha256()
-        self.length = 0
-
-    def writable(self) -> bool:
-        return True
-
-    def tell(self) -> int:
-        return self.length
-
-    def write(self, content: bytes) -> int:
-        self.digest.update(content)
-        self.length += len(content)
-        return len(content)
-
-
-def table_identity(table: pa.Table) -> str:
-    """Hash canonical Arrow batches without building another table-sized byte buffer."""
-
-    def field_type(dtype: pa.DataType) -> pa.DataType:
-        if pa.types.is_list(dtype):
-            return pa.list_(pa.field("item", field_type(dtype.value_type), nullable=dtype.value_field.nullable))
-        if pa.types.is_large_list(dtype):
-            return pa.large_list(pa.field("item", field_type(dtype.value_type), nullable=dtype.value_field.nullable))
-        if pa.types.is_fixed_size_list(dtype):
-            return pa.list_(
-                pa.field("item", field_type(dtype.value_type), nullable=dtype.value_field.nullable), dtype.list_size
-            )
-        if pa.types.is_struct(dtype):
-            return pa.struct([pa.field(field.name, field_type(field.type), nullable=field.nullable) for field in dtype])
-        return dtype
-
-    schema = pa.schema(
-        [pa.field(field.name, field_type(field.type), nullable=field.nullable) for field in table.schema]
-    )
-    canonical = table.cast(schema).combine_chunks()
-    sink = _IdentitySink()
-    with pa.ipc.new_stream(sink, canonical.schema) as writer:
-        writer.write_table(canonical, max_chunksize=1024)
-    return sink.digest.hexdigest()
 
 
 def _source_spec(source_root: Path | BlobLocation) -> dict[str, str]:
@@ -227,15 +190,6 @@ def restore_inputs(
 
 
 def _process(request: Path, *, container_factory: Callable[[str, str], Any] | None = None) -> None:
-    from physical_ai_curation.release.coordinator import (
-        EPISODES_PATH,
-        INFO_PATH,
-        STATS_PATH,
-        TASKS_PATH,
-        GenerationInputs,
-        _data_path,
-        _validate_native_inputs,
-    )
     from physical_ai_curation.release.tables import generate_native_selection
 
     if request.stat().st_size > MAX_SPEC_BYTES:

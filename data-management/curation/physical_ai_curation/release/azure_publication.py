@@ -282,6 +282,8 @@ class BlobReleaseStore:
 class BlobPublisher:
     """Attempt-owned writes, server-side copies, and marker publication in one container."""
 
+    _store_type = BlobReleaseStore
+
     def __init__(
         self,
         container: Any,
@@ -300,7 +302,7 @@ class BlobPublisher:
         self.source_authorization = source_authorization
         self.parent_prefix = prefix + "/" if prefix else ""
         self.root = f"{prefix}/{attempt.prefix}/" if prefix else f"{attempt.prefix}/"
-        self.store = BlobReleaseStore(container, self.root)
+        self.store = self._store_type(container, self.root)
 
     def _claim_root(self) -> None:
         path = self.parent_prefix + ownership_path(self.attempt.prefix)

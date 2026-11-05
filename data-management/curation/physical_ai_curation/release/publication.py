@@ -116,11 +116,11 @@ class PublicationControl(Protocol):
     A replay is eligible only when this exact owned identity was already persisted.
     """
 
-    def effect(
-        self, attempt: PublicationAttempt, path: str, length: int, digest: str
-    ) -> AbstractContextManager[bool]: ...
+    def effect(self, attempt: PublicationAttempt, path: str, length: int, digest: str) -> AbstractContextManager[bool]:
+        raise NotImplementedError
 
-    def publication(self, attempt: PublicationAttempt, digest: str) -> AbstractContextManager[None]: ...
+    def publication(self, attempt: PublicationAttempt, digest: str) -> AbstractContextManager[None]:
+        raise NotImplementedError
 
     def reconciliation(
         self,
@@ -131,18 +131,21 @@ class PublicationControl(Protocol):
         *,
         copy_id: str | None,
         cancel: bool,
-    ) -> AbstractContextManager[Callable[[str], None]]: ...
+    ) -> AbstractContextManager[Callable[[str], None]]:
+        raise NotImplementedError
 
 
 class LocalPublisher:
     """Write once at a stable configured destination, never through a promotion copy."""
+
+    _store_type = LocalReleaseStore
 
     def __init__(self, destination: Path, attempt: PublicationAttempt, control: PublicationControl) -> None:
         self.destination = destination
         self.attempt = attempt
         self.control = control
         self.root = destination / attempt.prefix
-        self.store = LocalReleaseStore(self.root)
+        self.store = self._store_type(self.root)
 
     def _claim_root(self) -> None:
         companion = ownership_path(self.attempt.prefix)

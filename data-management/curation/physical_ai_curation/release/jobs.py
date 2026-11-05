@@ -9,7 +9,7 @@ import os
 import re
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -2253,8 +2253,7 @@ def _remove_verified(
     parts = PurePosixPath(relative).parts
     if not parts or PurePosixPath(relative).is_absolute() or any(part in ("", ".", "..") for part in parts):
         return False
-    opened: list[int] = []
-    try:
+    with ExitStack() as stack:
         current = root_fd
         for name in parts[:-1]:
             try:
@@ -2263,7 +2262,7 @@ def _remove_verified(
                 return True
             except OSError:
                 return False
-            opened.append(current)
+            stack.callback(os.close, current)
         leaf = parts[-1]
         try:
             file_fd = os.open(leaf, _FILE_FLAGS, dir_fd=current)
@@ -2286,9 +2285,6 @@ def _remove_verified(
             return True
         finally:
             os.close(file_fd)
-    finally:
-        for fd in opened:
-            os.close(fd)
 
 
 def _verify_open_file(fd: int, length: int, digest: str, *, deadline: float | None = None) -> bool:

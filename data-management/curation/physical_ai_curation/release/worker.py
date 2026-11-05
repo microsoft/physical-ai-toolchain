@@ -26,9 +26,11 @@ Reason = Literal["exited", "cancelled", "lease_lost", "timed_out"]
 
 
 class _LeaseStore(Protocol):
-    def heartbeat(self, job_id: str, fence: int) -> bool: ...
+    def heartbeat(self, job_id: str, fence: int) -> bool:
+        raise NotImplementedError
 
-    def confirm_stopped(self, job_id: str, fence: int) -> None: ...
+    def confirm_stopped(self, job_id: str, fence: int) -> None:
+        raise NotImplementedError
 
     def runtime_proof_path(
         self,
@@ -38,7 +40,8 @@ class _LeaseStore(Protocol):
         effect_path: str | None = None,
         effect_paths: Sequence[str] | None = None,
         reconciliation: bool = False,
-    ) -> Path: ...
+    ) -> Path:
+        raise NotImplementedError
 
     def register_runtime(
         self,
@@ -49,9 +52,11 @@ class _LeaseStore(Protocol):
         effect_path: str | None = None,
         effect_paths: Sequence[str] | None = None,
         reconciliation: bool = False,
-    ) -> None: ...
+    ) -> None:
+        raise NotImplementedError
 
-    def confirm_runtime_stopped(self, job_id: str, fence: int, proof: StopProof) -> None: ...
+    def confirm_runtime_stopped(self, job_id: str, fence: int, proof: StopProof) -> None:
+        raise NotImplementedError
 
 
 @dataclass(frozen=True)

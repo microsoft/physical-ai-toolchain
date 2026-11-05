@@ -76,11 +76,14 @@ class RecordLimits:
 class RecordStorage(Protocol):
     """Transactional collection of per-job JSON records keyed by job ID."""
 
-    def transaction(self) -> AbstractContextManager[dict[str, dict[str, Any]]]: ...
+    def transaction(self) -> AbstractContextManager[dict[str, dict[str, Any]]]:
+        raise NotImplementedError
 
-    def snapshot(self) -> dict[str, dict[str, Any]]: ...
+    def snapshot(self) -> dict[str, dict[str, Any]]:
+        raise NotImplementedError
 
-    def configuration(self) -> dict[str, Any]: ...
+    def configuration(self) -> dict[str, Any]:
+        raise NotImplementedError
 
 
 def _decode_record(raw: bytes, key: str) -> dict[str, Any]:
@@ -529,9 +532,8 @@ class BlobRecordStorage:
         blob = self._container.get_blob_client(self._coordinator)
         if not self._coordinator_ready:
             try:
-                blob.upload_blob(b"", overwrite=False, timeout=timeout)
-            except ResourceExistsError:
-                pass
+                with suppress(ResourceExistsError):
+                    blob.upload_blob(b"", overwrite=False, timeout=timeout)
             except HttpResponseError as error:
                 if error.status_code != 412 or getattr(error, "error_code", None) != "LeaseIdMissing":
                     raise

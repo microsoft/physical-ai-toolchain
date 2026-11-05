@@ -10,7 +10,7 @@ import hashlib
 import os
 import stat
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -59,11 +59,14 @@ class ObjectStat:
 class ReleaseStore(Protocol):
     """Listing, streaming, and bounded control reads required by release verification."""
 
-    def list_objects(self) -> Sequence[ObjectStat]: ...
+    def list_objects(self) -> Sequence[ObjectStat]:
+        raise NotImplementedError
 
-    def iter_bytes(self, path: str, *, chunk_size: int) -> Iterator[bytes]: ...
+    def iter_bytes(self, path: str, *, chunk_size: int) -> Iterator[bytes]:
+        raise NotImplementedError
 
-    def read_control_bytes(self, path: str, *, max_bytes: int) -> bytes: ...
+    def read_control_bytes(self, path: str, *, max_bytes: int) -> bytes:
+        raise NotImplementedError
 
 
 def _safe_flags() -> tuple[int, int]:
@@ -85,12 +88,15 @@ def _open_child_directory(parent: int, name: str) -> int:
         descriptor = os.open(name, os.O_RDONLY | directory | nofollow, dir_fd=parent)
     except OSError as exc:
         raise ReleaseVerificationError(f"symbolic link or non-directory not allowed: {name}") from exc
-    opened = os.fstat(descriptor)
-    current = os.stat(name, dir_fd=parent, follow_symlinks=False)
-    if not stat.S_ISDIR(opened.st_mode) or not _same_object(opened, current):
+    try:
+        opened = os.fstat(descriptor)
+        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISDIR(opened.st_mode) or not _same_object(opened, current):
+            raise ReleaseVerificationError(f"directory changed during traversal: {name}")
+        return descriptor
+    except BaseException:
         os.close(descriptor)
-        raise ReleaseVerificationError(f"directory changed during traversal: {name}")
-    return descriptor
+        raise
 
 
 def _open_child_file(parent: int, name: str) -> int:
@@ -102,12 +108,15 @@ def _open_child_file(parent: int, name: str) -> int:
         descriptor = os.open(name, os.O_RDONLY | nofollow | nonblocking, dir_fd=parent)
     except OSError as exc:
         raise ReleaseVerificationError(f"unreadable release object: {name}") from exc
-    opened = os.fstat(descriptor)
-    current = os.stat(name, dir_fd=parent, follow_symlinks=False)
-    if not stat.S_ISREG(opened.st_mode) or not _same_object(opened, current):
+    try:
+        opened = os.fstat(descriptor)
+        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISREG(opened.st_mode) or not _same_object(opened, current):
+            raise ReleaseVerificationError(f"non-regular or replaced file not allowed: {name}")
+        return descriptor
+    except BaseException:
         os.close(descriptor)
-        raise ReleaseVerificationError(f"non-regular or replaced file not allowed: {name}")
-    return descriptor
+        raise
 
 
 class LocalReleaseStore:
@@ -185,11 +194,16 @@ class LocalReleaseStore:
         if not 0 < chunk_size <= CHUNK_BYTES:
             raise ReleaseVerificationError(f"chunk size must be between 1 and {CHUNK_BYTES}")
         segments = normalize_release_path(path).split("/")
-        descriptors: list[int] = [self._open_root()]
-        try:
+        with ExitStack() as stack:
+            root = self._open_root()
+            stack.callback(os.close, root)
+            descriptors = [root]
             for segment in segments[:-1]:
-                descriptors.append(_open_child_directory(descriptors[-1], segment))
+                child = _open_child_directory(descriptors[-1], segment)
+                stack.callback(os.close, child)
+                descriptors.append(child)
             file_fd = _open_child_file(descriptors[-1], segments[-1])
+            stack.callback(os.close, file_fd)
             descriptors.append(file_fd)
             before = os.fstat(file_fd)
             while chunk := os.read(file_fd, chunk_size):
@@ -202,9 +216,6 @@ class LocalReleaseStore:
             ):
                 raise ReleaseVerificationError(f"object changed during read: {path}")
             self._check_chain(descriptors, segments)
-        finally:
-            for descriptor in reversed(descriptors):
-                os.close(descriptor)
 
     def write_verified_object(
         self,
@@ -225,23 +236,29 @@ class LocalReleaseStore:
             raise ReleaseVerificationError("expected object length must be nonnegative")
         if len(sha256) != 64 or any(character not in "0123456789abcdef" for character in sha256):
             raise ReleaseVerificationError("expected object digest must be lowercase SHA-256")
-        descriptors = [self._open_root(create=True)]
+        root = self._open_root(create=True)
+        descriptors = [root]
         partial = f".curation-copy-{uuid4().hex}.partial"
         owns_partial = False
+        stack = ExitStack()
         try:
+            stack.callback(os.close, root)
             for segment in segments[:-1]:
                 with suppress(FileExistsError):
                     os.mkdir(segment, dir_fd=descriptors[-1])
                     os.fsync(descriptors[-1])
-                descriptors.append(_open_child_directory(descriptors[-1], segment))
+                child = _open_child_directory(descriptors[-1], segment)
+                stack.callback(os.close, child)
+                descriptors.append(child)
             _, nofollow = _safe_flags()
             descriptor = os.open(
                 partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, 0o600, dir_fd=descriptors[-1]
             )
             owns_partial = True
+            stack.callback(os.close, descriptor)
             digest = hashlib.sha256()
             total = 0
-            with os.fdopen(descriptor, "wb") as output:
+            with os.fdopen(descriptor, "wb", closefd=False) as output:
                 if on_created is not None:
                     on_created(partial, os.fstat(output.fileno()))
                 for chunk in chunks:
@@ -274,8 +291,7 @@ class LocalReleaseStore:
                 if owns_partial:
                     os.unlink(partial, dir_fd=descriptors[-1])
             finally:
-                for descriptor in reversed(descriptors):
-                    os.close(descriptor)
+                stack.close()
 
     def read_control_bytes(self, path: str, *, max_bytes: int) -> bytes:
         chunks: list[bytes] = []

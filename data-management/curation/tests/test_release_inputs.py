@@ -12,10 +12,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import physical_ai_curation.release.inputs as inputs_module
 import pytest
 from physical_ai_curation.adapters.local_saved_input import LocalSavedInputReader
 from physical_ai_curation.evidence import bind_job_evidence
+from physical_ai_curation.release import inputs as inputs_module
 from physical_ai_curation.release.canonical import serialize_model, sha256_hex
 from physical_ai_curation.release.inputs import (
     BlobReleaseSource,
@@ -1264,7 +1264,7 @@ def test_given_repeated_cancellation_while_settling_inventory_when_awaited_then_
         await asyncio.sleep(0)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.gather(task)
         assert finished.is_set()
 
     asyncio.run(scenario())

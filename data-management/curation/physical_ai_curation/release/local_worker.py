@@ -51,12 +51,13 @@ class _ObservedDestinationStore(LocalReleaseStore):
 class SupervisedLocalPublisher(LocalPublisher):
     """Keep payload writers in durably registered process trees, never controller threads."""
 
+    _store_type = _ObservedDestinationStore
+
     def __init__(
         self, destination: Path, attempt: PublicationAttempt, jobs: ReleaseJobStore, job_id: str, fence: int
     ) -> None:
         super().__init__(destination, attempt, ReleaseJobControl(jobs, job_id, fence))
         self.jobs, self.job_id, self.fence = jobs, job_id, fence
-        self.store = _ObservedDestinationStore(self.root)
 
     @property
     def destination_read_bytes(self) -> int:

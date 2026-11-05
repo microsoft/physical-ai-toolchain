@@ -51,6 +51,7 @@ from physical_ai_curation.release.media import (
     SubsetEpisodeInput,
 )
 from physical_ai_curation.release.models import ProducerIdentity, VersionIdentity
+from physical_ai_curation.release.native_inputs import _validate_native_inputs
 from physical_ai_curation.release.native_worker import _source_spec, native_operation, restore_inputs
 from physical_ai_curation.release.publication import LocalPublisher, PublicationAttempt
 from physical_ai_curation.release.record_storage import BlobLocation
@@ -360,6 +361,58 @@ def test_given_checkpoint_raises_during_inventory_then_error_propagates(tmp_path
         coordinator_module._inventory(store, checkpoint=checkpoint)
 
 
+@pytest.mark.parametrize("kind", ["file", "directory"])
+def test_given_identity_check_raises_when_child_opened_then_descriptor_closed(
+    tmp_path: Path, mocker: MockerFixture, kind: str
+) -> None:
+    from physical_ai_curation.release import store as store_module
+
+    entry = tmp_path / "entry"
+    if kind == "file":
+        entry.write_bytes(b"data")
+        open_child = store_module._open_child_file
+    else:
+        entry.mkdir()
+        open_child = store_module._open_child_directory
+    root = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        opened = mocker.spy(os, "open")
+        identity = mocker.patch.object(os, "fstat", side_effect=OSError("identity unavailable"))
+        with pytest.raises(OSError, match="identity unavailable"):
+            open_child(root, "entry")
+        mocker.stop(identity)
+
+        with pytest.raises(OSError, match="Bad file descriptor"):
+            os.fstat(opened.spy_return)
+    finally:
+        os.close(root)
+
+
+@pytest.mark.parametrize("operation", ["read", "write"])
+def test_given_aborted_stream_when_store_releases_ownership_then_all_descriptors_closed(
+    tmp_path: Path, mocker: MockerFixture, operation: str
+) -> None:
+    root = tmp_path / "release"
+    (root / "nested").mkdir(parents=True)
+    (root / "nested/item.bin").write_bytes(b"abc")
+    opened = mocker.spy(os, "open")
+    store = LocalReleaseStore(root)
+
+    if operation == "read":
+        stream = store.iter_bytes("nested/item.bin", chunk_size=1)
+        assert next(stream) == b"a"
+        stream.close()
+    else:
+        with pytest.raises(ReleaseVerificationError, match="expected length"):
+            store.write_verified_object("nested/output.bin", (b"abc",), length=1, sha256=sha256_hex(b"a"))
+        assert sorted(path.name for path in (root / "nested").iterdir()) == ["item.bin"]
+
+    assert opened.spy_return_list
+    for descriptor in set(opened.spy_return_list):
+        with pytest.raises(OSError, match="Bad file descriptor"):
+            os.fstat(descriptor)
+
+
 def test_given_task_cancelled_during_threaded_source_inventory_when_executed_then_thread_settled(
     tmp_path: Path,
 ) -> None:
@@ -389,7 +442,7 @@ def test_given_task_cancelled_during_threaded_source_inventory_when_executed_the
         await asyncio.to_thread(started.wait, 5)
         task.cancel()
         with suppress(asyncio.CancelledError):
-            await task
+            await asyncio.gather(task)
         return finished.is_set()
 
     with patch.object(LocalReleaseSource, "inventory", slow_inventory):
@@ -1556,7 +1609,7 @@ def test_given_v21_source_when_validated_and_assembled_then_v3_native_metadata(t
     from physical_ai_curation.release.tables import generate_native_selection
 
     source, frozen, planned = _v21_case(tmp_path)
-    bound = coordinator_module._validate_native_inputs(source, frozen, planned, 8 * 1024**2, restore=True)
+    bound = _validate_native_inputs(source, frozen, planned, 8 * 1024**2, restore=True)
     prepared = prepare_saved_generation(
         frozen.content, planned.request, planned.sources, camera_statistics=planned.camera_statistics
     )
@@ -1588,7 +1641,7 @@ def _blob_native_case(
     if version == "v2.1":
         local, local_frozen, inputs = _v21_case(tmp_path, with_stats=with_stats, stats_file=with_stats)
         reader, selection, context = SavedReader(), _selection(), _context()
-        inputs = coordinator_module._validate_native_inputs(local, local_frozen, inputs, 8 * 1024**2, restore=True)
+        inputs = _validate_native_inputs(local, local_frozen, inputs, 8 * 1024**2, restore=True)
     else:
         local, reader, selection, context, _, inputs, _ = _native_case(tmp_path, processed=processed)
     sdk = tmp_path / "sdk"
@@ -1708,8 +1761,6 @@ def test_given_oversized_native_metadata_when_restoring_then_refused_before_deco
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bound: str
 ) -> None:
     from types import SimpleNamespace
-
-    from physical_ai_curation.release.coordinator import _validate_native_inputs
 
     source, _reader, _selection, _context, frozen, inputs, _sdk, _remote = _blob_native_case(tmp_path)
 

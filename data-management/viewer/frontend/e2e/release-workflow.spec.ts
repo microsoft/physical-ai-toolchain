@@ -198,7 +198,7 @@ test.describe('curated dataset release workflow', () => {
     await dialog.getByRole('button', { name: 'Preview release' }).click()
     await expect(dialog.getByText('Reserved bytes')).toBeVisible({ timeout: 30_000 })
 
-    const processing = dialog.getByRole('checkbox', { name: /processing action/i })
+    const processing = dialog.getByRole('checkbox', { name: /video processing/i })
     if (await processing.count()) await processing.check()
     const localDisk = dialog.getByRole('checkbox', { name: /local disk/i })
     if (await localDisk.count()) await localDisk.check()
@@ -207,7 +207,7 @@ test.describe('curated dataset release workflow', () => {
     await expect(dialog).toBeHidden({ timeout: 30_000 })
 
     const jobs = page.getByRole('list', { name: 'Release jobs' })
-    await expect(jobs.getByRole('button', { name: /Open job/ })).toHaveCount(1)
+    await expect(jobs.getByRole('button', { name: /Close job/ })).toHaveCount(1)
 
     const workerOutput = await runReleaseWorkerOnce()
     expect(workerOutput).toBeTruthy()
@@ -220,7 +220,7 @@ test.describe('curated dataset release workflow', () => {
     await page.reload()
     await page.getByRole('tab', { name: 'Releases' }).click()
     await expect(
-      page.getByRole('list', { name: 'Release jobs' }).getByRole('button', { name: /Open job/ }),
+      page.getByRole('list', { name: 'Release jobs' }).getByRole('button', { name: /Close job/ }),
     ).toHaveCount(1)
   })
 
@@ -361,7 +361,7 @@ function countSubmissions(page: Page): () => number {
 async function previewAndAcknowledge(dialog: Locator): Promise<void> {
   await dialog.getByRole('button', { name: 'Preview release' }).click()
   await expect(dialog.getByText('Reserved bytes')).toBeVisible({ timeout: 30_000 })
-  const processing = dialog.getByRole('checkbox', { name: /processing action/i })
+  const processing = dialog.getByRole('checkbox', { name: /video processing/i })
   if (await processing.count()) await processing.check()
   const localDisk = dialog.getByRole('checkbox', { name: /local disk/i })
   if (await localDisk.count()) await localDisk.check()
@@ -569,7 +569,7 @@ test.describe('release API contract against the real backend', () => {
     expect(new URL(page.url()).searchParams.get('dataset')).toBe(datasetId)
   })
 
-  test('a label saved through the real API makes an earlier preview stale', async ({ page }) => {
+  test('a label saved through the real API leaves the advisory preview valid', async ({ page }) => {
     test.setTimeout(180_000)
     await openReleases(page)
     const spec = releaseSpec('e2e-stale', [0, 1])
@@ -592,11 +592,11 @@ test.describe('release API contract against the real backend', () => {
     expect(saved.ok(), await saved.text()).toBeTruthy()
 
     const refreshed = await previewViaApi(page, spec)
-    expect(refreshed.digest).not.toBe(preview.digest)
+    expect(refreshed.digest).toBe(preview.digest)
 
-    const stale = await submitViaApi(page, spec, preview)
-    expect(stale.status).toBe(409)
-    expect(stale.body.detail?.code).toBe('stale_preview')
+    const submitted = await submitViaApi(page, spec, preview)
+    expect(submitted.status).toBe(202)
+    expect(await jobStateViaApi(page, submitted.body.job_id!)).toBe('accepted')
   })
 
   test('an accepted job cancelled before publication leaves no output after the worker runs', async ({
@@ -604,6 +604,7 @@ test.describe('release API contract against the real backend', () => {
   }) => {
     test.setTimeout(300_000)
     await openReleases(page)
+    await drainReleaseWorker()
     const before = await listOutput()
 
     const spec = releaseSpec('e2e-cancel', [0])
@@ -616,22 +617,20 @@ test.describe('release API contract against the real backend', () => {
     const cancel = await page.request.post(`/api/releases/v1/jobs/${jobId}/cancel`, { headers })
     expect(cancel.status()).toBe(202)
 
-    await runReleaseWorkerOnce()
-    expect(await jobStateViaApi(page, jobId)).toBe('cancelled')
+    await drainReleaseWorker()
+    expect((await page.request.get(`/api/releases/v1/jobs/${jobId}`)).status()).toBe(404)
     expect(await listOutput()).toEqual(before)
   })
 })
 
 test.describe('release dialog and job panel through the real API', () => {
-  test('an inaccessible saved job reports unavailable status and clears without resubmitting', async ({
-    page,
-  }) => {
+  test('an inaccessible saved job clears its pointer without resubmitting', async ({ page }) => {
     test.setTimeout(180_000)
     const submissionCount = countSubmissions(page)
     const dialog = await startReleaseDraft(page, `e2e-denied-${Date.now()}`, [0])
     await previewAndAcknowledge(dialog)
     const ownJobId = await submitDraft(page, dialog)
-    const panel = page.getByRole('region', { name: 'Active job' })
+    const panel = page.getByRole('region', { name: `Job ${ownJobId.slice(0, 8)}` })
     await expect(panel.getByRole('status')).toContainText('Accepted')
     await expect(panel.getByRole('status')).toHaveAttribute('aria-live', 'polite')
     await cancelFixtureJob(ownJobId)
@@ -668,13 +667,27 @@ test.describe('release dialog and job panel through the real API', () => {
       await page.reload()
       await page.getByRole('tab', { name: 'Releases' }).click()
       expect((await refusal).status()).toBe(404)
-      await expect(panel.getByRole('status')).toHaveText('Job status could not be loaded.')
-      await expect(panel.getByRole('button', { name: 'Cancel job' })).toBeDisabled()
-      const clear = panel.getByRole('button', { name: 'Clear saved job' })
-      await clear.focus()
-      await page.keyboard.press('Enter')
       await expect(panel).toBeHidden()
-      await expect(page.getByRole('button', { name: 'Create release' })).toBeEnabled()
+      await expect(
+        page.getByRole('region', { name: `Job ${foreignJobId.slice(0, 8)}` }),
+      ).toBeHidden()
+      expect(
+        await page.evaluate(
+          (jobId) =>
+            Object.keys(localStorage).some(
+              (key) =>
+                key.startsWith('release-active-job:v2:') && localStorage.getItem(key) === jobId,
+            ),
+          foreignJobId,
+        ),
+      ).toBe(false)
+      const create = page.getByRole('button', { name: 'Create release' })
+      await expect(create).toBeEnabled()
+      await create.focus()
+      await page.keyboard.press('Enter')
+      await expect(page.getByRole('dialog', { name: 'Release curated dataset' })).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(create).toBeFocused()
       expect(submissionCount()).toBe(1)
     } finally {
       await cancelFixtureJob(foreignJobId, 'foreign-scope')
@@ -693,7 +706,9 @@ test.describe('release dialog and job panel through the real API', () => {
     await previewAndAcknowledge(dialog)
     const jobId = await submitDraft(page, dialog)
 
-    await expect(jobs.getByRole('button', { name: `Open job ${jobId.slice(0, 8)}` })).toBeVisible()
+    await expect(
+      jobs.getByRole('button', { name: `Close job ${jobId.slice(0, 8)}` }),
+    ).toHaveAttribute('aria-expanded', 'true')
     await drainReleaseWorker()
 
     const verified = page.getByRole('region', { name: 'Verified result' })
@@ -706,9 +721,7 @@ test.describe('release dialog and job panel through the real API', () => {
     expect(overflow).toBeLessThanOrEqual(0)
   })
 
-  test('a preview invalidated by a saved label shows a visible refusal and recovers on a new preview', async ({
-    page,
-  }) => {
+  test('a saved label leaves the advisory preview usable for submission', async ({ page }) => {
     test.setTimeout(180_000)
     const dialog = await startReleaseDraft(page, `e2e-ui-stale-${Date.now()}`, [0, 1])
     await previewAndAcknowledge(dialog)
@@ -726,12 +739,11 @@ test.describe('release dialog and job panel through the real API', () => {
     })
     expect(saved.ok(), await saved.text()).toBeTruthy()
 
-    await dialog.getByRole('button', { name: 'Submit release' }).click()
-    await expect(dialog.getByRole('alert')).toContainText('stale_preview')
-    await expect(dialog.getByText('Reserved bytes')).toBeHidden()
-
-    await previewAndAcknowledge(dialog)
+    await expect(dialog.getByText('Reserved bytes')).toBeVisible()
     await expect(dialog.getByRole('button', { name: 'Submit release' })).toBeEnabled()
+    const jobId = await submitDraft(page, dialog)
+    await expect(page.getByRole('region', { name: `Job ${jobId.slice(0, 8)}` })).toBeVisible()
+    expect(await jobStateViaApi(page, jobId)).toBe('accepted')
   })
 
   test('reloading while a job is accepted restores the job without a second submission', async ({
@@ -743,12 +755,12 @@ test.describe('release dialog and job panel through the real API', () => {
     const jobs = page.getByRole('list', { name: 'Release jobs' })
     await previewAndAcknowledge(dialog)
     const jobId = await submitDraft(page, dialog)
-    const jobButton = jobs.getByRole('button', { name: `Open job ${jobId.slice(0, 8)}` })
-    await expect(jobButton).toBeVisible()
+    const jobButton = jobs.getByRole('button', { name: `Close job ${jobId.slice(0, 8)}` })
+    await expect(jobButton).toHaveAttribute('aria-expanded', 'true')
 
     await page.reload()
     await page.getByRole('tab', { name: 'Releases' }).click()
-    await expect(page.getByRole('heading', { name: 'Active job' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: `Job ${jobId.slice(0, 8)}` })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Create release' })).toBeDisabled()
     await expect(jobButton).toBeVisible()
     expect(await jobStateViaApi(page, jobId)).toBe('accepted')
