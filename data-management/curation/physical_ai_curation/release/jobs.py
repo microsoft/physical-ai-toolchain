@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path, PurePosixPath
 from stat import S_ISDIR, S_ISREG
 from typing import Any
@@ -23,7 +24,7 @@ from physical_ai_curation.release.models import MARKER_PATH, RECEIPT_PATH, REPOR
 from physical_ai_curation.release.publication import PublicationAttempt, ownership_bytes, ownership_path
 from physical_ai_curation.release.record_storage import BlobLocation, LocalRecordStorage, RecordLimits, RecordStorage
 from physical_ai_curation.release.source_associations import SourceAssociationIntent
-from physical_ai_curation.release.store import LocalReleaseStore
+from physical_ai_curation.release.store import DescriptorHandle, LocalReleaseStore
 from physical_ai_curation.release.supervision import (
     MAX_PROOF_BYTES,
     ProcessIdentity,
@@ -2240,15 +2241,6 @@ def _clear_scratch_directory(descriptor: int, deadline: float, remaining: list[i
     os.fsync(descriptor)
 
 
-@contextmanager
-def _held_cleanup_directory(parent: int, name: str) -> Iterator[int]:
-    descriptor = os.open(name, _DIRECTORY_FLAGS, dir_fd=parent)
-    try:
-        yield descriptor
-    finally:
-        os.close(descriptor)
-
-
 def _remove_verified(
     root_fd: int,
     relative: str,
@@ -2266,11 +2258,12 @@ def _remove_verified(
         current = root_fd
         for name in parts[:-1]:
             try:
-                current = stack.enter_context(_held_cleanup_directory(current, name))
+                child = stack.enter_context(DescriptorHandle(partial(os.open, name, _DIRECTORY_FLAGS, dir_fd=current)))
             except FileNotFoundError:
                 return True
             except OSError:
                 return False
+            current = child.descriptor
         leaf = parts[-1]
         try:
             file_fd = os.open(leaf, _FILE_FLAGS, dir_fd=current)

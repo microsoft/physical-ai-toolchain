@@ -6,14 +6,16 @@ relative paths, regular files only, and no symbolic links.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import os
 import stat
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from contextlib import ExitStack, contextmanager, suppress
+from contextlib import ExitStack, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from types import TracebackType
+from typing import Protocol, Self
 from uuid import uuid4
 
 from physical_ai_curation.release.canonical import canonical_json_bytes, normalize_release_path, sha256_hex
@@ -99,13 +101,22 @@ def _open_child_directory(parent: int, name: str) -> int:
         raise
 
 
-@contextmanager
-def _held_child_directory(parent: int, name: str) -> Iterator[int]:
-    descriptor = _open_child_directory(parent, name)
-    try:
-        yield descriptor
-    finally:
-        os.close(descriptor)
+class DescriptorHandle:
+    """Own one descriptor while callers borrow its integer value."""
+
+    def __init__(self, opener: Callable[[], int]) -> None:
+        self.descriptor = opener()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        os.close(self.descriptor)
 
 
 def _open_child_file(parent: int, name: str) -> int:
@@ -208,8 +219,10 @@ class LocalReleaseStore:
             with ExitStack() as stack:
                 descriptors = [root]
                 for segment in segments[:-1]:
-                    child = stack.enter_context(_held_child_directory(descriptors[-1], segment))
-                    descriptors.append(child)
+                    child = stack.enter_context(
+                        DescriptorHandle(functools.partial(_open_child_directory, descriptors[-1], segment))
+                    )
+                    descriptors.append(child.descriptor)
                 file_fd = _open_child_file(descriptors[-1], segments[-1])
                 try:
                     descriptors.append(file_fd)
@@ -258,8 +271,10 @@ class LocalReleaseStore:
                 with suppress(FileExistsError):
                     os.mkdir(segment, dir_fd=descriptors[-1])
                     os.fsync(descriptors[-1])
-                child = stack.enter_context(_held_child_directory(descriptors[-1], segment))
-                descriptors.append(child)
+                child = stack.enter_context(
+                    DescriptorHandle(functools.partial(_open_child_directory, descriptors[-1], segment))
+                )
+                descriptors.append(child.descriptor)
             _, nofollow = _safe_flags()
             descriptor = os.open(
                 partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, 0o600, dir_fd=descriptors[-1]
