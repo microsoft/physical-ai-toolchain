@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -53,7 +54,10 @@ SAFE_CAMERA_NAME_PATTERN, CAMERA_NAME_INPUT_PATTERN = _identifier_patterns(r"[a-
 _DATASET_ID_RE = re.compile(SAFE_DATASET_ID_PATTERN)
 _CAMERA_NAME_RE = re.compile(SAFE_CAMERA_NAME_PATTERN)
 _CSV_WHITESPACE = r"[ \t\r\n\f\v]*"
-_CSV_INTEGER = r"[+-]?[\r\n]*[0-9](?:[\r\n]*[0-9])*"
+# Reflect the interpreter's startup conversion limit without counting signs or stripped CR/LF.
+_CSV_DIGIT_LIMIT = sys.get_int_max_str_digits()
+_CSV_DIGIT_TAIL = f"{{0,{_CSV_DIGIT_LIMIT - 1}}}" if _CSV_DIGIT_LIMIT else "*"
+_CSV_INTEGER = rf"[+-]?[\r\n]*[0-9](?:[\r\n]*[0-9]){_CSV_DIGIT_TAIL}"
 _CSV_INTS_PATTERN = (
     rf"^{_CSV_WHITESPACE}(?:,{_CSV_WHITESPACE})*{_CSV_INTEGER}"
     rf"(?:{_CSV_WHITESPACE},{_CSV_WHITESPACE}(?:{_CSV_INTEGER})?)*{_CSV_WHITESPACE}$"

@@ -753,7 +753,9 @@ Supported fields include object, pickup location, grasp outcome, place outcome, 
 
 ### Exporting edited episodes
 
-Export-preview CSV parameters accept signed ASCII decimal integers, surrounding ASCII whitespace, and empty comma-separated elements when at least one integer is present. CR/LF characters are stripped before parsing; underscores and non-ASCII digits return HTTP 400. Streaming exports return `text/event-stream`; pre-stream errors use JSON.
+Export-preview CSV parameters accept signed ASCII decimal integers, surrounding ASCII whitespace, and empty comma-separated elements when at least one integer is present.
+The schema limits each integer to Python's startup decimal-conversion limit (4,300 digits by default), including leading zeros but excluding signs and stripped CR/LF characters. When that interpreter limit is disabled, the schema has no digit bound.
+CR/LF characters are stripped before parsing; excessive digits, underscores, and non-ASCII digits return HTTP 400. Streaming exports return `text/event-stream`; pre-stream errors use JSON.
 
 **Export** writes the current episode with its edits applied: removed and inserted frames, crop and resize, trajectory adjustments and subtasks. The source dataset is never modified, and the output path must be under the Dataviewer data directory. A relative output path is resolved against that directory, so the default, `<dataset>-export`, appears in the dataset list as a new dataset beside its source.
 

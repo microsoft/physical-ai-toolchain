@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from urllib.parse import quote
 
@@ -380,3 +381,31 @@ def test_csv_contract_matches_existing_resource_requests(
     response = client.get("/api/datasets/sample/export/preview", params={"episode_indices": "0", parameter: value})
     assert response.status_code == (200 if accepted else 400)
     assert Draft202012Validator(schema).is_valid(value) == accepted
+
+
+@pytest.mark.parametrize("parameter", ["episode_indices", "removed_frames"])
+@pytest.mark.parametrize("extra_digits", [0, 1])
+@pytest.mark.parametrize("wire_format", ["plain", "signed", "line-breaks", "multiple", "last-token"])
+def test_csv_digit_limit_matches_existing_resource_requests(
+    client: TestClient, tmp_path: Path, parameter: str, extra_digits: int, wire_format: str
+) -> None:
+    limit = sys.get_int_max_str_digits()
+    digits = "0" * ((limit or sys.int_info.default_max_str_digits) + extra_digits)
+    value = {
+        "plain": digits,
+        "signed": f" \t,-{digits}, ,",
+        "line-breaks": f"+{digits[:-1]}\r\n0",
+        "multiple": f"{digits},,{digits},",
+        "last-token": f"0,{digits}",
+    }[wire_format]
+    accepted = limit == 0 or extra_digits == 0
+    write_source(tmp_path / "sample")
+    document = client.get("/openapi.json").json()
+    operation = document["paths"]["/api/datasets/{dataset_id}/export/preview"]["get"]
+    schema = next(item["schema"] for item in operation["parameters"] if item["name"] == parameter)
+    response = client.get("/api/datasets/sample/export/preview", params={"episode_indices": "0", parameter: value})
+    assert response.status_code == (200 if accepted else 400)
+    assert Draft202012Validator(schema).is_valid(value) == accepted
+    if not accepted:
+        error_schema = operation["responses"]["400"]["content"]["application/json"]["schema"]
+        Draft202012Validator({**error_schema, "components": document["components"]}).validate(response.json())
