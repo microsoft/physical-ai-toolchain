@@ -4,7 +4,17 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import fs, { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import fs, {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, matchesGlob } from 'node:path';
@@ -185,6 +195,132 @@ test('product workspace: judge tests and coverage remain required in the backend
   assert.equal(judgeBackendUpload.with.disable_search, true);
   assert.equal(judgeBackendUpload.with.files, 'logs/coverage-vlm-judge-backend.xml');
   assert.match(judgeBackendUpload.if, /judge_backend_valid == 'true'/);
+});
+
+
+test('backend coverage: invalid backend XML does not reject valid judge XML', t => {
+  const workspace = temporaryDirectory(t);
+  const cwd = join(workspace, 'data-management/viewer/backend');
+
+  mkdirSync(cwd, { recursive: true });
+  writeFixture(cwd, '.coverage', 'fixture');
+  writeFixture(workspace, 'logs/coverage-dataviewer.xml', '<coverage');
+  writeFixture(
+    workspace,
+    'logs/coverage-vlm-judge-backend.xml',
+    '<coverage lines-valid="1" line-rate="1"/>'
+  );
+
+  const output = join(workspace, 'outputs');
+  const steps = graph['.github/workflows/dataviewer-backend-pytests.yml']
+    .jobs['pytest-dataviewer'].steps;
+  const validate = steps.find(step => step.id === 'coverage_validate');
+
+  const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', validate.run], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 10_000,
+    env: { ...process.env, GITHUB_OUTPUT: output },
+  });
+
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+
+  const outputs = Object.fromEntries(
+    readFileSync(output, 'utf8')
+      .trim()
+      .split('\n')
+      .map(line => line.split('='))
+  );
+
+  assert.deepEqual(outputs, {
+    backend_valid: 'false',
+    judge_backend_valid: 'true',
+  });
+
+  assert.match(result.stdout, /::warning::Coverage report unavailable or invalid/);
+});
+
+test('backend coverage: judge report generation runs after backend generation fails', t => {
+  const workspace = temporaryDirectory(t);
+  const cwd = join(workspace, 'data-management/viewer/backend');
+  const bin = join(workspace, 'bin');
+
+  mkdirSync(cwd, { recursive: true });
+  mkdirSync(bin, { recursive: true });
+  writeFixture(cwd, '.coverage', 'fixture');
+
+  const uv = join(bin, 'uv');
+  const log = join(workspace, 'uv.log');
+
+  writeFileSync(uv, `#!/bin/bash
+printf '%s\\n' "$*" >> "$UV_LOG"
+
+output=""
+previous=""
+
+for arg in "$@"; do
+  if [ "$previous" = "-o" ]; then
+    output="$arg"
+    break
+  fi
+  previous="$arg"
+done
+
+case "$*" in
+  *backend/src*)
+    exit 7
+    ;;
+  *evaluation/vlm_judge*)
+    mkdir -p "$(dirname "$output")"
+    printf '<coverage lines-valid="1" line-rate="1"/>\\n' > "$output"
+    exit 0
+    ;;
+esac
+
+exit 99
+`);
+
+  chmodSync(uv, 0o755);
+
+  const steps = graph['.github/workflows/dataviewer-backend-pytests.yml']
+    .jobs['pytest-dataviewer'].steps;
+  const generate = steps.find(step => step.id === 'coverage_generate');
+
+  const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', generate.run], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 10_000,
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      UV_LOG: log,
+    },
+  });
+
+  assert.ifError(result.error);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+
+  const calls = readFileSync(log, 'utf8').trim().split('\n');
+
+  assert.equal(calls.length, 2);
+  assert.match(calls[0], /backend\/src/);
+  assert.match(calls[1], /evaluation\/vlm_judge/);
+
+  assert.equal(
+    existsSync(join(workspace, 'logs/coverage-dataviewer.xml')),
+    false
+  );
+
+  assert.equal(
+    existsSync(join(workspace, 'logs/coverage-vlm-judge-backend.xml')),
+    true
+  );
+
+  assert.match(
+    result.stdout,
+    /One or more scoped coverage reports could not be generated/
+  );
 });
 
 test('product workspace: independent evaluation keeps its own gate without judge coverage', () => {
