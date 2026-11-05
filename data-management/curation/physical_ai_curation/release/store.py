@@ -10,7 +10,7 @@ import hashlib
 import os
 import stat
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from contextlib import ExitStack, suppress
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -97,6 +97,15 @@ def _open_child_directory(parent: int, name: str) -> int:
     except BaseException:
         os.close(descriptor)
         raise
+
+
+@contextmanager
+def _held_child_directory(parent: int, name: str) -> Iterator[int]:
+    descriptor = _open_child_directory(parent, name)
+    try:
+        yield descriptor
+    finally:
+        os.close(descriptor)
 
 
 def _open_child_file(parent: int, name: str) -> int:
@@ -194,28 +203,31 @@ class LocalReleaseStore:
         if not 0 < chunk_size <= CHUNK_BYTES:
             raise ReleaseVerificationError(f"chunk size must be between 1 and {CHUNK_BYTES}")
         segments = normalize_release_path(path).split("/")
-        with ExitStack() as stack:
-            root = self._open_root()
-            stack.callback(os.close, root)
-            descriptors = [root]
-            for segment in segments[:-1]:
-                child = _open_child_directory(descriptors[-1], segment)
-                stack.callback(os.close, child)
-                descriptors.append(child)
-            file_fd = _open_child_file(descriptors[-1], segments[-1])
-            stack.callback(os.close, file_fd)
-            descriptors.append(file_fd)
-            before = os.fstat(file_fd)
-            while chunk := os.read(file_fd, chunk_size):
-                yield chunk
-            after = os.fstat(file_fd)
-            if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
-                after.st_size,
-                after.st_mtime_ns,
-                after.st_ctime_ns,
-            ):
-                raise ReleaseVerificationError(f"object changed during read: {path}")
-            self._check_chain(descriptors, segments)
+        root = self._open_root()
+        try:
+            with ExitStack() as stack:
+                descriptors = [root]
+                for segment in segments[:-1]:
+                    child = stack.enter_context(_held_child_directory(descriptors[-1], segment))
+                    descriptors.append(child)
+                file_fd = _open_child_file(descriptors[-1], segments[-1])
+                try:
+                    descriptors.append(file_fd)
+                    before = os.fstat(file_fd)
+                    while chunk := os.read(file_fd, chunk_size):
+                        yield chunk
+                    after = os.fstat(file_fd)
+                    if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+                        after.st_size,
+                        after.st_mtime_ns,
+                        after.st_ctime_ns,
+                    ):
+                        raise ReleaseVerificationError(f"object changed during read: {path}")
+                    self._check_chain(descriptors, segments)
+                finally:
+                    os.close(file_fd)
+        finally:
+            os.close(root)
 
     def write_verified_object(
         self,
@@ -242,13 +254,11 @@ class LocalReleaseStore:
         owns_partial = False
         stack = ExitStack()
         try:
-            stack.callback(os.close, root)
             for segment in segments[:-1]:
                 with suppress(FileExistsError):
                     os.mkdir(segment, dir_fd=descriptors[-1])
                     os.fsync(descriptors[-1])
-                child = _open_child_directory(descriptors[-1], segment)
-                stack.callback(os.close, child)
+                child = stack.enter_context(_held_child_directory(descriptors[-1], segment))
                 descriptors.append(child)
             _, nofollow = _safe_flags()
             descriptor = os.open(
@@ -291,7 +301,10 @@ class LocalReleaseStore:
                 if owns_partial:
                     os.unlink(partial, dir_fd=descriptors[-1])
             finally:
-                stack.close()
+                try:
+                    stack.close()
+                finally:
+                    os.close(root)
 
     def read_control_bytes(self, path: str, *, max_bytes: int) -> bytes:
         chunks: list[bytes] = []

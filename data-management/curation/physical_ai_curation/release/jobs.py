@@ -2240,6 +2240,15 @@ def _clear_scratch_directory(descriptor: int, deadline: float, remaining: list[i
     os.fsync(descriptor)
 
 
+@contextmanager
+def _held_cleanup_directory(parent: int, name: str) -> Iterator[int]:
+    descriptor = os.open(name, _DIRECTORY_FLAGS, dir_fd=parent)
+    try:
+        yield descriptor
+    finally:
+        os.close(descriptor)
+
+
 def _remove_verified(
     root_fd: int,
     relative: str,
@@ -2257,12 +2266,11 @@ def _remove_verified(
         current = root_fd
         for name in parts[:-1]:
             try:
-                current = os.open(name, _DIRECTORY_FLAGS, dir_fd=current)
+                current = stack.enter_context(_held_cleanup_directory(current, name))
             except FileNotFoundError:
                 return True
             except OSError:
                 return False
-            stack.callback(os.close, current)
         leaf = parts[-1]
         try:
             file_fd = os.open(leaf, _FILE_FLAGS, dir_fd=current)
