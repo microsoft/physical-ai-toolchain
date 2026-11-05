@@ -263,6 +263,7 @@ class JobStatus:
     destination_current_bytes: int = 0
     destination_peak_bytes: int = 0
     diagnostics: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
+    recovery_required: bool = False
 
 
 @dataclass(frozen=True)
@@ -612,7 +613,14 @@ class ReleaseJobStore:
                 raise AuthorityError("lease is held")
             fence = row["fence"] + 1
             state = "running" if row["state"] == "accepted" else row["state"]
-            row.update(fence=fence, lease_owner=worker, lease_expires=now + self.settings.lease_seconds, state=state)
+            row.update(
+                fence=fence,
+                lease_owner=worker,
+                lease_expires=now + self.settings.lease_seconds,
+                state=state,
+                last_failure=None,
+                retry_not_before=None,
+            )
             self._emit(conn, job_id, "lease.claimed", "info", {"fence": fence})
             return fence
 
@@ -2098,6 +2106,7 @@ def _status(conn: Mapping[str, dict[str, Any]], row: Mapping[str, Any]) -> JobSt
         destination_current_bytes=_destination_bytes(row),
         destination_peak_bytes=row["destination_peak_bytes"],
         diagnostics={key: dict(value) for key, value in sorted(row["diagnostics"].items())},
+        recovery_required=row["last_failure"] is not None and row["state"] not in TERMINAL_STATES,
     )
 
 

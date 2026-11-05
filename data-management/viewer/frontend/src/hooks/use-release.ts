@@ -474,7 +474,12 @@ export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: 
       (history) => {
         if (
           !history?.pages.some((page) =>
-            page.items.some((item) => item.jobId === current.jobId && item.state !== current.state),
+            page.items.some(
+              (item) =>
+                item.jobId === current.jobId &&
+                (item.state !== current.state ||
+                  item.recoveryRequired !== current.recoveryRequired),
+            ),
           )
         )
           return history
@@ -483,7 +488,9 @@ export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: 
           pages: history.pages.map((page) => ({
             ...page,
             items: page.items.map((item) =>
-              item.jobId === current.jobId ? { ...item, state: current.state } : item,
+              item.jobId === current.jobId
+                ? { ...item, state: current.state, recoveryRequired: current.recoveryRequired }
+                : item,
             ),
           })),
         }

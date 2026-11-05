@@ -799,11 +799,6 @@ async def run_release_generation(
     if prepared.plan.capacity.payload_bytes + projection_bytes > inputs.output_bytes:
         raise ReleaseInputError("projection output exceeds the accepted destination budget")
 
-    from physical_ai_curation.release.native_worker import native_operation
-
-    with native_operation(store, job_id, fence, frozen, prepared, inputs, mode="validate"):
-        pass
-
     with _publication_runtime(destination, attempt, store, job_id, fence, publisher) as selected:
         return _publish_generation(
             store,
@@ -847,7 +842,6 @@ def _publish_generation(
     effects = _Effects(publisher=publisher, store=store, job_id=job_id, fence=fence)
     source_objects = {obj.path: obj for obj in frozen.content.source_objects}
 
-    media = _encoded_files(effects, prepared, inputs, source, checkpoint)
     copies = [obj for obj in prepared.plan.objects if obj.action == "copy"]
     if isinstance(source, BlobReleaseSource) and isinstance(publisher, SupervisedBlobPublisher):
         blob_items = []
@@ -869,6 +863,7 @@ def _publish_generation(
                 publisher.copy(source.root, identity, output_path=obj.output_path)
             else:
                 raise ReleaseInputError("copy route does not match the accepted execution")
+    media = _encoded_files(effects, prepared, inputs, source, checkpoint)
     with (
         native_operation(store, job_id, fence, frozen, prepared, inputs, mode="assemble", media=media) as objects,
         _generated_batch(publisher),

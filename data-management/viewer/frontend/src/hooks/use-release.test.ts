@@ -63,6 +63,7 @@ function jobStatus(state: releaseApi.ReleaseJobState): releaseApi.ReleaseJobStat
     peakScratchBytes: 0,
     ioCounters: {},
     diagnostics: {},
+    recoveryRequired: false,
   }
 }
 
@@ -122,6 +123,17 @@ describe('useRelease', () => {
       }),
     )
     await waitFor(() => expect(result.current.jobs.data?.pages[0].items[0].state).toBe('running'))
+
+    vi.mocked(releaseApi.getReleaseJob).mockResolvedValue({
+      ...jobStatus('running'),
+      recoveryRequired: true,
+    })
+    await act(async () => {
+      await result.current.status.refetch()
+    })
+    await waitFor(() =>
+      expect(result.current.jobs.data?.pages[0].items[0].recoveryRequired).toBe(true),
+    )
 
     vi.mocked(releaseApi.getReleaseJob).mockResolvedValue(jobStatus('sealed'))
     await act(async () => {

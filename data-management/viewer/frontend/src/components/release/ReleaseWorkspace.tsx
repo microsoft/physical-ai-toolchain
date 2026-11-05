@@ -148,8 +148,14 @@ function WorkspaceNotice({ message }: { message: string }) {
 function describeJobStatus(status: ReleaseJobStatus | undefined, failed: boolean): string {
   if (failed) return 'Job status could not be loaded.'
   if (!status) return 'Loading job status...'
+  if (status.recoveryRequired && !status.cancelRequested) {
+    return 'Stalled. Recovery required. Cancel job to remove partial output, or Recover job to retry.'
+  }
   const parts = [`${STATE_LABELS[status.state]}.`]
-  if (status.state === 'cancelling' && status.cleanupState === 'failed') {
+  if (
+    status.state === 'cancelling' &&
+    (status.cleanupState === 'failed' || status.recoveryRequired)
+  ) {
     parts.push('Cleanup failed. Retry cleanup to remove the remaining output.')
   }
   if (status.cancelRequested) parts.push('Cancellation requested.')
@@ -464,8 +470,11 @@ function ReleaseWorkspaceContent({
     !status.cancelRequested &&
     !release.isCancelling
   const canRecover =
-    status !== undefined && RECOVERABLE_STATES.has(status.state) && !release.isRecovering
-  const cleanupFailed = status?.state === 'cancelling' && status.cleanupState === 'failed'
+    status !== undefined &&
+    (RECOVERABLE_STATES.has(status.state) || status.recoveryRequired) &&
+    !release.isRecovering
+  const cleanupFailed =
+    status?.state === 'cancelling' && (status.cleanupState === 'failed' || status.recoveryRequired)
   const canClearJob = release.activeJobId !== null && (activeTerminal || release.status.isError)
 
   const sourceReleases = useQuery({
@@ -727,7 +736,7 @@ function ReleaseWorkspaceContent({
                       <span className="font-mono text-xs">{job.jobId.slice(0, 8)}</span>
                       <CreationDate value={job.createdAt} />
                     </span>
-                    <span>{STATE_LABELS[job.state]}</span>
+                    <span>{job.recoveryRequired ? 'Stalled' : STATE_LABELS[job.state]}</span>
                     <Button
                       ref={release.activeJobId === job.jobId ? jobButton : null}
                       variant="outline"

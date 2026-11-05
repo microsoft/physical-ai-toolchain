@@ -1505,6 +1505,7 @@ def _status_body(status: JobStatus) -> dict[str, Any]:
         "peak_scratch_bytes": status.peak_scratch_bytes,
         "io_counters": dict(status.io_counters),
         "diagnostics": dict(status.diagnostics),
+        "recovery_required": status.recovery_required,
     }
 
 

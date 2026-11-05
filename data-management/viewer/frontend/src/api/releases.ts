@@ -103,6 +103,8 @@ export interface ReleaseJobStatus {
   peakScratchBytes: number
   ioCounters: Record<string, number>
   diagnostics: Record<string, unknown>
+  /** The latest execution attempt failed and is awaiting a worker retry. */
+  recoveryRequired: boolean
 }
 
 /** Job status as listed for one source. The list endpoint adds the source dataset identifier. */

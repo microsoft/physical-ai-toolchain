@@ -470,9 +470,10 @@ class ViewerReleasePlanner:
             or association.scope_sha256 != sha256_hex(context.principal_scope_id.encode())
         ):
             raise ReleaseApiError(409, "release association binding is unsupported")
+        record = store.storage.snapshot()[job_id]
         source = (
             None
-            if store.storage.snapshot()[job_id]["state"] == "committed"
+            if record["state"] == "committed" or record["cancel_requested"]
             else self._source(selection.dataset_id, finalized=raw["finalized"], kind=raw["source_kind"])
         )
         return ConfiguredExecution(

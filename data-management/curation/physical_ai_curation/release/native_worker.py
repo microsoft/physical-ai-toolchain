@@ -284,7 +284,7 @@ def _process(request: Path, *, container_factory: Callable[[str, str], Any] | No
             spec["memory_bytes"] // 2,
             table_identities=spec["tables"],
             task_identity=spec["tasks"],
-            restore=spec["mode"] == "restore",
+            restore=spec["mode"] == "restore" or (spec["mode"] == "assemble" and not spec["source_info"]),
         )
     objects = []
     remaining = spec["scratch_bytes"] - request.stat().st_size - MAX_RESULT_BYTES

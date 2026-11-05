@@ -65,6 +65,7 @@ function statusOf(state: ReleaseJobStatus['state'], overrides: Partial<ReleaseJo
     peakScratchBytes: 0,
     ioCounters: {},
     diagnostics: {},
+    recoveryRequired: false,
     ...overrides,
   } satisfies ReleaseJobStatus
 }
@@ -191,6 +192,27 @@ describe('ReleaseWorkspace', () => {
     expect(screen.getByText('Accepted. Waiting for a release worker.')).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Job aaaaaaaa' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Create release' })).toBeDisabled()
+  })
+
+  it('shows recovery-required execution as stalled with explicit cancellation guidance', () => {
+    const release = makeRelease({
+      activeJobId: JOB_ID,
+      status: { data: statusOf('running', { recoveryRequired: true, effectsStopped: true }) },
+      jobs: { data: { pages: [{ items: [statusOf('running', { recoveryRequired: true })] }] } },
+    })
+    vi.mocked(useRelease).mockReturnValue(release)
+    renderWorkspace()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Stalled. Recovery required. Cancel job to remove partial output, or Recover job to retry.',
+    )
+    expect(
+      within(screen.getByRole('list', { name: 'Release jobs' })).getByText('Stalled'),
+    ).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Cancel job' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Recover job' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Create release' })).toBeDisabled()
+    expect(release.cancel).not.toHaveBeenCalled()
+    expect(release.recover).not.toHaveBeenCalled()
   })
 
   it('shows stored creation dates next to job and release identities', async () => {

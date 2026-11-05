@@ -1636,6 +1636,52 @@ def test_stale_or_unconfirmed_submission_never_accepts(release_api: tuple, chang
     assert len(test_client.get(BASE + "/jobs").json()["items"]) == int(change == "source")
 
 
+def test_given_failed_release_when_status_and_history_read_then_recovery_required_is_visible(
+    release_api: tuple,
+) -> None:
+    test_client, spec, settings, _app, _root = release_api
+    job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
+    store = ReleaseJobStore(settings.job_root)
+    assert test_client.get(BASE + "/jobs/" + job).json()["recovery_required"] is False
+    assert store.record_dispatch_failure(job, "resolver_failed", expected_fence=0, worker_id="test-worker")
+
+    assert test_client.get(BASE + "/jobs/" + job).json()["recovery_required"] is True
+    history = test_client.get(BASE + "/jobs").json()["items"]
+    assert next(item for item in history if item["job_id"] == job)["recovery_required"] is True
+    store.claim(job, "retry-worker")
+    assert test_client.get(BASE + "/jobs/" + job).json()["recovery_required"] is False
+
+
+def test_given_cancelled_captured_job_when_source_unavailable_then_cleanup_configuration_resolves(
+    release_api: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    test_client, spec, settings, _app, _root = release_api
+    job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
+    store = ReleaseJobStore(settings.job_root)
+    planner = ViewerReleasePlanner(settings)
+    intent = store.frozen_request(job)
+    execution = planner.execution(job, intent)
+    captured, binding, reservation, _execution = asyncio.run(execution.capture(lambda: None))
+    fence = store.claim(job, "test-worker")
+    store.capture_execution(
+        job,
+        fence,
+        intent_request=intent,
+        frozen_request=captured,
+        execution_binding=binding,
+        reserved_bytes=reservation,
+    )
+    assert test_client.post(BASE + "/jobs/" + job + "/cancel").status_code == 202
+
+    def unavailable(*args: object, **kwargs: object) -> None:
+        raise AssertionError("cancellation must not reopen the source")
+
+    monkeypatch.setattr(planner, "_source", unavailable)
+    cleanup = planner.execution(job, store.frozen_request(job))
+    assert cleanup.source is None
+    assert cleanup.destination == execution.destination
+
+
 def test_cancel_is_owned_and_csrf_protected(release_api: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
     test_client, spec, _settings, app, _root = release_api
     job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]

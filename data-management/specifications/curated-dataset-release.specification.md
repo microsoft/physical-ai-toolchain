@@ -270,6 +270,11 @@ uncertain work must not be blindly dispatched again.
 
 Azure copies, generated uploads and cleanup use bounded supervised batches.
 `CURATION_RELEASE_BLOB_BATCH_SIZE` defaults to 16 objects and accepts 1 through 64.
+Execution checks the captured selection once, then starts unchanged-file copies
+before optional media processing and native assembly. One bounded assembly worker
+loads and validates selected native inputs while generating the related files;
+the normal path has no separate restoration or validation worker. Copied files
+remain unpublished until assembly and candidate verification succeed.
 Each object retains its own journaled identity and idempotent byte accounting.
 Recovery reconciles partial batches before dispatching new work; matching completed
 objects are reused. The publication marker remains independently arbitrated.
@@ -280,7 +285,11 @@ the private job record, not shared coordinator state or unrelated files.
 
 Failed cancellation exposes Retry cleanup. Explicit recovery clears retry backoff
 without replacing a live lease. Automatic retries respect backoff after writers
-have stopped. A definitive job-not-found response clears only the matching scoped
+have stopped. Status and history expose `recovery_required` after a dispatch
+failure; a retry request leaves it set until a worker claims the job. The UI shows
+the job as stalled and offers cancellation of partial output or explicit recovery.
+Cancellation resolves from recorded destination and association bindings without
+reopening the source. A definitive job-not-found response clears only the matching scoped
 browser pointer and history entry; it does not prove cleanup succeeded or submit a
 replacement job. A removed job's idempotency key is no longer retained.
 

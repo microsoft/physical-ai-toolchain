@@ -12,6 +12,7 @@ from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import numpy as np
@@ -393,7 +394,9 @@ def test_given_fence_lost_during_source_inventory_when_executed_then_dispatch_st
         _request(destination), frozen_request=generation_request_bytes(frozen, inputs), reserved_bytes=32 * 1024**2
     )
     job_id = store.accept(request).job_id
-    generation = mocker.patch.object(coordinator_module, "run_release_generation")
+    generation = mocker.patch.object(
+        coordinator_module, "run_release_generation", wraps=coordinator_module.run_release_generation
+    )
 
     def live_inventory(self: LocalReleaseSource, checkpoint: object = None) -> tuple:
         for _ in range(400):
@@ -408,7 +411,7 @@ def test_given_fence_lost_during_source_inventory_when_executed_then_dispatch_st
     with pytest.raises(AuthorityError, match="fence replaced"):
         asyncio.run(execute_job(store, job_id, ConfiguredExecution(source, reader, selection, context, destination)))
 
-    generation.assert_not_called()
+    generation.assert_awaited_once()
     assert store.storage.snapshot()[job_id]["state"] != "committed"
     assert not destination.exists() or not any(destination.rglob("*"))
     assert not any(thread.name == f"release-lease-{job_id}" for thread in threading.enumerate())
@@ -877,10 +880,14 @@ def test_given_recovery_request_under_retry_backoff_when_queue_pass_then_backoff
     job_id = store.accept(_request(tmp_path / "output")).job_id
     assert store.record_dispatch_failure(job_id, "resolver_failed", expected_fence=0, worker_id="queue-worker")
     assert store.storage.snapshot()[job_id]["retry_not_before"] is not None
+    assert store.get(job_id, scope=SCOPE, principal=OWNER).recovery_required
 
     store.request_recovery(job_id, scope=SCOPE, principal=OWNER)
 
     assert store.storage.snapshot()[job_id]["retry_not_before"] is None
+    assert store.get(job_id, scope=SCOPE, principal=OWNER).recovery_required
+    store.claim(job_id, "retry-worker")
+    assert not store.get(job_id, scope=SCOPE, principal=OWNER).recovery_required
 
 
 def test_given_uncertain_recovery_under_retry_backoff_when_queue_pass_then_recovery_is_eligible(
@@ -1237,6 +1244,52 @@ from test_release_jobs import fs_factory
 from physical_ai_curation.release.native_worker import _process
 _process(Path(sys.argv[1]), container_factory=fs_factory(Path(sys.argv[2])))
 """
+
+
+def test_given_unrestored_native_inputs_when_generating_then_copy_precedes_one_assembly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.release import native_worker
+
+    source, reader, selection, context, frozen, inputs, video = _native_case(tmp_path)
+    inputs = replace(inputs, source_info={}, source_tables={}, source_tasks=pa.table({}))
+    destination = tmp_path / "output"
+    store = _store(tmp_path / "ledger", OffsetClock())
+    job = store.accept(
+        replace(
+            _request(destination), frozen_request=generation_request_bytes(frozen, inputs), reserved_bytes=32 * 1024**2
+        )
+    )
+    fence = store.claim(job.job_id, "worker")
+    modes = []
+    original = native_worker.native_operation
+
+    def observe(*args: Any, **kwargs: Any) -> Any:
+        modes.append(kwargs["mode"])
+        copied = list((destination / ATTEMPT.prefix).rglob("*.mp4"))
+        assert len(copied) == 1, "unchanged copies must precede native assembly"
+        assert copied[0].read_bytes() == video
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(native_worker, "native_operation", observe)
+    result = asyncio.run(
+        run_release_generation(
+            store=store,
+            job_id=job.job_id,
+            fence=fence,
+            destination=destination,
+            attempt=ATTEMPT,
+            expected=frozen,
+            source=source,
+            reader=reader,
+            selection=selection,
+            context=context,
+            inputs=inputs,
+        )
+    )
+    assert modes == ["assemble"]
+    assert result is not None
+    assert store.get(job.job_id, scope=SCOPE, principal=OWNER).state == "committed"
 
 
 @pytest.mark.parametrize("invalid_frames", [False, True])
@@ -1808,7 +1861,9 @@ def test_given_copy_only_source_without_camera_statistics_when_coordinated_then_
     assert status.state == "committed"
 
 
-def test_given_unbound_native_table_when_generation_then_refused_before_effects(tmp_path: Path) -> None:
+def test_given_unbound_native_table_when_generation_then_refused_before_publication(tmp_path: Path) -> None:
+    from physical_ai_curation.release.errors import ReleaseVerificationError
+
     source, reader, selection, context, frozen, inputs, _ = _native_case(tmp_path)
     episode = frozen.content.selected_episode_ids[0]
     altered = inputs.source_tables[episode].set_column(5, "observation.state", pa.array([[999.0], [999.0]]))
@@ -1843,7 +1898,9 @@ def test_given_unbound_native_table_when_generation_then_refused_before_effects(
                 inputs=inputs,
             )
         )
-    assert not destination.exists()
+    assert store.get(job.job_id, scope="scope-a", principal="owner-a").state != "committed"
+    with pytest.raises(ReleaseVerificationError):
+        verify_published(LocalReleaseStore(destination / ATTEMPT.prefix))
 
 
 def test_given_two_processed_cameras_when_coordinated_then_sequential_native_publication(tmp_path: Path) -> None:

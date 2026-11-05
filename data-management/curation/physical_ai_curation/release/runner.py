@@ -25,7 +25,6 @@ from physical_ai_curation.release.inputs import (
     LocalReleaseSource,
     ReleaseInputError,
     ReleaseSelection,
-    revalidate_release_inputs,
 )
 from physical_ai_curation.release.jobs import (
     AuthorityError,
@@ -124,7 +123,6 @@ async def execute_job(
         validate_processing_confirmation,
     )
     from physical_ai_curation.release.models import MANIFEST_PATH, ProducerIdentity
-    from physical_ai_curation.release.native_worker import restore_inputs
     from physical_ai_curation.release.verification import verify_published
 
     record = store.storage.snapshot().get(job_id)
@@ -204,14 +202,6 @@ async def execute_job(
         if configured.source is None or configured.context is None:
             raise ReleaseInputError("generation requires the accepted source")
         frozen = TypeAdapter(FrozenReleaseInputs).validate_python(payload["frozen"])
-        await revalidate_release_inputs(
-            frozen,
-            configured.source,
-            configured.reader,
-            configured.selection,
-            configured.context,
-            checkpoint=monitor.check,
-        )
         monitor.check()
         import pyarrow as pa
 
@@ -255,7 +245,6 @@ async def execute_job(
                 assert isinstance(publisher, SupervisedBlobPublisher)
                 publisher.recover_outputs(copies)
         store.validate_execution_binding(job_id, fence, destination, attempt, route=record["route"])
-        inputs = restore_inputs(store, job_id, fence, frozen, prepared, inputs)
         monitor.check()
         result = await run_release_generation(
             store=store,
