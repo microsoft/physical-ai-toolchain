@@ -91,9 +91,15 @@ npm run dataviewer:dev
 
 ## 📊 AI Analysis
 
-The [AI-analysis endpoints](backend/src/api/routes/ai_analysis.py) require nonempty, rectangular position and force matrices containing only finite numbers. Invalid matrices return HTTP 400. `POST /api/ai/cluster` requires at least two trajectories; an explicit `num_clusters` must be between 2 and 20 and cannot exceed the number of trajectories.
+The [AI-analysis endpoints](backend/src/api/routes/ai_analysis.py) require nonempty, rectangular position and force matrices containing only finite numbers. Timestamps and optional force and gripper arrays must match the position count. Invalid matrix shapes or mismatched lengths return HTTP 400; boolean and string coordinates return HTTP 422.
+
+Trajectory analysis, anomaly detection, and annotation suggestions require at least three positions. `POST /api/ai/cluster` requires at least two trajectories; an explicit `num_clusters` must be between 2 and 20 and cannot exceed the number of trajectories.
 
 The [clustering service](backend/src/api/services/clustering.py) applies a shared scale to extreme coordinate magnitudes before extracting features when squared statistics or path lengths risk overflowing float64. Ordinary coordinate magnitudes retain their original feature calculation.
+
+The [trajectory analyzer](backend/src/api/services/trajectory_analysis.py) uses vectorized float64 norms for ordinary trajectories and scales norms and ratios to keep metrics finite. Unsafe arithmetic falls back to Decimal before calculating the bounded scores.
+
+The [anomaly detector](backend/src/api/services/anomaly_detection.py) uses shared overflow-safe derivatives and norms, with centered, scaled statistics when ordinary float64 calculations are unsafe. Absolute standard-deviation and stop thresholds remain in the original units. Severe anomalies contribute to annotation suggestions regardless of whether the calculation requires the wider-exponent fallback.
 
 ## 📄 Accepted Dataset Contract
 
@@ -358,6 +364,8 @@ judging rather than silently substituting the original video.
 
 #### Settings
 
+The judge API's `process_method` accepts `gvl`, `chronological`, or `null`, with CR/LF characters removed before method selection. Other whitespace and unsupported methods are rejected.
+
 The launcher selects the evaluator dependencies for the configured backend. For
 container build profiles and Azure setup, see the
 [deployment guide](../../evaluation/vlm_judge/README.md).
@@ -494,6 +502,8 @@ These are backend settings; the helper receives only the API UUID and caller cli
 The Easy Auth login secret remains required. Old Terraform proxy-secret objects are inert migration remnants retained for older revisions, not a fallback or rotation procedure for MI. Remove active `DATAVIEWER_PROXY_KEY`; a nonempty value fails frontend startup. Never log tokens or live principals. The [deployment specification](../specifications/viewer-deployment.specification.md#authentication) defines token claims, principal budgets, cache/propagation limits and trust assumptions.
 
 Only exact GET/HEAD `/health` is exempt at the hosted backend; docs, CSRF bootstrap, OPTIONS and unknown routes require caller and user authentication. Frontend static liveness is independent of Entra. Active `/health` privately checks usable helper proof and backend storage health; pending health is not security acceptance. Duplicate proof/principal headers, ambiguous subjects and over-budget claims are denied. Existing normalized user scopes and nonempty roles remain unchanged.
+
+The CSRF bootstrap schema includes hosted-auth HTTP 401 and 403 responses. Contract regressions exercise missing caller proof, unauthorized callers, missing users, and authorized requests with signed tokens and a local key server.
 
 ### Other Authentication Modes
 
@@ -684,6 +694,8 @@ The report is written to `data-management/viewer/frontend/dist/stats.html`. The 
 
 The annotation workspace exposes per-episode controls grouped by panel. Persisted state is stored alongside the dataset and surfaced through the REST API.
 
+Deleting a built-in label returns HTTP 409 without changing labels or their revision. Revision preconditions still apply.
+
 ### Multi-camera viewing
 
 Datasets that record multiple camera streams (e.g. `observation.images.front`, `observation.images.wrist`) drive a camera selector in the annotation workspace header. The selector lists every camera advertised by the episode's `cameras` array, falling back to the keys of `videoUrls` when the array is empty.
@@ -694,6 +706,10 @@ Datasets that record multiple camera streams (e.g. `observation.images.front`, `
 | Override          | User selection persists for the current episode                                                 |
 | Stale fallback    | When the selected camera is missing on episode change, selection resets to the new `cameras[0]` |
 | Frame extraction  | The chosen camera drives both video playback and `/frames/{idx}` thumbnail requests             |
+
+Video routes validate Range input before selecting local files or Blob storage. Malformed headers and unsupported units return JSON HTTP 400; HEAD responses omit the body. Bounded and open-ended single-byte ranges preserve partial delivery, and resource-unsatisfiable ranges return HTTP 416 with `Content-Range`. Suffix and multipart ranges are not supported.
+
+Each start and end integer is limited to Python's startup decimal-conversion limit (4,300 digits by default). Leading zeros count toward that limit; signs, underscores, and stripped CR/LF do not. When the limit is disabled, the schema has no digit bound.
 
 ### Language instruction (VLA annotation)
 
@@ -708,6 +724,8 @@ Each episode can carry a structured `LanguageInstructionAnnotation` for vision-l
 | `subtask_instructions` | Ordered subtask decomposition for hierarchical conditioning (up to 100 entries, 1000 characters each) |
 
 When a dataset task description is available, the widget seeds the instruction with `source = template` via the "Use as Instruction" button. Otherwise, "Add Instruction" creates a blank instruction with `source = human`. The source can be changed at any time through the dropdown.
+
+The API strips CR/LF from instruction text and rejects empty or CR/LF-only instructions with HTTP 422 before writing. Other whitespace remains supported; the 1,000-character limit applies before sanitization. Language tags allow surrounding whitespace within a 35-character input limit.
 
 A LeRobot export can include the saved instruction as LeRobot `task_aug` and `plan` rows; see [Exporting edited episodes](#exporting-edited-episodes).
 
@@ -745,9 +763,19 @@ The label panel shows import buttons only for analysis fields present in the dat
 
 Supported fields include object, pickup location, grasp outcome, place outcome, motion score, motion flags, and source. Free-text movement notes and instructions remain analysis data because importing them would create unbounded label sets.
 
+The import API accepts CR/LF sanitization and surrounding whitespace in field names within a 64-character input limit. The `overwrite` flag requires a JSON boolean.
+
 ### Exporting edited episodes
 
 **Export** writes the current episode with its edits applied: removed and inserted frames, crop and resize, trajectory adjustments and subtasks. The source dataset is never modified, and the output path must be under the Dataviewer data directory. A relative output path is resolved against that directory, so the default, `<dataset>-export`, appears in the dataset list as a new dataset beside its source.
+
+Saved-edit routes return HTTP 409 with the current source identity when a stored descriptor is stale. Invalid edit context returns HTTP 422; source or storage unavailability returns HTTP 503 or 500.
+
+Export-preview CSV parameters accept signed ASCII decimal integers, surrounding ASCII whitespace, and empty comma-separated elements when at least one integer is present.
+The schema limits each integer to Python's startup decimal-conversion limit (4,300 digits by default), including leading zeros but excluding signs and stripped CR/LF characters. When that interpreter limit is disabled, the schema has no digit bound.
+CR/LF characters are stripped before parsing; excessive digits, underscores, and non-ASCII digits return HTTP 400. Streaming exports return `text/event-stream`; pre-stream errors use JSON.
+
+Export edit-map keys use ASCII decimal strings with an optional leading minus; channel-map keys use ASCII digits only. Leading zeros remain supported. Plus signs, decimal points, whitespace, underscores, and non-ASCII digits in these keys return HTTP 422, including in nested operations and streaming exports, before output is created.
 
 | Source format | Export output                                                                                            |
 |---------------|----------------------------------------------------------------------------------------------------------|
@@ -985,6 +1013,16 @@ ruff check src/
 ruff check src/ --fix
 ```
 
+### Contract testing
+
+Run the focused [OpenAPI contract suite](backend/tests/test_api_fuzzing.py) from `data-management/viewer/`:
+
+```bash
+npm run test:backend -- tests/test_api_fuzzing.py -q
+```
+
+The suite runs every default Schemathesis check against the default and VLM-enabled APIs, with deterministic positive and negative generation and `max_examples=200`. It uses synthetic datasets and an echo judge, without cloud credentials or downloaded models.
+
 ### Frontend Development
 
 All frontend validation runs through npm scripts in `data-management/viewer/frontend/`.
@@ -1022,3 +1060,11 @@ Once the backend is running, visit:
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
 - Health check: `http://localhost:8000/health`
+
+### Request validation
+
+Annotation, analysis-record, detection, cluster, joint-config, and export integer fields accept integer-valued JSON numbers such as `1.0`, but reject booleans, numeric strings, and fractions. Numeric fields require JSON numbers; flags, including judge `force`, require JSON booleans. Optional fields accept `null` where documented. Episode annotation timestamps require datetime strings, not numeric epochs. Invalid body scalar types return HTTP 422 before writes or judge execution.
+
+Integer path and query parameters use integer text, such as `0` or `+1`. Decimal-form values such as `+0.0` return HTTP 422; this does not change integer-valued JSON numbers in request bodies.
+
+Detection filter labels allow surrounding whitespace, ignore blank values, and apply the 100-character limit after trimming. Saved detection labels require at least one character other than CR/LF and have a 100-character input limit before sanitization; empty or CR/LF-only values return HTTP 422 before writing.

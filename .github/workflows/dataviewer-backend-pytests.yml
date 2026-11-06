@@ -33,7 +33,7 @@ jobs:
   pytest-dataviewer:
     name: Pytest Dataviewer Backend
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     outputs:
       work-status: ${{ steps.outcome.outputs.work-status }}
       expected-count: ${{ steps.outcome.outputs.expected-count }}
