@@ -25,8 +25,6 @@ from physical_ai_curation.release.inputs import (
     LocalReleaseSource,
     ReleaseInputError,
     ReleaseSelection,
-    SourceMetadataError,
-    StaleReleaseInputError,
 )
 from physical_ai_curation.release.jobs import (
     AuthorityError,
@@ -142,7 +140,7 @@ async def execute_job(
     if record is None:
         return None
     package_id, attempt_id = record["attempt_key"].split("/", 1)
-    attempt = PublicationAttempt(package_id, attempt_id, record["attempt_prefix"], record["attempt_source_dataset_id"])
+    attempt = PublicationAttempt(package_id, attempt_id, record["attempt_prefix"])
     destination = configured.destination
     actual = destination.as_text() if isinstance(destination, BlobLocation) else str(destination.resolve())
     if record["destination"] != actual:
@@ -286,7 +284,7 @@ async def execute_job(
                 duration_ms=min(86_400_000, int((time.monotonic() - started) * 1000)),
             )
         return result
-    except (ReleaseRefusal, SourceMetadataError, StaleReleaseInputError) as error:
+    except ReleaseRefusal as error:
         monitor.stop()
         store.require_input(job_id, fence, error.code)
         return None
@@ -330,25 +328,12 @@ async def _dispatch(
     return None
 
 
-async def _register_committed(
-    registration: Callable[[str], Awaitable[bool]] | None,
-    job_id: str,
-) -> str | None:
-    if registration is None:
-        return None
-    try:
-        return "registration_settled" if await registration(job_id) else None
-    except Exception:
-        return "registration_failed"
-
-
 async def run_queue(
     store: ReleaseJobStore,
     resolve: Callable[[str, bytes], ConfiguredExecution],
     *,
     worker_id: str = "release-worker",
     limit: int = 1,
-    registration: Callable[[str], Awaitable[bool]] | None = None,
 ) -> tuple[dict[str, str], ...]:
     """Perform one bounded queue pass with a trusted resolver; never busy-poll or redispatch uncertainty.
 
@@ -361,19 +346,10 @@ async def run_queue(
     settled = 0
     failed = 0
     candidates = sorted(
-        store.storage.snapshot().items(),
-        key=lambda item: (item[1]["state"] == "committed", item[1].get("retry_not_before") or 0, item[0]),
+        store.storage.snapshot().items(), key=lambda item: (item[1].get("retry_not_before") or 0, item[0])
     )
     for job_id, row in candidates:
-        if row["state"] == "committed":
-            registration_status = await _register_committed(registration, job_id)
-            if registration_status is not None:
-                outcomes.append({"job_id": job_id, "status": registration_status})
-                settled += 1
-                if settled >= limit:
-                    break
-            continue
-        if row["state"] in ("cancelled", "needs_input"):
+        if row["state"] in ("committed", "cancelled", "needs_input"):
             continue
         if (row["lease_expires"] or 0) > store.now():
             continue
@@ -382,13 +358,7 @@ async def run_queue(
         observed_fence = row["fence"]
         category = await _dispatch(store, resolve, job_id, worker_id)
         if category is None:
-            outcome = {"job_id": job_id, "status": "settled"}
-            settled_record = store.storage.snapshot().get(job_id)
-            if settled_record is not None and settled_record["state"] == "committed":
-                registration_status = await _register_committed(registration, job_id)
-                if registration_status is not None:
-                    outcome["registration"] = registration_status
-            outcomes.append(outcome)
+            outcomes.append({"job_id": job_id, "status": "settled"})
             settled += 1
             if settled >= limit:
                 break

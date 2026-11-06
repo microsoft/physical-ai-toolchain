@@ -56,7 +56,8 @@ def _register(
 ) -> None:
     identity = ProcessIdentity.of(os.getpid())
     runtime = SupervisedRuntime(
-        identity, identity,
+        identity,
+        identity,
         store.runtime_proof_path(job_id, fence, effect_path=effect_path, reconciliation=reconciliation),
     )
     store.register_runtime(job_id, fence, runtime, effect_path=effect_path, reconciliation=reconciliation)
@@ -445,7 +446,11 @@ def test_blob_child_batch_refuses_invalid_group_before_writes(tmp_path: Path, fa
 
     with pytest.raises(ReleaseJobError):
         store.authorize_blob_writers(
-            job_id, fence, ATTEMPT, items, destination=BLOB.as_text(),
+            job_id,
+            fence,
+            ATTEMPT,
+            items,
+            destination=BLOB.as_text(),
             reconciliation=failure in {"missing_ids", "wrong_id_count"},
             copy_ids=[] if failure == "wrong_id_count" else None,
         )
@@ -465,13 +470,25 @@ def test_cleanup_writer_cannot_substitute_another_copy_id(tmp_path: Path, batch:
     with pytest.raises(AuthorityError, match="copy identity"):
         if batch:
             store.authorize_blob_writers(
-                job_id, fence, ATTEMPT, [(PATH, 1, DIGEST)], destination=BLOB.as_text(),
-                reconciliation=True, copy_ids=["copy-2"],
+                job_id,
+                fence,
+                ATTEMPT,
+                [(PATH, 1, DIGEST)],
+                destination=BLOB.as_text(),
+                reconciliation=True,
+                copy_ids=["copy-2"],
             )
         else:
             store.authorize_blob_writer(
-                job_id, fence, ATTEMPT, PATH, 1, DIGEST, destination=BLOB.as_text(),
-                reconciliation=True, copy_id="copy-2",
+                job_id,
+                fence,
+                ATTEMPT,
+                PATH,
+                1,
+                DIGEST,
+                destination=BLOB.as_text(),
+                reconciliation=True,
+                copy_id="copy-2",
             )
 
     assert store.storage.snapshot() == before
@@ -494,9 +511,12 @@ def test_marker_child_cannot_replace_chosen_commit_or_marker(tmp_path: Path, fai
 
     with pytest.raises(AuthorityError):
         store.authorize_marker_writer(
-            job_id, fence, OTHER_ATTEMPT if failure == "attempt" else ATTEMPT,
+            job_id,
+            fence,
+            OTHER_ATTEMPT if failure == "attempt" else ATTEMPT,
             "b" * 64 if failure == "manifest" else COMMIT_DIGEST,
-            2 if failure == "length" else 1, "b" * 64 if failure == "digest" else DIGEST,
+            2 if failure == "length" else 1,
+            "b" * 64 if failure == "digest" else DIGEST,
         )
 
     assert store.storage.snapshot() == before
@@ -504,7 +524,17 @@ def test_marker_child_cannot_replace_chosen_commit_or_marker(tmp_path: Path, fai
 
 @pytest.mark.parametrize(
     "failure",
-    ["observation", "not_committing", "missing", "acknowledged", "identity", "temporary", "runtime", "pending", "conflict"],
+    [
+        "observation",
+        "not_committing",
+        "missing",
+        "acknowledged",
+        "identity",
+        "temporary",
+        "runtime",
+        "pending",
+        "conflict",
+    ],
 )
 def test_marker_recovery_retains_unresolved_or_conflicting_commit(tmp_path: Path, failure: str) -> None:
     if failure == "not_committing":
@@ -525,9 +555,15 @@ def test_marker_recovery_retains_unresolved_or_conflicting_commit(tmp_path: Path
 
     with pytest.raises(ReleaseJobError):
         store.resolve_marker_effect(
-            job_id, fence, observed=failure if failure in {"pending", "conflict"} else
-            "untrusted" if failure == "observation" else "complete",
-            length=2 if failure == "identity" else 1, digest=DIGEST,
+            job_id,
+            fence,
+            observed=failure
+            if failure in {"pending", "conflict"}
+            else "untrusted"
+            if failure == "observation"
+            else "complete",
+            length=2 if failure == "identity" else 1,
+            digest=DIGEST,
         )
 
     assert store.storage.snapshot() == before

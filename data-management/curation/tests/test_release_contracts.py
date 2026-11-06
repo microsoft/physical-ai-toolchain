@@ -18,10 +18,10 @@ from physical_ai_curation.release.canonical import (
 )
 from physical_ai_curation.release.errors import IncompleteReleaseError, ReleaseVerificationError
 from physical_ai_curation.release.models import (
-    CHECKSUMS_PATH,
     MANIFEST_PATH,
     MARKER_PATH,
     RECEIPT_PATH,
+    REPORT_PATH,
     FrozenInput,
     IntegrationStatus,
     Inventory,
@@ -31,11 +31,14 @@ from physical_ai_curation.release.models import (
     ReleaseManifest,
     ReleaseMarker,
     ReleasePreview,
+    ReleaseReport,
     ReleaseResult,
     RevisionSourceObject,
     SourceObject,
     StorageRevisionEntry,
     UploadedContentEntry,
+    parse_report,
+    render_report,
 )
 from physical_ai_curation.release.packaging import build_inventory
 from physical_ai_curation.release.store import LocalReleaseStore, ObjectStat
@@ -138,13 +141,11 @@ def _write_package(root: Path, files: dict[str, bytes], manifest: ReleaseManifes
     return sha256_hex(manifest_bytes)
 
 
-def _finalize(root: Path, *, release_name: str = "release-a", source_dataset_id: str = "dataset-a") -> None:
+def _finalize(root: Path) -> None:
     candidate = verify_candidate(LocalReleaseStore(root))
     (root / RECEIPT_PATH).write_bytes(candidate.receipt_bytes)
-    (root / CHECKSUMS_PATH).write_bytes(candidate.checksums_bytes)
-    (root / MARKER_PATH).write_bytes(
-        build_marker(candidate, release_name=release_name, source_dataset_id=source_dataset_id)
-    )
+    (root / REPORT_PATH).write_bytes(candidate.report_bytes)
+    (root / MARKER_PATH).write_bytes(build_marker(candidate))
 
 
 @dataclass(frozen=True)
@@ -174,6 +175,18 @@ class TestSchemaRoundTrip:
         # Assert
         assert parsed == manifest
         assert serialize_model(parsed) == content
+
+    def test_given_report_when_render_then_parse_returns_same_model_and_bytes(self) -> None:
+        # Arrange
+        report = ReleaseReport(package_id="pkg-001", manifest_sha256=DIGEST)
+
+        # Act
+        content = render_report(report)
+        parsed = parse_report(content)
+
+        # Assert
+        assert parsed == report
+        assert render_report(parsed) == content
 
     @pytest.mark.parametrize("version", ["1.0.0", "3.0.0"])
     def test_given_unsupported_major_when_validate_then_rejected(self, version: str) -> None:
@@ -284,12 +297,7 @@ class TestResultIdentity:
 
     def test_given_published_without_integration_when_validate_then_accepted(self) -> None:
         # Arrange
-        identity = PackageIdentity(
-            package_id="pkg-001",
-            manifest_sha256=DIGEST,
-            release_name="release-a",
-            source_dataset_id="org--dataset",
-        )
+        identity = PackageIdentity(package_id="pkg-001", manifest_sha256=DIGEST)
 
         # Act
         result = ReleaseResult(identity=identity, publication_state="published")
@@ -462,58 +470,6 @@ class TestCandidateAndPublicVerification:
         with pytest.raises(ReleaseVerificationError, match="expected"):
             verify_published(LocalReleaseStore(miniature.root), expected_manifest_sha256="0" * 64)
 
-    def test_given_root_marker_when_verify_published_then_identity_binds_release_and_dataset(
-        self, miniature: MiniaturePackage
-    ) -> None:
-        _finalize(miniature.root, release_name="release-a", source_dataset_id="org--dataset")
-
-        result = verify_published(LocalReleaseStore(miniature.root))
-
-        assert (miniature.root / MARKER_PATH).name == ".published.json"
-        assert result.identity.release_name == "release-a"
-        assert result.identity.source_dataset_id == "org--dataset"
-
-    def test_given_marker_only_at_legacy_path_when_verify_published_then_rejected(
-        self, miniature: MiniaturePackage
-    ) -> None:
-        _finalize(miniature.root)
-        legacy = miniature.root / "release" / "marker.json"
-        legacy.parent.mkdir(parents=True, exist_ok=True)
-        (miniature.root / MARKER_PATH).rename(legacy)
-
-        with pytest.raises(ReleaseVerificationError, match=r"release/marker\.json"):
-            verify_published(LocalReleaseStore(miniature.root))
-
-    @pytest.mark.parametrize(
-        ("expected_name", "expected_dataset"),
-        [("release-b", "org--dataset"), ("release-a", "org--other")],
-    )
-    def test_given_identity_mismatch_when_verify_published_then_rejected(
-        self, miniature: MiniaturePackage, expected_name: str, expected_dataset: str
-    ) -> None:
-        _finalize(miniature.root, release_name="release-a", source_dataset_id="org--dataset")
-
-        with pytest.raises(ReleaseVerificationError, match="identity"):
-            verify_published(
-                LocalReleaseStore(miniature.root),
-                expected_release_name=expected_name,
-                expected_source_dataset_id=expected_dataset,
-            )
-
-    def test_given_altered_marker_identity_when_verify_published_then_rejected(
-        self, miniature: MiniaturePackage
-    ) -> None:
-        _finalize(miniature.root, release_name="release-a", source_dataset_id="org--dataset")
-        marker = miniature.root / MARKER_PATH
-        marker.write_bytes(marker.read_bytes().replace(b"org--dataset", b"org--forged"))
-
-        with pytest.raises(ReleaseVerificationError, match="identity"):
-            verify_published(
-                LocalReleaseStore(miniature.root),
-                expected_release_name="release-a",
-                expected_source_dataset_id="org--dataset",
-            )
-
     def test_given_tampered_payload_when_verify_candidate_then_rejected(self, miniature: MiniaturePackage) -> None:
         # Arrange
         (miniature.root / "media/front/episode-000.mp4").write_bytes(b"synthetic-MEDIA")
@@ -587,6 +543,15 @@ class TestCandidateAndPublicVerification:
         with pytest.raises(ReleaseVerificationError):
             verify_published(LocalReleaseStore(miniature.root))
 
+    def test_given_tampered_report_when_verify_published_then_rejected(self, miniature: MiniaturePackage) -> None:
+        # Arrange
+        _finalize(miniature.root)
+        (miniature.root / REPORT_PATH).write_bytes(b"# altered\n")
+
+        # Act / Assert
+        with pytest.raises(ReleaseVerificationError):
+            verify_published(LocalReleaseStore(miniature.root))
+
     def test_given_marker_bound_to_other_manifest_when_verify_published_then_rejected(
         self, miniature: MiniaturePackage
     ) -> None:
@@ -607,130 +572,6 @@ class TestCandidateAndPublicVerification:
         # Arrange
         _finalize(miniature.root)
         (miniature.root / "media/front/late.bin").write_bytes(b"late")
-
-        # Act / Assert
-        with pytest.raises(ReleaseVerificationError):
-            verify_published(LocalReleaseStore(miniature.root))
-
-
-def _checksum_entries(content: bytes) -> dict[str, str]:
-    entries: dict[str, str] = {}
-    for line in content.decode("utf-8").splitlines():
-        assert line[64:66] == "  "
-        digest, path = line[:64], line[66:]
-        entries[path] = digest
-    return entries
-
-
-class TestChecksumsArtifact:
-    def test_given_candidate_when_verify_then_checksums_cover_manifest_and_content_sorted(
-        self, miniature: MiniaturePackage
-    ) -> None:
-        # Arrange / Act
-        candidate = verify_candidate(LocalReleaseStore(miniature.root))
-        paths = [line[66:] for line in candidate.checksums_bytes.decode("utf-8").splitlines()]
-
-        # Assert
-        assert paths == sorted(paths)
-        assert set(paths) == {
-            MANIFEST_PATH,
-            FROZEN_PATH,
-            PREVIEW_PATH,
-            "data/episode-000.jsonl",
-            "media/front/episode-000.mp4",
-        }
-        assert candidate.checksums_bytes.endswith(b"\n")
-
-    def test_given_candidate_when_checksums_recomputed_then_sha256sum_equivalent_passes(
-        self, miniature: MiniaturePackage
-    ) -> None:
-        # Arrange
-        candidate = verify_candidate(LocalReleaseStore(miniature.root))
-        entries = _checksum_entries(candidate.checksums_bytes)
-
-        # Act / Assert
-        for path, digest in entries.items():
-            assert sha256_hex((miniature.root / path).read_bytes()) == digest
-
-    def test_given_candidate_when_verify_then_receipt_counts_checksum_coverage(
-        self, miniature: MiniaturePackage
-    ) -> None:
-        # Arrange / Act
-        receipt = json.loads(verify_candidate(LocalReleaseStore(miniature.root)).receipt_bytes)
-
-        # Assert
-        assert receipt["checksum_covered_count"] == 5
-        assert receipt["checksum_omitted_count"] == 0
-
-    def test_given_storage_revision_when_verify_then_entry_omitted_and_counted(self, tmp_path: Path) -> None:
-        # Arrange
-        _write_mixed_package(tmp_path, frozenset({"media/front/episode-000.mp4"}))
-        store = _RevisionStore(tmp_path, {"media/front/episode-000.mp4": MEDIA_REVISION})
-
-        # Act: _RevisionStore raises if a revision-bound payload is streamed, so success also proves no read.
-        candidate = verify_candidate(store)
-
-        # Assert
-        assert "media/front/episode-000.mp4" not in _checksum_entries(candidate.checksums_bytes)
-        receipt = json.loads(candidate.receipt_bytes)
-        assert receipt["checksum_covered_count"] == 4
-        assert receipt["checksum_omitted_count"] == 1
-
-    @pytest.mark.parametrize("revision_bound", [False, True])
-    def test_given_checksum_coverage_when_marker_built_then_counts_match_receipt(
-        self, tmp_path: Path, revision_bound: bool
-    ) -> None:
-        revisions = {"media/front/episode-000.mp4": MEDIA_REVISION} if revision_bound else {}
-        _write_mixed_package(tmp_path, frozenset(revisions))
-        candidate = verify_candidate(_RevisionStore(tmp_path, revisions))
-        receipt = json.loads(candidate.receipt_bytes)
-
-        marker = json.loads(build_marker(candidate, release_name="release-a", source_dataset_id="org--dataset"))
-
-        assert marker["checksum_covered_count"] == receipt["checksum_covered_count"]
-        assert marker["checksum_omitted_count"] == receipt["checksum_omitted_count"]
-
-    def test_given_root_checksums_present_when_verify_candidate_then_accepted(
-        self, miniature: MiniaturePackage
-    ) -> None:
-        # Arrange
-        candidate = verify_candidate(LocalReleaseStore(miniature.root))
-        (miniature.root / CHECKSUMS_PATH).write_bytes(candidate.checksums_bytes)
-
-        # Act
-        again = verify_candidate(LocalReleaseStore(miniature.root))
-
-        # Assert
-        assert again.checksums_bytes == candidate.checksums_bytes
-
-    def test_given_legacy_report_file_when_verify_candidate_then_undeclared_file_rejected(
-        self, miniature: MiniaturePackage
-    ) -> None:
-        # Arrange
-        (miniature.root / "release/report.md").write_bytes(b"# report\n")
-
-        # Act / Assert
-        with pytest.raises(ReleaseVerificationError):
-            verify_candidate(LocalReleaseStore(miniature.root))
-
-    def test_given_tampered_checksums_when_verify_published_then_rejected(self, miniature: MiniaturePackage) -> None:
-        # Arrange
-        _finalize(miniature.root)
-        (miniature.root / CHECKSUMS_PATH).write_bytes(b"# altered\n")
-
-        # Act / Assert
-        with pytest.raises(ReleaseVerificationError):
-            verify_published(LocalReleaseStore(miniature.root))
-
-    def test_given_marker_bound_to_other_checksums_when_verify_published_then_rejected(
-        self, miniature: MiniaturePackage
-    ) -> None:
-        # Arrange
-        _finalize(miniature.root)
-        marker = ReleaseMarker.model_validate_json((miniature.root / MARKER_PATH).read_bytes())
-        (miniature.root / MARKER_PATH).write_bytes(
-            serialize_model(marker.model_copy(update={"checksums_sha256": "0" * 64}))
-        )
 
         # Act / Assert
         with pytest.raises(ReleaseVerificationError):
@@ -1367,9 +1208,10 @@ def test_given_uploaded_content_when_verify_then_checks_evidence_without_readbac
         assert receipt["uploaded_content_count"] == 1
         assert receipt["storage_revision_count"] == 0
         assert receipt["content_digest_count"] == 3
-        checksums = _checksum_entries(verify_candidate(store).checksums_bytes)
-        assert len(checksums) == receipt["checksum_covered_count"]
-        assert receipt["checksum_omitted_count"] == 0
+        report = parse_report(verify_candidate(store).report_bytes)
+        assert report.uploaded_content_count == 1
+        assert report.storage_revision_count == 0
+        assert report.content_digest_count == 3
 
 
 class _ChangingListingStore(LocalReleaseStore):
@@ -1387,7 +1229,7 @@ class _ChangingListingStore(LocalReleaseStore):
 
 class _NoWholePayloadStore(LocalReleaseStore):
     def read_control_bytes(self, path: str, *, max_bytes: int) -> bytes:
-        if path not in {MANIFEST_PATH, INVENTORY_PATH, RECEIPT_PATH, CHECKSUMS_PATH, MARKER_PATH}:
+        if path not in {MANIFEST_PATH, INVENTORY_PATH, RECEIPT_PATH, REPORT_PATH, MARKER_PATH}:
             raise AssertionError(f"payload read as control bytes: {path}")
         return super().read_control_bytes(path, max_bytes=max_bytes)
 
