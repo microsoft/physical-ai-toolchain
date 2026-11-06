@@ -56,7 +56,10 @@ class AppConfig:
     """Bind port for uvicorn."""
 
     cors_origins: list[str] = field(default_factory=list)
-    """Allowed CORS origins for the frontend."""
+    """Allowed CORS origins for the frontend (literal matches only)."""
+
+    cors_origin_regex: str | None = None
+    """Optional regex for wildcard CORS origins (e.g. Terraform ``https://*.domain``)."""
 
     episode_cache_capacity: int = 32
     """Max episodes held in the LRU cache. 0 disables caching."""
@@ -116,6 +119,29 @@ class AppConfig:
     """Common ownership scope for workers sharing the same inference device."""
 
 
+
+def _split_cors_origins(cors_raw: str) -> tuple[list[str], str | None]:
+    """Split CORS_ORIGINS into literal origins and an optional wildcard regex.
+
+    Starlette's ``allow_origins`` matches literally, so values like
+    ``https://*.example.com`` never match a real Origin header. Those entries
+    are converted to a regex for ``allow_origin_regex`` instead.
+    """
+    literals: list[str] = []
+    regex_parts: list[str] = []
+    for origin in (o.strip() for o in cors_raw.split(",")):
+        if not origin:
+            continue
+        if "*" in origin:
+            # Escape then restore wildcards as ".*" so dots in the domain stay literal.
+            regex_parts.append(re.escape(origin).replace(r"\*", ".*"))
+        else:
+            literals.append(origin)
+    if not regex_parts:
+        return literals, None
+    return literals, "|".join(f"(?:{part})" for part in regex_parts)
+
+
 def load_config(env_path: Path | None = None) -> AppConfig:
     """
     Load application configuration from environment variables.
@@ -143,7 +169,7 @@ def load_config(env_path: Path | None = None) -> AppConfig:
     backend_port = int(os.environ.get("BACKEND_PORT", "8000"))
 
     cors_raw = os.environ.get("CORS_ORIGINS", _DEFAULT_CORS)
-    cors_origins = [o.strip() for o in cors_raw.split(",") if o.strip()]
+    cors_origins, cors_origin_regex = _split_cors_origins(cors_raw)
 
     episode_cache_capacity = int(os.environ.get("EPISODE_CACHE_CAPACITY", "32"))
     episode_cache_max_mb = int(os.environ.get("EPISODE_CACHE_MAX_MB", "100"))
@@ -174,6 +200,7 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         backend_host=backend_host,
         backend_port=backend_port,
         cors_origins=cors_origins,
+        cors_origin_regex=cors_origin_regex,
         episode_cache_capacity=episode_cache_capacity,
         episode_cache_max_mb=episode_cache_max_mb,
         detection_models_dir=detection_models_dir,

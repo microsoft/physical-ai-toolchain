@@ -372,15 +372,23 @@ def _build_provider() -> AuthProvider:
         return ApiKeyProvider(key)
 
     if provider_name == "azure_ad":
-        tenant_id = os.environ.get("DATAVIEWER_AZURE_TENANT_ID", "")
-        client_id = os.environ.get("DATAVIEWER_AZURE_CLIENT_ID", "")
+        tenant_id = os.environ.get("DATAVIEWER_AZURE_TENANT_ID", "").strip()
+        client_id = os.environ.get("DATAVIEWER_AZURE_CLIENT_ID", "").strip()
+        if not tenant_id or not client_id:
+            raise ValueError(
+                "DATAVIEWER_AZURE_TENANT_ID and DATAVIEWER_AZURE_CLIENT_ID are required for azure_ad"
+            )
         jwks_uri = f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys"
         issuer = f"https://login.microsoftonline.com/{tenant_id}/v2.0"
         return JwtProvider(jwks_uri=jwks_uri, audience=client_id, issuer=issuer, auth_method="azure_ad")
 
     if provider_name == "auth0":
-        domain = os.environ.get("DATAVIEWER_AUTH0_DOMAIN", "")
-        audience = os.environ.get("DATAVIEWER_AUTH0_AUDIENCE", "")
+        domain = os.environ.get("DATAVIEWER_AUTH0_DOMAIN", "").strip()
+        audience = os.environ.get("DATAVIEWER_AUTH0_AUDIENCE", "").strip()
+        if not domain or not audience:
+            raise ValueError(
+                "DATAVIEWER_AUTH0_DOMAIN and DATAVIEWER_AUTH0_AUDIENCE are required for auth0"
+            )
         jwks_uri = f"https://{domain}/.well-known/jwks.json"
         issuer = f"https://{domain}/"
         return JwtProvider(jwks_uri=jwks_uri, audience=audience, issuer=issuer, auth_method="auth0")
