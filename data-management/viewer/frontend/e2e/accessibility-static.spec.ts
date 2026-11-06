@@ -66,7 +66,7 @@ test('V05 and V15 analyzer state has no axe violations', async ({ page }, testIn
 
 test('V02 dataset chooser has no axe violations', async ({ page }, testInfo) => {
   const errors = await openViewer(page, testInfo)
-  await page.getByRole('button', { name: 'Dataset', exact: true }).click()
+  await page.getByRole('button', { name: /^Dataset: / }).click()
   await expect(page.getByRole('main', { name: 'Dataset catalog' })).toBeVisible()
   await attachJson(testInfo, 'state-proof-dataset-open', {
     journeyIds: ['V02'],
@@ -105,7 +105,7 @@ test('V02 V05 and V18 expose exact page and component semantics', async ({ page 
     page.getByRole('heading', { level: 2, name: 'Episode 0', exact: true }),
   ).toBeVisible()
 
-  const datasetButton = page.getByRole('button', { name: 'Dataset', exact: true })
+  const datasetButton = page.getByRole('button', { name: /^Dataset: / })
   await expect(datasetButton).toHaveAttribute('aria-expanded', 'false')
   await datasetButton.click()
   await expect(datasetButton).toHaveAttribute('aria-expanded', 'true')

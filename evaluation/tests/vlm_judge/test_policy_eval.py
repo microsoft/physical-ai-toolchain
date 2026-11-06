@@ -7,7 +7,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from vlm_judge import policy_eval
+
+from evaluation.vlm_judge import policy_eval
 
 
 def _arguments(root: Path, instruction: str = "Pick the block") -> list[str]:

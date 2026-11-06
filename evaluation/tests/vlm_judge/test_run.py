@@ -36,7 +36,7 @@ def test_given_inference_only_command_when_scoring_then_needs_no_curation(
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
-    from vlm_judge import run as inference
+    from evaluation.vlm_judge import run as inference
 
     assert inference.main([*_arguments(jsonl_dataset), "--indices", "0", "--force"]) == 0
     result = json.loads((jsonl_dataset / "results.jsonl").read_text())
@@ -51,7 +51,7 @@ def test_given_an_episode_that_cannot_be_judged_when_scoring_then_fails_and_keep
     jsonl_dataset: Path, monkeypatch: pytest.MonkeyPatch, judge_service_stub: Callable[..., object]
 ) -> None:
     # Arrange
-    from vlm_judge import run as inference
+    from evaluation.vlm_judge import run as inference
 
     monkeypatch.setattr(inference, "build_service", lambda _args: judge_service_stub(fail_calls={2}))
 
@@ -68,7 +68,7 @@ def test_given_a_complete_batch_with_a_failed_outcome_when_scoring_then_succeeds
     jsonl_dataset: Path, monkeypatch: pytest.MonkeyPatch, judge_service_stub: Callable[..., object]
 ) -> None:
     # Arrange
-    from vlm_judge import run as inference
+    from evaluation.vlm_judge import run as inference
 
     monkeypatch.setattr(inference, "build_service", lambda _args: judge_service_stub(outcome=False))
 

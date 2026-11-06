@@ -347,6 +347,9 @@ paket-files/
 **/__pycache__/
 **/*.egg-info/
 *.pyc
+/data-management/curation/build/
+/data-management/dataset-io/build/
+/evaluation/vlm_judge/build/
 
 # Hypothesis testing framework cache
 .hypothesis/

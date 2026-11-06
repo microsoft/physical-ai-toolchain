@@ -391,10 +391,10 @@ async function captureContrastMeasurement(
     const relativePath = path.join('contrast-evidence', `${signature}-${tupleDigest.slice(0, 12)}.png`);
     await captures.capture(path.join(outputDirectory, relativePath), async (temporaryPath) => {
       try {
-        await page.locator(selector).first().screenshot({ path: temporaryPath });
+        await page.locator(selector).first().screenshot({ path: temporaryPath, timeout: 2_000 });
       } catch {
         const locator = page.locator(selector).first();
-        await locator.scrollIntoViewIfNeeded().catch(() => undefined);
+        await locator.scrollIntoViewIfNeeded({ timeout: 2_000 }).catch(() => undefined);
         const box = await locator.boundingBox().catch(() => null);
         const viewport = page.viewportSize() ?? { height: 720, width: 1280 };
         const scroll = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
@@ -1283,6 +1283,8 @@ async function collectedEvidence(): Promise<RouteEvidence[]> {
 }
 
 test.describe.serial('all-route default-state evidence', () => {
+  test.describe.configure({ retries: 0, timeout: 55 * 60_000 });
+
   test.afterAll(async () => {
     writeArtifacts(readBaseline(), await collectedEvidence());
   });
@@ -1291,7 +1293,6 @@ test.describe.serial('all-route default-state evidence', () => {
     { journeyId: 'DCS01', method: 'PLAYWRIGHT_TREE' },
     { journeyId: 'DCS12', method: 'PLAYWRIGHT_TREE' },
   ]), async ({ browser }) => {
-    test.setTimeout(55 * 60_000);
     const attempt = new CrawlAttempt((visit, owner) => runCrawlVisit(browser, visit, owner));
     collectorAttempt = attempt;
     await attempt.run(
@@ -1620,6 +1621,29 @@ test.describe('route and contrast evidence contracts', () => {
     for (const route of ['/setup', '/cleanup', '/pending', '/late']) {
       expect(artifacts.routeBlocking.some((finding) => finding.startsWith(`${route} [light/default]`)), route).toBe(true);
     }
+  });
+
+  test('moving contrast targets retain image evidence without exhausting stability waits', async ({ page }) => {
+    test.setTimeout(10_000);
+    await page.setContent(`
+      <style>
+        @keyframes moving { from { transform: translateX(0); } to { transform: translateX(100px); } }
+        p { animation: moving 1s linear infinite alternate; width: 200px; color: #333; background: white; }
+      </style>
+      <main><p>Moving contrast probe</p></main>
+    `);
+    const measurement = await captureContrastMeasurement(
+      page,
+      new CaptureCoordinator(),
+      { id: 'color-contrast', nodes: [] },
+      { html: '<p>Moving contrast probe</p>', target: ['p'] },
+      '/moving-contrast-probe',
+      'light',
+      'default',
+    );
+    expect(measurement.evidencePath).toBeTruthy();
+    const imagePath = path.join(outputDirectory, measurement.evidencePath!);
+    expect(fs.readFileSync(imagePath).subarray(1, 4).toString()).toBe('PNG');
   });
 
   test('concurrent contrast captures share one complete image and failed writes stay blocking', async (

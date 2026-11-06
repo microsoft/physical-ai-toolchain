@@ -26,7 +26,7 @@ test('dataset workspace disclosure excludes hidden editors and returns keyboard 
 
 test('V02 and V03 support keyboard dataset and episode selection', async ({ page }, testInfo) => {
   const errors = await openViewer(page, testInfo)
-  const datasetButton = page.getByRole('button', { name: 'Dataset', exact: true })
+  const datasetButton = page.getByRole('button', { name: /^Dataset: / })
 
   await datasetButton.focus()
   await page.keyboard.press('Enter')
@@ -105,7 +105,7 @@ test('V05 V06 V08 V13 V14 and V18 expose exact workspace semantics', async ({ pa
 
 test('V02 and V18 preserve forward and reverse focus boundaries', async ({ page }, testInfo) => {
   const errors = await openViewer(page, testInfo)
-  const datasetButton = page.getByRole('button', { name: 'Dataset', exact: true })
+  const datasetButton = page.getByRole('button', { name: /^Dataset: / })
   const datasetDialog = page.getByRole('main', { name: 'Dataset catalog' })
   const diagnosticsButton = page.getByRole('button', { name: 'Toggle Diagnostics' })
 
@@ -246,7 +246,7 @@ test('V19 preserves adaptive layout focus and target geometry', async ({ page },
   await expect(page.getByRole('heading', { name: 'Episode 0' })).toBeVisible()
   await page.setViewportSize({ width: 320, height: 720 })
   const reflow = await collectGeometry()
-  const datasetButton = page.getByRole('button', { name: 'Dataset', exact: true })
+  const datasetButton = page.getByRole('button', { name: /^Dataset: / })
   await datasetButton.focus()
   const focusStyle = await datasetButton.evaluate((element) => {
     const style = getComputedStyle(element)

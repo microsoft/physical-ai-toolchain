@@ -2,7 +2,7 @@
 title: Hardware-in-the-Loop Evaluation
 description: Run CPU-only and independently no-command HiL validation on an Ubuntu K3s OSMO backend.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-23
+ms.date: 2026-10-27
 ms.topic: how-to
 ---
 

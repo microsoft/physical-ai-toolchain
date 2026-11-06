@@ -971,6 +971,8 @@ class TestMlflowRunContext:
         assert tags_call["checkpoint_resume"] == "/some/ckpt"
         assert tags_call["checkpoint_source_uri"] == "runs:/abc"
         assert tags_call["correlation_id"] == "corr-99"
+        mlflow.set_tracking_uri.assert_called_once_with("azureml://tracking")
+        mlflow.set_registry_uri.assert_called_once_with("azureml://tracking")
 
 
 # ---------------------------------------------------------------------------
@@ -1730,6 +1732,7 @@ class TestRunHydraTraining:
             "_run_training_with_mlflow",
             side_effect=SystemExit(0),
         )
+        prepare_shutdown = mocker.patch.object(_MOD, "prepare_for_shutdown")
         logger_error = mocker.patch.object(_MOD._LOGGER, "error")
         cli = _make_cli(seed=1)
         cli.agent = None
@@ -1743,6 +1746,7 @@ class TestRunHydraTraining:
         )
 
         env.close.assert_called_once()
+        prepare_shutdown.assert_called_once_with()
         logger_error.assert_not_called()
 
 

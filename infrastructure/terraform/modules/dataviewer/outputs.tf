@@ -49,3 +49,15 @@ output "entra_id" {
     tenant_id = data.azuread_client_config.current.tenant_id
   } : null
 }
+
+output "caller_auth" {
+  description = "Frontend-only managed identity caller contract, null when hosted authentication is disabled"
+  value = var.should_deploy_dataviewer_auth ? {
+    mode               = "managed_identity"
+    tenant_id          = data.azuread_client_config.current.tenant_id
+    api_client_id      = azuread_application.dataviewer[0].client_id
+    caller_identity_id = azurerm_user_assigned_identity.caller[0].id
+    caller_client_id   = azurerm_user_assigned_identity.caller[0].client_id
+    caller_object_id   = azurerm_user_assigned_identity.caller[0].principal_id
+  } : null
+}

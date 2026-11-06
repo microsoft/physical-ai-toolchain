@@ -173,7 +173,7 @@ describe('AppContent', () => {
         onToggleDiagnostics={vi.fn()}
       />,
     )
-    const trigger = screen.getByRole('button', { name: 'Dataset' })
+    const trigger = screen.getByRole('button', { name: 'Dataset: cell-b--first' })
     await user.click(trigger)
     const filter = screen.getByRole('combobox', { name: 'Filter datasets' })
     expect(filter).toHaveFocus()
@@ -206,8 +206,10 @@ describe('AppContent', () => {
     )
     expect(screen.getByText('HDF5')).toBeVisible()
     expect(screen.getByText('Warming')).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Dataset' })).toHaveTextContent('Select a dataset')
-    await user.click(screen.getByRole('button', { name: 'Dataset' }))
+    expect(screen.getByRole('button', { name: 'Dataset: Select a dataset' })).toHaveTextContent(
+      'Select a dataset',
+    )
+    await user.click(screen.getByRole('button', { name: /^Dataset: / }))
     await user.click(screen.getByRole('button', { name: 'Toggle Diagnostics' }))
     expect(onOpenCatalog).toHaveBeenCalledOnce()
     expect(onToggleDiagnostics).toHaveBeenCalledOnce()
@@ -369,13 +371,13 @@ describe('AppContent', () => {
     await user.keyboard('{ArrowDown}{Enter}')
     expect(await screen.findByText('Annotation Workspace')).toBeVisible()
     act(() => useEpisodeStore.setState({ isPlaying: true }))
-    await user.click(screen.getByRole('button', { name: 'Dataset' }))
+    await user.click(screen.getByRole('button', { name: /^Dataset: / }))
     expect(useEpisodeStore.getState().isPlaying).toBe(false)
     expect(screen.getByRole('combobox', { name: 'Filter datasets' })).toHaveValue('0999')
     expect(screen.getByRole('option', { name: /group--0999/ })).toHaveFocus()
     await user.keyboard('{Escape}')
     expect(useEpisodeStore.getState().isPlaying).toBe(false)
-    expect(screen.getByRole('button', { name: 'Dataset' })).toHaveFocus()
+    expect(screen.getByRole('button', { name: /^Dataset: / })).toHaveFocus()
   })
   it('starts in the catalog without selecting or mounting an episode workspace', async () => {
     window.history.replaceState(null, '', '/')
@@ -431,7 +433,7 @@ describe('AppContent', () => {
     const { rerender } = render(<AppContent />)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Dataset' })).toHaveTextContent(
+      expect(screen.getByRole('button', { name: /^Dataset: / })).toHaveTextContent(
         'houston_lerobot_fixed',
       )
     })
@@ -450,7 +452,7 @@ describe('AppContent', () => {
     rerender(<AppContent />)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Dataset' })).toHaveTextContent(
+      expect(screen.getByRole('button', { name: /^Dataset: / })).toHaveTextContent(
         'houston_lerobot_fixed',
       )
     })
@@ -473,7 +475,7 @@ describe('AppContent', () => {
 
     render(<AppContent />)
 
-    const trigger = await screen.findByRole('button', { name: 'Dataset' })
+    const trigger = await screen.findByRole('button', { name: /^Dataset: / })
     expect(trigger).toHaveTextContent('customer_lerobot')
     expect(screen.queryByPlaceholderText('Dataset ID')).not.toBeInTheDocument()
 
@@ -488,7 +490,7 @@ describe('AppContent', () => {
 
     render(<AppContent />)
 
-    const trigger = await screen.findByRole('button', { name: 'Dataset' })
+    const trigger = await screen.findByRole('button', { name: /^Dataset: / })
     expect(trigger).toHaveTextContent('houston_lerobot_fixed')
 
     await user.click(trigger)
@@ -496,7 +498,9 @@ describe('AppContent', () => {
     await user.keyboard('{ArrowDown}{Enter}')
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Dataset' })).toHaveTextContent('customer_lerobot')
+      expect(screen.getByRole('button', { name: /^Dataset: / })).toHaveTextContent(
+        'customer_lerobot',
+      )
     })
   })
 
@@ -516,7 +520,7 @@ describe('AppContent', () => {
 
     const banner = await screen.findByRole('banner')
     const diagnosticsButton = screen.getByRole('button', { name: /toggle diagnostics/i })
-    const datasetPicker = screen.getByRole('button', { name: 'Dataset' })
+    const datasetPicker = screen.getByRole('button', { name: /^Dataset: / })
 
     expect(banner).toContainElement(diagnosticsButton)
     expect(diagnosticsButton.className).toContain('h-8')
@@ -582,7 +586,7 @@ describe('AppContent', () => {
     const user = userEvent.setup()
     render(<AppContent />)
 
-    const trigger = await screen.findByRole('button', { name: 'Dataset' })
+    const trigger = await screen.findByRole('button', { name: /^Dataset: / })
     await user.click(trigger)
 
     const filter = screen.getByRole('combobox', { name: 'Filter datasets' })

@@ -370,16 +370,16 @@ Describe 'VLM judge inputs at submission' -Tag 'Unit' -Skip:(-not $script:ToolsP
         finally {
             $archive.Dispose()
         }
-        $names | Should -Contain 'evaluation/vlm_judge/uv.lock'
-        $project = Join-Path $script:RepoRoot 'evaluation/vlm_judge'
-        $sources = @([regex]::Matches((Get-Content -Path (Join-Path $project 'pyproject.toml') -Raw), 'path\s*=\s*"([^"]+)"') |
-            ForEach-Object { $_.Groups[1].Value })
-        $sources.Count | Should -BeGreaterThan 0
-        foreach ($source in $sources) {
-            $relative = [System.IO.Path]::GetRelativePath($script:RepoRoot,
-                [System.IO.Path]::GetFullPath((Join-Path $project $source))).Replace('\', '/')
-            $names | Should -Contain "$relative/pyproject.toml" -Because "the judge lock installs $relative from its path"
+        $names | Should -Contain 'pyproject.toml'
+        $names | Should -Contain 'uv.lock'
+        foreach ($member in @('evaluation/vlm_judge', 'data-management/dataset-io',
+                'data-management/curation', 'data-management/viewer/backend')) {
+            $names | Should -Contain "$member/pyproject.toml"
+            $names | Should -Not -Contain "$member/uv.lock"
         }
+        $names | Should -Contain 'evaluation/vlm_judge/service.py'
+        $names | Should -Contain 'data-management/dataset-io/physical_ai_dataset_io/lerobot.py'
+        @($names | Where-Object { $_ -match '(^|/)(build|\.venv|\.env)(/|$|\.)' }).Count | Should -Be 0
     }
 
     It 'Sends the instruction base64-encoded, so quotes, backslashes, and a leading dash reach the workflow' -Skip:(-not $script:ArchiveToolsPresent) {

@@ -3,6 +3,7 @@
 import { themes as prismThemes } from 'prism-react-renderer';
 import remarkGithubAlert from 'remark-github-blockquote-alert';
 
+import rehypeFootnoteLinks from './plugins/rehype-footnote-links.mjs';
 import rehypeTableScope from './plugins/rehype-table-scope.mjs';
 import remarkTableCaption from './plugins/remark-table-caption.mjs';
 import labelData from './src/data/labelRegistry.cjs';
@@ -65,7 +66,7 @@ const config = {
           showLastUpdateTime: true,
           showLastUpdateAuthor: true,
           remarkPlugins: [remarkGithubAlert, remarkTableCaption],
-          rehypePlugins: [rehypeTableScope],
+          rehypePlugins: [rehypeTableScope, rehypeFootnoteLinks],
         },
         blog: false,
         theme: {

@@ -7,8 +7,9 @@ import json
 from pathlib import Path
 
 import pytest
-from vlm_judge.cache import JudgeCache
-from vlm_judge.service import BackendConfig, JudgeService, ServiceConfig
+
+from evaluation.vlm_judge.cache import JudgeCache
+from evaluation.vlm_judge.service import BackendConfig, JudgeService, ServiceConfig
 
 
 def _touch(path: Path, size_bytes: int = 64) -> Path:
