@@ -20,10 +20,12 @@ const isolatedEnvironment = {
   VLM_JUDGE_CACHE_DIR: join(dataDirectory, 'cache'),
   VLM_JUDGE_JOB_DIR: join(dataDirectory, 'jobs'),
   RELEASE_JOB_ROOT: join(dataDirectory, 'release-jobs'),
+  RELEASE_JOB_STORAGE: '',
   RELEASE_DESTINATIONS: JSON.stringify({ local: join(dataDirectory, 'release-output') }),
+  CURATION_RELEASE_AZUREML_ENABLED: 'false',
 }
 const python = 'uv run --project ../../.. --all-packages --no-sync --frozen'
-const manualReleaseWorkerServer = `${python} python -c "import uvicorn; import src.api.release_worker as worker; worker.start_release_worker = lambda: None; uvicorn.run('src.api.main:app', log_config='../backend/logging.json', host='127.0.0.1', port=18000)"`
+const manualReleaseWorkerServer = `${python} python -c "import uvicorn; import src.api.release_worker as worker; worker.start_release_worker = lambda: None; uvicorn.run('src.api.main:app', log_config='../backend/logging.json', host='127.0.0.1', port=18000, loop='asyncio')"`
 const seedDataset = `${python} --directory ../backend python -c "import os; from pathlib import Path; from tests.api.test_vlm_judge_router import _build_dataset; [_build_dataset(Path(os.environ['DATA_DIR']) / dataset_id, instruction='Place the block', n_episodes=2) for dataset_id in ('integration-fixture', 'integration-judge-fixture', 'integration-grounding-fixture')]"`
 const seedReleaseDataset = `${python} --directory ../backend python -c "import os; import pyarrow as pa; import pyarrow.parquet as pq; from pathlib import Path; from tests.lerobot_sources import CAMERA, write_source; root = write_source(Path(os.environ['DATA_DIR']) / 'release-fixture'); metadata = root / 'meta/episodes/chunk-000/file-000.parquet'; rows = pq.read_table(metadata).to_pylist(); [row.update({f'stats/{CAMERA}/{key}': [[[value]]] * 3 for key, value in dict(min=0.1, max=0.9, mean=0.5, std=0.1).items()}) or row.__setitem__(f'stats/{CAMERA}/count', [row['length']]) for row in rows]; pq.write_table(pa.Table.from_pylist(rows), metadata)"`
 

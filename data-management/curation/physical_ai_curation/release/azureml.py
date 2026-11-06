@@ -67,9 +67,11 @@ class AzureMLDataAsset:
 class AzureMLAssetClient(Protocol):
     """Narrow data-asset surface used by registration; implementations may wrap the Azure ML SDK."""
 
-    def get_data_asset(self, name: str, version: str) -> AzureMLDataAsset | None: ...
+    def get_data_asset(self, name: str, version: str) -> AzureMLDataAsset | None:
+        raise NotImplementedError
 
-    def create_data_asset(self, asset: AzureMLDataAsset) -> None: ...
+    def create_data_asset(self, asset: AzureMLDataAsset) -> None:
+        raise NotImplementedError
 
 
 @dataclass(frozen=True)

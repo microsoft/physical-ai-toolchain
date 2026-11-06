@@ -179,7 +179,7 @@ def test_nested_upload_batch_does_not_destroy_outer_batch(publisher: SupervisedB
     with publisher.write_batch():
         outer = publisher._generated
         with pytest.raises(ReleaseVerificationError, match="already open"), publisher.write_batch():
-            pytest.fail("nested upload batch must be refused")
+            pass
         assert publisher._generated is outer
 
     assert publisher._generated is None

@@ -14,7 +14,7 @@ from pathlib import Path
 from pydantic import TypeAdapter
 
 from physical_ai_curation.release.canonical import normalize_release_path, parse_strict_json, sha256_hex
-from physical_ai_curation.release.composition import NativeGenerationPlan
+from physical_ai_curation.release.composition import NativeGenerationPlan, iter_lineage
 from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.jobs import ReleaseJobControl, ReleaseJobStore
 from physical_ai_curation.release.models import MANIFEST_PATH, MARKER_PATH, ReleaseResult, SourceObject
@@ -253,9 +253,7 @@ def _process(descriptor: int) -> None:
         content = base64.b64decode(spec["content"], validate=True)
         chunks = (content[offset : offset + CHUNK_BYTES] for offset in range(0, len(content), CHUNK_BYTES))
     elif spec["mode"] == "lineage":
-        from physical_ai_curation.release.coordinator import _lineage
-
-        chunks = _lineage(TypeAdapter(NativeGenerationPlan).validate_python(spec["prepared"]))
+        chunks = iter_lineage(TypeAdapter(NativeGenerationPlan).validate_python(spec["prepared"]))
     else:
         raise ReleaseVerificationError("unsupported local effect mode")
     root = Path(spec["root"])

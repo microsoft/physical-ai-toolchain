@@ -20,6 +20,7 @@ from physical_ai_curation.release.canonical import (
 )
 from physical_ai_curation.release.composition import (
     NativeGenerationPlan,
+    iter_lineage,
     prepare_saved_generation,
 )
 from physical_ai_curation.release.encoding import EncodeOptions, VideoOutput
@@ -51,7 +52,6 @@ from physical_ai_curation.release.models import (
     MANIFEST_PATH,
     RECEIPT_PATH,
     CapacityEstimate,
-    FrameLineageRecord,
     Inventory,
     InventoryEntry,
     LineageStream,
@@ -380,26 +380,10 @@ def _encoded_files(
     return media
 
 
-def _lineage(prepared: NativeGenerationPlan) -> Iterator[bytes]:
-    for output_episode_index, episode in enumerate(prepared.episodes):
-        output_frame = 0
-        for source_frame in range(episode.length):
-            if source_frame in episode.removed_frames:
-                continue
-            record = FrameLineageRecord(
-                output_episode_index=output_episode_index,
-                source_episode_id=episode.episode_id,
-                output_frame_index=output_frame,
-                source_frame_index=source_frame,
-            )
-            yield serialize_model(record) + b"\n"
-            output_frame += 1
-
-
 def _lineage_identity(prepared: NativeGenerationPlan) -> tuple[int, str, int]:
     digest = hashlib.sha256()
     length = count = 0
-    for line in _lineage(prepared):
+    for line in iter_lineage(prepared):
         digest.update(line)
         length += len(line)
         count += 1

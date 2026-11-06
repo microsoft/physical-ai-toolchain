@@ -24,12 +24,15 @@ function releaseEnvironment(): NodeJS.ProcessEnv {
   const root = dataDirectory()
   return {
     ...process.env,
+    UV_PROJECT_ENVIRONMENT: process.env.UV_PROJECT_ENVIRONMENT ?? join(backendDirectory, '.venv'),
     DATA_DIR: root,
     STORAGE_BACKEND: 'local',
     DATAVIEWER_AUTH_DISABLED: 'true',
     VLM_JUDGE_ENABLED: 'false',
     RELEASE_JOB_ROOT: join(root, 'release-jobs'),
+    RELEASE_JOB_STORAGE: '',
     RELEASE_DESTINATIONS: JSON.stringify({ local: join(root, 'release-output') }),
+    CURATION_RELEASE_AZUREML_ENABLED: 'false',
     PYTHONPATH: '.',
   }
 }

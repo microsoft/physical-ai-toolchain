@@ -34,6 +34,8 @@ from physical_ai_curation.release.inputs import (
     ReleaseInputError,
     ReleaseSelection,
     SavedSelection,
+    SourceMetadataError,
+    StaleReleaseInputError,
     freeze_release_inputs,
 )
 from physical_ai_curation.release.jobs import (
@@ -104,6 +106,8 @@ def test_given_committed_job_when_registration_queue_runs_then_no_source_dispatc
     assert store.get(job_id, scope=SCOPE, principal=OWNER).state == "committed"
     assert "private" not in repr(result)
     assert all(item["status"] != "recovery_required" for item in result)
+    expected_status = {"worked": "registration_settled", "failed": "registration_failed"}.get(outcome)
+    assert result == (() if expected_status is None else ({"job_id": job_id, "status": expected_status},))
 
 
 def _source_root(tmp_path: Path) -> Path:
@@ -113,6 +117,63 @@ def _source_root(tmp_path: Path) -> Path:
     (root / "meta").mkdir()
     (root / "meta/info.json").write_bytes(b'{"total_episodes":1}')
     return root
+
+
+def test_given_ready_publication_when_registration_pending_then_publication_has_priority(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    clock = OffsetClock()
+    store = _store(tmp_path / "ledger", clock)
+    _committed_job(store, tmp_path / "committed")
+    pending = store.accept(
+        replace(
+            _request(tmp_path / "pending"),
+            idempotency_key="pending-publication",
+            attempt=PublicationAttempt("pending-package", "attempt-1", source_dataset_id="sample"),
+        )
+    ).job_id
+    store.record_dispatch_failure(pending, "resolver_failed", expected_fence=0, worker_id="worker")
+    clock.advance(7200)
+    dispatch = mocker.patch("physical_ai_curation.release.runner._dispatch", new_callable=mocker.AsyncMock)
+    dispatch.return_value = None
+    registration = mocker.AsyncMock(return_value=True)
+    resolver = mocker.Mock()
+
+    outcomes = asyncio.run(run_queue(store, resolver, registration=registration))
+
+    assert outcomes == ({"job_id": pending, "status": "settled"},)
+    dispatch.assert_awaited_once_with(store, resolver, pending, "release-worker")
+    registration.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        SourceMetadataError("source_object_reference_invalid", "private source detail"),
+        StaleReleaseInputError("private source detail"),
+    ],
+)
+def test_given_typed_source_refusal_when_capture_runs_then_no_retry_or_destination_effect(
+    tmp_path: Path, failure: ReleaseInputError
+) -> None:
+    store = _store(tmp_path / "jobs", OffsetClock())
+    destination = tmp_path / "output"
+    request = replace(_request(destination), frozen_request=b'{"schema_version":"curated-release-intent/v1"}')
+    job_id = store.accept(request).job_id
+
+    async def capture(checkpoint: object) -> tuple[bytes, bytes, int, ConfiguredExecution]:
+        raise failure
+
+    configured = ConfiguredExecution(None, SavedReader(), _selection(), None, destination, capture)
+
+    assert asyncio.run(run_queue(store, lambda *_args: configured)) == ({"job_id": job_id, "status": "settled"},)
+    status = store.get(job_id, scope=SCOPE, principal=OWNER)
+    assert status.state == "needs_input"
+    assert status.refusal_code == failure.code
+    assert not status.recovery_required
+    assert "private" not in repr(status)
+    assert asyncio.run(run_queue(store, lambda *_args: configured)) == ()
+    assert not destination.exists()
 
 
 def _inputs(request: object) -> GenerationInputs:
@@ -647,6 +708,35 @@ def test_given_accepted_job_when_independent_runner_reopens_then_verified_withou
         assert associations.discover(source_key=intent.source_key, scope_sha256=intent.scope_sha256) == [
             destination / ATTEMPT.prefix
         ]
+
+
+def test_given_new_publication_when_queue_runs_then_registration_follows_commit_in_same_pass(
+    tmp_path: Path,
+) -> None:
+    source, reader, selection, context, frozen, inputs, _video = _native_case(tmp_path)
+    destination = tmp_path / "output"
+    store = _store(tmp_path / "jobs", OffsetClock())
+    job_id = store.accept(
+        replace(
+            _request(destination),
+            frozen_request=generation_request_bytes(frozen, inputs),
+            reserved_bytes=32 * 1024**2,
+        )
+    ).job_id
+    registrations = []
+
+    async def registration(committed_job: str) -> bool:
+        status = store.get(committed_job, scope=SCOPE, principal=OWNER)
+        assert status.state == "committed"
+        verified = verify_published(LocalReleaseStore(destination / ATTEMPT.prefix))
+        registrations.append((committed_job, verified.identity.source_dataset_id))
+        return True
+
+    configured = ConfiguredExecution(source, reader, selection, context, destination)
+    outcomes = asyncio.run(run_queue(store, lambda *_args: configured, registration=registration))
+
+    assert registrations == [(job_id, "sample")]
+    assert outcomes == ({"job_id": job_id, "status": "settled", "registration": "registration_settled"},)
 
 
 @pytest.mark.parametrize("foreign", [False, True])

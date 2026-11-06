@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import asdict, dataclass, replace
 from typing import Any
 
@@ -23,7 +23,7 @@ from physical_ai_curation.release.media import (
     plan_release_objects,
     subset_episode_lengths,
 )
-from physical_ai_curation.release.models import FrozenInput
+from physical_ai_curation.release.models import FrameLineageRecord, FrozenInput
 from physical_ai_curation.release.statistics import validate_feature_statistics
 
 EDIT_RESOURCE = re.compile(r"^edits/(episode_\d{6})$")
@@ -261,6 +261,23 @@ class NativeGenerationPlan:
         order = {episode.episode_id: index for index, episode in enumerate(self.episodes)}
         windows = sorted(obj.windows, key=lambda window: (order[window.episode_id], window.camera))
         return tuple(indexed[obj.source_path, window.episode_id, window.camera] for window in windows)
+
+
+def iter_lineage(prepared: NativeGenerationPlan) -> Iterator[bytes]:
+    """Serialize retained frames in native output episode and frame order."""
+    for output_episode_index, episode in enumerate(prepared.episodes):
+        output_frame = 0
+        for source_frame in range(episode.length):
+            if source_frame in episode.removed_frames:
+                continue
+            record = FrameLineageRecord(
+                output_episode_index=output_episode_index,
+                source_episode_id=episode.episode_id,
+                output_frame_index=output_frame,
+                source_frame_index=source_frame,
+            )
+            yield serialize_model(record) + b"\n"
+            output_frame += 1
 
 
 def prepare_saved_generation(

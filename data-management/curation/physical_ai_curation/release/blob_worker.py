@@ -37,7 +37,7 @@ from physical_ai_curation.release.azure_publication import (
 )
 from physical_ai_curation.release.blob_source_associations import BlobSourceAssociations
 from physical_ai_curation.release.canonical import normalize_release_path, parse_strict_json, sha256_hex
-from physical_ai_curation.release.composition import NativeGenerationPlan
+from physical_ai_curation.release.composition import NativeGenerationPlan, iter_lineage
 from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.jobs import (
     BLOB_OWNER_CLEANUP_PATH,
@@ -1040,9 +1040,7 @@ def _generated_chunks(spec: dict[str, Any]) -> Iterator[bytes]:
         return LocalReleaseStore(Path(spec["source_root"])).iter_bytes(spec["source_path"], chunk_size=CHUNK_BYTES)
     if spec["mode"] != "lineage":
         raise ReleaseVerificationError("unsupported generated upload mode")
-    from physical_ai_curation.release.coordinator import _lineage
-
-    return _lineage(TypeAdapter(NativeGenerationPlan).validate_python(spec["prepared"]))
+    return iter_lineage(TypeAdapter(NativeGenerationPlan).validate_python(spec["prepared"]))
 
 
 def _batch_entries(spec: dict[str, Any], jobs: ReleaseJobStore) -> list[tuple[str, int, str]]:

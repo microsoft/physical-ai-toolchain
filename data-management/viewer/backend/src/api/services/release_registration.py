@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import re
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import Protocol
+from uuid import UUID
 
 from physical_ai_curation.release.azureml import (
     AzureMLAssetClient,
@@ -22,10 +25,39 @@ from physical_ai_curation.release.jobs import AuthorityError, ReleaseJobStore
 from physical_ai_curation.release.publication import PublicationAttempt
 from physical_ai_curation.release.record_storage import BlobLocation, release_collection_location
 
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
-    from src.api.services.release_service import ReleaseApiSettings
+@dataclass(frozen=True)
+class AzureMLDestinationSettings:
+    """Credential-free AML workspace and datastore binding for one Azure destination."""
+
+    subscription_id: str
+    resource_group: str
+    workspace_name: str
+    datastore_name: str
+
+    def __post_init__(self) -> None:
+        try:
+            canonical_subscription = str(UUID(self.subscription_id))
+        except (ValueError, TypeError, AttributeError) as error:
+            raise ValueError("Azure ML subscription must be a UUID") from error
+        if canonical_subscription != self.subscription_id.lower():
+            raise ValueError("Azure ML subscription must be a canonical UUID")
+        if not re.fullmatch(r"[A-Za-z0-9_.()-]{1,90}", self.resource_group) or self.resource_group.endswith("."):
+            raise ValueError("Azure ML resource group is invalid")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{2,32}", self.workspace_name):
+            raise ValueError("Azure ML workspace is invalid")
+        if not re.fullmatch(r"[A-Za-z0-9_]{1,255}", self.datastore_name):
+            raise ValueError("Azure ML datastore is invalid")
+
+
+class _RegistrationSettings(Protocol):
+    @property
+    def azureml_destinations(self) -> Mapping[str, AzureMLDestinationSettings]:
+        raise NotImplementedError
+
+    @property
+    def destinations(self) -> Mapping[str, Path | BlobLocation]:
+        raise NotImplementedError
 
 
 @dataclass(frozen=True)
@@ -72,7 +104,7 @@ def _registration_lease(store: ReleaseJobStore, job_id: str, token: str) -> Iter
 
 
 def register_job(
-    settings: ReleaseApiSettings,
+    settings: _RegistrationSettings,
     store: ReleaseJobStore,
     job_id: str,
     *,

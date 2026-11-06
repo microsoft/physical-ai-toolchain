@@ -18,10 +18,10 @@ from physical_ai_curation.release.canonical import (
 )
 from physical_ai_curation.release.errors import IncompleteReleaseError, ReleaseVerificationError
 from physical_ai_curation.release.models import (
+    CHECKSUMS_PATH,
     MANIFEST_PATH,
     MARKER_PATH,
     RECEIPT_PATH,
-    REPORT_PATH,
     FrozenInput,
     IntegrationStatus,
     Inventory,
@@ -31,14 +31,12 @@ from physical_ai_curation.release.models import (
     ReleaseManifest,
     ReleaseMarker,
     ReleasePreview,
-    ReleaseReport,
     ReleaseResult,
     RevisionSourceObject,
     SourceObject,
     StorageRevisionEntry,
     UploadedContentEntry,
-    parse_report,
-    render_report,
+    VerificationReceipt,
 )
 from physical_ai_curation.release.packaging import build_inventory
 from physical_ai_curation.release.store import LocalReleaseStore, ObjectStat
@@ -144,8 +142,8 @@ def _write_package(root: Path, files: dict[str, bytes], manifest: ReleaseManifes
 def _finalize(root: Path) -> None:
     candidate = verify_candidate(LocalReleaseStore(root))
     (root / RECEIPT_PATH).write_bytes(candidate.receipt_bytes)
-    (root / REPORT_PATH).write_bytes(candidate.report_bytes)
-    (root / MARKER_PATH).write_bytes(build_marker(candidate))
+    (root / CHECKSUMS_PATH).write_bytes(candidate.checksums_bytes)
+    (root / MARKER_PATH).write_bytes(build_marker(candidate, release_name="pkg-001", source_dataset_id="sample"))
 
 
 @dataclass(frozen=True)
@@ -176,17 +174,18 @@ class TestSchemaRoundTrip:
         assert parsed == manifest
         assert serialize_model(parsed) == content
 
-    def test_given_report_when_render_then_parse_returns_same_model_and_bytes(self) -> None:
+    def test_given_receipt_when_serialize_then_parse_returns_same_model_and_bytes(
+        self, miniature: MiniaturePackage
+    ) -> None:
         # Arrange
-        report = ReleaseReport(package_id="pkg-001", manifest_sha256=DIGEST)
+        content = verify_candidate(LocalReleaseStore(miniature.root)).receipt_bytes
 
         # Act
-        content = render_report(report)
-        parsed = parse_report(content)
+        parsed = VerificationReceipt.model_validate_json(content)
 
         # Assert
-        assert parsed == report
-        assert render_report(parsed) == content
+        assert parsed.package_id == "pkg-001"
+        assert serialize_model(parsed) == content
 
     @pytest.mark.parametrize("version", ["1.0.0", "3.0.0"])
     def test_given_unsupported_major_when_validate_then_rejected(self, version: str) -> None:
@@ -297,7 +296,9 @@ class TestResultIdentity:
 
     def test_given_published_without_integration_when_validate_then_accepted(self) -> None:
         # Arrange
-        identity = PackageIdentity(package_id="pkg-001", manifest_sha256=DIGEST)
+        identity = PackageIdentity(
+            package_id="pkg-001", manifest_sha256=DIGEST, release_name="pkg-001", source_dataset_id="sample"
+        )
 
         # Act
         result = ReleaseResult(identity=identity, publication_state="published")
@@ -543,10 +544,10 @@ class TestCandidateAndPublicVerification:
         with pytest.raises(ReleaseVerificationError):
             verify_published(LocalReleaseStore(miniature.root))
 
-    def test_given_tampered_report_when_verify_published_then_rejected(self, miniature: MiniaturePackage) -> None:
+    def test_given_tampered_checksums_when_verify_published_then_rejected(self, miniature: MiniaturePackage) -> None:
         # Arrange
         _finalize(miniature.root)
-        (miniature.root / REPORT_PATH).write_bytes(b"# altered\n")
+        (miniature.root / CHECKSUMS_PATH).write_bytes(b"altered\n")
 
         # Act / Assert
         with pytest.raises(ReleaseVerificationError):
@@ -1208,10 +1209,6 @@ def test_given_uploaded_content_when_verify_then_checks_evidence_without_readbac
         assert receipt["uploaded_content_count"] == 1
         assert receipt["storage_revision_count"] == 0
         assert receipt["content_digest_count"] == 3
-        report = parse_report(verify_candidate(store).report_bytes)
-        assert report.uploaded_content_count == 1
-        assert report.storage_revision_count == 0
-        assert report.content_digest_count == 3
 
 
 class _ChangingListingStore(LocalReleaseStore):
@@ -1229,7 +1226,7 @@ class _ChangingListingStore(LocalReleaseStore):
 
 class _NoWholePayloadStore(LocalReleaseStore):
     def read_control_bytes(self, path: str, *, max_bytes: int) -> bytes:
-        if path not in {MANIFEST_PATH, INVENTORY_PATH, RECEIPT_PATH, REPORT_PATH, MARKER_PATH}:
+        if path not in {MANIFEST_PATH, INVENTORY_PATH, RECEIPT_PATH, CHECKSUMS_PATH, MARKER_PATH}:
             raise AssertionError(f"payload read as control bytes: {path}")
         return super().read_control_bytes(path, max_bytes=max_bytes)
 
