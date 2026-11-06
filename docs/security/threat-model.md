@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Threat Model — Physical AI Toolchain
 description: STRIDE-based threat model covering infrastructure-as-code components, trust boundaries, and remediation roadmap
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-30
+ms.date: 2026-10-19
 ms.topic: concept
 keywords:
   - threat model
@@ -418,8 +418,8 @@ Historical values and targets below are retained without remeasurement.
 
 | Metric                   | Current    | Target      |
 |--------------------------|------------|-------------|
-| OpenSSF Passing badge    | ~85%       | 100%        |
-| OpenSSF Silver badge     | ~30%       | 80%         |
+| OpenSSF Passing badge    | 100%       | 100%        |
+| OpenSSF Silver badge     | 100%       | 100%        |
 | SHA-pinned actions       | 95%        | 100%        |
 | STRIDE threats mitigated | 9/19 (47%) | 15/19 (79%) |
 | Critical threats open    | 1          | 0           |
