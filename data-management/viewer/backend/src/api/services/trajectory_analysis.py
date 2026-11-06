@@ -15,6 +15,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .trajectory_numerics import (
+    DECIMAL_PRECISION,
     MetricArray,
     decimal_array,
     decimal_row_norms,
@@ -29,6 +30,7 @@ SMOOTHNESS_MODES: tuple[SmoothnessMode, ...] = ("log-scaled", "radian-based")
 DEFAULT_SMOOTHNESS_MODE: SmoothnessMode = "log-scaled"
 
 _MIN_PATH_LENGTH = Decimal("0.000001")
+_MIN_SPECTRAL_AMPLITUDE = Decimal("0.00001")  # Square root of the original 1e-10 power floor.
 
 
 def _derivatives(positions: NDArray[np.float64], timestamps: NDArray[np.float64]) -> tuple[MetricArray, MetricArray]:
@@ -47,7 +49,7 @@ def _path_efficiency(direct_distance: float | Decimal, path_length: float | Deci
 
 def _decimal_path_efficiency(positions: NDArray[np.float64]) -> float:
     with localcontext() as context:
-        context.prec = 34
+        context.prec = DECIMAL_PRECISION
         decimal_positions = decimal_array(positions)
         path_segments = np.diff(decimal_positions, axis=0)
         displacement = decimal_positions[-1:] - decimal_positions[:1]
@@ -275,7 +277,8 @@ class TrajectoryAnalyzer:
             freq_spectrum = np.abs(scipy_fft.fft(vel_magnitude))[: n // 2]
 
             # Estimate sample rate
-            avg_dt = float((Decimal(float(timestamps[len(velocity)])) - Decimal(float(timestamps[0]))) / len(velocity))
+            time_span = Decimal(float(timestamps[len(velocity)])) - Decimal(float(timestamps[0]))
+            avg_dt = float(time_span / len(velocity))
             if avg_dt <= 0:
                 avg_dt = 1.0 / 30.0  # Default 30 FPS
 
@@ -286,7 +289,7 @@ class TrajectoryAnalyzer:
             high_freq_power = np.sum(freq_spectrum[high_freq_mask] ** 2)
             total_power = np.sum(freq_spectrum**2)
 
-            if total_power == 0 or np.sqrt(total_power) < float(Decimal("0.00001") / Decimal(scale)):
+            if total_power == 0 or np.sqrt(total_power) < float(_MIN_SPECTRAL_AMPLITUDE / Decimal(scale)):
                 return 0.0
 
             jitter = high_freq_power / total_power

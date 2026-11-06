@@ -59,6 +59,25 @@ TEST_DATASET_PATH = os.environ.get(
 
 TEST_DATASET_ID = os.environ.get("TEST_DATASET_ID", "lerobot")
 
+RANGE_FORMS = ("start", "end", "open-ended")
+RANGE_WIRE_FORMATS = ("plain", "signed", "separators", "line-breaks")
+
+
+def range_digits_header(form: str, wire_format: str, digits: int) -> str:
+    """Build a byte Range whose start or end integer has exactly ``digits`` decimal digits."""
+    run = "0" * digits
+    if wire_format == "separators":
+        run = "_".join(run)
+    elif wire_format == "line-breaks":
+        middle = digits // 2
+        run = run[:middle] + "\r\n" + run[middle:]
+    sign = ("-" if form == "end" else "+") if wire_format == "signed" else ""
+    if form == "start":
+        return f"bytes={sign}{run}-3"
+    if form == "end":
+        return f"bytes=0-{sign}{run}"
+    return f"bytes={sign}{run}-"
+
 
 @pytest.fixture
 def held_locks() -> Iterator[contextlib.ExitStack]:

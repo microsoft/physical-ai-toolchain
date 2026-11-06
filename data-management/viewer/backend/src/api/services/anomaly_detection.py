@@ -16,7 +16,14 @@ from enum import StrEnum
 import numpy as np
 from numpy.typing import NDArray
 
-from .trajectory_numerics import MetricArray, decimal_array, decimal_row_norms, differentiate, time_deltas
+from .trajectory_numerics import (
+    DECIMAL_PRECISION,
+    MetricArray,
+    decimal_array,
+    decimal_row_norms,
+    differentiate,
+    time_deltas,
+)
 
 
 def _magnitudes(values: MetricArray) -> MetricArray:
@@ -42,7 +49,7 @@ def _z_scores(magnitudes: MetricArray) -> NDArray[np.float64] | None:
             pass
 
     with localcontext() as context:
-        context.prec = 34
+        context.prec = DECIMAL_PRECISION
         values = decimal_array(magnitudes)
         offsets = values - values[0]
         centered = offsets - sum(offsets) / len(offsets)

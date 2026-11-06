@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import quote
@@ -18,8 +21,10 @@ from src.api.main import api_http_exception_handler
 from src.api.models.episode_edits import SaveEpisodeEditsRequest
 from src.api.validation import path_int_param, query_int_param, range_header_param
 
-from .conftest import DEFAULT_PRINCIPAL, HostedCaller
-from .lerobot_sources import write_source
+from .conftest import DEFAULT_PRINCIPAL, RANGE_FORMS, RANGE_WIRE_FORMATS, HostedCaller, range_digits_header
+from .lerobot_sources import CAMERA, write_source
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize("path", ["/api/csrf-token", "/api/auth/context", "/api/datasets"])
@@ -444,3 +449,90 @@ def test_csv_digit_limit_matches_existing_resource_requests(
     if not accepted:
         error_schema = operation["responses"]["400"]["content"]["application/json"]["schema"]
         Draft202012Validator({**error_schema, "components": document["components"]}).validate(response.json())
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+@pytest.mark.parametrize("wire_format", RANGE_WIRE_FORMATS)
+@pytest.mark.parametrize("form", RANGE_FORMS)
+@pytest.mark.parametrize("extra_digits", [0, 1])
+def test_video_range_digit_limit_matches_existing_resource_requests(
+    client: TestClient, tmp_path: Path, method: str, wire_format: str, form: str, extra_digits: int
+) -> None:
+    limit = sys.get_int_max_str_digits()
+    digits = (limit or sys.int_info.default_max_str_digits) + extra_digits
+    value = range_digits_header(form, wire_format, digits)
+    accepted = limit == 0 or extra_digits == 0
+    write_source(tmp_path / "sample")
+    document = client.get("/openapi.json").json()
+    operation = document["paths"]["/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{camera}"]["get"]
+    schema = next(item["schema"] for item in operation["parameters"] if item["name"] == "Range")
+    response = client.request(method, f"/api/datasets/sample/episodes/0/video/{CAMERA}", headers={"Range": value})
+    assert Draft202012Validator(schema).is_valid(value) == accepted
+    assert response.status_code == (206 if accepted else 400)
+    if not accepted and method == "GET":
+        error_schema = operation["responses"]["400"]["content"]["application/json"]["schema"]
+        Draft202012Validator({**error_schema, "components": document["components"]}).validate(response.json())
+
+
+_STARTUP_LIMIT_PROBE = """
+import json
+import sys
+
+from fastapi.testclient import TestClient
+from jsonschema_rs import Draft202012Validator
+
+from src.api.main import app
+
+request = json.load(sys.stdin)
+operation = app.openapi()["paths"]["/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{camera}"]["get"]
+schema = next(item["schema"] for item in operation["parameters"] if item["name"] == "Range")
+validator = Draft202012Validator(schema)
+results = []
+with TestClient(app) as client:
+    for value in request["values"]:
+        response = client.get(f"/api/datasets/sample/episodes/0/video/{request['camera']}", headers={"Range": value})
+        results.append({"schema_valid": validator.is_valid(value), "status": response.status_code})
+json.dump({"limit": sys.get_int_max_str_digits(), "results": results}, sys.stdout)
+"""
+
+
+@pytest.mark.parametrize(
+    ("startup_limit", "reference_digits"),
+    [("0", sys.int_info.default_max_str_digits), ("640", 640)],
+    ids=["disabled", "nondefault"],
+)
+def test_video_range_digit_limit_follows_startup_interpreter_setting(
+    tmp_path: Path, startup_limit: str, reference_digits: int
+) -> None:
+    write_source(tmp_path / "sample")
+    cases = [
+        (form, wire_format, extra_digits)
+        for form in RANGE_FORMS
+        for wire_format in RANGE_WIRE_FORMATS
+        for extra_digits in (0, 1)
+    ]
+    values = [range_digits_header(form, wire_format, reference_digits + extra) for form, wire_format, extra in cases]
+    environment = {
+        **os.environ,
+        "PYTHONINTMAXSTRDIGITS": startup_limit,
+        "DATAVIEWER_AUTH_DISABLED": "true",
+        "DATA_DIR": str(tmp_path),
+        "STORAGE_BACKEND": "local",
+    }
+    completed = subprocess.run(
+        [sys.executable, "-c", _STARTUP_LIMIT_PROBE],
+        input=json.dumps({"camera": CAMERA, "values": values}),
+        capture_output=True,
+        text=True,
+        cwd=BACKEND_ROOT,
+        env=environment,
+        timeout=120,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    probe = json.loads(completed.stdout)
+    limit = int(startup_limit)
+    assert probe["limit"] == limit
+    for (_, _, extra_digits), result in zip(cases, probe["results"], strict=True):
+        accepted = limit == 0 or extra_digits == 0
+        assert result == {"schema_valid": accepted, "status": 206 if accepted else 400}

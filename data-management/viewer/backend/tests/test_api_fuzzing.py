@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
 from copy import deepcopy
 from pathlib import Path
@@ -42,7 +43,7 @@ from src.api.services.vlm_judge_service import reset_vlm_judge_service
 from src.api.validation import sanitize_user_string
 
 from .api.test_annotations import sample_annotation as sample_annotation
-from .conftest import _reset_singletons
+from .conftest import RANGE_FORMS, _reset_singletons, range_digits_header
 from .lerobot_sources import CAMERA, write_source
 
 schemathesis.checks.load_all_checks()
@@ -1106,6 +1107,36 @@ def test_original_invalid_video_ranges_satisfy_response_contract(
     assert response.json() == {"detail": "Invalid Range header"}
 
 
+@pytest.mark.parametrize("form", RANGE_FORMS)
+@pytest.mark.parametrize("extra_digits", [0, 1])
+def test_video_range_digit_limit_keeps_default_checks_on_original_wire(
+    api_schema: OpenApiSchema,
+    client: TestClient,
+    tmp_path: Path,
+    form: str,
+    extra_digits: int,
+) -> None:
+    limit = sys.get_int_max_str_digits()
+    accepted = limit == 0 or extra_digits == 0
+    value = range_digits_header(form, "plain", (limit or sys.int_info.default_max_str_digits) + extra_digits)
+    write_source(tmp_path / "sample")
+    path_item = api_schema.raw_schema["paths"]["/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{camera}"]
+    schema = next(item["schema"] for item in path_item["get"]["parameters"] if item["name"] == "Range")
+    case = api_schema.make_case(
+        operation=api_schema["/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{camera}"]["GET"],
+        path_parameters={"dataset_id": "sample", "episode_idx": 0, "camera": CAMERA},
+        headers={"Range": value},
+        meta=_generation_meta(
+            schemathesis.GenerationMode.POSITIVE if accepted else schemathesis.GenerationMode.NEGATIVE
+        ),
+    )
+    prepare_positive_case(case, client)
+    assert Draft202012Validator(schema).is_valid(value) == accepted
+    response = case.call_and_validate()
+    assert case.headers["Range"] == value
+    assert response.status_code == (206 if accepted else 400)
+
+
 def test_existing_resources_satisfy_complete_contracts(
     api_schema: OpenApiSchema, client: TestClient, tmp_path: Path, sample_annotation: EpisodeAnnotation
 ) -> None:
@@ -1135,6 +1166,11 @@ def test_existing_resources_satisfy_complete_contracts(
     episode = base + "/episodes/{episode_idx}"
     for path in (base, base + "/episodes", episode, episode + "/cameras", episode + "/annotations"):
         call(path)
+    for path in (base + "/joint-config", "/api/joint-config/defaults"):
+        call(path, "PUT", body={"labels": {"0": "Shoulder"}})
+        assert call(path).json()["labels"]["0"] == "Shoulder"
+    warmed = call(base + "/cache/warm", "POST", query={"count": 1})
+    assert warmed.json()["loaded"] == warmed.json()["requested"] == 1
     call(episode + "/annotations", "PUT", body=sample_annotation.model_dump(mode="json"))
     call(episode + "/annotations", "PUT", body=sample_annotation.model_dump(mode="json"))
     annotation = call(episode + "/annotations")
@@ -1145,6 +1181,10 @@ def test_existing_resources_satisfy_complete_contracts(
     call(base + "/labels/import-from-analysis", "POST", body={"field": "object"})
     labels = call(base + "/labels/save", "POST")
     assert labels.json()["episodes"]["0"] == ["CUSTOM", "OBJECT: CUBE"]
+    parameters["label"] = "CUSTOM"
+    remaining = call(base + "/labels/options/{label}", "DELETE")
+    assert "CUSTOM" not in remaining.json()
+    assert call(episode + "/labels").json()["labels"] == ["OBJECT: CUBE"]
     parameters.update(camera=CAMERA, frame_idx=0)
     call(episode + "/frames/{frame_idx}", query={"camera": CAMERA})
     video = call(episode + "/video/{camera}")
@@ -1153,6 +1193,7 @@ def test_existing_resources_satisfy_complete_contracts(
     assert partial_video.content == video.content[:4]
     limiter.reset()
     call(episode + "/detect", "POST", body={})
+    call(episode + "/detections", "DELETE")
     call(base + "/export/preview", query={"episode_indices": "0"})
     exported = call(base + "/export", "POST", body={"episodeIndices": [0], "outputPath": str(tmp_path / "exported")})
     assert exported.json()["success"] is True
@@ -1165,6 +1206,18 @@ def test_existing_resources_satisfy_complete_contracts(
     assert "event: complete" in streamed.text
     assert "event: error" not in streamed.text
     assert (tmp_path / "streamed/meta/info.json").is_file()
+    edits = call(episode + "/edits").json()
+    edit_body = {
+        "source_id": edits["source_id"],
+        "source_revision": edits["source_revision"],
+        "operations": {"datasetId": "sample", "episodeIndex": 0, "removedFrames": [0]},
+    }
+    saved_edits = call(episode + "/edits", "PUT", body=edit_body)
+    assert saved_edits.json()["saved"]["operations"]["removedFrames"] == [0]
+    assert call(episode + "/edits").json() == saved_edits.json()
+    edit_body["operations"]["removedFrames"] = []
+    cleared_edits = call(episode + "/edits", "PUT", body=edit_body)
+    assert call(episode + "/edits").json() == cleared_edits.json()
     if episode + "/judge" in api_schema.raw_schema["paths"]:
         call(episode + "/judge")
         queued = call(episode + "/judge", "POST", expected_status=202, body={})

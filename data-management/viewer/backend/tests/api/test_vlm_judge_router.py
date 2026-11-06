@@ -34,6 +34,7 @@ from evaluation.vlm_judge.judge import JudgeResult
 from evaluation.vlm_judge.prompts import PROMPT_VERSION
 from evaluation.vlm_judge.service import BackendConfig, FrameConfig, JudgeService, ServiceConfig
 from fastapi.testclient import TestClient
+from jsonschema_rs import Draft202012Validator
 from physical_ai_curation import run as curation_run
 from physical_ai_curation.adapters.job_storage import LocalJobStore
 from physical_ai_curation.adapters.local_dataset import LocalDatasetResolver
@@ -1109,7 +1110,10 @@ def test_conflicting_authors_require_explicit_selection(vlm_client: TestClient) 
         vlm_client.app.dependency_overrides.pop(require_principal_context)
 
 
-def test_saved_media_edits_block_judging_and_clearing_invalidates_snapshot(vlm_client: TestClient) -> None:
+@pytest.mark.parametrize(("method", "suffix"), [("GET", "judge"), ("GET", "judge/snapshot"), ("POST", "judge")])
+def test_saved_media_edits_block_judging_and_clearing_invalidates_snapshot(
+    vlm_client: TestClient, method: str, suffix: str
+) -> None:
     path = f"/api/datasets/{DATASET_ID}/episodes/0"
     original = vlm_client.get(f"{path}/judge/snapshot").json()
     state = vlm_client.get(f"{path}/edits")
@@ -1121,7 +1125,12 @@ def test_saved_media_edits_block_judging_and_clearing_invalidates_snapshot(vlm_c
     }
     saved = vlm_client.put(f"{path}/edits", headers={"If-None-Match": "*"}, json=body)
     assert saved.status_code == 200, saved.text
-    assert vlm_client.post(f"{path}/judge", json={"force": True}).status_code == 422
+    rejected = vlm_client.request(method, f"{path}/{suffix}", **({"json": {"force": True}} if method == "POST" else {}))
+    assert rejected.status_code == 422
+    document = vlm_client.get("/openapi.json").json()
+    operation = document["paths"]["/api/datasets/{dataset_id}/episodes/{episode_idx}/" + suffix][method.lower()]
+    error_schema = operation["responses"]["422"]["content"]["application/json"]["schema"]
+    Draft202012Validator({**error_schema, "components": document["components"]}).validate(rejected.json())
     body["operations"]["removedFrames"] = []
     cleared = vlm_client.put(f"{path}/edits", headers={"If-Match": saved.headers["ETag"]}, json=body)
     assert cleared.status_code == 200, cleared.text

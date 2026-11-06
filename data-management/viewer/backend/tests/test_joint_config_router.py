@@ -233,7 +233,7 @@ def test_given_azure_write_failure_when_saving_then_reports_safe_error(
 
 @pytest.mark.parametrize("path", ["/api/datasets/test-dataset/joint-config", "/api/joint-config/defaults"])
 @pytest.mark.parametrize("index", [False, True, "1", 1.5])
-def test_joint_indices_reject_non_integers(client, path: str, index: object) -> None:
+def test_joint_indices_reject_non_integers(client: TestClient, path: str, index: object) -> None:
     response = client.put(
         path,
         json={"groups": [{"id": "arm", "label": "Arm", "indices": [index]}]},
@@ -245,7 +245,7 @@ def test_joint_indices_reject_non_integers(client, path: str, index: object) -> 
 
 @pytest.mark.parametrize("path", ["/api/datasets/test-dataset/joint-config", "/api/joint-config/defaults"])
 @pytest.mark.parametrize("index", [0, 1, 1.0])
-def test_joint_indices_accept_schema_integers(client, path: str, index: int | float) -> None:
+def test_joint_indices_accept_schema_integers(client: TestClient, path: str, index: int | float) -> None:
     response = client.put(
         path,
         json={"groups": [{"id": "arm", "label": "Arm", "indices": [index]}]},

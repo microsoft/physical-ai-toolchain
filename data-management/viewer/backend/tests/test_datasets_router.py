@@ -9,6 +9,7 @@ warmup endpoints with the dataset service mocked out.
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,20 @@ from fastapi.testclient import TestClient
 
 from src.api.models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, TrajectoryPoint
 from src.api.services.dataset_service import DatasetService, EpisodeLoadError
+
+from .conftest import RANGE_FORMS, range_digits_header
+
+_DIGIT_LIMIT = sys.get_int_max_str_digits()
+_DIGIT_REFERENCE = _DIGIT_LIMIT or sys.int_info.default_max_str_digits
+_OVER_DIGIT_LIMIT_RANGES = (
+    [
+        pytest.param(range_digits_header(form, wire, _DIGIT_LIMIT + 1), id=f"{form}-{wire}-over-limit")
+        for form in RANGE_FORMS
+        for wire in ("plain", "line-breaks")
+    ]
+    if _DIGIT_LIMIT
+    else []
+)
 
 
 @pytest.fixture
@@ -548,6 +563,19 @@ class TestGetVideo:
             ("bytes=0_2-0_4", 206, b"cde", "bytes 2-4/10"),
             ("by\rtes=0\r2-0\n4", 206, b"cde", "bytes 2-4/10"),
             (" BYTES =2-4", 206, b"cde", "bytes 2-4/10"),
+            pytest.param(
+                range_digits_header("start", "plain", _DIGIT_REFERENCE), 206, b"abcd", "bytes 0-3/10", id="start-limit"
+            ),
+            pytest.param(
+                range_digits_header("end", "plain", _DIGIT_REFERENCE), 206, b"a", "bytes 0-0/10", id="end-limit"
+            ),
+            pytest.param(
+                range_digits_header("open-ended", "plain", _DIGIT_REFERENCE),
+                206,
+                b"abcdefghij",
+                "bytes 0-9/10",
+                id="open-limit",
+            ),
             ("bytes=0--0", 206, b"a", "bytes 0-0/10"),
             ("bytes=20-", 416, b"", "bytes */10"),
         ],
@@ -608,7 +636,17 @@ class TestGetVideo:
             override_service.materialize_blob_video.assert_not_called()
 
     @pytest.mark.parametrize(
-        "value", ["items=0-3", "", "bytes=-3", "bytes=abc", "bytes=4-1", "bytes=0-1,3-4", "bytes=0- "]
+        "value",
+        [
+            "items=0-3",
+            "",
+            "bytes=-3",
+            "bytes=abc",
+            "bytes=4-1",
+            "bytes=0-1,3-4",
+            "bytes=0- ",
+            *_OVER_DIGIT_LIMIT_RANGES,
+        ],
     )
     @pytest.mark.parametrize("source", ["local", "blob-stream", "blob-file"])
     @pytest.mark.parametrize("method", ["GET", "HEAD"])

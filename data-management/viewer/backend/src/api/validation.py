@@ -18,8 +18,12 @@ from pydantic import BeforeValidator
 from pydantic.json_schema import SkipJsonSchema
 
 __all__ = [
+    "CAMERA_NAME_INPUT_PATTERN",
+    "DATASET_ID_INPUT_PATTERN",
+    "NON_WHITESPACE_PATTERN",
     "SAFE_CAMERA_NAME_PATTERN",
     "SAFE_DATASET_ID_PATTERN",
+    "WHITESPACE_PATTERN",
     "JsonInteger",
     "SanitizedModel",
     "path_int_param",
@@ -53,18 +57,20 @@ SAFE_CAMERA_NAME_PATTERN, CAMERA_NAME_INPUT_PATTERN = _identifier_patterns(r"[a-
 
 _DATASET_ID_RE = re.compile(SAFE_DATASET_ID_PATTERN)
 _CAMERA_NAME_RE = re.compile(SAFE_CAMERA_NAME_PATTERN)
+# CSV accepts ASCII whitespace; Range numbers retain Python int() whitespace.
 _CSV_WHITESPACE = r"[ \t\r\n\f\v]*"
-# Reflect the interpreter's startup conversion limit without counting signs or stripped CR/LF.
-_CSV_DIGIT_LIMIT = sys.get_int_max_str_digits()
-_CSV_DIGIT_TAIL = f"{{0,{_CSV_DIGIT_LIMIT - 1}}}" if _CSV_DIGIT_LIMIT else "*"
-_CSV_INTEGER = rf"[+-]?[\r\n]*[0-9](?:[\r\n]*[0-9]){_CSV_DIGIT_TAIL}"
+# Reflect the interpreter's startup conversion limit without counting signs, separators, or stripped CR/LF.
+_INTEGER_DIGIT_LIMIT = sys.get_int_max_str_digits()
+_INTEGER_DIGIT_TAIL = f"{{0,{_INTEGER_DIGIT_LIMIT - 1}}}" if _INTEGER_DIGIT_LIMIT else "*"
+_CSV_INTEGER = rf"[+-]?[\r\n]*[0-9](?:[\r\n]*[0-9]){_INTEGER_DIGIT_TAIL}"
 _CSV_INTS_PATTERN = (
     rf"^{_CSV_WHITESPACE}(?:,{_CSV_WHITESPACE})*{_CSV_INTEGER}"
     rf"(?:{_CSV_WHITESPACE},{_CSV_WHITESPACE}(?:{_CSV_INTEGER})?)*{_CSV_WHITESPACE}$"
 )
 _CSV_INTS_RE = re.compile(_CSV_INTS_PATTERN)
+# Unlike str.strip(), int() rejects U+001C through U+001F.
 _INTEGER_WHITESPACE = r"[\t-\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*"
-_RANGE_DIGITS = r"[\r\n]*[0-9](?:[\r\n]*(?:_[\r\n]*)?[0-9])*"
+_RANGE_DIGITS = rf"[\r\n]*[0-9](?:[\r\n]*(?:_[\r\n]*)?[0-9]){_INTEGER_DIGIT_TAIL}"
 _RANGE_UNIT = r"[bB][\r\n]*[yY][\r\n]*[tT][\r\n]*[eE][\r\n]*[sS]"
 _RANGE_PATTERN = (
     rf"^{WHITESPACE_PATTERN}*{_RANGE_UNIT}{WHITESPACE_PATTERN}*="
@@ -250,7 +256,7 @@ def query_csv_ints_param(
     default = ... if required else None
 
     def dependency(
-        raw_value: str = Query(
+        raw_value: str | SkipJsonSchema[None] = Query(
             default,
             alias=param_name,
             description=description,

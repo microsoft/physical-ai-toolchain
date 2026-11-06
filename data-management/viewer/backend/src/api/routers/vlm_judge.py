@@ -53,7 +53,9 @@ from ..validation import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(responses=error_responses(400, 404, 409, 503))
+router = APIRouter(
+    responses={**error_responses(400, 404, 409, 503), 422: {"model": ErrorResponse | ValidationErrorResponse}}
+)
 
 
 def _judge_dataset_id(
@@ -65,6 +67,7 @@ def _judge_dataset_id(
         },
     ),
 ) -> str:
+    """Describe identifiers without empty, dot, or parent components after splitting on ``--``."""
     return validate_safe_string(dataset_id, pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")
 
 
@@ -254,7 +257,7 @@ async def get_episode_judgment(
 @router.post(
     "/{dataset_id}/episodes/{episode_idx}/judge",
     status_code=202,
-    responses={**error_responses(502), 422: {"model": ErrorResponse | ValidationErrorResponse}},
+    responses=error_responses(502),
     dependencies=[Depends(require_csrf_token)],
 )
 async def run_episode_judgment(

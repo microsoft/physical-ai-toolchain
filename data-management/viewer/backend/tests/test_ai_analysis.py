@@ -1,13 +1,18 @@
+# cspell:ignore prec
 """Behavior tests for trajectory analysis services and API endpoints."""
 
 from __future__ import annotations
+
+from collections.abc import Callable
+from decimal import Decimal, localcontext
 
 import numpy as np
 import pytest
 
 from src.api.services import trajectory_analysis, trajectory_numerics
 from src.api.services.anomaly_detection import AnomalyDetector
-from src.api.services.trajectory_analysis import TrajectoryAnalyzer
+from src.api.services.trajectory_analysis import SmoothnessMode, TrajectoryAnalyzer, TrajectoryMetrics
+from src.api.services.trajectory_numerics import MetricArray
 
 
 @pytest.fixture
@@ -84,22 +89,27 @@ UNSAFE_CASES = {
 @pytest.fixture
 def decimal_helper_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Record array-wide Decimal helper calls while delegating to the real helpers."""
-    calls: list[str] = []
+    calls = []
     for module in (trajectory_numerics, trajectory_analysis):
         for name in DECIMAL_HELPERS:
             original = getattr(module, name, None)
             if original is None:
                 continue
 
-            def spy(*args, _name=name, _original=original, **kwargs):
+            def spy(
+                values: MetricArray,
+                *,
+                _name: str = name,
+                _original: Callable[[MetricArray], MetricArray] = original,
+            ) -> MetricArray:
                 calls.append(_name)
-                return _original(*args, **kwargs)
+                return _original(values)
 
             monkeypatch.setattr(module, name, spy)
     return calls
 
 
-def _assert_metrics_match(metrics, expected: dict) -> None:
+def _assert_metrics_match(metrics: TrajectoryMetrics, expected: dict[str, object]) -> None:
     for name, value in expected.items():
         actual = getattr(metrics, name)
         if isinstance(value, float):
@@ -277,7 +287,9 @@ class TestTrajectoryAnalyzer:
 
     @pytest.mark.parametrize("smoothness_mode", SMOOTHNESS_MODES)
     @pytest.mark.parametrize("case", list(ORDINARY_CASES))
-    def test_ordinary_float_trajectories_skip_decimal_work(self, case, smoothness_mode, decimal_helper_calls):
+    def test_ordinary_float_trajectories_skip_decimal_work(
+        self, case: str, smoothness_mode: SmoothnessMode, decimal_helper_calls: list[str]
+    ) -> None:
         positions, timestamps = ORDINARY_CASES[case]()
 
         metrics = TrajectoryAnalyzer(smoothness_mode=smoothness_mode).analyze(positions, timestamps)
@@ -286,7 +298,7 @@ class TestTrajectoryAnalyzer:
         _assert_metrics_match(metrics, ORDINARY_EXPECTED[(case, smoothness_mode)])
 
     @pytest.mark.parametrize("case", list(UNSAFE_CASES))
-    def test_unsafe_float_trajectories_keep_decimal_fallback(self, case, decimal_helper_calls):
+    def test_unsafe_float_trajectories_keep_decimal_fallback(self, case: str, decimal_helper_calls: list[str]) -> None:
         positions, timestamps = UNSAFE_CASES[case]()
 
         metrics = TrajectoryAnalyzer().analyze(positions, timestamps)
@@ -295,6 +307,32 @@ class TestTrajectoryAnalyzer:
         for bounded in (metrics.smoothness, metrics.normalized_smoothness, metrics.efficiency, metrics.jitter):
             assert 0.0 <= bounded <= 1.0
         _assert_metrics_match(metrics, UNSAFE_EXPECTED[case])
+
+    def test_radian_overflow_matches_decimal_reference(self, decimal_helper_calls: list[str]) -> None:
+        positions, timestamps = _path_length_overflow_case()
+        with localcontext() as context:
+            context.prec = 60
+            samples = [Decimal(float(value)) for value in positions[:, 0]]
+            jerk = [
+                samples[index + 3] - 3 * samples[index + 2] + 3 * samples[index + 1] - samples[index]
+                for index in range(len(samples) - 3)
+            ]
+            rms = (sum(value**2 for value in jerk) / len(jerk)).sqrt()
+            expected = float(1 / (1 + rms * Decimal(np.pi / 180.0)))
+
+        metrics = TrajectoryAnalyzer(smoothness_mode="radian-based").analyze(positions, timestamps)
+
+        assert decimal_helper_calls
+        assert 0 < metrics.normalized_smoothness < 1e-300
+        assert metrics.normalized_smoothness == pytest.approx(expected, rel=1e-12, abs=0)
+        _assert_metrics_match(
+            metrics,
+            {
+                name: value
+                for name, value in UNSAFE_EXPECTED["path_length_overflow"].items()
+                if name != "normalized_smoothness"
+            },
+        )
 
 
 class TestAnomalyDetector:

@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 type MetricArray = NDArray[np.float64] | NDArray[np.object_]
 
+DECIMAL_PRECISION = 34
 _FLOAT_MAX = np.finfo(np.float64).max
 
 
@@ -26,7 +27,7 @@ def time_deltas(timestamps: NDArray[np.float64]) -> MetricArray:
             return np.where(intervals > 0, intervals, 1e-6)
     except FloatingPointError:
         with localcontext() as context:
-            context.prec = 34
+            context.prec = DECIMAL_PRECISION
             intervals = np.diff(decimal_array(timestamps))
             return np.where(intervals > 0, intervals, Decimal("0.000001"))
 
@@ -40,14 +41,14 @@ def differentiate(values: MetricArray, intervals: MetricArray) -> MetricArray:
         except FloatingPointError:
             pass
     with localcontext() as context:
-        context.prec = 34
+        context.prec = DECIMAL_PRECISION
         return np.diff(decimal_array(values), axis=0) / decimal_array(intervals)[:, np.newaxis]
 
 
 def decimal_row_norms(values: MetricArray) -> NDArray[np.object_]:
     """Return row-scaled norms with enough exponent range for finite derivatives."""
     with localcontext() as context:
-        context.prec = 34
+        context.prec = DECIMAL_PRECISION
         norms = []
         for row in values:
             scale = max(abs(value) for value in row)

@@ -997,7 +997,7 @@ The [backend CI job](../../.github/workflows/dataviewer-backend-pytests.yml) has
 
 Positive-case preparation aligns dependent arrays, establishes subtask identities and adoption references, orders edit ranges, supplies revision preconditions, and serializes integer-valued path/query numbers as integer text without changing their values. It leaves negative cases and check-generated probes unchanged. Keep expressible constraints in OpenAPI rather than adding check exclusions.
 
-Video Range uses a dependent `http-byte-range` generation strategy to produce ordered endpoints without rewriting requests. The schema constrains header syntax; direct regressions submit malformed and reversed ranges unchanged.
+Video Range uses a dependent `http-byte-range` generation strategy to produce ordered endpoints without rewriting requests. The schema constrains header syntax and limits each start and end integer to Python's startup decimal-conversion limit (4,300 digits by default). Leading zeros count toward that limit; signs, underscores, and stripped CR/LF do not. When the limit is disabled, the schema has no digit bound. Direct regressions submit malformed, reversed, and over-limit ranges unchanged.
 
 The VLM-enabled configuration includes the shared judge-job routes. Resource regressions submit jobs, execute the echo worker, and verify completed results and cache reuse through the job-status API. Each test restores both routes and lifespan state; each generated case has an independent job manager.
 
