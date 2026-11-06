@@ -108,7 +108,7 @@ After every successful training or inference submission, open the OSMO workflow 
 
 1. Capture the workflow ID from the submission output (the line `Workflow ID - <id>`).
 2. Build the URL from the service URL used for `osmo login`: `<service-url>/workflows/<workflow-id>`. Don't rely on the `Workflow Overview` line, which can show an in-cluster address that a browser can't reach.
-3. Open it with the `open_browser_page` tool (VS Code SimpleBrowser).
+3. Open it in the integrated browser with `open_browser_page` (VS Code SimpleBrowser). This tool is editor-provided and may be unavailable, for example under the OSMO Training Manager's `tools` list or outside VS Code. When it is unavailable, open the URL with the Playwright `browser_navigate` action, or print the URL for the user to open.
 4. Tell the user that the **Logs** tab on that page streams live output per task (e.g., `lerobot-train`, `lerobot-infer`).
 
 **Example after a training submission:**
@@ -133,7 +133,9 @@ Open: `<service-url>/workflows/lerobot-inference-20`
 
 ## Azure ML Portal Monitoring (Playwright)
 
-After submitting a training job, and whenever the background eval poller reports a new inference job, open the Azure ML portal with Playwright to view live metrics and trajectory plots. Use `mcp_playwright_browser_navigate`, `mcp_playwright_browser_snapshot`, `mcp_playwright_browser_click`, and `mcp_playwright_browser_take_screenshot`.
+After submitting a training job, and whenever the background eval poller reports a new inference job, open the Azure ML portal with Playwright to view live metrics and trajectory plots. The steps use the Playwright MCP actions `browser_navigate`, `browser_snapshot`, `browser_click`, and `browser_take_screenshot`. Each harness exposes them under its own identifiers, so use the host's tool search to find the navigate, snapshot, click, and screenshot tools before calling them.
+
+When no browser tools are available, report the portal URL and use `osmo workflow logs <id> -t <task> -n 100` for progress.
 
 ### Training Metrics — Open Immediately After Submission
 
@@ -145,16 +147,16 @@ After the training job is submitted, navigate to the training experiment page an
    https://ml.azure.com/experiments/{experiment_name}?wsid=/subscriptions/{AZURE_SUBSCRIPTION_ID}/resourceGroups/{AZURE_RESOURCE_GROUP}/providers/Microsoft.MachineLearningServices/workspaces/{AZUREML_WORKSPACE_NAME}
    ```
 
-2. Call `mcp_playwright_browser_navigate` with that URL.
-3. Call `mcp_playwright_browser_snapshot` to confirm the page loaded and identify the latest run row in the table.
+2. Navigate (`browser_navigate`) to that URL.
+3. Take a snapshot (`browser_snapshot`) to confirm the page loaded and identify the latest run row in the table.
 4. Click the first (most recent) run link.
-5. On the run detail page, call `mcp_playwright_browser_snapshot` to locate the **Metrics** tab.
+5. On the run detail page, take a snapshot (`browser_snapshot`) to locate the **Metrics** tab.
 6. Click **Metrics**.
-7. Call `mcp_playwright_browser_take_screenshot` and show the live training curves to the user.
+7. Take a screenshot (`browser_take_screenshot`) and show the live training curves to the user.
 
 Key metrics to surface: `train/loss`, `train/learning_rate` (confirm `1e-04`, not `1e-05`), `train/grad_norm`, `gpu_percent`.
 
-Refresh by calling `mcp_playwright_browser_navigate` again on the same URL at any time.
+Refresh by navigating (`browser_navigate`) to the same URL again at any time.
 
 > See [references/REFERENCE.md](references/REFERENCE.md) for exact click paths, tab selectors, and screenshot guidance.
 
@@ -174,11 +176,11 @@ While the background eval poller is running, monitor the poller log and navigate
    https://ml.azure.com/experiments/{inference_experiment_name}?wsid=/subscriptions/{AZURE_SUBSCRIPTION_ID}/resourceGroups/{AZURE_RESOURCE_GROUP}/providers/Microsoft.MachineLearningServices/workspaces/{AZUREML_WORKSPACE_NAME}
    ```
 
-3. Call `mcp_playwright_browser_navigate` with that URL.
-4. Call `mcp_playwright_browser_snapshot` to identify the latest run row (most recently submitted checkpoint eval).
+3. Navigate (`browser_navigate`) to that URL.
+4. Take a snapshot (`browser_snapshot`) to identify the latest run row (most recently submitted checkpoint eval).
 5. Click that run.
 6. On the run detail page, click the **Images** tab.
-7. Call `mcp_playwright_browser_take_screenshot` and show the trajectory plots to the user.
+7. Take a screenshot (`browser_take_screenshot`) and show the trajectory plots to the user.
 
 > The **Images** tab contains per-episode trajectory plots logged by the inference job (`episode_NNN_trajectory.png` and `eval_summary.png`). They appear after the OSMO inference workflow reaches `completed` status. If images are not yet present, check `osmo workflow query <inference-workflow-id>` and wait for `completed`.
 

@@ -2,7 +2,7 @@
 sidebar_position: 2
 title: Repository Architecture
 description: Tiered architecture for the Physical AI Toolchain, organized around the T0–T5 adoption ladder with the eight lifecycle domains presented as components adopted per tier.
-ms.date: 2026-10-16
+ms.date: 2026-10-31
 ms.topic: concept
 ---
 
@@ -401,7 +401,7 @@ The root `pyproject.toml` serves local development dependency management, provid
 
 ## Agentic Tooling
 
-This project uses [GitHub Copilot](https://code.visualstudio.com/docs/copilot/overview) agents, instructions, prompts, and skills to automate development workflows. Tooling comes from two sources: the HVE-Core extension (shared across Microsoft HVE projects) and project-specific artifacts defined in `.github/`.
+This project uses [GitHub Copilot](https://code.visualstudio.com/docs/copilot/overview) agents, instructions, prompts, and skills to automate development workflows. Project workflows ship as skills; prompts come only from the HVE-Core extension. Tooling comes from two sources: the HVE-Core extension (shared across Microsoft HVE projects) and project-specific artifacts defined in `.github/`.
 
 ### HVE-Core Extension
 
@@ -420,31 +420,30 @@ HVE-Core artifacts are registered via the extension's `package.json` `contribute
 
 This repository defines project-specific artifacts in `.github/` that extend HVE-Core with domain knowledge:
 
-| Artifact Type | Count | Purpose                                                                      |
-|---------------|-------|------------------------------------------------------------------------------|
-| Agents        | 2     | OSMO training manager, dataviewer developer                                  |
-| Instructions  | 5     | Four committed instructions and runtime-provisioned RPI tracking conventions |
-| Prompts       | 4     | OSMO training submission, LeRobot pipeline, dataviewer workflows             |
-| Skills        | 15    | Seven committed domain skills and eight runtime-provisioned RPI skills       |
+| Artifact Type | Count | Purpose                                                                                               |
+|---------------|-------|-------------------------------------------------------------------------------------------------------|
+| Agents        | 4     | OSMO training manager, dataviewer developer, Dependabot PR reviewer, agentic workflows                |
+| Instructions  | 8     | Seven committed instructions and runtime-provisioned RPI tracking conventions                         |
+| Skills        | 23    | Ten committed domain skills, five committed workflow skills, and eight runtime-provisioned RPI skills |
 
 Project artifacts are auto-discovered by VS Code from the `.github/` directory without explicit registration.
 
 Three workflow chains compose these artifacts:
 
-- **OSMO Training Manager**: `osmo-training-manager` agent → `osmo-lerobot-training` skill → training submission prompts
-- **Dataviewer Developer**: `dataviewer-developer` agent → `dataviewer` skill → dataviewer instruction conventions
+- **OSMO Training Manager**: `osmo-training-manager` agent → `/submit-lerobot-training` and `/check-training-status` workflow skills → `osmo-lerobot-training` skill
+- **Dataviewer Developer**: `dataviewer-developer` agent → `/start-dataviewer` and `/dataviewer-annotate` workflow skills → `dataviewer` skill → dataviewer instruction conventions
 - **RPI**: `rpi-quick` → `rpi-research` → `rpi-plan` / `rpi-plan-critique` → `rpi-implement` → `rpi-review`
 
 ### Artifact Types and Loading
 
 Each artifact type uses YAML frontmatter to declare behavior:
 
-| Artifact     | File Pattern        | Key Frontmatter                | Loading                                      |
-|--------------|---------------------|--------------------------------|----------------------------------------------|
-| Agents       | `*.agent.md`        | `mode`, `tools`, `description` | Auto-discovered from `.github/agents/`       |
-| Instructions | `*.instructions.md` | `applyTo`, `description`       | Auto-discovered from `.github/instructions/` |
-| Prompts      | `*.prompt.md`       | `mode`, `description`, `tools` | Auto-discovered from `.github/prompts/`      |
-| Skills       | `SKILL.md`          | N/A (referenced by agents)     | Referenced via `copilot-skill:` URI          |
+| Artifact     | File Pattern        | Key Frontmatter                                                             | Loading                                                                                     |
+|--------------|---------------------|-----------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|
+| Agents       | `*.agent.md`        | `mode`, `tools`, `description`                                              | Auto-discovered from `.github/agents/`                                                      |
+| Instructions | `*.instructions.md` | `applyTo`, `description`                                                    | Auto-discovered from `.github/instructions/`                                                |
+| Prompts      | `*.prompt.md`       | `agent`, `description`, `tools`                                             | Local harness only; the Copilot harness does not load prompts. This repository commits none |
+| Skills       | `SKILL.md`          | `name`, `description`, optional `argument-hint`, `disable-model-invocation` | Auto-discovered from `.github/skills/` in both harnesses; workflow skills run from `/name`  |
 
 HVE-Core artifacts follow the same patterns but load through extension contribution points rather than workspace auto-discovery.
 
