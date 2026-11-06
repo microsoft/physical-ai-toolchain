@@ -1,5 +1,6 @@
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useEffect, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AppContent } from '@/App'
@@ -18,6 +19,9 @@ const { mockIsDiagnosticsEnabled, mockEnableDiagnostics, mockDisableDiagnostics 
 )
 
 let mockDatasets: DatasetInfo[] = []
+const mockEpisodeEffect = vi.fn()
+const mockJudgeDatasetEnabled = vi.fn()
+let mockJudgeEnabled = false
 let mockCatalogError: Error | null = null
 const mockCatalogDiagnostic = vi.fn()
 const mockRefreshCatalog = vi.fn()
@@ -53,7 +57,7 @@ vi.mock('@/hooks/use-datasets', () => ({
       refreshCatalog: mockRefreshCatalog,
     }
   },
-  useCapabilities: () => ({ data: undefined }),
+  useCapabilities: () => ({ data: { vlmJudgeEnabled: mockJudgeEnabled } }),
   useEpisodes: () => ({
     data: [
       { index: 0, length: 12, taskIndex: 0, hasAnnotations: false },
@@ -82,18 +86,25 @@ vi.mock('@/hooks/use-joint-config', () => ({
   useJointConfig: () => undefined,
 }))
 
+vi.mock('@/components/release/ReleaseWorkspace', () => ({
+  ReleaseWorkspace: ({ datasetId }: { datasetId: string }) => <div>Releases for {datasetId}</div>,
+}))
+
 vi.mock('@/hooks/use-vlm-judge-batch', () => ({
-  useJudgeDataset: () => ({
-    inventory: {},
-    jobs: {},
-    approvals: {},
-    annotated: {},
-    usable: {},
-    reset: {},
-    review: {},
-    act: vi.fn(),
-    refresh: vi.fn(),
-  }),
+  useJudgeDataset: (_datasetId: string, enabled: boolean) => {
+    mockJudgeDatasetEnabled(enabled)
+    return {
+      inventory: {},
+      jobs: {},
+      approvals: {},
+      annotated: {},
+      usable: {},
+      reset: {},
+      review: {},
+      act: vi.fn(),
+      refresh: vi.fn(),
+    }
+  },
   useVlmJudgeBatch: () => ({ submit: vi.fn(), isPending: false }),
   useJudgeSamples: () => ({ data: [] }),
 }))
@@ -127,35 +138,116 @@ vi.mock('@/components/annotation-panel', () => ({
 }))
 
 vi.mock('@/components/annotation-workspace/AnnotationWorkspace', () => ({
-  AnnotationWorkspace: ({
+  AnnotationWorkspace: function MockAnnotationWorkspace({
+    visible = true,
     canGoPreviousEpisode,
     onPreviousEpisode,
     canGoNextEpisode,
     onNextEpisode,
     onSaveAndNextEpisode,
   }: {
+    visible?: boolean
     canGoPreviousEpisode?: boolean
     onPreviousEpisode?: () => void
     canGoNextEpisode?: boolean
     onNextEpisode?: () => void
     onSaveAndNextEpisode?: () => void
-  }) => (
-    <div>
-      <div>Annotation Workspace</div>
-      <button type="button" disabled={!canGoPreviousEpisode} onClick={onPreviousEpisode}>
-        Previous Episode
-      </button>
-      <button type="button" disabled={!canGoNextEpisode} onClick={onNextEpisode}>
-        Next Episode
-      </button>
-      <button type="button" disabled={!canGoNextEpisode} onClick={onSaveAndNextEpisode}>
-        Save and Next Episode
-      </button>
-    </div>
-  ),
+  }) {
+    const [draft, setDraft] = useState('')
+    useEffect(() => {
+      mockEpisodeEffect('active')
+      return () => mockEpisodeEffect('inactive')
+    }, [])
+    return (
+      <div data-testid="annotation-workspace-probe" data-visible={String(visible)}>
+        <div>Annotation Workspace</div>
+        <input
+          aria-label="Annotation draft probe"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <button type="button" disabled={!canGoPreviousEpisode} onClick={onPreviousEpisode}>
+          Previous Episode
+        </button>
+        <button type="button" disabled={!canGoNextEpisode} onClick={onNextEpisode}>
+          Next Episode
+        </button>
+        <button type="button" disabled={!canGoNextEpisode} onClick={onSaveAndNextEpisode}>
+          Save and Next Episode
+        </button>
+      </div>
+    )
+  },
 }))
 
 describe('AppContent', () => {
+  it('pauses judge queries while closed or on Releases and resumes on return', async () => {
+    mockJudgeEnabled = true
+    const user = userEvent.setup()
+    render(<AppContent />)
+    try {
+      expect(mockJudgeDatasetEnabled).toHaveBeenLastCalledWith(false)
+      await user.click(screen.getByRole('button', { name: 'Dataset workspace' }))
+      expect(mockJudgeDatasetEnabled).toHaveBeenLastCalledWith(true)
+      await user.click(screen.getByRole('tab', { name: 'Releases' }))
+      expect(mockJudgeDatasetEnabled).toHaveBeenLastCalledWith(false)
+      await user.click(screen.getByRole('tab', { name: 'Episodes' }))
+      expect(mockJudgeDatasetEnabled).toHaveBeenLastCalledWith(true)
+      await user.click(screen.getByRole('button', { name: 'Dataset workspace' }))
+      expect(mockJudgeDatasetEnabled).toHaveBeenLastCalledWith(false)
+      await user.click(screen.getByRole('tab', { name: 'Releases' }))
+      await user.click(screen.getByRole('button', { name: 'Dataset workspace' }))
+      expect(screen.getByRole('tab', { name: 'Episodes' })).toHaveAttribute('aria-selected', 'true')
+      expect(mockJudgeDatasetEnabled).toHaveBeenLastCalledWith(true)
+    } finally {
+      mockJudgeEnabled = false
+    }
+  })
+
+  it('keeps hidden episode loaders active without discarding panel state', async () => {
+    const user = userEvent.setup()
+    render(<AppContent />)
+    await user.type(await screen.findByLabelText('Annotation draft probe'), 'unsaved draft')
+    mockEpisodeEffect.mockClear()
+
+    await user.click(screen.getByRole('tab', { name: 'Releases' }))
+
+    expect(mockEpisodeEffect).not.toHaveBeenCalledWith('inactive')
+    expect(screen.getByTestId('annotation-workspace-probe')).toHaveAttribute(
+      'data-visible',
+      'false',
+    )
+    await user.click(screen.getByRole('tab', { name: 'Episodes' }))
+    expect(screen.getByLabelText('Annotation draft probe')).toHaveValue('unsaved draft')
+    expect(mockEpisodeEffect).not.toHaveBeenCalled()
+  })
+
+  it('stops playback on release navigation and resets to episodes for a new source', async () => {
+    const user = userEvent.setup()
+    render(<AppContent />)
+    const video = document.createElement('video')
+    const pause = vi.fn()
+    video.pause = pause
+    document.body.append(video)
+    try {
+      act(() => useEpisodeStore.setState({ isPlaying: true }))
+      await user.click(screen.getByRole('tab', { name: 'Releases' }))
+      expect(useEpisodeStore.getState().isPlaying).toBe(false)
+      expect(pause).toHaveBeenCalled()
+      expect(screen.getByText('Releases for houston_lerobot_fixed')).toBeVisible()
+      expect(screen.getByRole('tab', { name: 'Releases' })).toHaveAttribute('aria-selected', 'true')
+      await user.click(screen.getByRole('tab', { name: 'Episodes' }))
+      expect(screen.queryByText('Releases for houston_lerobot_fixed')).toBeNull()
+      await user.click(screen.getByRole('tab', { name: 'Releases' }))
+      await user.click(screen.getByRole('button', { name: /^Dataset: / }))
+      await user.click(screen.getByRole('option', { name: /customer_lerobot/ }))
+      expect(screen.getByRole('tab', { name: 'Episodes' })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.queryByText(/Releases for/)).toBeNull()
+    } finally {
+      video.remove()
+    }
+  })
+
   it('filters the header picker by name and group, resets the filter and selects a dataset', async () => {
     const user = userEvent.setup()
     const onSelectDataset = vi.fn()

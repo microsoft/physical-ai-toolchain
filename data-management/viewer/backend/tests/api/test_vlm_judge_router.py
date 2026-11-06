@@ -621,6 +621,8 @@ def test_cold_blob_judge_downloads_only_selected_media_and_reuses_cache(
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock
 
+    from azure.core.exceptions import ResourceNotFoundError
+
     from src.api.services.dataset_service import DatasetService, get_dataset_service
     from src.api.storage.blob_dataset import BlobDatasetProvider
 
@@ -646,13 +648,18 @@ def test_cold_blob_judge_downloads_only_selected_media_and_reuses_cache(
         transfers.append(path)
         yield (tmp_path / "remote" / path).read_bytes()
 
-    async def sdk_properties() -> SimpleNamespace:
-        return SimpleNamespace(etag=str(info_path.stat().st_mtime_ns))
+    def sdk_blob(path: str) -> SimpleNamespace:
+        async def sdk_properties() -> SimpleNamespace:
+            source = tmp_path / "remote" / path
+            if not source.is_file():
+                raise ResourceNotFoundError("missing")
+            details = source.stat()
+            return SimpleNamespace(etag=str(details.st_mtime_ns), size=details.st_size)
+
+        return SimpleNamespace(get_blob_properties=AsyncMock(side_effect=sdk_properties))
 
     sdk = MagicMock()
-    sdk.get_container_client.return_value.get_blob_client.return_value.get_blob_properties = AsyncMock(
-        side_effect=sdk_properties
-    )
+    sdk.get_container_client.return_value.get_blob_client.side_effect = sdk_blob
     monkeypatch.setattr(provider, "_get_client", AsyncMock(return_value=sdk))
     monkeypatch.setattr(provider, "get_info_json", AsyncMock(return_value=info))
     monkeypatch.setattr(provider, "sync_meta_only_to_local", sync_meta)

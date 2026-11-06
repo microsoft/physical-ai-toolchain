@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from physical_ai_curation.adapters.job_storage import BlobJobStore
+from physical_ai_curation.adapters.local_saved_input import (
+    JudgeEvidenceAuthority,
+    JudgeStateReader,
+    ScopedJudgeEvidenceAuthority,
+    bound_judge_evidence,
+    content_etag,
+)
 from physical_ai_curation.saved_input import (
     SavedInputError,
     SavedInputSnapshot,
@@ -19,15 +28,48 @@ from .annotation_service import AnnotationService
 from .dataset_service import DatasetService
 
 if TYPE_CHECKING:
+    from physical_ai_curation.models import DatasetLabelsFile
+    from physical_ai_curation.release.inputs import SavedSelection
     from physical_ai_dataset_io.lerobot import EpisodeRecord
 
+    from ..storage import VersionedValue
     from .label_storage import LabelStorage
 
 
+class AzureJudgeStateReader:
+    """Read persisted judge state from the blob container used by judge jobs."""
+
+    def __init__(self, provider: Any | None) -> None:
+        self.provider = provider
+
+    async def read(self) -> dict[str, Any]:
+        if self.provider is None:
+            raise SavedInputError("Judge evidence storage is unavailable", 503)
+        client = await self.provider._get_client()
+        blob = client.get_container_client(self.provider.container_name).get_blob_client("_curation/judge/state.json")
+        return await BlobJobStore(blob).read()
+
+
 class ViewerSavedInputReader:
-    def __init__(self, datasets: DatasetService, annotations: AnnotationService) -> None:
+    def __init__(
+        self,
+        datasets: DatasetService,
+        annotations: AnnotationService,
+        label_storage: LabelStorage | None = None,
+        *,
+        judge_evidence: JudgeEvidenceAuthority | None = None,
+        cache_release_labels: bool = False,
+        cache_source_revisions: bool = False,
+    ) -> None:
         self.datasets = datasets
         self.annotations = annotations
+        self.label_storage = label_storage
+        self.judge_evidence = judge_evidence
+        self._cache_release_labels = cache_release_labels
+        self._cache_source_revisions = cache_source_revisions
+        self._source_revisions: dict[tuple[str, int], tuple[str, str]] = {}
+        self._release_labels: dict[str, VersionedValue[DatasetLabelsFile]] = {}
+        self._labels_lock = asyncio.Lock()
 
     async def annotation(self, dataset_id: str, episode_index: int) -> SavedResource:
         resource = await self.annotations.get_annotation_versioned(dataset_id, episode_index)
@@ -41,8 +83,42 @@ class ViewerSavedInputReader:
         )
         return SavedResource(resource.value.model_dump(mode="json") if resource.value else None, resource.etag)
 
+    async def release_resource(self, dataset_id: str, selection: SavedSelection) -> SavedResource:
+        """Read selected labels, episode ledger, or bound judge evidence; other kinds are unavailable here."""
+        if selection.kind == "evidence":
+            if self.judge_evidence is None:
+                raise SavedInputError("Judge evidence authority is not bound", 503)
+            bound = await self.judge_evidence.evidence(dataset_id, selection.episode_index)
+            return bound_judge_evidence(bound, dataset_id, selection.episode_index)
+        if selection.kind not in {"labels", "ledger"}:
+            return SavedResource(None, None)
+        if self.label_storage is None:
+            raise SavedInputError("Labels storage is unavailable", 503)
+        if self._cache_release_labels:
+            async with self._labels_lock:
+                if dataset_id not in self._release_labels:
+                    self._release_labels[dataset_id] = await self.label_storage.load_versioned(dataset_id)
+                resource = self._release_labels[dataset_id]
+        else:
+            resource = await self.label_storage.load_versioned(dataset_id)
+        if resource.value is not None and resource.value.dataset_id != dataset_id:
+            raise SavedInputError("Curation dataset identity mismatch")
+        if selection.kind == "labels":
+            return SavedResource(resource.value.model_dump(mode="json") if resource.value else None, resource.etag)
+        ledger = resource.value.provenance.get(str(selection.episode_index)) if resource.value else None
+        if ledger is None:
+            return SavedResource(None, None)
+        value = ledger.model_dump(mode="json")
+        return SavedResource(value, content_etag(value))
+
     async def source_revision(self, dataset_id: str, episode_index: int) -> tuple[str, str]:
-        return await self.datasets.get_source_revision(dataset_id, episode_index)
+        key = (dataset_id, episode_index)
+        if self._cache_source_revisions and key in self._source_revisions:
+            return self._source_revisions[key]
+        revision = await self.datasets.get_source_revision(dataset_id, episode_index)
+        if self._cache_source_revisions:
+            self._source_revisions[key] = revision
+        return revision
 
 
 class ViewerDatasetResolver:
@@ -176,4 +252,12 @@ async def resolve_saved_input(
     )
 
 
-__all__ = ["SavedInputError", "SavedInputSnapshot", "ViewerSavedInputReader", "resolve_saved_input"]
+__all__ = [
+    "AzureJudgeStateReader",
+    "JudgeStateReader",
+    "SavedInputError",
+    "SavedInputSnapshot",
+    "ScopedJudgeEvidenceAuthority",
+    "ViewerSavedInputReader",
+    "resolve_saved_input",
+]

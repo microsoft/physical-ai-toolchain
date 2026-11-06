@@ -1,0 +1,2518 @@
+"""Durable release job acceptance, fenced leases, capacity, effect ledger and commit arbitration."""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+import re
+import time
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from functools import partial
+from pathlib import Path, PurePosixPath
+from stat import S_ISDIR, S_ISREG
+from typing import Any
+from uuid import uuid4
+
+from physical_ai_curation.release.canonical import normalize_release_path, parse_strict_json
+from physical_ai_curation.release.errors import ReleaseVerificationError
+from physical_ai_curation.release.models import CHECKSUMS_PATH, MARKER_PATH, RECEIPT_PATH
+from physical_ai_curation.release.publication import PublicationAttempt, ownership_bytes, ownership_path
+from physical_ai_curation.release.record_storage import BlobLocation, LocalRecordStorage, RecordLimits, RecordStorage
+from physical_ai_curation.release.source_associations import SourceAssociationIntent
+from physical_ai_curation.release.store import DescriptorHandle, LocalReleaseStore
+from physical_ai_curation.release.supervision import (
+    MAX_PROOF_BYTES,
+    ProcessIdentity,
+    StopProof,
+    SupervisedRuntime,
+    bounded_seconds,
+    recover_stop_proof,
+)
+
+EVENTS_NAME = "release-job-events.jsonl"
+EVENT_SCHEMA = "release-job-event/v1"
+SERVICE_NAME = "physical-ai-curation"
+MAX_REQUEST_BYTES = 256 * 1024
+MIN_LEASE_SECONDS = 5
+MAX_LEASE_SECONDS = 3600
+DISPATCH_FAILURES = frozenset({"resolver_failed", "worker_failed"})
+INPUT_REFUSAL_MESSAGES = {
+    "processing_confirmation_required": "Selected video processing requires explicit confirmation.",
+    "insufficient_capacity": "The selected release exceeds available capacity.",
+    "source_unavailable": "The selected source is unavailable.",
+    "selection_exceeds_bounds": "The selected source exceeds the configured read limits.",
+    "source_object_reference_invalid": (
+        "Source metadata has a missing or invalid chunk or file index. "
+        "Correct the source metadata or select a valid dataset."
+    ),
+    "source_metadata_invalid": (
+        "Source metadata is missing, malformed, or ambiguous. Correct the source metadata or select a valid dataset."
+    ),
+    "source_task_metadata_invalid": (
+        "Source task declarations are empty or invalid, or selected frames reference an undeclared task. "
+        "Correct the source tasks or select a valid dataset."
+    ),
+    "source_frame_schema_invalid": (
+        "Source frames have missing or invalid native coordinate columns, including task_index. "
+        "Correct the source frame schema or select a valid dataset."
+    ),
+    "source_binding_changed": (
+        "The source or saved inputs changed after this request was captured. "
+        "Cancel this request and submit a new release from the current source."
+    ),
+}
+INPUT_REFUSALS = frozenset(INPUT_REFUSAL_MESSAGES)
+MIN_MEMORY_BYTES = 64 * 1024 * 1024
+MAX_BYTES = 1 << 42
+LEASE_ENV = "CURATION_RELEASE_LEASE_SECONDS"
+RESERVE_ENV = "CURATION_RELEASE_RESERVE_BYTES"
+MEMORY_ENV = "CURATION_RELEASE_MEMORY_BYTES"
+GRACE_ENV = "CURATION_RELEASE_GRACE_SECONDS"
+GUARDIAN_ENV = "CURATION_RELEASE_GUARDIAN_SECONDS"
+STATE_TIMEOUT_ENV = "CURATION_RELEASE_STATE_TIMEOUT_SECONDS"
+STATE_RECORD_ENV = "CURATION_RELEASE_STATE_MAX_RECORD_BYTES"
+STATE_TOTAL_ENV = "CURATION_RELEASE_STATE_MAX_TOTAL_BYTES"
+STATE_JOBS_ENV = "CURATION_RELEASE_STATE_MAX_JOBS"
+RECOVERY_ENV = "CURATION_RELEASE_RECOVERY_SECONDS"
+CLEANUP_ENV = "CURATION_RELEASE_CLEANUP_SECONDS"
+RETRY_BASE_ENV = "CURATION_RELEASE_RETRY_BASE_SECONDS"
+RETRY_MAX_ENV = "CURATION_RELEASE_RETRY_MAX_SECONDS"
+FAILED_DISPATCH_ENV = "CURATION_RELEASE_MAX_FAILED_DISPATCHES"
+CONTROL_PATHS = (RECEIPT_PATH, CHECKSUMS_PATH)
+CLOSED_STATES = frozenset({"sealed", "committing", "committed"})
+TERMINAL_STATES = frozenset({"committed", "cancelled"})
+_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+MAX_FENCE = (1 << 63) - 1
+
+
+def has_recovery_obligation(row: Mapping[str, Any]) -> bool:
+    """Return True when a row must be reconciled regardless of retry backoff.
+
+    Unstopped runtimes and cancellations without stop proof are urgent. Once stop is proven, cancellation cleanup
+    and uncertain output reconciliation follow the retry backoff so a failing backlog cannot starve healthy jobs.
+    """
+    if any(not item["stopped"] for item in row["runtimes"].values()):
+        return True
+    if row["cancel_requested"] or row["state"] == "cancelling":
+        return row["stopped_fence"] < row["fence"]
+    return any(effect["status"] != "acknowledged" for effect in row["effects"].values())
+
+
+_EVENT_KEY = re.compile(r"[a-z][a-z_]{0,31}")
+_DIGEST = re.compile(r"[0-9a-f]{64}")
+_DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+_FILE_FLAGS = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+_READ_CHUNK = 1024 * 1024
+BLOB_OWNER_CLEANUP_PATH = "release/cleanup-owner.json"
+MAX_EVENT_PAGE = 1000
+MAX_RUNTIME_RECOVERY_PAGE = 128
+MAX_DIAGNOSTIC_DURATION_MS = 86_400_000
+MAX_DIAGNOSTIC_OPERATIONS = 256
+DIAGNOSTIC_CATEGORIES = frozenset(
+    {"encode", "validation", "copy", "reconciliation", "marker", "cleanup", "runtime_stop", "lease"}
+)
+DIAGNOSTIC_STATUSES = frozenset({"succeeded", "failed", "timed_out", "cancelled", "uncertain"})
+IO_COUNTERS = frozenset(
+    {
+        "storage_copy_bytes",
+        "source_verification_bytes",
+        "destination_verification_bytes",
+        "affected_download_bytes",
+        "generated_upload_bytes",
+        "generated_output_bytes",
+    }
+)
+
+
+class ReleaseJobError(ReleaseVerificationError):
+    """A job transition was refused with a fixed, non-sensitive category."""
+
+
+class JobNotFoundError(ReleaseJobError):
+    """The job is absent or not visible to the caller's scope."""
+
+
+class JobConflictError(ReleaseJobError):
+    """The idempotency key or release identity is bound to different work."""
+
+
+class AuthorityError(ReleaseJobError):
+    """A stale fence, expired lease, unconfirmed predecessor, or unresolved effect blocks the step."""
+
+
+class CapacityError(ReleaseJobError):
+    """Reserved capacity or the reserved estimate cannot admit the work."""
+
+
+class LedgerClosedError(ReleaseJobError):
+    """Payload effects are closed for this job."""
+
+
+class CancellationError(ReleaseJobError):
+    """Cancellation blocks the requested step, or the step is too late to cancel."""
+
+
+class ReleaseRefusal(ReleaseJobError):
+    """A deterministic capture refusal requiring a corrected submission, never an automatic retry."""
+
+    def __init__(self, code: str) -> None:
+        if code not in INPUT_REFUSALS:
+            raise ValueError("unsupported release refusal")
+        self.code = code
+        super().__init__(code)
+
+
+class EffectPending(Exception):
+    """Raised by a payload writer whose dispatch outcome cannot be known yet."""
+
+
+BLOB_RESERVATION_ENV = "CURATION_RELEASE_BLOB_RESERVATION_LIMIT_BYTES"
+BLOB_BATCH_ENV = "CURATION_RELEASE_BLOB_BATCH_SIZE"
+
+
+@dataclass(frozen=True)
+class ReleaseRuntimeSettings:
+    """Validated runtime bounds; protocol constants are not configurable."""
+
+    lease_seconds: int = 60
+    reserve_bytes: int = 1024**3
+    memory_bytes: int = 8 * 1024**3
+    grace_seconds: int = 5
+    guardian_seconds: int = 30
+    state_timeout_seconds: int = 30
+    state_max_record_bytes: int = 16 * 1024**2
+    state_max_total_bytes: int = 64 * 1024**2
+    state_max_jobs: int = 4096
+    recovery_seconds: int = 30
+    cleanup_seconds: int = 30
+    blob_reservation_limit_bytes: int = 1024**4
+    retry_base_seconds: int = 30
+    retry_max_seconds: int = 3600
+    max_failed_dispatches: int = 8
+    blob_batch_size: int = 16
+
+    def __post_init__(self) -> None:
+        _require_int(self.lease_seconds, "lease seconds", MIN_LEASE_SECONDS, MAX_LEASE_SECONDS)
+        _require_int(self.reserve_bytes, "reserve bytes", 0, MAX_BYTES)
+        _require_int(self.memory_bytes, "memory bytes", MIN_MEMORY_BYTES, MAX_BYTES)
+        _require_int(self.blob_reservation_limit_bytes, "blob reservation limit", 1, MAX_BYTES)
+        _require_int(self.grace_seconds, "termination grace", 0, 3600)
+        _require_int(self.guardian_seconds, "guardian liveness", 1, 86400)
+        _require_int(self.state_timeout_seconds, "state timeout", 1, 300)
+        try:
+            RecordLimits(
+                self.state_timeout_seconds, self.state_max_record_bytes, self.state_max_total_bytes, self.state_max_jobs
+            )
+        except ValueError as error:
+            raise ReleaseJobError("state record limits are outside their validated ranges") from error
+        _require_int(self.recovery_seconds, "recovery timeout", 0, 3600)
+        _require_int(self.cleanup_seconds, "cleanup timeout", 1, 3600)
+        _require_int(self.retry_base_seconds, "retry base seconds", 1, 3600)
+        _require_int(self.retry_max_seconds, "retry maximum seconds", self.retry_base_seconds, 86400)
+        _require_int(self.max_failed_dispatches, "failed dispatch limit", 1, 100)
+        _require_int(self.blob_batch_size, "blob batch size", 1, 64)
+        if self.guardian_seconds < min(20, self.lease_seconds):
+            raise ReleaseJobError("guardian liveness is shorter than the heartbeat safety window")
+
+    @classmethod
+    def from_environment(cls, environ: Mapping[str, str]) -> ReleaseRuntimeSettings:
+        defaults = cls()
+        return cls(
+            lease_seconds=_env_int(environ, LEASE_ENV, defaults.lease_seconds),
+            reserve_bytes=_env_int(environ, RESERVE_ENV, defaults.reserve_bytes),
+            memory_bytes=_env_int(environ, MEMORY_ENV, defaults.memory_bytes),
+            grace_seconds=_env_int(environ, GRACE_ENV, defaults.grace_seconds),
+            guardian_seconds=_env_int(environ, GUARDIAN_ENV, defaults.guardian_seconds),
+            state_timeout_seconds=_env_int(environ, STATE_TIMEOUT_ENV, defaults.state_timeout_seconds),
+            state_max_record_bytes=_env_int(environ, STATE_RECORD_ENV, defaults.state_max_record_bytes),
+            state_max_total_bytes=_env_int(environ, STATE_TOTAL_ENV, defaults.state_max_total_bytes),
+            state_max_jobs=_env_int(environ, STATE_JOBS_ENV, defaults.state_max_jobs),
+            recovery_seconds=_env_int(environ, RECOVERY_ENV, defaults.recovery_seconds),
+            cleanup_seconds=_env_int(environ, CLEANUP_ENV, defaults.cleanup_seconds),
+            blob_reservation_limit_bytes=_env_int(environ, BLOB_RESERVATION_ENV, defaults.blob_reservation_limit_bytes),
+            retry_base_seconds=_env_int(environ, RETRY_BASE_ENV, defaults.retry_base_seconds),
+            retry_max_seconds=_env_int(environ, RETRY_MAX_ENV, defaults.retry_max_seconds),
+            max_failed_dispatches=_env_int(environ, FAILED_DISPATCH_ENV, defaults.max_failed_dispatches),
+            blob_batch_size=_env_int(environ, BLOB_BATCH_ENV, defaults.blob_batch_size),
+        )
+
+
+@dataclass(frozen=True)
+class JobRequest:
+    """Server-derived admission input; the frozen request bytes are persisted verbatim."""
+
+    scope: str
+    principal: str
+    idempotency_key: str
+    attempt: PublicationAttempt
+    destination: Path | BlobLocation
+    frozen_request: bytes
+    reserved_bytes: int
+    route: str = "local"
+    execution_binding: bytes = b""
+    client_request_digest: str = ""
+
+    def __post_init__(self) -> None:
+        if not _TOKEN.fullmatch(self.scope) or not _TOKEN.fullmatch(self.idempotency_key):
+            raise ReleaseJobError("invalid scope or idempotency key")
+        if not _TOKEN.fullmatch(self.route):
+            raise ReleaseJobError("invalid route")
+        if not isinstance(self.principal, str) or not 0 < len(self.principal) <= 512:
+            raise ReleaseJobError("invalid principal")
+        if not isinstance(self.attempt, PublicationAttempt) or not isinstance(self.destination, (Path, BlobLocation)):
+            raise ReleaseJobError("invalid publication binding")
+        expected_route = "local" if isinstance(self.destination, Path) else "blob"
+        if self.route != expected_route:
+            raise ReleaseJobError("destination route mismatch")
+        if not isinstance(self.frozen_request, bytes) or not 0 < len(self.frozen_request) <= MAX_REQUEST_BYTES:
+            raise ReleaseJobError("frozen request is empty or exceeds the bound")
+        _require_int(self.reserved_bytes, "reserved bytes", 1, MAX_BYTES)
+        if not isinstance(self.execution_binding, bytes) or len(self.execution_binding) > MAX_REQUEST_BYTES:
+            raise ReleaseJobError("execution binding exceeds its bound")
+        if self.client_request_digest and not re.fullmatch(r"[0-9a-f]{64}", self.client_request_digest):
+            raise ReleaseJobError("invalid client request digest")
+
+
+@dataclass(frozen=True)
+class AcceptedJob:
+    job_id: str
+    replayed: bool
+
+
+@dataclass(frozen=True)
+class JobStatus:
+    job_id: str
+    state: str
+    cancel_requested: bool
+    fence: int
+    effects_stopped: bool
+    cleanup_state: str
+    capacity_state: str
+    scratch_bytes: int = 0
+    observed_scratch_bytes: int = 0
+    peak_scratch_bytes: int = 0
+    io_counters: Mapping[str, int] = field(default_factory=dict)
+    destination_current_bytes: int = 0
+    destination_peak_bytes: int = 0
+    diagnostics: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
+    recovery_required: bool = False
+    refusal_code: str | None = None
+    refusal_message: str | None = None
+    registration: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class JobPage:
+    items: tuple[JobStatus, ...]
+    next_cursor: int | None
+    execution_bindings: Mapping[str, bytes] = field(default_factory=dict)
+    accepted_times: Mapping[str, str] = field(default_factory=dict)
+
+
+REGISTRATION_ERROR_CATEGORIES = frozenset(
+    {"not_configured", "not_published", "verification_failed", "invalid_request", "conflict", "provider_error"}
+)
+_REGISTRATION_OUTCOMES = frozenset({"registered", "failed", "conflict", "not_configured"})
+_REGISTRATION_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,254}")
+_REGISTRATION_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,29}")
+_REGISTRATION_VIEW_KEYS = ("status", "asset_name", "asset_version", "last_error_category", "attempted_at")
+
+
+def _runtime_scope(effect_path: str | None, effect_paths: Sequence[str] | None) -> str | tuple[str, ...] | None:
+    """Return the single effect or the exact effect set a runtime may name."""
+    if effect_paths is None:
+        return effect_path
+    if effect_path is not None:
+        raise AuthorityError("runtime names an invalid effect scope")
+    if not effect_paths:
+        raise AuthorityError("runtime effect set is empty")
+    return tuple(effect_paths)
+
+
+class ReleaseJobStore:
+    """Release state reconstructed from atomic local or conditional Blob job records."""
+
+    def __init__(
+        self,
+        root: Path,
+        *,
+        settings: ReleaseRuntimeSettings | None = None,
+        clock: Callable[[], float] = time.time,
+        free_bytes: Callable[[Path], int] | None = None,
+        storage: RecordStorage | None = None,
+    ) -> None:
+        self.root = root
+        self.settings = settings or ReleaseRuntimeSettings()
+        self.storage = storage or LocalRecordStorage(
+            root,
+            timeout_seconds=self.settings.state_timeout_seconds,
+            max_record_bytes=self.settings.state_max_record_bytes,
+            max_total_bytes=self.settings.state_max_total_bytes,
+            max_jobs=self.settings.state_max_jobs,
+        )
+        self.events_path = root / EVENTS_NAME
+        self._clock = clock
+        self._free_bytes = free_bytes or _statvfs_free_bytes
+
+    @contextmanager
+    def _transaction(self) -> Iterator[dict[str, dict[str, Any]]]:
+        with self.storage.transaction() as records:
+            for row in records.values():
+                _require_current_job(row)
+            yield records
+
+    def accept(self, request: JobRequest) -> AcceptedJob:
+        principal = _digest(request.principal)
+        destination = _destination_text(request.destination)
+        request_digest = _fingerprint(request, destination)
+        identity = _digest(f"{request.scope}\0{request.attempt.prefix}\0{destination}")
+        volume = _destination_volume(request.destination)
+        free = self._free_bytes(_existing_ancestor(Path(destination))) if isinstance(request.destination, Path) else 0
+        with self._transaction() as conn:
+            same_key = next(
+                (
+                    job
+                    for job in conn.values()
+                    if (job["scope"], job["principal_digest"], job["idempotency_key"])
+                    == (request.scope, principal, request.idempotency_key)
+                ),
+                None,
+            )
+            if same_key is not None:
+                if (
+                    same_key["request_digest"] != request_digest
+                    or same_key["client_request_digest"] != request.client_request_digest
+                ):
+                    raise JobConflictError("idempotency key is bound to a different request")
+                return AcceptedJob(same_key["job_id"], replayed=True)
+            live = next(
+                (job for job in conn.values() if job["logical_identity"] == identity and job["state"] != "cancelled"),
+                None,
+            )
+            if live is not None:
+                if live["principal_digest"] == principal and live["request_digest"] == request_digest:
+                    return AcceptedJob(live["job_id"], replayed=True)
+                raise JobConflictError("release identity is already claimed")
+            used = self._reserved_on(conn, volume)
+            if isinstance(request.destination, BlobLocation):
+                available = self.settings.blob_reservation_limit_bytes
+            else:
+                available = free - self.settings.reserve_bytes
+            if request.reserved_bytes > available - used:
+                raise CapacityError("insufficient capacity for the reserved estimate")
+            if any(job["attempt_key"] == request.attempt.key for job in conn.values()):
+                raise JobConflictError("publication attempt is already bound")
+            job_id = uuid4().hex
+            conn[job_id] = {
+                "schema_version": "curated-release-job/v1",
+                "job_id": job_id,
+                "scope": request.scope,
+                "principal_digest": principal,
+                "idempotency_key": request.idempotency_key,
+                "request_digest": request_digest,
+                "client_request_digest": request.client_request_digest,
+                "logical_identity": identity,
+                "attempt_prefix": request.attempt.prefix,
+                "attempt_key": request.attempt.key,
+                "attempt_source_dataset_id": request.attempt.source_dataset_id,
+                "destination": destination,
+                "route": request.route,
+                "volume_key": volume,
+                "reserved_bytes": request.reserved_bytes,
+                "frozen_request": base64.b64encode(request.frozen_request).decode("ascii"),
+                "execution_binding": base64.b64encode(request.execution_binding).decode("ascii"),
+                "state": "accepted",
+                "cancel_requested": False,
+                "cleanup_state": "none",
+                "fence": 0,
+                "stopped_fence": 0,
+                "lease_owner": None,
+                "lease_expires": None,
+                "failed_attempts": 0,
+                "retry_not_before": None,
+                "last_failure": None,
+                "commit_attempt": None,
+                "commit_digest": None,
+                "scratch_bytes": 0,
+                "observed_scratch_bytes": 0,
+                "peak_scratch_bytes": 0,
+                "reservation": {"volume_key": volume, "bytes": request.reserved_bytes, "status": "reserved"},
+                "scratch_reservation": None,
+                "workspace": None,
+                "effects": {},
+                "controls": {},
+                "runtimes": {},
+                "temporaries": [],
+                "io_counters": {},
+                "io_observations": {},
+                "destination_peak_bytes": 0,
+                "diagnostic_operations": {},
+                "diagnostics": {},
+                "events": [],
+            }
+            self._emit(conn, job_id, "job.accepted", "info", {"reserved_bytes": request.reserved_bytes})
+            return AcceptedJob(job_id, replayed=False)
+
+    def _snapshot(self) -> dict[str, dict[str, Any]]:
+        records = self.storage.snapshot()
+        for row in records.values():
+            _require_current_job(row)
+        return records
+
+    def accepted_request(
+        self, *, scope: str, principal: str, idempotency_key: str, client_request_digest: str | None = None
+    ) -> AcceptedJob | None:
+        """Resolve an exact accepted client request without opening its source or changing state."""
+        for row in self._snapshot().values():
+            if (row["scope"], row["principal_digest"], row["idempotency_key"]) != (
+                scope,
+                _digest(principal),
+                idempotency_key,
+            ):
+                continue
+            if client_request_digest is not None and (
+                not client_request_digest or row["client_request_digest"] != client_request_digest
+            ):
+                raise JobConflictError("idempotency key is bound to a different request")
+            return AcceptedJob(row["job_id"], replayed=True)
+        return None
+
+    def request_recovery(self, job_id: str, *, scope: str, principal: str) -> JobStatus:
+        """Record an authorized retry, clearing backoff without changing leases, attempts or stop obligations."""
+        with self._transaction() as conn:
+            row = self._owned(conn, job_id, scope, principal)
+            if row["state"] in TERMINAL_STATES or row["state"] == "needs_input":
+                raise JobConflictError("job requires a new submission")
+            row["retry_not_before"] = None
+            self._emit(conn, job_id, "recovery.requested", "info", {})
+            return _status(conn, row)
+
+    def execution_binding(self, job_id: str) -> bytes:
+        """Return immutable private configuration for trusted workers, never HTTP clients."""
+        row = self._job(self._snapshot(), job_id)
+        return base64.b64decode(row["execution_binding"], validate=True)
+
+    def get(self, job_id: str, *, scope: str, principal: str) -> JobStatus:
+        conn = self._snapshot()
+        row = self._owned(conn, job_id, scope, principal)
+        return _status(conn, row)
+
+    def page(self, *, scope: str, principal: str, cursor: int = 0, limit: int = 50) -> JobPage:
+        """Return an initiator-scoped bounded page ordered by durable acceptance sequence."""
+        _require_int(cursor, "job cursor", 0, (1 << 63) - 1)
+        _require_int(limit, "job page size", 1, 100)
+        conn = self._snapshot()
+        rows = sorted(
+            (
+                job
+                for job in conn.values()
+                if job["scope"] == scope
+                and job["principal_digest"] == _digest(principal)
+                and job["events"][0]["seq"] > cursor
+            ),
+            key=lambda job: job["events"][0]["seq"],
+        )
+        selected = rows[:limit]
+        return JobPage(
+            tuple(_status(conn, row) for row in selected),
+            selected[-1]["events"][0]["seq"] if len(rows) > limit else None,
+            {row["job_id"]: base64.b64decode(row["execution_binding"], validate=True) for row in selected},
+            {row["job_id"]: _iso(self._acceptance_time(row)) for row in selected},
+        )
+
+    def frozen_request(self, job_id: str) -> bytes:
+        return base64.b64decode(self._job(self._snapshot(), job_id)["frozen_request"], validate=True)
+
+    def capture_execution(
+        self,
+        job_id: str,
+        fence: int,
+        *,
+        intent_request: bytes,
+        frozen_request: bytes,
+        execution_binding: bytes,
+        reserved_bytes: int,
+    ) -> None:
+        """Persist one execution snapshot and reserve capacity before any output effects."""
+        _require_int(reserved_bytes, "reserved bytes", 1, MAX_BYTES)
+        if not 0 < len(frozen_request) <= MAX_REQUEST_BYTES or not 0 < len(execution_binding) <= MAX_REQUEST_BYTES:
+            raise ReleaseJobError("execution capture exceeds its bound")
+        with self._transaction() as conn:
+            row = self._authorize(conn, job_id, fence)
+            if row["cancel_requested"]:
+                raise CancellationError("cancellation requested")
+            if (
+                base64.b64decode(row["frozen_request"], validate=True) != intent_request
+                or row["effects"]
+                or row["controls"]
+                or row["runtimes"]
+            ):
+                raise AuthorityError("execution capture is already bound or effects have started")
+            if parse_strict_json(intent_request).get("schema_version") != "curated-release-intent/v1":
+                raise AuthorityError("only an accepted intent can be captured")
+            if parse_strict_json(frozen_request).get("schema_version") != "curated-release-generation/v1":
+                raise ReleaseJobError("execution capture requires a generation request")
+            available = (
+                self.settings.blob_reservation_limit_bytes
+                if row["route"] == "blob"
+                else self._free_bytes(_existing_ancestor(Path(row["destination"]))) - self.settings.reserve_bytes
+            )
+            used = self._reserved_on(conn, row["volume_key"]) - row["reservation"]["bytes"]
+            if reserved_bytes > available - used:
+                raise CapacityError("insufficient capacity for release execution")
+            row["frozen_request"] = base64.b64encode(frozen_request).decode("ascii")
+            row["execution_binding"] = base64.b64encode(execution_binding).decode("ascii")
+            row["reserved_bytes"] = reserved_bytes
+            row["reservation"]["bytes"] = reserved_bytes
+
+    def validate_execution_binding(
+        self,
+        job_id: str,
+        fence: int,
+        destination: Path | BlobLocation,
+        attempt: PublicationAttempt,
+        *,
+        route: str,
+        recovery: bool = False,
+        cancellation: bool = False,
+    ) -> None:
+        """Check the worker composition against the durable accepted publication binding."""
+        conn = self._snapshot()
+        row = self._authorize(conn, job_id, fence, allow_unresolved_effects=recovery)
+        if recovery and self._active_runtimes(conn, job_id, fence):
+            raise AuthorityError("runtime stop proof is unresolved")
+        if (
+            row["destination"] != _destination_text(destination)
+            or row["attempt_prefix"] != attempt.prefix
+            or row["attempt_key"] != attempt.key
+            or row["route"] != route
+        ):
+            raise AuthorityError("execution does not match the accepted destination binding")
+        if cancellation and (not recovery or not row["cancel_requested"] or row["state"] != "cancelling"):
+            raise AuthorityError("cancellation recovery is not authorized")
+        if row["cancel_requested"] and not cancellation:
+            raise CancellationError("cancellation was requested")
+
+    def source_association(self, job_id: str) -> SourceAssociationIntent | None:
+        """Restore private accepted association from durable binding and acceptance event."""
+        return self._restore_source_association(self._job(self._snapshot(), job_id))
+
+    def accepted_at(self, job_id: str) -> str:
+        """Return the durable acceptance time as UTC ISO text before or after capture."""
+        return _iso(self._acceptance_time(self._job(self._snapshot(), job_id)))
+
+    @staticmethod
+    def _acceptance_time(row: Mapping[str, Any]) -> float:
+        accepted = [event for event in row["events"] if event["event"] == "job.accepted"]
+        if len(accepted) != 1:
+            raise ReleaseJobError("unsupported release job acceptance record")
+        return accepted[0]["occurred_at"]
+
+    @staticmethod
+    def _restore_source_association(row: Mapping[str, Any]) -> SourceAssociationIntent | None:
+        from physical_ai_curation.release.source_associations import restore_source_association
+
+        return restore_source_association(
+            base64.b64decode(row["execution_binding"], validate=True),
+            accepted_at=ReleaseJobStore._acceptance_time(row),
+        )
+
+    def validate_source_association(
+        self,
+        job_id: str,
+        fence: int,
+        destination: Path | BlobLocation,
+        attempt: PublicationAttempt,
+        binding: bytes,
+        scope_sha256: str,
+    ) -> None:
+        """Check immutable accepted source/access identity; effect and commit guards authorize dispatch separately."""
+        row = self._job(self._snapshot(), job_id)
+        if (
+            row["fence"] != fence
+            or row["destination"] != _destination_text(destination)
+            or row["attempt_prefix"] != attempt.prefix
+            or row["attempt_key"] != attempt.key
+            or row["route"] != ("local" if isinstance(destination, Path) else "blob")
+            or row["principal_digest"] != scope_sha256
+        ):
+            raise AuthorityError("source association does not match the accepted binding")
+        from physical_ai_curation.release.source_associations import source_association_binding
+
+        try:
+            accepted = self.source_association(job_id)
+        except ReleaseVerificationError as exc:
+            raise AuthorityError("source association does not match the accepted binding") from exc
+        if accepted is None or source_association_binding(accepted) != binding:
+            raise AuthorityError("source association does not match the accepted binding")
+
+    def claim(self, job_id: str, worker: str) -> int:
+        if not _TOKEN.fullmatch(worker):
+            raise ReleaseJobError("invalid worker identity")
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            if row["state"] in TERMINAL_STATES or row["state"] == "needs_input":
+                raise AuthorityError("job cannot be claimed")
+            now = self._clock()
+            if row["lease_expires"] is not None and row["lease_expires"] > now:
+                raise AuthorityError("lease is held")
+            fence = row["fence"] + 1
+            state = "running" if row["state"] == "accepted" else row["state"]
+            row.update(
+                fence=fence,
+                lease_owner=worker,
+                lease_expires=now + self.settings.lease_seconds,
+                state=state,
+                last_failure=None,
+                retry_not_before=None,
+            )
+            self._emit(conn, job_id, "lease.claimed", "info", {"fence": fence})
+            return fence
+
+    def heartbeat(self, job_id: str, fence: int) -> bool:
+        """Observe cancellation every time; renew only when less than half the lease remains."""
+        row = self._lease(self._snapshot(), job_id, fence)
+        if row["lease_expires"] - self._clock() >= self.settings.lease_seconds / 2:
+            return bool(row["cancel_requested"])
+        with self._transaction() as conn:
+            row = self._lease(conn, job_id, fence)
+            if row["lease_expires"] - self._clock() < self.settings.lease_seconds / 2:
+                row["lease_expires"] = self._clock() + self.settings.lease_seconds
+            return bool(row["cancel_requested"])
+
+    def now(self) -> float:
+        """Return the store clock used for leases and retry eligibility."""
+        return self._clock()
+
+    def require_input(self, job_id: str, fence: int, code: str) -> None:
+        """Pause stopped work while retaining all owned effects and cancellation obligations."""
+        if code not in INPUT_REFUSALS:
+            raise ReleaseJobError("invalid refusal category")
+        with self._transaction() as conn:
+            row = self._lease(conn, job_id, fence)
+            if row["cancel_requested"]:
+                raise CancellationError("cancellation requested")
+            if (
+                row["state"] != "running"
+                or row["scratch_bytes"]
+                or row["stopped_fence"] < fence
+                or self._active_runtimes(conn, job_id, fence)
+            ):
+                raise AuthorityError("input refusal has unresolved work")
+            row.update(
+                state="needs_input", last_failure=code, retry_not_before=None, lease_expires=None, lease_owner=None
+            )
+
+    def yield_cancellation(self, job_id: str, fence: int) -> None:
+        """Relinquish an unwound cancelling claim so the next pass can reconcile it immediately."""
+        with self._transaction() as conn:
+            row = self._lease(conn, job_id, fence)
+            if not row["cancel_requested"]:
+                raise AuthorityError("cancellation was not requested")
+            row.update(
+                lease_expires=None, lease_owner=None, failed_attempts=0, retry_not_before=None, last_failure=None
+            )
+
+    def record_dispatch_failure(self, job_id: str, category: str, *, expected_fence: int, worker_id: str) -> bool:
+        """Schedule retry backoff only if the observed claim is still current; return True when recorded.
+
+        Before dispatch, the row must still carry `expected_fence` with no live lease. After a worker claim,
+        the row must carry `expected_fence + 1` owned by `worker_id`. Any other row is left untouched.
+        """
+        if category not in DISPATCH_FAILURES:
+            raise ReleaseJobError("invalid dispatch failure category")
+        _require_int(expected_fence, "expected fence", 0, MAX_FENCE)
+        if not isinstance(worker_id, str) or not _TOKEN.fullmatch(worker_id):
+            raise ReleaseJobError("invalid worker id")
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            if row["state"] in TERMINAL_STATES or row["state"] in CLOSED_STATES:
+                return False
+            now = self._clock()
+            pre_claim = row["fence"] == expected_fence and not (
+                row["lease_owner"] is not None and (row["lease_expires"] or 0) > now
+            )
+            own_claim = (
+                category == "worker_failed" and row["fence"] == expected_fence + 1 and row["lease_owner"] == worker_id
+            )
+            if not (pre_claim or own_claim):
+                return False
+            attempts = row["failed_attempts"] + 1
+            delay = min(self.settings.retry_max_seconds, self.settings.retry_base_seconds * 2 ** min(attempts - 1, 16))
+            row.update(failed_attempts=attempts, retry_not_before=now + delay, last_failure=category)
+            self._emit(conn, job_id, "dispatch.failed", "warning", {"category": category, "attempts": attempts})
+            return True
+
+    def reserve_scratch(self, job_id: str, fence: int, length: int) -> None:
+        """Charge a bounded sequential native workspace against this job's shared-volume reservation."""
+        _require_int(length, "scratch bytes", 1, MAX_BYTES)
+        with self._transaction() as conn:
+            row = self._authorize(conn, job_id, fence)
+            if row["state"] != "running" or row["cancel_requested"] or row["scratch_bytes"]:
+                raise AuthorityError("native scratch is not available")
+            volume = _volume_key(self.root)
+            payload = sum(effect["length"] for effect in row["effects"].values())
+            if volume == row["volume_key"] and payload + length > row["reserved_bytes"]:
+                raise CapacityError("native scratch exceeds the durable reservation")
+            if volume != row["volume_key"]:
+                available = self._free_bytes(_existing_ancestor(self.root)) - self._reserved_on(conn, volume)
+                if length > available - self.settings.reserve_bytes:
+                    raise CapacityError("insufficient independently reserved scratch capacity")
+                row["scratch_reservation"] = {"volume_key": volume, "bytes": length, "status": "reserved"}
+            row["scratch_bytes"] = length
+
+    def record_scratch_usage(self, job_id: str, fence: int, length: int) -> None:
+        """Record measured private-workspace bytes separately from the admitted bound."""
+        _require_int(length, "observed scratch bytes", 0, MAX_BYTES)
+        with self._transaction() as conn:
+            row = self._lease(conn, job_id, fence)
+            if length > row["scratch_bytes"]:
+                raise CapacityError("observed scratch exceeds its admission")
+            row.update(observed_scratch_bytes=length, peak_scratch_bytes=max(row["peak_scratch_bytes"], length))
+
+    def record_io(
+        self, job_id: str, fence: int, operation_id: str, counters: Mapping[str, int], *, duration_ms: int = 0
+    ) -> None:
+        """Record completed observed I/O once; partial or uncertain effects remain separate obligations."""
+        self.record_ios(job_id, fence, [(operation_id, counters, duration_ms)])
+
+    def record_ios(self, job_id: str, fence: int, observations: Sequence[tuple[str, Mapping[str, int], int]]) -> None:
+        """Record a batch of observed I/O in one transaction; each operation identity counts once."""
+        if not observations:
+            raise ReleaseJobError("I/O observation batch is empty")
+        prepared: dict[str, dict[str, Any]] = {}
+        for operation_id, counters, duration_ms in observations:
+            if not isinstance(operation_id, str) or re.fullmatch(r"[0-9a-f]{32}|[0-9a-f]{64}", operation_id) is None:
+                raise ReleaseJobError("I/O operation identity is invalid")
+            if not counters or set(counters) - IO_COUNTERS:
+                raise ReleaseJobError("I/O counter category is invalid")
+            _require_int(duration_ms, "observed duration", 0, MAX_BYTES)
+            for value in counters.values():
+                _require_int(value, "observed bytes", 0, MAX_BYTES)
+            observation = {"counters": dict(counters), "duration_ms": duration_ms}
+            if prepared.setdefault(operation_id, observation) != observation:
+                raise JobConflictError("I/O observation conflicts with its recorded identity")
+        with self._transaction() as conn:
+            row = self._lease(conn, job_id, fence)
+            for operation_id, observation in prepared.items():
+                existing = row["io_observations"].get(operation_id)
+                if existing is not None:
+                    if existing != observation:
+                        raise JobConflictError("I/O observation conflicts with its recorded identity")
+                    continue
+                for name, value in observation["counters"].items():
+                    row["io_counters"][name] = row["io_counters"].get(name, 0) + value
+                row["io_observations"][operation_id] = observation
+                self._emit(conn, job_id, "io.observed", "info", {"duration_ms": observation["duration_ms"]})
+
+    def release_scratch(self, job_id: str, fence: int) -> None:
+        """Release scratch only under current ownership and after registered native effects stopped."""
+        with self._transaction() as conn:
+            row = self._lease(conn, job_id, fence)
+            if self._active_runtimes(conn, job_id, fence):
+                raise AuthorityError("runtime stop proof is unresolved")
+            workspace = row["workspace"]
+            if workspace is not None and workspace["status"] != "removed":
+                raise AuthorityError("private scratch ownership is unresolved")
+            row.update(scratch_bytes=0, observed_scratch_bytes=0)
+            if row["scratch_reservation"] is not None:
+                row["scratch_reservation"]["status"] = "released"
+
+    def authorize_scratch_cleanup(self, job_id: str, fence: int) -> None:
+        """Refuse private-workspace removal while any registered writer is unresolved."""
+        with self._transaction() as conn:
+            self._lease(conn, job_id, fence)
+            if self._active_runtimes(conn, job_id, fence):
+                raise AuthorityError("runtime stop proof is unresolved; scratch is retained")
+
+    def create_scratch_workspace(self, job_id: str, fence: int, length: int) -> Path:
+        """Persist creator identity before a private workspace can receive any bytes."""
+        self.reserve_scratch(job_id, fence, length)
+        name = uuid4().hex
+        owner = ProcessIdentity.of(os.getpid()).to_dict()
+        with self._transaction() as conn:
+            self._lease(conn, job_id, fence)["workspace"] = {
+                "fence": fence,
+                "name": name,
+                "owner": owner,
+                "device": None,
+                "inode": None,
+                "status": "planned",
+            }
+        directory = self.root.resolve() / "scratch" / job_id / name
+        descriptor = _open_root_nofollow(self.root.resolve())
+        try:
+            for segment in ("scratch", job_id, name):
+                try:
+                    os.mkdir(segment, mode=0o700, dir_fd=descriptor)
+                except FileExistsError:
+                    if segment == name:
+                        raise AuthorityError("private workspace name collided") from None
+                child = os.open(segment, _DIRECTORY_FLAGS, dir_fd=descriptor)
+                os.fsync(descriptor)
+                os.close(descriptor)
+                descriptor = child
+            identity = os.fstat(descriptor)
+            with self._transaction() as conn:
+                workspace = self._lease(conn, job_id, fence)["workspace"]
+                if workspace["name"] != name or workspace["fence"] != fence:
+                    raise AuthorityError("workspace creation authority changed")
+                workspace.update(device=identity.st_dev, inode=identity.st_ino, status="present")
+        finally:
+            os.close(descriptor)
+        return directory
+
+    def cleanup_scratch_workspace(self, job_id: str, fence: int, *, recover: bool = False) -> None:
+        """Remove only a recorded inode after stopped children and creator authority are established."""
+        with self._transaction() as conn:
+            row = self._lease(conn, job_id, fence)
+            if self._active_runtimes(conn, job_id, fence):
+                raise AuthorityError("runtime stop proof is unresolved; scratch is retained")
+            workspace = row["workspace"]
+            if workspace is None or workspace["status"] == "removed":
+                return
+            owner = ProcessIdentity.from_dict(workspace["owner"])
+            if recover:
+                if owner.boot_id != ProcessIdentity.of(os.getpid()).boot_id:
+                    raise AuthorityError("scratch creator host/boot is not independently observable")
+                if not owner.has_exited():
+                    raise AuthorityError("scratch creator is not independently stopped")
+            elif workspace["fence"] != fence or owner != ProcessIdentity.of(os.getpid()):
+                raise AuthorityError("private workspace belongs to another creator")
+            if workspace["status"] != "present":
+                raise AuthorityError("workspace creation outcome is unresolved")
+            parent = self.root.resolve() / "scratch" / job_id
+            parent_fd = _open_root_nofollow(parent)
+            try:
+                try:
+                    descriptor = os.open(workspace["name"], _DIRECTORY_FLAGS, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    descriptor = None
+                if descriptor is not None:
+                    try:
+                        identity = os.fstat(descriptor)
+                        if (identity.st_dev, identity.st_ino) != (workspace["device"], workspace["inode"]):
+                            raise AuthorityError("private workspace identity changed")
+                        _clear_scratch_directory(
+                            descriptor, time.monotonic() + self.settings.cleanup_seconds, [16384], 0
+                        )
+                        current = os.stat(workspace["name"], dir_fd=parent_fd, follow_symlinks=False)
+                        if (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino):
+                            raise AuthorityError("private workspace identity changed")
+                        os.rmdir(workspace["name"], dir_fd=parent_fd)
+                    finally:
+                        os.close(descriptor)
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
+            if row["fence"] != fence:
+                raise AuthorityError("scratch cleanup authority changed")
+            workspace["status"] = "removed"
+            self._emit(conn, job_id, "scratch.removed", "info", {"fence": fence})
+
+    def confirm_stopped(self, job_id: str, fence: int) -> None:
+        """Record that every process tree for this fence has been terminated and reaped."""
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            if not 0 < fence <= row["fence"]:
+                raise AuthorityError("unknown fence")
+            if self._active_runtimes(conn, job_id, fence):
+                raise AuthorityError("runtime stop proof is unresolved")
+            if fence > row["stopped_fence"]:
+                row["stopped_fence"] = fence
+                self._emit(conn, job_id, "effects.stopped", "info", {"fence": fence})
+
+    def runtime_proof_path(
+        self,
+        job_id: str,
+        fence: int,
+        *,
+        effect_path: str | None = None,
+        effect_paths: Sequence[str] | None = None,
+        reconciliation: bool = False,
+    ) -> Path:
+        """Allocate a unique internal proof name for one authorized runtime."""
+        scope = _runtime_scope(effect_path, effect_paths)
+        conn = self._snapshot()
+        if reconciliation:
+            self._authorize_reconciliation_runtime(conn, job_id, fence, scope)
+        else:
+            self._authorize_runtime(conn, job_id, fence, scope)
+        directory = self.root.resolve() / "runtimes" / job_id
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        for parent in (self.root, directory.parent):
+            descriptor = os.open(parent, _DIRECTORY_FLAGS)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        return directory / f"{fence}-{uuid4().hex}.json"
+
+    def register_runtime(
+        self,
+        job_id: str,
+        fence: int,
+        runtime: SupervisedRuntime,
+        *,
+        effect_path: str | None = None,
+        effect_paths: Sequence[str] | None = None,
+        reconciliation: bool = False,
+    ) -> None:
+        """Persist guardian/leader identity while the native start gate is still closed."""
+        expected = self.root.resolve() / "runtimes" / job_id
+        if runtime.proof_path is None or runtime.proof_path.parent != expected:
+            raise AuthorityError("runtime proof destination is not confined")
+        if not re.fullmatch(rf"{fence}-[0-9a-f]{{32}}\.json", runtime.proof_path.name):
+            raise AuthorityError("runtime proof identity is invalid")
+        encoded = json.dumps(runtime.to_dict(), sort_keys=True, separators=(",", ":"))
+        scope = _runtime_scope(effect_path, effect_paths)
+        with self._transaction() as conn:
+            row = (
+                self._authorize_reconciliation_runtime(conn, job_id, fence, scope)
+                if reconciliation
+                else self._authorize_runtime(conn, job_id, fence, scope)
+            )
+            allowed = (
+                row["state"] == "running"
+                or (row["state"] == "sealed" and effect_path in CONTROL_PATHS)
+                or (row["state"] == "committing" and effect_path == MARKER_PATH)
+            )
+            if not reconciliation and (not allowed or row["cancel_requested"]):
+                raise AuthorityError("runtime start is not authorized")
+            if self._active_runtimes(conn, job_id, fence):
+                raise AuthorityError("runtime is already active")
+            identity = _digest(encoded)
+            if identity in row["runtimes"]:
+                raise AuthorityError("runtime identity is already registered")
+            row["runtimes"][identity] = {
+                "fence": fence,
+                "identity": identity,
+                "runtime": runtime.to_dict(),
+                "stopped": False,
+            }
+            row["stopped_fence"] = min(row["stopped_fence"], fence - 1)
+            self._emit(conn, job_id, "runtime.registered", "info", {"fence": fence})
+
+    def recover_runtimes(self, job_id: str, fence: int, *, timeout_seconds: float | None = None) -> None:
+        """Recover only guardian-issued proofs; absent evidence leaves ownership and capacity unresolved."""
+        timeout = self.settings.recovery_seconds if timeout_seconds is None else timeout_seconds
+        deadline = time.monotonic() + bounded_seconds(timeout, low=0, high=3600, name="runtime recovery budget")
+        with self._transaction() as conn:
+            job = self._job(conn, job_id)
+            if not 0 < fence <= job["fence"]:
+                raise AuthorityError("unknown fence")
+            records = sorted(
+                (record for record in job["runtimes"].values() if record["fence"] <= fence and not record["stopped"]),
+                key=lambda record: (record["fence"], record["identity"]),
+            )[:MAX_RUNTIME_RECOVERY_PAGE]
+        for record in records:
+            runtime = SupervisedRuntime.from_dict(record["runtime"])
+            recover_stop_proof(runtime, timeout_seconds=max(0.0, deadline - time.monotonic()))
+            with self._transaction() as conn:
+                self._job(conn, job_id)["runtimes"][record["identity"]]["stopped"] = True
+                self._emit(conn, job_id, "runtime.stopped", "info", {"fence": record["fence"]})
+
+    def confirm_runtime_stopped(self, job_id: str, fence: int, proof: StopProof) -> None:
+        """Independently recover the persisted proof before accepting a live worker's notification."""
+        with self._transaction() as conn:
+            records = [record for record in self._job(conn, job_id)["runtimes"].values() if record["fence"] == fence]
+        for record in records:
+            runtime = SupervisedRuntime.from_dict(record["runtime"])
+            if runtime.guardian == proof.guardian and runtime.leader == proof.leader:
+                if recover_stop_proof(runtime, timeout_seconds=0) != proof:
+                    raise AuthorityError("runtime stop proof does not match")
+                self.recover_runtimes(job_id, fence, timeout_seconds=0)
+                return
+        raise AuthorityError("runtime stop proof is not registered")
+
+    def _active_runtimes(self, conn: Mapping[str, dict[str, Any]], job_id: str, fence: int) -> int:
+        return sum(
+            record["fence"] <= fence and not record["stopped"]
+            for record in self._job(conn, job_id)["runtimes"].values()
+        )
+
+    def request_cancel(self, job_id: str, *, scope: str, principal: str) -> JobStatus:
+        with self._transaction() as conn:
+            row = self._owned(conn, job_id, scope, principal)
+            if row["state"] in ("committing", "committed"):
+                raise CancellationError("commit was already chosen; cancellation is too late")
+            if row["state"] != "cancelled" and not row["cancel_requested"]:
+                row.update(cancel_requested=True, state="cancelling")
+                self._emit(conn, job_id, "cancel.requested", "info", {})
+            return _status(conn, self._job(conn, job_id))
+
+    def settle_cancellation(self, job_id: str, fence: int, *, output_removed: bool) -> JobStatus:
+        """Release capacity only after stopped effects and removed owned output; otherwise retain it visibly."""
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            if not row["cancel_requested"]:
+                raise CancellationError("cancellation was not requested")
+            if row["fence"] != fence:
+                raise AuthorityError("stale worker fence")
+            if row["fence"]:
+                self._lease(conn, job_id, fence)
+                if row["stopped_fence"] < row["fence"]:
+                    raise AuthorityError("effects are not confirmed stopped")
+            if self._open_effects(conn, job_id):
+                raise AuthorityError("effects are still dispatched or unresolved")
+            if output_removed and row["scratch_bytes"]:
+                raise AuthorityError("scratch cleanup is unresolved")
+            if output_removed:
+                self._purge_runtime_proofs(row)
+                row["reservation"]["status"] = "released"
+                row.update(state="cancelled", cleanup_state="completed")
+                self._emit(conn, job_id, "cleanup.completed", "info", {})
+            else:
+                if row["reservation"]["status"] == "reserved":
+                    row["reservation"]["status"] = "retained"
+                row["cleanup_state"] = "retained"
+                self._emit(conn, job_id, "cleanup.retained", "warning", {"retained_bytes": row["reservation"]["bytes"]})
+            return _status(conn, self._job(conn, job_id))
+
+    def purge_cancelled(self, job_id: str, fence: int) -> None:
+        """Delete a cancelled job and its events only after output, stop, and capacity obligations are closed."""
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            if not row["cancel_requested"] or row["state"] != "cancelled" or row["cleanup_state"] != "completed":
+                raise AuthorityError("cancellation is not settled")
+            if row["fence"] != fence:
+                raise AuthorityError("stale worker fence")
+            if row["fence"] and row["stopped_fence"] < row["fence"]:
+                raise AuthorityError("effects are not confirmed stopped")
+            if row["reservation"]["status"] != "released" or row["scratch_bytes"]:
+                raise AuthorityError("cancelled capacity is not released")
+            if self._open_effects(conn, job_id):
+                raise AuthorityError("effects are still dispatched or unresolved")
+            self._purge_runtime_proofs(row)
+            del conn[job_id]
+
+    def _purge_runtime_proofs(self, row: Mapping[str, Any]) -> None:
+        if any(not item["stopped"] for item in row["runtimes"].values()):
+            raise AuthorityError("runtime stop proof is unresolved")
+        if any(not item["removed"] for item in row["temporaries"]):
+            raise AuthorityError("temporary output cleanup is unresolved")
+        if row["workspace"] is not None and row["workspace"]["status"] != "removed":
+            raise AuthorityError("scratch workspace cleanup is unresolved")
+        scratch = self.root.resolve() / "scratch" / row["job_id"]
+        try:
+            directory = _open_root_nofollow(scratch)
+        except FileNotFoundError:
+            pass
+        else:
+            try:
+                if os.listdir(directory):
+                    raise AuthorityError("unregistered scratch residue prevents cleanup")
+            finally:
+                os.close(directory)
+            scratch.rmdir()
+        root = self.root.resolve() / "runtimes" / row["job_id"]
+        known = {}
+        for item in row["runtimes"].values():
+            runtime = SupervisedRuntime.from_dict(item["runtime"])
+            if runtime.proof_path is None or runtime.proof_path.parent != root:
+                raise AuthorityError("runtime proof destination is not confined")
+            known[runtime.proof_path.name] = runtime
+        try:
+            directory = _open_root_nofollow(root)
+        except FileNotFoundError:
+            return
+        try:
+            verified = []
+            for name in os.listdir(directory):
+                if name not in known:
+                    raise AuthorityError("unregistered runtime proof prevents cleanup")
+                descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+                with os.fdopen(descriptor, "rb") as stream:
+                    info = os.fstat(stream.fileno())
+                    if not S_ISREG(info.st_mode) or info.st_size > MAX_PROOF_BYTES:
+                        raise AuthorityError("runtime proof is not a bounded regular file")
+                    content = stream.read(MAX_PROOF_BYTES + 1)
+                if len(content) > MAX_PROOF_BYTES:
+                    raise AuthorityError("runtime proof exceeds its bound")
+                StopProof.from_payload(json.loads(content), known[name])
+                verified.append((name, content, (info.st_dev, info.st_ino)))
+            for name, content, inode in verified:
+                if not _remove_verified(
+                    directory, name, len(content), hashlib.sha256(content).hexdigest(), expected_inode=inode
+                ):
+                    raise AuthorityError("runtime proof changed during cleanup")
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        root.rmdir()
+
+    def seal(self, job_id: str, fence: int, controls: Mapping[str, tuple[int, str]]) -> None:
+        """Close payload writers and journal the exact receipt and checksums identities."""
+        if set(controls) != set(CONTROL_PATHS):
+            raise ReleaseJobError("controls must be exactly the receipt and checksums")
+        for length, digest in controls.values():
+            _require_int(length, "control length", 0, MAX_BYTES)
+            if not _DIGEST.fullmatch(digest):
+                raise ReleaseJobError("control digest must be lowercase SHA-256")
+        with self._transaction() as conn:
+            row = self._authorize(conn, job_id, fence)
+            if row["cancel_requested"]:
+                raise CancellationError("cancellation was requested before seal")
+            if row["state"] == "sealed":
+                if self._journal(conn, job_id) != dict(controls):
+                    raise JobConflictError("ledger is sealed with different controls")
+                return
+            if row["state"] != "running":
+                raise AuthorityError("job is not sealable")
+            if self._active_runtimes(conn, job_id, fence):
+                raise AuthorityError("runtime stop proof is unresolved")
+            if row["scratch_bytes"]:
+                raise AuthorityError("native scratch is still retained")
+            if self._open_effects(conn, job_id):
+                raise AuthorityError("payload effects are unresolved")
+            row["controls"] = {
+                path: {"length": length, "digest": digest} for path, (length, digest) in controls.items()
+            }
+            row["state"] = "sealed"
+            self._emit(conn, job_id, "ledger.sealed", "info", {"fence": fence})
+
+    def begin_effect(
+        self, job_id: str, fence: int, attempt: PublicationAttempt, path: str, length: int, digest: str
+    ) -> bool:
+        """Persist intent before dispatch; return True when an acknowledged identical effect exists."""
+        return self.begin_effects(job_id, fence, attempt, [(path, length, digest)])[0]
+
+    def begin_effects(
+        self, job_id: str, fence: int, attempt: PublicationAttempt, effects: Sequence[tuple[str, int, str]]
+    ) -> list[bool]:
+        """Persist a bounded intent batch in one transaction; True marks an acknowledged identical replay."""
+        if not effects:
+            raise ReleaseJobError("effect batch is empty")
+        if len(effects) > self.settings.blob_batch_size:
+            raise CapacityError("effect batch exceeds the configured blob batch size")
+        prepared: list[tuple[str, int, str]] = []
+        for path, length, digest in effects:
+            normalized = normalize_release_path(path)
+            if normalized in (MARKER_PATH, BLOB_OWNER_CLEANUP_PATH):
+                raise LedgerClosedError("marker requires a commit-bound marker intent")
+            _require_int(length, "effect length", 0, MAX_BYTES)
+            prepared.append((normalized, length, digest))
+        if len({path for path, _, _ in prepared}) != len(prepared):
+            raise ReleaseJobError("effect batch repeats a path")
+        with self._transaction() as conn:
+            row = self._authorize(conn, job_id, fence)
+            if row["attempt_prefix"] != attempt.prefix or row["attempt_key"] != attempt.key:
+                raise AuthorityError("attempt is not owned by this job")
+            if row["cancel_requested"]:
+                raise CancellationError("cancellation was requested")
+            return [self._begin_row_effect(row, fence, path, length, digest) for path, length, digest in prepared]
+
+    def _begin_row_effect(self, row: dict[str, Any], fence: int, path: str, length: int, digest: str) -> bool:
+        control = row["controls"].get(path)
+        if row["state"] in CLOSED_STATES and control is None:
+            raise LedgerClosedError("payload ledger is closed")
+        if control is not None and (control["length"], control["digest"]) != (length, digest):
+            raise AuthorityError("control identity conflict")
+        existing = row["effects"].get(path)
+        if existing is not None:
+            if (existing["length"], existing["digest"]) != (length, digest):
+                raise AuthorityError("effect identity conflict")
+            if existing["status"] == "acknowledged":
+                return True
+            raise AuthorityError("effect outcome is unresolved")
+        total = sum(effect["length"] for effect in row["effects"].values())
+        shared_scratch = row["scratch_bytes"] if _volume_key(self.root) == row["volume_key"] else 0
+        if total + length + shared_scratch > row["reserved_bytes"]:
+            raise CapacityError("effects exceed the reserved estimate")
+        row["effects"][path] = {
+            "path": path,
+            "length": length,
+            "digest": digest,
+            "fence": fence,
+            "status": "dispatched",
+            "copy_id": None,
+        }
+        _record_destination_peak(row)
+        return False
+
+    def register_local_temporary(self, job_id: str, fence: int, path: str, name: str, identity: os.stat_result) -> None:
+        """Record an existing private inode from its registered writer before the first byte."""
+        path = normalize_release_path(path)
+        if (
+            re.fullmatch(r"\.curation-copy-[0-9a-f]{32}\.partial", name) is None
+            or not S_ISREG(identity.st_mode)
+            or identity.st_size != 0
+        ):
+            raise AuthorityError("temporary ownership identity is invalid")
+        caller = ProcessIdentity.of(os.getpid())
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            effect = row["effects"].get(path)
+            runtimes = [item for item in row["runtimes"].values() if item["fence"] == fence and not item["stopped"]]
+            if (
+                effect is None
+                or effect["fence"] != fence
+                or effect["status"] not in ("dispatched", "uncertain")
+                or not any(SupervisedRuntime.from_dict(item["runtime"]).leader == caller for item in runtimes)
+            ):
+                raise AuthorityError("temporary creator is not a recorded effect writer")
+            if any(item["path"] == path and item["name"] == name for item in row["temporaries"]):
+                raise AuthorityError("temporary ownership is already recorded")
+            row["temporaries"].append(
+                {
+                    "path": path,
+                    "name": name,
+                    "fence": fence,
+                    "device": identity.st_dev,
+                    "inode": identity.st_ino,
+                    "removed": False,
+                }
+            )
+            self._emit(conn, job_id, "local.temporary_owned", "info", {"fence": fence})
+
+    def reconcile_local_outputs(self, job_id: str, fence: int) -> int:
+        """Inspect at most 100 stopped local effects; never trust a client-supplied outcome."""
+        with self._transaction() as conn:
+            row = self._authorize(conn, job_id, fence, allow_unresolved_effects=True)
+            if (
+                row["route"] != "local"
+                or row["state"] not in ("running", "cancelling", "sealed")
+                or self._active_runtimes(conn, job_id, fence)
+            ):
+                raise AuthorityError("local reconciliation is not authorized")
+            root = Path(row["destination"]) / row["attempt_prefix"]
+            effects = sorted(
+                (effect for effect in row["effects"].values() if effect["status"] != "acknowledged"),
+                key=lambda effect: effect["path"],
+            )[:100]
+        from physical_ai_curation.release.store import LocalReleaseStore
+
+        destination = LocalReleaseStore(root)
+        if os.path.lexists(root / MARKER_PATH):
+            raise AuthorityError("published output is immutable")
+        deadline = time.monotonic() + self.settings.recovery_seconds
+        for effect in effects:
+            if time.monotonic() >= deadline:
+                raise AuthorityError("local reconciliation budget exhausted")
+            with self._transaction() as conn:
+                current = self._lease(conn, job_id, fence)
+                temporaries = [
+                    item for item in current["temporaries"] if item["path"] == effect["path"] and not item["removed"]
+                ]
+                if os.path.lexists(root):
+                    descriptor = _open_root_nofollow(root)
+                    try:
+                        for temporary in temporaries:
+                            relative = str(PurePosixPath(effect["path"]).parent / temporary["name"])
+                            if not _remove_verified(
+                                descriptor, relative, 0, "", expected_inode=(temporary["device"], temporary["inode"])
+                            ):
+                                raise AuthorityError("temporary output ownership is unresolved")
+                    finally:
+                        os.close(descriptor)
+                for temporary in temporaries:
+                    temporary["removed"] = True
+            if os.path.lexists(root / effect["path"]):
+                digest = hashlib.sha256()
+                length = 0
+                for chunk in destination.iter_bytes(effect["path"], chunk_size=_READ_CHUNK):
+                    if time.monotonic() >= deadline:
+                        raise AuthorityError("local reconciliation budget exhausted")
+                    digest.update(chunk)
+                    length += len(chunk)
+                    if length > effect["length"]:
+                        raise JobConflictError("observed local output conflicts with its intent")
+                observed = (
+                    "complete" if (length, digest.hexdigest()) == (effect["length"], effect["digest"]) else "conflict"
+                )
+            else:
+                observed = "absent"
+            self.reconcile_effect(
+                job_id, fence, effect["path"], observed=observed, length=effect["length"], digest=effect["digest"]
+            )
+        with self._transaction() as conn:
+            self._lease(conn, job_id, fence)
+            return self._open_effects(conn, job_id)
+
+    def finish_effect(self, job_id: str, fence: int, path: str, *, ok: bool) -> None:
+        """Record the outcome of a dispatched effect; failures stay unresolved, never acknowledged."""
+        self.finish_effects(job_id, fence, [path], ok=ok)
+
+    def finish_effects(self, job_id: str, fence: int, paths: Sequence[str], *, ok: bool) -> None:
+        """Record outcomes for a batch of dispatched effects; failures stay unresolved, never acknowledged."""
+        if not paths:
+            raise ReleaseJobError("effect finish batch is empty")
+        if len(set(paths)) != len(paths):
+            raise ReleaseJobError("effect finish batch repeats a path")
+        with self._transaction() as conn:
+            row = self._lease(conn, job_id, fence)
+            effects: list[dict[str, Any]] = []
+            for path in paths:
+                effect = row["effects"].get(path)
+                if effect is None or effect["fence"] != fence or effect["status"] != "dispatched":
+                    raise AuthorityError("stale or unknown effect finish refused")
+                effects.append(effect)
+            for effect in effects:
+                effect["status"] = "acknowledged" if ok else "uncertain"
+
+    def reconcile_effect(self, job_id: str, fence: int, path: str, *, observed: str, length: int, digest: str) -> str:
+        """Resolve an unresolved effect from an observation of the output; pending keeps it blocked."""
+        if observed not in ("absent", "complete", "pending", "conflict"):
+            raise ReleaseJobError("reconciliation observation is invalid")
+        _require_int(length, "effect length", 0, MAX_BYTES)
+        with self._transaction() as conn:
+            row = self._authorize(conn, job_id, fence, allow_unresolved_effects=True)
+            effect = row["effects"].get(path)
+            if effect is None or effect["status"] == "acknowledged":
+                raise AuthorityError("no unresolved effect to reconcile")
+            if (effect["length"], effect["digest"]) != (length, digest):
+                raise AuthorityError("effect identity does not match the recorded effect")
+            if observed == "pending":
+                raise AuthorityError("effect is still pending")
+            if observed == "conflict":
+                raise JobConflictError("observed content conflicts with the recorded effect")
+            if observed == "absent":
+                del row["effects"][path]
+                outcome = "abandoned"
+            else:
+                effect.update(status="acknowledged", fence=fence)
+                outcome = "acknowledged"
+            self._emit(conn, job_id, "effect.reconciled", "info", {"outcome": outcome})
+            return outcome
+
+    def begin_marker_effect(
+        self, job_id: str, fence: int, attempt: PublicationAttempt, manifest_digest: str, length: int, digest: str
+    ) -> bool:
+        """Persist the marker intent under the chosen commit before dispatch; True when already acknowledged."""
+        _require_int(length, "marker length", 0, MAX_BYTES)
+        if not _DIGEST.fullmatch(digest):
+            raise ReleaseJobError("marker digest must be lowercase SHA-256")
+        with self._transaction() as conn:
+            row = self._authorize(conn, job_id, fence)
+            if row["attempt_prefix"] != attempt.prefix or row["attempt_key"] != attempt.key:
+                raise AuthorityError("attempt is not owned by this job")
+            if row["state"] != "committing":
+                raise AuthorityError("marker requires a committing publication")
+            if row["commit_attempt"] != attempt.prefix or row["commit_digest"] != manifest_digest:
+                raise JobConflictError("commit decision belongs to another manifest")
+            if row["cancel_requested"]:
+                raise CancellationError("cancellation was requested")
+            existing = row["effects"].get(MARKER_PATH)
+            if existing is not None:
+                if (existing["length"], existing["digest"]) != (length, digest):
+                    raise AuthorityError("marker identity conflict")
+                if existing["status"] == "acknowledged":
+                    return True
+                raise AuthorityError("effect outcome is unresolved")
+            if self._open_effects(conn, job_id) or self._active_runtimes(conn, job_id, fence):
+                raise AuthorityError("effects or runtimes are unresolved")
+            total = sum(effect["length"] for effect in row["effects"].values())
+            shared_scratch = row["scratch_bytes"] if _volume_key(self.root) == row["volume_key"] else 0
+            if total + length + shared_scratch > row["reserved_bytes"]:
+                raise CapacityError("effects exceed the reserved estimate")
+            row["effects"][MARKER_PATH] = {
+                "path": MARKER_PATH,
+                "length": length,
+                "digest": digest,
+                "fence": fence,
+                "status": "dispatched",
+                "copy_id": None,
+            }
+            _record_destination_peak(row)
+            self._emit(conn, job_id, "marker.dispatched", "info", {"fence": fence})
+            return False
+
+    def marker_intent(self, job_id: str, fence: int) -> dict[str, Any] | None:
+        """Return the journaled marker intent after authorizing the fence, or None when none was begun."""
+        with self._transaction() as conn:
+            row = self._lease(conn, job_id, fence)
+            effect = row["effects"].get(MARKER_PATH)
+            return None if effect is None else dict(effect)
+
+    def authorize_marker_writer(
+        self, job_id: str, fence: int, attempt: PublicationAttempt, manifest_digest: str, length: int, digest: str
+    ) -> None:
+        """Re-check the commit-bound marker intent inside the registered writer before it creates bytes."""
+        with self._transaction() as conn:
+            row = self._authorize_runtime(conn, job_id, fence, MARKER_PATH)
+            if (
+                row["state"] != "committing"
+                or row["attempt_prefix"] != attempt.prefix
+                or row["attempt_key"] != attempt.key
+                or row["commit_attempt"] != attempt.prefix
+                or row["commit_digest"] != manifest_digest
+            ):
+                raise AuthorityError("marker writer is not authorized by the commit decision")
+            effect = row["effects"][MARKER_PATH]
+            if (effect["length"], effect["digest"]) != (length, digest):
+                raise AuthorityError("marker identity does not match the recorded intent")
+
+    def authorize_blob_writer(
+        self,
+        job_id: str,
+        fence: int,
+        attempt: PublicationAttempt,
+        path: str,
+        length: int,
+        digest: str,
+        *,
+        destination: str,
+        reconciliation: bool = False,
+        copy_id: str | None = None,
+    ) -> None:
+        """Re-check a dispatched Blob copy inside its registered child before any remote mutation."""
+        path = normalize_release_path(path)
+        caller = ProcessIdentity.of(os.getpid())
+        with self._transaction() as conn:
+            row = (
+                self._authorize_reconciliation_runtime(conn, job_id, fence, path)
+                if reconciliation
+                else self._authorize_runtime(conn, job_id, fence, path)
+            )
+            if (
+                row["route"] != "blob"
+                or row["destination"] != destination
+                or row["attempt_key"] != attempt.key
+                or row["attempt_prefix"] != attempt.prefix
+            ):
+                raise AuthorityError("blob writer is not bound to this job")
+            effect = row["effects"][path]
+            if reconciliation and copy_id is not None and effect["copy_id"] != copy_id:
+                raise AuthorityError("cleanup copy identity differs from its journal")
+            if effect["fence"] != fence or (effect["length"], effect["digest"]) != (length, digest):
+                raise AuthorityError("blob identity does not match the recorded intent")
+            runtimes = [item for item in row["runtimes"].values() if item["fence"] == fence and not item["stopped"]]
+            if not any(SupervisedRuntime.from_dict(item["runtime"]).leader == caller for item in runtimes):
+                raise AuthorityError("blob writer is not a registered runtime")
+
+    def authorize_blob_writers(
+        self,
+        job_id: str,
+        fence: int,
+        attempt: PublicationAttempt,
+        items: Sequence[tuple[str, int, str]],
+        *,
+        destination: str,
+        reconciliation: bool = False,
+        copy_ids: Sequence[str | None] | None = None,
+    ) -> None:
+        """Re-check a batch of dispatched Blob copies inside one registered child before any remote mutation."""
+        if not items:
+            raise ReleaseJobError("blob writer batch is empty")
+        if len(items) > self.settings.blob_batch_size:
+            raise ReleaseJobError("blob writer batch exceeds configured size")
+        if reconciliation and (copy_ids is None or len(copy_ids) != len(items)):
+            raise AuthorityError("cleanup copy identities are missing")
+        names = [normalize_release_path(path) for path, _, _ in items]
+        if len(set(names)) != len(names):
+            raise ReleaseJobError("blob writer batch repeats a path")
+        caller = ProcessIdentity.of(os.getpid())
+        with self._transaction() as conn:
+            row = (
+                self._authorize_reconciliation_runtime(conn, job_id, fence, names)
+                if reconciliation
+                else self._authorize_runtime(conn, job_id, fence, names)
+            )
+            if (
+                row["route"] != "blob"
+                or row["destination"] != destination
+                or row["attempt_prefix"] != attempt.prefix
+                or row["attempt_key"] != attempt.key
+            ):
+                raise AuthorityError("blob writer is not bound to this job")
+            runtimes = [item for item in row["runtimes"].values() if item["fence"] == fence and not item["stopped"]]
+            if not any(SupervisedRuntime.from_dict(item["runtime"]).leader == caller for item in runtimes):
+                raise AuthorityError("blob writer is not a registered runtime")
+            for name, (_, length, digest) in zip(names, items, strict=True):
+                effect = row["effects"][name]
+                if effect["fence"] != fence or (effect["length"], effect["digest"]) != (length, digest):
+                    raise AuthorityError("blob identity does not match the recorded intent")
+            if reconciliation and any(
+                row["effects"][name]["copy_id"] != copy_id for name, copy_id in zip(names, copy_ids or (), strict=True)
+            ):
+                raise AuthorityError("cleanup copy identity differs from its journal")
+
+    def remove_marker_temporaries(self, job_id: str, fence: int, root: Path) -> None:
+        """Remove only inode-bound marker partials; refuse unregistered or unresolved residue."""
+        with self._transaction() as conn:
+            row = self._authorize(conn, job_id, fence, allow_unresolved_effects=True)
+            if (
+                row["state"] != "committing"
+                or row["route"] != "local"
+                or root.absolute() != Path(row["destination"]) / row["attempt_prefix"]
+            ):
+                raise AuthorityError("marker residue cleanup is not authorized")
+            if self._active_runtimes(conn, job_id, fence):
+                raise AuthorityError("runtime stop proof is unresolved")
+            deadline = time.monotonic() + self.settings.cleanup_seconds
+            known = {item["name"] for item in row["temporaries"] if item["path"] == MARKER_PATH}
+            pending = [item for item in row["temporaries"] if not item["removed"]]
+            if any(item["path"] != MARKER_PATH for item in pending):
+                raise AuthorityError("temporary output ownership is unresolved")
+            if os.path.lexists(root):
+                descriptor = _open_root_nofollow(root)
+                try:
+                    release = os.open(str(PurePosixPath(MARKER_PATH).parent), _DIRECTORY_FLAGS, dir_fd=descriptor)
+                    try:
+                        with os.scandir(release) as entries:
+                            for count, entry in enumerate(entries, start=1):
+                                if count > 16384 or time.monotonic() >= deadline:
+                                    raise AuthorityError("marker cleanup budget exhausted")
+                                if (
+                                    re.fullmatch(r"\.curation-copy-[0-9a-f]{32}\.partial", entry.name)
+                                    and entry.name not in known
+                                ):
+                                    raise AuthorityError("unregistered temporary output is present")
+                    finally:
+                        os.close(release)
+                    for item in pending:
+                        if time.monotonic() >= deadline:
+                            raise AuthorityError("marker cleanup budget exhausted")
+                        relative = str(PurePosixPath(MARKER_PATH).parent / item["name"])
+                        if not _remove_verified(
+                            descriptor, relative, 0, "", expected_inode=(item["device"], item["inode"])
+                        ):
+                            raise AuthorityError("temporary output ownership is unresolved")
+                finally:
+                    os.close(descriptor)
+            for item in pending:
+                if item["path"] == MARKER_PATH:
+                    item["removed"] = True
+
+    def resolve_marker_effect(self, job_id: str, fence: int, *, observed: str, length: int, digest: str) -> str:
+        """Resolve the marker intent from an observation; a marker is never deleted here."""
+        if observed not in ("absent", "complete", "pending", "conflict"):
+            raise ReleaseJobError("marker observation is invalid")
+        _require_int(length, "marker length", 0, MAX_BYTES)
+        with self._transaction() as conn:
+            row = self._authorize(conn, job_id, fence, allow_unresolved_effects=True)
+            if row["state"] != "committing":
+                raise AuthorityError("marker resolution requires a committing publication")
+            effect = row["effects"].get(MARKER_PATH)
+            if effect is None or effect["status"] == "acknowledged":
+                raise AuthorityError("no unresolved marker effect")
+            if (effect["length"], effect["digest"]) != (length, digest):
+                raise AuthorityError("marker identity does not match the recorded intent")
+            if any(item["path"] == MARKER_PATH and not item["removed"] for item in row["temporaries"]):
+                raise AuthorityError("marker temporaries are not removed")
+            if self._active_runtimes(conn, job_id, fence):
+                raise AuthorityError("runtime stop proof is unresolved")
+            if observed == "pending":
+                raise AuthorityError("marker is still pending")
+            if observed == "conflict":
+                raise JobConflictError("observed marker conflicts with the recorded intent")
+            if observed == "absent":
+                del row["effects"][MARKER_PATH]
+                outcome = "abandoned"
+            else:
+                effect.update(status="acknowledged", fence=fence)
+                outcome = "acknowledged"
+            self._emit(conn, job_id, "marker.reconciled", "info", {"outcome": outcome})
+            return outcome
+
+    def begin_reconciliation(
+        self,
+        job_id: str,
+        fence: int,
+        attempt: PublicationAttempt,
+        path: str,
+        length: int,
+        digest: str,
+        *,
+        copy_id: str | None,
+        cancel: bool,
+    ) -> None:
+        """Journal observed copy identity before any abort/delete; no client-supplied outcome is accepted."""
+        self.begin_reconciliations(job_id, fence, attempt, [(path, length, digest, copy_id)], cancel=cancel)
+
+    def begin_reconciliations(
+        self,
+        job_id: str,
+        fence: int,
+        attempt: PublicationAttempt,
+        items: Sequence[tuple[str, int, str, str | None]],
+        *,
+        cancel: bool,
+    ) -> None:
+        """Journal a bounded set of observed identities before a cleanup child starts."""
+        if not 1 <= len(items) <= self.settings.blob_batch_size:
+            raise ReleaseJobError("reconciliation batch exceeds its bound")
+        paths = [normalize_release_path(item[0]) for item in items]
+        if len(set(paths)) != len(paths):
+            raise ReleaseJobError("reconciliation batch repeats a path")
+        if any(
+            copy_id is not None and (not isinstance(copy_id, str) or not 1 <= len(copy_id) <= 512)
+            for _, _, _, copy_id in items
+        ):
+            raise ReleaseJobError("copy identity is invalid")
+        with self._transaction() as conn:
+            row = self._authorize(conn, job_id, fence, allow_unresolved_effects=True)
+            if (
+                row["state"] not in ("running", "cancelling")
+                or row["attempt_prefix"] != attempt.prefix
+                or row["attempt_key"] != attempt.key
+            ):
+                raise AuthorityError("reconciliation is not owned by this attempt")
+            if cancel and not row["cancel_requested"]:
+                raise CancellationError("cancellation was not requested")
+            if self._active_runtimes(conn, job_id, fence):
+                raise AuthorityError("runtime stop proof is unresolved")
+            for path, length, digest, copy_id in items:
+                effect = row["effects"].get(path)
+                if effect is None or (effect["length"], effect["digest"]) != (length, digest):
+                    raise AuthorityError("reconciliation identity is not journaled")
+                if effect["copy_id"] is not None and copy_id is not None and effect["copy_id"] != copy_id:
+                    raise JobConflictError("observed copy identity conflicts with the journal")
+                effect.update(
+                    status="uncertain", copy_id=effect["copy_id"] or copy_id, fence=fence, reconciliation=cancel
+                )
+            self._emit(conn, job_id, "effect.reconcile_requested", "info", {"fence": fence})
+
+    def finish_blob_removals(self, job_id: str, fence: int, paths: Sequence[str]) -> None:
+        """Retire a stopped cancellation batch after its output absence was verified."""
+        with self._transaction() as conn:
+            row = self._authorize_reconciliation_runtime(conn, job_id, fence, paths)
+            if self._active_runtimes(conn, job_id, fence):
+                raise AuthorityError("runtime stop proof is unresolved")
+            for path in paths:
+                del row["effects"][path]
+            self._emit(conn, job_id, "effect.reconciled", "info", {"outcome": "abandoned"})
+
+    def blob_cleanup_status(self, job_id: str, fence: int, *, failed: bool) -> None:
+        """Expose cleanup uncertainty without releasing reservations or requiring stopped effects."""
+        with self._transaction() as conn:
+            row = self._lease(conn, job_id, fence)
+            if row["route"] != "blob" or row["state"] != "cancelling" or not row["cancel_requested"]:
+                raise AuthorityError("cancellation cleanup is not authorized")
+            row["cleanup_state"] = "failed" if failed else "running"
+            if failed:
+                row["reservation"]["status"] = "retained"
+            self._emit(
+                conn, job_id, "cleanup.failed" if failed else "cleanup.running", "warning" if failed else "info", {}
+            )
+
+    def cancellation_effects(self, job_id: str, fence: int) -> tuple[dict[str, Any], ...]:
+        """Read exact cancellation obligations after all registered writers have stopped."""
+        with self._transaction() as conn:
+            row = self._authorize(conn, job_id, fence, allow_unresolved_effects=True)
+            if row["state"] != "cancelling" or not row["cancel_requested"]:
+                raise AuthorityError("cancellation cleanup is not authorized")
+            if self._active_runtimes(conn, job_id, fence):
+                raise AuthorityError("runtime stop proof is unresolved")
+            return tuple(dict(effect) for effect in row["effects"].values())
+
+    def recovery_effects(self, job_id: str, fence: int) -> tuple[dict[str, Any], ...]:
+        """Return unresolved payload intents only after the previous writer has stopped."""
+        conn = self._snapshot()
+        row = self._authorize(conn, job_id, fence, allow_unresolved_effects=True)
+        if row["state"] != "running" or row["cancel_requested"] or self._active_runtimes(conn, job_id, fence):
+            raise AuthorityError("payload recovery is not authorized")
+        return tuple(dict(effect) for effect in row["effects"].values() if effect["status"] != "acknowledged")
+
+    def begin_blob_owner_cleanup(self, job_id: str, fence: int, attempt: PublicationAttempt) -> tuple[int, str]:
+        """Journal companion removal only after every payload/control obligation is resolved."""
+        content = ownership_bytes(attempt)
+        length, digest = len(content), hashlib.sha256(content).hexdigest()
+        with self._transaction() as conn:
+            row = self._authorize(conn, job_id, fence, allow_unresolved_effects=True)
+            if (
+                row["route"] != "blob"
+                or row["state"] != "cancelling"
+                or not row["cancel_requested"]
+                or row["attempt_key"] != attempt.key
+                or row["attempt_prefix"] != attempt.prefix
+                or row["attempt_source_dataset_id"] != attempt.source_dataset_id
+                or self._active_runtimes(conn, job_id, fence)
+                or set(row["effects"]) - {BLOB_OWNER_CLEANUP_PATH}
+            ):
+                raise AuthorityError("companion cleanup is not authorized")
+            row["effects"][BLOB_OWNER_CLEANUP_PATH] = {
+                "path": BLOB_OWNER_CLEANUP_PATH,
+                "length": length,
+                "digest": digest,
+                "fence": fence,
+                "status": "uncertain",
+                "copy_id": None,
+                "reconciliation": True,
+            }
+            _record_destination_peak(row)
+            row["cleanup_state"] = "running"
+            self._emit(conn, job_id, "cleanup.companion_requested", "info", {"fence": fence})
+        return length, digest
+
+    def cleanup_owned_outputs(self, job_id: str, fence: int, root: Path) -> bool:
+        """Remove only acknowledged outputs whose identity still matches; refuse on any mismatch or marker."""
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            if not row["cancel_requested"]:
+                raise CancellationError("cancellation was not requested")
+            expected_root = Path(row["destination"]) / row["attempt_prefix"]
+            if row["state"] in TERMINAL_STATES:
+                raise AuthorityError("terminal job no longer owns cleanup authority")
+            if row["route"] != "local" or root.absolute() != expected_root:
+                raise AuthorityError("cleanup destination is not the bound attempt root")
+            if fence != row["fence"] or row["stopped_fence"] < fence:
+                raise AuthorityError("effects are not confirmed stopped")
+            if fence:
+                self._lease(conn, job_id, fence)
+            if self._open_effects(conn, job_id):
+                raise AuthorityError("effects are still dispatched or unresolved")
+            owned = [effect for effect in row["effects"].values() if effect["status"] == "acknowledged"]
+            package_id, attempt_id = row["attempt_key"].split("/", 1)
+            attempt = PublicationAttempt(
+                package_id, attempt_id, row["attempt_prefix"], row["attempt_source_dataset_id"]
+            )
+            deadline = time.monotonic() + self.settings.cleanup_seconds
+            content = ownership_bytes(attempt)
+            companion = ownership_path(attempt.prefix)
+            if os.path.lexists(root.parent / companion):
+                try:
+                    if LocalReleaseStore(root.parent).read_control_bytes(companion, max_bytes=4096) != content:
+                        return False
+                except (OSError, ReleaseVerificationError):
+                    return False
+            if os.path.lexists(root / MARKER_PATH):
+                return False
+            if os.path.lexists(root):
+                try:
+                    root_fd = _open_root_nofollow(root)
+                except OSError:
+                    return False
+                try:
+                    removed = all(
+                        _remove_verified(
+                            root_fd,
+                            effect["path"],
+                            effect["length"],
+                            effect["digest"],
+                            deadline=deadline,
+                        )
+                        for effect in owned
+                    )
+                    if not removed or not _remove_empty_output_tree(root_fd, [16384], 0, deadline):
+                        return False
+                    identity = os.fstat(root_fd)
+                    parent_fd = _open_root_nofollow(root.parent)
+                    try:
+                        current = os.stat(root.name, dir_fd=parent_fd, follow_symlinks=False)
+                        if (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino):
+                            return False
+                        os.rmdir(root.name, dir_fd=parent_fd)
+                        os.fsync(parent_fd)
+                    finally:
+                        os.close(parent_fd)
+                finally:
+                    os.close(root_fd)
+            if not os.path.lexists(root.parent):
+                return True
+            parent_fd = _open_root_nofollow(root.parent)
+            try:
+                removed = _remove_verified(
+                    parent_fd,
+                    companion,
+                    len(content),
+                    hashlib.sha256(content).hexdigest(),
+                    deadline=deadline,
+                )
+            finally:
+                os.close(parent_fd)
+            if removed:
+                intent = self._restore_source_association(row)
+                if intent is not None:
+                    from physical_ai_curation.release.source_associations import LocalSourceAssociations
+
+                    if (
+                        intent.attempt.key != attempt.key
+                        or intent.attempt.prefix != attempt.prefix
+                        or intent.source_dataset_id != attempt.source_dataset_id
+                        or intent.scope_sha256 != row["principal_digest"]
+                        or intent.effective_destination != row["destination"]
+                    ):
+                        raise AuthorityError("association cleanup differs from accepted execution")
+                    configuration = self.storage.configuration()
+                    limits = RecordLimits(
+                        **{
+                            key: configuration[key]
+                            for key in ("timeout_seconds", "max_record_bytes", "max_total_bytes", "max_jobs")
+                        }
+                    )
+                    LocalSourceAssociations(root.parent, limits=limits).remove_pending(intent)
+            return removed
+
+    @contextmanager
+    def publication(self, job_id: str, fence: int, attempt: PublicationAttempt, digest: str) -> Iterator[None]:
+        self._begin_publication(job_id, fence, attempt, digest)
+        yield
+        self._complete_publication(job_id, attempt, digest)
+
+    def _begin_publication(self, job_id: str, fence: int, attempt: PublicationAttempt, digest: str) -> None:
+        if not _DIGEST.fullmatch(digest):
+            raise ReleaseJobError("commit digest must be lowercase SHA-256")
+        with self._transaction() as conn:
+            row = self._authorize(conn, job_id, fence)
+            if row["attempt_prefix"] != attempt.prefix or row["attempt_key"] != attempt.key:
+                raise AuthorityError("attempt is not owned by this job")
+            if row["cancel_requested"] and row["state"] not in ("committing", "committed"):
+                raise CancellationError("cancellation was accepted before commit")
+            if row["state"] == "sealed":
+                if not self._controls_acknowledged(conn, job_id):
+                    raise AuthorityError("control artifacts are not journaled")
+                if self._open_effects(conn, job_id):
+                    raise AuthorityError("effects are unresolved")
+                row.update(state="committing", commit_attempt=attempt.prefix, commit_digest=digest)
+                self._emit(conn, job_id, "commit.chosen", "info", {"fence": fence})
+            elif row["state"] in ("committing", "committed"):
+                if row["commit_attempt"] != attempt.prefix or row["commit_digest"] != digest:
+                    raise JobConflictError("commit decision belongs to another manifest")
+            else:
+                raise AuthorityError("job is not sealed")
+
+    def _complete_publication(self, job_id: str, attempt: PublicationAttempt, digest: str) -> None:
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            if (row["state"], row["commit_attempt"], row["commit_digest"]) == ("committing", attempt.prefix, digest):
+                if self._open_effects(conn, job_id) or self._active_runtimes(conn, job_id, row["fence"]):
+                    raise AuthorityError("publication effects or runtime stop proof are unresolved")
+                row["state"] = "committed"
+                self._emit(conn, job_id, "job.committed", "info", {})
+
+    def begin_registration(
+        self,
+        job_id: str,
+        *,
+        asset_name: str,
+        asset_version: str,
+        target_digest: str,
+        retry: bool = False,
+    ) -> str | None:
+        """Start one registration attempt and return its token, or None when the target is already registered."""
+        if not _REGISTRATION_NAME.fullmatch(asset_name) or not _REGISTRATION_VERSION.fullmatch(asset_version):
+            raise ReleaseJobError("registration asset identity is invalid")
+        if not _DIGEST.fullmatch(target_digest):
+            raise ReleaseJobError("registration target must be lowercase SHA-256")
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            if row["state"] != "committed":
+                raise AuthorityError("registration requires a committed release")
+            if not isinstance(row["commit_digest"], str) or not _DIGEST.fullmatch(row["commit_digest"]):
+                raise AuthorityError("registration requires a valid committed manifest")
+            now = self._clock()
+            current = row.get("registration")
+            if current is not None:
+                if (current["asset_name"], current["asset_version"], current["target_digest"]) != (
+                    asset_name,
+                    asset_version,
+                    target_digest,
+                ):
+                    raise JobConflictError("registration belongs to another asset identity")
+                if current["status"] == "pending" and current["lease_expires"] > now:
+                    return None
+                if current["status"] != "pending" and not retry:
+                    return None
+            token = uuid4().hex
+            attempts = 1 if current is None else current["attempts"] + 1
+            row["registration"] = {
+                "status": "pending",
+                "asset_name": asset_name,
+                "asset_version": asset_version,
+                "target_digest": target_digest,
+                "token_digest": _digest(token),
+                "lease_expires": now + self.settings.lease_seconds,
+                "attempts": attempts,
+                "attempted_at": now,
+                "last_error_category": current["last_error_category"] if current is not None else None,
+            }
+            self._emit(conn, job_id, "registration.started", "info", {"attempt": attempts})
+            return token
+
+    def renew_registration(self, job_id: str, token: str) -> None:
+        """Renew only the still-live independent registration token; never revive expired authority."""
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            current = row.get("registration")
+            if (
+                row["state"] != "committed"
+                or current is None
+                or current["status"] != "pending"
+                or current["token_digest"] != _digest(token)
+                or current["lease_expires"] <= self._clock()
+            ):
+                raise AuthorityError("registration authority is not live")
+            current["lease_expires"] = self._clock() + self.settings.lease_seconds
+
+    def finish_registration(
+        self,
+        job_id: str,
+        token: str,
+        *,
+        status: str,
+        error_category: str | None = None,
+    ) -> JobStatus:
+        """Record the outcome of the current registration attempt; release state and effects are never changed."""
+        if status not in _REGISTRATION_OUTCOMES:
+            raise ReleaseJobError("registration outcome is invalid")
+        if status != "registered" and error_category not in REGISTRATION_ERROR_CATEGORIES:
+            raise ReleaseJobError("registration error category is invalid")
+        if status == "registered" and error_category is not None:
+            raise ReleaseJobError("registered outcome cannot carry an error category")
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            current = row.get("registration")
+            if current is None or current["status"] != "pending" or current["token_digest"] != _digest(token):
+                raise AuthorityError("stale registration token")
+            if current["lease_expires"] <= self._clock():
+                raise AuthorityError("registration lease expired")
+            current.update(
+                status=status,
+                last_error_category=error_category,
+                token_digest=None,
+                lease_expires=None,
+            )
+            self._emit(conn, job_id, "registration.finished", "info", {"status": status})
+            return _status(conn, row)
+
+    def record_diagnostic(
+        self,
+        job_id: str,
+        fence: int,
+        operation_id: str,
+        category: str,
+        status: str,
+        *,
+        duration_ms: int = 0,
+    ) -> None:
+        """Record a fixed category, status and duration once per operation; no free-form text is accepted."""
+        if not isinstance(operation_id, str) or re.fullmatch(r"[0-9a-f]{32}|[0-9a-f]{64}", operation_id) is None:
+            raise ReleaseJobError("diagnostic operation identity is invalid")
+        if category not in DIAGNOSTIC_CATEGORIES or status not in DIAGNOSTIC_STATUSES:
+            raise ReleaseJobError("diagnostic category or status is invalid")
+        _require_int(duration_ms, "diagnostic duration", 0, MAX_DIAGNOSTIC_DURATION_MS)
+        observation = {"category": category, "status": status, "duration_ms": duration_ms}
+        with self._transaction() as conn:
+            row = self._lease(conn, job_id, fence)
+            existing = row["diagnostic_operations"].get(operation_id)
+            if existing is not None:
+                if existing != observation:
+                    raise JobConflictError("diagnostic observation conflicts with its recorded identity")
+                return
+            if len(row["diagnostic_operations"]) >= MAX_DIAGNOSTIC_OPERATIONS:
+                raise ReleaseJobError("diagnostic operation budget is exhausted")
+            row["diagnostic_operations"][operation_id] = observation
+            bucket = row["diagnostics"].setdefault(f"{category}.{status}", {"count": 0, "duration_ms": 0})
+            bucket["count"] += 1
+            bucket["duration_ms"] += duration_ms
+            severity = "info" if status == "succeeded" else "warning"
+            self._emit(conn, job_id, "diagnostic.recorded", severity, observation)
+
+    def flush_events(self, *, max_events: int = 256) -> int:
+        """Append up to max_events unexported events in sequence order, repairing a partial tail first."""
+        _require_int(max_events, "event page size", 1, MAX_EVENT_PAGE)
+        with self._transaction() as conn:
+            last = self._repair_event_log(conn)
+            rows = sorted(
+                (event for job in conn.values() for event in job["events"] if event["seq"] > last),
+                key=lambda event: event["seq"],
+            )[:max_events]
+            if not rows:
+                return 0
+            observed = self._clock()
+            lines = []
+            for row in rows:
+                record = {
+                    "schema": EVENT_SCHEMA,
+                    "seq": row["seq"],
+                    "event_id": row["event_id"],
+                    "job_id": row["job_id"],
+                    "event": row["event"],
+                    "severity": row["severity"],
+                    "occurred_at": _iso(row["occurred_at"]),
+                    "observed_at": _iso(observed),
+                    "service": SERVICE_NAME,
+                    "body": row["body"],
+                }
+                lines.append(json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n")
+            self.root.mkdir(parents=True, exist_ok=True)
+            with self.events_path.open("ab") as stream:
+                stream.write("".join(lines).encode("utf-8"))
+                stream.flush()
+                os.fsync(stream.fileno())
+            return len(rows)
+
+    def _repair_event_log(self, conn: Mapping[str, dict[str, Any]]) -> int:
+        if not self.events_path.exists():
+            return 0
+        identities = {event["seq"]: event["event_id"] for job in conn.values() for event in job["events"]}
+        last = 0
+        with self.events_path.open("r+b") as stream:
+            while True:
+                position = stream.tell()
+                line = stream.readline(4097)
+                if not line:
+                    break
+                if len(line) > 4096:
+                    raise ReleaseJobError("event log is corrupt")
+                if not line.endswith(b"\n"):
+                    stream.truncate(position)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                    break
+                try:
+                    record = json.loads(line)
+                    sequence = record["seq"]
+                    if type(sequence) is not int or sequence != last + 1:
+                        raise ValueError("invalid sequence")
+                    if identities.get(sequence) != record["event_id"]:
+                        raise ValueError("unknown event identity")
+                    last = sequence
+                except (ValueError, KeyError, TypeError) as error:
+                    raise ReleaseJobError("event log is corrupt") from error
+        return last
+
+    def _emit(
+        self, conn: Mapping[str, dict[str, Any]], job_id: str, event: str, severity: str, body: Mapping[str, Any]
+    ) -> None:
+        sequence = max((item["seq"] for job in conn.values() for item in job["events"]), default=0) + 1
+        self._job(conn, job_id)["events"].append(
+            {
+                "seq": sequence,
+                "event_id": uuid4().hex,
+                "job_id": job_id,
+                "event": event,
+                "severity": severity,
+                "occurred_at": self._clock(),
+                "body": json.loads(_bounded_body(body)),
+            }
+        )
+
+    def _job(self, conn: Mapping[str, dict[str, Any]], job_id: str) -> dict[str, Any]:
+        row = conn.get(job_id)
+        if row is None:
+            raise JobNotFoundError("job not found")
+        return row
+
+    def _owned(self, conn: Mapping[str, dict[str, Any]], job_id: str, scope: str, principal: str) -> dict[str, Any]:
+        row = self._job(conn, job_id)
+        if row["scope"] != scope or row["principal_digest"] != _digest(principal):
+            raise JobNotFoundError("job not found")
+        return row
+
+    def _lease(self, conn: Mapping[str, dict[str, Any]], job_id: str, fence: int) -> dict[str, Any]:
+        row = self._job(conn, job_id)
+        if fence <= 0 or row["fence"] != fence:
+            raise AuthorityError("stale worker fence")
+        if row["lease_expires"] is None or row["lease_expires"] <= self._clock():
+            raise AuthorityError("lease expired")
+        return row
+
+    def _authorize_reconciliation_runtime(
+        self, conn: Mapping[str, dict[str, Any]], job_id: str, fence: int, effect_path: str | Sequence[str] | None
+    ) -> dict[str, Any]:
+        row = self._authorize(conn, job_id, fence, allow_unresolved_effects=True)
+        paths = [effect_path] if isinstance(effect_path, str) else list(effect_path or ())
+        if not 1 <= len(paths) <= self.settings.blob_batch_size or len(set(paths)) != len(paths):
+            raise AuthorityError("runtime reconciliation set is invalid")
+        if row["route"] != "blob" or row["state"] != "cancelling" or not row["cancel_requested"]:
+            raise AuthorityError("runtime lacks a journaled cancellation reconciliation")
+        for path in paths:
+            effect = row["effects"].get(path)
+            if (
+                effect is None
+                or effect["fence"] != fence
+                or effect["status"] != "uncertain"
+                or effect.get("reconciliation") is not True
+            ):
+                raise AuthorityError("runtime lacks a journaled cancellation reconciliation")
+        return row
+
+    def _authorize_runtime(
+        self, conn: Mapping[str, dict[str, Any]], job_id: str, fence: int, effect_path: str | Sequence[str] | None
+    ) -> dict[str, Any]:
+        row = self._authorize(conn, job_id, fence, allow_unresolved_effects=effect_path is not None)
+        if effect_path is not None:
+            requested = [effect_path] if isinstance(effect_path, str) else list(effect_path)
+            expected = {normalize_release_path(path) for path in requested}
+            if not expected or len(expected) != len(requested):
+                raise AuthorityError("runtime effect set is invalid")
+            records = [effect for effect in row["effects"].values() if effect["status"] != "acknowledged"]
+            if {record["path"] for record in records} != expected or any(
+                record["fence"] != fence or record["status"] != "dispatched" for record in records
+            ):
+                raise AuthorityError("runtime does not match the sole current effect intent")
+        return row
+
+    def _authorize(
+        self,
+        conn: Mapping[str, dict[str, Any]],
+        job_id: str,
+        fence: int,
+        *,
+        allow_unresolved_effects: bool = False,
+    ) -> dict[str, Any]:
+        row = self._lease(conn, job_id, fence)
+        if row["stopped_fence"] < fence - 1:
+            raise AuthorityError("predecessor fence is not confirmed stopped")
+        if not allow_unresolved_effects and self._open_effects(conn, job_id):
+            raise AuthorityError("effect outcome is unresolved; reconcile before dispatch")
+        return row
+
+    def _open_effects(self, conn: Mapping[str, dict[str, Any]], job_id: str) -> int:
+        return sum(effect["status"] != "acknowledged" for effect in self._job(conn, job_id)["effects"].values())
+
+    def _reserved_on(self, conn: Mapping[str, dict[str, Any]], volume: str) -> int:
+        return sum(
+            reservation["bytes"]
+            for job in conn.values()
+            for reservation in (job["reservation"], job["scratch_reservation"])
+            if reservation is not None
+            and reservation["volume_key"] == volume
+            and reservation["status"] in ("reserved", "retained")
+        )
+
+    def _journal(self, conn: Mapping[str, dict[str, Any]], job_id: str) -> dict[str, tuple[int, str]]:
+        return {
+            path: (control["length"], control["digest"])
+            for path, control in self._job(conn, job_id)["controls"].items()
+        }
+
+    def _controls_acknowledged(self, conn: Mapping[str, dict[str, Any]], job_id: str) -> bool:
+        journaled = self._journal(conn, job_id)
+        if set(journaled) != set(CONTROL_PATHS):
+            return False
+        effects = self._job(conn, job_id)["effects"]
+        return all(path in effects and effects[path]["status"] == "acknowledged" for path in CONTROL_PATHS)
+
+
+class ReleaseJobControl:
+    """Publication control bound to one claimed fence; satisfies the P03 PublicationControl protocol."""
+
+    def __init__(self, store: ReleaseJobStore, job_id: str, fence: int) -> None:
+        self._store = store
+        self._job_id = job_id
+        self._fence = fence
+
+    def seal(self, controls: Mapping[str, tuple[int, str]]) -> None:
+        self._store.seal(self._job_id, self._fence, controls)
+
+    @contextmanager
+    def effect(self, attempt: PublicationAttempt, path: str, length: int, digest: str) -> Iterator[bool]:
+        replay = self._store.begin_effect(self._job_id, self._fence, attempt, path, length, digest)
+        if replay:
+            yield True
+            return
+        try:
+            yield False
+        except EffectPending as error:
+            self._store.finish_effect(self._job_id, self._fence, path, ok=False)
+            raise AuthorityError("effect outcome is pending reconciliation") from error
+        except BaseException:
+            self._store.finish_effect(self._job_id, self._fence, path, ok=False)
+            raise
+        self._store.finish_effect(self._job_id, self._fence, path, ok=True)
+
+    @contextmanager
+    def publication(self, attempt: PublicationAttempt, digest: str) -> Iterator[None]:
+        with self._store.publication(self._job_id, self._fence, attempt, digest):
+            yield
+
+    @contextmanager
+    def reconciliation(
+        self,
+        attempt: PublicationAttempt,
+        path: str,
+        length: int,
+        digest: str,
+        *,
+        copy_id: str | None,
+        cancel: bool,
+    ) -> Iterator[Callable[[str], None]]:
+        self._store.begin_reconciliation(
+            self._job_id,
+            self._fence,
+            attempt,
+            path,
+            length,
+            digest,
+            copy_id=copy_id,
+            cancel=cancel,
+        )
+        observation = "pending"
+
+        def observed(value: str) -> None:
+            nonlocal observation
+            if value not in ("absent", "complete", "pending"):
+                raise ReleaseJobError("reconciliation observation is invalid")
+            observation = value
+
+        yield observed
+        if observation != "pending":
+            self._store.reconcile_effect(
+                self._job_id,
+                self._fence,
+                path,
+                observed=observation,
+                length=length,
+                digest=digest,
+            )
+
+
+def _require_current_job(row: Mapping[str, Any]) -> None:
+    if not {
+        "diagnostic_operations",
+        "diagnostics",
+        "destination_peak_bytes",
+        "execution_binding",
+        "client_request_digest",
+        "failed_attempts",
+        "retry_not_before",
+        "last_failure",
+    }.issubset(row):
+        raise ReleaseJobError("unsupported release job record; clean obsolete state")
+
+
+def _status(conn: Mapping[str, dict[str, Any]], row: Mapping[str, Any]) -> JobStatus:
+    reservation = row["reservation"]
+    return JobStatus(
+        job_id=row["job_id"],
+        state=row["state"],
+        cancel_requested=bool(row["cancel_requested"]),
+        fence=row["fence"],
+        effects_stopped=row["fence"] > 0 and row["stopped_fence"] >= row["fence"],
+        cleanup_state=row["cleanup_state"],
+        capacity_state=reservation["status"] if reservation is not None else "none",
+        scratch_bytes=row["scratch_bytes"],
+        observed_scratch_bytes=row["observed_scratch_bytes"],
+        peak_scratch_bytes=row["peak_scratch_bytes"],
+        io_counters=dict(row["io_counters"]),
+        destination_current_bytes=_destination_bytes(row),
+        destination_peak_bytes=row["destination_peak_bytes"],
+        diagnostics={key: dict(value) for key, value in sorted(row["diagnostics"].items())},
+        recovery_required=row["last_failure"] in DISPATCH_FAILURES and row["state"] not in TERMINAL_STATES,
+        refusal_code=row["last_failure"] if row["state"] == "needs_input" else None,
+        refusal_message=INPUT_REFUSAL_MESSAGES.get(row["last_failure"]) if row["state"] == "needs_input" else None,
+        registration=_registration_view(row.get("registration")),
+    )
+
+
+def _registration_view(record: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Project only the public registration fields; tokens and target bindings stay internal."""
+    if record is None:
+        return None
+    return {key: record[key] for key in _REGISTRATION_VIEW_KEYS}
+
+
+def _destination_bytes(row: Mapping[str, Any]) -> int:
+    """Journaled destination bytes: every dispatched, uncertain or acknowledged effect until reconciled absent."""
+    if row["state"] == "cancelled" and row["cleanup_state"] == "completed":
+        return 0
+    return sum(effect["length"] for effect in row["effects"].values())
+
+
+def _record_destination_peak(row: dict[str, Any]) -> None:
+    """Advance the monotonic peak after any journaled increase; reconciliation never lowers it."""
+    row["destination_peak_bytes"] = max(row["destination_peak_bytes"], _destination_bytes(row))
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _fingerprint(request: JobRequest, destination: str) -> str:
+    canonical = {
+        "attempt": request.attempt.key,
+        "dataset_name": request.attempt.prefix,
+        "package_id": request.attempt.package_id,
+        "destination": destination,
+        "frozen": hashlib.sha256(request.frozen_request).hexdigest(),
+        "reserved_bytes": request.reserved_bytes,
+        "route": request.route,
+        "scope": request.scope,
+        "client_request_digest": request.client_request_digest,
+    }
+    if request.execution_binding:
+        canonical["execution_binding"] = hashlib.sha256(request.execution_binding).hexdigest()
+    return _digest(json.dumps(canonical, sort_keys=True, separators=(",", ":")))
+
+
+def _remove_empty_output_tree(descriptor: int, remaining: list[int], depth: int, deadline: float) -> bool:
+    if depth > 32 or time.monotonic() >= deadline:
+        return False
+    with os.scandir(descriptor) as entries:
+        for entry in entries:
+            remaining[0] -= 1
+            if remaining[0] < 0 or time.monotonic() >= deadline or not entry.is_dir(follow_symlinks=False):
+                return False
+            try:
+                child = os.open(entry.name, _DIRECTORY_FLAGS, dir_fd=descriptor)
+            except OSError:
+                return False
+            try:
+                if not _remove_empty_output_tree(child, remaining, depth + 1, deadline):
+                    return False
+            finally:
+                os.close(child)
+            try:
+                os.rmdir(entry.name, dir_fd=descriptor)
+            except OSError:
+                return False
+    os.fsync(descriptor)
+    return True
+
+
+def _clear_scratch_directory(descriptor: int, deadline: float, remaining: list[int], depth: int) -> None:
+    if depth > 32:
+        raise AuthorityError("private scratch nesting exceeds the cleanup bound")
+    with os.scandir(descriptor) as entries:
+        for entry in entries:
+            remaining[0] -= 1
+            if remaining[0] < 0 or time.monotonic() >= deadline:
+                raise AuthorityError("private scratch cleanup budget exhausted")
+            identity = entry.stat(follow_symlinks=False)
+            if S_ISDIR(identity.st_mode):
+                child = os.open(entry.name, _DIRECTORY_FLAGS, dir_fd=descriptor)
+                try:
+                    opened = os.fstat(child)
+                    if (opened.st_dev, opened.st_ino) != (identity.st_dev, identity.st_ino):
+                        raise AuthorityError("private scratch directory changed")
+                    _clear_scratch_directory(child, deadline, remaining, depth + 1)
+                finally:
+                    os.close(child)
+                os.rmdir(entry.name, dir_fd=descriptor)
+            elif S_ISREG(identity.st_mode):
+                os.unlink(entry.name, dir_fd=descriptor)
+            else:
+                raise AuthorityError("private scratch contains an unowned special entry")
+    os.fsync(descriptor)
+
+
+def _remove_verified(
+    root_fd: int,
+    relative: str,
+    length: int,
+    digest: str,
+    *,
+    expected_inode: tuple[int, int] | None = None,
+    deadline: float | None = None,
+) -> bool:
+    """Unlink one owned file through directory descriptors without following symlinks."""
+    parts = PurePosixPath(relative).parts
+    if not parts or PurePosixPath(relative).is_absolute() or any(part in ("", ".", "..") for part in parts):
+        return False
+    with ExitStack() as stack:
+        current = root_fd
+        for name in parts[:-1]:
+            try:
+                child = stack.enter_context(DescriptorHandle(partial(os.open, name, _DIRECTORY_FLAGS, dir_fd=current)))
+            except FileNotFoundError:
+                return True
+            except OSError:
+                return False
+            current = child.descriptor
+        leaf = parts[-1]
+        try:
+            file_fd = os.open(leaf, _FILE_FLAGS, dir_fd=current)
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+        try:
+            opened_info = os.fstat(file_fd)
+            if expected_inode is None:
+                if not _verify_open_file(file_fd, length, digest, deadline=deadline):
+                    return False
+            elif not S_ISREG(opened_info.st_mode) or (opened_info.st_dev, opened_info.st_ino) != expected_inode:
+                return False
+            named = os.stat(leaf, dir_fd=current, follow_symlinks=False)
+            if (named.st_dev, named.st_ino) != (opened_info.st_dev, opened_info.st_ino):
+                return False
+            os.unlink(leaf, dir_fd=current)
+            os.fsync(current)
+            return True
+        finally:
+            os.close(file_fd)
+
+
+def _verify_open_file(fd: int, length: int, digest: str, *, deadline: float | None = None) -> bool:
+    info = os.fstat(fd)
+    if not S_ISREG(info.st_mode) or info.st_size != length:
+        return False
+    hasher = hashlib.sha256()
+    while chunk := os.read(fd, _READ_CHUNK):
+        if deadline is not None and time.monotonic() >= deadline:
+            return False
+        hasher.update(chunk)
+    return hasher.hexdigest() == digest
+
+
+def _open_root_nofollow(root: Path) -> int:
+    absolute = root.absolute()
+    descriptor = os.open(absolute.anchor, _DIRECTORY_FLAGS)
+    try:
+        for segment in absolute.parts[1:]:
+            child = os.open(segment, _DIRECTORY_FLAGS, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _iso(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp, UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _bounded_body(body: Mapping[str, Any]) -> str:
+    if len(body) > 8:
+        raise ReleaseJobError("event body exceeds the bound")
+    for key, value in body.items():
+        if not _EVENT_KEY.fullmatch(key):
+            raise ReleaseJobError("event body key is invalid")
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise ReleaseJobError("event body value is invalid")
+        if isinstance(value, str) and len(value) > 64:
+            raise ReleaseJobError("event body value exceeds the bound")
+    return json.dumps(dict(sorted(body.items())), sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _require_int(value: object, label: str, low: int, high: int) -> None:
+    if type(value) is not int or not low <= value <= high:
+        raise ReleaseJobError(f"{label} is outside its validated range")
+
+
+def _env_int(environ: Mapping[str, str], name: str, default: int) -> int:
+    raw = environ.get(name)
+    if raw is None:
+        return default
+    if not re.fullmatch(r"[0-9]{1,18}", raw):
+        raise ReleaseJobError(f"{name} must be a base-10 integer")
+    return int(raw)
+
+
+def _existing_ancestor(path: Path) -> Path:
+    current = path
+    while not current.exists():
+        if current.parent == current:
+            raise ReleaseJobError("destination has no existing ancestor")
+        current = current.parent
+    return current
+
+
+def _volume_key(path: Path) -> str:
+    return f"dev:{os.stat(_existing_ancestor(path)).st_dev}"
+
+
+def _destination_text(destination: Path | BlobLocation) -> str:
+    if isinstance(destination, BlobLocation):
+        return destination.as_text()
+    return str(destination.resolve())
+
+
+def _destination_volume(destination: Path | BlobLocation) -> str:
+    if isinstance(destination, BlobLocation):
+        return f"blob:{destination.account_url}"
+    return _volume_key(destination.resolve())
+
+
+def _statvfs_free_bytes(path: Path) -> int:
+    info = os.statvfs(path)
+    return info.f_bavail * info.f_frsize

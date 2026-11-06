@@ -2,7 +2,7 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-10-26
+ms.date: 2026-11-05
 ms.topic: overview
 ---
 
@@ -205,19 +205,27 @@ Expected blob structure:
 
 ### Full Environment Variable Reference
 
-| Variable                             | Default         | Description                                                    |
-|--------------------------------------|-----------------|----------------------------------------------------------------|
-| `STORAGE_BACKEND`                    | `local`         | Storage backend: `local` or `azure`                            |
-| `DATA_DIR`                           | `./data`        | Local dataset directory (local mode)                           |
-| `AZURE_STORAGE_ACCOUNT_NAME`         | —               | Azure Storage account name (azure mode)                        |
-| `AZURE_STORAGE_DATASET_CONTAINER`    | —               | Blob container for dataset files                               |
-| `AZURE_STORAGE_ANNOTATION_CONTAINER` | —               | Blob container for annotations (defaults to dataset container) |
-| `AZURE_STORAGE_SAS_TOKEN`            | —               | SAS token (omit to use DefaultAzureCredential / MSI)           |
-| `BACKEND_HOST`                       | `127.0.0.1`     | Bind address (`0.0.0.0` for containers)                        |
-| `BACKEND_PORT`                       | `8000`          | API server port                                                |
-| `LOG_LEVEL`                          | `info`          | Uvicorn log level                                              |
-| `FRONTEND_PORT`                      | `5173`          | Dev server port                                                |
-| `CORS_ORIGINS`                       | localhost ports | Comma-separated allowed CORS origins                           |
+| Variable                                    | Default         | Description                                                                             |
+|---------------------------------------------|-----------------|-----------------------------------------------------------------------------------------|
+| `STORAGE_BACKEND`                           | `local`         | Storage backend: `local` or `azure`                                                     |
+| `DATA_DIR`                                  | `./data`        | Local dataset directory (local mode)                                                    |
+| `AZURE_STORAGE_ACCOUNT_NAME`                | —               | Azure Storage account name (azure mode)                                                 |
+| `AZURE_STORAGE_DATASET_CONTAINER`           | —               | Blob container for dataset files                                                        |
+| `AZURE_STORAGE_ANNOTATION_CONTAINER`        | —               | Blob container for annotations (defaults to dataset container)                          |
+| `AZURE_STORAGE_SAS_TOKEN`                   | —               | SAS token (omit to use DefaultAzureCredential / MSI)                                    |
+| `BACKEND_HOST`                              | `127.0.0.1`     | Bind address (`0.0.0.0` for containers)                                                 |
+| `BACKEND_PORT`                              | `8000`          | API server port                                                                         |
+| `LOG_LEVEL`                                 | `info`          | Uvicorn log level                                                                       |
+| `FRONTEND_PORT`                             | `5173`          | Dev server port                                                                         |
+| `CORS_ORIGINS`                              | localhost ports | Comma-separated allowed CORS origins                                                    |
+| `RELEASE_JOB_ROOT`                          | —               | Absolute local directory for release job state; unset disables the release API          |
+| `RELEASE_DESTINATIONS`                      | —               | JSON object mapping destination aliases to absolute paths or Blob location objects      |
+| `RELEASE_JOB_STORAGE`                       | —               | Optional JSON Blob location (`account_url`, `container`, `prefix`) for shared job state |
+| `CURATION_RELEASE_READ_METADATA_BYTES`      | `67108864`      | Bound on release metadata reads (64 MiB)                                                |
+| `CURATION_RELEASE_READ_MEDIA_BYTES`         | `536870912`     | Bound on release media reads (512 MiB)                                                  |
+| `CURATION_RELEASE_PROCESSING_MEMORY_BYTES`  | `2147483648`    | Processing working-memory budget (2 GiB)                                                |
+| `CURATION_RELEASE_RESERVE_BYTES`            | `1073741824`    | Capacity reserve per volume (1 GiB)                                                     |
+| `CURATION_RELEASE_TRANSCODE_OUTPUT_PERCENT` | `100`           | Output-size estimate multiplier for selected media; advisory, not a hard cap            |
 
 ### VLM-as-Judge (experimental)
 
@@ -455,6 +463,169 @@ The shim reads these variables ([`evaluation/vlm_judge/openai_shim.py`](../../ev
 > Do not expose it through LAN listeners, proxies, tunnels or port forwarding.
 > Authentication and ingress hardening remain separate work.
 
+## 📦 Curated Release
+
+The release workflow turns selected source episodes into an immutable, verified
+LeRobot v3 dataset. The viewer exposes it through the source Episodes and Releases
+tabs and a scoped API under `/api/releases/v1`. Releases are available only when
+`RELEASE_JOB_ROOT` and `RELEASE_DESTINATIONS` are configured.
+
+LeRobot v2.1 and v3.0 source datasets produce v3.0 releases. The v2.1 path uses
+bounded JSONL metadata and selected Parquet reads; unchanged Azure videos are
+copied storage-side to their v3.0 output paths without downloading them.
+
+### Viewer workflow
+
+The source header remains above the Episodes and Releases tabs. Releases are not
+added to the ordinary dataset catalog. The desktop and narrow-screen views follow
+the same flow; the dialog keeps selection, preview and submission together.
+
+```text
+Source header
+  Episodes | Releases
+               Create release
+                 Episode selection and order
+                 Saved evidence, destination and name
+                 Preview: blockers, bytes, processing and acknowledgments
+                 Submit
+               Job status: effects, cleanup, cancel and recovery
+               Verified result: manifest, inventory, receipt and checksums
+                 Read-only episodes and camera media
+                 Return to source Episodes
+```
+
+| Surface   | Behavior                                                                                            |
+|-----------|-----------------------------------------------------------------------------------------------------|
+| Selection | In Releases, choose Create release, then filter and order source episodes in the dialog             |
+| Preview   | Advisory and quick. Shows the selection, known estimates and blockers without freezing or reserving |
+| Submit    | Records the selected intent and required acknowledgments; the worker captures source state later    |
+| Releases  | Lists verified releases for the source, their episodes, and camera media, with job status           |
+
+Episode indices and labels load first. Annotation, edit and judge details load
+only for visible or selected episodes, in bounded sequential batches. Preview
+waits for selected details and saved-input readiness, not unrelated episode details.
+Unloaded details remain unknown. Detail filters announce incomplete results and
+offer **Load remaining episode details** to complete coverage; label filters do
+not require those reads. Failed detail reads can be retried without clearing the
+selection or draft.
+
+The dialog requires a declaration that the local source dataset is finalized and
+will not change during release. Video processing consent is optional at submission;
+required processing without consent fails before any video is processed.
+A local-disk acknowledgment is shown
+for local destinations, or when the preview does not report a destination kind, and
+shows the byte estimate as unknown until execution. Submission is blocked while the preview reports blocking
+entries, limited to structural, authorization and known capacity refusals. Preview marks statistics as unchecked; the worker records discovered omissions as warnings, never as completeness gates. Changing the selection, filter, or finalized-source declaration discards the displayed preview; refresh it before submitting.
+
+Closing the dialog preserves its draft and stops browser requests; it does not
+cancel an accepted release. After an uncertain submission, reopen to look up the
+original request key before retrying. Reloads and matching cross-tab updates
+rediscover the accepted job without resubmitting it. Use the job's explicit cancel
+action to request server-side cancellation.
+
+### Azure Data Movement
+
+The Azure workflow is the same on a workstation, in a dev container or on an Azure
+host. Preview checks bounded source metadata and selected references without freezing
+source revisions or reading copied videos. Acceptance persists the job before the
+independent backend worker captures source revisions and starts native generation.
+Unchanged payloads use same-account storage-side copies, without host downloads for
+verification or source staging on disk.
+
+The worker may read necessary metadata and selected Parquet row groups into bounded
+memory using revision-conditional ranges. Missing Parquet row-group statistics or exceeded
+footer, transfer, row or decoded-memory limits cause a refusal, not a whole-file
+download fallback. Only confirmed video encoding permits affected video download
+and staging; generated output scratch has its own capacity accounting.
+
+Verification reports distinguish content-digest checks, write-time hashes of
+generated uploads and revision-bound Azure copy evidence. A copied object's ETag
+or version is not presented as a content hash. Results also report the covered and
+omitted counts for the derived `checksums.sha256`. See the
+[release specification](../specifications/curated-dataset-release.specification.md)
+for the assurance and schema-version contracts, and
+[backend configuration](backend/.env.example) for source and worker limits.
+
+Feature statistics are optional for copy-only or unchanged-camera releases. A release with missing or partial camera summaries publishes with a visible completeness warning that lists the omitted coverage. Package integrity and training readiness are reported separately; an intact release can still need normalization statistics before training.
+
+### Optional Azure ML Registration
+
+Registration is disabled by default. To enable it, configure the following backend
+settings after creating a datastore that references the release destination's
+existing Blob account and container:
+
+```dotenv
+CURATION_RELEASE_AZUREML_ENABLED=true
+CURATION_RELEASE_AZUREML_SUBSCRIPTION_ID=00000000-0000-0000-0000-000000000000
+CURATION_RELEASE_AZUREML_RESOURCE_GROUP=rg-example
+CURATION_RELEASE_AZUREML_WORKSPACE=mlw-example
+CURATION_RELEASE_AZUREML_DATASTORES={"azure-releases":"release_datastore"}
+```
+
+The JSON maps configured Azure destination aliases to datastore names. Local and
+unknown aliases are refused. The launcher includes the optional `azureml` dependency
+extra only when enabled; disabled publication needs no AML SDK. Authentication uses
+`DefaultAzureCredential`, separately from application authentication. Configuration
+does not create datastores, grant permissions or store credentials.
+
+Enabled destinations limit release names to 30 characters. After commit, the worker
+independently verifies the package and registers a `uri_folder` asset at its full
+release prefix. The source dataset identity determines the asset name; the release
+name is its version. The verified manifest digest and release identity are asset
+properties, not trust inferred from tags.
+
+The result shows registration status and `azureml:NAME:VERSION` only when enabled.
+A failure or conflict leaves publication committed and artifacts available. Use
+**Retry registration**, the scoped CSRF-protected
+`POST /api/releases/v1/jobs/{job_id}/registration`, or the
+[headless retry command](../curation/README.md#headless-client). A request timeout
+does not cancel server work; inspect status before retrying. Restarted workers
+reconcile unfinished registrations without republishing.
+
+Matching assets are confirmed without updates; conflicting type, path or required
+properties are refused. The SDK uses lookup followed by its create-or-update API,
+not an atomic create-only operation. Concurrent external writes remain subject to
+AML service guarantees.
+
+### Refusal and Recovery
+
+A submission that does not match the selection and processing intent confirmed in the dialog
+is refused, and the dialog keeps the refusal visible. Review the selection and create a fresh
+preview. A source revision that changes after preview is not a refusal; the worker captures the
+revision it executes. An admission-time insufficient-capacity `507` is a definite
+refusal. Capacity shortages discovered by the worker fail the accepted job before
+output effects. Release or increase the relevant capacity before retrying.
+
+A transport failure or other ambiguous server failure can occur after acceptance.
+Retain the idempotency key and use accepted-request lookup; do not submit a new
+key to guess the outcome. Reload reconnects to an accepted job without resubmitting.
+A foreign-scope or unavailable job stays unavailable rather than exposing another
+principal's state. Clearing that browser pointer does not cancel the underlying job.
+
+Cancellation requests a transition, not immediate deletion. Confirm stopped
+effects, completed cleanup and released capacity separately in status. Once the
+irrevocable commit decision has won, cancellation is too late; recover and verify
+the committed result instead. Failed or uncertain cleanup retains capacity and
+requires reconciliation, not deletion of its job records. Return from read-only
+release browsing to the source Episodes tab to continue source annotation.
+
+### Automation and Contracts
+
+Release supports local-to-local and same-account Blob-to-Blob publication from
+supported v2.1/v3 sources to v3 output. Selected saved labels, annotations, ledgers
+and bound judge evidence are included without running inference. Published output
+is independent of the source and remains read-only. Keep its expected manifest
+SHA-256 separately for verification of the intended release.
+
+Use the [headless client](../curation/README.md#headless-client) for scripts and CI,
+or the [standalone worker](../curation/README.md#standalone-worker) for configured
+local execution. The [release specification](../specifications/curated-dataset-release.specification.md)
+defines supported operations, package layout, provenance, authentication, capacity
+and [API contracts](../specifications/curated-dataset-release.specification.md#api-contract).
+See [storage and runtime settings](../curation/README.md#storage-and-runtime-settings)
+for operating limits and [cleanup guidance](../curation/README.md#clean-start-after-release-contract-changes)
+before removing obsolete state.
+
 ## 🔒 Authentication with Entra ID
 
 Azure Container Apps deployments use Easy Auth on the public frontend. Nginx forwards `X-MS-CLIENT-PRINCIPAL` with one server-only `X-Dataviewer-Caller-Token`, acquired through a loopback helper using a dedicated frontend managed identity. The backend verifies the workload token and caller ACL before accepting the user principal. Caller, user and storage identities remain separate.
@@ -490,6 +661,21 @@ DATAVIEWER_SECURE_COOKIES=true
 ```
 
 These are backend settings; the helper receives only the API UUID and caller client UUID. The deployment script selects frontend `DATAVIEWER_CALLER_MODE=managed_identity` only after verifying Easy Auth and anonymous denial. `pending` denies protected forwarding; `off` is for non-hosted application-auth modes. Empty/unknown modes fail startup, and helper failure never downgrades active mode.
+
+For application clients, configure frontend Easy Auth's
+`identityProviders.azureActiveDirectory.validation.defaultAuthorizationPolicy.allowedApplications`
+with the approved client IDs, retaining the first-party interactive client.
+An explicitly empty list denied app-only tokens on the tested deployment.
+Verify admission after the change; restart the frontend revision if it retains the old policy.
+This frontend policy is separate from the backend workload caller ACL: do not add automation
+identities to that ACL or trust their forwarded principal headers.
+
+The hosted application probe confirmed its own server-derived scope without roles,
+anonymous and invalid-token denial, and rejection of forged identity headers.
+Headless clients must retain the CSRF cookie and echo its token; missing, mismatched, or
+header-only tokens remain denied, including requests claiming to be application clients.
+Verify `Secure` and `SameSite=Strict` on the hosted CSRF cookie.
+This identity/CSRF evidence does not establish live release publication or human browser acceptance.
 
 The Easy Auth login secret remains required. Old Terraform proxy-secret objects are inert migration remnants retained for older revisions, not a fallback or rotation procedure for MI. Remove active `DATAVIEWER_PROXY_KEY`; a nonempty value fails frontend startup. Never log tokens or live principals. The [deployment specification](../specifications/viewer-deployment.specification.md#authentication) defines token claims, principal budgets, cache/propagation limits and trust assumptions.
 
@@ -658,8 +844,26 @@ Available options:
 ```bash
 cd backend
 source .venv/bin/activate
-uvicorn src.api.main:app --log-config logging.json --log-level "${LOG_LEVEL:-info}" --reload --port 8000
+python -m src.api.server --reload --port 8000
 ```
+
+The container and development launchers use this supervised entrypoint. Shutdown allows
+10 seconds for requests to finish, then cancels pending requests and cleans up workers.
+An independent 25-second total deadline terminates an unresponsive server process group.
+Configure these limits through `DATAVIEWER_GRACEFUL_SHUTDOWN_SECONDS` and
+`DATAVIEWER_SHUTDOWN_TIMEOUT_SECONDS` in [backend/.env.example](backend/.env.example).
+Keep the total deadline below the deployment's termination grace period. Forced termination
+does not mark durable release jobs complete or cancelled; their existing recovery rules apply.
+
+Release preview is an advisory request through `POST /api/releases/v1/preview`, bounded by
+`RELEASE_OPERATION_TIMEOUT_SECONDS` (default 30 seconds). It reads bounded metadata, does not
+verify source revisions and never accepts a release. Submission through `POST /api/releases/v1/jobs`
+durably records the selected intent, confirmations and an idempotency key before expensive source
+work. The independent worker captures the source and performs integrity verification.
+If submission acceptance races with a lost response, use the existing accepted-request lookup
+before retrying with the same key.
+No payload-download fallback is used. Copied objects are recorded with storage revision evidence,
+not content hashes.
 
 #### Start Frontend
 

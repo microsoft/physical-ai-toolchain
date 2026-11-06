@@ -1,4 +1,8 @@
-# Data Management
+---
+title: Data Management
+description: Dataset curation, storage, annotation and viewer documentation for the Physical AI Toolchain.
+ms.date: 2026-11-03
+---
 
 Dataset curation, storage, annotation, versioning, and the viewer application for the Physical AI Toolchain.
 
@@ -6,6 +10,8 @@ Dataset curation, storage, annotation, versioning, and the viewer application fo
 
 ```text
 data-management/
+├── curation/                          # Saved evidence and curated release library
+├── dataset-io/                        # Shared native dataset interpretation
 ├── viewer/                            # Dataset Analysis Tool (FastAPI + React)
 ├── setup/                             # Viewer deployment scripts
 ├── tools/                             # CLI tools for dataset operations
@@ -34,21 +40,25 @@ docker compose up
 
 ## 📦 Components
 
-| Component       | Location           | Description                                                   |
-|-----------------|--------------------|---------------------------------------------------------------|
-| Viewer Backend  | `viewer/backend/`  | FastAPI REST API for dataset browsing, annotation, export     |
-| Viewer Frontend | `viewer/frontend/` | React/Vite/TypeScript UI for episode visualization            |
-| Deploy Script   | `setup/`           | Kubernetes deployment for hosted viewer                       |
-| CLI Tools       | `tools/`           | Dataset filtering, splitting, merging, conversion, validation |
-| Specifications  | `specifications/`  | Domain contracts and interface definitions                    |
+| Component       | Location           | Description                                                    |
+|-----------------|--------------------|----------------------------------------------------------------|
+| Viewer Backend  | `viewer/backend/`  | FastAPI REST API for dataset browsing, annotation, export      |
+| Viewer Frontend | `viewer/frontend/` | React/Vite/TypeScript UI for episode visualization             |
+| Curation        | `curation/`        | Saved-input curation, judge jobs, and curated dataset releases |
+| Deploy Script   | `setup/`           | Kubernetes deployment for hosted viewer                        |
+| CLI Tools       | `tools/`           | Dataset filtering, splitting, merging, conversion, validation  |
+| Specifications  | `specifications/`  | Domain contracts and interface definitions                     |
 
 ## 📖 Documentation
 
-| Guide                                                                       | Description                                           |
-|-----------------------------------------------------------------------------|-------------------------------------------------------|
-| [Viewer README](viewer/README.md)                                           | Architecture, API reference, auth configuration       |
-| [Dataset Curation Spec](specifications/dataset-curation.specification.md)   | Filtering, splitting, merging, conversion, validation |
-| [Viewer Deployment Spec](specifications/viewer-deployment.specification.md) | Kubernetes deployment architecture                    |
+| Guide                                                                           | Description                                                                     |
+|---------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| [Viewer README](viewer/README.md)                                               | Setup, user workflows and authentication configuration                          |
+| [Curation README](curation/README.md)                                           | Library, CLI, worker and operating guidance                                     |
+| [Release workflow](viewer/README.md#-curated-release)                           | Saved selection, preview, publication and recovery                              |
+| [Curated Release Spec](specifications/curated-dataset-release.specification.md) | Source selection, immutable packages, lifecycle, verification and API contracts |
+| [Dataset Curation Spec](specifications/dataset-curation.specification.md)       | Filtering, splitting, merging, conversion, validation                           |
+| [Viewer Deployment Spec](specifications/viewer-deployment.specification.md)     | Kubernetes deployment architecture                                              |
 
 ## 🗂️ Dataset Storage
 

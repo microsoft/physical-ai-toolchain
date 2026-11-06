@@ -1,7 +1,7 @@
 import type { Locator, Page, TestInfo } from '@playwright/test'
 import { expect, test } from '@playwright/test'
 
-import { attachJson, openEmptyViewer, openViewer } from './accessibility-fixture'
+import { attachJson, openEmptyViewer, openReleaseDialog, openViewer } from './accessibility-fixture'
 
 const interactiveSelector = [
   'a[href]',
@@ -81,6 +81,70 @@ async function assertNoLayoutLoss(page: Page, testInfo: TestInfo, state: string)
   expect(findings.pageOverflow, `${state} document overflow`).toBeLessThanOrEqual(1)
   expect(findings.clipped, `${state} clipped content`).toEqual([])
 }
+
+test('V21 release dialog preserves reflow text spacing and unclipped focus', async ({
+  page,
+}, testInfo) => {
+  for (const state of [
+    { name: 'desktop', width: 1280, scale: 1, spacing: false },
+    { name: 'reflow-320', width: 320, scale: 1, spacing: false },
+    { name: 'resize-200', width: 1280, scale: 2, spacing: false },
+    { name: 'text-spacing', width: 320, scale: 1, spacing: true },
+  ]) {
+    await page.setViewportSize({ width: state.width, height: 900 })
+    const { dialog, consoleErrors, pageErrors } = await openReleaseDialog(page, testInfo)
+    await page.addStyleTag({
+      content: `
+      html { font-size: ${state.scale * 100}% !important; }
+      ${state.spacing ? '* { line-height: 1.5 !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important; } p { margin-bottom: 2em !important; }' : ''}
+    `,
+    })
+    const name = dialog.getByRole('textbox', { name: 'Release name', exact: true })
+    await name.focus()
+    await page.keyboard.press('ArrowRight')
+    const focus = await name.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      const gaps = []
+      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor)
+        const bounds = ancestor.getBoundingClientRect()
+        if (style.overflowX !== 'visible')
+          gaps.push(rect.left - bounds.left, bounds.right - rect.right)
+        if (style.overflowY !== 'visible')
+          gaps.push(rect.top - bounds.top, bounds.bottom - rect.bottom)
+      }
+      return { gaps, shadow: getComputedStyle(element).boxShadow }
+    })
+    await attachJson(testInfo, `release-${state.name}-focus`, { journeyIds: ['V21'], ...focus })
+    expect(Math.min(...focus.gaps)).toBeGreaterThanOrEqual(4)
+    expect(focus.shadow).not.toBe('none')
+    const layout = await dialog.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      const clipped = [...element.querySelectorAll<HTMLElement>('*')]
+        .filter((child) => child.checkVisibility({ checkVisibilityCSS: true }))
+        .filter((child) => {
+          const rect = child.getBoundingClientRect()
+          return rect.width > 0 && (rect.left < bounds.left - 1 || rect.right > bounds.right + 1)
+        })
+        .map((child) => child.getAttribute('aria-label') ?? child.textContent?.trim().slice(0, 60))
+      return { clipped, left: bounds.left, right: bounds.right, width: innerWidth }
+    })
+    await attachJson(testInfo, `release-${state.name}-layout`, { journeyIds: ['V21'], ...layout })
+    expect(layout.left).toBeGreaterThanOrEqual(0)
+    expect(layout.right).toBeLessThanOrEqual(layout.width)
+    expect(layout.clipped).toEqual([])
+    for (const action of ['Cancel', 'Preview release', 'Submit release']) {
+      await expect(dialog.getByRole('button', { name: action, exact: true })).toBeInViewport()
+    }
+    await testInfo.attach(`release-${state.name}`, {
+      body: await page.screenshot(),
+      contentType: 'image/png',
+    })
+    expect(consoleErrors).toEqual([])
+    expect(pageErrors).toEqual([])
+    await page.keyboard.press('Escape')
+  }
+})
 
 test('V19 preserves loaded and transient content under adaptive rendering', async ({
   page,

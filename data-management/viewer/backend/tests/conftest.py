@@ -142,6 +142,9 @@ def configure_test_environment(tmp_path_factory: pytest.TempPathFactory) -> Iter
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "true")
         monkeypatch.setenv("DATA_DIR", str(tmp_path_factory.mktemp("default-datasets")))
+        monkeypatch.setenv("RELEASE_JOB_ROOT", "")
+        monkeypatch.setenv("RELEASE_JOB_STORAGE", "")
+        monkeypatch.setenv("RELEASE_DESTINATIONS", "")
 
         import src.api.config as config_mod
         import src.api.main as main_mod

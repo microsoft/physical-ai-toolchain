@@ -1243,7 +1243,8 @@ def test_browser_gate_cannot_reuse_live_services_or_resolve_dependencies() -> No
     assert "PYTHONPATH:" not in config
     assert "mkdtempSync" in config
     assert "STORAGE_BACKEND: 'local'" in config
-    assert "--port 18000" in config
+    assert "uvicorn.run('src.api.main:app'," in config
+    assert "host='127.0.0.1', port=18000" in config
     assert "--port 18001" in config
     assert "--port 18002" in config
     assert "physical_ai_curation.api:build_app --factory" in config

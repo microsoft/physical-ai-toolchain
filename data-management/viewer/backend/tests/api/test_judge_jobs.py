@@ -1301,7 +1301,11 @@ async def test_reset_recovery_preserves_humans_and_reports_safe_failures(
         client = MagicMock()
         client.get_container_client.return_value.get_blob_client.return_value = MemoryBlob(require_lease=False)
         storage = BlobLabelStorage(
-            SimpleNamespace(container_name="synthetic", _get_client=AsyncMock(return_value=client))
+            SimpleNamespace(
+                container_name="synthetic",
+                _get_client=AsyncMock(return_value=client),
+                _admit_blob_path=AsyncMock(return_value=True),
+            )
         )
         store = BlobJobStore(MemoryBlob())
     else:

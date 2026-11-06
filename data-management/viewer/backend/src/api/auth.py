@@ -520,16 +520,14 @@ def issue_media_session(request: Request, response: Response, user: dict[str, An
 def resolve_principal_context(user: dict[str, Any] | None) -> PrincipalContext:
     """Resolve authenticated claims to an opaque stable ownership scope."""
     if user is None:
-        auth_mode: AuthMode = "local"
-        subject = "disabled-auth-session"
-    else:
-        raw_auth_mode = str(user.get("auth_method", ""))
-        if raw_auth_mode not in {"azure_ad", "auth0", "easy_auth", "apikey"}:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unsupported authentication identity")
-        auth_mode = cast(AuthMode, raw_auth_mode)
-        subject = str(user.get("sub", "")).strip()
-        if not subject:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication subject is required")
+        return PrincipalContext(scope_id="localuser", auth_mode="local")
+    raw_auth_mode = str(user.get("auth_method", ""))
+    if raw_auth_mode not in {"azure_ad", "auth0", "easy_auth", "apikey"}:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unsupported authentication identity")
+    auth_mode = cast(AuthMode, raw_auth_mode)
+    subject = str(user.get("sub", "")).strip()
+    if not subject:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication subject is required")
 
     digest = hashlib.sha256(f"{auth_mode}\0{subject}".encode()).hexdigest()
     return PrincipalContext(scope_id=f"principal-{digest}", auth_mode=auth_mode)

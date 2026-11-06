@@ -512,8 +512,12 @@ class DatasetService:
         """Recursively scan for datasets, building --separated IDs. Max 5 levels; hidden folders are skipped."""
         if len(prefix_parts) >= 5:
             return
+        from physical_ai_curation.release.publication import OPERATIONAL_RELEASE_NAMESPACES, local_dataset_admitted
+
         for item in directory.iterdir():
-            if not item.is_dir() or item.name.startswith("."):
+            if not item.is_dir() or item.name.startswith(".") or item.name in OPERATIONAL_RELEASE_NAMESPACES:
+                continue
+            if not local_dataset_admitted(item):
                 continue
             current_parts = [*prefix_parts, item.name]
             handled = False
@@ -907,6 +911,12 @@ class DatasetService:
     async def get_source_revision(self, dataset_id: str, episode_idx: int) -> tuple[str, str]:
         """Identify the source and its current dataset generation without curation files."""
         _validate_dataset_id(dataset_id)
+        if (
+            self._blob_provider is not None
+            and dataset_id not in self._blob_dataset_ids
+            and dataset_id not in self._local_dataset_ids
+        ):
+            await self.get_dataset(dataset_id)
         if dataset_id in self._blob_dataset_ids and dataset_id not in self._local_dataset_ids:
             return await self._get_blob_source_revision(dataset_id, episode_idx)
 
@@ -1285,7 +1295,11 @@ class DatasetService:
         """
         if self._blob_provider is not None:
             raise ValueError("Local dataset access is disabled in Azure mode")
+        from physical_ai_curation.release.publication import OPERATIONAL_RELEASE_NAMESPACES
+
         parts = dataset_id.split("--") if "--" in dataset_id else [dataset_id]
+        if OPERATIONAL_RELEASE_NAMESPACES.intersection(parts):
+            raise ValueError("reserved releases require marker-aware admission")
         if len(parts) > 5:
             raise ValueError(f"Dataset nesting too deep (max 5 levels): {dataset_id}")
 
@@ -1307,6 +1321,10 @@ class DatasetService:
                     break
             if not found:
                 raise ValueError(f"Dataset directory not found: {dataset_id}")
+            from physical_ai_curation.release.publication import local_dataset_admitted
+
+            if not local_dataset_admitted(current):
+                raise ValueError("release requires verified marker-aware admission")
         return current
 
     async def get_frame_image(self, dataset_id: str, episode_idx: int, frame_idx: int, camera: str) -> bytes | None:

@@ -8,6 +8,7 @@ connections.
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 import tempfile
 from collections.abc import AsyncIterator
@@ -111,6 +112,46 @@ def _trajectory_point(frame: int = 0) -> TrajectoryPoint:
 
 
 class TestDatasetDiscovery:
+    async def test_given_recorded_named_release_without_marker_when_scanned_then_hidden(self, tmp_path: Path) -> None:
+        candidate = tmp_path / "plate-release"
+        candidate.mkdir()
+        ownership = tmp_path / "_releases"
+        ownership.mkdir()
+        (ownership / "plate-release.json").write_text(
+            json.dumps(
+                {"schema_version": "curated-release-ownership/v1", "package_id": "plate-release", "attempt_id": "a"}
+            )
+        )
+        service = DatasetService(base_path=str(tmp_path))
+        handler = _make_handler()
+        handler.can_handle.side_effect = lambda path: path == candidate
+        _install_handlers(service, handler)
+        discovered = set()
+
+        service._scan_directory(tmp_path, [], discovered)
+
+        assert discovered == set()
+        with pytest.raises(ValueError, match="release"):
+            service._get_dataset_path("plate-release")
+
+    @pytest.mark.parametrize("namespace", ["_releases", "_release_associations"])
+    async def test_given_operational_namespace_when_scanned_then_not_an_ordinary_dataset(
+        self, tmp_path: Path, namespace: str
+    ) -> None:
+        candidate = tmp_path / namespace / "pkg" / "attempt"
+        candidate.mkdir(parents=True)
+        service = DatasetService(base_path=str(tmp_path))
+        handler = _make_handler()
+        handler.can_handle.side_effect = lambda path: path == candidate
+        _install_handlers(service, handler)
+        discovered = set()
+
+        service._scan_directory(tmp_path, [], discovered)
+
+        assert discovered == set()
+        with pytest.raises(ValueError, match="reserved"):
+            service._get_dataset_path(f"{namespace}--pkg--attempt")
+
     @pytest.mark.parametrize("failure", ["fallback", "missing", "container"])
     async def test_given_blob_manifest_missing_when_resolving_then_only_missing_objects_are_skipped(
         self,
@@ -565,7 +606,10 @@ class TestDatasetDiscovery:
         assert await service.get_source_revision("dataset", 0) == (replacement_source, replacement_revision)
 
     @pytest.mark.asyncio
-    async def test_given_blob_generation_when_etag_changes_then_revision_changes(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("cold_cache", [False, True])
+    async def test_given_blob_generation_when_etag_changes_then_revision_changes(
+        self, tmp_path: Path, cold_cache: bool
+    ) -> None:
         blob = MagicMock()
         blob.get_blob_properties = AsyncMock(return_value=SimpleNamespace(etag='"generation-one"'))
         container = MagicMock()
@@ -574,8 +618,10 @@ class TestDatasetDiscovery:
         client.get_container_client.return_value = container
         provider = _make_provider(account_name="synthetic", container_name="datasets")
         provider._get_client = AsyncMock(return_value=client)
+        provider.get_info_json = AsyncMock(return_value={"total_episodes": 1, "fps": 30.0})
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        service._blob_dataset_ids.add("owner--dataset")
+        if not cold_cache:
+            service._blob_dataset_ids.add("owner--dataset")
 
         source_id, revision = await service.get_source_revision("owner--dataset", 0)
         blob.get_blob_properties.return_value = SimpleNamespace(etag='"generation-two"')
@@ -585,6 +631,10 @@ class TestDatasetDiscovery:
         assert changed_revision != revision
         assert "synthetic" not in source_id
         assert container.get_blob_client.call_args.args[0] == "owner/dataset/meta/info.json"
+        if cold_cache:
+            provider.get_info_json.assert_awaited_once_with("owner--dataset")
+        else:
+            provider.get_info_json.assert_not_awaited()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("failure", [False, True])
