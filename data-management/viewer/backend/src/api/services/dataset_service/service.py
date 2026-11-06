@@ -911,6 +911,12 @@ class DatasetService:
     async def get_source_revision(self, dataset_id: str, episode_idx: int) -> tuple[str, str]:
         """Identify the source and its current dataset generation without curation files."""
         _validate_dataset_id(dataset_id)
+        if (
+            self._blob_provider is not None
+            and dataset_id not in self._blob_dataset_ids
+            and dataset_id not in self._local_dataset_ids
+        ):
+            await self.get_dataset(dataset_id)
         if dataset_id in self._blob_dataset_ids and dataset_id not in self._local_dataset_ids:
             return await self._get_blob_source_revision(dataset_id, episode_idx)
 

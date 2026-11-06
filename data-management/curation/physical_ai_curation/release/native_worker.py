@@ -24,6 +24,7 @@ from physical_ai_curation.release.inputs import (
     FrozenReleaseInputs,
     LocalReleaseSource,
     ReleaseInputError,
+    SourceMetadataError,
 )
 from physical_ai_curation.release.jobs import CapacityError, ReleaseJobStore
 from physical_ai_curation.release.media import ObjectPlanRequest, ReleasePlanError, SubsetEpisodeInput
@@ -79,6 +80,16 @@ def _entra_container_factory(stack: ExitStack, timeout: float) -> Callable[[str,
         )
 
     return build
+
+
+_SOURCE_METADATA_REFUSALS = frozenset(
+    {
+        "source_metadata_invalid",
+        "source_object_reference_invalid",
+        "source_task_metadata_invalid",
+        "source_frame_schema_invalid",
+    }
+)
 
 
 @contextmanager
@@ -144,6 +155,8 @@ def native_operation(
             raise CapacityError("native result exceeds its protocol bound")
         result = json.loads(result_path.read_bytes())
         if result["state"] != "complete":
+            if result.get("reason") in _SOURCE_METADATA_REFUSALS:
+                raise SourceMetadataError(result["reason"], "native source metadata is invalid")
             raise ReleaseInputError("native inputs are not condition-bound or exceed supported processing bounds")
         if restored is not None:
             restored.update(result.get("restored", {}))
@@ -308,6 +321,17 @@ def main(argv: list[str] | None = None) -> int:
     request = Path(arguments[0])
     try:
         _process(request)
+    except SourceMetadataError as error:
+        (request.parent / "result.json").write_bytes(
+            json.dumps(
+                {
+                    "state": "invalid_input",
+                    "objects": [],
+                    "reason": error.code if error.code in _SOURCE_METADATA_REFUSALS else "source_metadata_invalid",
+                },
+                separators=(",", ":"),
+            ).encode()
+        )
     except (ReleaseInputError, ReleasePlanError, CapacityError):
         (request.parent / "result.json").write_bytes(b'{"state":"invalid_input","objects":[]}')
     except Exception:

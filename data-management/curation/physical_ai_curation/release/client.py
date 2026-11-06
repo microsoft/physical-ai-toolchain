@@ -375,6 +375,9 @@ class ReleaseApiClient:
     def recover(self, job_id: str) -> Any:
         return self.post(f"{API_PREFIX}/jobs/{_job_path(job_id)}/recover")
 
+    def retry_registration(self, job_id: str) -> Any:
+        return self.post(f"{API_PREFIX}/jobs/{_job_path(job_id)}/registration")
+
     def result(self, job_id: str) -> Any:
         return self.get(f"{API_PREFIX}/jobs/{_job_path(job_id)}/result")
 
@@ -557,6 +560,8 @@ def _run(
         return client.cancel(args.job_id)
     if command == "recover":
         return client.recover(args.job_id)
+    if command == "retry-registration":
+        return client.retry_registration(args.job_id)
     if command == "result":
         return client.result(args.job_id)
     if command == "artifact":
@@ -668,6 +673,7 @@ def _build_parser() -> argparse.ArgumentParser:
     for name, help_text in (
         ("cancel", "Request cancellation of a job."),
         ("recover", "Request recovery of a job."),
+        ("retry-registration", "Retry Azure ML registration without republishing a committed release."),
         ("result", "Show the result of a committed job."),
     ):
         command = commands.add_parser(name, help=help_text)

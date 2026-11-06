@@ -51,10 +51,10 @@ from physical_ai_curation.release.jobs import (
 )
 from physical_ai_curation.release.local_worker import SourceAssociatedLocalPublisher, SupervisedLocalPublisher
 from physical_ai_curation.release.models import (
+    CHECKSUMS_PATH,
     MANIFEST_PATH,
     MARKER_PATH,
     RECEIPT_PATH,
-    REPORT_PATH,
     SourceObject,
     SourceObjectRecord,
 )
@@ -87,13 +87,13 @@ from test_release_contracts import _manifest_for, _payload_files, _write_package
 from test_release_inputs import FakePages
 from test_release_publishers import _association_intent, _FakeBlobClient, _FakeContainer
 
-ATTEMPT = PublicationAttempt("pkg-001", "attempt-1")
-OTHER_ATTEMPT = PublicationAttempt("pkg-002", "attempt-2")
+ATTEMPT = PublicationAttempt("pkg-001", "attempt-1", source_dataset_id="sample")
+OTHER_ATTEMPT = PublicationAttempt("pkg-002", "attempt-2", source_dataset_id="sample")
 DIGEST = "a" * 64
 COMMIT_DIGEST = "d" * 64
 SCOPE = "release"
 OWNER = "user-a"
-CONTROLS = {RECEIPT_PATH: (10, "b" * 64), REPORT_PATH: (20, "c" * 64)}
+CONTROLS = {RECEIPT_PATH: (10, "b" * 64), CHECKSUMS_PATH: (20, "c" * 64)}
 MEMORY = 512 * 1024**2
 SETTINGS = ReleaseRuntimeSettings(lease_seconds=30, reserve_bytes=0)
 
@@ -496,6 +496,211 @@ def _sealed_job(store: ReleaseJobStore, destination: Path) -> tuple[str, int]:
     return job_id, fence
 
 
+def _committed_job(store: ReleaseJobStore, destination: Path) -> tuple[str, int]:
+    job_id, fence = _sealed_job(store, destination)
+    with ReleaseJobControl(store, job_id, fence).publication(ATTEMPT, COMMIT_DIGEST):
+        pass
+    return job_id, fence
+
+
+def test_given_committed_release_when_registration_finished_then_projection_is_sanitized(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, _ = _committed_job(store, tmp_path / "dest")
+
+    token = store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+    assert isinstance(token, str)
+    pending = store.get(job_id, scope=SCOPE, principal=OWNER)
+    assert pending.registration is not None and pending.registration["status"] == "pending"
+
+    status = store.finish_registration(job_id, token, status="registered")
+    assert status.state == "committed"
+    assert status.registration is not None
+    assert set(status.registration) == {"status", "asset_name", "asset_version", "last_error_category", "attempted_at"}
+    assert status.registration["status"] == "registered"
+    assert status.registration["last_error_category"] is None
+    assert COMMIT_DIGEST not in repr(status.registration)
+    assert token not in repr(status.registration)
+
+
+def test_given_uncommitted_job_when_registration_begun_then_refused_without_records(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, _ = _sealed_job(store, tmp_path / "dest")
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError):
+        store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+    assert store.storage.snapshot() == before
+
+
+def test_given_other_target_digest_when_registration_begun_then_conflict(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, _ = _committed_job(store, tmp_path / "dest")
+    store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+
+    with pytest.raises(JobConflictError):
+        store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest="e" * 64)
+
+
+@pytest.mark.parametrize(
+    ("asset_name", "asset_version", "target"),
+    [
+        ("", "1", COMMIT_DIGEST),
+        ("../model", "1", COMMIT_DIGEST),
+        ("model", "1 2", COMMIT_DIGEST),
+        ("model", "1", "ABC"),
+    ],
+    ids=["empty-name", "traversal-name", "spaced-version", "bad-target"],
+)
+def test_given_invalid_registration_identity_when_begun_then_refused(
+    tmp_path: Path, asset_name: str, asset_version: str, target: str
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, _ = _committed_job(store, tmp_path / "dest")
+    before = store.storage.snapshot()
+
+    with pytest.raises(ReleaseJobError):
+        store.begin_registration(job_id, asset_name=asset_name, asset_version=asset_version, target_digest=target)
+    assert store.storage.snapshot() == before
+
+
+def test_given_failed_registration_when_finished_then_release_effects_and_capacity_preserved(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, _ = _committed_job(store, tmp_path / "dest")
+    before = store.get(job_id, scope=SCOPE, principal=OWNER)
+
+    token = store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+    assert token is not None
+    after = store.finish_registration(job_id, token, status="failed", error_category="provider_error")
+
+    assert after.registration is not None
+    assert after.registration["status"] == "failed"
+    assert after.registration["last_error_category"] == "provider_error"
+    assert after.state == before.state == "committed"
+    assert after.capacity_state == before.capacity_state
+    assert after.cleanup_state == before.cleanup_state
+    assert after.effects_stopped == before.effects_stopped
+    assert after.destination_current_bytes == before.destination_current_bytes
+    assert after.io_counters == before.io_counters
+
+
+def test_given_failed_registration_when_retried_then_explicit_retry_issues_new_token(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, _ = _committed_job(store, tmp_path / "dest")
+    first = store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+    assert first is not None
+    store.finish_registration(job_id, first, status="failed", error_category="conflict")
+
+    assert store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST) is None
+
+    second = store.begin_registration(
+        job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST, retry=True
+    )
+    assert second is not None and second != first
+    assert store._snapshot()[job_id]["registration"]["attempts"] == 2
+
+
+def test_given_registered_target_when_begun_again_then_replays_without_token(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, _ = _committed_job(store, tmp_path / "dest")
+    token = store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+    assert token is not None
+    store.finish_registration(job_id, token, status="registered")
+    before = store.storage.snapshot()
+
+    assert store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST) is None
+    assert store.storage.snapshot() == before
+
+
+def test_given_held_pending_registration_when_lease_expires_then_reclaim_fences_old_token(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _store(tmp_path / "ledger", clock)
+    job_id, _ = _committed_job(store, tmp_path / "dest")
+    stale = store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+    assert stale is not None
+
+    assert store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST) is None
+
+    clock.advance(31)
+    current = store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+    assert current is not None
+    with pytest.raises(AuthorityError, match="stale"):
+        store.finish_registration(job_id, stale, status="registered")
+    assert store.finish_registration(job_id, current, status="registered").registration is not None
+
+
+def test_given_stale_registration_token_when_finished_then_refused_without_change(tmp_path: Path) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, _ = _committed_job(store, tmp_path / "dest")
+    store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+    before = store.storage.snapshot()
+
+    with pytest.raises(AuthorityError):
+        store.finish_registration(job_id, "f" * 32, status="registered")
+    assert store.storage.snapshot() == before
+
+
+def test_given_pending_registration_when_store_reopened_then_token_still_finishes(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _store(tmp_path / "ledger", clock)
+    job_id, _ = _committed_job(store, tmp_path / "dest")
+    token = store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+    assert token is not None
+
+    reopened = _store(tmp_path / "ledger", clock)
+    status = reopened.finish_registration(job_id, token, status="registered")
+    assert status.registration is not None and status.registration["status"] == "registered"
+
+
+def test_given_live_registration_when_renewed_then_expired_authority_cannot_revive(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _store(tmp_path / "ledger", clock)
+    job_id, _ = _committed_job(store, tmp_path / "dest")
+    token = store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+    assert token is not None
+    clock.advance(20)
+    store.renew_registration(job_id, token)
+    clock.advance(20)
+    store.renew_registration(job_id, token)
+    clock.advance(31)
+    with pytest.raises(AuthorityError):
+        store.renew_registration(job_id, token)
+
+
+@pytest.mark.parametrize("status", ["conflict", "not_configured"])
+def test_given_definitive_registration_outcome_when_finished_then_release_remains_committed(
+    tmp_path: Path,
+    status: str,
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, _ = _committed_job(store, tmp_path / "dest")
+    token = store.begin_registration(job_id, asset_name="a" * 255, asset_version="r" * 30, target_digest="e" * 64)
+    assert token is not None
+    result = store.finish_registration(job_id, token, status=status, error_category=status)
+    assert result.state == "committed"
+    assert result.registration is not None and result.registration["status"] == status
+
+
+@pytest.mark.parametrize(
+    ("status", "category"),
+    [("failed", "not-a-category"), ("failed", None), ("registered", "unavailable"), ("pending", None)],
+    ids=["unknown-category", "missing-category", "success-with-category", "non-terminal-status"],
+)
+def test_given_invalid_registration_outcome_when_finished_then_refused_without_change(
+    tmp_path: Path, status: str, category: str | None
+) -> None:
+    store = _store(tmp_path / "ledger", FakeClock())
+    job_id, _ = _committed_job(store, tmp_path / "dest")
+    token = store.begin_registration(job_id, asset_name="model", asset_version="1", target_digest=COMMIT_DIGEST)
+    assert token is not None
+    before = store.storage.snapshot()
+
+    with pytest.raises(ReleaseJobError):
+        store.finish_registration(job_id, token, status=status, error_category=category)
+    assert store.storage.snapshot() == before
+
+
 def _reaped(identity: ProcessIdentity) -> bool:
     """Report whether the identified process has been reaped, so no zombie entry remains."""
     try:
@@ -601,7 +806,7 @@ def test_given_cancelled_named_release_when_retried_then_new_attempt_can_claim_c
     assert store.cleanup_owned_outputs(first.job_id, fence, publisher.root) is True
     assert store.cleanup_owned_outputs(first.job_id, fence, publisher.root) is True
     store.settle_cancellation(first.job_id, fence, output_removed=True)
-    next_attempt = PublicationAttempt(ATTEMPT.package_id, "attempt-next", ATTEMPT.prefix)
+    next_attempt = PublicationAttempt(ATTEMPT.package_id, "attempt-next", ATTEMPT.prefix, ATTEMPT.source_dataset_id)
     second = store.accept(_request(destination, key="next-key", attempt=next_attempt))
     current = store.claim(second.job_id, "worker-b")
     replacement = LocalPublisher(destination, next_attempt, ReleaseJobControl(store, second.job_id, current))
@@ -711,7 +916,7 @@ def test_given_accepted_source_association_when_published_then_checkpoint_preced
     fence = store.claim(job_id, "worker-a")
     publisher = SourceAssociatedLocalPublisher(destination, intent.attempt, store, job_id, fence, intent)
     for item in LocalReleaseStore(source).list_objects():
-        if item.path in {RECEIPT_PATH, REPORT_PATH}:
+        if item.path in {RECEIPT_PATH, CHECKSUMS_PATH}:
             continue
         payload = (source / item.path).read_bytes()
         publisher.write(item.path, (payload,), length=len(payload), sha256=sha256_hex(payload))
@@ -721,7 +926,7 @@ def test_given_accepted_source_association_when_published_then_checkpoint_preced
         fence,
         {
             RECEIPT_PATH: (len(candidate.receipt_bytes), sha256_hex(candidate.receipt_bytes)),
-            REPORT_PATH: (len(candidate.report_bytes), sha256_hex(candidate.report_bytes)),
+            CHECKSUMS_PATH: (len(candidate.checksums_bytes), sha256_hex(candidate.checksums_bytes)),
         },
     )
     execute = publisher._execute
@@ -1495,7 +1700,7 @@ def test_given_candidate_when_published_end_to_end_then_sealed_committed_and_rep
     control.seal(
         {
             RECEIPT_PATH: (len(candidate.receipt_bytes), sha256_hex(candidate.receipt_bytes)),
-            REPORT_PATH: (len(candidate.report_bytes), sha256_hex(candidate.report_bytes)),
+            CHECKSUMS_PATH: (len(candidate.checksums_bytes), sha256_hex(candidate.checksums_bytes)),
         }
     )
 
@@ -2869,7 +3074,7 @@ def test_given_cancelled_blob_root_when_cleaned_then_companion_last_and_capacity
     publisher = fixture.publisher
     publisher.copy(fixture.source, fixture.source_object, fixture.source_etag)
     publisher.write("meta/info.json", [b"{}"], length=2, sha256=sha256_hex(b"{}"))
-    controls = {RECEIPT_PATH: b"receipt", REPORT_PATH: b"report"}
+    controls = {RECEIPT_PATH: b"receipt", CHECKSUMS_PATH: b"checksums"}
     fixture.store.seal(
         fixture.job_id, fixture.fence, {path: (len(content), sha256_hex(content)) for path, content in controls.items()}
     )
@@ -3072,6 +3277,7 @@ def test_given_blob_candidate_when_supervised_upload_and_publish_then_independen
     intent = _association_intent(tmp_path).model_copy(
         update={
             "attempt": ATTEMPT,
+            "source_dataset_id": ATTEMPT.source_dataset_id,
             "effective_destination": BLOB.as_text(),
             "scope_sha256": sha256_hex(OWNER.encode()),
             "frozen_input_sha256": json.loads((root / MANIFEST_PATH).read_bytes())["frozen_input_sha256"],
@@ -3105,7 +3311,7 @@ def test_given_blob_candidate_when_supervised_upload_and_publish_then_independen
         fence,
         {
             RECEIPT_PATH: (len(candidate.receipt_bytes), sha256_hex(candidate.receipt_bytes)),
-            REPORT_PATH: (len(candidate.report_bytes), sha256_hex(candidate.report_bytes)),
+            CHECKSUMS_PATH: (len(candidate.checksums_bytes), sha256_hex(candidate.checksums_bytes)),
         },
     )
 
@@ -3180,6 +3386,7 @@ def _associated_cancel_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     intent = _association_intent(tmp_path).model_copy(
         update={
             "attempt": ATTEMPT,
+            "source_dataset_id": ATTEMPT.source_dataset_id,
             "effective_destination": BLOB.as_text(),
             "scope_sha256": sha256_hex(OWNER.encode()),
         }
@@ -3403,7 +3610,7 @@ def test_given_blob_reservations_across_prefixes_when_accepted_then_account_limi
                 key="second",
                 reserved=500,
                 destination=ACCOUNT_BLOB,
-                attempt=PublicationAttempt("pkg-003", "attempt-3"),
+                attempt=PublicationAttempt("pkg-003", "attempt-3", source_dataset_id="sample"),
             )
         )
     accepted = store.accept(
@@ -3411,7 +3618,7 @@ def test_given_blob_reservations_across_prefixes_when_accepted_then_account_limi
             key="third",
             reserved=400,
             destination=ACCOUNT_BLOB,
-            attempt=PublicationAttempt("pkg-004", "attempt-4"),
+            attempt=PublicationAttempt("pkg-004", "attempt-4", source_dataset_id="sample"),
         )
     )
     assert accepted.replayed is False
@@ -3636,10 +3843,10 @@ def _committed_package(tmp_path: Path, clock: OffsetClock) -> tuple[ReleaseJobSt
     control.seal(
         {
             RECEIPT_PATH: (len(candidate.receipt_bytes), sha256_hex(candidate.receipt_bytes)),
-            REPORT_PATH: (len(candidate.report_bytes), sha256_hex(candidate.report_bytes)),
+            CHECKSUMS_PATH: (len(candidate.checksums_bytes), sha256_hex(candidate.checksums_bytes)),
         }
     )
-    for path, body in ((RECEIPT_PATH, candidate.receipt_bytes), (REPORT_PATH, candidate.report_bytes)):
+    for path, body in ((RECEIPT_PATH, candidate.receipt_bytes), (CHECKSUMS_PATH, candidate.checksums_bytes)):
         publisher.write(path, (body,), length=len(body), sha256=sha256_hex(body))
     commit = control.publication(ATTEMPT, manifest_digest)
     commit.__enter__()  # Leave the commit open, as if the writer crashed before the marker.
@@ -3647,7 +3854,11 @@ def _committed_package(tmp_path: Path, clock: OffsetClock) -> tuple[ReleaseJobSt
 
 
 def _marker_identity(root: Path, manifest_digest: str) -> tuple[bytes, int, str]:
-    marker = build_marker(verify_candidate(LocalReleaseStore(root), manifest_digest))
+    marker = build_marker(
+        verify_candidate(LocalReleaseStore(root), manifest_digest),
+        release_name=ATTEMPT.prefix,
+        source_dataset_id=ATTEMPT.source_dataset_id,
+    )
     return marker, len(marker), sha256_hex(marker)
 
 
@@ -3705,7 +3916,7 @@ def test_given_marker_writer_interrupted_after_registered_temp_when_successor_pu
                 str(tmp_path / "ledger"),
                 job_id,
                 str(stale),
-                str(root / "release"),
+                str(root),
             ],
             memory_bytes=MEMORY,
             heartbeat_seconds=0.01,
@@ -3714,7 +3925,7 @@ def test_given_marker_writer_interrupted_after_registered_temp_when_successor_pu
         )
     if not lose_stop_ack:
         store.finish_effect(job_id, stale, MARKER_PATH, ok=False)
-    assert len(list((root / "release").glob(".curation-copy-*.partial"))) == 1
+    assert len(list(root.glob(".curation-copy-*.partial"))) == 1
     assert not (root / MARKER_PATH).exists()
 
     clock.advance(31)
@@ -3723,7 +3934,7 @@ def test_given_marker_writer_interrupted_after_registered_temp_when_successor_pu
 
     assert result.publication_state == "published"
     assert (root / MARKER_PATH).is_file()
-    assert list((root / "release").glob(".curation-copy-*.partial")) == []
+    assert list(root.glob(".curation-copy-*.partial")) == []
     assert store.get(job_id, scope=SCOPE, principal=OWNER).state == "committed"
 
 
@@ -3752,7 +3963,7 @@ def test_given_unregistered_residue_when_successor_publishes_then_refused_and_re
     store, job_id, stale, destination, root, digest = _committed_package(tmp_path, clock)
     _, length, marker_digest = _marker_identity(root, digest)
     assert store.begin_marker_effect(job_id, stale, ATTEMPT, digest, length, marker_digest) is False
-    residue = root / "release" / f".curation-copy-{'e' * 32}.partial"
+    residue = root / f".curation-copy-{'e' * 32}.partial"
     residue.write_bytes(b"foreign")
 
     clock.advance(31)
@@ -4038,7 +4249,7 @@ def test_given_many_events_when_exported_in_bounded_pages_then_ordered_and_compl
                 tmp_path / f"dest-{index}",
                 key=f"key-{index}",
                 principal=f"user-{index}",
-                attempt=PublicationAttempt(f"pkg-{index:03d}", f"attempt-{index}"),
+                attempt=PublicationAttempt(f"pkg-{index:03d}", f"attempt-{index}", source_dataset_id="sample"),
             )
         )
 
@@ -4243,7 +4454,7 @@ def test_given_reopened_jobs_when_paged_then_order_and_principal_confinement_per
             tmp_path / "destination",
             key="foreign",
             principal="other",
-            attempt=PublicationAttempt("third", "one"),
+            attempt=PublicationAttempt("third", "one", source_dataset_id="sample"),
             frozen=b"third",
         )
     )
@@ -4584,7 +4795,7 @@ def test_given_sealed_job_when_controls_written_then_supervised_and_payload_rema
     request = _request(tmp_path)
     job = store.accept(request)
     fence = store.claim(job.job_id, "worker")
-    controls = {RECEIPT_PATH: b"receipt", REPORT_PATH: b"report"}
+    controls = {RECEIPT_PATH: b"receipt", CHECKSUMS_PATH: b"checksums"}
     store.seal(job.job_id, fence, {path: (len(content), sha256_hex(content)) for path, content in controls.items()})
     publisher = SupervisedLocalPublisher(request.destination, ATTEMPT, store, job.job_id, fence)
     for path, content in controls.items():

@@ -20,6 +20,7 @@ vi.mock('@/api/releases', async (importOriginal) => {
     submitRelease: vi.fn(),
     cancelReleaseJob: vi.fn(),
     recoverReleaseJob: vi.fn(),
+    retryReleaseRegistration: vi.fn(),
     listReleaseJobs: vi.fn(),
     lookupAcceptedRelease: vi.fn(),
   }
@@ -68,6 +69,41 @@ function jobStatus(state: releaseApi.ReleaseJobState): releaseApi.ReleaseJobStat
 }
 
 describe('useRelease', () => {
+  it('retries registration on a committed job and refreshes its result without republishing', async () => {
+    localStorage.setItem(pointerKey(SCOPE_A), JOB_ID)
+    vi.mocked(releaseApi.getReleaseJob).mockResolvedValue(jobStatus('committed'))
+    vi.mocked(releaseApi.retryReleaseRegistration).mockResolvedValue(jobStatus('committed'))
+    vi.mocked(releaseApi.getReleaseResult)
+      .mockResolvedValueOnce({
+        schema: 'v1',
+        result: {},
+        artifacts: ['checksums'],
+        azuremlRegistrationEnabled: true,
+      })
+      .mockResolvedValue({
+        schema: 'v1',
+        result: {},
+        artifacts: ['checksums'],
+        azuremlRegistrationEnabled: true,
+        registration: {
+          status: 'registered',
+          assetName: 'dataset',
+          assetVersion: 'release',
+          lastErrorCategory: null,
+          attemptedAt: 1,
+        },
+      })
+    const { result } = renderHookWithProviders(() => useRelease(DATASET, SCOPE_A))
+    await waitFor(() => expect(result.current.result.data?.artifacts).toEqual(['checksums']))
+    await act(async () => {
+      await result.current.retryRegistration()
+    })
+    await waitFor(() => expect(result.current.result.data?.registration?.status).toBe('registered'))
+    expect(releaseApi.retryReleaseRegistration).toHaveBeenCalledWith(JOB_ID)
+    expect(releaseApi.recoverReleaseJob).not.toHaveBeenCalled()
+    expect(releaseApi.submitRelease).not.toHaveBeenCalled()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     globalThis.localStorage.clear()

@@ -24,6 +24,7 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
+from uuid import UUID
 
 from physical_ai_curation.release.azure_publication import BlobReleaseStore
 from physical_ai_curation.release.blob_source_associations import BlobSourceAssociations, BlobVerifiedAssociation
@@ -41,7 +42,14 @@ from physical_ai_curation.release.jobs import (
     ReleaseJobStore,
     ReleaseRuntimeSettings,
 )
-from physical_ai_curation.release.models import INVENTORY_PATH, MANIFEST_PATH, Inventory, StorageRevisionEntry
+from physical_ai_curation.release.models import (
+    CHECKSUMS_PATH,
+    INVENTORY_PATH,
+    MANIFEST_PATH,
+    RECEIPT_PATH,
+    Inventory,
+    StorageRevisionEntry,
+)
 from physical_ai_curation.release.projections import LABELS_PATH
 from physical_ai_curation.release.publication import PublicationAttempt
 from physical_ai_curation.release.record_storage import (
@@ -95,10 +103,14 @@ _MAX_OPERATION_SECONDS = 600.0
 class ReleaseApiError(Exception):
     """Client-safe release API failure carrying an HTTP status and fixed message."""
 
-    def __init__(self, status_code: int, detail: str) -> None:
+    def __init__(
+        self, status_code: int, detail: str, *, message: str | None = None, nonretryable: bool = False
+    ) -> None:
         super().__init__(detail)
         self.status_code = status_code
         self.detail = detail
+        self.message = message
+        self.nonretryable = nonretryable
 
 
 @dataclass(frozen=True)
@@ -426,6 +438,30 @@ def close_release_offload(settle_seconds: float = _SHUTDOWN_SETTLE_SECONDS) -> b
 
 
 @dataclass(frozen=True)
+class AzureMLDestinationSettings:
+    """Credential-free AML workspace and datastore binding for one Azure destination."""
+
+    subscription_id: str
+    resource_group: str
+    workspace_name: str
+    datastore_name: str
+
+    def __post_init__(self) -> None:
+        try:
+            canonical_subscription = str(UUID(self.subscription_id))
+        except (ValueError, TypeError, AttributeError) as error:
+            raise ValueError("Azure ML subscription must be a UUID") from error
+        if canonical_subscription != self.subscription_id.lower():
+            raise ValueError("Azure ML subscription must be a canonical UUID")
+        if not re.fullmatch(r"[A-Za-z0-9_.()-]{1,90}", self.resource_group) or self.resource_group.endswith("."):
+            raise ValueError("Azure ML resource group is invalid")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{2,32}", self.workspace_name):
+            raise ValueError("Azure ML workspace is invalid")
+        if not re.fullmatch(r"[A-Za-z0-9_]{1,255}", self.datastore_name):
+            raise ValueError("Azure ML datastore is invalid")
+
+
+@dataclass(frozen=True)
 class ReleaseApiSettings:
     """Validated release API configuration read from the process environment."""
 
@@ -435,6 +471,11 @@ class ReleaseApiSettings:
     media_max_bytes: int = _MAX_MEDIA_BYTES
     job_storage: BlobLocation | None = None
     offload: ReleaseOffloadSettings = field(default_factory=ReleaseOffloadSettings)
+    azureml_destinations: Mapping[str, AzureMLDestinationSettings] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if any(not isinstance(self.destinations.get(alias), BlobLocation) for alias in self.azureml_destinations):
+            raise ValueError("Azure ML registration requires a configured Azure destination")
 
     @property
     def enabled(self) -> bool:
@@ -477,6 +518,26 @@ def load_release_api_settings(environ: Mapping[str, str]) -> ReleaseApiSettings:
                 destinations[alias] = Path(location)
             else:
                 raise ValueError(f"{RELEASE_DESTINATIONS_ENV} entries must be configured storage roots")
+    aml_enabled = environ.get("CURATION_RELEASE_AZUREML_ENABLED", "false").strip().lower()
+    if aml_enabled not in {"true", "false"}:
+        raise ValueError("CURATION_RELEASE_AZUREML_ENABLED must be true or false")
+    azureml_destinations = {}
+    if aml_enabled == "true":
+        try:
+            datastores = json.loads(environ.get("CURATION_RELEASE_AZUREML_DATASTORES", ""))
+        except json.JSONDecodeError as error:
+            raise ValueError("CURATION_RELEASE_AZUREML_DATASTORES must be a nonempty JSON object") from error
+        if not isinstance(datastores, dict) or not datastores:
+            raise ValueError("CURATION_RELEASE_AZUREML_DATASTORES must be a nonempty JSON object")
+        for alias, datastore in datastores.items():
+            if not isinstance(destinations.get(alias), BlobLocation) or not isinstance(datastore, str):
+                raise ValueError("Azure ML datastores must map configured Azure destination aliases to names")
+            azureml_destinations[alias] = AzureMLDestinationSettings(
+                subscription_id=environ.get("CURATION_RELEASE_AZUREML_SUBSCRIPTION_ID", "").strip(),
+                resource_group=environ.get("CURATION_RELEASE_AZUREML_RESOURCE_GROUP", "").strip(),
+                workspace_name=environ.get("CURATION_RELEASE_AZUREML_WORKSPACE", "").strip(),
+                datastore_name=datastore,
+            )
     limits = {}
     for name, default in (
         ("CURATION_RELEASE_READ_METADATA_BYTES", _MAX_METADATA_BYTES),
@@ -515,6 +576,7 @@ def load_release_api_settings(environ: Mapping[str, str]) -> ReleaseApiSettings:
         media_max_bytes=media_max_bytes,
         job_storage=job_storage,
         offload=offload,
+        azureml_destinations=azureml_destinations,
     )
 
 
@@ -584,7 +646,7 @@ class ReleaseSpec:
             if not _IDENTITY.fullmatch(value):
                 raise ReleaseApiError(422, "release identity is invalid")
         if not _DATASET_NAME.fullmatch(self.dataset_name) or "--" in self.dataset_name:
-            raise ReleaseApiError(422, "dataset name is invalid")
+            raise ReleaseApiError(422, "release name is invalid")
         if not _DATASET_ID.fullmatch(self.dataset_id):
             raise ReleaseApiError(422, "dataset id is invalid")
         if not self.episode_indices or len(self.episode_indices) > _MAX_EPISODES:
@@ -669,6 +731,7 @@ class ReleaseService:
             "schema": CAPABILITY_SCHEMA,
             "job_store": self._settings.enabled,
             "planning": self.planner_configured,
+            "azureml_registration_enabled": bool(self._settings.azureml_destinations),
             "destinations": self.destinations(),
             "operations": [
                 "capabilities",
@@ -688,8 +751,11 @@ class ReleaseService:
             "capacity": "unknown",
         }
 
-    def destinations(self) -> list[dict[str, str]]:
-        return [{"alias": alias} for alias in sorted(self._settings.destinations)]
+    def destinations(self) -> list[dict[str, Any]]:
+        return [
+            {"alias": alias, "azureml_registration_enabled": alias in self._settings.azureml_destinations}
+            for alias in sorted(self._settings.destinations)
+        ]
 
     def jobs(self, scope: str, *, cursor: int, limit: int, dataset_id: str | None = None) -> dict[str, Any]:
         store = self._store()
@@ -738,6 +804,31 @@ class ReleaseService:
         store = self._store()
         try:
             return _status_body(store.request_cancel(job_id, scope=scope, principal=scope))
+        except ReleaseJobError as error:
+            raise _map_job_error(error) from error
+
+    async def register_pending(self, job_id: str) -> bool:
+        """Run independent post-commit work without restoring or reading the source dataset."""
+        if not self._settings.azureml_destinations:
+            return False
+        from .release_registration import register_job
+
+        return await self.control(register_job, self._settings, self._store(), job_id)
+
+    def retry_registration(self, scope: str, job_id: str) -> dict[str, Any]:
+        """Authorize a committed job before retrying only its independently verified AML registration."""
+        from .release_registration import register_job
+
+        store = self._store()
+        try:
+            status = store.get(job_id, scope=scope, principal=scope)
+            if status.state != "committed":
+                raise ReleaseApiError(409, "release_result_not_verified")
+            binding = parse_strict_json(store.execution_binding(job_id))
+            if binding.get("destination") not in self._settings.azureml_destinations:
+                raise ReleaseApiError(409, "release_registration_not_enabled")
+            register_job(self._settings, store, job_id, retry=True)
+            return _status_body(store.get(job_id, scope=scope, principal=scope))
         except ReleaseJobError as error:
             raise _map_job_error(error) from error
 
@@ -807,6 +898,7 @@ class ReleaseService:
                 package_id=spec.package_id,
                 attempt_id=spec.attempt_id,
                 dataset_name=spec.dataset_name,
+                source_dataset_id=spec.dataset_id,
             ),
             destination=destination,
             frozen_request=prepared.frozen_request,
@@ -989,18 +1081,21 @@ class ReleaseService:
 
     def result(self, scope: str, job_id: str, artifact: str | None = None) -> dict[str, Any]:
         from physical_ai_curation.release.coordinator import _publication_runtime
-        from physical_ai_curation.release.models import INVENTORY_PATH, MANIFEST_PATH, RECEIPT_PATH, REPORT_PATH
         from physical_ai_curation.release.verification import verify_published
 
         store = self._store()
         try:
-            configured = self._execution(store, scope, job_id)
             status = store.get(job_id, scope=scope, principal=scope)
+            if status.state == "needs_input" and status.refusal_code and status.refusal_message:
+                raise ReleaseApiError(422, status.refusal_code, message=status.refusal_message, nonretryable=True)
             if status.state != "committed":
                 raise ReleaseApiError(409, "release_result_not_verified")
+            configured = self._execution(store, scope, job_id)
             record = store.storage.snapshot()[job_id]
             package_id, attempt_id = record["attempt_key"].split("/", 1)
-            attempt = PublicationAttempt(package_id, attempt_id, record["attempt_prefix"])
+            attempt = PublicationAttempt(
+                package_id, attempt_id, record["attempt_prefix"], record["attempt_source_dataset_id"]
+            )
             actual = (
                 configured.destination.as_text()
                 if isinstance(configured.destination, BlobLocation)
@@ -1009,12 +1104,17 @@ class ReleaseService:
             if actual != record["destination"]:
                 raise ReleaseApiError(409, "configured_destination_changed")
             with _publication_runtime(configured.destination, attempt, store, job_id, status.fence, None) as publisher:
-                result = verify_published(publisher.store, record["commit_digest"])
+                result = verify_published(
+                    publisher.store,
+                    record["commit_digest"],
+                    expected_release_name=attempt.prefix,
+                    expected_source_dataset_id=record["attempt_source_dataset_id"],
+                )
                 artifacts = {
                     "manifest": MANIFEST_PATH,
                     "inventory": INVENTORY_PATH,
                     "receipt": RECEIPT_PATH,
-                    "report": REPORT_PATH,
+                    "checksums": CHECKSUMS_PATH,
                 }
                 if artifact is not None:
                     if artifact not in artifacts:
@@ -1023,12 +1123,26 @@ class ReleaseService:
                     return {
                         "schema": CAPABILITY_SCHEMA,
                         "artifact": artifact,
-                        "content": content.decode("utf-8") if artifact == "report" else json.loads(content),
+                        "content": content.decode("utf-8") if artifact == "checksums" else json.loads(content),
                     }
                 return {
                     "schema": CAPABILITY_SCHEMA,
                     "result": result.model_dump(mode="json"),
+                    "identity": {
+                        "release_name": result.identity.release_name,
+                        "source_dataset_id": result.identity.source_dataset_id,
+                    },
+                    "checksum_coverage": {
+                        "covered": result.checksum_covered_count,
+                        "omitted": result.checksum_omitted_count,
+                    },
                     "artifacts": list(artifacts),
+                    "registration": dict(status.registration) if status.registration else None,
+                    "azureml_registration_enabled": bool(
+                        self._settings.azureml_destinations
+                        and parse_strict_json(store.execution_binding(job_id)).get("destination")
+                        in self._settings.azureml_destinations
+                    ),
                 }
         except ReleaseJobError as error:
             raise _map_job_error(error) from error
@@ -1224,6 +1338,10 @@ class ReleaseService:
             raise ReleaseApiError(422, "release destination is unavailable or unsupported") from error
 
     async def _prepare(self, scope: str, spec: ReleaseSpec, destination: Path | BlobLocation) -> PreparedRelease:
+        if spec.destination in self._settings.azureml_destinations and not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._-]{0,29}", spec.dataset_name
+        ):
+            raise ReleaseApiError(422, "release_name_not_azureml_compatible")
         if self._planner is None:
             raise ReleaseApiError(503, "release planning is not configured")
         try:
@@ -1515,6 +1633,8 @@ def _status_body(status: JobStatus) -> dict[str, Any]:
         "diagnostics": dict(status.diagnostics),
         "recovery_required": status.recovery_required,
         "refusal_code": status.refusal_code,
+        "refusal_message": status.refusal_message,
+        "registration": dict(status.registration) if status.registration else None,
     }
 
 

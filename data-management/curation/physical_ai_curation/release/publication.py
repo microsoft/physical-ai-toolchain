@@ -18,7 +18,7 @@ from physical_ai_curation.release.canonical import (
     sha256_hex,
 )
 from physical_ai_curation.release.errors import ReleaseVerificationError
-from physical_ai_curation.release.models import MARKER_PATH, RECEIPT_PATH, REPORT_PATH, ReleaseResult, SourceObject
+from physical_ai_curation.release.models import CHECKSUMS_PATH, MARKER_PATH, RECEIPT_PATH, ReleaseResult, SourceObject
 from physical_ai_curation.release.store import CHUNK_BYTES, LocalReleaseStore
 from physical_ai_curation.release.verification import (
     CandidateVerification,
@@ -34,11 +34,12 @@ OPERATIONAL_RELEASE_NAMESPACES = frozenset({RELEASE_NAMESPACE, ASSOCIATION_NAMES
 
 @dataclass(frozen=True)
 class PublicationAttempt:
-    """Attempt identity and the selected dataset name beneath a configured destination."""
+    """Attempt identity, selected dataset name, and the trusted source dataset it publishes."""
 
     package_id: str
     attempt_id: str
     dataset_name: str | None = None
+    source_dataset_id: str | None = None
 
     def __post_init__(self) -> None:
         for value in (self.package_id, self.attempt_id):
@@ -52,6 +53,11 @@ class PublicationAttempt:
             or name == RELEASE_NAMESPACE
         ):
             raise ReleaseVerificationError("invalid release dataset name")
+        if self.source_dataset_id is not None and (
+            not isinstance(self.source_dataset_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,255}", self.source_dataset_id)
+        ):
+            raise ReleaseVerificationError("invalid source dataset identity")
 
     @property
     def prefix(self) -> str:
@@ -69,12 +75,15 @@ def ownership_path(dataset_name: str) -> str:
 
 
 def ownership_bytes(attempt: PublicationAttempt) -> bytes:
+    if attempt.source_dataset_id is None:
+        raise ReleaseVerificationError("release attempt requires a source dataset identity")
     return canonical_json_bytes(
         {
             "schema_version": "curated-release-ownership/v1",
             "package_id": attempt.package_id,
             "attempt_id": attempt.attempt_id,
             "dataset_name": attempt.prefix,
+            "source_dataset_id": attempt.source_dataset_id,
         }
     )
 
@@ -86,12 +95,15 @@ def parse_ownership(content: bytes, dataset_name: str) -> PublicationAttempt:
     record = parse_strict_json(content)
     if (
         not isinstance(record, dict)
-        or set(record) != {"schema_version", "package_id", "attempt_id", "dataset_name"}
+        or set(record) != {"schema_version", "package_id", "attempt_id", "dataset_name", "source_dataset_id"}
         or record["schema_version"] != "curated-release-ownership/v1"
         or record["dataset_name"] != dataset_name
+        or record["source_dataset_id"] is None
     ):
         raise ReleaseVerificationError("invalid release ownership")
-    return PublicationAttempt(record["package_id"], record["attempt_id"], record["dataset_name"])
+    return PublicationAttempt(
+        record["package_id"], record["attempt_id"], record["dataset_name"], record["source_dataset_id"]
+    )
 
 
 def local_dataset_admitted(root: Path) -> bool:
@@ -196,22 +208,44 @@ class LocalPublisher:
     def prepare(self, expected_manifest_sha256: str) -> CandidateVerification:
         """Verify destination content and journal derived controls before commit choice."""
         candidate = verify_candidate(self.store, expected_manifest_sha256)
-        for path, content in ((RECEIPT_PATH, candidate.receipt_bytes), (REPORT_PATH, candidate.report_bytes)):
+        for path, content in ((RECEIPT_PATH, candidate.receipt_bytes), (CHECKSUMS_PATH, candidate.checksums_bytes)):
             self.write(path, (content,), length=len(content), sha256=sha256_hex(content))
         return verify_candidate(self.store, expected_manifest_sha256)
 
     def publish(self, expected_manifest_sha256: str) -> ReleaseResult:
         """Create the final marker only under coordinator-owned publication authority."""
+        release_name, source_dataset_id = self._identity()
         if any(item.path == MARKER_PATH for item in self.store.list_objects()):
             with self.control.publication(self.attempt, expected_manifest_sha256):
-                return verify_published(self.store, expected_manifest_sha256)
+                return verify_published(
+                    self.store,
+                    expected_manifest_sha256,
+                    expected_release_name=release_name,
+                    expected_source_dataset_id=source_dataset_id,
+                )
         candidate = self.prepare(expected_manifest_sha256)
-        marker = build_marker(candidate)
+        marker = build_marker(candidate, release_name=release_name, source_dataset_id=source_dataset_id)
         with self.control.publication(self.attempt, expected_manifest_sha256):
             if any(item.path == MARKER_PATH for item in self.store.list_objects()):
-                return verify_published(self.store, expected_manifest_sha256)
+                return verify_published(
+                    self.store,
+                    expected_manifest_sha256,
+                    expected_release_name=release_name,
+                    expected_source_dataset_id=source_dataset_id,
+                )
             self._write_marker(marker, expected_manifest_sha256)
-            return verify_published(self.store, expected_manifest_sha256)
+            return verify_published(
+                self.store,
+                expected_manifest_sha256,
+                expected_release_name=release_name,
+                expected_source_dataset_id=source_dataset_id,
+            )
+
+    def _identity(self) -> tuple[str, str]:
+        """Return the release name and trusted source dataset that the marker must bind."""
+        if self.attempt.source_dataset_id is None:
+            raise ReleaseVerificationError("release attempt requires a source dataset identity")
+        return self.attempt.prefix, self.attempt.source_dataset_id
 
     def _write_marker(self, marker: bytes, expected_manifest_sha256: str) -> None:
         """Create the marker once; supervised publishers override this under a commit-bound intent."""
@@ -234,7 +268,13 @@ class LocalPublisher:
                     LocalReleaseStore(self.destination).read_control_bytes(ownership_path(record.stem), max_bytes=4096),
                     record.stem,
                 )
-                verified = verify_published(LocalReleaseStore(root))
+                if owner.source_dataset_id is None:
+                    continue
+                verified = verify_published(
+                    LocalReleaseStore(root),
+                    expected_release_name=record.stem,
+                    expected_source_dataset_id=owner.source_dataset_id,
+                )
             except (OSError, ReleaseVerificationError):
                 continue
             if verified.identity.package_id == owner.package_id:

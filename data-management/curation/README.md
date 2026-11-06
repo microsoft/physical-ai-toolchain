@@ -104,7 +104,9 @@ Use `verify_candidate` from `physical_ai_curation.release.verification` before
 publication and `verify_published` for a completed package. Supply an independently
 obtained `expected_manifest_sha256`. Without it, verification establishes internal
 consistency, not that the package is the intended release. Verification does not
-authenticate its producer or certify recording dates, provenance truth or quality.
+authenticate its producer or certify recording dates, provenance truth or quality. The derived
+`checksums.sha256` is a convenience for standard tools and does not replace
+`verify_published`.
 
 ### Headless Client
 
@@ -126,7 +128,8 @@ python -m physical_ai_curation.release.client [--base-url URL] [--timeout-second
 | `list [--cursor N] [--limit N] [--dataset-id ID]`                                                                   | List jobs                                                              |
 | `accepted-request --idempotency-key K`                                                                              | Recover acceptance after a lost response                               |
 | `cancel JOB_ID`, `recover JOB_ID`, `result JOB_ID`                                                                  | Job control and verified result                                        |
-| `artifact JOB_ID ALIAS`                                                                                             | Download `manifest`, `inventory`, `receipt` or `report`                |
+| `retry-registration JOB_ID`                                                                                         | Retry AML registration of a committed release without republishing     |
+| `artifact JOB_ID ALIAS`                                                                                             | Download `manifest`, `inventory`, `receipt` or `checksums`             |
 | `inventory DATASET_ID [--cursor N] [--limit N]`                                                                     | Source and saved-evidence inventory                                    |
 | `source-releases DATASET_ID`, `source-release DATASET_ID HANDLE`                                                    | Retained releases for a source                                         |
 | `source-episodes DATASET_ID HANDLE [--cursor N] [--limit N]`                                                        | Episodes in a retained release                                         |
@@ -147,6 +150,23 @@ accepted request before retrying. For stale selection, fetch current inventory a
 preview again. Cancellation is not immediate cleanup: inspect effects stopped,
 cleanup and capacity status. Once committing has begun, recover the exact committed
 result instead of trying to cancel it. Never delete job records to clear a reservation.
+
+AML registration is optional and runs after publication commits. Its status is
+separate from publication: a failed registration does not invalidate the verified
+release or require publication recovery. Configure it through the
+[viewer registration settings](../viewer/README.md#optional-azure-ml-registration).
+
+Registration includes destination verification and an AML request, which can exceed
+the client's default 10-second request timeout. Use the existing timeout option:
+
+```bash
+python -m physical_ai_curation.release.client --timeout-seconds 60 retry-registration JOB_ID
+```
+
+A disconnected request can still finish on the server. Read `status JOB_ID` before
+retrying; a pending registration is already owned by an active attempt. Matching
+existing assets are confirmed without updates; conflicting paths or properties are
+refused rather than overwritten.
 
 ### Clean Start After Release Contract Changes
 

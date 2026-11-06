@@ -171,6 +171,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._reply(202, {"job_id": JOB_ID, "state": "cancelled"})
         elif route == ("POST", f"{API_PREFIX}/jobs/{JOB_ID}/recover"):
             self._reply(202, {"job_id": JOB_ID, "state": "recovering"})
+        elif route == ("POST", f"{API_PREFIX}/jobs/{JOB_ID}/registration"):
+            self._reply(200, {"job_id": JOB_ID, "state": "committed", "registration": {"status": "registered"}})
         elif route == ("GET", f"{API_PREFIX}/jobs/{JOB_ID}/artifacts/manifest"):
             self._reply(200, {"alias": "manifest"})
         elif path.startswith(f"{API_PREFIX}/inventory/"):
@@ -882,7 +884,11 @@ def test_given_empty_dataset_filter_when_list_then_refused_without_request(
 
 @pytest.mark.parametrize(
     ("command", "suffix"),
-    [pytest.param("cancel", "cancel", id="cancel"), pytest.param("recover", "recover", id="recover")],
+    [
+        pytest.param("cancel", "cancel", id="cancel"),
+        pytest.param("recover", "recover", id="recover"),
+        pytest.param("retry-registration", "registration", id="registration"),
+    ],
 )
 def test_given_mutation_when_main_then_post_carries_matching_csrf_and_key(
     api: FakeReleaseApi, capsys: pytest.CaptureFixture[str], command: str, suffix: str
@@ -917,7 +923,7 @@ def test_given_cancel_when_csrf_cookie_withheld_then_no_post_sent(
     assert all(item.method == "GET" for item in api.requests)
 
 
-@pytest.mark.parametrize("command", ["cancel", "recover"])
+@pytest.mark.parametrize("command", ["cancel", "recover", "retry-registration"])
 def test_given_malformed_job_id_when_mutation_then_refused_without_request(
     api: FakeReleaseApi, capsys: pytest.CaptureFixture[str], command: str
 ) -> None:

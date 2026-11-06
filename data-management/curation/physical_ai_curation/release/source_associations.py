@@ -50,6 +50,7 @@ class SourceAssociationIntent(ReleaseModel):
     source_relative_path: ReleasePath
     effective_destination: NonEmptyStr
     attempt: PublicationAttempt
+    source_dataset_id: NonEmptyStr
     frozen_input_sha256: Sha256Hex
     display_name: NonEmptyStr
     description: str
@@ -60,6 +61,8 @@ class SourceAssociationIntent(ReleaseModel):
     def validate_identity(self) -> Self:
         if self.source_key != source_association_key(self.source_identity):
             raise ValueError("source association key does not match identity")
+        if self.attempt.source_dataset_id != self.source_dataset_id:
+            raise ValueError("source dataset identity does not match attempt")
         if datetime.fromisoformat(self.accepted_at).utcoffset() is None:
             raise ValueError("association acceptance time must include a timezone")
         return self
@@ -310,11 +313,20 @@ class LocalSourceAssociations:
                 ),
                 intent.attempt.prefix,
             )
-            if (owner.key, owner.prefix) != (intent.attempt.key, intent.attempt.prefix):
+            if (owner.key, owner.prefix, owner.source_dataset_id) != (
+                intent.attempt.key,
+                intent.attempt.prefix,
+                intent.source_dataset_id,
+            ):
                 return None
             root = self.collection / owner.prefix
             store = LocalReleaseStore(root)
-            verified = verify_published(store, record.checkpoint.manifest_sha256)
+            verified = verify_published(
+                store,
+                record.checkpoint.manifest_sha256,
+                expected_release_name=intent.attempt.prefix,
+                expected_source_dataset_id=intent.source_dataset_id,
+            )
             manifest = parse_strict_json(store.read_control_bytes(MANIFEST_PATH, max_bytes=MAX_CONTROL_BYTES))
             if (
                 verified.identity.package_id == owner.package_id

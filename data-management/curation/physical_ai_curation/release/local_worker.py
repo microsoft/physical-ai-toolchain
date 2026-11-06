@@ -153,7 +153,12 @@ class SupervisedLocalPublisher(LocalPublisher):
                 "content": base64.b64encode(marker).decode("ascii"),
                 "marker": True,
                 "manifest_digest": expected_manifest_sha256,
-                "attempt": [self.attempt.package_id, self.attempt.attempt_id, self.attempt.prefix],
+                "attempt": [
+                    self.attempt.package_id,
+                    self.attempt.attempt_id,
+                    self.attempt.prefix,
+                    self.attempt.source_dataset_id,
+                ],
             },
         )
         try:

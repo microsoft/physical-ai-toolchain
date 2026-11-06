@@ -25,6 +25,7 @@ import {
   type ReleaseRequest,
   ReleaseRequestError,
   type ReleaseSubmission,
+  retryReleaseRegistration,
   submitRelease,
 } from '@/api/releases'
 
@@ -455,6 +456,14 @@ export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: 
     queryKey: ['releases', 'result', scopeId, jobId],
     queryFn: () => getReleaseResult(jobId as string),
     enabled: Boolean(jobId && scopeId && status.data?.state === 'committed'),
+    refetchInterval: (query) => {
+      const current = query.state.data
+      return current?.azuremlRegistrationEnabled &&
+        (!current.registration || current.registration.status === 'pending') &&
+        query.state.dataUpdateCount < MAX_STATUS_POLLS
+        ? POLL_INTERVAL_MS
+        : false
+    },
   })
 
   const jobs = useInfiniteQuery({
@@ -548,6 +557,17 @@ export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: 
   })
 
   const { mutateAsync: submitAsync } = submitMutation
+  const registrationMutation = useMutation({
+    mutationFn: (id: string) => retryReleaseRegistration(id),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['releases', 'job', scopeId] }),
+        queryClient.invalidateQueries({ queryKey: ['releases', 'result', scopeId] }),
+      ])
+    },
+  })
+
+  const { mutateAsync: registerAsync } = registrationMutation
   const { mutateAsync: cancelAsync } = cancelMutation
   const { mutateAsync: recoverAsync } = recoverMutation
 
@@ -684,6 +704,9 @@ export function useRelease(datasetId: string, scopeId: string, sourceIdentity?: 
     isCancelling: cancelMutation.isPending,
     recover,
     isRecovering: recoverMutation.isPending,
+    retryRegistration: () =>
+      jobId ? registerAsync(jobId) : Promise.reject(new Error('no_active_job')),
+    isRegistering: registrationMutation.isPending,
     startNew,
   }
 }

@@ -132,7 +132,9 @@ async function downloadArtifact(jobId: string, name: string): Promise<void> {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `${name}.${text === null ? 'json' : 'txt'}`
+  const fileName =
+    name === 'checksums' ? 'checksums.sha256' : `${name}.${text === null ? 'json' : 'txt'}`
+  link.download = fileName
   document.body.append(link)
   link.click()
   link.remove()
@@ -151,7 +153,7 @@ function describeJobStatus(status: ReleaseJobStatus | undefined, failed: boolean
   if (failed) return 'Job status could not be loaded.'
   if (!status) return 'Loading job status...'
   if (status.state === 'needs_input') {
-    return `Needs input: ${status.refusalCode ?? 'submission_refused'}. Cancel this job and submit a corrected request.`
+    return `Needs input: ${status.refusalMessage ?? status.refusalCode ?? 'submission_refused'}. Cancel this job and submit a corrected request.`
   }
   if (status.recoveryRequired && !status.cancelRequested) {
     return 'Stalled. Recovery required. Cancel job to remove partial output, or Recover job to retry.'
@@ -496,6 +498,7 @@ function ReleaseWorkspaceContent({
     !release.isCancelling
   const canRecover =
     status !== undefined &&
+    status.state !== 'needs_input' &&
     (RECOVERABLE_STATES.has(status.state) || status.recoveryRequired) &&
     !release.isRecovering
   const cleanupFailed = status?.state === 'cancelling' && status.cleanupState === 'failed'
@@ -523,6 +526,7 @@ function ReleaseWorkspaceContent({
   }, [activeState, queryClient, scopeId, datasetId])
 
   const result: ReleaseResult | undefined = release.result.data
+  const registration = result?.azuremlRegistrationEnabled ? result.registration : null
   const dialogItems: ReleaseItem[] = release.inventoryItems.map(toReleaseItem)
   const inventoryMessage = release.inventory.isError
     ? 'Source inventory could not be loaded. Release selection is unavailable.'
@@ -722,6 +726,49 @@ function ReleaseWorkspaceContent({
               <AlertDescription>The verified result could not be loaded.</AlertDescription>
             </Alert>
           )}
+          {result?.identity && (
+            <dl className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-x-3 gap-y-1 text-sm wrap-anywhere">
+              <dt className="text-muted-foreground">Source dataset ID</dt>
+              <dd>{result.identity.sourceDatasetId}</dd>
+              <dt className="text-muted-foreground">Release name</dt>
+              <dd>{result.identity.releaseName}</dd>
+              {result.checksumCoverage && (
+                <>
+                  <dt className="text-muted-foreground">Checksums covered</dt>
+                  <dd>{result.checksumCoverage.covered}</dd>
+                  <dt className="text-muted-foreground">Checksums omitted</dt>
+                  <dd>{result.checksumCoverage.omitted}</dd>
+                </>
+              )}
+            </dl>
+          )}
+          {result?.azuremlRegistrationEnabled && (
+            <div className="grid min-w-0 gap-2 text-sm">
+              <p role="status" aria-live="polite">
+                Azure ML: {registration?.status.replaceAll('_', ' ') ?? 'awaiting registration'}
+                {registration?.lastErrorCategory ? ` (${registration.lastErrorCategory})` : ''}
+              </p>
+              {registration && (
+                <p className="font-mono wrap-anywhere">
+                  azureml:{registration.assetName}:{registration.assetVersion}
+                </p>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="justify-self-start"
+                disabled={release.isRegistering || registration?.status === 'pending'}
+                aria-busy={release.isRegistering}
+                onClick={() => void runAction(release.retryRegistration)}
+              >
+                <RefreshCw
+                  aria-hidden="true"
+                  className={release.isRegistering ? 'animate-spin' : undefined}
+                />
+                Retry registration
+              </Button>
+            </div>
+          )}
           {result && (
             <ul className="flex flex-wrap gap-2">
               {result.artifacts.map((name) => (
@@ -883,6 +930,9 @@ function ReleaseWorkspaceContent({
         onRequestDetails={release.requestDetails}
         detailError={release.detailError}
         destinations={destinations}
+        azuremlDestinations={capabilities?.destinations
+          .filter((destination) => destination.azuremlRegistrationEnabled === true)
+          .map((destination) => destination.alias)}
         onPreview={release.preview}
         onCancelPreparation={release.cancelPreparation}
         onSubmit={submitFromDialog}

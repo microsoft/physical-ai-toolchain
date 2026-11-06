@@ -96,7 +96,7 @@ jobs:
           rm -f ../../../logs/coverage-curation.xml
           rm -f ../../../logs/coverage-dataset-io.xml
 
-          if [ ! -s .coverage ]; then
+          if [ ! -s ../../../logs/coverage-dataviewer/.coverage ]; then
             echo "::warning::Coverage data is unavailable; scoped reports cannot be generated."
             exit 1
           fi
@@ -191,6 +191,8 @@ jobs:
 
       - name: Run product-owned judge unit tests
         id: judge_unit
+        env:
+          COVERAGE_FILE: ${{ github.workspace }}/logs/coverage-vlm-judge/.coverage
         run: |
           uv run --project ../../.. --all-packages --no-sync --frozen pytest -v -c ../../../evaluation/vlm_judge/pyproject.toml ../../../evaluation/tests/vlm_judge --junitxml=../../../logs/pytest-vlm-judge-results.xml --cov-report=xml:../../../logs/coverage-vlm-judge.xml --cov-fail-under=35
           test -s ../../../logs/coverage-vlm-judge.xml

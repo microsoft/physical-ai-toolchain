@@ -24,7 +24,7 @@ from ..services.release_service import (
 class ReleaseErrorBody(BaseModel):
     """Release failures or FastAPI request-validation details."""
 
-    detail: dict[str, str] | list[dict[str, Any]]
+    detail: dict[str, Any] | list[dict[str, Any]]
 
 
 router = APIRouter(responses={422: {"model": ReleaseErrorBody}})
@@ -66,9 +66,11 @@ class ReleaseSpecBody(BaseModel):
 
 
 def _raise(error: ReleaseApiError) -> NoReturn:
-    raise HTTPException(
-        status_code=error.status_code, detail={"schema": "curated-release-api/v1", "code": error.detail}
-    ) from error
+    detail: dict[str, Any] = {"schema": "curated-release-api/v1", "code": error.detail}
+    if error.nonretryable:
+        detail["nonretryable"] = True
+        detail["message"] = error.message
+    raise HTTPException(status_code=error.status_code, detail=detail) from error
 
 
 def _sanitized(value: Any) -> Any:
@@ -258,6 +260,21 @@ async def cancel_job(
         _raise(error)
 
 
+@router.post("/jobs/{job_id}/registration", dependencies=[Depends(require_csrf_token)])
+async def retry_registration(
+    job_id: JobId,
+    principal: PrincipalContext = Depends(require_principal_context),
+    service: ReleaseService = Depends(get_release_service),
+) -> dict[str, Any]:
+    """Retry registration of a caller-owned committed release without republishing it."""
+    try:
+        return await service.control(
+            service.retry_registration, _scope(principal), job_id.replace("\r", "").replace("\n", "")
+        )
+    except ReleaseApiError as error:
+        _raise(error)
+
+
 @router.get("/inventory/{dataset_id}")
 async def source_inventory(
     dataset_id: str,
@@ -422,7 +439,9 @@ async def get_source_episode_media(
 @router.get("/jobs/{job_id}/artifacts/{artifact}")
 async def get_artifact(
     job_id: JobId,
-    artifact: str,
+    artifact: Annotated[
+        str, Path(description="Supported artifacts: manifest, inventory, receipt, checksums. Others return 404.")
+    ],
     principal: PrincipalContext = Depends(require_principal_context),
     service: ReleaseService = Depends(get_release_service),
 ) -> dict[str, Any]:

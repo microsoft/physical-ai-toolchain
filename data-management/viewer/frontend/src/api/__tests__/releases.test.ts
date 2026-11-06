@@ -20,6 +20,7 @@ import {
   recoverReleaseJob,
   type ReleaseRequest,
   ReleaseRequestError,
+  retryReleaseRegistration,
   submitRelease,
 } from '../releases'
 
@@ -56,6 +57,25 @@ function sentBody(callIndex = 0): Record<string, unknown> {
 
 beforeEach(() => {
   mockApiFetch.mockReset()
+})
+
+describe('getReleaseResult', () => {
+  it('converts verified marker identity and checksum coverage for the workspace', async () => {
+    mockApiFetch.mockResolvedValueOnce(
+      jsonResponse({
+        schema: 'curated-release-api/v1',
+        result: { publication_state: 'published' },
+        identity: { release_name: 'release-a', source_dataset_id: 'org--dataset' },
+        checksum_coverage: { covered: 12, omitted: 2 },
+        artifacts: ['manifest', 'inventory', 'receipt', 'checksums'],
+      }),
+    )
+
+    const result = await getReleaseResult('job-a')
+
+    expect(result.identity).toEqual({ releaseName: 'release-a', sourceDatasetId: 'org--dataset' })
+    expect(result.checksumCoverage).toEqual({ covered: 12, omitted: 2 })
+  })
 })
 
 describe('getReleaseCapabilities', () => {
@@ -298,6 +318,7 @@ describe('retained release routes', () => {
   it.each([
     [cancelReleaseJob, 'cancel'],
     [recoverReleaseJob, 'recover'],
+    [retryReleaseRegistration, 'registration'],
   ] as const)('posts an explicit lifecycle action: %s', async (action, suffix) => {
     mockApiFetch.mockResolvedValue(jsonResponse({ job_id: 'accepted' }))
     expect(await action('job/a')).toEqual({ jobId: 'accepted' })

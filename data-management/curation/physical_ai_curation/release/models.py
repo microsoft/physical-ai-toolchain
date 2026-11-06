@@ -7,12 +7,14 @@ Closure rules:
 * The inventory never lists itself or another control artifact.
 * The manifest binds the inventory, frozen input, preview, and provenance
   mappings. It never hashes itself.
-* The candidate receipt and report bind the manifest digest. The marker binds
-  the manifest, inventory, receipt, and report digests, and is the only
-  artifact without a digest.
-* Candidate closure is inventory plus manifest, inventory, receipt, and report,
-  with no marker. Public closure is inventory plus all five control artifacts,
-  with the marker required.
+* The candidate receipt binds the manifest digest. The checksums file lists
+  SHA-256 digests in `sha256sum` format for the manifest and every content
+  entry that carries a content digest. Storage-revision entries are omitted
+  and counted in the receipt. The marker binds the manifest, inventory,
+  receipt, and checksums digests, and is the only artifact without a digest.
+* Candidate closure is inventory plus manifest, inventory, receipt, and
+  checksums, with no marker. Public closure is inventory plus all five control
+  artifacts, with the marker required.
 
 Each artifact carries its own `schema_version`. Only major version 2 is
 supported; major version 1 inventories lack assurance discriminators and are
@@ -28,7 +30,6 @@ from typing import Annotated, Literal, Self
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from physical_ai_curation.release.canonical import canonical_json_bytes, normalize_release_path, parse_strict_json
-from physical_ai_curation.release.errors import ReleaseVerificationError
 
 SUPPORTED_MAJOR = 2
 SCHEMA_VERSION = "2.0.0"
@@ -38,13 +39,12 @@ CANDIDATE_ASSURANCE = "candidate_internal_consistency"
 MANIFEST_PATH = "release/manifest.json"
 INVENTORY_PATH = "release/inventory.json"
 RECEIPT_PATH = "release/receipt.json"
-REPORT_PATH = "release/report.md"
-MARKER_PATH = "release/marker.json"
-CONTROL_PATHS = frozenset({MANIFEST_PATH, INVENTORY_PATH, RECEIPT_PATH, REPORT_PATH, MARKER_PATH})
-CANDIDATE_CONTROL_PATHS = frozenset({MANIFEST_PATH, INVENTORY_PATH, RECEIPT_PATH, REPORT_PATH})
+CHECKSUMS_PATH = "checksums.sha256"
+MARKER_PATH = ".published.json"
+CONTROL_PATHS = frozenset({MANIFEST_PATH, INVENTORY_PATH, RECEIPT_PATH, CHECKSUMS_PATH, MARKER_PATH})
+CANDIDATE_CONTROL_PATHS = frozenset({MANIFEST_PATH, INVENTORY_PATH, RECEIPT_PATH, CHECKSUMS_PATH})
 
 _SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
-_REPORT_FIELD = re.compile(r"^- ([a-z0-9_]+): (.+)$", re.MULTILINE)
 
 
 def _check_schema_version(value: str) -> str:
@@ -392,22 +392,12 @@ class VerificationReceipt(ReleaseModel):
     content_digest_count: NonNegativeInt
     uploaded_content_count: NonNegativeInt
     storage_revision_count: NonNegativeInt
+    checksum_covered_count: NonNegativeInt
+    checksum_omitted_count: NonNegativeInt
     payload_byte_count: NonNegativeInt
     episode_mapping_count: NonNegativeInt
     frame_mapping_count: NonNegativeInt
     checks: tuple[NonEmptyStr, ...]
-
-
-class ReleaseReport(ReleaseModel):
-    """Readable candidate report bound to the manifest digest."""
-
-    schema_version: SchemaVersion = SCHEMA_VERSION
-    package_id: NonEmptyStr
-    verification_mode: Literal["candidate"] = "candidate"
-    manifest_sha256: Sha256Hex
-    content_digest_count: NonNegativeInt = 0
-    uploaded_content_count: NonNegativeInt = 0
-    storage_revision_count: NonNegativeInt = 0
 
 
 class ReleaseMarker(ReleaseModel):
@@ -415,18 +405,24 @@ class ReleaseMarker(ReleaseModel):
 
     schema_version: SchemaVersion = SCHEMA_VERSION
     package_id: NonEmptyStr
+    release_name: NonEmptyStr
+    source_dataset_id: NonEmptyStr
     manifest_sha256: Sha256Hex
     inventory_sha256: Sha256Hex
     receipt_sha256: Sha256Hex
-    report_sha256: Sha256Hex
+    checksums_sha256: Sha256Hex
+    checksum_covered_count: NonNegativeInt
+    checksum_omitted_count: NonNegativeInt
     status: Literal["final"] = "final"
 
 
 class PackageIdentity(ReleaseModel):
-    """Immutable package identity."""
+    """Immutable package identity; published identity also binds release name and source dataset."""
 
     package_id: NonEmptyStr
     manifest_sha256: Sha256Hex
+    release_name: NonEmptyStr | None = None
+    source_dataset_id: NonEmptyStr | None = None
 
 
 class JobStatus(ReleaseModel):
@@ -449,6 +445,8 @@ class ReleaseResult(ReleaseModel):
     schema_version: SchemaVersion = SCHEMA_VERSION
     identity: PackageIdentity
     publication_state: Literal["candidate", "published"]
+    checksum_covered_count: NonNegativeInt | None = None
+    checksum_omitted_count: NonNegativeInt | None = None
     job: JobStatus | None = None
     integrations: list[IntegrationStatus] = Field(default_factory=list)
 
@@ -457,46 +455,12 @@ class ReleaseResult(ReleaseModel):
         registered = any(item.state == "registered" for item in self.integrations)
         if registered and self.publication_state != "published":
             raise ValueError("integration registration requires published core publication")
+        if self.publication_state == "published" and (
+            self.identity.release_name is None or self.identity.source_dataset_id is None
+        ):
+            raise ValueError("published identity requires release name and source dataset")
         return self
 
     @property
     def discoverable(self) -> bool:
         return self.publication_state == "published"
-
-
-def render_report(report: ReleaseReport) -> bytes:
-    """Render the readable report deterministically."""
-    lines = [
-        "# Release verification report",
-        "",
-        f"- report_schema_version: {report.schema_version}",
-        f"- package_id: {report.package_id}",
-        f"- verification_mode: {report.verification_mode}",
-        f"- manifest_sha256: {report.manifest_sha256}",
-        f"- content_digest_count: {report.content_digest_count}",
-        f"- uploaded_content_count: {report.uploaded_content_count}",
-        f"- storage_revision_count: {report.storage_revision_count}",
-        "",
-    ]
-    return "\n".join(lines).encode("utf-8")
-
-
-def parse_report(content: bytes) -> ReleaseReport:
-    """Parse a report; callers must re-render and compare bytes."""
-    try:
-        text = content.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise ReleaseVerificationError("report must be UTF-8") from exc
-    fields = dict(_REPORT_FIELD.findall(text))
-    try:
-        return ReleaseReport(
-            schema_version=fields.get("report_schema_version", ""),
-            package_id=fields.get("package_id", ""),
-            verification_mode=fields.get("verification_mode", ""),
-            manifest_sha256=fields.get("manifest_sha256", ""),
-            content_digest_count=int(fields.get("content_digest_count", "-1")),
-            uploaded_content_count=int(fields.get("uploaded_content_count", "-1")),
-            storage_revision_count=int(fields.get("storage_revision_count", "-1")),
-        )
-    except ValueError as exc:
-        raise ReleaseVerificationError("invalid release report") from exc

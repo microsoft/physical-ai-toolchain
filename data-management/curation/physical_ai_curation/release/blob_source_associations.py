@@ -224,11 +224,20 @@ class BlobSourceAssociations:
             self._read_control(ownership_name, limit=_MAX_OWNERSHIP_BYTES),
             intent.attempt.prefix,
         )
-        if (owner.key, owner.prefix) != (intent.attempt.key, intent.attempt.prefix):
+        if (owner.key, owner.prefix, owner.source_dataset_id) != (
+            intent.attempt.key,
+            intent.attempt.prefix,
+            intent.attempt.source_dataset_id,
+        ):
             return None
         root = f"{_child(self.collection.prefix, owner.prefix)}/"
         store = BlobReleaseStore(self.container, root)
-        verified = verify_published(store, record.checkpoint.manifest_sha256)
+        verified = verify_published(
+            store,
+            record.checkpoint.manifest_sha256,
+            expected_release_name=owner.prefix,
+            expected_source_dataset_id=owner.source_dataset_id,
+        )
         manifest = parse_strict_json(store.read_control_bytes(MANIFEST_PATH, max_bytes=MAX_CONTROL_BYTES))
         if verified.identity.package_id != owner.package_id:
             return None

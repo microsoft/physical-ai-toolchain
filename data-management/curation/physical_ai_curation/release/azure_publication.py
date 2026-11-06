@@ -18,10 +18,10 @@ from urllib.parse import urlsplit
 from physical_ai_curation.release.canonical import canonical_json_bytes, normalize_release_path, sha256_hex
 from physical_ai_curation.release.errors import ReleaseVerificationError
 from physical_ai_curation.release.models import (
+    CHECKSUMS_PATH,
     CONTROL_PATHS,
     MARKER_PATH,
     RECEIPT_PATH,
-    REPORT_PATH,
     ReleaseResult,
     SourceObject,
     SourceObjectRecord,
@@ -467,7 +467,7 @@ class BlobPublisher:
         """Verify destination bytes and persist the canonical derived controls."""
         self._require_settled()
         candidate = verify_candidate(self.store, expected_manifest_sha256)
-        for path, content in ((RECEIPT_PATH, candidate.receipt_bytes), (REPORT_PATH, candidate.report_bytes)):
+        for path, content in ((RECEIPT_PATH, candidate.receipt_bytes), (CHECKSUMS_PATH, candidate.checksums_bytes)):
             self.write(path, (content,), length=len(content), sha256=sha256_hex(content))
         return verify_candidate(self.store, expected_manifest_sha256)
 
@@ -477,7 +477,14 @@ class BlobPublisher:
             with self.control.publication(self.attempt, expected_manifest_sha256):
                 return verify_published(self.store, expected_manifest_sha256)
         candidate = self.prepare(expected_manifest_sha256)
-        self._publish_marker(build_marker(candidate), expected_manifest_sha256=expected_manifest_sha256)
+        if self.attempt.source_dataset_id is None:
+            raise ReleaseVerificationError("publication attempt has no source dataset identity")
+        marker = build_marker(
+            candidate,
+            release_name=self.attempt.prefix,
+            source_dataset_id=self.attempt.source_dataset_id,
+        )
+        self._publish_marker(marker, expected_manifest_sha256=expected_manifest_sha256)
         return verify_published(self.store, expected_manifest_sha256)
 
     def discover(self) -> list[str]:

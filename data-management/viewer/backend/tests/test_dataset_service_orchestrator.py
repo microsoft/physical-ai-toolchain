@@ -606,7 +606,10 @@ class TestDatasetDiscovery:
         assert await service.get_source_revision("dataset", 0) == (replacement_source, replacement_revision)
 
     @pytest.mark.asyncio
-    async def test_given_blob_generation_when_etag_changes_then_revision_changes(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("cold_cache", [False, True])
+    async def test_given_blob_generation_when_etag_changes_then_revision_changes(
+        self, tmp_path: Path, cold_cache: bool
+    ) -> None:
         blob = MagicMock()
         blob.get_blob_properties = AsyncMock(return_value=SimpleNamespace(etag='"generation-one"'))
         container = MagicMock()
@@ -615,8 +618,10 @@ class TestDatasetDiscovery:
         client.get_container_client.return_value = container
         provider = _make_provider(account_name="synthetic", container_name="datasets")
         provider._get_client = AsyncMock(return_value=client)
+        provider.get_info_json = AsyncMock(return_value={"total_episodes": 1, "fps": 30.0})
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        service._blob_dataset_ids.add("owner--dataset")
+        if not cold_cache:
+            service._blob_dataset_ids.add("owner--dataset")
 
         source_id, revision = await service.get_source_revision("owner--dataset", 0)
         blob.get_blob_properties.return_value = SimpleNamespace(etag='"generation-two"')
@@ -626,6 +631,10 @@ class TestDatasetDiscovery:
         assert changed_revision != revision
         assert "synthetic" not in source_id
         assert container.get_blob_client.call_args.args[0] == "owner/dataset/meta/info.json"
+        if cold_cache:
+            provider.get_info_json.assert_awaited_once_with("owner--dataset")
+        else:
+            provider.get_info_json.assert_not_awaited()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("failure", [False, True])

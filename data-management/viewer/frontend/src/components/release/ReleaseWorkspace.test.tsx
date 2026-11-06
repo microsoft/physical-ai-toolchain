@@ -103,6 +103,8 @@ function makeRelease(patch: Record<string, unknown> = {}) {
     isCancelling: false,
     recover: vi.fn().mockResolvedValue(undefined),
     isRecovering: false,
+    retryRegistration: vi.fn().mockResolvedValue(undefined),
+    isRegistering: false,
     startNew: vi.fn(),
     selectJob: vi.fn(),
     hasPendingSubmission: false,
@@ -125,6 +127,63 @@ function renderWorkspace() {
 }
 
 describe('ReleaseWorkspace', () => {
+  it('keeps verified artifacts available after a registration failure and retries only registration', async () => {
+    const user = userEvent.setup()
+    const release = makeRelease({
+      activeJobId: JOB_ID,
+      status: { data: statusOf('committed') },
+      result: {
+        data: {
+          azuremlRegistrationEnabled: true,
+          registration: {
+            status: 'failed',
+            assetName: 'dataset-a',
+            assetVersion: 'release-a',
+            lastErrorCategory: 'provider_error',
+            attemptedAt: 1,
+          },
+          artifacts: ['manifest', 'checksums'],
+        },
+      },
+    })
+    vi.mocked(useRelease).mockReturnValue(release)
+    renderWorkspace()
+    expect(screen.getByText('azureml:dataset-a:release-a')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Download checksums' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Retry registration' }))
+    expect(release.retryRegistration).toHaveBeenCalledOnce()
+    expect(release.recover).not.toHaveBeenCalled()
+    expect(release.submit).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])(
+    'shows registration controls only when enabled and disables pending work: %s',
+    (enabled) => {
+      vi.mocked(useRelease).mockReturnValue(
+        makeRelease({
+          activeJobId: JOB_ID,
+          status: { data: statusOf('committed') },
+          result: {
+            data: {
+              azuremlRegistrationEnabled: enabled,
+              registration: {
+                status: 'pending',
+                assetName: 'dataset-a',
+                assetVersion: 'release-a',
+                lastErrorCategory: null,
+                attemptedAt: 1,
+              },
+              artifacts: ['checksums'],
+            },
+          },
+        }),
+      )
+      renderWorkspace()
+      if (enabled) expect(screen.getByRole('button', { name: 'Retry registration' })).toBeDisabled()
+      else expect(screen.queryByText('azureml:dataset-a:release-a')).not.toBeInTheDocument()
+    },
+  )
+
   beforeEach(() => {
     dialogSpy.props = null
     vi.mocked(usePrincipalContext).mockReturnValue({ data: { scopeId: 'scope-1' } } as never)
@@ -368,6 +427,27 @@ describe('ReleaseWorkspace', () => {
     )
     renderWorkspace()
     expect(screen.getByText(/Needs input: processing_confirmation_required/)).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Cancel job' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Recover job' })).toBeDisabled()
+  })
+
+  it('shows the source refusal reason and cannot recover unchanged malformed metadata', () => {
+    vi.mocked(useRelease).mockReturnValue(
+      makeRelease({
+        activeJobId: JOB_ID,
+        status: {
+          data: statusOf('needs_input', {
+            refusalCode: 'source_object_reference_invalid',
+            refusalMessage: 'Source metadata has a missing or invalid chunk or file index.',
+            recoveryRequired: true,
+          }),
+        },
+      }),
+    )
+    renderWorkspace()
+    expect(
+      screen.getByText(/Source metadata has a missing or invalid chunk or file index/),
+    ).toBeVisible()
     expect(screen.getByRole('button', { name: 'Cancel job' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Recover job' })).toBeDisabled()
   })
@@ -687,11 +767,36 @@ describe('ReleaseWorkspace', () => {
     expect(screen.queryByText(/private provider detail/)).not.toBeInTheDocument()
   })
 
+  it('shows the camel-cased verified identity and checksum coverage', () => {
+    vi.mocked(useRelease).mockReturnValue(
+      makeRelease({
+        activeJobId: JOB_ID,
+        status: { data: statusOf('committed') },
+        result: {
+          data: {
+            schema: 'curated-release-api/v1',
+            result: {},
+            identity: { releaseName: 'release-a', sourceDatasetId: 'org--dataset' },
+            checksumCoverage: { covered: 12, omitted: 2 },
+            artifacts: ['checksums'],
+          },
+        },
+      }),
+    )
+    renderWorkspace()
+
+    const result = screen.getByRole('region', { name: 'Verified result' })
+    expect(result).toHaveTextContent('Source dataset IDorg--dataset')
+    expect(result).toHaveTextContent('Release namerelease-a')
+    expect(result).toHaveTextContent('Checksums covered12')
+    expect(result).toHaveTextContent('Checksums omitted2')
+  })
+
   it.each([
     ['manifest', { source_revision: 'r1' }, 'json'],
     ['inventory', { objects: [] }, 'json'],
     ['receipt', { verified: true }, 'json'],
-    ['report', 'verified', 'txt'],
+    ['checksums', 'verified', 'sha256'],
   ])(
     'downloads verified %s content and releases its object URL',
     async (name, content, extension) => {

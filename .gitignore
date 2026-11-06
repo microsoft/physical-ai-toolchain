@@ -170,6 +170,7 @@ coverage/
 
 # Visual Studio code coverage results
 *.coverage
+.coverage.*
 *.coveragexml
 
 # NCrunch

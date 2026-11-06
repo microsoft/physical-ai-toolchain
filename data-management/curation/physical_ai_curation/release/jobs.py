@@ -20,7 +20,7 @@ from uuid import uuid4
 
 from physical_ai_curation.release.canonical import normalize_release_path, parse_strict_json
 from physical_ai_curation.release.errors import ReleaseVerificationError
-from physical_ai_curation.release.models import MARKER_PATH, RECEIPT_PATH, REPORT_PATH
+from physical_ai_curation.release.models import CHECKSUMS_PATH, MARKER_PATH, RECEIPT_PATH
 from physical_ai_curation.release.publication import PublicationAttempt, ownership_bytes, ownership_path
 from physical_ai_curation.release.record_storage import BlobLocation, LocalRecordStorage, RecordLimits, RecordStorage
 from physical_ai_curation.release.source_associations import SourceAssociationIntent
@@ -41,9 +41,32 @@ MAX_REQUEST_BYTES = 256 * 1024
 MIN_LEASE_SECONDS = 5
 MAX_LEASE_SECONDS = 3600
 DISPATCH_FAILURES = frozenset({"resolver_failed", "worker_failed"})
-INPUT_REFUSALS = frozenset(
-    {"processing_confirmation_required", "insufficient_capacity", "source_unavailable", "selection_exceeds_bounds"}
-)
+INPUT_REFUSAL_MESSAGES = {
+    "processing_confirmation_required": "Selected video processing requires explicit confirmation.",
+    "insufficient_capacity": "The selected release exceeds available capacity.",
+    "source_unavailable": "The selected source is unavailable.",
+    "selection_exceeds_bounds": "The selected source exceeds the configured read limits.",
+    "source_object_reference_invalid": (
+        "Source metadata has a missing or invalid chunk or file index. "
+        "Correct the source metadata or select a valid dataset."
+    ),
+    "source_metadata_invalid": (
+        "Source metadata is missing, malformed, or ambiguous. Correct the source metadata or select a valid dataset."
+    ),
+    "source_task_metadata_invalid": (
+        "Source task declarations are empty or invalid, or selected frames reference an undeclared task. "
+        "Correct the source tasks or select a valid dataset."
+    ),
+    "source_frame_schema_invalid": (
+        "Source frames have missing or invalid native coordinate columns, including task_index. "
+        "Correct the source frame schema or select a valid dataset."
+    ),
+    "source_binding_changed": (
+        "The source or saved inputs changed after this request was captured. "
+        "Cancel this request and submit a new release from the current source."
+    ),
+}
+INPUT_REFUSALS = frozenset(INPUT_REFUSAL_MESSAGES)
 MIN_MEMORY_BYTES = 64 * 1024 * 1024
 MAX_BYTES = 1 << 42
 LEASE_ENV = "CURATION_RELEASE_LEASE_SECONDS"
@@ -60,7 +83,7 @@ CLEANUP_ENV = "CURATION_RELEASE_CLEANUP_SECONDS"
 RETRY_BASE_ENV = "CURATION_RELEASE_RETRY_BASE_SECONDS"
 RETRY_MAX_ENV = "CURATION_RELEASE_RETRY_MAX_SECONDS"
 FAILED_DISPATCH_ENV = "CURATION_RELEASE_MAX_FAILED_DISPATCHES"
-CONTROL_PATHS = (RECEIPT_PATH, REPORT_PATH)
+CONTROL_PATHS = (RECEIPT_PATH, CHECKSUMS_PATH)
 CLOSED_STATES = frozenset({"sealed", "committing", "committed"})
 TERMINAL_STATES = frozenset({"committed", "cancelled"})
 _TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
@@ -279,6 +302,8 @@ class JobStatus:
     diagnostics: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
     recovery_required: bool = False
     refusal_code: str | None = None
+    refusal_message: str | None = None
+    registration: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -287,6 +312,15 @@ class JobPage:
     next_cursor: int | None
     execution_bindings: Mapping[str, bytes] = field(default_factory=dict)
     accepted_times: Mapping[str, str] = field(default_factory=dict)
+
+
+REGISTRATION_ERROR_CATEGORIES = frozenset(
+    {"not_configured", "not_published", "verification_failed", "invalid_request", "conflict", "provider_error"}
+)
+_REGISTRATION_OUTCOMES = frozenset({"registered", "failed", "conflict", "not_configured"})
+_REGISTRATION_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,254}")
+_REGISTRATION_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,29}")
+_REGISTRATION_VIEW_KEYS = ("status", "asset_name", "asset_version", "last_error_category", "attempted_at")
 
 
 def _runtime_scope(effect_path: str | None, effect_paths: Sequence[str] | None) -> str | tuple[str, ...] | None:
@@ -385,6 +419,7 @@ class ReleaseJobStore:
                 "logical_identity": identity,
                 "attempt_prefix": request.attempt.prefix,
                 "attempt_key": request.attempt.key,
+                "attempt_source_dataset_id": request.attempt.source_dataset_id,
                 "destination": destination,
                 "route": request.route,
                 "volume_key": volume,
@@ -655,7 +690,7 @@ class ReleaseJobStore:
         return self._clock()
 
     def require_input(self, job_id: str, fence: int, code: str) -> None:
-        """Pause a capture-only job without dropping ownership or cancellation obligations."""
+        """Pause stopped work while retaining all owned effects and cancellation obligations."""
         if code not in INPUT_REFUSALS:
             raise ReleaseJobError("invalid refusal category")
         with self._transaction() as conn:
@@ -664,11 +699,11 @@ class ReleaseJobStore:
                 raise CancellationError("cancellation requested")
             if (
                 row["state"] != "running"
-                or row["effects"]
                 or row["scratch_bytes"]
+                or row["stopped_fence"] < fence
                 or self._active_runtimes(conn, job_id, fence)
             ):
-                raise AuthorityError("capture refusal has unresolved work")
+                raise AuthorityError("input refusal has unresolved work")
             row.update(
                 state="needs_input", last_failure=code, retry_not_before=None, lease_expires=None, lease_owner=None
             )
@@ -1112,9 +1147,9 @@ class ReleaseJobStore:
         root.rmdir()
 
     def seal(self, job_id: str, fence: int, controls: Mapping[str, tuple[int, str]]) -> None:
-        """Close payload writers and journal the exact receipt and report identities."""
+        """Close payload writers and journal the exact receipt and checksums identities."""
         if set(controls) != set(CONTROL_PATHS):
-            raise ReleaseJobError("controls must be exactly the receipt and report")
+            raise ReleaseJobError("controls must be exactly the receipt and checksums")
         for length, digest in controls.values():
             _require_int(length, "control length", 0, MAX_BYTES)
             if not _DIGEST.fullmatch(digest):
@@ -1686,6 +1721,7 @@ class ReleaseJobStore:
                 or not row["cancel_requested"]
                 or row["attempt_key"] != attempt.key
                 or row["attempt_prefix"] != attempt.prefix
+                or row["attempt_source_dataset_id"] != attempt.source_dataset_id
                 or self._active_runtimes(conn, job_id, fence)
                 or set(row["effects"]) - {BLOB_OWNER_CLEANUP_PATH}
             ):
@@ -1723,7 +1759,9 @@ class ReleaseJobStore:
                 raise AuthorityError("effects are still dispatched or unresolved")
             owned = [effect for effect in row["effects"].values() if effect["status"] == "acknowledged"]
             package_id, attempt_id = row["attempt_key"].split("/", 1)
-            attempt = PublicationAttempt(package_id, attempt_id, row["attempt_prefix"])
+            attempt = PublicationAttempt(
+                package_id, attempt_id, row["attempt_prefix"], row["attempt_source_dataset_id"]
+            )
             deadline = time.monotonic() + self.settings.cleanup_seconds
             content = ownership_bytes(attempt)
             companion = ownership_path(attempt.prefix)
@@ -1786,6 +1824,7 @@ class ReleaseJobStore:
                     if (
                         intent.attempt.key != attempt.key
                         or intent.attempt.prefix != attempt.prefix
+                        or intent.source_dataset_id != attempt.source_dataset_id
                         or intent.scope_sha256 != row["principal_digest"]
                         or intent.effective_destination != row["destination"]
                     ):
@@ -1836,6 +1875,101 @@ class ReleaseJobStore:
                     raise AuthorityError("publication effects or runtime stop proof are unresolved")
                 row["state"] = "committed"
                 self._emit(conn, job_id, "job.committed", "info", {})
+
+    def begin_registration(
+        self,
+        job_id: str,
+        *,
+        asset_name: str,
+        asset_version: str,
+        target_digest: str,
+        retry: bool = False,
+    ) -> str | None:
+        """Start one registration attempt and return its token, or None when the target is already registered."""
+        if not _REGISTRATION_NAME.fullmatch(asset_name) or not _REGISTRATION_VERSION.fullmatch(asset_version):
+            raise ReleaseJobError("registration asset identity is invalid")
+        if not _DIGEST.fullmatch(target_digest):
+            raise ReleaseJobError("registration target must be lowercase SHA-256")
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            if row["state"] != "committed":
+                raise AuthorityError("registration requires a committed release")
+            if not isinstance(row["commit_digest"], str) or not _DIGEST.fullmatch(row["commit_digest"]):
+                raise AuthorityError("registration requires a valid committed manifest")
+            now = self._clock()
+            current = row.get("registration")
+            if current is not None:
+                if (current["asset_name"], current["asset_version"], current["target_digest"]) != (
+                    asset_name,
+                    asset_version,
+                    target_digest,
+                ):
+                    raise JobConflictError("registration belongs to another asset identity")
+                if current["status"] == "pending" and current["lease_expires"] > now:
+                    return None
+                if current["status"] != "pending" and not retry:
+                    return None
+            token = uuid4().hex
+            attempts = 1 if current is None else current["attempts"] + 1
+            row["registration"] = {
+                "status": "pending",
+                "asset_name": asset_name,
+                "asset_version": asset_version,
+                "target_digest": target_digest,
+                "token_digest": _digest(token),
+                "lease_expires": now + self.settings.lease_seconds,
+                "attempts": attempts,
+                "attempted_at": now,
+                "last_error_category": current["last_error_category"] if current is not None else None,
+            }
+            self._emit(conn, job_id, "registration.started", "info", {"attempt": attempts})
+            return token
+
+    def renew_registration(self, job_id: str, token: str) -> None:
+        """Renew only the still-live independent registration token; never revive expired authority."""
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            current = row.get("registration")
+            if (
+                row["state"] != "committed"
+                or current is None
+                or current["status"] != "pending"
+                or current["token_digest"] != _digest(token)
+                or current["lease_expires"] <= self._clock()
+            ):
+                raise AuthorityError("registration authority is not live")
+            current["lease_expires"] = self._clock() + self.settings.lease_seconds
+
+    def finish_registration(
+        self,
+        job_id: str,
+        token: str,
+        *,
+        status: str,
+        error_category: str | None = None,
+    ) -> JobStatus:
+        """Record the outcome of the current registration attempt; release state and effects are never changed."""
+        if status not in _REGISTRATION_OUTCOMES:
+            raise ReleaseJobError("registration outcome is invalid")
+        if status != "registered" and error_category not in REGISTRATION_ERROR_CATEGORIES:
+            raise ReleaseJobError("registration error category is invalid")
+        if status == "registered" and error_category is not None:
+            raise ReleaseJobError("registered outcome cannot carry an error category")
+        with self._transaction() as conn:
+            row = self._job(conn, job_id)
+            current = row.get("registration")
+            if current is None or current["status"] != "pending" or current["token_digest"] != _digest(token):
+                raise AuthorityError("stale registration token")
+            if current["lease_expires"] <= self._clock():
+                raise AuthorityError("registration lease expired")
+            current.update(
+                status=status,
+                last_error_category=error_category,
+                token_digest=None,
+                lease_expires=None,
+            )
+            self._emit(conn, job_id, "registration.finished", "info", {"status": status})
+            return _status(conn, row)
 
     def record_diagnostic(
         self,
@@ -2154,7 +2288,16 @@ def _status(conn: Mapping[str, dict[str, Any]], row: Mapping[str, Any]) -> JobSt
         diagnostics={key: dict(value) for key, value in sorted(row["diagnostics"].items())},
         recovery_required=row["last_failure"] in DISPATCH_FAILURES and row["state"] not in TERMINAL_STATES,
         refusal_code=row["last_failure"] if row["state"] == "needs_input" else None,
+        refusal_message=INPUT_REFUSAL_MESSAGES.get(row["last_failure"]) if row["state"] == "needs_input" else None,
+        registration=_registration_view(row.get("registration")),
     )
+
+
+def _registration_view(record: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Project only the public registration fields; tokens and target bindings stay internal."""
+    if record is None:
+        return None
+    return {key: record[key] for key in _REGISTRATION_VIEW_KEYS}
 
 
 def _destination_bytes(row: Mapping[str, Any]) -> int:

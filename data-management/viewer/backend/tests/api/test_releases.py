@@ -55,14 +55,124 @@ from tests.lerobot_sources import CAMERA, write_source
 BASE = "/api/releases/v1"
 
 
-async def test_given_selected_intent_when_previewed_and_admitted_then_no_source_reads(
+@pytest.mark.parametrize("outcome", ["registered", "failed", "conflict", "lease_lost"])
+def test_given_committed_release_when_registered_then_publication_and_authority_are_preserved(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+) -> None:
+    from contextlib import nullcontext
+
+    from physical_ai_curation.release.azureml import AzureMLDataAsset, azureml_data_asset_name
+    from physical_ai_curation.release.jobs import JobRequest, ReleaseJobControl
+    from test_release_azureml import _build_package, _FakeAssetClient
+    from test_release_jobs import ATTEMPT, CONTROLS, OWNER, SCOPE, FakeClock, _store
+
+    from src.api.services import release_registration as registration
+    from src.api.services.release_service import AzureMLDestinationSettings
+
+    base = BlobLocation("https://example.blob.core.windows.net", "releases")
+    destination = release_collection_location(base, ATTEMPT.source_dataset_id)
+    settings = ReleaseApiSettings(
+        tmp_path / "jobs",
+        {"output": base},
+        azureml_destinations={
+            "output": AzureMLDestinationSettings(
+                "00000000-0000-0000-0000-000000000001",
+                "rg-example",
+                "mlw-example",
+                "release_data",
+            )
+        },
+    )
+    clock = FakeClock()
+    store = _store(settings.job_root, clock)
+    package = tmp_path / "package"
+    digest = _build_package(package, release_name=ATTEMPT.prefix, source_dataset_id=ATTEMPT.source_dataset_id)
+    job_id = store.accept(
+        JobRequest(
+            SCOPE,
+            OWNER,
+            "registration-test",
+            ATTEMPT,
+            destination,
+            b"{}",
+            1024,
+            route="blob",
+            execution_binding=b'{"destination":"output"}',
+        )
+    ).job_id
+    fence = store.claim(job_id, "worker")
+    store.seal(job_id, fence, CONTROLS)
+    for path, (length, control_digest) in CONTROLS.items():
+        store.begin_effect(job_id, fence, ATTEMPT, path, length, control_digest)
+        store.finish_effect(job_id, fence, path, ok=True)
+    with ReleaseJobControl(store, job_id, fence).publication(ATTEMPT, digest):
+        pass
+    monkeypatch.setattr(
+        registration,
+        "_publication_runtime",
+        lambda *args: nullcontext(
+            SimpleNamespace(store=LocalReleaseStore(package)),
+        ),
+    )
+    client = _FakeAssetClient()
+    monkeypatch.setattr(registration, "create_azureml_client", lambda **kwargs: client)
+    if outcome == "failed":
+        client.create_error = RuntimeError("private token and provider details")
+    if outcome == "conflict":
+        name = azureml_data_asset_name(ATTEMPT.source_dataset_id)
+        client.assets[(name, ATTEMPT.prefix)] = AzureMLDataAsset(
+            name,
+            ATTEMPT.prefix,
+            "azureml://datastores/other/paths/other/",
+            {},
+            {},
+        )
+    if outcome == "lease_lost":
+
+        def lose_lease(name: str, version: str) -> None:
+            clock.advance(31)
+
+        monkeypatch.setattr(client, "get_data_asset", lose_lease)
+    before = store.storage.snapshot()[job_id]
+
+    assert registration.register_job(settings, store, job_id)
+
+    after = store.storage.snapshot()[job_id]
+    status = store.get(job_id, scope=SCOPE, principal=OWNER)
+    assert status.state == "committed"
+    assert after["commit_digest"] == before["commit_digest"]
+    assert after["fence"] == before["fence"]
+    assert after["reserved_bytes"] == before["reserved_bytes"]
+    assert status.registration["status"] == ("pending" if outcome == "lease_lost" else outcome)
+    assert "private" not in repr(status.registration)
+    assert len(client.created) == int(outcome == "registered")
+    if outcome != "lease_lost":
+        assert registration.register_job(settings, store, job_id) is False
+
+
+async def test_given_selected_intent_when_previewed_and_admitted_then_no_destination_effects(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from src.api.services.release_service import ReleaseSpec
 
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
     settings = ReleaseApiSettings(tmp_path / "jobs", destinations={"output": tmp_path / "output"})
     planner = ViewerReleasePlanner(settings)
-    forbidden = AsyncMock(side_effect=AssertionError("preview/admission read the source"))
+    from physical_ai_curation.release.inputs import LocalReleaseSource
+    from physical_ai_curation.release.store import LocalReleaseStore
+
+    source = LocalReleaseSource(write_source(tmp_path / "dataset"), finalized=True)
+    monkeypatch.setattr(planner, "_source", lambda *args, **kwargs: source)
+    original_read = LocalReleaseStore.iter_bytes
+
+    def metadata_bytes(store: LocalReleaseStore, path: str, *, chunk_size: int) -> Iterator[bytes]:
+        assert path.startswith(("meta/", "data/")), "preview/admission read copied video payloads"
+        return original_read(store, path, chunk_size=chunk_size)
+
+    monkeypatch.setattr(LocalReleaseStore, "iter_bytes", metadata_bytes)
+    forbidden = AsyncMock(side_effect=AssertionError("preview/admission froze the source"))
     monkeypatch.setattr(planner.datasets, "get_dataset", forbidden)
     monkeypatch.setattr("src.api.services.viewer_release_planner.freeze_release_inputs", forbidden)
     service = ReleaseService(settings, planner=planner)
@@ -84,6 +194,42 @@ async def test_given_selected_intent_when_previewed_and_admitted_then_no_source_
     assert payload["schema_version"] == "curated-release-intent/v1"
     assert "frozen" not in payload
     forbidden.assert_not_called()
+
+
+async def test_given_blob_source_without_metadata_when_prepared_then_nonretryable_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.release.record_storage import BlobLocation
+
+    from src.api.services import viewer_release_planner as planner_module
+    from src.api.services.release_service import ReleaseSpec
+
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    settings = ReleaseApiSettings(tmp_path / "jobs", destinations={"output": tmp_path / "output"})
+    planner = ViewerReleasePlanner(settings)
+
+    class FakeBlobSource:
+        metadata_max_bytes = 1024
+        metadata_max_rows = 10
+
+        def metadata_inventory(self) -> list[object]:
+            return []
+
+        def iter_bytes(self, item: object, *, chunk_size: int, checkpoint: object = None) -> object:
+            yield b""
+
+    monkeypatch.setattr(planner_module, "BlobReleaseSource", FakeBlobSource)
+    monkeypatch.setattr(planner.datasets, "has_blob_provider", lambda: True)
+    monkeypatch.setattr(planner, "_source", lambda *args, **kwargs: FakeBlobSource())
+    spec = ReleaseSpec("output", "package", "attempt", "release", "dataset", (0,), finalized=True)
+    destination = BlobLocation("https://releases.blob.core.windows.net", "container")
+
+    with pytest.raises(ReleaseApiError) as raised:
+        await planner.prepare("localuser", spec, destination)
+
+    assert raised.value.status_code == 422
+    assert raised.value.detail == "source_metadata_invalid"
+    assert raised.value.nonretryable is True
 
 
 @pytest.mark.parametrize("entrypoint", ["api", "worker"])
@@ -300,6 +446,98 @@ def test_given_invalid_release_configuration_when_loaded_then_refused(environ: d
         load_release_api_settings(environ)
 
 
+@pytest.fixture
+def azureml_environment(tmp_path: Path) -> dict[str, str]:
+    location = {"account_url": "https://account.blob.core.windows.net", "container": "releases", "prefix": ""}
+    return {
+        "RELEASE_JOB_ROOT": str(tmp_path / "jobs"),
+        "RELEASE_DESTINATIONS": json.dumps({"registered": location, "plain": location, "local": str(tmp_path / "out")}),
+        "CURATION_RELEASE_AZUREML_ENABLED": "true",
+        "CURATION_RELEASE_AZUREML_SUBSCRIPTION_ID": "00000000-0000-0000-0000-000000000001",
+        "CURATION_RELEASE_AZUREML_RESOURCE_GROUP": "rg-example",
+        "CURATION_RELEASE_AZUREML_WORKSPACE": "mlw-example",
+        "CURATION_RELEASE_AZUREML_DATASTORES": '{"registered":"release_data"}',
+    }
+
+
+@pytest.mark.parametrize(
+    "alias,length,allowed",
+    [("registered", 30, True), ("registered", 31, False), ("plain", 128, True), ("local", 128, True)],
+)
+@pytest.mark.parametrize("operation", ["preview", "submit"])
+async def test_given_destination_registration_when_previewed_then_version_limit_is_conditional(
+    azureml_environment: dict[str, str], alias: str, length: int, allowed: bool, operation: str
+) -> None:
+    from src.api.services.release_service import ReleaseSpec
+
+    settings = load_release_api_settings(azureml_environment)
+    planner = MagicMock()
+    sentinel = ReleaseApiError(409, "planner reached")
+    planner.prepare = AsyncMock(side_effect=sentinel)
+    service = ReleaseService(settings, planner=planner)
+    destinations = {item["alias"]: item["azureml_registration_enabled"] for item in service.destinations()}
+    assert destinations == {"registered": True, "plain": False, "local": False}
+    assert service.capabilities()["azureml_registration_enabled"] is True
+    spec = ReleaseSpec(alias, "package", "attempt", "r" * length, "native", (0,))
+    with pytest.raises(ReleaseApiError) as error:
+        if operation == "preview":
+            await service.preview("localuser", spec)
+        else:
+            await service.submit(
+                "localuser",
+                spec,
+                "aml-version-check",
+                preview_digest="preview",
+                processing_digest="",
+                local_disk_acknowledged=True,
+            )
+    if allowed:
+        assert error.value is sentinel
+        planner.prepare.assert_awaited_once()
+    else:
+        assert error.value.status_code == 422
+        assert error.value.detail == "release_name_not_azureml_compatible"
+        planner.prepare.assert_not_awaited()
+
+
+def test_given_disabled_azureml_when_loaded_then_no_registration_or_sdk_is_required(
+    azureml_environment: dict[str, str],
+) -> None:
+    azureml_environment["CURATION_RELEASE_AZUREML_ENABLED"] = "false"
+    azureml_environment["CURATION_RELEASE_AZUREML_SUBSCRIPTION_ID"] = ""
+    azureml_environment["CURATION_RELEASE_AZUREML_DATASTORES"] = "not-json"
+    settings = load_release_api_settings(azureml_environment)
+    assert settings.azureml_destinations == {}
+    assert ReleaseService(settings).capabilities()["azureml_registration_enabled"] is False
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("ENABLED", "invalid"),
+        ("SUBSCRIPTION_ID", "private invalid value"),
+        ("RESOURCE_GROUP", "private/path"),
+        ("WORKSPACE", "private/path"),
+        ("DATASTORES", "not-json"),
+        ("DATASTORES", "[]"),
+        ("DATASTORES", "{}"),
+        ("DATASTORES", '{"unknown":"release_data"}'),
+        ("DATASTORES", '{"local":"release_data"}'),
+        ("DATASTORES", '{"registered":"private/path"}'),
+        ("DATASTORES", '{"registered":123}'),
+    ],
+)
+def test_given_invalid_azureml_configuration_when_loaded_then_fixed_refusal(
+    azureml_environment: dict[str, str],
+    key: str,
+    value: str,
+) -> None:
+    azureml_environment["CURATION_RELEASE_AZUREML_" + key] = value
+    with pytest.raises(ValueError) as error:
+        load_release_api_settings(azureml_environment)
+    assert "private" not in str(error.value)
+
+
 @pytest.mark.parametrize(
     "field,value",
     [
@@ -308,6 +546,13 @@ def test_given_invalid_release_configuration_when_loaded_then_refused(environ: d
         ("package_id", "bad/id"),
         ("attempt_id", "bad/id"),
         ("dataset_name", "bad--name"),
+        ("dataset_name", ""),
+        ("dataset_name", "release name"),
+        ("dataset_name", "_release"),
+        ("dataset_name", "release@1"),
+        ("dataset_name", " release"),
+        ("dataset_name", "release "),
+        ("dataset_name", "r" * 129),
         ("dataset_id", "../private"),
         ("episode_indices", ()),
         ("episode_indices", (-1,)),
@@ -330,6 +575,8 @@ def test_given_invalid_selection_when_constructed_then_safe_refusal(field: str, 
     with pytest.raises(ReleaseApiError) as error:
         ReleaseSpec(**selection)
     assert error.value.status_code == 422
+    if field == "dataset_name":
+        assert error.value.detail == "release name is invalid"
 
 
 @pytest.mark.parametrize("operation", ["status", "cancel", "recover", "result"])
@@ -587,6 +834,111 @@ def test_given_required_saved_processing_without_consent_when_captured_then_no_v
     assert status["state"] == "needs_input"
     assert status["refusal_code"] == "processing_confirmation_required"
     assert not status["recovery_required"]
+    assert asyncio.run(run_queue(store, planner.execution)) == ()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "code"),
+    [
+        ("missing-task-column", "source_frame_schema_invalid"),
+        ("unknown-task-index", "source_task_metadata_invalid"),
+        ("empty-tasks", "source_task_metadata_invalid"),
+        ("malformed-tasks", "source_task_metadata_invalid"),
+    ],
+)
+@pytest.mark.parametrize("stage", ["preview", "capture"])
+def test_given_invalid_native_frame_or_task_structure_when_previewed_then_safe_refusal(
+    release_api: tuple, mutation: str, code: str, stage: str
+) -> None:
+    from physical_ai_curation.release.runner import run_queue
+
+    client, spec, settings, _app, root = release_api
+    job = _submit(client, spec, _preview(client, spec)).json()["job_id"] if stage == "capture" else None
+    data_path = sorted((root / "data").rglob("*.parquet"))[0]
+    data = pq.read_table(data_path)
+    if mutation == "missing-task-column":
+        pq.write_table(data.drop_columns(["task_index"]), data_path)
+    elif mutation == "unknown-task-index":
+        position = data.column_names.index("task_index")
+        pq.write_table(data.set_column(position, "task_index", pa.array([99] * data.num_rows)), data_path)
+    elif mutation == "malformed-tasks":
+        (root / "meta/tasks.parquet").write_bytes(b"private provider detail")
+    else:
+        tasks_path = root / "meta/tasks.parquet"
+        pq.write_table(pq.read_table(tasks_path).slice(0, 0), tasks_path)
+    if stage == "preview":
+        response = client.get(BASE + "/preview", params={"selection": json.dumps(spec)})
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert detail["code"] == code
+        assert detail["message"]
+        assert detail["nonretryable"] is True
+    else:
+        store = ReleaseJobStore(settings.job_root)
+        planner = ViewerReleasePlanner(settings)
+        asyncio.run(run_queue(store, planner.execution))
+        response = client.get(BASE + "/jobs/" + job)
+        status = response.json()
+        assert status["state"] == "needs_input"
+        assert status["refusal_code"] == code
+        assert status["refusal_message"]
+        assert not status["recovery_required"]
+        assert store.storage.snapshot()[job]["effects"] == {}
+        assert asyncio.run(run_queue(store, planner.execution)) == ()
+        result = client.get(BASE + "/jobs/" + job + "/result")
+        assert result.status_code == 422
+        assert result.json()["detail"] == {
+            "schema": "curated-release-api/v1",
+            "code": code,
+            "message": status["refusal_message"],
+            "nonretryable": True,
+        }
+    assert str(root) not in response.text
+    assert "private provider detail" not in response.text
+
+
+def test_given_local_source_has_invalid_object_reference_when_previewed_then_safe_nonretryable_refusal(
+    release_api: tuple,
+) -> None:
+    client, spec, _settings, _app, root = release_api
+    metadata = root / "meta/episodes/chunk-000/file-000.parquet"
+    pq.write_table(pq.read_table(metadata).drop_columns(["data/file_index"]), metadata)
+    response = client.get(BASE + "/preview", params={"selection": json.dumps(spec)})
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "source_object_reference_invalid"
+    assert detail["nonretryable"] is True
+    assert "chunk or file index" in detail["message"]
+    assert str(root) not in response.text
+
+
+def test_given_source_metadata_loses_object_index_when_captured_then_actionable_nonretryable_refusal(
+    release_api: tuple,
+) -> None:
+    from physical_ai_curation.release.jobs import ReleaseRefusal
+    from physical_ai_curation.release.runner import run_queue
+
+    client, spec, settings, _app, root = release_api
+    accepted = _submit(client, spec, _preview(client, spec))
+    assert accepted.status_code == 202
+    job = accepted.json()["job_id"]
+    metadata = root / "meta/episodes/chunk-000/file-000.parquet"
+    pq.write_table(pq.read_table(metadata).drop_columns(["data/file_index"]), metadata)
+    store = ReleaseJobStore(settings.job_root)
+    planner = ViewerReleasePlanner(settings)
+    capture = planner.execution(job, store.frozen_request(job)).capture
+    assert capture is not None
+    with pytest.raises(ReleaseRefusal, match="source_object_reference_invalid"):
+        asyncio.run(capture(lambda: None))
+    asyncio.run(run_queue(store, planner.execution))
+    response = client.get(BASE + "/jobs/" + job)
+    status = response.json()
+    assert status["state"] == "needs_input"
+    assert status["refusal_code"] == "source_object_reference_invalid"
+    assert "chunk or file index" in status["refusal_message"]
+    assert str(root) not in response.text
+    assert not status["recovery_required"]
+    assert store.storage.snapshot()[job]["effects"] == {}
     assert asyncio.run(run_queue(store, planner.execution)) == ()
 
 
@@ -1067,6 +1419,7 @@ def test_given_inconsistent_execution_destination_when_result_read_then_refused(
         "job": {
             "attempt_key": "package/attempt",
             "attempt_prefix": "published",
+            "attempt_source_dataset_id": "source",
             "destination": str(tmp_path / "accepted"),
         }
     }
@@ -1106,6 +1459,7 @@ def release_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tup
     monkeypatch.setenv("RELEASE_JOB_ROOT", str(settings.job_root))
     monkeypatch.setenv("RELEASE_DESTINATIONS", json.dumps({"local": str(tmp_path / "output")}))
     monkeypatch.setenv("DATA_DIR", str(root.parent))
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
     datasets = DatasetService(base_path=str(root.parent))
     import src.api.services.viewer_release_planner as planner_module
 
@@ -1691,6 +2045,28 @@ def test_given_cancelled_captured_job_when_source_unavailable_then_cleanup_confi
     assert cleanup.destination == execution.destination
 
 
+def test_given_registration_retry_when_uncommitted_foreign_or_missing_csrf_then_no_execution(
+    release_api: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_client, spec, settings, app, _root = release_api
+    job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
+    endpoint = BASE + "/jobs/" + job + "/registration"
+    assert test_client.post(endpoint).status_code == 409
+    app.dependency_overrides[require_principal_context] = lambda: PrincipalContext(scope_id="other", auth_mode="local")
+    assert test_client.post(endpoint).status_code == 404
+    app.dependency_overrides[require_principal_context] = lambda: PrincipalContext(
+        scope_id="localuser", auth_mode="local"
+    )
+    monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
+    assert test_client.post(endpoint).status_code == 403
+    test_client.cookies.set("csrf_token", "a" * 64)
+    response = test_client.post(endpoint, headers={"X-CSRF-Token": "a" * 64})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "release_result_not_verified"
+    assert ReleaseJobStore(settings.job_root).get(job, scope="localuser", principal="localuser").state == "accepted"
+
+
 def test_cancel_is_owned_and_csrf_protected(release_api: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
     test_client, spec, _settings, app, _root = release_api
     job = _submit(test_client, spec, _preview(test_client, spec)).json()["job_id"]
@@ -1771,19 +2147,33 @@ def test_fresh_process_worker_publishes_and_artifacts_reverify(release_api: tupl
     )
     assert completed.returncode == 0, completed.stderr.decode()
     status = test_client.get(BASE + "/jobs/" + job).json()
-    assert status["state"] == "committed", status
+    assert status["state"] == "committed", status.get("refusal_code")
     result = test_client.get(BASE + "/jobs/" + job + "/result")
     assert result.status_code == 200, result.json()
     assert result.json()["result"]["publication_state"] == "published"
+    assert set(result.json()["artifacts"]) == {"manifest", "inventory", "receipt", "checksums"}
     published = settings.destinations["local"] / "native/releases" / spec["dataset_name"]
+    assert result.json()["identity"] == {
+        "release_name": spec["dataset_name"],
+        "source_dataset_id": spec["dataset_id"],
+    }
+    receipt = json.loads((published / "release/receipt.json").read_bytes())
+    assert result.json()["checksum_coverage"] == {
+        "covered": receipt["checksum_covered_count"],
+        "omitted": receipt["checksum_omitted_count"],
+    }
     artifact_contents = {}
     for artifact in result.json()["artifacts"]:
         response = test_client.get(BASE + "/jobs/" + job + "/artifacts/" + artifact)
         assert response.status_code == 200
-        content = (published / "release" / (artifact + (".md" if artifact == "report" else ".json"))).read_bytes()
         assert response.json()["artifact"] == artifact
-        assert response.json()["content"] == (content.decode() if artifact == "report" else json.loads(content))
+        if artifact == "checksums":
+            assert response.json()["content"] == (published / "checksums.sha256").read_text(encoding="utf-8")
+        else:
+            content = (published / "release" / (artifact + ".json")).read_bytes()
+            assert response.json()["content"] == json.loads(content)
         artifact_contents[artifact] = response.json()
+    assert test_client.get(BASE + "/jobs/" + job + "/artifacts/report").status_code == 404
     source_root.rename(source_root.with_name("removed-source"))
     retained = test_client.get(BASE + "/jobs/" + job + "/result")
     assert retained.status_code == 200, retained.json()
@@ -1793,7 +2183,17 @@ def test_fresh_process_worker_publishes_and_artifacts_reverify(release_api: tupl
         assert response.status_code == 200
         assert response.json() == expected
     assert test_client.get(BASE + "/jobs/" + job + "/artifacts/not-allowed").status_code == 404
-    (published / "release/marker.json").unlink()
+    marker = published / ".published.json"
+    original_marker = marker.read_bytes()
+    altered_marker = parse_strict_json(original_marker)
+    altered_marker["release_name"] = "other-release"
+    marker.write_bytes(canonical_json_bytes(altered_marker))
+    assert test_client.get(BASE + "/jobs/" + job + "/result").status_code == 409
+    marker.write_bytes(original_marker + b" ")
+    assert test_client.get(BASE + "/jobs/" + job + "/result").status_code == 409
+    assert test_client.get(BASE + "/jobs/" + job + "/artifacts/manifest").status_code == 409
+    marker.write_bytes(original_marker)
+    marker.unlink()
     assert test_client.get(BASE + "/jobs/" + job + "/result").status_code == 409
     assert test_client.get(BASE + "/jobs/" + job + "/artifacts/manifest").status_code == 409
 
@@ -1894,7 +2294,7 @@ def test_tampered_source_release_is_hidden_and_restores_when_bytes_return(releas
     manifest_path = published / "release/manifest.json"
     frozen_path = published / json.loads(manifest_path.read_bytes())["frozen_input_path"]
     path = {
-        "marker": published / "release/marker.json",
+        "marker": published / ".published.json",
         "manifest": manifest_path,
         "frozen": frozen_path,
     }[target]

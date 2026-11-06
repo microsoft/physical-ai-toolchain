@@ -92,7 +92,7 @@ function episodeList() {
 }
 
 async function fillRequiredFields(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText('Release name'), 'Release A')
+  await user.type(screen.getByLabelText('Release name'), 'release-a')
 }
 
 describe('ReleaseDialog', () => {
@@ -112,6 +112,93 @@ describe('ReleaseDialog', () => {
     expect(screen.getByText(/Target: v3/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /submit release/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /preview release/i })).toBeDisabled()
+  })
+
+  it.each([
+    '',
+    'release name',
+    '_release',
+    'release@1',
+    'release--1',
+    ' release',
+    'release ',
+    'r'.repeat(129),
+  ])('rejects an invalid release name without rewriting drafts: %s', async (name) => {
+    const user = userEvent.setup()
+    const props = renderDialog()
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    const input = screen.getByLabelText('Release name')
+    await user.click(input)
+    if (name) await user.paste(name)
+    expect(input).toHaveValue(name)
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(input).toHaveAttribute('aria-describedby', 'release-name-error')
+    expect(screen.getByRole('button', { name: /preview release/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /submit release/i })).toBeDisabled()
+    expect(props.onPreview).not.toHaveBeenCalled()
+    expect(props.onSubmit).not.toHaveBeenCalled()
+    expect(screen.getByRole('checkbox', { name: 'Episode 0' })).toBeChecked()
+    await user.clear(input)
+    await user.type(input, 'valid-name')
+    expect(input).toHaveFocus()
+    expect(input).toHaveAttribute('aria-invalid', 'false')
+    expect(input).not.toHaveAttribute('aria-describedby')
+    expect(screen.getByRole('checkbox', { name: 'Episode 0' })).toBeChecked()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /preview release/i })).toBeEnabled(),
+    )
+  })
+
+  it.each(['a', '0', 'A._-9', 'a'.repeat(128)])(
+    'previews a valid release name without applying AML limits: %s',
+    async (name) => {
+      const user = userEvent.setup()
+      const props = renderDialog()
+      await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+      const input = screen.getByLabelText('Release name')
+      await user.click(input)
+      await user.paste(name)
+      const preview = screen.getByRole('button', { name: /preview release/i })
+      await waitFor(() => expect(preview).toBeEnabled())
+      await user.click(preview)
+      expect(props.onPreview).toHaveBeenCalledWith(
+        expect.objectContaining({ datasetName: name, episodeIndices: [0] }),
+      )
+    },
+  )
+
+  it('applies the AML version limit only to an enabled destination without losing drafts', async () => {
+    const user = userEvent.setup()
+    const props = renderDialog({
+      destinations: ['registered', 'local-disk'],
+      azuremlDestinations: ['registered'],
+    })
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    const input = screen.getByLabelText('Release name')
+    await user.click(input)
+    await user.paste('r'.repeat(31))
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(
+      screen.getByText('Azure ML release versions must be at most 30 characters.'),
+    ).toHaveAttribute('role', 'alert')
+    expect(screen.getByRole('button', { name: /preview release/i })).toBeDisabled()
+    expect(props.onPreview).not.toHaveBeenCalled()
+    await user.selectOptions(screen.getByLabelText('Destination'), 'local-disk')
+    expect(input).toHaveValue('r'.repeat(31))
+    expect(input).toHaveAttribute('aria-invalid', 'false')
+    expect(screen.getByRole('checkbox', { name: 'Episode 0' })).toBeChecked()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /preview release/i })).toBeEnabled(),
+    )
+    await user.selectOptions(screen.getByLabelText('Destination'), 'registered')
+    await user.click(input)
+    await user.keyboard('{Backspace}')
+    expect(input).toHaveValue('r'.repeat(30))
+    expect(input).toHaveFocus()
+    expect(input).toHaveAttribute('aria-invalid', 'false')
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /preview release/i })).toBeEnabled(),
+    )
   })
 
   it('closes a busy preview without clearing the draft or submitting work', async () => {
@@ -142,10 +229,44 @@ describe('ReleaseDialog', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Preview stopped in the browser. No release was submitted.',
     )
-    expect(screen.getByLabelText('Release name')).toHaveValue('Release A')
+    expect(screen.getByLabelText('Release name')).toHaveValue('release-a')
     expect(screen.getByRole('checkbox', { name: 'Episode 0' })).toBeChecked()
     expect(screen.getByRole('button', { name: /preview release/i })).toBeEnabled()
     expect(props.onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('stops waiting for submission without cancelling or resubmitting the release', async () => {
+    const user = userEvent.setup()
+    let finish!: () => void
+    const props = renderDialog({
+      onSubmit: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve
+          }),
+      ),
+      onCancelPreparation: vi.fn(),
+      onDiscardSubmission: vi.fn(),
+    })
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('checkbox', { name: 'Episode 0' }))
+    await user.click(screen.getByRole('checkbox', { name: /I declare/i }))
+    await user.click(screen.getByRole('button', { name: /preview release/i }))
+    await user.click(await screen.findByRole('checkbox', { name: /local disk/i }))
+    await user.click(screen.getByRole('button', { name: /submit release/i }))
+
+    const stopWaiting = screen.getByRole('button', { name: 'Stop waiting' })
+    expect(stopWaiting).toHaveAccessibleDescription(
+      'Waiting for submission confirmation. Closing this dialog does not cancel the release.',
+    )
+    stopWaiting.focus()
+    await user.keyboard('{Enter}')
+    expect(props.onCancelPreparation).toHaveBeenCalledOnce()
+    expect(props.onOpenChange).toHaveBeenCalledWith(false)
+    expect(props.onDiscardSubmission).not.toHaveBeenCalled()
+    expect(props.onSubmit).toHaveBeenCalledOnce()
+    await act(async () => finish())
+    expect(props.onSubmit).toHaveBeenCalledOnce()
   })
 
   it('preserves keyboard focus when selected-only rows disappear', async () => {
@@ -200,7 +321,7 @@ describe('ReleaseDialog', () => {
     await user.keyboard('{Enter}')
     expect(props.onRetryInventory).toHaveBeenCalledOnce()
     rerender(<ReleaseDialog {...props} />)
-    expect(screen.getByLabelText('Release name')).toHaveValue('Release A')
+    expect(screen.getByLabelText('Release name')).toHaveValue('release-a')
     expect(screen.getByRole('checkbox', { name: 'Episode 0' })).toBeChecked()
     expect(props.onPreview).not.toHaveBeenCalled()
     expect(props.onSubmit).not.toHaveBeenCalled()
@@ -342,6 +463,14 @@ describe('ReleaseDialog', () => {
   it.each([
     [new Error('private transport detail'), 'Release request failed.'],
     [
+      new ReleaseRequestError('private provider detail', 'source_task_metadata_invalid', 422),
+      'Source task declarations are empty or invalid, or selected frames reference an undeclared task. Correct the source tasks or select a valid dataset.',
+    ],
+    [
+      new ReleaseRequestError('private provider detail', 'source_object_reference_invalid', 422),
+      'Source metadata has a missing or invalid chunk or file index. Correct the source metadata or select a valid dataset.',
+    ],
+    [
       new ReleaseRequestError('private provider detail', 'stale_preview', 409),
       'Release request failed: stale_preview.',
     ],
@@ -451,7 +580,7 @@ describe('ReleaseDialog', () => {
     await user.keyboard('{Escape}')
     expect(props.onOpenChange).toHaveBeenCalledWith(false)
     expect(props.onDiscardSubmission).not.toHaveBeenCalled()
-    expect(screen.getByLabelText('Release name')).toHaveValue('Release A')
+    expect(screen.getByLabelText('Release name')).toHaveValue('release-a')
     await user.click(discard)
     expect(props.onDiscardSubmission).toHaveBeenCalledOnce()
     expect(screen.getByLabelText('Release name')).toHaveValue('')
@@ -642,6 +771,16 @@ describe('ReleaseDialog', () => {
 
     const retry = await screen.findByRole('button', { name: /retry submission/i })
     expect(screen.getByRole('button', { name: /discard and start over/i })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Submission not confirmed.')
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      "We couldn't confirm whether your release was submitted. It may already have been accepted.",
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Retry submission reuses the same request to avoid duplicates.',
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Discarding does not cancel an accepted release; starting over could create a duplicate.',
+    )
     await user.click(retry)
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2))
@@ -652,7 +791,7 @@ describe('ReleaseDialog', () => {
       expect.objectContaining({
         datasetId: 'dataset-1',
         episodeIndices: [0],
-        datasetName: 'Release A',
+        datasetName: 'release-a',
         finalized: true,
         resources: [{ resource_id: 'cam-a', revision_no: 1 }],
       }),
@@ -765,7 +904,7 @@ describe('ReleaseDialog selection evidence', () => {
   it('does not gate selection or preview on an adverse judge outcome', async () => {
     const user = userEvent.setup()
     renderDialog({ items: evidenceItems })
-    await user.type(screen.getByLabelText('Release name'), 'Release B')
+    await user.type(screen.getByLabelText('Release name'), 'release-b')
 
     await user.click(screen.getByRole('checkbox', { name: 'Episode 10' }))
 

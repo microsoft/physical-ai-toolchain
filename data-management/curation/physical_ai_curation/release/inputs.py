@@ -59,8 +59,18 @@ class ReleaseInputError(ReleaseVerificationError):
     """Saved confirmation or finalized source no longer matches the request."""
 
 
+class SourceMetadataError(ReleaseInputError):
+    """Malformed source metadata with a public, allowlisted refusal category."""
+
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        super().__init__(message)
+
+
 class StaleReleaseInputError(ReleaseInputError):
-    """A selected saved revision changed or disappeared and requires a fresh preview."""
+    """An accepted source or saved revision changed and requires a fresh request."""
+
+    code = "source_binding_changed"
 
 
 class SourceReadBoundsError(ReleaseInputError):
@@ -120,16 +130,39 @@ class LocalReleaseSource:
         return not path.startswith(("annotations/", "_curation/")) and path != "meta/episode_labels.json"
 
     def inventory(self, checkpoint: Checkpoint | None = None) -> tuple[SourceObject, ...]:
+        return self._inventory(checkpoint)
+
+    def metadata_inventory(
+        self, checkpoint: Checkpoint | None = None, *, max_bytes: int = 16 * 1024**2
+    ) -> tuple[SourceObject, ...]:
+        """Hash only source metadata within the caller's bound; never read video payloads."""
+        return self._inventory(checkpoint, metadata_only=True, max_bytes=max_bytes)
+
+    def _inventory(
+        self,
+        checkpoint: Checkpoint | None,
+        *,
+        metadata_only: bool = False,
+        max_bytes: int | None = None,
+    ) -> tuple[SourceObject, ...]:
         if self.finalized is not True:
             raise ReleaseInputError("local release requires a finalized/quiescent source declaration")
         store = LocalReleaseStore(self.root)
         try:
             listed = sorted(
-                (item for item in store.list_objects() if self._is_source(item.path)),
+                (
+                    item
+                    for item in store.list_objects()
+                    if self._is_source(item.path) and (not metadata_only or item.path.startswith("meta/"))
+                ),
                 key=lambda x: x.path,
             )
             if not listed:
                 raise ReleaseInputError("source inventory is empty")
+            if max_bytes is not None and (
+                type(max_bytes) is not int or max_bytes <= 0 or sum(item.length for item in listed) > max_bytes
+            ):
+                raise SourceReadBoundsError("source metadata exceeds the configured byte bound")
             objects = []
             for item in listed:
                 _checkpoint(checkpoint)
@@ -143,7 +176,7 @@ class LocalReleaseSource:
                     digest.update(chunk)
                 after = path.lstat()
                 if _stat_identity(before) != _stat_identity(after) or length != item.length:
-                    raise ReleaseInputError("source changed while hashing content")
+                    raise StaleReleaseInputError("source changed while hashing content")
                 if self.on_verified is not None:
                     self.on_verified(length)
                 objects.append(
@@ -155,11 +188,15 @@ class LocalReleaseSource:
                     )
                 )
             ending = sorted(
-                (item for item in store.list_objects() if self._is_source(item.path)),
+                (
+                    item
+                    for item in store.list_objects()
+                    if self._is_source(item.path) and (not metadata_only or item.path.startswith("meta/"))
+                ),
                 key=lambda x: x.path,
             )
             if ending != listed:
-                raise ReleaseInputError("source inventory changed during read")
+                raise StaleReleaseInputError("source inventory changed during read")
             return tuple(objects)
         except ReleaseJobError:
             raise
@@ -669,7 +706,7 @@ async def _check_context(reader: SavedInputReader, selection: ReleaseSelection, 
         raise ReleaseInputError("release source/principal context is required")
     for index in selection.episode_indices:
         if await reader.source_revision(selection.dataset_id, index) != context.source:
-            raise ReleaseInputError("release source context changed")
+            raise StaleReleaseInputError("release source context changed")
 
 
 async def _read_saved(
@@ -941,5 +978,5 @@ async def revalidate_release_inputs(
         raise ReleaseInputError("release selection changed")
     current = await freeze_release_inputs(source, reader, selection, context, checkpoint)
     if current.sha256 != expected.sha256:
-        raise ReleaseInputError("release source or saved inputs changed; preview again")
+        raise StaleReleaseInputError("release source or saved inputs changed; preview again")
     return expected

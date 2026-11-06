@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import json
 import os
 import stat
 from collections.abc import Iterator
@@ -61,8 +62,9 @@ def _association_intent(collection: Path) -> SourceAssociationIntent:
         scope_sha256=sha256_hex(b"principal-a"),
         destination_alias="output",
         source_relative_path="group-a/source-a",
+        source_dataset_id="org--dataset",
         effective_destination=str(collection.resolve()),
-        attempt=PublicationAttempt("pkg-001", "attempt-1", "release-a"),
+        attempt=PublicationAttempt("pkg-001", "attempt-1", "release-a", source_dataset_id="org--dataset"),
         frozen_input_sha256=sha256_hex(canonical_json_bytes({"schema_version": "1.0.0"})),
         display_name="Release A",
         description="Selected training episodes",
@@ -248,7 +250,11 @@ def test_given_candidate_when_publish_then_independent_marker_gated_same_root(tm
     files = _payload_files()
     digest = _write_package(source, files, _manifest_for(files))
     control = OwnedControl()
-    publisher = LocalPublisher(tmp_path / "destination", PublicationAttempt("pkg-001", "attempt-1"), control)
+    publisher = LocalPublisher(
+        tmp_path / "destination",
+        PublicationAttempt("pkg-001", "attempt-1", source_dataset_id="org--dataset"),
+        control,
+    )
 
     for item in LocalReleaseStore(source).list_objects():
         content = (source / item.path).read_bytes()
@@ -270,7 +276,9 @@ def test_given_candidate_when_publish_then_independent_marker_gated_same_root(tm
 
 def test_given_replay_when_write_then_only_matching_owned_bytes_reused(tmp_path: Path) -> None:
     control = OwnedControl()
-    publisher = LocalPublisher(tmp_path, PublicationAttempt("pkg-001", "attempt-1"), control)
+    publisher = LocalPublisher(
+        tmp_path, PublicationAttempt("pkg-001", "attempt-1", source_dataset_id="org--dataset"), control
+    )
     content = b"independent bytes"
     publisher.write("data/item", (content,), length=len(content), sha256=sha256_hex(content))
 
@@ -282,7 +290,9 @@ def test_given_replay_when_write_then_only_matching_owned_bytes_reused(tmp_path:
 
 
 def test_given_chosen_dataset_name_when_written_then_layout_has_no_attempt_segment(tmp_path: Path) -> None:
-    publisher = LocalPublisher(tmp_path, PublicationAttempt("plate-release", "try-a"), OwnedControl())
+    publisher = LocalPublisher(
+        tmp_path, PublicationAttempt("plate-release", "try-a", source_dataset_id="org--plate"), OwnedControl()
+    )
     publisher.write("data/item", (b"x",), length=1, sha256=sha256_hex(b"x"))
 
     assert publisher.root == tmp_path / "plate-release"
@@ -332,7 +342,11 @@ def test_given_collection_symlink_escape_when_resolved_then_refused(tmp_path: Pa
 def test_given_two_sources_when_same_release_name_published_then_ownership_is_source_local(tmp_path: Path) -> None:
     for source_path in ("group-a/source-a", "group-a/source-b"):
         collection = release_collection_location(tmp_path, source_path)
-        publisher = LocalPublisher(collection, PublicationAttempt("package", "attempt", "same-name"), OwnedControl())
+        publisher = LocalPublisher(
+            collection,
+            PublicationAttempt("package", "attempt", "same-name", source_dataset_id="org--dataset"),
+            OwnedControl(),
+        )
         publisher.write("data/item", (b"x",), length=1, sha256=sha256_hex(b"x"))
 
         assert (collection / "_releases/same-name.json").is_file()
@@ -340,20 +354,66 @@ def test_given_two_sources_when_same_release_name_published_then_ownership_is_so
 
 
 def test_given_named_root_owned_when_other_attempt_writes_then_foreign_attempt_refused(tmp_path: Path) -> None:
-    first = LocalPublisher(tmp_path, PublicationAttempt("plate-release", "try-a"), OwnedControl())
+    first = LocalPublisher(
+        tmp_path, PublicationAttempt("plate-release", "try-a", source_dataset_id="org--plate"), OwnedControl()
+    )
     first.write("data/first", (b"x",), length=1, sha256=sha256_hex(b"x"))
-    other = LocalPublisher(tmp_path, PublicationAttempt("plate-release", "try-b"), OwnedControl())
+    other = LocalPublisher(
+        tmp_path, PublicationAttempt("plate-release", "try-b", source_dataset_id="org--plate"), OwnedControl()
+    )
 
     with pytest.raises(ReleaseVerificationError, match="ownership"):
         other.write("data/second", (b"y",), length=1, sha256=sha256_hex(b"y"))
     assert not (first.root / "data/second").exists()
 
 
+def test_given_attempt_without_source_dataset_when_claimed_then_refused(tmp_path: Path) -> None:
+    publisher = LocalPublisher(tmp_path, PublicationAttempt("plate-release", "try-a"), OwnedControl())
+
+    with pytest.raises(ReleaseVerificationError, match="source dataset"):
+        publisher.write("data/item", (b"x",), length=1, sha256=sha256_hex(b"x"))
+    assert not (tmp_path / "_releases" / "plate-release.json").exists()
+
+
+def test_given_owned_release_when_ownership_recorded_then_binds_source_dataset(tmp_path: Path) -> None:
+    publisher = LocalPublisher(
+        tmp_path,
+        PublicationAttempt("pkg-001", "try-a", "plate-release", source_dataset_id="org--plate"),
+        OwnedControl(),
+    )
+    publisher.write("data/item", (b"x",), length=1, sha256=sha256_hex(b"x"))
+
+    record = json.loads((tmp_path / "_releases" / "plate-release.json").read_bytes())
+    assert record["source_dataset_id"] == "org--plate"
+    assert record["dataset_name"] == "plate-release"
+
+
+def test_given_owned_release_when_other_source_dataset_discovers_then_not_admitted(tmp_path: Path) -> None:
+    source = _association_intent(tmp_path)
+    publisher = LocalPublisher(tmp_path / "destination", source.attempt, OwnedControl())
+    publisher.write("data/item", (b"x",), length=1, sha256=sha256_hex(b"x"))
+    other = source.model_copy(
+        update={
+            "source_dataset_id": "org--other",
+            "attempt": PublicationAttempt("pkg-001", "attempt-1", "release-a", source_dataset_id="org--other"),
+        }
+    )
+
+    assert (
+        LocalSourceAssociations(tmp_path / "destination", limits=RecordLimits()).discover(
+            source_key=other.source_key, scope_sha256=other.scope_sha256
+        )
+        == []
+    )
+
+
 def test_given_existing_legacy_dataset_when_release_claimed_then_no_files_added(tmp_path: Path) -> None:
     root = tmp_path / "plate-release"
     root.mkdir()
     (root / "original").write_bytes(b"keep")
-    publisher = LocalPublisher(tmp_path, PublicationAttempt("plate-release", "try-a"), OwnedControl())
+    publisher = LocalPublisher(
+        tmp_path, PublicationAttempt("plate-release", "try-a", source_dataset_id="org--plate"), OwnedControl()
+    )
 
     with pytest.raises(ReleaseVerificationError, match="already exists"):
         publisher.write("data/item", (b"x",), length=1, sha256=sha256_hex(b"x"))
@@ -369,7 +429,9 @@ def test_given_unsafe_attempt_when_construct_then_refused(package: str, attempt:
 def test_given_lost_authority_when_write_then_no_output(tmp_path: Path) -> None:
     control = OwnedControl()
     control.active = False
-    publisher = LocalPublisher(tmp_path, PublicationAttempt("pkg", "attempt"), control)
+    publisher = LocalPublisher(
+        tmp_path, PublicationAttempt("pkg", "attempt", source_dataset_id="org--dataset"), control
+    )
 
     with pytest.raises(ReleaseVerificationError, match="authority"):
         publisher.write("data/item", (b"x",), length=1, sha256=sha256_hex(b"x"))
@@ -390,7 +452,9 @@ def test_given_new_directories_when_write_then_parent_entries_are_durable(
         original(descriptor)
 
     monkeypatch.setattr(os, "fsync", observe)
-    publisher = LocalPublisher(tmp_path, PublicationAttempt("pkg", "attempt"), OwnedControl())
+    publisher = LocalPublisher(
+        tmp_path, PublicationAttempt("pkg", "attempt", source_dataset_id="org--dataset"), OwnedControl()
+    )
     publisher.write("data/item", (b"x",), length=1, sha256=sha256_hex(b"x"))
 
     assert tmp_path.stat().st_ino in synchronized
@@ -398,7 +462,7 @@ def test_given_new_directories_when_write_then_parent_entries_are_durable(
 
 
 _ETAGS = itertools.count()
-ATTEMPT = PublicationAttempt("pkg-001", "attempt-1")
+ATTEMPT = PublicationAttempt("pkg-001", "attempt-1", source_dataset_id="org--dataset")
 PATH = "media/front/episode-000.mp4"
 PAYLOAD = b"front camera bytes"
 
@@ -1301,7 +1365,9 @@ def test_given_record_bound_when_second_package_admitted_then_refused_and_first_
     tmp_path: Path, destination: _FakeContainer, bound: str
 ) -> None:
     first = _blob_intent(tmp_path)
-    second = first.model_copy(update={"attempt": PublicationAttempt("pkg-002", "attempt-2", "release-b")})
+    second = first.model_copy(
+        update={"attempt": PublicationAttempt("pkg-002", "attempt-2", "release-b", source_dataset_id="org--dataset")}
+    )
     _blob_associations(destination).ensure_intent(first)
     size = len(destination.blobs[_blob_record()].data)
     limits = RecordLimits(max_jobs=1) if bound == "jobs" else RecordLimits(max_record_bytes=size, max_total_bytes=size)

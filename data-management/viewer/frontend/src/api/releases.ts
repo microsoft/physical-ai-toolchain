@@ -41,7 +41,9 @@ export interface ReleaseCapabilities {
   schema: string
   jobStore: boolean
   planning: boolean
-  destinations: { alias: string }[]
+  /** Available after capability discovery; registration is configured per destination. */
+  azuremlRegistrationEnabled?: boolean
+  destinations: { alias: string; azuremlRegistrationEnabled?: boolean }[]
   operations: string[]
   target: { name: string; version: string }
   routes: string[]
@@ -95,6 +97,23 @@ export type ReleaseJobState =
   | 'committed'
   | 'cancelled'
 
+/** Registration is independent of publication; failures never invalidate a verified release. */
+export interface ReleaseRegistration {
+  status: 'not_configured' | 'pending' | 'registered' | 'failed' | 'conflict'
+  assetName: string
+  assetVersion: string
+  lastErrorCategory:
+    | 'not_configured'
+    | 'not_published'
+    | 'verification_failed'
+    | 'invalid_request'
+    | 'conflict'
+    | 'provider_error'
+    | null
+  /** Unix epoch seconds, not milliseconds. */
+  attemptedAt: number
+}
+
 /** Client-safe status of one release job. Paths and frozen requests are never returned. */
 export interface ReleaseJobStatus {
   jobId: string
@@ -113,6 +132,8 @@ export interface ReleaseJobStatus {
   /** The latest execution attempt failed and is awaiting a worker retry. */
   recoveryRequired: boolean
   refusalCode?: string | null
+  refusalMessage?: string | null
+  registration?: ReleaseRegistration | null
 }
 
 /** Job status as listed for one source. The list endpoint adds the source dataset identifier. */
@@ -132,10 +153,14 @@ export interface ReleaseJobPage {
 export interface ReleaseResult {
   schema: string
   result: Record<string, unknown>
+  identity?: { releaseName: string; sourceDatasetId: string }
+  checksumCoverage?: { covered: number; omitted: number }
   artifacts: string[]
+  azuremlRegistrationEnabled?: boolean
+  registration?: ReleaseRegistration | null
 }
 
-/** One committed release artifact. Content is a parsed JSON value, or text for the report. */
+/** One committed release artifact. Content is a parsed JSON value, or text for checksums. */
 export interface ReleaseArtifact {
   schema: string
   artifact: string
@@ -211,6 +236,27 @@ export class ReleaseRequestError extends Error {
   ) {
     super(message)
     this.name = 'ReleaseRequestError'
+  }
+
+  /** Fixed explanation for a recognized input refusal; never provider response text. */
+  get inputReason(): string | undefined {
+    if (this.status !== 422) return undefined
+    const reasons: Record<string, string> = {
+      release_name_not_azureml_compatible:
+        'Azure ML release versions must be at most 30 characters.',
+      source_metadata_invalid:
+        'Source metadata is missing, malformed, or ambiguous. Correct the source metadata or select a valid dataset.',
+      source_object_reference_invalid:
+        'Source metadata has a missing or invalid chunk or file index. Correct the source metadata or select a valid dataset.',
+      source_task_metadata_invalid:
+        'Source task declarations are empty or invalid, or selected frames reference an undeclared task. Correct the source tasks or select a valid dataset.',
+      source_frame_schema_invalid:
+        'Source frames have missing or invalid native coordinate columns, including task_index. Correct the source frame schema or select a valid dataset.',
+      source_binding_changed:
+        'The source or saved inputs changed after this request was captured. Cancel this request and submit a new release from the current source.',
+      selection_exceeds_bounds: 'The selected source exceeds the configured read limits.',
+    }
+    return Object.hasOwn(reasons, this.code) ? reasons[this.code] : undefined
   }
 
   /** Whether submission was refused rather than possibly accepted with a lost response. */
@@ -458,6 +504,14 @@ export function recoverReleaseJob(jobId: string): Promise<ReleaseJobStatus> {
   )
 }
 
+/** Retry only AML registration for a caller-owned committed job; never republishes the release. */
+export function retryReleaseRegistration(jobId: string): Promise<ReleaseJobStatus> {
+  return releaseRequest<ReleaseJobStatus>(
+    `/releases/v1/jobs/${encodeURIComponent(jobId)}/registration`,
+    { method: 'POST' },
+  )
+}
+
 /**
  * Read the verified result of a committed release job.
  *
@@ -472,7 +526,7 @@ export function getReleaseResult(jobId: string): Promise<ReleaseResult> {
  * Read one committed release artifact. Content keys are returned as stored, not camel-cased.
  *
  * @param jobId - Job identifier.
- * @param artifact - One of `manifest`, `inventory`, `receipt`, or `report`.
+ * @param artifact - One of `manifest`, `inventory`, `receipt`, or `checksums`.
  * @returns Artifact content.
  */
 export async function getReleaseArtifact(

@@ -489,7 +489,7 @@ Source header
                  Preview: blockers, bytes, processing and acknowledgments
                  Submit
                Job status: effects, cleanup, cancel and recovery
-               Verified result: manifest, inventory, receipt and report
+               Verified result: manifest, inventory, receipt and checksums
                  Read-only episodes and camera media
                  Return to source Episodes
 ```
@@ -526,8 +526,9 @@ action to request server-side cancellation.
 ### Azure Data Movement
 
 The Azure workflow is the same on a workstation, in a dev container or on an Azure
-host. Preview reads no source metadata and does not verify source revisions. Acceptance
-persists the job before the independent backend worker captures source revisions and starts native generation.
+host. Preview checks bounded source metadata and selected references without freezing
+source revisions or reading copied videos. Acceptance persists the job before the
+independent backend worker captures source revisions and starts native generation.
 Unchanged payloads use same-account storage-side copies, without host downloads for
 verification or source staging on disk.
 
@@ -539,12 +540,52 @@ and staging; generated output scratch has its own capacity accounting.
 
 Verification reports distinguish content-digest checks, write-time hashes of
 generated uploads and revision-bound Azure copy evidence. A copied object's ETag
-or version is not presented as a content hash. See the
+or version is not presented as a content hash. Results also report the covered and
+omitted counts for the derived `checksums.sha256`. See the
 [release specification](../specifications/curated-dataset-release.specification.md)
 for the assurance and schema-version contracts, and
 [backend configuration](backend/.env.example) for source and worker limits.
 
 Feature statistics are optional for copy-only or unchanged-camera releases. A release with missing or partial camera summaries publishes with a visible completeness warning that lists the omitted coverage. Package integrity and training readiness are reported separately; an intact release can still need normalization statistics before training.
+
+### Optional Azure ML Registration
+
+Registration is disabled by default. To enable it, configure the following backend
+settings after creating a datastore that references the release destination's
+existing Blob account and container:
+
+```dotenv
+CURATION_RELEASE_AZUREML_ENABLED=true
+CURATION_RELEASE_AZUREML_SUBSCRIPTION_ID=00000000-0000-0000-0000-000000000000
+CURATION_RELEASE_AZUREML_RESOURCE_GROUP=rg-example
+CURATION_RELEASE_AZUREML_WORKSPACE=mlw-example
+CURATION_RELEASE_AZUREML_DATASTORES={"azure-releases":"release_datastore"}
+```
+
+The JSON maps configured Azure destination aliases to datastore names. Local and
+unknown aliases are refused. The launcher includes the optional `azureml` dependency
+extra only when enabled; disabled publication needs no AML SDK. Authentication uses
+`DefaultAzureCredential`, separately from application authentication. Configuration
+does not create datastores, grant permissions or store credentials.
+
+Enabled destinations limit release names to 30 characters. After commit, the worker
+independently verifies the package and registers a `uri_folder` asset at its full
+release prefix. The source dataset identity determines the asset name; the release
+name is its version. The verified manifest digest and release identity are asset
+properties, not trust inferred from tags.
+
+The result shows registration status and `azureml:NAME:VERSION` only when enabled.
+A failure or conflict leaves publication committed and artifacts available. Use
+**Retry registration**, the scoped CSRF-protected
+`POST /api/releases/v1/jobs/{job_id}/registration`, or the
+[headless retry command](../curation/README.md#headless-client). A request timeout
+does not cancel server work; inspect status before retrying. Restarted workers
+reconcile unfinished registrations without republishing.
+
+Matching assets are confirmed without updates; conflicting type, path or required
+properties are refused. The SDK uses lookup followed by its create-or-update API,
+not an atomic create-only operation. Concurrent external writes remain subject to
+AML service guarantees.
 
 ### Refusal and Recovery
 

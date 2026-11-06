@@ -19,12 +19,19 @@ from physical_ai_curation.release.inputs import (
     FrozenReleaseInputs,
     LocalReleaseSource,
     ReleaseSelection,
+    SourceMetadataError,
     SourceReadBoundsError,
+    StaleReleaseInputError,
     _join_owned,
     capture_saved_selection,
     freeze_release_inputs,
 )
-from physical_ai_curation.release.jobs import CapacityError, ReleaseRefusal, ReleaseRuntimeSettings
+from physical_ai_curation.release.jobs import (
+    INPUT_REFUSAL_MESSAGES,
+    CapacityError,
+    ReleaseRefusal,
+    ReleaseRuntimeSettings,
+)
 from physical_ai_curation.release.media import StorageEndpoint, load_media_limits
 from physical_ai_curation.release.models import ProducerIdentity, VersionIdentity
 from physical_ai_curation.release.projections import materialize_saved_projections
@@ -36,6 +43,11 @@ from physical_ai_curation.release.source_associations import (
     source_association_binding,
     source_association_key,
 )
+from physical_ai_curation.release.source_format import (
+    source_version,
+    v21_tasks_table,
+)
+from physical_ai_curation.release.store import CHUNK_BYTES
 from pydantic import TypeAdapter
 
 from ..config import get_app_config
@@ -48,6 +60,7 @@ from .release_service import (
     ReleaseApiSettings,
     ReleaseSpec,
     check_cancelled,
+    current_preparation_work,
     open_release_job_store,
 )
 from .saved_input_service import (
@@ -124,13 +137,171 @@ class ViewerReleasePlanner:
             client.get_container_client(provider.container_name), prefix=provider.get_blob_prefix(dataset_id)
         )
 
+    def _preflight_metadata(self, spec: ReleaseSpec, source_kind: str) -> None:
+        """Validate selected metadata and frame tables within bounds; never fetch copied videos."""
+        import math
+
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        from physical_ai_curation.release.coordinator import _planning_metadata, select_blob_dependencies
+        from physical_ai_curation.release.errors import ReleaseVerificationError
+        from physical_ai_curation.release.inputs import ReleaseInputError
+        from physical_ai_curation.release.media import ReleasePlanError, SubsetEpisodeInput
+        from physical_ai_curation.release.source_format import object_path
+        from physical_ai_curation.release.store import LocalReleaseStore
+        from physical_ai_curation.release.tables import generate_episode_table, generate_task_table
+
+        source = self._source(spec.dataset_id, finalized=spec.finalized, kind=source_kind)
+        runtime = ReleaseRuntimeSettings.from_environment(os.environ)
+        if isinstance(source, BlobReleaseSource):
+            metadata = source.metadata_inventory()
+            metadata_budget = min(runtime.memory_bytes, source.metadata_max_bytes)
+        else:
+            metadata_budget = min(runtime.memory_bytes, 16 * 1024**2)
+            metadata = source.metadata_inventory(max_bytes=metadata_budget)
+        try:
+            info, rows = _planning_metadata(source, metadata, metadata_budget, None)
+            features = info.get("features")
+            fps = info.get("fps")
+            if not isinstance(features, dict) or any(not isinstance(feature, dict) for feature in features.values()):
+                raise SourceMetadataError("source_metadata_invalid", "source feature declarations are invalid")
+            if isinstance(fps, bool) or not isinstance(fps, (int, float)) or not math.isfinite(fps) or fps <= 0:
+                raise SourceMetadataError("source_metadata_invalid", "source frame rate is invalid")
+            by_episode = {row["episode_index"]: row for row in rows}
+            if len(by_episode) != len(rows) or any(index not in by_episode for index in spec.episode_indices):
+                raise SourceMetadataError("source_metadata_invalid", "selected episode metadata is invalid")
+            prefixes = [
+                "data",
+                *(f"videos/{name}" for name, feature in features.items() if feature.get("dtype") == "video"),
+            ]
+            paths = {
+                object_path(info, by_episode[index], prefix) for index in spec.episode_indices for prefix in prefixes
+            }
+            if isinstance(source, BlobReleaseSource):
+                source = select_blob_dependencies(source, spec.episode_indices, metadata_budget=metadata_budget)
+                objects = {item.path: item for item in source.inventory()}
+            else:
+                objects = {item.path: item for item in LocalReleaseStore(source.root).list_objects()}
+            if not paths <= objects.keys():
+                raise SourceMetadataError("source_object_reference_invalid", "selected source object is missing")
+        except SourceMetadataError:
+            raise
+        except StaleReleaseInputError:
+            raise
+        except SourceReadBoundsError:
+            raise
+        except (
+            ReleaseInputError,
+            ReleaseVerificationError,
+            KeyError,
+            TypeError,
+            ValueError,
+            pa.ArrowException,
+        ) as error:
+            raise SourceMetadataError("source_metadata_invalid", "source metadata is invalid") from error
+        budget = runtime.memory_bytes
+
+        def read(path: str) -> bytes:
+            nonlocal budget
+            item = objects.get(path)
+            if item is None:
+                raise SourceMetadataError("source_metadata_invalid", "source metadata is missing")
+            if item.length > budget:
+                raise SourceReadBoundsError("source tables exceed the configured memory bound")
+            budget -= item.length
+            if isinstance(source, LocalReleaseSource):
+                return LocalReleaseStore(source.root).read_control_bytes(path, max_bytes=item.length)
+            return b"".join(source.iter_bytes(item, chunk_size=CHUNK_BYTES))
+
+        def table(path: str) -> pa.Table:
+            nonlocal budget
+            parquet = pq.ParquetFile(
+                pa.BufferReader(read(path)),
+                thrift_string_size_limit=metadata_budget,
+                thrift_container_size_limit=metadata_budget,
+            )
+            estimate = sum(
+                parquet.metadata.row_group(index).total_byte_size for index in range(parquet.metadata.num_row_groups)
+            )
+            if estimate * 3 > budget:
+                raise SourceReadBoundsError("decoded source tables exceed the configured memory bound")
+            result = parquet.read()
+            budget -= result.nbytes * 3
+            if budget < 0:
+                raise SourceReadBoundsError("decoded source tables exceed the configured memory bound")
+            return result
+
+        try:
+            tasks = (
+                v21_tasks_table(read, max_rows=getattr(source, "metadata_max_rows", 10000))
+                if source_version(info) == "v2.1"
+                else table("meta/tasks.parquet")
+            )
+            task_count = generate_task_table(tasks).num_rows
+        except SourceReadBoundsError:
+            raise
+        except (
+            ReleasePlanError,
+            ReleaseVerificationError,
+            KeyError,
+            TypeError,
+            ValueError,
+            pa.ArrowException,
+        ) as error:
+            raise SourceMetadataError("source_task_metadata_invalid", "source task declarations are invalid") from error
+        loaded = {}
+        for index in spec.episode_indices:
+            row = by_episode[index]
+            path = object_path(info, row, "data")
+            try:
+                if path not in loaded:
+                    loaded[path] = table(path)
+                episode = loaded[path].filter(pa.compute.equal(loaded[path]["episode_index"], index))
+                descriptor = SubsetEpisodeInput(
+                    f"{spec.dataset_id}/episode_{index:06d}", index, row["length"], float(fps)
+                )
+                generate_episode_table(
+                    episode,
+                    descriptor,
+                    output_episode_index=0,
+                    output_from_index=0,
+                    limits=load_media_limits(os.environ),
+                )
+                if any(value < 0 or value >= task_count for value in episode["task_index"].to_pylist()):
+                    raise SourceMetadataError("source_task_metadata_invalid", "source task index is not declared")
+            except SourceMetadataError:
+                raise
+            except SourceReadBoundsError:
+                raise
+            except (ReleasePlanError, KeyError, TypeError, ValueError, pa.ArrowException) as error:
+                raise SourceMetadataError(
+                    "source_frame_schema_invalid", "native source frame coordinates are invalid"
+                ) from error
+
     async def prepare(self, scope: str, spec: ReleaseSpec, destination: Path | BlobLocation) -> PreparedRelease:
-        """Describe selected intent without inspecting or freezing the source."""
+        """Describe selected intent; run a bounded metadata preflight without destination effects."""
         if self.settings.job_root is None:
             raise ReleaseApiError(503, "release worker is not configured")
         source_kind = "blob" if self.datasets.has_blob_provider() else "local"
         if source_kind == "blob" and isinstance(destination, Path):
             raise ReleaseApiError(422, "azure_to_local_unsupported")
+        try:
+            work = current_preparation_work()
+            if work is None:
+                self._preflight_metadata(spec, source_kind)
+            else:
+                await work.run(self._preflight_metadata, spec, source_kind)
+        except (SourceMetadataError, StaleReleaseInputError) as error:
+            raise ReleaseApiError(
+                422, error.code, message=INPUT_REFUSAL_MESSAGES[error.code], nonretryable=True
+            ) from error
+        except SourceReadBoundsError as error:
+            raise ReleaseApiError(
+                422,
+                "selection_exceeds_bounds",
+                message=INPUT_REFUSAL_MESSAGES["selection_exceeds_bounds"],
+                nonretryable=True,
+            ) from error
         location = (
             {"kind": "local", "path": str(destination.resolve())}
             if isinstance(destination, Path)
@@ -194,6 +365,7 @@ class ViewerReleasePlanner:
         checkpoint()
         if await self.datasets.get_dataset(spec.dataset_id) is None:
             raise ReleaseApiError(404, "release source is unavailable")
+        await run(self._preflight_metadata, spec, source_kind)
         source = await run(self._source, spec.dataset_id, finalized=spec.finalized, kind=source_kind)
         if isinstance(source, BlobReleaseSource) and isinstance(destination, Path):
             raise ReleaseApiError(422, "azure_to_local_unsupported")
@@ -298,7 +470,9 @@ class ViewerReleasePlanner:
         )
         capacity = prepared.plan.capacity
         checkpoint()
-        attempt = PublicationAttempt(spec.package_id, spec.attempt_id, spec.dataset_name)
+        attempt = PublicationAttempt(
+            spec.package_id, spec.attempt_id, spec.dataset_name, source_dataset_id=spec.dataset_id
+        )
         projections = materialize_saved_projections(
             frozen.content, prepared.episodes, release_dataset_id=attempt.prefix
         )
@@ -346,6 +520,7 @@ class ViewerReleasePlanner:
                 str(destination.resolve()) if isinstance(destination, Path) else destination.as_text()
             ),
             attempt=attempt,
+            source_dataset_id=spec.dataset_id,
             frozen_input_sha256=frozen.sha256,
             display_name=spec.dataset_name,
             description=spec.description,
@@ -433,6 +608,8 @@ class ViewerReleasePlanner:
                     prepared, execution = await self._capture(
                         scope, spec, destination, checkpoint, payload["source_kind"]
                     )
+                except (SourceMetadataError, StaleReleaseInputError) as error:
+                    raise ReleaseRefusal(error.code) from error
                 except ReleaseApiError as error:
                     if error.status_code == 404:
                         raise ReleaseRefusal("source_unavailable") from error

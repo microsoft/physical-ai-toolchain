@@ -1,7 +1,7 @@
 ---
 title: Curated Dataset Release
-description: Contracts for saved-selection capture, advisory preview, immutable LeRobot publication, verification and recoverable release jobs.
-ms.date: 2026-11-05
+description: Contracts for saved-selection capture, immutable LeRobot publication, verification, release jobs and optional Azure ML registration.
+ms.date: 2026-11-06
 ms.topic: reference
 ---
 
@@ -22,9 +22,9 @@ Sources are not modified, and consuming a published package does not require the
 
 The [general curation operations](dataset-curation.specification.md) are separate
 contracts. Release does not imply support for arbitrary splitting, merging or
-conversion. It does not run inference or require judge approval. Azure ML
-registration, training/model integration, signing, WORM storage and legal-retention
-policy are outside this contract.
+conversion. It does not run inference or require judge approval. Optional Azure ML
+registration runs independently after publication. Training/model integration,
+signing, WORM storage and legal-retention policy are outside this contract.
 
 ## Selection and Source Identity
 
@@ -159,8 +159,8 @@ DEST/<source-relative-path>/releases/
     release/manifest.json         # Package bindings
     release/inventory.json        # Payload lengths and declared integrity evidence
     release/receipt.json          # Verification receipt
-    release/report.md             # Derived readable report
-    release/marker.json           # Final publication boundary
+    checksums.sha256              # Derived sha256sum-format convenience list
+    .published.json               # Final publication boundary
   _releases/<release-name>.json    # Private attempt ownership
   _release_associations/           # Private source/principal associations
 ```
@@ -201,17 +201,25 @@ same-length replacement before returning bytes.
 
 The inventory does not list itself or other control artifacts. The manifest binds
 the inventory, frozen input, preview and provenance mappings, but never itself.
-Receipt and report bind the manifest digest. The final marker binds manifest,
-inventory, receipt and report digests.
+The receipt binds the manifest digest. `checksums.sha256` is a derived list in
+`sha256sum` format. It covers the manifest and every entry with a content digest,
+`content_sha256` or `uploaded_content`. It omits `storage_revision` entries. The
+covered count includes the manifest; the omitted count does not. The receipt and
+marker record both counts. The final marker binds the manifest, inventory, receipt
+and checksums digests, and is the only artifact without a digest.
 
 Candidate verification checks canonical controls, each entry's declared assurance,
 references, output paths and bounded lineage before publication. Public verification
-additionally requires the matching receipt, report and marker. Extra, missing,
+additionally requires the matching receipt, checksums file and marker. Extra, missing,
 revision-changed or incomplete-copy objects prevent successful verification and
 published access. Revision-bound evidence trusts Azure's revision and copy semantics;
 it does not detect byte corruption that leaves those storage properties unchanged.
-Receipts and readable reports show separate content-digest, storage-revision and
-uploaded-content counts.
+Receipts show separate content-digest, storage-revision and uploaded-content counts,
+plus the checksum covered and omitted counts. `checksums.sha256` is a derived
+convenience for standard tools such as `sha256sum -c`. It is not the authority.
+For Azure-side copies it covers only part of the package, because storage-revision
+objects have no content digest. Authority rests on `verify_published` with the
+independently obtained expected manifest digest.
 
 Pass an independently obtained expected manifest SHA-256 to verify the intended
 package. Without it, verification establishes internal consistency, not protection
@@ -254,7 +262,7 @@ different source for work already started. Job state must remain available acros
 |-----------------------------|------------------------------------------------------------------------------------|
 | Accepted to running         | Restore accepted bindings and claim a live fenced lease before effects             |
 | Running                     | Register writers and effect intents; enforce admitted source/output/scratch bounds |
-| Sealed                      | Close payload effects and retain exact receipt/report identities                   |
+| Sealed                      | Close payload effects and retain exact receipt/checksums identities                |
 | Committing                  | Record the irrevocable manifest-bound decision; serialize it against cancellation  |
 | Committed                   | Write the marker last and independently verify publication with stopped writers    |
 | Cancelling                  | Stop and reconcile effects, then remove only owned unpublished residue             |
@@ -305,6 +313,41 @@ state. There is no automatic job/event TTL or reservation expiry. Reads do not
 prune records. Keep active obligations and retention requirements reconciled before
 operator cleanup; incompatible old execution bindings are not automatically migrated.
 
+## Optional Azure ML Registration
+
+Registration is opt-in per configured Azure destination alias. Enabled aliases
+require release names matching `[A-Za-z0-9][A-Za-z0-9._-]{0,29}` in addition to
+the base release-name rules. Local destinations never register. Workspace and
+datastore settings are operator configuration, not public capability fields;
+capabilities expose enabled flags only. The AML SDK remains an optional dependency.
+
+After commit, registration independently verifies the destination against the
+accepted manifest digest and release/source identities. The asset is a `uri_folder`:
+its name is the bounded lowercase source-identity slug plus 12 SHA-256 characters,
+its version is the release name, and its datastore URI includes the full collection
+and release prefix. Required properties are `package_id`, `release_name`,
+`source_dataset_id`, `manifest_sha256`, `inventory_sha256`, `checksums_sha256`,
+`schema_version`, `content_digest_count`, `storage_revision_count` and
+`uploaded_content_count`. Tags are bounded metadata, not verification authority.
+
+The job's nullable `registration` projection contains `status`, `asset_name`,
+`asset_version`, `last_error_category` and `attempted_at` (Unix seconds). Status is
+`not_configured`, `pending`, `registered`, `failed` or `conflict`. Error categories
+are bounded; provider exception text and lease tokens are never public. The verified
+result also exposes its destination's `azureml_registration_enabled` flag.
+
+Registration has its own renewable lease and never changes publication state,
+fence, capacity obligations or package contents. Restart reconciles absent or
+expired pending registrations; settled failures require explicit retry. Retry
+preserves caller authorization and CSRF, does not reread the source and does not
+republish. A client timeout does not cancel server work.
+
+An existing asset with matching type, path and required properties succeeds without
+updates. Scoped datastore URIs are equivalent only within the configured workspace;
+conflicting assets are refused. SDK lookup followed by create-or-update is not an
+atomic create-only operation; concurrent external mutation remains a service-side
+immutability risk.
+
 ## Retained Browsing and Authorization
 
 Private source associations bind existing source/principal scope, destination,
@@ -353,7 +396,10 @@ copy-first does not eliminate verification traffic or establish a fixed saving.
 ## API Contract
 
 Requests reject unknown fields. Submission returns `202` with `Location` and
-`Retry-After: 5`; clients reconnect through scoped job and accepted-request reads.
+`Retry-After: 5`; clients reconnect through scoped job and accepted-request reads. Artifact reads accept
+`manifest`, `inventory`, `receipt` and `checksums`; other aliases, including `report`,
+return `404`. The `checksums` alias returns its text in a JSON `content` field; the
+other aliases return parsed JSON.
 The route contracts below complement generated OpenAPI and canonical models,
 which remain authoritative for field schemas.
 
@@ -367,8 +413,9 @@ which remain authoritative for field schemas.
 | `GET /api/releases/v1/requests`                                     | Scoped accepted-request lookup                                         |
 | `GET /api/releases/v1/jobs`, `GET /api/releases/v1/jobs/{job_id}`   | List and read job status                                               |
 | `POST /api/releases/v1/jobs/{job_id}/cancel`, `.../recover`         | Request cancellation or recovery (`202`)                               |
+| `POST /api/releases/v1/jobs/{job_id}/registration`                  | Retry registration of a scoped committed release without republishing  |
 | `GET /api/releases/v1/jobs/{job_id}/result`                         | Verified committed result; otherwise `409 release_result_not_verified` |
-| `GET /api/releases/v1/jobs/{job_id}/artifacts/{artifact}`           | Aliases `manifest`, `inventory`, `receipt`, `report`                   |
+| `GET /api/releases/v1/jobs/{job_id}/artifacts/{artifact}`           | Aliases `manifest`, `inventory`, `receipt`, `checksums`                |
 | `GET /api/releases/v1/inventory/{dataset_id}`                       | Source inventory and saved-evidence freshness                          |
 | `GET /api/releases/v1/sources/{dataset_id}/releases`                | Source-associated verified releases                                    |
 | `GET .../sources/{dataset_id}/releases/{handle}`                    | One retained release                                                   |
@@ -381,9 +428,9 @@ Dataset-I/O owns native interpretation; curation owns freezing, planning,
 verification and job/publication policy; viewer adapters own authenticated
 composition and transport. Optional consumers use a verified manifest identity,
 verifier result, committed result/artifact API or retained read-only handle.
-Azure ML registration and training/model lineage belong to the separate
-[integration work](https://github.com/microsoft/physical-ai-toolchain/issues/2123),
-not a core library dependency.
+Azure ML registration is an optional post-commit integration, not a core library
+dependency. Training/model lineage remains separate
+[integration work](https://github.com/microsoft/physical-ai-toolchain/issues/2123).
 
 - [Curation library, CLI and operations](../curation/README.md)
 - [Viewer release workflow](../viewer/README.md#-curated-release)

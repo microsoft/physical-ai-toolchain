@@ -31,6 +31,7 @@ from physical_ai_curation.release.inputs import (
     LocalReleaseSource,
     ReleaseInputError,
     ReleaseSelection,
+    SourceMetadataError,
     revalidate_release_inputs,
 )
 from physical_ai_curation.release.jobs import ReleaseJobStore
@@ -44,11 +45,11 @@ from physical_ai_curation.release.media import (
     validate_processing_confirmation,
 )
 from physical_ai_curation.release.models import (
+    CHECKSUMS_PATH,
     CONTROL_PATHS,
     INVENTORY_PATH,
     MANIFEST_PATH,
     RECEIPT_PATH,
-    REPORT_PATH,
     CapacityEstimate,
     FrameLineageRecord,
     Inventory,
@@ -228,6 +229,8 @@ def plan_generation_inputs(
         row = by_episode.get(index)
         if row is None:
             raise ReleaseInputError("native selected episode is missing")
+        if object_path(info, row, "data") not in identities:
+            raise SourceMetadataError("source_object_reference_invalid", "native data object is missing")
         sources[episode] = SubsetEpisodeInput(episode, index, row["length"], float(info["fps"]))
         summaries[episode] = {}
         for camera in cameras:
@@ -408,6 +411,21 @@ def _checkpoint(checkpoint: Callable[[], None] | None) -> None:
         checkpoint()
 
 
+def _trusted_source_dataset_id(frozen: FrozenReleaseInputs, selection: ReleaseSelection) -> str:
+    """Derive the source dataset from frozen selected episodes and the freeze selection.
+
+    Every selected episode must share one `<dataset-id>/episode_...` prefix, and
+    that prefix must match the dataset the selection was frozen against.
+    """
+    prefixes = {episode.rsplit("/episode_", 1)[0] for episode in frozen.content.selected_episode_ids}
+    if len(prefixes) != 1:
+        raise ReleaseInputError("selected episodes must belong to one source dataset")
+    (dataset_id,) = prefixes
+    if dataset_id != selection.dataset_id:
+        raise ReleaseInputError("selected episodes do not match the frozen source dataset")
+    return dataset_id
+
+
 def _inventory(store: ReleaseStore, *, checkpoint: Callable[[], None] | None = None) -> Inventory:
     entries = []
     for stat in sorted(store.list_objects(), key=lambda item: item.path):
@@ -550,6 +568,8 @@ async def run_release_generation(
     frozen = await revalidate_release_inputs(
         expected, observed_source, reader, selection, context, checkpoint=checkpoint
     )
+    if attempt.source_dataset_id != _trusted_source_dataset_id(frozen, selection):
+        raise ReleaseInputError("attempt source dataset does not match the frozen selection")
     store.record_io(job_id, fence, uuid4().hex, {"source_verification_bytes": source_read_bytes})
     if store.frozen_request(job_id) != generation_request_bytes(frozen, inputs):
         raise ReleaseInputError("generation does not match the durably accepted frozen request")
@@ -722,14 +742,22 @@ def _publish_generation(
                 len(candidate.receipt_bytes),
                 sha256_hex(candidate.receipt_bytes),
             ),
-            REPORT_PATH: (
-                len(candidate.report_bytes),
-                sha256_hex(candidate.report_bytes),
+            CHECKSUMS_PATH: (
+                len(candidate.checksums_bytes),
+                sha256_hex(candidate.checksums_bytes),
             ),
         },
     )
     publisher.publish(candidate.manifest_sha256)
-    result = verify_published(publisher.store, candidate.manifest_sha256, checkpoint=checkpoint)
+    if attempt.source_dataset_id is None:
+        raise ReleaseInputError("release attempt requires a source dataset identity")
+    result = verify_published(
+        publisher.store,
+        candidate.manifest_sha256,
+        checkpoint=checkpoint,
+        expected_release_name=attempt.prefix,
+        expected_source_dataset_id=attempt.source_dataset_id,
+    )
     store.record_io(
         job_id,
         fence,

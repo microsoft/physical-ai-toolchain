@@ -75,12 +75,35 @@ from test_release_jobs import (
     FsContainer,
     OffsetClock,
     _ChildBlobPublisher,
+    _committed_job,
     _request,
     _sdk_calls,
     _store,
 )
 from test_release_media import _encode_source
 from test_release_publishers import _association_intent
+
+
+@pytest.mark.parametrize("outcome", ["worked", "skipped", "failed"])
+def test_given_committed_job_when_registration_queue_runs_then_no_source_dispatch(
+    tmp_path: Path,
+    mocker: MockerFixture,
+    outcome: str,
+) -> None:
+    from physical_ai_curation.release.runner import run_queue
+
+    store = _store(tmp_path / "ledger", OffsetClock())
+    job_id, _ = _committed_job(store, tmp_path / "dest")
+    resolver = mocker.Mock(side_effect=AssertionError("source dispatch forbidden"))
+    registration = mocker.AsyncMock(return_value=outcome == "worked")
+    if outcome == "failed":
+        registration.side_effect = RuntimeError("private provider detail")
+    result = asyncio.run(run_queue(store, resolver, registration=registration))
+    registration.assert_awaited_once_with(job_id)
+    resolver.assert_not_called()
+    assert store.get(job_id, scope=SCOPE, principal=OWNER).state == "committed"
+    assert "private" not in repr(result)
+    assert all(item["status"] != "recovery_required" for item in result)
 
 
 def _source_root(tmp_path: Path) -> Path:
@@ -198,10 +221,21 @@ def test_given_final_verification_longer_than_lease_when_executed_then_live_fenc
     real_verify = coordinator_module.verify_published
 
     def delayed_verify(
-        local_store: LocalReleaseStore, expected: str | None = None, *, checkpoint: object = None
+        local_store: LocalReleaseStore,
+        expected: str | None = None,
+        *,
+        checkpoint: object = None,
+        expected_release_name: str | None = None,
+        expected_source_dataset_id: str | None = None,
     ) -> object:
         time.sleep(lease_seconds + 2)
-        return real_verify(local_store, expected, checkpoint=checkpoint)
+        return real_verify(
+            local_store,
+            expected,
+            checkpoint=checkpoint,
+            expected_release_name=expected_release_name,
+            expected_source_dataset_id=expected_source_dataset_id,
+        )
 
     with patch.object(coordinator_module, "verify_published", side_effect=delayed_verify):
         asyncio.run(execute_job(store, job_id, ConfiguredExecution(source, reader, selection, context, destination)))
@@ -574,7 +608,12 @@ def test_given_accepted_job_when_independent_runner_reopens_then_verified_withou
     root = tmp_path / "jobs"
     store = _store(root, OffsetClock())
     intent = _association_intent(destination).model_copy(
-        update={"attempt": ATTEMPT, "scope_sha256": sha256_hex(OWNER.encode()), "frozen_input_sha256": frozen.sha256}
+        update={
+            "attempt": ATTEMPT,
+            "source_dataset_id": ATTEMPT.source_dataset_id,
+            "scope_sha256": sha256_hex(OWNER.encode()),
+            "frozen_input_sha256": frozen.sha256,
+        }
     )
     job_id = store.accept(
         replace(
@@ -617,7 +656,12 @@ def test_given_cancelled_associated_job_when_runner_reopens_then_pending_cleanup
     destination = tmp_path / "output"
     store = _store(tmp_path / "jobs", OffsetClock())
     intent = _association_intent(destination).model_copy(
-        update={"attempt": ATTEMPT, "scope_sha256": sha256_hex(OWNER.encode()), "frozen_input_sha256": frozen.sha256}
+        update={
+            "attempt": ATTEMPT,
+            "source_dataset_id": ATTEMPT.source_dataset_id,
+            "scope_sha256": sha256_hex(OWNER.encode()),
+            "frozen_input_sha256": frozen.sha256,
+        }
     )
     job_id = store.accept(
         replace(
@@ -696,7 +740,11 @@ def test_given_leased_and_queued_jobs_when_runner_pass_then_bounded_safe_outcome
     destination = tmp_path / "output"
     job_ids = [
         store.accept(
-            _request(destination, key=f"queue-{index}", attempt=PublicationAttempt(f"package-{index}", "attempt-1"))
+            _request(
+                destination,
+                key=f"queue-{index}",
+                attempt=PublicationAttempt(f"package-{index}", "attempt-1", source_dataset_id="sample"),
+            )
         ).job_id
         for index in range(3)
     ]
@@ -727,7 +775,11 @@ def test_given_permanent_resolver_failure_on_lowest_job_when_queue_passes_then_h
     destination = tmp_path / "output"
     job_ids = sorted(
         store.accept(
-            _request(destination, key=f"retry-{index}", attempt=PublicationAttempt(f"retry-{index}", "attempt-1"))
+            _request(
+                destination,
+                key=f"retry-{index}",
+                attempt=PublicationAttempt(f"retry-{index}", "attempt-1", source_dataset_id="sample"),
+            )
         ).job_id
         for index in range(4)
     )
@@ -777,7 +829,11 @@ def test_given_many_failing_jobs_when_queue_pass_then_failed_dispatches_are_boun
     destination = tmp_path / "output"
     job_ids = sorted(
         store.accept(
-            _request(destination, key=f"bulk-{index}", attempt=PublicationAttempt(f"bulk-{index}", "attempt-1"))
+            _request(
+                destination,
+                key=f"bulk-{index}",
+                attempt=PublicationAttempt(f"bulk-{index}", "attempt-1", source_dataset_id="sample"),
+            )
         ).job_id
         for index in range(failed_dispatch_bound + 2)
     )
@@ -837,7 +893,11 @@ def test_given_failing_cancellation_backlog_when_restarted_then_healthy_job_prog
     destination = tmp_path / "output"
     job_ids = sorted(
         store.accept(
-            _request(destination, key=f"cancel-{index}", attempt=PublicationAttempt(f"cancel-{index}", "attempt-1"))
+            _request(
+                destination,
+                key=f"cancel-{index}",
+                attempt=PublicationAttempt(f"cancel-{index}", "attempt-1", source_dataset_id="sample"),
+            )
         ).job_id
         for index in range(10)
     )
@@ -907,7 +967,17 @@ def test_given_own_claim_when_worker_fails_then_failure_is_recorded_with_backoff
 
 @pytest.mark.parametrize(
     "code",
-    ["processing_confirmation_required", "insufficient_capacity", "source_unavailable", "selection_exceeds_bounds"],
+    [
+        "processing_confirmation_required",
+        "insufficient_capacity",
+        "source_unavailable",
+        "selection_exceeds_bounds",
+        "source_metadata_invalid",
+        "source_object_reference_invalid",
+        "source_task_metadata_invalid",
+        "source_frame_schema_invalid",
+        "source_binding_changed",
+    ],
 )
 def test_given_capture_refusal_when_queue_runs_then_needs_input_is_not_recaptured(tmp_path: Path, code: str) -> None:
     clock = OffsetClock()
@@ -934,6 +1004,28 @@ def test_given_capture_refusal_when_queue_runs_then_needs_input_is_not_recapture
     store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
     asyncio.run(run_queue(store, lambda *_args: configured))
     assert job_id not in store.storage.snapshot()
+
+
+def test_given_stopped_partial_effect_when_source_refused_then_cleanup_ownership_and_capacity_are_retained(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path / "jobs", OffsetClock())
+    job_id = store.accept(_request(tmp_path / "output")).job_id
+    fence = store.claim(job_id, "queue-worker")
+    store.confirm_stopped(job_id, fence)
+    store.begin_effect(job_id, fence, ATTEMPT, "data/partial.bin", 1, "a" * 64)
+    before = json.dumps(store.storage.snapshot()[job_id]["effects"], sort_keys=True)
+    store.require_input(job_id, fence, "source_binding_changed")
+    status = store.get(job_id, scope=SCOPE, principal=OWNER)
+    assert status.state == "needs_input"
+    assert status.refusal_code == "source_binding_changed"
+    assert status.capacity_state == "reserved"
+    assert not status.recovery_required
+    assert json.dumps(store.storage.snapshot()[job_id]["effects"], sort_keys=True) == before
+    store.request_cancel(job_id, scope=SCOPE, principal=OWNER)
+    assert store.get(job_id, scope=SCOPE, principal=OWNER).state == "cancelling"
+    assert store.get(job_id, scope=SCOPE, principal=OWNER).capacity_state == "reserved"
+    assert json.dumps(store.storage.snapshot()[job_id]["effects"], sort_keys=True) == before
 
 
 def test_given_job_page_when_projected_then_binding_and_acceptance_use_one_snapshot(
@@ -1631,6 +1723,85 @@ def test_given_v21_metadata_over_row_budget_when_read_then_refused_before_extra_
 
     with pytest.raises(ReleaseInputError, match="row budget"):
         v21_tasks_table(lambda _path: b'{"task_index":0,"task":"pick"}\nnot-json\n', max_rows=1)
+
+
+@pytest.mark.parametrize("content", [b"", b'{"task":"pick"}\n'])
+def test_given_empty_or_unindexed_v21_task_metadata_when_read_then_refused_with_task_code(content: bytes) -> None:
+    from physical_ai_curation.release.inputs import SourceMetadataError
+    from physical_ai_curation.release.source_format import v21_tasks_table
+
+    with pytest.raises(SourceMetadataError) as error:
+        v21_tasks_table(lambda _path: content)
+    assert error.value.code == "source_task_metadata_invalid"
+
+
+def test_given_malformed_v21_task_json_when_read_then_classified_as_task_code() -> None:
+    from physical_ai_curation.release.inputs import SourceMetadataError
+    from physical_ai_curation.release.source_format import v21_tasks_table
+
+    with pytest.raises(SourceMetadataError) as error:
+        v21_tasks_table(lambda _path: b"not-json\n")
+    assert error.value.code == "source_task_metadata_invalid"
+
+
+@pytest.mark.parametrize(
+    ("code", "reason"),
+    [
+        ("source_metadata_invalid", "source_metadata_invalid"),
+        ("source_object_reference_invalid", "source_object_reference_invalid"),
+        ("source_task_metadata_invalid", "source_task_metadata_invalid"),
+        ("source_frame_schema_invalid", "source_frame_schema_invalid"),
+        ("arbitrary_payload /private/path", "source_metadata_invalid"),
+    ],
+)
+def test_given_source_refusal_when_worker_reports_then_only_allowlisted_reason_crosses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: str, reason: str
+) -> None:
+    from physical_ai_curation.release import native_worker
+    from physical_ai_curation.release.inputs import SourceMetadataError
+
+    request = tmp_path / "request.json"
+    request.write_bytes(b"{}")
+
+    def refuse(_path: Path) -> None:
+        raise SourceMetadataError(code, "secret detail /private/path")
+
+    monkeypatch.setattr(native_worker, "_process", refuse)
+    assert native_worker.main([str(request)]) == 0
+    result = json.loads((tmp_path / "result.json").read_bytes())
+    assert result == {"state": "invalid_input", "objects": [], "reason": reason}
+
+
+def test_given_release_input_refusal_when_worker_reports_then_fixed_payload_without_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.release import native_worker
+
+    request = tmp_path / "request.json"
+    request.write_bytes(b"{}")
+
+    def refuse(_path: Path) -> None:
+        raise ReleaseInputError("private detail /private/path")
+
+    monkeypatch.setattr(native_worker, "_process", refuse)
+    assert native_worker.main([str(request)]) == 0
+    assert (tmp_path / "result.json").read_bytes() == b'{"state":"invalid_input","objects":[]}'
+
+
+def test_given_raw_verification_failure_when_worker_runs_then_no_message_result_is_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from physical_ai_curation.release import native_worker
+
+    request = tmp_path / "request.json"
+    request.write_bytes(b"{}")
+
+    def fail(_path: Path) -> None:
+        raise ReleaseVerificationError("invalid release JSON: private detail /private/path")
+
+    monkeypatch.setattr(native_worker, "_process", fail)
+    assert native_worker.main([str(request)]) == 1
+    assert not (tmp_path / "result.json").exists()
 
 
 def _blob_native_case(

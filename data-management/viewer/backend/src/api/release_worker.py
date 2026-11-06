@@ -9,6 +9,7 @@ import logging
 import math
 import os
 import sys
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from physical_ai_curation.release.runner import run_queue
 from .logging_config import configure_logging
 from .services.release_service import (
     ReleaseApiError,
+    ReleaseService,
     get_release_planner,
     load_release_api_settings,
     open_release_job_store,
@@ -90,10 +92,16 @@ def start_release_worker() -> asyncio.Task[None] | None:
 
 
 async def _watch_queue(
-    store: ReleaseJobStore, planner: ViewerReleasePlanner, args: argparse.Namespace, poll_seconds: float
+    store: ReleaseJobStore,
+    planner: ViewerReleasePlanner,
+    args: argparse.Namespace,
+    poll_seconds: float,
+    registration: Callable[[str], Awaitable[bool]] | None = None,
 ) -> None:
     while True:
-        outcomes = await run_queue(store, planner.execution, worker_id=args.worker_id, limit=args.limit)
+        outcomes = await run_queue(
+            store, planner.execution, worker_id=args.worker_id, limit=args.limit, registration=registration
+        )
         if outcomes:
             logger.info(json.dumps({"schema_version": OUTCOME_SCHEMA, "outcomes": list(outcomes)}, sort_keys=True))
         await asyncio.sleep(poll_seconds)
@@ -118,11 +126,20 @@ def main(argv: list[str] | None = None) -> int:
     planner = get_release_planner() or ViewerReleasePlanner(settings)
 
     store = open_release_job_store(settings)
+    service = ReleaseService(settings, planner=planner)
     try:
         if args.watch:
-            asyncio.run(_watch_queue(store, planner, args, poll_seconds))
+            asyncio.run(_watch_queue(store, planner, args, poll_seconds, service.register_pending))
             return EXIT_OK
-        outcomes = asyncio.run(run_queue(store, planner.execution, worker_id=args.worker_id, limit=args.limit))
+        outcomes = asyncio.run(
+            run_queue(
+                store,
+                planner.execution,
+                worker_id=args.worker_id,
+                limit=args.limit,
+                registration=service.register_pending,
+            )
+        )
     except ReleaseApiError:
         logger.error("release worker pass failed")
         return EXIT_NOT_CONFIGURED

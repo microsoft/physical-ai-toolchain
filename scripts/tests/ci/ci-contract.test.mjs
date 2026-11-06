@@ -135,7 +135,9 @@ test('product workspace: judge tests and coverage remain required in the backend
   }
   assert.equal(install.includes('--all-groups'), false);
   assert.equal(install.includes('azureml-tracking'), false);
-  const judge = steps.find(step => step.id === 'judge_unit').run;
+  const judgeStep = steps.find(step => step.id === 'judge_unit');
+  assert.equal(judgeStep.env.COVERAGE_FILE, '${{ github.workspace }}/logs/coverage-vlm-judge/.coverage');
+  const judge = judgeStep.run;
   assert.match(judge, /--no-sync --frozen pytest/);
   assert.ok(judge.includes('evaluation/vlm_judge/pyproject.toml'));
   assert.ok(judge.includes('evaluation/tests/vlm_judge'));
@@ -160,6 +162,7 @@ test('product workspace: judge tests and coverage remain required in the backend
   assert.match(generate.if, /!cancelled\(\)/);
   assert.match(generate.if, /steps\.install\.outcome == 'success'/);
   assert.ok(generate.run.includes('coverage xml'));
+  assert.ok(generate.run.includes('! -s ../../../logs/coverage-dataviewer/.coverage'));
   assert.ok(generate.run.includes('backend_status=$?'));
   assert.ok(generate.run.includes('judge_status=$?'));
   assert.ok(generate.run.includes('rm -f'));
@@ -204,7 +207,7 @@ test('backend coverage: invalid backend XML does not reject valid judge XML', t 
   const cwd = join(workspace, 'data-management/viewer/backend');
 
   mkdirSync(cwd, { recursive: true });
-  writeFixture(cwd, '.coverage', 'fixture');
+  writeFixture(workspace, 'logs/coverage-dataviewer/.coverage', 'fixture');
   writeFixture(workspace, 'logs/coverage-dataviewer.xml', '<coverage');
   writeFixture(
     workspace,
@@ -249,7 +252,7 @@ test('backend coverage: judge report generation runs after backend generation fa
 
   mkdirSync(cwd, { recursive: true });
   mkdirSync(bin, { recursive: true });
-  writeFixture(cwd, '.coverage', 'fixture');
+  writeFixture(workspace, 'logs/coverage-dataviewer/.coverage', 'fixture');
 
   const uv = join(bin, 'uv');
   const log = join(workspace, 'uv.log');

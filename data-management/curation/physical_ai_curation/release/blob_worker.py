@@ -636,7 +636,12 @@ class SupervisedBlobPublisher(BlobPublisher):
             "version": 1,
             "job_id": self.job_id,
             "fence": self.fence,
-            "attempt": [self.attempt.package_id, self.attempt.attempt_id, self.attempt.prefix],
+            "attempt": [
+                self.attempt.package_id,
+                self.attempt.attempt_id,
+                self.attempt.prefix,
+                self.attempt.source_dataset_id,
+            ],
             "destination": self.location.as_text(),
             "account_url": self.location.account_url,
             "container": self.location.container,
@@ -1228,7 +1233,11 @@ def _process(
         if spec.get("marker") is True:
             marker = b"".join(_verified_stream(chunks, spec["length"], spec["sha256"]))
             candidate = verify_candidate(publisher.store, spec["manifest_digest"])
-            if build_marker(candidate) != marker:
+            if (
+                attempt.source_dataset_id is None
+                or build_marker(candidate, release_name=attempt.prefix, source_dataset_id=attempt.source_dataset_id)
+                != marker
+            ):
                 raise ReleaseVerificationError("marker differs from the verified candidate")
             publisher._claim_root()
             publisher._publish_marker(marker, expected_manifest_sha256=spec["manifest_digest"])

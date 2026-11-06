@@ -2,7 +2,7 @@
 
 Candidate verification checks the closed object set without a marker. Public
 verification additionally requires the final marker and bindings to the
-manifest, inventory, receipt, and report bytes.
+manifest, inventory, receipt, and checksums bytes.
 """
 
 from __future__ import annotations
@@ -23,12 +23,12 @@ from physical_ai_curation.release.errors import IncompleteReleaseError, ReleaseV
 from physical_ai_curation.release.models import (
     CANDIDATE_ASSURANCE,
     CANDIDATE_CONTROL_PATHS,
+    CHECKSUMS_PATH,
     CONTROL_PATHS,
     INVENTORY_PATH,
     MANIFEST_PATH,
     MARKER_PATH,
     RECEIPT_PATH,
-    REPORT_PATH,
     VERIFIER_VERSION,
     FrameLineageRecord,
     FrozenInput,
@@ -40,13 +40,11 @@ from physical_ai_curation.release.models import (
     ReleaseManifest,
     ReleaseMarker,
     ReleasePreview,
-    ReleaseReport,
     ReleaseResult,
     RevisionSourceObject,
     StorageRevisionEntry,
     UploadedContentEntry,
     VerificationReceipt,
-    render_report,
 )
 from physical_ai_curation.release.store import CHUNK_BYTES, ObjectStat, ReleaseStore
 
@@ -90,7 +88,7 @@ class CandidateVerification:
     manifest_sha256: str
     inventory_sha256: str
     receipt_bytes: bytes
-    report_bytes: bytes
+    checksums_bytes: bytes
 
 
 def verify_candidate(
@@ -104,10 +102,19 @@ def verify_candidate(
     if expected_manifest_sha256 is not None and sha256_hex(package.manifest_bytes) != expected_manifest_sha256:
         raise ReleaseVerificationError("manifest digest does not match expected value")
     candidate = _build_candidate(package)
-    for path, expected in ((RECEIPT_PATH, candidate.receipt_bytes), (REPORT_PATH, candidate.report_bytes)):
+    for path, expected in ((RECEIPT_PATH, candidate.receipt_bytes), (CHECKSUMS_PATH, candidate.checksums_bytes)):
         _require_matching_control(store, package, path, expected)
     _require_unchanged_listing(store, package)
     return candidate
+
+
+@dataclass(frozen=True)
+class VerifiedPublication:
+    """Published result with the marker and receipt read during the same verification pass."""
+
+    result: ReleaseResult
+    marker: ReleaseMarker
+    receipt: VerificationReceipt
 
 
 def verify_published(
@@ -115,39 +122,77 @@ def verify_published(
     expected_manifest_sha256: str | None = None,
     *,
     checkpoint: Callable[[], None] | None = None,
+    expected_release_name: str | None = None,
+    expected_source_dataset_id: str | None = None,
 ) -> ReleaseResult:
-    """Verify a finalized package and return a published result."""
+    """Verify a finalized package and return a published result bound to its identity."""
+    return verify_published_publication(
+        store,
+        expected_manifest_sha256,
+        checkpoint=checkpoint,
+        expected_release_name=expected_release_name,
+        expected_source_dataset_id=expected_source_dataset_id,
+    ).result
+
+
+def verify_published_publication(
+    store: ReleaseStore,
+    expected_manifest_sha256: str | None = None,
+    *,
+    checkpoint: Callable[[], None] | None = None,
+    expected_release_name: str | None = None,
+    expected_source_dataset_id: str | None = None,
+) -> VerifiedPublication:
+    """Verify a finalized package and return the result with its verified marker and receipt."""
     package = _load(store, CONTROL_PATHS, checkpoint)
     if expected_manifest_sha256 is not None and sha256_hex(package.manifest_bytes) != expected_manifest_sha256:
         raise ReleaseVerificationError("manifest digest does not match expected value")
-    missing = sorted({MARKER_PATH, RECEIPT_PATH, REPORT_PATH} - package.present)
+    missing = sorted({MARKER_PATH, RECEIPT_PATH, CHECKSUMS_PATH} - package.present)
     if missing:
         raise IncompleteReleaseError(f"release is not finalized; missing: {', '.join(missing)}")
     candidate = _build_candidate(package)
-    for path, expected in ((RECEIPT_PATH, candidate.receipt_bytes), (REPORT_PATH, candidate.report_bytes)):
+    for path, expected in ((RECEIPT_PATH, candidate.receipt_bytes), (CHECKSUMS_PATH, candidate.checksums_bytes)):
         _require_matching_control(store, package, path, expected)
     marker_bytes = store.read_control_bytes(MARKER_PATH, max_bytes=MAX_CONTROL_BYTES)
     marker = _parse_model(ReleaseMarker, marker_bytes, "marker")
     _require_canonical(marker_bytes, marker, "marker")
-    if marker != _expected_marker(candidate):
+    if marker != _expected_marker(candidate, marker.release_name, marker.source_dataset_id):
         raise ReleaseVerificationError("marker bindings do not match release contents")
+    if expected_release_name is not None and marker.release_name != expected_release_name:
+        raise ReleaseVerificationError("published release identity does not match expected release name")
+    if expected_source_dataset_id is not None and marker.source_dataset_id != expected_source_dataset_id:
+        raise ReleaseVerificationError("published release identity does not match expected source dataset")
     _require_unchanged_listing(store, package)
-    return ReleaseResult(identity=candidate.result.identity, publication_state="published")
+    result = ReleaseResult(
+        identity=candidate.result.identity.model_copy(
+            update={"release_name": marker.release_name, "source_dataset_id": marker.source_dataset_id}
+        ),
+        publication_state="published",
+        checksum_covered_count=marker.checksum_covered_count,
+        checksum_omitted_count=marker.checksum_omitted_count,
+    )
+    receipt = _parse_model(VerificationReceipt, candidate.receipt_bytes, "receipt")
+    return VerifiedPublication(result=result, marker=marker, receipt=receipt)
 
 
-def build_marker(candidate: CandidateVerification) -> bytes:
-    """Return canonical marker bytes binding the verified candidate artifacts."""
-    return serialize_model(_expected_marker(candidate))
+def build_marker(candidate: CandidateVerification, *, release_name: str, source_dataset_id: str) -> bytes:
+    """Return canonical marker bytes binding the verified candidate artifacts and identity."""
+    return serialize_model(_expected_marker(candidate, release_name, source_dataset_id))
 
 
-def _expected_marker(candidate: CandidateVerification) -> ReleaseMarker:
+def _expected_marker(candidate: CandidateVerification, release_name: str, source_dataset_id: str) -> ReleaseMarker:
     identity = candidate.result.identity
+    receipt = _parse_model(VerificationReceipt, candidate.receipt_bytes, "receipt")
     return ReleaseMarker(
         package_id=identity.package_id,
+        release_name=release_name,
+        source_dataset_id=source_dataset_id,
         manifest_sha256=identity.manifest_sha256,
         inventory_sha256=candidate.inventory_sha256,
         receipt_sha256=sha256_hex(candidate.receipt_bytes),
-        report_sha256=sha256_hex(candidate.report_bytes),
+        checksums_sha256=sha256_hex(candidate.checksums_bytes),
+        checksum_covered_count=receipt.checksum_covered_count,
+        checksum_omitted_count=receipt.checksum_omitted_count,
     )
 
 
@@ -394,10 +439,24 @@ def _check_bindings(manifest: ReleaseManifest, contents: dict[str, bytes], decla
     return frozen
 
 
+def _build_checksums(package: _Package) -> tuple[bytes, int, int]:
+    """Return sha256sum-format bytes, covered count, and omitted count."""
+    covered: dict[str, str] = {MANIFEST_PATH: sha256_hex(package.manifest_bytes)}
+    omitted = 0
+    for entry in package.inventory.entries:
+        if isinstance(entry, StorageRevisionEntry):
+            omitted += 1
+            continue
+        covered[entry.path] = entry.sha256
+    lines = "".join(f"{covered[path]}  {path}\n" for path in sorted(covered))
+    return lines.encode("utf-8"), len(covered), omitted
+
+
 def _build_candidate(package: _Package) -> CandidateVerification:
     manifest_sha = sha256_hex(package.manifest_bytes)
     inventory_sha = sha256_hex(package.inventory_bytes)
     package_id = package.manifest.package_id
+    checksums_bytes, covered_count, omitted_count = _build_checksums(package)
     receipt = VerificationReceipt(
         package_id=package_id,
         verifier_version=VERIFIER_VERSION,
@@ -408,28 +467,25 @@ def _build_candidate(package: _Package) -> CandidateVerification:
         content_digest_count=sum(isinstance(entry, InventoryEntry) for entry in package.inventory.entries),
         uploaded_content_count=sum(isinstance(entry, UploadedContentEntry) for entry in package.inventory.entries),
         storage_revision_count=sum(isinstance(entry, StorageRevisionEntry) for entry in package.inventory.entries),
+        checksum_covered_count=covered_count,
+        checksum_omitted_count=omitted_count,
         payload_byte_count=sum(entry.length for entry in package.inventory.entries),
         episode_mapping_count=package.episode_mapping_count,
         frame_mapping_count=package.frame_mapping_count,
         checks=RECEIPT_CHECKS,
     )
-    report = ReleaseReport(
-        package_id=package_id,
-        manifest_sha256=manifest_sha,
-        content_digest_count=receipt.content_digest_count,
-        uploaded_content_count=receipt.uploaded_content_count,
-        storage_revision_count=receipt.storage_revision_count,
-    )
     result = ReleaseResult(
         identity=PackageIdentity(package_id=package_id, manifest_sha256=manifest_sha),
         publication_state="candidate",
+        checksum_covered_count=covered_count,
+        checksum_omitted_count=omitted_count,
     )
     return CandidateVerification(
         result=result,
         manifest_sha256=manifest_sha,
         inventory_sha256=inventory_sha,
         receipt_bytes=serialize_model(receipt),
-        report_bytes=render_report(report),
+        checksums_bytes=checksums_bytes,
     )
 
 

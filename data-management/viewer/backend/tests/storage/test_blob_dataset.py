@@ -17,11 +17,11 @@ import pytest
 from azure.core.exceptions import ResourceNotFoundError
 from physical_ai_curation.release.canonical import serialize_model, sha256_hex
 from physical_ai_curation.release.models import (
+    CHECKSUMS_PATH,
     INVENTORY_PATH,
     MANIFEST_PATH,
     MARKER_PATH,
     RECEIPT_PATH,
-    REPORT_PATH,
     EpisodeMapping,
     FrameMapping,
     FrozenInput,
@@ -168,11 +168,11 @@ _PREVIEW_PATH = "evidence/preview.json"
 _PAYLOAD_BLOB = f"{_RELEASE_PREFIX}/data/item"
 _MARKER_BLOB = f"{_RELEASE_PREFIX}/{MARKER_PATH}"
 _RECEIPT_BLOB = f"{_RELEASE_PREFIX}/{RECEIPT_PATH}"
-_REPORT_BLOB = f"{_RELEASE_PREFIX}/{REPORT_PATH}"
+_CHECKSUMS_BLOB = f"{_RELEASE_PREFIX}/{CHECKSUMS_PATH}"
 _REFUSED_CASES = (
     "missing_marker",
     "missing_receipt",
-    "missing_report",
+    "missing_checksums",
     "invalid_owner",
     "owner_dataset_mismatch",
     "owner_package_mismatch",
@@ -219,8 +219,8 @@ def _build_finalized_release(root: Path) -> dict[str, bytes]:
         target.write_bytes(content)
     candidate = verify_candidate(LocalReleaseStore(root))
     files[RECEIPT_PATH] = candidate.receipt_bytes
-    files[REPORT_PATH] = candidate.report_bytes
-    files[MARKER_PATH] = build_marker(candidate)
+    files[CHECKSUMS_PATH] = candidate.checksums_bytes
+    files[MARKER_PATH] = build_marker(candidate, release_name="plate", source_dataset_id="source-plate")
     return {f"{_RELEASE_PREFIX}/{relative}": content for relative, content in files.items()}
 
 
@@ -229,12 +229,20 @@ def _refused_package(case: str, blobs: dict[str, bytes]) -> dict[str, bytes]:
     if case == "invalid_owner":
         return {**blobs, _OWNER_PATH: b"not-json"}
     if case == "owner_dataset_mismatch":
-        return {**blobs, _OWNER_PATH: ownership_bytes(PublicationAttempt(_RELEASE_PACKAGE_ID, "attempt-a", "other"))}
+        return {
+            **blobs,
+            _OWNER_PATH: ownership_bytes(PublicationAttempt(_RELEASE_PACKAGE_ID, "attempt-a", "other", "source-plate")),
+        }
     if case == "owner_package_mismatch":
-        return {**blobs, _OWNER_PATH: ownership_bytes(PublicationAttempt("pkg-other", "attempt-a", "plate"))}
+        return {
+            **blobs,
+            _OWNER_PATH: ownership_bytes(PublicationAttempt("pkg-other", "attempt-a", "plate", "source-plate")),
+        }
     if case == "tampered_payload":
         return {**blobs, _PAYLOAD_BLOB: b"ITEM-BYTES"}
-    removed = {"missing_marker": _MARKER_BLOB, "missing_receipt": _RECEIPT_BLOB, "missing_report": _REPORT_BLOB}[case]
+    removed = {"missing_marker": _MARKER_BLOB, "missing_receipt": _RECEIPT_BLOB, "missing_checksums": _CHECKSUMS_BLOB}[
+        case
+    ]
     return {key: value for key, value in blobs.items() if key != removed}
 
 
@@ -344,7 +352,7 @@ def _named_provider(
 def named_release_blobs(tmp_path: Path) -> dict[str, bytes]:
     """Finalized plate release built by the curation core, plus its ownership companion."""
     blobs = _build_finalized_release(tmp_path / "package")
-    blobs[_OWNER_PATH] = ownership_bytes(PublicationAttempt(_RELEASE_PACKAGE_ID, "attempt-a", "plate"))
+    blobs[_OWNER_PATH] = ownership_bytes(PublicationAttempt(_RELEASE_PACKAGE_ID, "attempt-a", "plate", "source-plate"))
     return blobs
 
 
@@ -456,7 +464,7 @@ class TestNamedReleaseAdmission:
             **named_release_blobs,
             "org/legacy/meta/info.json": b"{}",
             "org/bad/meta/info.json": b"{}",
-            "org/_releases/bad.json": ownership_bytes(PublicationAttempt("bad", "attempt-a", "bad")),
+            "org/_releases/bad.json": ownership_bytes(PublicationAttempt("bad", "attempt-a", "bad", "source-bad")),
         }
         provider = _named_provider(blobs)
 

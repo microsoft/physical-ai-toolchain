@@ -74,6 +74,8 @@ export interface ReleaseDialogProps {
   detailError?: string | null
   /** Destination aliases from the release capabilities response. */
   destinations: string[]
+  /** Aliases whose available capabilities explicitly enable Azure ML registration. */
+  azuremlDestinations?: string[]
   onPreview: (request: ReleaseRequest) => Promise<ReleasePreview>
   /** Aborts the browser request only; the server is not asked to cancel. The pending promise then settles. */
   onCancelPreparation?: () => void
@@ -232,7 +234,8 @@ function formatReservedBytes(bytes: number): string {
 }
 
 function describeError(error: unknown): string {
-  if (error instanceof ReleaseRequestError) return `Release request failed: ${error.code}.`
+  if (error instanceof ReleaseRequestError)
+    return error.inputReason ?? `Release request failed: ${error.code}.`
   return 'Release request failed.'
 }
 
@@ -362,7 +365,7 @@ function PreviewProgress({
   submitting?: boolean
   cancelling?: boolean
 }) {
-  const stopLabel = submitting ? 'Detaching from submission...' : 'Stopping preview...'
+  const stopLabel = submitting ? 'Stopping the wait...' : 'Stopping preview...'
   const [startedAt] = useState(Date.now)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
 
@@ -386,11 +389,13 @@ function PreviewProgress({
             ? 'Preparing release submission...'
             : `Preparing preview for ${episodeCount} ${episodeCount === 1 ? 'episode' : 'episodes'}.`}
       </p>
-      <p>
+      <p id="release-request-notice">
         {cancelling
-          ? 'Only the browser request is stopping. The server may still finish it.'
+          ? submitting
+            ? 'Only the browser request is stopping. This does not cancel the release.'
+            : 'Only the browser request is stopping. The server may still finish it.'
           : submitting
-            ? 'Revalidating source inputs before release acceptance.'
+            ? 'Waiting for submission confirmation. Closing this dialog does not cancel the release.'
             : 'Checking the selection and preparing an advisory preview. No release has been submitted.'}
       </p>
       <p
@@ -422,6 +427,7 @@ export function ReleaseDialog({
   onRequestDetails,
   detailError = null,
   destinations,
+  azuremlDestinations = [],
   onPreview,
   onCancelPreparation,
   onSubmit,
@@ -515,7 +521,7 @@ export function ReleaseDialog({
     packageId: identity.packageId,
     attemptId: identity.attemptId,
     datasetId,
-    datasetName: name.trim(),
+    datasetName: name,
     episodeIndices: liveSelected,
     resources: selectedRows.flatMap((row) =>
       (row.resources ?? []).map((resource) => toSnakeCase(resource) as Record<string, unknown>),
@@ -558,17 +564,26 @@ export function ReleaseDialog({
     readiness.ready &&
     liveSelected.length > 0 &&
     destination !== ''
-  const canPreview = !formLocked && baseReady && name.trim() !== '' && !previewing
+  const nameError =
+    name === ''
+      ? 'Enter a release name.'
+      : !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name) || name.includes('--')
+        ? 'Use 1-128 ASCII letters, digits, periods, underscores or hyphens; start with a letter or digit and avoid consecutive hyphens.'
+        : azuremlDestinations.includes(destination) && name.length > 30
+          ? 'Azure ML release versions must be at most 30 characters.'
+          : null
+  const canPreview = !formLocked && baseReady && nameError === null && !previewing
   const canSubmit =
     !formLocked &&
     baseReady &&
+    nameError === null &&
     finalized &&
     currentReview !== null &&
     blocking.length === 0 &&
     acknowledgmentsReady
 
   function describeActionStatus(): string {
-    if (ambiguous) return 'Submission outcome unknown.'
+    if (ambiguous) return 'Submission not confirmed.'
     if (submitting) return 'Submitting release...'
     if (previewing) return 'Preparing preview...'
     if (disabled) return 'Release creation is unavailable.'
@@ -641,6 +656,7 @@ export function ReleaseDialog({
   }
 
   async function handlePreview() {
+    if (!canPreview) return
     const key = draftKey
     setPreviewing(true)
     setNotice(null)
@@ -744,8 +760,15 @@ export function ReleaseDialog({
                 id="release-name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
+                aria-invalid={nameError !== null}
+                aria-describedby={nameError ? 'release-name-error' : undefined}
                 required
               />
+              {nameError && (
+                <p id="release-name-error" role="alert" className="text-destructive text-sm">
+                  {nameError}
+                </p>
+              )}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="release-destination">Destination</Label>
@@ -1222,9 +1245,10 @@ export function ReleaseDialog({
         {ambiguous && (
           <Alert variant="destructive">
             <AlertDescription>
-              The submission outcome is unknown. Retry sends the same request with the same
-              idempotency key. Discarding may leave a duplicate job, so check existing release jobs
-              first.
+              We couldn't confirm whether your release was submitted. It may already have been
+              accepted. Retry submission reuses the same request to avoid duplicates. Closing keeps
+              your pending request. Discarding does not cancel an accepted release; starting over
+              could create a duplicate. Check release jobs before discarding.
             </AlertDescription>
           </Alert>
         )}
@@ -1267,13 +1291,14 @@ export function ReleaseDialog({
                 variant="outline"
                 onClick={() => handleOpenChange(false)}
                 disabled={cancelling}
+                aria-describedby={submitting ? 'release-request-notice' : undefined}
               >
                 {cancelling
                   ? 'Stopping...'
                   : previewing
                     ? 'Stop preview'
                     : submitting
-                      ? 'Detach from submission'
+                      ? 'Stop waiting'
                       : 'Cancel'}
               </Button>
               <Button
