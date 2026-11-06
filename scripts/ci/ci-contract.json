@@ -1583,8 +1583,9 @@
             "system-dependencies",
             "install",
             "test",
-            "coverage_gate",
-            "judge_unit"
+            "judge_unit",
+            "backend_coverage_gate",
+            "judge_backend_coverage_gate"
           ],
           "reports": [
             {
@@ -1609,11 +1610,16 @@
             "test": {
               "run-sha256": "3e34d539de1f384e58b36e0a15d7e7716962b8acafc4c408014d518ea844353d"
             },
-            "coverage_gate": {
-              "run-sha256": "a3bdc15b1babee2b05fe1d4dcb92c200908adf7dc742648fc7c3175d2e93e79c"
-            },
             "judge_unit": {
               "run-sha256": "fb9ad8b81e9fe71d8b4d8b964f73246f4e5dc2aef6cb0e808d3a05e991497769"
+            },
+            "backend_coverage_gate": {
+              "run-sha256": "049c215e1b7e2ef542014b20a39ea8b66caccf86339aa92a90b2617049c182d3",
+              "if": "${{ !cancelled() && steps.install.outcome == 'success' }}"
+            },
+            "judge_backend_coverage_gate": {
+              "run-sha256": "715aaff67148e4a88206e6de14295780b82d07e9587fdcc32fc33d5991b5d547",
+              "if": "${{ !cancelled() && steps.install.outcome == 'success' }}"
             }
           }
         }
